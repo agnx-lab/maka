@@ -130,5 +130,8 @@ MAKA_TOOL_STORM_CALLS=64 MAKA_TOOL_STORM_PAYLOAD_BYTES=128 \
 同一模型 step 中的只读调用；backend `javascript` 使用真实 JavaScript 服务。
 fanout 数量不代表同时执行的 handler 数量。`MAKA_AGENT_TOOL_STORM` JSON 记录
 实际调用、精确结果校验、请求、延迟／CPU、进程峰值 RSS 和清理结果。计时包含
-受控 HTTP responder，不包含外部推理、IPC 或渲染。大 payload 可能触发上下文
-维护；只有完整执行且全部校验通过的工作才计为成功 case。
+受控 HTTP responder，不包含外部推理、IPC 或渲染。大 payload 可以触发真实自动
+压缩：responder 返回 Summary 正文，验证生成的 checkpoint 及后续 Main 对它的
+采用，同时通过历史逐一核对原始工具结果。Summary 请求和 checkpoint 与工具工作量
+分别记录。这验证受控协议和生命周期，不证明真实模型的上下文容量或摘要质量。
+只有完整执行且全部校验通过的工作才计为成功 case。

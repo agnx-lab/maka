@@ -150,5 +150,9 @@ the actual JavaScript service. Fanout count does not imply simultaneous handlers
 The `MAKA_AGENT_TOOL_STORM` JSON records actual calls, exact result checks,
 requests, latency/CPU, process peak RSS and cleanup. Timings include the controlled
 HTTP responder; they exclude external inference, IPC and rendering. Large
-payloads may reach context maintenance; only completed, fully verified work
-counts as a successful case.
+payloads can trigger real automatic compaction. The responder supplies Summary
+text and verifies the resulting checkpoint and its adoption by the next Main,
+while history checks retain every original tool result. Summary requests and
+checkpoints are reported separately from tool work. This proves the controlled
+protocol and lifecycle, not a real model's context capacity or summary quality.
+Only completed, fully verified work counts as a successful case.

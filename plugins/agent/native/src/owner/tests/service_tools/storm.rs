@@ -88,7 +88,7 @@ async fn reply(
     socket: &mut TcpStream,
     case: Case,
     indices: std::ops::Range<usize>,
-    final_text: bool,
+    text: Option<&str>,
     progress: &Arc<StdMutex<Value>>,
 ) -> usize {
     let mut body = String::new();
@@ -100,10 +100,10 @@ async fn reply(
         // One event per call, including large query fanout; never one giant arguments event.
         body.push_str(&format!("data: {delta}\n\n"));
     }
-    if final_text {
-        body.push_str(&format!("data: {}\n\n", json!({"id":"storm-model","choices":[{"index":0,"delta":{"content":FINAL},"finish_reason":null}]})));
+    if let Some(text) = text {
+        body.push_str(&format!("data: {}\n\n", json!({"id":"storm-model","choices":[{"index":0,"delta":{"content":text},"finish_reason":null}]})));
     }
-    let mut end = json!({"id":"storm-model","choices":[{"index":0,"delta":{},"finish_reason":if final_text {"stop"} else {"tool_calls"}}]});
+    let mut end = json!({"id":"storm-model","choices":[{"index":0,"delta":{},"finish_reason":if text.is_some() {"stop"} else {"tool_calls"}}]});
     if case.model_usage {
         end["usage"] = json!({"prompt_tokens":7,"completion_tokens":11,"total_tokens":18});
     }
@@ -124,6 +124,54 @@ async fn reply(
     wire.len()
 }
 
+#[derive(serde::Serialize)]
+struct SummaryProof {
+    step_id: String,
+    source_through: u64,
+    previous_checkpoint_id: Option<String>,
+    text: String,
+    confirmed: usize,
+    checkpoint_id: Option<String>,
+    completion_seen: bool,
+    adopted: bool,
+}
+
+struct RequestProof {
+    step_id: String,
+    purpose: ModelPurpose,
+    source_through: u64,
+    checkpoint_id: Option<String>,
+}
+
+fn model_text(output: &maka_agent_facts::model::ModelStep) -> String {
+    output
+        .parts
+        .iter()
+        .filter_map(|part| match part {
+            ModelPart::Text {
+                text,
+                text_kind: TextKind::Text,
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn summary_output(output: &maka_agent_facts::model::ModelStep, expected: &str) {
+    assert_eq!(model_text(output), expected);
+    assert_eq!(output.finish_reason, ModelFinishReason::Stop);
+    assert!(output.parts.iter().all(|part| matches!(
+        part,
+        ModelPart::Text {
+            text_kind: TextKind::Text,
+            ..
+        }
+    )));
+    assert_eq!(output.usage.input_tokens, None);
+    assert_eq!(output.usage.output_tokens, None);
+}
+
 async fn serve(
     listener: TcpListener,
     store: Arc<maka_event_log::EventLog>,
@@ -133,6 +181,7 @@ async fn serve(
 ) -> Value {
     let mut after = 0;
     let mut mains = 0;
+    let mut issued = 0;
     let mut request_bytes = 0;
     let mut response_bytes = 0;
     let mut archives = BTreeMap::new();
@@ -140,9 +189,12 @@ async fn serve(
     let mut latencies = Vec::new();
     let mut emitted_at = None;
     let mut confirmed = BTreeSet::new();
+    let mut summaries: Vec<SummaryProof> = Vec::new();
+    let mut opening = None;
     loop {
         let (mut socket, _) = listener.accept().await.unwrap();
         let body = request(&mut socket).await; // Original auth/EOF/content-length checks.
+        assert_eq!(body["model"], "fixture-model");
         request_bytes += serde_json::to_vec(&body).unwrap().len();
         {
             let mut progress = progress.lock().unwrap();
@@ -150,7 +202,7 @@ async fn serve(
             progress["normalized_request_json_bytes"] = json!(request_bytes);
         }
         let through = *store.subscribe_commits().borrow();
-        let mut purpose = None;
+        let mut requested = None;
         loop {
             let page = store
                 .session_events(&session, after, through, 512, usize::MAX)
@@ -158,15 +210,64 @@ async fn serve(
                 .unwrap();
             for stored in page.events {
                 match stored.event.fact {
+                    Fact::InvocationOpened { .. } => {
+                        assert!(opening.replace(stored.event.id).is_none());
+                    }
                     Fact::ModelRequested {
-                        purpose: role,
+                        purpose,
+                        step_id,
+                        source_high_water,
+                        checkpoint_event_id,
                         context,
                         context_breakdown,
                         ..
                     } => {
-                        purpose = Some(role);
-                        budgets.push(json!({"purpose":role,"context":context,"context_breakdown":context_breakdown,
+                        assert!(
+                            requested
+                                .replace(RequestProof {
+                                    step_id: step_id.clone(),
+                                    purpose,
+                                    source_through: source_high_water,
+                                    checkpoint_id: checkpoint_event_id.clone(),
+                                })
+                                .is_none(),
+                            "serial HTTP must have one fresh canonical request"
+                        );
+                        budgets.push(json!({"purpose":purpose,"step_id":step_id,"source_through":source_high_water,
+                            "checkpoint_event_id":checkpoint_event_id,"context":context,"context_breakdown":context_breakdown,
                             "http_max_tokens":body.get("max_tokens"),"http_max_completion_tokens":body.get("max_completion_tokens")}));
+                    }
+                    Fact::ModelCompleted { step_id, output } => {
+                        if let Some(summary) = summaries
+                            .iter_mut()
+                            .find(|summary| summary.step_id == step_id)
+                        {
+                            assert!(!summary.completion_seen);
+                            summary_output(&output, &summary.text);
+                            summary.completion_seen = true;
+                        }
+                    }
+                    Fact::ContextCheckpointRecorded { checkpoint } => {
+                        let summary = summaries
+                            .last_mut()
+                            .expect("checkpoint follows a served Summary");
+                        assert!(summary.completion_seen);
+                        assert!(summary.checkpoint_id.is_none());
+                        assert_eq!(checkpoint.summary_step_id, summary.step_id);
+                        assert_eq!(checkpoint.summary.text, summary.text);
+                        assert_eq!(checkpoint.covered_through, summary.source_through);
+                        assert!(checkpoint.covered_through < stored.sequence);
+                        assert_eq!(
+                            checkpoint.previous_checkpoint_id,
+                            summary.previous_checkpoint_id
+                        );
+                        assert_eq!(
+                            checkpoint.mode,
+                            maka_agent_facts::context::CheckpointMode::MidTurn {
+                                anchor_event_id: opening.as_ref().unwrap().clone(),
+                            }
+                        );
+                        summary.checkpoint_id = Some(stored.event.id);
                     }
                     Fact::ToolResultArchived { placeholder } => {
                         let DurableToolProjection::Json { value } =
@@ -174,74 +275,184 @@ async fn serve(
                         else {
                             panic!("archive projection")
                         };
-                        archives.insert(placeholder.identity.tool_call_id, value);
+                        archives
+                            .insert(placeholder.identity.tool_call_id, (stored.sequence, value));
                     }
                     _ => {}
                 }
             }
             if let Some(next) = page.next_after {
+                assert!(next > after);
                 after = next;
             } else {
                 after = through;
                 break;
             }
         }
-        progress.lock().unwrap()["last_canonical_purpose"] = json!(purpose);
-        if purpose == Some(ModelPurpose::Summary) {
-            return json!({"status":"reached_maintenance","main_requests":mains,"summary_requests":1,
-                "http_requests":mains+1,"normalized_request_json_bytes":request_bytes,"response_wire_bytes":response_bytes,
-                "confirmed_results":confirmed.len(),"step_confirmation_ms":latencies,"requests":budgets});
+        let requested = requested.expect("HTTP request has original canonical role");
+        {
+            let mut progress = progress.lock().unwrap();
+            progress["last_canonical_purpose"] = json!(requested.purpose);
+            progress["last_step_id"] = json!(requested.step_id);
+            progress["source_through"] = json!(requested.source_through);
         }
-        assert_eq!(
-            purpose,
-            Some(ModelPurpose::Main),
-            "HTTP request must have a real canonical role"
-        );
         let messages = body["messages"].as_array().unwrap();
         assert!(has_tool(&body, "Counter"));
-        let expected_indices = if mains == 0 {
-            0..0
-        } else if case.query {
-            0..case.calls
-        } else {
-            mains - 1..mains
-        };
-        for index in expected_indices {
-            let id = call_id(index);
-            let result = messages
-                .iter()
-                .rev()
-                .find(|m| m["role"] == "tool" && m["tool_call_id"] == id)
-                .expect("the actual result reached the next Main");
-            let actual: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+        let before_confirmed = confirmed.len();
+        for message in messages {
+            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for call in calls {
+                    let index = (0..issued)
+                        .find(|index| call["id"] == call_id(*index))
+                        .expect("only already issued tool calls can reach the provider");
+                    assert_eq!(call["function"]["name"], "Counter");
+                    let input: Value =
+                        serde_json::from_str(call["function"]["arguments"].as_str().unwrap())
+                            .unwrap();
+                    assert_eq!(input, json!({"amount":1,"note":payload(index,case.bytes)}));
+                }
+            }
+            if message["role"] != "tool" {
+                continue;
+            }
+            let index = (0..issued)
+                .find(|index| message["tool_call_id"] == call_id(*index))
+                .expect("only already issued results can reach the provider");
+            let actual: Value = serde_json::from_str(message["content"].as_str().unwrap()).unwrap();
             let expected = archives
-                .get(&id)
-                .cloned()
+                .get(&call_id(index))
+                .filter(|(sequence, _)| *sequence <= requested.source_through)
+                .map(|(_, value)| value.clone())
                 .unwrap_or_else(|| case.business(index));
-            assert_eq!(actual, expected, "model projection for {id}");
+            assert_eq!(
+                actual,
+                expected,
+                "actual model projection for {}",
+                call_id(index)
+            );
             assert!(actual.get("receipt").is_none() && actual.get("stateDomain").is_none());
-            assert!(confirmed.insert(index));
-            progress.lock().unwrap()["confirmed_results"] = json!(confirmed.len());
+            confirmed.insert(index); // Previously confirmed results may remain in the next prompt.
         }
-        if let Some(at) = emitted_at.take() {
+        assert_eq!(
+            confirmed.len(),
+            issued,
+            "every issued result reached Main or Summary"
+        );
+        if confirmed.len() > before_confirmed {
+            let at = emitted_at.take().expect("one outstanding issued batch");
             latencies.push(Instant::now().duration_since(at).as_secs_f64() * 1000.0);
         }
+        {
+            let mut progress = progress.lock().unwrap();
+            progress["confirmed_results"] = json!(confirmed.len());
+            progress["issued_calls"] = json!(issued);
+        }
+        if let Some(summary) = summaries.last() {
+            assert!(summary.completion_seen);
+            assert!(summary.checkpoint_id.is_some());
+            assert_eq!(requested.checkpoint_id, summary.checkpoint_id);
+            assert!(messages.iter().any(|message| message["role"] == "user"
+                && message["content"] == format!("Continuation summary:\n{}", summary.text)));
+            // Both Main and later Summary inherit covered work only through the checkpoint.
+            for message in messages {
+                if message["role"] == "tool" {
+                    assert!(
+                        !(0..summary.confirmed)
+                            .any(|index| message["tool_call_id"] == call_id(index))
+                    );
+                }
+                if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                    assert!(calls.iter().all(|call| {
+                        !(0..summary.confirmed).any(|index| call["id"] == call_id(index))
+                    }));
+                }
+            }
+        } else {
+            assert!(requested.checkpoint_id.is_none());
+        }
+        if requested.purpose == ModelPurpose::Summary {
+            assert!(
+                confirmed.len() > before_confirmed,
+                "Summary must verify newly issued work"
+            );
+            if let Some(previous) = summaries.last() {
+                assert!(previous.adopted);
+                assert!(confirmed.len() > previous.confirmed);
+                assert!(requested.source_through > previous.source_through);
+            }
+            let text = format!(
+                "K43_SUMMARY_{}: {issued} original service results confirmed.",
+                summaries.len() + 1
+            );
+            // Summary is real text-only SSE, with no invented provider usage.
+            response_bytes += reply(
+                &mut socket,
+                Case {
+                    model_usage: false,
+                    ..case
+                },
+                0..0,
+                Some(&text),
+                &progress,
+            )
+            .await;
+            summaries.push(SummaryProof {
+                step_id: requested.step_id,
+                source_through: requested.source_through,
+                previous_checkpoint_id: requested.checkpoint_id,
+                text,
+                confirmed: confirmed.len(),
+                checkpoint_id: None,
+                completion_seen: false,
+                adopted: false,
+            });
+            progress.lock().unwrap()["summary_requests"] = json!(summaries.len());
+            continue;
+        }
+        assert_eq!(requested.purpose, ModelPurpose::Main);
+        if let Some(summary) = summaries.last_mut() {
+            summary.adopted = true;
+            progress.lock().unwrap()["adopted_checkpoints"] =
+                json!(summaries.iter().filter(|summary| summary.adopted).count());
+        }
         mains += 1;
-        let finished = confirmed.len() == case.calls;
+        let finished = issued == case.calls;
         let indices = if finished {
             0..0
         } else if case.query {
+            assert_eq!(issued, 0, "query emits its original batch only once");
             0..case.calls
         } else {
-            mains - 1..mains
+            issued..issued + 1
         };
-        emitted_at = Some(Instant::now());
-        response_bytes += reply(&mut socket, case, indices, finished, &progress).await;
+        issued = indices.end.max(issued);
+        {
+            let mut progress = progress.lock().unwrap();
+            progress["issued_calls"] = json!(issued);
+            progress["main_requests"] = json!(mains);
+        }
+        if !finished {
+            emitted_at = Some(Instant::now());
+        }
+        response_bytes += reply(
+            &mut socket,
+            case,
+            indices,
+            finished.then_some(FINAL),
+            &progress,
+        )
+        .await;
         if finished {
-            return json!({"status":"completed","main_requests":mains,"summary_requests":0,"http_requests":mains,
-                "normalized_request_json_bytes":request_bytes,"response_wire_bytes":response_bytes,
+            assert!(
+                summaries
+                    .iter()
+                    .all(|summary| summary.completion_seen && summary.adopted)
+            );
+            return json!({"status":"completed","main_requests":mains,"summary_requests":summaries.len(),
+                "http_requests":mains+summaries.len(),"normalized_request_json_bytes":request_bytes,"response_wire_bytes":response_bytes,
                 "confirmed_results":confirmed.len(),"step_confirmation_ms":latencies,"requests":budgets,
-                "archived_projections":archives.len()});
+                "archived_projections":archives.len(),"summaries":summaries,
+                "adopted_checkpoints":summaries.len()});
         }
     }
 }
@@ -262,7 +473,13 @@ async fn business_read(fixture: &Fixture, binding: Binding) -> Result<Value, Str
         .await
 }
 
-async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) -> Value {
+async fn verify(
+    fixture: &Fixture,
+    session: &str,
+    invocation: &str,
+    case: Case,
+    served: &Value,
+) -> Value {
     let through = *fixture.store.subscribe_commits().borrow();
     let mut after = 0;
     let mut dispatched = BTreeMap::new();
@@ -272,7 +489,10 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
     let mut final_completions = 0;
     let mut completed = 0;
     let mut maintenance = 0;
-    let mut purposes = Vec::new();
+    let mut purposes = BTreeMap::new();
+    let mut summary_completions = 0;
+    let mut main_completions = 0;
+    let mut checkpoints = 0;
     loop {
         let page = fixture
             .store
@@ -338,32 +558,50 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
                         other => panic!("wrong original service result: {other:?}"),
                     }
                 }
-                Fact::ModelRequested { purpose, .. } => purposes.push(*purpose),
-                Fact::ModelCompleted { output, .. } => {
-                    if case.model_usage {
-                        assert_eq!(output.usage.input_tokens, Some(7));
-                        assert_eq!(output.usage.output_tokens, Some(11));
-                    }
-                    let text: String = output
-                        .parts
-                        .iter()
-                        .filter_map(|p| match p {
-                            ModelPart::Text {
-                                text,
-                                text_kind: TextKind::Text,
-                                ..
-                            } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect();
-                    if !text.is_empty() {
-                        assert_eq!(text, FINAL);
-                        assert_eq!(output.finish_reason, ModelFinishReason::Stop);
-                        final_completions += 1;
-                    }
+                Fact::ModelRequested {
+                    purpose, step_id, ..
+                } => {
+                    assert!(purposes.insert(step_id.clone(), *purpose).is_none());
                 }
-                Fact::ToolResultArchived { .. } | Fact::ContextCheckpointRecorded { .. } => {
-                    maintenance += 1
+                Fact::ModelCompleted { step_id, output } => match purposes[step_id] {
+                    ModelPurpose::Main => {
+                        main_completions += 1;
+                        if case.model_usage {
+                            assert_eq!(output.usage.input_tokens, Some(7));
+                            assert_eq!(output.usage.output_tokens, Some(11));
+                        }
+                        let text = model_text(output);
+                        if !text.is_empty() {
+                            assert_eq!(text, FINAL);
+                            assert_eq!(output.finish_reason, ModelFinishReason::Stop);
+                            final_completions += 1;
+                        }
+                    }
+                    ModelPurpose::Summary => {
+                        let proof = served["summaries"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|proof| proof["step_id"] == *step_id)
+                            .unwrap();
+                        summary_output(output, proof["text"].as_str().unwrap());
+                        summary_completions += 1;
+                    }
+                },
+                Fact::ToolResultArchived { .. } => maintenance += 1,
+                Fact::ContextCheckpointRecorded { checkpoint } => {
+                    let proof = served["summaries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|proof| proof["step_id"] == checkpoint.summary_step_id)
+                        .unwrap();
+                    assert_eq!(proof["checkpoint_id"], stored.event.id);
+                    assert_eq!(proof["source_through"], checkpoint.covered_through);
+                    assert_eq!(proof["text"], checkpoint.summary.text);
+                    assert_eq!(proof["adopted"], true);
+                    checkpoints += 1;
+                    maintenance += 1;
                 }
                 Fact::InvocationEnded { outcome } => {
                     assert!(matches!(outcome, InvocationOutcome::Completed));
@@ -383,8 +621,23 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
     assert_eq!(settled.len(), case.calls);
     assert_eq!(completed, 1);
     assert_eq!(final_completions, 1);
-    assert!(purposes.iter().all(|p| *p == ModelPurpose::Main));
-    assert_eq!(purposes.len(), if case.query { 2 } else { case.calls + 1 });
+    let main_requests = purposes
+        .values()
+        .filter(|purpose| **purpose == ModelPurpose::Main)
+        .count();
+    let summary_requests = purposes.len() - main_requests;
+    assert_eq!(main_requests, if case.query { 2 } else { case.calls + 1 });
+    assert_eq!(main_completions, main_requests);
+    assert_eq!(summary_completions, summary_requests);
+    assert_eq!(checkpoints, summary_requests);
+    assert_eq!(
+        summary_requests,
+        served["summary_requests"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        summary_requests,
+        served["adopted_checkpoints"].as_u64().unwrap() as usize
+    );
     // Exact original assistant text through the public, fixed-fence paged history path.
     let mut input = json!({"sessionId":session,"through":through,"position":{"kind":"start"}});
     let mut final_text = String::new();
@@ -472,7 +725,8 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
     assert!(!observed.compacting);
     json!({"tool_dispatches":dispatched.len(),"tool_settlements":settled.len(),"raw_result_json_bytes":raw_bytes,
         "business_result_json_bytes":projected_bytes,"original_payload_bytes":case.calls*case.bytes,
-        "maintenance_facts":maintenance,"model_requests":purposes.len(),"completed_invocations":completed,
+        "maintenance_facts":maintenance,"model_requests":purposes.len(),"main_requests":main_requests,
+        "summary_requests":summary_requests,"checkpoints":checkpoints,"completed_invocations":completed,
         "final_assistant_bytes":final_text.len(),"through":through})
 }
 
@@ -559,38 +813,32 @@ async fn run(case: Case) -> Value {
                 .await
                 .unwrap()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-            if metrics["status"] != "completed" {
-                fixture
-                    .mutation(
-                        2,
-                        "stop",
-                        json!({"sessionId":session,"invocationId":invocation}),
-                        Uuid::new_v4(),
-                    )
-                    .await
-                    .unwrap();
-            }
             fixture.owner.workers.wait().await;
             assert!(fixture.owner.workers.reopen());
             metrics["admission_ms"] = json!(admission);
             metrics["turn_wall_ms"] = json!(start.elapsed().as_secs_f64() * 1000.0);
             metrics["turn_cpu_seconds"] = json!(usage().0 - cpu);
             metrics["turn_peak_rss_bytes"] = json!(usage().1);
-            if metrics["status"] == "completed" {
-                if !case.javascript {
-                    assert_eq!(
-                        counter.entered.available_permits() - entered_before,
-                        case.calls
-                    );
-                    assert_eq!(
-                        counter.effects.load(Ordering::SeqCst),
-                        if case.query { 0 } else { case.calls }
-                    );
-                    metrics["native_tool_handler_entries"] = json!(case.calls);
-                }
-                metrics["canonical"] =
-                    verify(&fixture, &session, invocation.as_deref().unwrap(), case).await;
+            if !case.javascript {
+                assert_eq!(
+                    counter.entered.available_permits() - entered_before,
+                    case.calls
+                );
+                assert_eq!(
+                    counter.effects.load(Ordering::SeqCst),
+                    if case.query { 0 } else { case.calls }
+                );
+                metrics["native_tool_handler_entries"] = json!(case.calls);
             }
+            let canonical = verify(
+                &fixture,
+                &session,
+                invocation.as_deref().unwrap(),
+                case,
+                &metrics,
+            )
+            .await;
+            metrics["canonical"] = canonical;
             metrics
         })
         .catch_unwind(),
@@ -762,7 +1010,10 @@ async fn public_history_preserves_129_real_service_query_results() {
         query: true,
         model_usage: false,
     };
-    assert_eq!(run(case).await["status"], "completed");
+    let result = run(case).await;
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["summary_requests"], 0);
+    assert_eq!(result["canonical"]["checkpoints"], 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -774,5 +1025,38 @@ async fn public_history_preserves_256_real_service_query_results_with_usage() {
         query: true,
         model_usage: true,
     };
-    assert_eq!(run(case).await["status"], "completed");
+    let result = run(case).await;
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["summary_requests"], 0);
+    assert_eq!(result["canonical"]["checkpoints"], 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn query_storm_automatic_summary_preserves_original_history() {
+    let result = run(Case {
+        calls: 8,
+        bytes: 65536,
+        javascript: false,
+        query: true,
+        model_usage: false,
+    })
+    .await;
+    assert_eq!(result["status"], "completed");
+    assert!(result["summary_requests"].as_u64().unwrap() >= 1);
+    assert_eq!(result["confirmed_results"], 8);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mutation_storm_repeated_summaries_preserve_original_effects() {
+    let result = run(Case {
+        calls: 16,
+        bytes: 65536,
+        javascript: false,
+        query: false,
+        model_usage: false,
+    })
+    .await;
+    assert_eq!(result["status"], "completed");
+    assert!(result["summary_requests"].as_u64().unwrap() >= 2);
+    assert_eq!(result["confirmed_results"], 16);
 }
