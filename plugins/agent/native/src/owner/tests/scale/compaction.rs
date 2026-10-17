@@ -229,7 +229,11 @@ async fn phase(
         .expect("controlled HTTP phase must match its explicit plan");
     assert_eq!(arrival.cycle, expected.cycle);
     assert_eq!(arrival.purpose, expected.purpose);
-    load.fixture.drained().await;
+    // This sequential fixture owns the tracker until shutdown. Wait for its
+    // notification instead of charging a self-waking observer to each phase.
+    assert!(load.fixture.owner.workers.close());
+    load.fixture.owner.workers.wait().await;
+    assert!(load.fixture.owner.workers.reopen());
     let completion_ms = start.elapsed().as_secs_f64() * 1000.0;
     let cpu_seconds = usage().0 - cpu;
     let through = *load.fixture.store.subscribe_commits().borrow();
