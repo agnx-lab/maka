@@ -87,7 +87,7 @@ impl Tools {
         let bytes = serde_json::to_vec(&(operation, &identity, name, &input))
             .map_err(|_| ProjectionError::TooLarge)?
             .len();
-        if self.pending.len() >= 256 || bytes > self.limit.saturating_sub(self.bytes) {
+        if bytes > self.limit.saturating_sub(self.bytes) {
             return Err(ProjectionError::TooLarge);
         }
         self.bytes += bytes;

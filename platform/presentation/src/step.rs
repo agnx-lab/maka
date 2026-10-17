@@ -54,7 +54,7 @@ pub(super) struct Step {
     model: String,
     parts: Vec<Part>,
     order: Vec<Observed>,
-    text_bytes: usize,
+    retained_bytes: usize,
     limit: usize,
 }
 impl Step {
@@ -65,7 +65,7 @@ impl Step {
             model,
             parts: Vec::new(),
             order: Vec::new(),
-            text_bytes: 0,
+            retained_bytes: 0,
             limit,
         }
     }
@@ -88,12 +88,24 @@ impl Step {
                 text_kind,
                 provider_options,
             } => {
-                if self.order.len() >= 128 {
-                    return Err(ProjectionError::TooLarge);
-                }
                 if self.parts.iter().any(|part| part.provider_id == *id) {
                     return Err(ProjectionError::Invalid("duplicate model part"));
                 }
+                let bytes = serde_json::to_vec(&(
+                    id,
+                    &event.id,
+                    &event.invocation.turn_id,
+                    timestamp,
+                    text_kind,
+                    "",
+                    provider_options,
+                ))
+                .map_err(|_| ProjectionError::TooLarge)?
+                .len();
+                if bytes > self.limit.saturating_sub(self.retained_bytes) {
+                    return Err(ProjectionError::TooLarge);
+                }
+                self.retained_bytes += bytes;
                 self.order.push(Observed::Text(self.parts.len()));
                 self.parts.push(Part {
                     provider_id: id.clone(),
@@ -112,9 +124,6 @@ impl Step {
                 text,
                 provider_options,
             } => {
-                if text.len() > self.limit.saturating_sub(self.text_bytes) {
-                    return Err(ProjectionError::TooLarge);
-                }
                 let part = self
                     .parts
                     .iter_mut()
@@ -123,9 +132,16 @@ impl Step {
                 if part.state != PartState::Open {
                     return Err(ProjectionError::Invalid("delta after part end"));
                 }
-                self.text_bytes += text.len();
+                part.merge_options(
+                    provider_options.as_ref(),
+                    &mut self.retained_bytes,
+                    self.limit,
+                )?;
+                if text.len() > self.limit.saturating_sub(self.retained_bytes) {
+                    return Err(ProjectionError::TooLarge);
+                }
+                self.retained_bytes += text.len();
                 part.text.push_str(text);
-                merge_provider_options(&mut part.options, provider_options.clone());
             }
             ModelEvent::PartFinished {
                 id,
@@ -139,8 +155,12 @@ impl Step {
                 if part.state != PartState::Open {
                     return Err(ProjectionError::Invalid("duplicate part end"));
                 }
+                part.merge_options(
+                    provider_options.as_ref(),
+                    &mut self.retained_bytes,
+                    self.limit,
+                )?;
                 part.state = PartState::Closed;
-                merge_provider_options(&mut part.options, provider_options.clone());
             }
             ModelEvent::Source(source) => self.tool(ModelPart::Source {
                 source: source.clone(),
@@ -168,10 +188,10 @@ impl Step {
         let bytes = serde_json::to_vec(&part)
             .map_err(|_| ProjectionError::TooLarge)?
             .len();
-        if self.order.len() >= 128 || bytes > self.limit.saturating_sub(self.text_bytes) {
+        if bytes > self.limit.saturating_sub(self.retained_bytes) {
             return Err(ProjectionError::TooLarge);
         }
-        self.text_bytes += bytes;
+        self.retained_bytes += bytes;
         self.order.push(Observed::Tool(part));
         Ok(())
     }
@@ -258,6 +278,32 @@ impl Step {
     }
 }
 impl Part {
+    fn merge_options(
+        &mut self,
+        incoming: Option<&Value>,
+        retained_bytes: &mut usize,
+        limit: usize,
+    ) -> Result<(), ProjectionError> {
+        let Some(incoming) = incoming else {
+            return Ok(());
+        };
+        let mut options = self.options.clone();
+        merge_provider_options(&mut options, Some(incoming.clone()));
+        let size = |options: &Option<Value>| {
+            serde_json::to_vec(options)
+                .map(|bytes| bytes.len())
+                .map_err(|_| ProjectionError::TooLarge)
+        };
+        let bytes = retained_bytes.saturating_sub(size(&self.options)?);
+        let new_size = size(&options)?;
+        if new_size > limit.saturating_sub(bytes) {
+            return Err(ProjectionError::TooLarge);
+        }
+        *retained_bytes = bytes + new_size;
+        self.options = options;
+        Ok(())
+    }
+
     fn message(&self, model: &str, options: Option<Value>, interrupted: bool) -> Message {
         let (text, thinking) = match self.kind {
             TextKind::Text => (self.text.clone(), None),

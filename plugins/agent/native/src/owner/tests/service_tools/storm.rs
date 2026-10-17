@@ -378,14 +378,41 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
     // Exact original assistant text through the public, fixed-fence paged history path.
     let mut input = json!({"sessionId":session,"through":through,"position":{"kind":"start"}});
     let mut final_text = String::new();
+    let expected_tools: BTreeMap<_, _> = dispatched
+        .iter()
+        .map(|(operation, index)| {
+            (
+                maka_agent_facts::tool_call::tool_use_id(invocation, operation),
+                *index,
+            )
+        })
+        .collect();
+    let mut result_offsets = BTreeMap::new();
     loop {
-        let page = fixture.query("history", input.clone()).await.unwrap();
+        let page = match fixture.query("history", input.clone()).await {
+            Ok(page) => page,
+            Err(error) => {
+                let preparation = fixture.store.prepare_transcript(session, through, 32).await;
+                panic!("public history failed: {error}; preparation diagnostic: {preparation:?}");
+            }
+        };
         assert_eq!(page["through"], through);
         if page["kind"] == "preparing" {
             tokio::task::yield_now().await;
             continue;
         }
         for chunk in page["chunks"].as_array().unwrap() {
+            if chunk["role"] == "tool_result" && chunk["field"] == "body" {
+                let tool = chunk["tool"]["toolUseId"].as_str().unwrap();
+                let index = expected_tools[tool];
+                let expected = payload(index, case.bytes);
+                let offset = result_offsets.entry(tool.to_owned()).or_insert(0usize);
+                let text = chunk["text"].as_str().unwrap();
+                assert_eq!(chunk["offset"], *offset);
+                assert_eq!(chunk["totalBytes"], expected.len());
+                assert_eq!(text, &expected[*offset..*offset + text.len()]);
+                *offset += text.len();
+            }
             if chunk["role"] == "assistant" && chunk["field"] == "body" {
                 assert_eq!(chunk["offset"], final_text.len());
                 assert_eq!(chunk["totalBytes"], FINAL.len());
@@ -398,6 +425,8 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
         input["position"] = json!({"kind":"after","cursor":page["after"]});
     }
     assert_eq!(final_text, FINAL);
+    assert_eq!(result_offsets.len(), case.calls);
+    assert!(result_offsets.values().all(|bytes| *bytes == case.bytes));
     let execution = fixture
         .query(
             "execution",
@@ -699,4 +728,15 @@ async fn real_service_tool_storm() {
 #[ignore = "explicit real service query fanout workload, one case per process"]
 async fn real_service_query_fanout() {
     assert_eq!(run(Case::environment(true)).await["status"], "completed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn public_history_preserves_129_real_service_query_results() {
+    let case = Case {
+        calls: 129,
+        bytes: 128,
+        javascript: false,
+        query: true,
+    };
+    assert_eq!(run(case).await["status"], "completed");
 }
