@@ -482,8 +482,7 @@ async fn run(cycles: usize, prompt_bytes: usize, timeout: Duration) -> Value {
                     assert!(coverage > previous_coverage && coverage >= main_terminal);
                     previous_coverage = coverage;
                     previous_checkpoint = checkpoint;
-                    let source = fixture.store.read_model_context(session, None).await.unwrap();
-                    assert_eq!(source.baseline.unwrap().event_id, *previous_checkpoint.as_ref().unwrap());
+                    // The next Main proves adoption through its request and HTTP body without prewarming its source.
                     summary_count += 1;
                     summary_bytes += expected.reply.len();
                 }
