@@ -1811,8 +1811,34 @@ async fn workhub_presets_freeze_selected_worker_tools_and_recover_after_restart(
         let listed=query_import(&fixture,hub::EXPORT,"tasks",json!({})).await;
         let persisted_presets=query_import(&fixture,hub::EXPORT,"presets",json!({})).await;
         let intents=fixture.store.application_intents(fixture.app.source().unwrap().deployment,id(1),0,128).await.unwrap();
-        let unexpected_dispatch=tokio::time::timeout(Duration::from_millis(30),listener.accept()).await.is_ok();
         fixture.app.shutdown().await.unwrap();fixture.config.shutdown().await.unwrap();
+        let prefix=fixture.store.scoped_prefix(maka_agent_facts::event::LogScope::Session {id:worker.to_owned()},256,4*1024*1024).await.unwrap();
+        let original_invocation=task["status"]["invocationId"].as_str().unwrap();
+        let mut lifecycle=[0usize;4];
+        let mut requested_step=None;
+        for event in prefix.events.iter().map(|row|&row.event).filter(|event|event.invocation.session_id == worker) {
+            let index=match &event.fact {
+                Fact::InvocationOpened {..} => 0,
+                Fact::ModelRequested {purpose,model_id,step_id,..} => {
+                    assert_eq!(*purpose,maka_agent_facts::context::ModelPurpose::Main);
+                    assert_eq!(model_id,"fixture-model");
+                    requested_step=Some(step_id);
+                    1
+                }
+                Fact::ModelCompleted {step_id,..} => {
+                    assert_eq!(Some(step_id),requested_step);
+                    2
+                }
+                Fact::InvocationEnded {outcome} => {
+                    assert_eq!(*outcome,maka_agent_facts::event::InvocationOutcome::Completed);
+                    3
+                }
+                _ => continue,
+            };
+            assert_eq!(event.invocation.invocation_id,original_invocation);
+            lifecycle[index]+=1;
+        }
+        assert_eq!(lifecycle,[1,1,1,1],"worker must keep one original opening, request, completion and ending across restart");
         for original_task in [&advanced,&restored] {
             assert_eq!(original_task["taskId"],task["taskId"]);
             assert_eq!(original_task["operation"],task["operation"]);
@@ -1825,7 +1851,6 @@ async fn workhub_presets_freeze_selected_worker_tools_and_recover_after_restart(
         assert_eq!(refused_result,"workhub_preset_disabled");
         assert_eq!(listed["entries"].as_array().unwrap().len(),1,"a disabled preset must not publish a new task");
         assert_eq!(intents.iter().filter(|intent|intent.reference.method == "send").count(),1,"accepted task advance/restart must not dispatch another worker message");
-        assert!(!unexpected_dispatch);
     }).await.unwrap();
 }
 
