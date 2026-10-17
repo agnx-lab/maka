@@ -199,7 +199,13 @@ impl Pty {
             revents: 0,
         };
         let available = unsafe { libc::poll(&mut poll, 1, 50) };
-        assert!(available >= 0);
+        if available < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                return;
+            }
+            panic!("PTY poll failed: {error}");
+        }
         if available == 0 {
             return;
         }
