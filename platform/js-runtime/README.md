@@ -23,4 +23,6 @@
 
 Provides the V8 execution machinery shared by plugin guests and persistent JavaScript REPLs. `plugin` implements bounded guest execution; `repl` and `CodeExecutor` support cells that retain variables between calls. Embeddings supply callable capabilities and own their resources. A JavaScript promise finishing does not prove that the native work it started has settled.
 
+The trusted provider SDK isolate uses V8’s default heap policy and queues requests with byte reservations held through native cleanup. Heap-limit notifications mark the shared runtime failed; native out-of-memory failures can still terminate the process. Generated code and plugin guests keep their separately configured limits.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

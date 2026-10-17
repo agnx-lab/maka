@@ -136,7 +136,6 @@ pub async fn request(socket: &mut TcpStream) -> Value {
                 .then(|| value.trim().parse().unwrap())
         })
         .unwrap();
-    assert!(length < 20 * 1024 * 1024);
     let received = bytes.len();
     bytes.resize(boundary + length, 0);
     socket.read_exact(&mut bytes[received..]).await.unwrap();

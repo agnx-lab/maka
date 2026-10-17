@@ -39,7 +39,7 @@ use tokio_util::sync::CancellationToken;
 const FOUR_MIB: usize = 4 * 1024 * 1024;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reopened_images_do_not_starve_current_images_and_each_artifact_read_is_bounded() {
+async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authority() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("events.sqlite");
@@ -48,7 +48,7 @@ async fn reopened_images_do_not_starve_current_images_and_each_artifact_read_is_
         for id in ["historical", "tool", "fits"] { artifact(&log, id, FOUR_MIB, true).await; }
         artifact(&log, "invalid", FOUR_MIB + 1, false).await;
         artifact(&log, "overflow", 8, true).await;
-        artifact(&log, "too-large", 3 * FOUR_MIB + 1, true).await;
+        artifact(&log, "accepted-50-mib", 50 * 1024 * 1024, true).await;
         let prior = identity("historical");
         let mut historical = attachment("historical");
         historical["bytes"] = json!(FOUR_MIB);
@@ -94,26 +94,24 @@ async fn reopened_images_do_not_starve_current_images_and_each_artifact_read_is_
         workspace["ref"] = json!({"kind":"workspace_file", "relativePath":"historical"});
         let engine = engine(log.clone());
         engine.run(input(&base, json!([attachment("invalid"), attachment("missing"), foreign, workspace,
-            attachment("fits"), attachment("overflow"), attachment("too-large")])), CancellationToken::new()).await.unwrap();
+            attachment("fits"), attachment("overflow"), attachment("accepted-50-mib")])), CancellationToken::new()).await.unwrap();
         let body = server.await.unwrap();
         let mut urls = Vec::new();
         collect_images(&body["messages"], &mut urls);
-        assert_eq!(urls.len(), 4, "prior user + typed Read + both current images; history must not crowd out the newest image");
-        let mut sizes = Vec::new();
-        for url in urls {
+        assert_eq!(urls.len(), 5, "prior user + typed Read + all three current images must reach the provider");
+        for (url, size) in urls.into_iter().zip([FOUR_MIB, FOUR_MIB, FOUR_MIB, 8, 50 * 1024 * 1024]) {
             let data = url.strip_prefix("data:image/png;base64,").unwrap();
             let bytes = STANDARD.decode(data).unwrap();
-            sizes.push(bytes.len());
+            assert!(bytes.len() == size, "provider image length differs from the accepted artifact");
             assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+            assert!(bytes[8..].iter().all(|byte| *byte == 0), "provider image bytes differ from the accepted artifact");
         }
-        assert_eq!(sizes, [FOUR_MIB, FOUR_MIB, FOUR_MIB, 8]);
         let text = body["messages"].to_string();
         assert!(text.contains("\"detail\":\"high\""), "tool image detail reaches the provider after reopening");
-        for name in ["invalid", "missing", "historical", "workspace", "too-large"] {
+        for name in ["invalid", "missing", "historical", "workspace"] {
             assert!(text.contains(&format!("Image attachment \\\"{name}\\\" could not be loaded")), "missing error for {name}");
         }
         assert!(text.contains("unsupported_mime"));
-        assert!(text.contains("per-artifact read limit"));
         assert!(!text.contains("per-request image budget"));
         assert!(text.contains("session_mismatch"));
         assert!(text.contains("unsupported_ref_kind"));

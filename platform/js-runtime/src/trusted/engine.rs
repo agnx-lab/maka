@@ -74,9 +74,6 @@ pub(super) fn create(health: &Arc<Health>) -> Result<JsRuntime> {
             deno_crypto::deno_crypto::init(None),
             super::ops::maka_trusted::init(),
         ],
-        create_params: Some(
-            deno_core::v8::CreateParams::default().heap_limits(0, 256 * 1024 * 1024),
-        ),
         ..Default::default()
     })
     .map_err(|error| TrustedError::Failed(error.to_string()))?;

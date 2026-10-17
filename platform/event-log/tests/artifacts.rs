@@ -41,6 +41,62 @@ fn artifact(id: &str, bytes: &[u8]) -> Artifact {
 }
 
 #[tokio::test]
+async fn oversized_artifact_rejection_preserves_catalog_and_writer() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("runtime.sqlite"))
+        .await
+        .unwrap();
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    let before = log.list_artifacts("session", 0, 128).await.unwrap();
+    let bytes = vec![0x5a; 50 * 1024 * 1024 + 1];
+    let record = artifact("oversized", &bytes);
+    assert!(matches!(
+        log.commit_artifact(record, bytes).await,
+        Err(StoreError::InvalidTransition(message))
+            if message == "Artifact payload size mismatch or limit exceeded"
+    ));
+    let after = log.list_artifacts("session", 0, 128).await.unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.records, before.records);
+    assert_eq!(after.total, 0);
+    assert!(
+        log.get_artifact("session", "oversized")
+            .await
+            .unwrap()
+            .record
+            .is_none()
+    );
+    assert!(
+        log.read_artifact_chunk("session", "oversized", 0, 1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let accepted = artifact("accepted", b"writer remains usable");
+    assert_eq!(
+        log.commit_artifact(accepted.clone(), b"writer remains usable".to_vec())
+            .await
+            .unwrap(),
+        accepted
+    );
+    let committed = log.list_artifacts("session", 0, 128).await.unwrap();
+    assert_ne!(committed.revision, before.revision);
+    assert_eq!(committed.records, [accepted]);
+    assert_eq!(
+        log.read_artifact_chunk("session", "accepted", 0, 64)
+            .await
+            .unwrap()
+            .unwrap()
+            .bytes,
+        b"writer remains usable"
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn immutable_uploads_are_scoped_bounded_and_reopen_with_atomic_catalog_changes() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("runtime.sqlite");

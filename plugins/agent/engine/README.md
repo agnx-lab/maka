@@ -25,4 +25,6 @@ Coordinates Agent runs, model steps, tools, handoffs and recovery. `Engine` cons
 
 Resuming a run preserves its original input and settled history. New model steps use the current authorized tool state.
 
+Vision history projection reads each authorized image in full under the existing artifact storage limit. Copied sessions resolve retained images through destination-owned references.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

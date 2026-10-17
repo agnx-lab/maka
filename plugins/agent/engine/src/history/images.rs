@@ -19,6 +19,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use maka_agent_facts::attachment::AttachmentRef;
+use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_agent_facts::attachment::sniff_binary_mime;
 use maka_agent_facts::event::StoredEvent;
@@ -32,9 +33,6 @@ use crate::RunError;
 
 pub(super) const NO_VISION: &str =
     "Image was read, but the selected model does not support image input.";
-// Bound each artifact read, not the accumulated media in a model request.
-// Historical images must not consume the allowance for a newly captured image.
-const MEDIA_READ_LIMIT: usize = 12 * 1024 * 1024;
 
 /// Targets borrow canonical evidence and are emitted alongside their messages.
 /// Arbitrary JSON tool results cannot authorize a storage read.
@@ -179,21 +177,15 @@ async fn read(
     if maka_agent_facts::interaction::entity_id(relative_path).is_err() {
         return Ok(ImageRead::Unavailable("not_found"));
     }
-    // Signatures fit within 1024 bytes. Read one bounded snapshot, enough to
-    // distinguish an invalid image from a valid image exceeding the per-artifact read limit.
+    // Storage admission bounds each artifact; project its complete accepted payload.
     let Some(chunk) = log
-        .read_artifact_chunk(session, relative_path, 0, MEDIA_READ_LIMIT + 1)
+        .read_artifact_chunk(session, relative_path, 0, MAX_ATTACHMENT_BYTES as usize)
         .await?
     else {
         return Ok(ImageRead::Unavailable("not_found"));
     };
     if !audio && sniff_binary_mime(&chunk.bytes).is_none() {
         return Ok(ImageRead::Unavailable("unsupported_mime"));
-    }
-    if chunk.total_bytes > MEDIA_READ_LIMIT as u64 {
-        return Ok(ImageRead::Unavailable(
-            "media exceeds the 12 MiB per-artifact read limit",
-        ));
     }
     Ok(ImageRead::Bytes(chunk.bytes))
 }

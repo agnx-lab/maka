@@ -443,7 +443,27 @@ async fn run(count: usize, side: u32) {
         invocation = Some(sent["invocationId"].as_str().unwrap().to_owned());
         metrics["admission_ms"] = json!(turn.elapsed().as_secs_f64()*1000.0);
         stage.set("model_http");
-        receive.await.unwrap().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        let mut commits = f.store.subscribe_commits();
+        let terminal_failure = async {
+            loop {
+                commits.borrow_and_update();
+                for stored in canonical(&f, session).await.unwrap() {
+                    if stored.event.invocation.invocation_id != invocation.as_deref().unwrap() {
+                        continue;
+                    }
+                    if let Fact::InvocationEnded { outcome } = stored.event.fact {
+                        assert!(matches!(outcome, InvocationOutcome::Completed),
+                            "image invocation ended before HTTP completion: {outcome:?}");
+                    }
+                }
+                commits.changed().await.unwrap();
+            }
+        };
+        tokio::select! {
+            biased;
+            result = receive => result.unwrap().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            _ = terminal_failure => unreachable!("terminal failure observer only returns by panic"),
+        }
         stage.set("terminal");
         assert!(f.owner.workers.close());
         f.owner.workers.wait().await;
@@ -582,6 +602,11 @@ async fn run(count: usize, side: u32) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn uploaded_pngs_reach_vision_http_and_complete_history() {
     run(2, 64).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uploaded_large_png_reaches_vision_http_and_complete_history() {
+    run(1, 2048).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
