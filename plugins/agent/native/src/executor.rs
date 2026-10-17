@@ -179,7 +179,6 @@ impl executor::Backend for Backend {
         let body = Execute {
             invocation: input.invocation.clone(),
             conversation_key: input.conversation_key,
-            attachment_count: input.content.attachments.as_ref().map_or(0, Vec::len),
             message: input.content.text,
             cwd: input.cwd,
             instructions: input.instructions,

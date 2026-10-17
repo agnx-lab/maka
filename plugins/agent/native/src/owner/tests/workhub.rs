@@ -242,9 +242,28 @@ async fn activate_worker_mode(
                 ("executor.mjs".into(),format!(r#"export function activate(){{return {{executor:{{contract:{},service:['backend']}}}};}} export const backend={{async execute(input,observation,context){{
                     let suffix='';
                     if(input.message.includes('original upload')) {{
-                        const file=await context.invoke({{operation:'metadata',slot:'attachment0'}});
-                        const bytes=await context.invoke({{operation:'read',slot:'attachment0',start:0,end:file.bytes}});
-                        suffix=' / attachment: '+new TextDecoder().decode(new Uint8Array(bytes));
+                        const descriptor=await context.invoke({{operation:'metadata',slot:'attachments'}});
+                        const files=descriptor.metadata;
+                        if(!Array.isArray(files)) throw new Error('attachment manifest required');
+                        let offset=0;
+                        const texts=[];
+                        for(const file of files) {{
+                            const end=offset+file.bytes;
+                            if(!Number.isSafeInteger(end)||end<offset) throw new Error('invalid attachment length');
+                            const decoder=new TextDecoder();
+                            let text='';
+                            for(let start=offset;start<end;start+=65536) {{
+                                const chunkEnd=Math.min(start+65536,end);
+                                const bytes=await context.invoke({{operation:'read',slot:'attachments',start,end:chunkEnd}});
+                                if(bytes.length!==chunkEnd-start) throw new Error('incomplete original attachment');
+                                text+=decoder.decode(new Uint8Array(bytes),{{stream:true}});
+                            }}
+                            text+=decoder.decode();
+                            texts.push(text);
+                            offset=end;
+                        }}
+                        if(offset!==descriptor.bytes) throw new Error('attachment manifest does not cover original bundle');
+                        suffix=' / attachment: '+texts.join(' | ');
                     }}
                     return {{status:'completed',text:input.message+' / '+input.settings.model+suffix}};
                 }}}};"#,serde_json::to_string(&maka_agent_api::executor::contract()).unwrap()).into_bytes())
@@ -1541,10 +1560,13 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
         let directories=control_turn(&fixture,&listener,&coordinator,json!({"operation":"directories","worker":"worker","location":{"kind":"roots"}})).await;
         let directory=directories["roots"][0]["selection"].clone();
         assert!(directory.is_object());
-        let bytes="original user attachment\n中\0".repeat(6000).into_bytes();
-        let uploaded=attachments::upload(&fixture,&coordinator,"transfer.txt",&bytes,Uuid::new_v4()).await.unwrap();
-        let source=uploaded["attachment"]["id"].as_str().unwrap().to_owned();
-        fixture.mutation(2,"send",json!({"sessionId":coordinator,"message":"Use my attached file","attachments":[source],"model":fixture.selection().await}),Uuid::new_v4()).await.unwrap();
+        let files: Vec<_> = (0..9).map(|index| (format!("transfer-{index}.txt"), if index == 0 { "original user attachment\n中\0".repeat(6000).into_bytes() } else { format!("original user attachment {index}\n中\0tail-{index}").into_bytes() })).collect();
+        let mut sources=Vec::new();
+        for (name,bytes) in &files {
+            let uploaded=attachments::upload(&fixture,&coordinator,name,bytes,Uuid::new_v4()).await.unwrap();
+            sources.push(uploaded["attachment"]["id"].as_str().unwrap().to_owned());
+        }
+        fixture.mutation(2,"send",json!({"sessionId":coordinator,"message":"Use my attached file","attachments":sources,"model":fixture.selection().await}),Uuid::new_v4()).await.unwrap();
         let (mut socket,_)=listener.accept().await.unwrap();request(&mut socket).await;
         task_response(&mut socket,json!({"operation":"route","worker":"worker","target":{"kind":"new","title":"New assigned worker","workspace":directory},"note":"Check the original file","model":fixture.selection().await})).await;
         let mut dispatched=None;
@@ -1554,7 +1576,7 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
             if is_coordinator(&input) {dispatched=Some(tool_value(&input));} else {
                 worker_calls+=1;
                 assert!(input["messages"].to_string().contains("Use my attached file"));
-                assert!(!input["messages"].to_string().contains(&source),"foreign artifact IDs must never be forwarded as worker authority");
+                for source in &sources { assert!(!input["messages"].to_string().contains(source),"foreign artifact IDs must never be forwarded as worker authority"); }
             }
             response(&mut socket).await;
         }
@@ -1563,17 +1585,35 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
         assert_eq!(query_import(&fixture,hub::EXPORT,"tasks",json!({})).await["entries"][0]["title"],"New assigned worker");
         let worker=task["status"]["sessionId"].as_str().unwrap();
         idle(&fixture,EXPORT,&coordinator).await;idle(&fixture,"worker",worker).await;
-        let records=fixture.store.list_artifacts(worker,0,10).await.unwrap();assert_eq!(records.records.len(),1);
-        let copied=&records.records[0];assert_ne!(copied.id,source);
-        assert_eq!(copied.session_id,worker);
-        assert_eq!(copied.summary.as_deref(),Some(maka_agent_facts::artifact::content_digest(&bytes).as_str()));
-        assert_eq!(fixture.store.read_artifact_chunk(worker,&copied.id,0,bytes.len()).await.unwrap().unwrap().bytes,bytes);
+        let artifacts=fixture.store.list_artifacts(worker,0,10).await.unwrap();assert_eq!(artifacts.records.len(),9);
+        for ((name,bytes),source) in files.iter().zip(&sources) {
+            let copied=artifacts.records.iter().find(|record|record.name==*name).unwrap();
+            assert_ne!(&copied.id,source);
+            assert_eq!(copied.session_id,worker);
+            assert_eq!(copied.size_bytes,bytes.len() as u64);
+            assert_eq!(copied.summary.as_deref(),Some(maka_agent_facts::artifact::content_digest(bytes).as_str()));
+            assert!(fixture.store.read_artifact_chunk(worker,&copied.id,0,bytes.len()).await.unwrap().unwrap().bytes==*bytes,"original transfer bytes differ: {name}");
+        }
+        let through=*fixture.store.subscribe_commits().borrow();
+        let events=fixture.store.session_events(worker,0,through,512,usize::MAX).await.unwrap();
+        let received=events.events.iter().find_map(|stored|match &stored.event.fact {
+            Fact::InvocationOpened {input:maka_agent_facts::event::InvocationInput::Message {content,..},..}=>content.attachments.as_ref(),
+            _=>None,
+        }).unwrap();
+        assert_eq!(received.len(),9);
+        for (attachment,(name,bytes)) in received.iter().zip(&files) {
+            assert_eq!(&attachment.name,name);
+            assert_eq!(attachment.bytes,bytes.len() as u64);
+            let copied=artifacts.records.iter().find(|record|record.name==*name).unwrap();
+            assert_eq!(attachment.storage_ref,maka_agent_facts::attachment::StorageRef::SessionFile {session_id:worker.into(),relative_path:copied.id.clone()});
+        }
         let records=fixture.store.application_intents(fixture.app.source().unwrap().deployment,id(1),0,128).await.unwrap();
-        assert_eq!(records.iter().map(|row|row.reference.method.as_str()).collect::<Vec<_>>(),vec!["create","uploadAttachment","send"]);
+        let methods:Vec<_>=std::iter::once("create").chain(std::iter::repeat_n("uploadAttachment",9)).chain(std::iter::once("send")).collect();
+        assert_eq!(records.iter().map(|row|row.reference.method.as_str()).collect::<Vec<_>>(),methods);
         assert_eq!(query_import(&fixture,"worker","list",json!({"filter":"all","position":{"kind":"start"}})).await["sessions"].as_array().unwrap().len(),1);
         let replay=control_turn(&fixture,&listener,&coordinator,json!({"operation":"advance","taskId":task["taskId"]})).await;
         assert_eq!(replay["status"]["invocationId"],task["status"]["invocationId"]);
-        assert_eq!(fixture.store.list_artifacts(worker,0,10).await.unwrap().records.len(),1);
+        assert_eq!(fixture.store.list_artifacts(worker,0,10).await.unwrap().records.len(),9);
         while let Ok(accepted)=tokio::time::timeout(Duration::from_millis(30),listener.accept()).await {
             let (mut socket,_)=accepted.unwrap();let input=request(&mut socket).await;
             assert!(is_coordinator(&input)&&is_worker_notice(&input),"advance redispatched work instead of receiving the original completion notice: {input}");
@@ -1584,7 +1624,7 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
         let restored=query_import(&fixture,hub::EXPORT,"task",json!({"taskId":task["taskId"]})).await;
         assert_eq!(restored["status"]["sessionId"],worker);assert_eq!(restored["status"]["invocationId"],task["status"]["invocationId"]);
         assert_eq!(restored["status"]["progress"]["answer"]["text"],"Elegant response");
-        assert_eq!(fixture.store.application_intents(fixture.app.source().unwrap().deployment,id(1),0,128).await.unwrap().len(),3);
+        assert_eq!(fixture.store.application_intents(fixture.app.source().unwrap().deployment,id(1),0,128).await.unwrap().len(),11);
         fixture.app.shutdown().await.unwrap();fixture.config.shutdown().await.unwrap();
     }).await.unwrap();
 }

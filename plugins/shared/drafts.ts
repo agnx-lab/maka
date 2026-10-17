@@ -77,8 +77,7 @@ function attachments(value: unknown, session: string): AgentAttachment[] | null 
       (typeof value.historyScope !== 'string' || value.historyScope.length > 4096)) ||
     !Number.isSafeInteger(value.historyAfter) ||
     (value.historyAfter as number) < 0 ||
-    !Array.isArray(value.attachments) ||
-    value.attachments.length > 8
+    !Array.isArray(value.attachments)
   )
     return null;
   const files: AgentAttachment[] = [];
@@ -124,7 +123,6 @@ function correlation(original: CallerIntent, draft: DraftRecord) {
     !Number.isSafeInteger(value.editor.revision) ||
     (value.editor.revision as number) < 0 ||
     !Array.isArray(value.attachments) ||
-    value.attachments.length > 8 ||
     !value.attachments.every((id) => text(id, 128)) ||
     new Set(value.attachments).size !== value.attachments.length
   )
@@ -225,10 +223,6 @@ export function nextDraftStep(
             sameValue(current.dataSource, record.dataSource),
         ),
     );
-    if (retained.files.length + missing.length > 64) {
-      work.status = 'failed';
-      continue;
-    }
     retained.files.push(...missing.map((file) => ({ ...file, dataSource: record.dataSource })));
     work.restore = {
       owner: record.observation.owner,

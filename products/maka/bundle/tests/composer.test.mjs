@@ -204,6 +204,17 @@ async function client(target) {
 for (const target of ['tui']) {
   test(`${target} sends from its native snapshot without a parent callback and freezes the original destination`, async () => {
     const c = await client(target);
+    const files = Array.from({ length: 9 }, (_, index) => ({
+      sessionId: 'session',
+      dataSource,
+      id: `attachment-${index}`,
+      name: `file-${index}.txt`,
+      mimeType: 'text/plain',
+      bytes: 3,
+    }));
+    const ids = files.map((file) => file.id);
+    c.props.attachments = files;
+    c.update();
     c.ready();
     for (const saved of [false, true, false, true]) {
       c.emit('checkpoint', { owner: 'editor', state: { kind: 'ready', initialized: true, saved } });
@@ -231,7 +242,7 @@ for (const target of ['tui']) {
     assert.deepEqual(send.input, {
       sessionId: 'session',
       message: 'hello',
-      attachments: [],
+      attachments: ids,
       model: backend.model,
       thinkingLevel: null,
     });
@@ -239,7 +250,7 @@ for (const target of ['tui']) {
     assert.deepEqual(c.out.events[0].value, {
       context: 'session',
       dataSource,
-      attachments: [],
+      attachments: ids,
       key: send.key,
       text: 'hello',
       status: 'pending',
@@ -249,14 +260,14 @@ for (const target of ['tui']) {
       format: 'maka.agent.draft-send@2',
       sessionId: 'session',
       editor: { owner: 'editor', revision: 1 },
-      attachments: [],
+      attachments: ids,
     });
     c.reply({ status: 'operation', reply: returned(), caller });
     assert.equal(c.out.events[0].value.status, 'accepted');
     assert.equal(c.out.events[0].value.messageId, 'canonical-message');
     assert.deepEqual(
       c.out.events.filter((event) => event.name === 'sent'),
-      [{ name: 'sent', value: { context: 'session', dataSource, attachments: [] } }],
+      [{ name: 'sent', value: { context: 'session', dataSource, attachments: ids } }],
     );
     assert.equal(c.editor().command.owner, 'editor');
     assert.equal(
@@ -366,20 +377,20 @@ for (const target of ['tui']) {
   });
   test(`${target} resolves an interrupted original send before clearing only its consumed draft and attachments`, async () => {
     const c = await client(target);
-    const file = {
+    const files = Array.from({ length: 9 }, (_, index) => ({
       sessionId: 'session',
-      id: 'attachment',
-      name: 'one.txt',
+      id: `attachment-${index}`,
+      name: `file-${index}.txt`,
       mimeType: 'text/plain',
       bytes: 3,
-    };
+    }));
     c.emit('checkpoint', {
       owner: 'new-editor',
       state: {
         kind: 'restore',
         version: 3,
         snapshot: observed().snapshot,
-        metadata: { attachments: [file], historyAfter: 17, historyScope: 'another-caller' },
+        metadata: { attachments: files, historyAfter: 17, historyScope: 'another-caller' },
       },
     });
     const original = {
@@ -389,11 +400,11 @@ for (const target of ['tui']) {
         format: 'maka.agent.draft-send@2',
         sessionId: 'session',
         editor: { owner: 'editor', revision: 1 },
-        attachments: ['attachment'],
+        attachments: files.map((file) => file.id),
       },
     };
     c.reply({ status: 'succeeded', value: [original] });
-    assert.equal(c.out.actions[0].binding, 'receipts');
+    assert.equal(c.out.actions[0]?.binding, 'receipts');
     c.reply({
       status: 'succeeded',
       value: { reference, receipt: { kind: 'unavailable', diagnostic: 'unknown' } },
@@ -401,7 +412,7 @@ for (const target of ['tui']) {
     assert.equal(c.editor().persistence.restore, null);
     assert.deepEqual(c.out.actions, []);
     c.raw('draft-retry');
-    assert.equal(c.out.actions[0].binding, 'receipts');
+    assert.equal(c.out.actions[0]?.binding, 'receipts');
     c.reply({ status: 'succeeded', value: returned() });
     assert.deepEqual(c.out.actions[0].input, { after: 18, limit: 1 });
     c.reply({ status: 'succeeded', value: [] });
@@ -416,23 +427,24 @@ for (const target of ['tui']) {
       state: { kind: 'ready', initialized: true, saved: true },
     });
     assert.equal(c.editor().persistence.metadata.historyAfter, 18);
+    assert.deepEqual(c.editor().persistence.metadata.attachments, []);
   });
   test(`${target} preserves a newer unsent draft, restores unused attachments, and rejects missing recovery metadata`, async () => {
     const c = await client(target);
-    const file = {
+    const files = Array.from({ length: 9 }, (_, index) => ({
       sessionId: 'session',
-      id: 'attachment',
-      name: 'one.txt',
+      id: `unused-${index}`,
+      name: `unused-${index}.txt`,
       mimeType: 'text/plain',
       bytes: 3,
-    };
+    }));
     c.emit('checkpoint', {
       owner: 'new-editor',
       state: {
         kind: 'restore',
         version: 3,
         snapshot: observed('new text', 2).snapshot,
-        metadata: { attachments: [file], historyAfter: 0, historyScope: null },
+        metadata: { attachments: files, historyAfter: 0, historyScope: null },
       },
     });
     c.reply({
@@ -451,14 +463,14 @@ for (const target of ['tui']) {
       ],
     });
     assert.equal(
-      c.out.actions[0].binding,
+      c.out.actions[0]?.binding,
       'history',
       'older accepted text does not clear a newer draft',
     );
     c.reply({ status: 'succeeded', value: [] });
     assert.equal(c.editor().persistence.restore.clearText, false);
     assert.deepEqual(c.out.events, [
-      { name: 'restored', value: { files: [{ ...file, dataSource }] } },
+      { name: 'restored', value: { files: files.map((file) => ({ ...file, dataSource })) } },
     ]);
     const invalid = await client(target);
     invalid.emit('checkpoint', {
@@ -473,6 +485,64 @@ for (const target of ['tui']) {
     assert.deepEqual(invalid.out.actions, []);
     assert.equal(invalid.editor().persistence.restore, null);
     assert.equal(invalid.state.records[0].work.status, 'failed');
+  });
+  test(`${target} restores 65 attachment descriptors across two retained draft contexts`, async () => {
+    const c = await client(target);
+    const retained = [];
+    for (const [context, count, owner] of [
+      ['session', 32, 'first-editor'],
+      ['second-session', 33, 'second-editor'],
+    ]) {
+      c.props.context = context;
+      c.props.attachments = [...retained];
+      c.update();
+      const entry = c.state.entries.find((entry) => entry.context === context);
+      const files = Array.from({ length: count }, (_, index) => ({
+        sessionId: context,
+        id: `${context}-${index}`,
+        name: `${index}.txt`,
+        mimeType: 'text/plain',
+        bytes: 1,
+      }));
+      c.emit(
+        'checkpoint',
+        {
+          owner,
+          state: {
+            kind: 'restore',
+            version: 1,
+            snapshot: observed('unsent', 1, owner).snapshot,
+            metadata: { attachments: files, historyAfter: 0, historyScope: null },
+          },
+        },
+        entry.key,
+      );
+      assert.equal(c.out.actions[0]?.binding, 'history');
+      c.reply({ status: 'succeeded', value: [] });
+      assert.deepEqual(c.out.events, [
+        { name: 'restored', value: { files: files.map((file) => ({ ...file, dataSource })) } },
+      ]);
+      assert.deepEqual(c.editor(entry.key).persistence.restore, {
+        owner,
+        version: 1,
+        clearText: false,
+      });
+      retained.push(...files.map((file) => ({ ...file, dataSource })));
+      c.props.attachments = [...retained];
+      c.emit(
+        'checkpoint',
+        { owner, state: { kind: 'ready', initialized: true, saved: true } },
+        entry.key,
+      );
+      assert.deepEqual(c.editor(entry.key).persistence.metadata.attachments, files);
+    }
+    assert.equal(retained.length, 65);
+    assert.equal(validProps(c.props), true, JSON.stringify(validProps.errors));
+    c.props.context = 'session';
+    c.update();
+    assert.equal(c.editor('draft').persistence.metadata.attachments.length, 32);
+    const second = c.state.entries.find((entry) => entry.context === 'second-session');
+    assert.equal(c.editor(second.key).persistence.metadata.attachments.length, 33);
   });
 }
 

@@ -30,7 +30,10 @@ use std::sync::{Arc, mpsc};
 
 enum Source {
     Paths(Paths),
-    Clipboard { maximum: usize, target: PasteTarget },
+    Clipboard {
+        allow_files: bool,
+        target: PasteTarget,
+    },
     Snapshot,
     Failed,
     Empty,
@@ -169,9 +172,12 @@ impl Paste {
         if self.pending() {
             return None;
         }
-        let paths =
-            clipboard::admit_paths(paths::parse(text)?, policy.max_files, &self.context.budget)
-                .ok()?;
+        let paths = clipboard::admit_paths(
+            paths::parse(text)?,
+            policy.allow_files,
+            &self.context.budget,
+        )
+        .ok()?;
         self.stage_source(Source::Paths(paths), policy)
     }
     pub fn stage_clipboard(
@@ -181,7 +187,7 @@ impl Paste {
     ) -> Option<NativeInput> {
         self.stage_source(
             Source::Clipboard {
-                maximum: policy.max_files,
+                allow_files: policy.allow_files,
                 target: editor.paste_target(),
             },
             policy,
@@ -298,8 +304,8 @@ impl Paste {
                 let path = paths.items.front().unwrap().clone();
                 Box::new(move || read_selected(&path, &budget).map(Output::File))
             }
-            Source::Clipboard { maximum, .. } => {
-                let maximum = *maximum;
+            Source::Clipboard { allow_files, .. } => {
+                let allow_files = *allow_files;
                 #[cfg(test)]
                 if let Some(value) = self.clipboard.take() {
                     return self.spawn(Box::new(move || {
@@ -310,7 +316,7 @@ impl Paste {
                         })))
                     }));
                 }
-                Box::new(move || clipboard::read(maximum, &budget).map(Output::Clipboard))
+                Box::new(move || clipboard::read(allow_files, &budget).map(Output::Clipboard))
             }
             _ => return,
         };
@@ -385,11 +391,15 @@ impl Paste {
                 self.start();
             }
             Ok(Output::Clipboard(Content::Text(text))) => {
-                let Source::Clipboard { maximum, target } = batch.source else {
+                let Source::Clipboard {
+                    allow_files,
+                    target,
+                } = batch.source
+                else {
                     unreachable!()
                 };
                 if let Some(paths) = paths::parse(&text.value).and_then(|paths| {
-                    clipboard::admit_paths(paths, maximum, &self.context.budget).ok()
+                    clipboard::admit_paths(paths, allow_files, &self.context.budget).ok()
                 }) {
                     batch.source = Source::Paths(paths);
                     self.start();
@@ -531,6 +541,72 @@ mod tests {
         }
     }
     #[test]
+    fn nine_original_files_are_deduplicated_and_consumed_with_exact_bytes_and_custody() {
+        let directory = tempfile::tempdir().unwrap();
+        let originals: Vec<_> = (0..9)
+            .map(|index| {
+                let path = directory.path().join(format!("original file {index}.txt"));
+                let bytes = format!("original bytes {index} 中文").into_bytes();
+                std::fs::write(&path, &bytes).unwrap();
+                (path, bytes)
+            })
+            .collect();
+        let mut paths: Vec<_> = originals.iter().map(|(path, _)| path).collect();
+        paths.insert(1, &originals[0].0);
+        paths.push(&originals[8].0);
+        let text = paths
+            .iter()
+            .map(|path| format!("\"{}\"", path.display()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let resources = Arc::new(maka_capabilities::call::Resources::default());
+        let budget = NativeBudget::default();
+        let mut paste = Paste::new(NativeContext {
+            checkpoint: None,
+            resources: resources.clone(),
+            budget: budget.clone(),
+        });
+        let staged = paste
+            .stage(
+                &text,
+                &FilePastePolicy {
+                    context: "original-session".into(),
+                    allow_files: true,
+                },
+            )
+            .expect("all nine original files can be admitted");
+        paste.commit(staged.value["request"].as_str(), None, true);
+        let mut held = None;
+        for (index, (path, bytes)) in originals.iter().enumerate() {
+            let observed = settled(&mut paste);
+            assert_eq!(observed.context, "original-session");
+            assert_eq!(observed.remaining, originals.len() - index);
+            assert_eq!(observed.selection.phase, FilePhase::Ready);
+            let next = command(&observed, FilePasteAction::Next);
+            let captured = paste
+                .capture(&serde_json::to_value(&next.selection).unwrap())
+                .unwrap();
+            assert_eq!(captured.bytes(), bytes.len());
+            assert_eq!(captured.read(0..captured.bytes()).unwrap(), *bytes);
+            std::fs::remove_file(path).unwrap();
+            paste.commit(None, Some(&next), true);
+            if index == originals.len() - 1 {
+                held = Some(captured);
+            }
+        }
+        assert_eq!(settled(&mut paste).remaining, 0);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(resources.finish())
+            .unwrap();
+        assert!(!paste.pending());
+        assert_eq!(budget.usage(), (65536, 0, 0));
+        drop(held);
+        assert_eq!(budget.usage(), (0, 0, 0));
+    }
+    #[test]
     fn original_batch_advances_only_by_revision_and_retains_capture_budget_until_release() {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first.txt");
@@ -549,7 +625,7 @@ mod tests {
         });
         let policy = FilePastePolicy {
             context: "original-session".into(),
-            max_files: 2,
+            allow_files: true,
         };
         let staged = paste
             .stage(
@@ -642,7 +718,7 @@ mod tests {
         });
         let policy = FilePastePolicy {
             context: "session".into(),
-            max_files: 1,
+            allow_files: true,
         };
         let staged = paste.stage(path.to_str().unwrap(), &policy).unwrap();
         paste.suspend();
@@ -702,7 +778,7 @@ mod tests {
             }
             let policy = FilePastePolicy {
                 context: "original".into(),
-                max_files: if change == "full" { 0 } else { 8 },
+                allow_files: change != "full",
             };
             let staged = paste.stage_clipboard(&editor, &policy).unwrap();
             // Admit the same private marker, substituting only the OS response.
@@ -802,7 +878,7 @@ mod tests {
                 &editor,
                 &FilePastePolicy {
                     context: "original".into(),
-                    max_files: 1,
+                    allow_files: true,
                 },
             )
             .unwrap();

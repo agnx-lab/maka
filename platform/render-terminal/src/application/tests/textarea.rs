@@ -1281,7 +1281,7 @@ fn terminal_enter_submit_keeps_shift_enter_control_j_and_paste_in_the_original_d
     dispatch(
         &mut tui,
         "configure",
-        json!({"submit":"enter","filePaste":{"context":"original-session","maxFiles":2}}),
+        json!({"submit":"enter","filePaste":{"context":"original-session","allowFiles":true}}),
     );
     draw(&mut tui, 50, 20);
     tui.input_settled(Event::Paste("/missing-maka-paste-test.txt".into()))
@@ -1498,7 +1498,7 @@ fn native_clipboard_gesture_uses_the_original_textarea_commit_and_observation() 
     dispatch(
         &mut tui,
         "configure",
-        json!({"submit":"enter", "filePaste":{"context":"original", "maxFiles":8}}),
+        json!({"submit":"enter", "filePaste":{"context":"original", "allowFiles":true}}),
     );
     draw(&mut tui, 50, 20);
     tui.input_settled(Event::Key(KeyEvent::new(

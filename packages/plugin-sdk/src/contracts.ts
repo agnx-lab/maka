@@ -4568,16 +4568,13 @@ export const contracts = {
                 minLength: 1,
                 maxLength: 512,
               },
-              maxFiles: {
-                description: 'Zero still permits clipboard text, but no new file attachments.',
-                type: 'integer',
-                format: 'uint',
-                minimum: 0,
-                maximum: 8,
+              allowFiles: {
+                description: 'Clipboard text remains available when file attachments are disabled.',
+                type: 'boolean',
               },
             },
             additionalProperties: false,
-            required: ['context', 'maxFiles'],
+            required: ['context', 'allowFiles'],
           },
           FilePasteCommand: {
             type: 'object',
@@ -5014,7 +5011,6 @@ export const contracts = {
               type: 'integer',
               format: 'uint',
               minimum: 0,
-              maximum: 8,
             },
             retryable: {
               description:
@@ -10594,7 +10590,6 @@ export const contracts = {
                 items: {
                   type: 'string',
                 },
-                maxItems: 8,
                 default: [],
               },
               sessionId: {
@@ -13158,7 +13153,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/AgentHistoryAttachment',
                     },
-                    maxItems: 8,
                   },
                   timing: {
                     anyOf: [
@@ -24146,7 +24140,6 @@ export const contracts = {
                 items: {
                   type: 'string',
                 },
-                maxItems: 8,
                 default: [],
               },
               model: {
@@ -27916,14 +27909,6 @@ export const contracts = {
                 type: 'string',
                 maxLength: 65536,
               },
-              attachmentCount: {
-                description:
-                  'Number of contiguous request slots attachment0..attachment7. Descriptors are read through the actual request.',
-                type: 'integer',
-                format: 'uint',
-                minimum: 0,
-                maximum: 8,
-              },
               cwd: {
                 type: 'string',
                 minLength: 1,
@@ -27938,14 +27923,7 @@ export const contracts = {
               },
             },
             additionalProperties: false,
-            required: [
-              'invocation',
-              'conversationKey',
-              'message',
-              'attachmentCount',
-              'cwd',
-              'settings',
-            ],
+            required: ['invocation', 'conversationKey', 'message', 'cwd', 'settings'],
             $defs: {
               Invocation: {
                 type: 'object',
@@ -28140,56 +28118,7 @@ export const contracts = {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
           },
           resources: {
-            attachment0: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment1: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment2: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment3: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment4: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment5: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment6: {
-              type: {
-                name: 'maka.bytes',
-                version: 1,
-              },
-              optional: true,
-            },
-            attachment7: {
+            attachments: {
               type: {
                 name: 'maka.bytes',
                 version: 1,

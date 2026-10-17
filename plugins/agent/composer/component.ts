@@ -543,7 +543,7 @@ export function composer<N extends Node>(
                 filePaste:
                   entry === current
                     ? (props.filePaste ?? null)
-                    : { context: entry.context, maxFiles: 0 },
+                    : { context: entry.context, allowFiles: false },
                 fileCommand:
                   props.fileCommand?.selection.owner === entry.files?.selection.owner
                     ? props.fileCommand

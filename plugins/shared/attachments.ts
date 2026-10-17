@@ -128,12 +128,6 @@ export const attachmentFiles = (
   drafts.files.filter(
     (file) => file.sessionId === sessionId && sameValue(file.dataSource, dataSource),
   );
-// Bound retained descriptors across navigation; never silently evict another draft.
-export const attachmentCapacity = (
-  drafts: AttachmentDrafts,
-  sessionId: string,
-  dataSource: AgentDataSource,
-) => drafts.files.length < 64 && attachmentFiles(drafts, sessionId, dataSource).length < 8;
 export const attachmentChild = (drafts: AttachmentDrafts) =>
   'attachment-file-' + drafts.selection?.attempt;
 export function attachmentView<N extends Node>(
@@ -152,7 +146,6 @@ export function attachmentView<N extends Node>(
     selection = drafts.selection!;
   const observed = selection.file;
   const files = attachmentFiles(drafts, selection.sessionId, selection.dataSource);
-  const capacity = attachmentCapacity(drafts, selection.sessionId, selection.dataSource);
   const fileContent = [
     presentation.slot(
       attachmentChild(drafts),
@@ -166,7 +159,7 @@ export function attachmentView<N extends Node>(
         emptyLabel: text.fileListEmpty,
         truncatedLabel: text.fileListTruncated,
         placeholder: text.attachmentPathPlaceholder,
-        disabled: busy || !enabled || !capacity,
+        disabled: busy || !enabled,
         tabIndex: 0,
       },
       { changed: 'attachment-file-changed' },
@@ -235,7 +228,7 @@ export function attachmentView<N extends Node>(
           { truncate: true },
         ),
         false,
-        busy || !enabled || !capacity,
+        busy || !enabled,
         { followFocus: false, submit: true },
       ),
     );
@@ -258,7 +251,6 @@ export function attachmentView<N extends Node>(
               },
               { input: 'attachment-input' },
             ),
-            ...(!capacity ? [ui.text('attachment-limit', text.attachmentLimit, theme.muted)] : []),
             ...(notice ? [ui.text('attachment-list-notice', notice, theme.muted)] : []),
             ui.box(
               'attachment-list-controls',
@@ -297,7 +289,7 @@ export function attachmentView<N extends Node>(
                 ui.button(
                   'attachment-upload',
                   text.attachmentAdd,
-                  busy || !enabled || !capacity || observed?.phase !== 'ready' || !observed.file,
+                  busy || !enabled || observed?.phase !== 'ready' || !observed.file,
                   true,
                 ),
               ],

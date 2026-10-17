@@ -38,12 +38,7 @@ import type {
 import { sameValue } from '../../shared/value.js';
 import { compactLabel } from '../../shared/view.js';
 
-import {
-  attachmentFiles,
-  attachmentCapacity,
-  sameFile,
-  selectedFile,
-} from '../../shared/attachments.js';
+import { attachmentFiles, sameFile, selectedFile } from '../../shared/attachments.js';
 
 import { draftReady } from '../../shared/drafts.js';
 
@@ -613,10 +608,6 @@ export function uploadPastedFile(state: State, actions: Action[]) {
   const dataSource = observed.dataSource;
   if (state.selected && !sameValue(state.selected.dataSource, dataSource)) return;
   if (!dataSource || !draftReady(state.drafts, { id: observed.context, dataSource })) return;
-  if (!attachmentCapacity(state.attachments, observed.context, dataSource)) {
-    state.notice = 'attachmentLimit';
-    return;
-  }
   paste.attempted = selectedFile(file);
   state.notice = null;
   intent(

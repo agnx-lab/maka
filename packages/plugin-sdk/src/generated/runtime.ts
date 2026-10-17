@@ -6284,9 +6284,9 @@ export interface TextRange {
 export interface FilePastePolicy {
   context: string;
   /**
-   * Zero still permits clipboard text, but no new file attachments.
+   * Clipboard text remains available when file attachments are disabled.
    */
-  maxFiles: number;
+  allowFiles: boolean;
 }
 export interface FilePasteCommand {
   selection: FileCapture;
@@ -7024,19 +7024,8 @@ export interface WebProbe {
 export interface AgentExecute {
   /**
    * IDs of immutable user uploads in this Session, resolved by the Agent owner.
-   *
-   * @maxItems 8
    */
-  attachments?:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string];
+  attachments?: string[];
   sessionId: string;
   message: string;
   executor: AgentExecutorSelection;
@@ -7071,10 +7060,6 @@ export interface ExecutorExecute {
   invocation: Invocation;
   conversationKey: string;
   message: string;
-  /**
-   * Number of contiguous request slots attachment0..attachment7. Descriptors are read through the actual request.
-   */
-  attachmentCount: number;
   cwd: string;
   instructions?: string | null;
   settings: ExecutorSettings;
@@ -9458,19 +9443,8 @@ export interface AgentChangeSession {
 export interface AgentSend {
   /**
    * IDs of immutable user uploads in this Session; metadata is resolved by the owner.
-   *
-   * @maxItems 8
    */
-  attachments?:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string];
+  attachments?: string[];
   model: ModelSelection;
   /**
    * Omission/null uses the configured model default; `off` is explicit.
@@ -10161,54 +10135,8 @@ export interface AgentHistoryChunk {
   compaction?: HistoryCompaction | null;
   /**
    * Display metadata only, on the first user-message fragment; no storage capability.
-   *
-   * @maxItems 8
    */
-  attachments?:
-    | []
-    | [AgentHistoryAttachment]
-    | [AgentHistoryAttachment, AgentHistoryAttachment]
-    | [AgentHistoryAttachment, AgentHistoryAttachment, AgentHistoryAttachment]
-    | [
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-      ]
-    | [
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-      ]
-    | [
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-      ]
-    | [
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-      ]
-    | [
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-        AgentHistoryAttachment,
-      ];
+  attachments?: AgentHistoryAttachment[];
   timing?: HistoryTurnTiming | null;
   field: HistoryField;
   messageId: string;

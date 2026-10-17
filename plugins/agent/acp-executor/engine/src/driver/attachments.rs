@@ -78,7 +78,7 @@ fn blocks(
         .map(|text| json!({"type":"text","text":text}))
         .collect();
     let mut size = serde_json::to_vec(&blocks)?.len();
-    if size > MAX_CONTENT || attachments.len() > 8 {
+    if size > MAX_CONTENT {
         return Err(Error::Invalid("ACP prompt exceeds its content limit"));
     }
     for (index, attachment) in attachments.into_iter().enumerate() {

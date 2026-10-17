@@ -1311,29 +1311,239 @@ test('attachment preview captures only original identities and survives attachme
     mimeType: 'text/plain',
     bytes: 3,
   };
+  const files = Array.from({ length: 9 }, (_, index) => ({
+    ...file,
+    id: `attachment-${index}`,
+    name: `original-${index}.txt`,
+  }));
+  const ids = files.map((file) => file.id);
+  const preview =
+    'original-0.txt\noriginal-1.txt\noriginal-2.txt\noriginal-3.txt\noriginal-4.txt\noriginal-5.txt\noriginal-6.txt\noriginal-7.txt\noriginal-8.txt';
   c.state.attachments.files = [
-    file,
-    { ...file, dataSource: { ...dataSource, deployment: 'foreign' }, name: 'foreign.txt' },
+    ...files,
+    { ...files[0], dataSource: { ...dataSource, deployment: 'foreign' }, name: 'foreign.txt' },
     { ...file, id: 'later', name: 'later.txt' },
   ];
-  c.child('composer', 'submission', submission(id, { text: '', attachments: ['attachment'] }));
-  assert.equal(c.find(c.reader()).props.messages[0].text, 'original.txt');
+  c.child('composer', 'submission', submission(id, { text: '', attachments: ids }));
+  assert.equal(c.find(c.reader()).props.messages[0].text, preview);
   c.child(
     'composer',
     'submission',
     submission(id, {
       text: '',
-      attachments: ['attachment'],
+      attachments: ids,
       status: 'accepted',
       messageId: 'canonical',
     }),
   );
-  c.child('composer', 'sent', { context: id, dataSource, attachments: ['attachment'] });
-  assert.equal(c.find(c.reader()).props.messages[0].text, 'original.txt');
+  c.child('composer', 'sent', { context: id, dataSource, attachments: ids });
+  assert.equal(c.find(c.reader()).props.messages[0].text, preview);
   assert.deepEqual(
     c.state.attachments.files.map((file) => file.name),
     ['foreign.txt', 'later.txt'],
   );
+});
+
+test('a catalogue-selected new session retains its file gesture until the original create receipt', () => {
+  const c = client('en', { sessions: [] });
+  c.raw('home-new');
+  c.reply(c.action('directories'), {
+    kind: 'roots',
+    roots: [
+      {
+        name: 'Workspace',
+        path: '/project',
+        selection: {
+          rootId: 'workspace',
+          segments: [],
+          directoryIdentity: 'sha256:' + 'a'.repeat(64),
+        },
+      },
+    ],
+  });
+  const create = c.action('create');
+  assert.ok(create);
+  const created = session('Fresh');
+  c.event({
+    kind: 'action',
+    key: c.state.catalogWatch.key,
+    event: {
+      status: 'updated',
+      value: { sessions: [created], before: null, after: null },
+    },
+  });
+  assert.equal(c.find('composer').props.enabled, true);
+  assert.deepEqual(c.find('composer').props.filePaste, {
+    context: created.id,
+    allowFiles: true,
+  });
+  c.child('composer', 'readiness', [
+    { context: created.id, dataSource: created.dataSource, ready: true },
+  ]);
+  const capture = { owner: '00000000-0000-0000-0000-000000000060', revision: 3 };
+  const file = {
+    name: 'original.gif',
+    bytes: 43,
+    digest: 'sha256:ab99355f27cb10c630ac0ac0921a683e4c812a89066cd731299ead501fa6797a',
+  };
+  c.child('composer', 'files', {
+    context: created.id,
+    dataSource: created.dataSource,
+    remaining: 1,
+    retryable: false,
+    selection: { ...capture, phase: 'ready', file },
+  });
+  assert.equal(c.action('uploadAttachment'), undefined, 'the original create is still pending');
+  c.event({
+    kind: 'action',
+    key: create.key,
+    event: {
+      status: 'operation',
+      reply: {
+        reference: { ...recapReference, method: 'create' },
+        receipt: {
+          kind: 'recorded',
+          outcome: { kind: 'returned', value: { kind: 'created', session: created } },
+          cleanup: { kind: 'confirmed' },
+        },
+      },
+    },
+  });
+  const upload = c.action('uploadAttachment');
+  assert.ok(upload, 'the original receipt resumes the retained file without another gesture');
+  assert.deepEqual(upload.input, { sessionId: created.id, ...file });
+  assert.deepEqual(upload.resources, {
+    file: { child: 'composer', method: 'file', input: capture },
+  });
+});
+
+test('a held backend selection retains the original file gesture until its receipt', () => {
+  const c = client().observe(0).history(page(0, []));
+  const original = c.state.selected;
+  c.child('models', 'backends', { available: true });
+  c.child('models', 'resolved', {
+    selectionKey: String(c.state.epoch),
+    selection: recapModel,
+  });
+  // The actual model picker emits selected when it applies its initial choice.
+  c.child('models', 'selected', recapModel);
+  const selection = c.action('selectBackend');
+  assert.ok(selection);
+  assert.equal(selection.input.sessionId, original.id);
+  assert.equal(c.find('composer').props.enabled, true);
+  assert.deepEqual(c.find('composer').props.filePaste, {
+    context: original.id,
+    allowFiles: true,
+  });
+  c.child('composer', 'readiness', [
+    { context: original.id, dataSource: original.dataSource, ready: true },
+  ]);
+  const capture = { owner: '00000000-0000-0000-0000-000000000060', revision: 3 };
+  const file = {
+    name: 'original.gif',
+    bytes: 43,
+    digest: 'sha256:ab99355f27cb10c630ac0ac0921a683e4c812a89066cd731299ead501fa6797a',
+  };
+  c.child('composer', 'files', {
+    context: original.id,
+    dataSource: original.dataSource,
+    remaining: 1,
+    retryable: false,
+    selection: { ...capture, phase: 'ready', file },
+  });
+  assert.equal(c.action('uploadAttachment'), undefined, 'backend persistence remains pending');
+  c.event({
+    kind: 'action',
+    key: selection.key,
+    event: {
+      status: 'operation',
+      reply: {
+        reference: { ...recapReference, method: 'selectBackend' },
+        receipt: {
+          kind: 'recorded',
+          outcome: {
+            kind: 'returned',
+            value: {
+              kind: 'committed',
+              session: { ...original, revision: 2, backend: selection.input.backend },
+            },
+          },
+          cleanup: { kind: 'confirmed' },
+        },
+      },
+    },
+  });
+  const upload = c.action('uploadAttachment');
+  assert.ok(upload, 'the backend receipt resumes the same file without another gesture');
+  assert.deepEqual(upload.input, { sessionId: original.id, ...file });
+  assert.deepEqual(upload.resources, {
+    file: { child: 'composer', method: 'file', input: capture },
+  });
+});
+
+test('an editable selected session accepts original file resources while history is pending', () => {
+  const c = client().observe(1).history(page(1, []));
+  c.select('Task B');
+  const original = c.state.selected;
+  assert.ok(c.action('observe'), 'the selected session observation remains pending');
+  assert.equal(c.find('composer').props.enabled, true);
+  assert.deepEqual(c.find('composer').props.filePaste, {
+    context: original.id,
+    allowFiles: true,
+  });
+
+  c.observe(0);
+  assert.ok(c.action('history'), 'the initial history read remains pending');
+  assert.equal(c.find('composer').props.enabled, true);
+  assert.deepEqual(c.find('composer').props.filePaste, {
+    context: original.id,
+    allowFiles: true,
+  });
+  c.child('composer', 'readiness', [
+    { context: original.id, dataSource: original.dataSource, ready: true },
+  ]);
+  const capture = { owner: '00000000-0000-0000-0000-000000000060', revision: 3 };
+  const file = {
+    name: 'original.gif',
+    bytes: 43,
+    digest: 'sha256:ab99355f27cb10c630ac0ac0921a683e4c812a89066cd731299ead501fa6797a',
+  };
+  c.child('composer', 'files', {
+    context: original.id,
+    dataSource: original.dataSource,
+    remaining: 1,
+    retryable: false,
+    selection: { ...capture, phase: 'ready', file },
+  });
+  const upload = c.action('uploadAttachment');
+  assert.ok(upload, 'history loading does not prevent the ready original resource upload');
+  assert.deepEqual(upload.input, { sessionId: original.id, ...file });
+  assert.deepEqual(upload.resources, {
+    file: { child: 'composer', method: 'file', input: capture },
+  });
+});
+
+test('the ninth attachment can be selected and removed without changing another source', () => {
+  const c = client().observe(1).history(page(1, []));
+  const id = c.state.selected.id;
+  const files = Array.from({ length: 9 }, (_, index) => ({
+    sessionId: id,
+    dataSource,
+    id: `attachment-${index}`,
+    name: `file-${index}.txt`,
+    mimeType: 'text/plain',
+    bytes: 3,
+  }));
+  const foreign = { ...files[8], dataSource: { ...dataSource, deployment: 'foreign' } };
+  c.state.attachments.files = [...files, foreign];
+  c.child('composer', 'readiness', [{ context: id, dataSource, ready: true }]);
+  c.raw('attachments-open');
+  assert.ok(c.find('attachment-select-8'), 'the ninth item is rendered');
+  c.raw('attachment-select-8');
+  assert.equal(c.state.attachments.selection.selected, 'attachment-8');
+  c.raw('attachment-remove-attachment-8');
+  assert.deepEqual(c.state.attachments.files, [...files.slice(0, 8), foreign]);
+  assert.equal(c.state.attachments.selection.selected, 'attachment-7');
 });
 
 test('pending preview truncation preserves complete Unicode attachment names', () => {

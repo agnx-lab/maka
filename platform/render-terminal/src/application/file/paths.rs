@@ -30,7 +30,7 @@ pub(in crate::application) fn valid(path: &Path) -> bool {
 /// Interpret only a whole paste made of local paths; never run shell expansion.
 pub(in crate::application) fn parse(text: &str) -> Option<Vec<PathBuf>> {
     let text = text.trim();
-    if text.is_empty() || text.len() > 8 * 4096 {
+    if text.is_empty() {
         return None;
     }
     let words = path_words(text, cfg!(windows))?;
@@ -111,6 +111,24 @@ pub(in crate::application) fn local_path(text: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nine_individually_valid_paths_are_parsed_without_an_aggregate_count_budget() {
+        let expected: Vec<_> = (0..9)
+            .map(|index| {
+                let prefix = if cfg!(windows) { r"C:\" } else { "/" };
+                PathBuf::from(format!("{prefix}{}{index}.txt", "a".repeat(3700)))
+            })
+            .collect();
+        assert!(expected.iter().all(|path| valid(path)));
+        let text = expected
+            .iter()
+            .map(|path| format!("\"{}\"", path.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.len() > 32768);
+        assert_eq!(parse(&text), Some(expected));
+    }
     #[test]
     fn path_pastes_preserve_unicode_spaces_and_never_evaluate_shell_syntax() {
         let directory = tempfile::tempdir().unwrap();

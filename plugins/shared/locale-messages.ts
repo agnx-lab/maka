@@ -1795,9 +1795,9 @@ export const msg_fileListTruncated: Message = [
 ];
 export const msg_attachmentTitle: Message = ['Attachments', '附件', '附件'];
 export const msg_attachmentHelp: Message = [
-  'Choose a local file. Up to eight files per message.',
-  '选择本机文件后，将其加入当前会话的消息。每条消息最多八个附件。',
-  '選取本機檔案後，將其加入目前對話的訊息。每則訊息最多八個附件。',
+  'Choose a local file to attach to this message.',
+  '选择本机文件后，将其加入当前会话的消息。',
+  '選取本機檔案後，將其加入目前對話的訊息。',
 ];
 export const msg_attachmentChoose: Message = ['Choose file…', '选择文件…', '選擇檔案…'];
 export const msg_attachmentPath: Message = ['Local file path', '本机文件路径', '本機檔案路徑'];
@@ -1808,11 +1808,6 @@ export const msg_attachmentPathPlaceholder: Message = [
 ];
 export const msg_attachmentAdd: Message = ['Attach to message', '加入消息', '加入訊息'];
 export const msg_attachmentRemove: Message = ['Remove from message', '从消息移除', '從訊息移除'];
-export const msg_attachmentLimit: Message = [
-  'Send or remove a drafted file to add another.',
-  '请先发送或移除草稿中的文件，再添加附件。',
-  '請先傳送或移除草稿中的檔案，再新增附件。',
-];
 export const msg_attachmentTooLarge: Message = [
   'The file exceeds 50 MiB.',
   '文件超过 50 MiB。',

@@ -385,7 +385,7 @@ async fn reject_changed_authority(f: &Fixture, session: &str) {
                 CancellationToken::new(),
             )
             .unwrap();
-        let mut input = json!({"invocation":invocation,"conversationKey":"untrusted shared key","attachmentCount":0,"message":"must not run","cwd":f.workspace,"settings":{}});
+        let mut input = json!({"invocation":invocation,"conversationKey":"untrusted shared key","message":"must not run","cwd":f.workspace,"settings":{}});
         if field == "invocation" {
             input["invocation"]["session_id"] = json!("another-session");
         } else {
@@ -516,8 +516,10 @@ async fn attachment_prompt(protocol: u8) {
         let image = b"\x89PNG\r\n\x1a\nactual binary pixels";
         let pdf = b"%PDF-1.7\n\0actual binary document";
         let text = "User attachment 独立字节\n";
+        let extra: Vec<_> = (0..6).map(|index| (format!("extra-{index}.txt"), format!("ACP original extra {index} 中\nend-{index}"))).collect();
         let mut ids = Vec::new();
-        for (name, bytes) in [("notes.md",text.as_bytes()), ("image.png",image.as_slice()), ("document.pdf",pdf.as_slice())] {
+        for (name, bytes) in [("notes.md",text.as_bytes()), ("image.png",image.as_slice()), ("document.pdf",pdf.as_slice())]
+            .into_iter().chain(extra.iter().map(|(name, bytes)| (name.as_str(), bytes.as_bytes()))) {
             let uploaded = super::super::attachments::upload(&f, &session, name, bytes, Uuid::new_v4()).await.unwrap();
             ids.push(uploaded["attachment"]["id"].clone());
         }
@@ -537,6 +539,15 @@ async fn attachment_prompt(protocol: u8) {
         assert!(blocks.iter().any(|v| v["type"]=="resource" && v["resource"]["text"]==text));
         assert!(blocks.iter().any(|v| v["type"]=="image" && v["data"]==STANDARD.encode(image) && v["mimeType"]=="image/png"));
         assert!(blocks.iter().any(|v| v["type"]=="resource" && v["resource"]["blob"]==STANDARD.encode(pdf) && v["resource"]["mimeType"]=="application/pdf"));
+        let media: Vec<_> = blocks.iter().filter(|block| matches!(block["type"].as_str(), Some("resource" | "image"))).collect();
+        assert_eq!(media.len(),9);
+        assert_eq!(media[0]["resource"]["text"],text);
+        assert_eq!(media[1]["data"],STANDARD.encode(image));
+        assert_eq!(media[2]["resource"]["blob"],STANDARD.encode(pdf));
+        for (block, (_, expected)) in media[3..].iter().zip(&extra) {
+            assert_eq!(block["type"],"resource");
+            assert_eq!(block["resource"]["text"],*expected);
+        }
         assert!(!prompt.to_string().contains(&f.workspace.to_string_lossy().to_string()));
         for id in &ids { assert!(!prompt.to_string().contains(id.as_str().unwrap())); }
         let mut large_image = vec![255;800_000];

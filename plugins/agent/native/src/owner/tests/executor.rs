@@ -99,24 +99,40 @@ impl Handler for Probe {
                     return Ok(json!({"status":"cancelled","reason":"output rejected"}));
                 }
                 Behavior::Attachments => {
+                    assert_eq!(context.attachments().len(), 1);
+                    let resource = context.attachments().get("attachments").unwrap();
+                    assert_eq!(
+                        resource.encoding(),
+                        maka_capabilities::call::ResourceEncoding::Bytes
+                    );
+                    let manifest: Vec<executor::AttachmentMetadata> =
+                        serde_json::from_value(resource.metadata()).unwrap();
                     let mut files = Vec::new();
-                    for (slot, resource) in context.attachments() {
-                        assert_eq!(
-                            resource.encoding(),
-                            maka_capabilities::call::ResourceEncoding::Bytes
-                        );
+                    let mut offset = 0usize;
+                    for metadata in manifest {
+                        let len = usize::try_from(metadata.bytes).unwrap();
+                        let end = offset.checked_add(len).unwrap();
+                        assert!(end <= resource.bytes());
                         let mut bytes = Vec::new();
-                        for start in (0..resource.bytes()).step_by(64 * 1024) {
-                            bytes.extend(
-                                resource.read(start..(start + 64 * 1024).min(resource.bytes()))?,
-                            );
+                        for start in (offset..end).step_by(64 * 1024) {
+                            let chunk_end = start.saturating_add(64 * 1024).min(end);
+                            let chunk = resource.read(start..chunk_end)?;
+                            assert_eq!(chunk.len(), chunk_end - start);
+                            bytes.extend(chunk);
                         }
+                        assert_eq!(bytes.len(), len);
                         assert_eq!(
-                            resource.metadata()["digest"],
+                            metadata.digest,
                             maka_agent_facts::artifact::content_digest(&bytes)
                         );
-                        files.push(json!({"slot":slot,"metadata":resource.metadata(),"preview":String::from_utf8(bytes[..bytes.len().min(80)].to_vec()).unwrap()}));
+                        files.push(json!({"metadata":metadata,"preview":String::from_utf8(bytes[..bytes.len().min(80)].to_vec()).unwrap()}));
+                        offset = end;
                     }
+                    assert_eq!(
+                        offset,
+                        resource.bytes(),
+                        "manifest must cover the entire original bundle"
+                    );
                     return Ok(
                         json!({"status":"completed","text":serde_json::to_string(&files).unwrap()}),
                     );
@@ -1020,12 +1036,25 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
         activate(&mut f, true, Some(probe.clone()), true).await;
         let session = f.create("Attachments").await;
         let other = f.create("Other").await;
-        let bytes = "original immutable content\n".repeat(6000);
-        let uploaded =
-            super::attachments::upload(&f, &session, "notes.md", bytes.as_bytes(), Uuid::new_v4())
-                .await
-                .unwrap();
-        let id = uploaded["attachment"]["id"].clone();
+        let mut files = vec![(
+            "notes.md".to_owned(),
+            "original immutable content\n".repeat(6000),
+        )];
+        files.extend((1..17).map(|index| {
+            (
+                format!("note-{index}.txt"),
+                format!("distinct executor file {index}\n中\0tail-{index}"),
+            )
+        }));
+        let mut ids = Vec::new();
+        for (name, bytes) in &files {
+            let uploaded =
+                super::attachments::upload(&f, &session, name, bytes.as_bytes(), Uuid::new_v4())
+                    .await
+                    .unwrap();
+            ids.push(uploaded["attachment"]["id"].clone());
+        }
+        let id = ids[0].clone();
         for (target, ids) in [
             (&other, json!([id])),
             (&session, json!([id, id])),
@@ -1040,7 +1069,7 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
             );
         }
         let mut input = input_for(&session, "");
-        input["attachments"] = json!([id]);
+        input["attachments"] = json!(ids);
         let operation = Uuid::new_v4();
         let accepted = f
             .mutation(2, "execute", input.clone(), operation)
@@ -1050,13 +1079,32 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
         f.drained().await;
         let observed = work(&f, &session, &accepted).await;
         assert_eq!(observed["execution"]["state"], "completed", "{observed}");
-        let answer = observed["answer"]["text"].as_str().unwrap();
-        assert!(answer.contains("attachment0"));
-        assert!(answer.contains("notes.md"));
-        assert!(answer.contains(&maka_agent_facts::artifact::content_digest(
-            bytes.as_bytes()
-        )));
-        assert!(answer.contains("original immutable content"));
+        let mut page = observed;
+        let mut answer = String::new();
+        loop {
+            assert_eq!(page["execution"]["state"], "completed");
+            assert_eq!(page["execution"]["invocationId"], accepted["invocationId"]);
+            answer.push_str(page["answer"]["text"].as_str().unwrap());
+            let cursor = &page["answer"]["next"];
+            if cursor.is_null() {
+                break;
+            }
+            page = f
+                .query("work", json!({"sessionId":session,"target":{"kind":"invocation","invocationId":accepted["invocationId"]},"cursor":cursor}))
+                .await
+                .unwrap();
+        }
+        let received: Vec<Value> = serde_json::from_str(&answer).unwrap();
+        assert_eq!(received.len(), files.len());
+        for (received, (name, bytes)) in received.iter().zip(&files) {
+            assert_eq!(received["metadata"]["name"], *name);
+            assert_eq!(received["metadata"]["bytes"], bytes.len());
+            assert_eq!(
+                received["metadata"]["digest"],
+                maka_agent_facts::artifact::content_digest(bytes.as_bytes())
+            );
+            assert_eq!(received["preview"], &bytes[..bytes.len().min(80)]);
+        }
         assert_eq!(
             f.mutation(2, "execute", input, operation).await.unwrap(),
             accepted

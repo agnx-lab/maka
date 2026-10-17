@@ -26,6 +26,7 @@ use std::{
 };
 use uuid::Uuid;
 
+mod attachments;
 mod code_mode;
 mod compaction;
 mod computer;

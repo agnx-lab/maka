@@ -290,7 +290,12 @@ const selectedModel: ModelSelection = {
   revision: 3,
   modelId: 'chosen-model',
 };
+const uploadedAttachmentIds: string[] = Array.from(
+  { length: 9 },
+  (_, index) => `attachment-${index}`,
+);
 const explicitSend: AgentSend = {
+  attachments: uploadedAttachmentIds,
   sessionId: 'conversation',
   message: 'Hello',
   model: selectedModel,

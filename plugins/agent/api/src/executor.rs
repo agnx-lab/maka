@@ -57,9 +57,6 @@ pub struct Execute {
     pub conversation_key: String,
     #[schemars(length(max = 65536))]
     pub message: String,
-    /// Number of contiguous request slots attachment0..attachment7. Descriptors are read through the actual request.
-    #[schemars(range(max = 8))]
-    pub attachment_count: usize,
     #[schemars(length(min = 1, max = 4096))]
     pub cwd: String,
     #[schemars(length(max = 65536))]
@@ -83,23 +80,15 @@ pub fn contract() -> Contract {
                         .expect("executor input"),
                     output: serde_json::to_value(schemars::schema_for!(Outcome))
                         .expect("executor output"),
-                    resources: (0..8)
-                        .map(|index| {
-                            (
-                                attachment_slot(index),
-                                maka_plugin_core::contract::binary_resource_type().optional(),
-                            )
-                        })
-                        .collect(),
+                    resources: BTreeMap::from([(
+                        "attachments".into(),
+                        maka_plugin_core::contract::binary_resource_type().optional(),
+                    )]),
                 },
             )]),
         },
     }
 }
-pub fn attachment_slot(index: usize) -> String {
-    format!("attachment{index}")
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AttachmentMetadata {

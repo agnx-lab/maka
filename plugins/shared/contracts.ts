@@ -1211,7 +1211,6 @@ export const composerContract = component(
       dataSource: { anyOf: [{ $ref: '#/$defs/AgentDataSource' }, { type: 'null' }] },
       attachments: {
         type: 'array',
-        maxItems: 64,
         items: object({
           ...native.agent.interface.methods.uploadAttachment.output.$defs.AgentAttachment
             .properties,
@@ -1249,7 +1248,7 @@ export const composerContract = component(
         dataSource: { $ref: '#/$defs/AgentDataSource' },
         key: string,
         text: { type: 'string', maxLength: 24000 },
-        attachments: { type: 'array', maxItems: 8, items: string },
+        attachments: { type: 'array', items: string },
         status: { enum: ['pending', 'unknown', 'accepted', 'removed'] },
         messageId: { anyOf: [string, { type: 'null' }] },
       }),
@@ -1258,7 +1257,7 @@ export const composerContract = component(
       object({
         context: string,
         dataSource: { $ref: '#/$defs/AgentDataSource' },
-        attachments: { type: 'array', maxItems: 8, items: string },
+        attachments: { type: 'array', items: string },
       }),
     ),
     command: withDefs(

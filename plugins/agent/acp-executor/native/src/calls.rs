@@ -17,6 +17,8 @@
  * under the License.
  */
 
+mod attachments;
+
 use super::*;
 use maka_agent_ports::execution::OfferInteraction;
 use maka_agent_ports::execution::Prompt;
@@ -131,32 +133,7 @@ impl maka_external_agent::ports::Callbacks for Calls {
         scope: &Scope,
     ) -> Result<Vec<maka_external_agent::ports::PromptAttachment>, String> {
         let origin = self.origin(scope)?;
-        if origin.attachments().len() > 8 {
-            return Err("ACP attachment limit exceeded".into());
-        }
-        (0..origin.attachments().len())
-            .map(|index| {
-                let resource = origin
-                    .attachments()
-                    .get(&maka_agent_api::executor::attachment_slot(index))
-                    .ok_or("ACP attachment slots are invalid")?
-                    .clone();
-                let metadata: maka_agent_api::executor::AttachmentMetadata =
-                    serde_json::from_value(resource.metadata())
-                        .map_err(|_| "ACP attachment metadata is invalid")?;
-                if resource.resource_type() != maka_plugin_core::contract::binary_resource_type()
-                    || resource.encoding() != maka_capabilities::call::ResourceEncoding::Bytes
-                    || resource.bytes() as u64 != metadata.bytes
-                {
-                    return Err("ACP attachment descriptor is invalid".into());
-                }
-                Ok(maka_external_agent::ports::PromptAttachment {
-                    name: metadata.name,
-                    mime_type: metadata.mime_type,
-                    resource,
-                })
-            })
-            .collect()
+        attachments::read(origin.attachments().get("attachments").cloned())
     }
 
     fn file(

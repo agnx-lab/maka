@@ -30,12 +30,7 @@ import { settingsEvent } from '../../shared/settings.js';
 import { sameValue } from '../../shared/value.js';
 import { type Node, type Presentation } from '../../shared/view.js';
 
-import {
-  attachmentCapacity,
-  attachmentChild,
-  attachmentFiles,
-  selectedFile,
-} from '../../shared/attachments.js';
+import { attachmentChild, attachmentFiles, selectedFile } from '../../shared/attachments.js';
 
 import { goalAction } from './goal.js';
 import { sandboxAction } from './sandbox.js';
@@ -174,14 +169,11 @@ export function handleRaw<N extends Node>(
     if (input.key === 'attachment-list-back') {
       selection.browse = false;
       focusAttachments(state);
-    } else if (/^attachment-select-[0-7]$/.test(input.key)) {
-      selection.selected =
-        files[Number(input.key.slice('attachment-select-'.length))]?.id ?? selection.selected;
-    } else if (
-      input.key === 'attachment-browse' &&
-      !state.selected.archived &&
-      attachmentCapacity(state.attachments, selection.sessionId, selection.dataSource)
-    ) {
+    } else if (/^attachment-select-\d+$/.test(input.key)) {
+      const index = Number(input.key.slice('attachment-select-'.length));
+      if (Number.isSafeInteger(index) && index < files.length)
+        selection.selected = files[index]!.id;
+    } else if (input.key === 'attachment-browse' && !state.selected.archived) {
       if (['activate', 'submit'].includes((input.event as { kind?: string } | null)?.kind ?? '')) {
         selection.selected = null;
         selection.browse = true;
@@ -208,7 +200,6 @@ export function handleRaw<N extends Node>(
     } else if (
       input.key === 'attachment-upload' &&
       !state.selected.archived &&
-      attachmentCapacity(state.attachments, selection.sessionId, selection.dataSource) &&
       selection.file?.phase === 'ready' &&
       selection.file.file
     ) {

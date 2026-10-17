@@ -43,13 +43,11 @@ pub(super) async fn capture(
     if attachments.is_empty() {
         return Ok(maka_capabilities::call::Attachments::default().into());
     }
-    if attachments.len() > 8 {
-        return Err("executor_attachment_limit".into());
-    }
-    let mut descriptors = BTreeMap::new();
+    let mut manifest = Vec::with_capacity(attachments.len());
+    let mut total = 0u64;
     let mut sources = Vec::new();
     let mut seen = BTreeSet::new();
-    for (index, attachment) in attachments.into_iter().enumerate() {
+    for attachment in attachments {
         let StorageRef::SessionFile {
             session_id,
             relative_path,
@@ -81,18 +79,28 @@ pub(super) async fn capture(
             bytes: attachment.bytes,
             digest: record.summary.ok_or("executor_attachment_invalid")?,
         };
-        let key = maka_agent_api::executor::attachment_slot(index);
-        descriptors.insert(
-            key.clone(),
-            ResourceDescriptor {
-                encoding: ResourceEncoding::Bytes,
-                resource: maka_plugin_core::contract::binary_resource_type(),
-                length: attachment.bytes,
-                metadata: serde_json::to_value(&metadata).map_err(|e| e.to_string())?,
-            },
-        );
-        sources.push((key, relative_path.clone(), metadata));
+        let start = total;
+        total = total
+            .checked_add(metadata.bytes)
+            .ok_or("executor_attachment_invalid")?;
+        usize::try_from(total).map_err(|_| "executor_attachment_invalid")?;
+        sources.push((
+            start,
+            relative_path.clone(),
+            metadata.bytes,
+            metadata.digest.clone(),
+        ));
+        manifest.push(metadata);
     }
+    let descriptors = BTreeMap::from([(
+        "attachments".into(),
+        ResourceDescriptor {
+            encoding: ResourceEncoding::Bytes,
+            resource: maka_plugin_core::contract::binary_resource_type(),
+            length: total,
+            metadata: serde_json::to_value(manifest).map_err(|e| e.to_string())?,
+        },
+    )]);
     // Reserve before allocating payloads. The original request retains capacity
     // and observes physical completion even if this future is cancelled.
     let mut capture = request.capture_resources(descriptors)?;
@@ -102,26 +110,34 @@ pub(super) async fn capture(
     ticket.start();
     tokio::spawn(async move {
         let result = async {
-            for (key, id, metadata) in sources {
+            for (start, id, bytes, digest) in sources {
+                if scope.cancellation.is_cancelled() {
+                    return Err("executor_attachment_cancelled".into());
+                }
                 let mut hash = Sha256::new();
-                for offset in (0..metadata.bytes).step_by(RESOURCE_CHUNK_LIMIT) {
+                for offset in (0..bytes).step_by(RESOURCE_CHUNK_LIMIT) {
                     if scope.cancellation.is_cancelled() {
                         return Err("executor_attachment_cancelled".into());
                     }
-                    let length =
-                        (metadata.bytes - offset).min(RESOURCE_CHUNK_LIMIT as u64) as usize;
+                    let length = (bytes - offset).min(RESOURCE_CHUNK_LIMIT as u64) as usize;
                     let chunk = store
                         .read_artifact_chunk(&session, &id, offset, length)
                         .await
                         .map_err(|_| "executor_attachment_unavailable")?
                         .ok_or("executor_attachment_unavailable")?;
-                    if chunk.total_bytes != metadata.bytes || chunk.bytes.len() != length {
+                    if chunk.total_bytes != bytes || chunk.bytes.len() != length {
                         return Err("executor_attachment_invalid".into());
                     }
                     hash.update(&chunk.bytes);
-                    capture.write(&key, offset, &chunk.bytes)?;
+                    capture.write(
+                        "attachments",
+                        start
+                            .checked_add(offset)
+                            .ok_or("executor_attachment_invalid")?,
+                        &chunk.bytes,
+                    )?;
                 }
-                if format!("sha256:{}", hex::encode(hash.finalize())) != metadata.digest {
+                if format!("sha256:{}", hex::encode(hash.finalize())) != digest {
                     return Err("executor_attachment_invalid".into());
                 }
             }

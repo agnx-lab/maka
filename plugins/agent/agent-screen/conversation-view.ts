@@ -281,14 +281,12 @@ export function conversationView<N extends Node>(
         !state.dialog &&
         !state.source &&
         !state.image &&
-        !state.loading &&
-        (!busy || !!state.attachments.paste) &&
         (!state.attachments.paste ||
           (state.attachments.paste.observed.context === state.selected.id &&
             sameValue(state.attachments.paste.observed.dataSource, state.selected.dataSource)))
           ? {
               context: state.selected.id,
-              maxFiles: Math.min(8 - attached.length, 64 - state.attachments.files.length),
+              allowFiles: true,
             }
           : null,
       fileCommand: state.attachments.paste?.command ?? null,

@@ -79,10 +79,10 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
             let release;
             export function activate(){{ return {{executor:{{contract:{executor},service:['backend']}},control:{{contract:{control},service:['control']}}}}; }}
             export const backend={{async execute(input,observation,context){{
-                if(input.message !== 'Run real external backend' || input.settings.model !== 'backend-model' || input.attachmentCount !== 1) throw Error(JSON.stringify(input));
-                const file=await context.invoke({{operation:'metadata',slot:'attachment0'}});
-                const bytes=await context.invoke({{operation:'read',slot:'attachment0',start:0,end:file.bytes}});
-                if(file.metadata.name !== 'executor-note.txt' || new TextDecoder().decode(new Uint8Array(bytes)) !== 'Actual file bytes for external backend\n') throw Error('attachment was not delivered');
+                if(input.message !== 'Run real external backend' || input.settings.model !== 'backend-model') throw Error(JSON.stringify(input));
+                const file=await context.invoke({{operation:'metadata',slot:'attachments'}});
+                const bytes=await context.invoke({{operation:'read',slot:'attachments',start:0,end:file.bytes}});
+                if(file.metadata.length !== 1 || file.metadata[0].name !== 'executor-note.txt' || file.metadata[0].bytes !== file.bytes || new TextDecoder().decode(new Uint8Array(bytes)) !== 'Actual file bytes for external backend\n') throw Error('attachment was not delivered');
                 await context.invoke({{operation:'emit',value:{{type:'thinking_delta',text:'Inspecting external workspace'}}}});
                 await context.invoke({{operation:'emit',value:{{type:'output_delta',text:'Live external answer'}}}});
                 await new Promise(resolve=>{{release=resolve;}});

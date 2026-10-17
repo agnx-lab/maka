@@ -39,38 +39,75 @@ pub(super) enum Content {
     Image(Arc<FileSnapshot>),
     Text(Text),
 }
+const FILE_LIST_BYTES: usize = 128 * 1024;
 const MAX_PIXELS: u64 = 32 * 1024 * 1024;
 const PIXEL_BYTES: usize = 128 * 1024 * 1024;
 
 pub(super) fn admit_paths(
     paths: impl IntoIterator<Item = PathBuf>,
-    maximum: usize,
+    allow_files: bool,
     budget: &NativeBudget,
 ) -> Result<Paths, FileError> {
+    if !allow_files {
+        return Err(FileError::LimitExceeded);
+    }
     let mut items = VecDeque::new();
     for path in paths {
         if !paths::valid(&path) {
             return Err(FileError::InvalidFile);
         }
         if !items.contains(&path) {
-            if items.len() == maximum {
-                return Err(FileError::LimitExceeded);
-            }
             items.push_back(path);
         }
     }
     if items.is_empty() {
         return Err(FileError::InvalidFile);
     }
-    let memory = budget.reserve(
-        Kind::Encoded,
-        items.capacity() * std::mem::size_of::<PathBuf>()
-            + items.iter().map(PathBuf::capacity).sum::<usize>(),
-    )?;
+    let capacity = items
+        .capacity()
+        .checked_mul(std::mem::size_of::<PathBuf>())
+        .and_then(|bytes| {
+            items
+                .iter()
+                .try_fold(bytes, |bytes, path| bytes.checked_add(path.capacity()))
+        })
+        .ok_or(FileError::BudgetExhausted)?;
+    let memory = budget.reserve(Kind::Encoded, capacity)?;
     Ok(Paths {
         items,
         _memory: memory,
     })
+}
+
+// The native getter allocates before returning; retain its reservation until
+// parsing and the separately charged path collection have both finished.
+// Parameters drop in reverse order: files must drop before their reservation.
+fn admit_clipboard_files(
+    _memory: Permit,
+    files: Vec<String>,
+    budget: &NativeBudget,
+) -> Result<Paths, FileError> {
+    let capacity = files
+        .capacity()
+        .checked_mul(std::mem::size_of::<String>())
+        .and_then(|bytes| {
+            files
+                .iter()
+                .try_fold(bytes, |bytes, file| bytes.checked_add(file.capacity()))
+        })
+        .ok_or(FileError::BudgetExhausted)?;
+    if capacity > FILE_LIST_BYTES {
+        return Err(FileError::BudgetExhausted);
+    }
+    if files.iter().any(|file| file.len() > 4096) {
+        return Err(FileError::LimitExceeded);
+    }
+    let parsed = files
+        .iter()
+        .map(|file| paths::local_path(file))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(FileError::InvalidFile)?;
+    admit_paths(parsed, true, budget)
 }
 
 /// Text-only controls never inspect files or decode clipboard images.
@@ -97,34 +134,26 @@ pub(super) fn read_text(_: &NativeBudget) -> Result<Content, FileError> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
-pub(super) fn read(maximum: usize, budget: &NativeBudget) -> Result<Content, FileError> {
+pub(super) fn read(allow_files: bool, budget: &NativeBudget) -> Result<Content, FileError> {
     use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
     let clipboard = ClipboardContext::new().map_err(|_| FileError::ClipboardUnavailable)?;
     if clipboard.has(ContentFormat::Files) {
         // Native clipboard getters allocate their platform response internally.
         // Reserve before calling; reject oversized responses before retaining or decoding.
-        let memory = budget.reserve(Kind::Encoded, 128 * 1024)?;
+        if !allow_files {
+            return Err(FileError::LimitExceeded);
+        }
+        let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES)?;
         let files = clipboard
             .get_files()
             .map_err(|_| FileError::ClipboardUnavailable)?;
-        if files.len() > maximum || files.iter().any(|file| file.len() > 4096) {
-            return Err(FileError::LimitExceeded);
-        }
-        let parsed = files
-            .iter()
-            .map(|file| paths::local_path(file))
-            .collect::<Option<Vec<_>>>()
-            .ok_or(FileError::InvalidFile)?;
-        let admitted = admit_paths(parsed, maximum, budget)?;
-        drop(files);
-        drop(memory);
-        return Ok(Content::Files(admitted));
+        return admit_clipboard_files(memory, files, budget).map(Content::Files);
     }
     let has_image = clipboard.has(ContentFormat::Image);
     #[cfg(windows)]
     let has_image = has_image || clipboard_win::is_format_avail(clipboard_win::formats::CF_DIBV5);
     if has_image {
-        if maximum == 0 {
+        if !allow_files {
             return Err(FileError::LimitExceeded);
         }
         let mut memory = budget.reserve(Kind::Encoded, MAX_FILE_BYTES)?;
@@ -154,7 +183,7 @@ pub(super) fn read(maximum: usize, budget: &NativeBudget) -> Result<Content, Fil
     Err(FileError::ClipboardUnavailable)
 }
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-pub(super) fn read(_: usize, _: &NativeBudget) -> Result<Content, FileError> {
+pub(super) fn read(_: bool, _: &NativeBudget) -> Result<Content, FileError> {
     Err(FileError::ClipboardUnavailable)
 }
 
@@ -330,12 +359,57 @@ mod tests {
     fn native_paths_keep_spaces_and_deduplicate_without_reinterpreting_file_names() {
         let budget = NativeBudget::default();
         let directory = tempfile::tempdir().unwrap();
-        let first =
-            paths::local_path(directory.path().join("中文 file.txt").to_str().unwrap()).unwrap();
-        let paths = admit_paths([first.clone(), first], 1, &budget).unwrap();
-        assert_eq!(paths.items.len(), 1);
+        let expected: Vec<_> = (0..9)
+            .map(|index| {
+                let path = directory.path().join(format!("中文 file {index}.txt"));
+                std::fs::write(&path, format!("original file {index}")).unwrap();
+                paths::local_path(path.to_str().unwrap()).unwrap()
+            })
+            .collect();
+        let mut input = expected.clone();
+        input.insert(1, expected[0].clone());
+        input.push(expected[8].clone());
+        let paths = admit_paths(input, true, &budget).unwrap();
+        assert_eq!(
+            paths.items.iter().collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
         assert!(budget.usage().0 > 0);
         drop(paths);
+        assert_eq!(budget.usage(), (0, 0, 0));
+    }
+    #[test]
+    fn clipboard_file_capacity_is_charged_before_parsing_and_released_on_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("original.txt");
+        std::fs::write(&path, b"original").unwrap();
+        let original = path.to_str().unwrap().to_owned();
+        for vector_capacity in [false, true] {
+            let mut files = if vector_capacity {
+                Vec::with_capacity(FILE_LIST_BYTES / std::mem::size_of::<String>() + 1)
+            } else {
+                Vec::new()
+            };
+            let mut value = if vector_capacity {
+                String::new()
+            } else {
+                String::with_capacity(FILE_LIST_BYTES)
+            };
+            value.push_str(&original);
+            files.push(value);
+            let budget = NativeBudget::default();
+            let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES).unwrap();
+            assert!(matches!(
+                admit_clipboard_files(memory, files, &budget),
+                Err(FileError::BudgetExhausted)
+            ));
+            assert_eq!(budget.usage(), (0, 0, 0));
+        }
+        let budget = NativeBudget::default();
+        let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES).unwrap();
+        let admitted = admit_clipboard_files(memory, vec![original], &budget).unwrap();
+        assert_eq!(admitted.items, VecDeque::from([path]));
+        drop(admitted);
         assert_eq!(budget.usage(), (0, 0, 0));
     }
     #[test]

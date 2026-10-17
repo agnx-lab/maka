@@ -187,9 +187,6 @@ impl Handler for Service {
                 return Err("ACP input does not match its admitted Session".into());
             }
             input.settings.validate().map_err(str::to_owned)?;
-            if input.attachment_count != context.attachments().len() {
-                return Err("ACP attachment count does not match its actual resources".into());
-            }
             // Wire conversation keys are observations. Only the real caller and
             // admitted Session select the durable external conversation.
             let conversation_key = calls::digest(&(

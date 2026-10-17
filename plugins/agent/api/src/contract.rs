@@ -572,7 +572,6 @@ pub enum MetadataResult {
 pub struct Send {
     /// IDs of immutable user uploads in this Session; metadata is resolved by the owner.
     #[serde(default)]
-    #[schemars(length(max = 8))]
     pub attachments: Vec<String>,
     pub model: ModelSelection,
     /// Omission/null uses the configured model default; `off` is explicit.
@@ -599,7 +598,6 @@ pub struct Executors {
 pub struct Execute {
     /// IDs of immutable user uploads in this Session, resolved by the Agent owner.
     #[serde(default)]
-    #[schemars(length(max = 8))]
     pub attachments: Vec<String>,
     #[schemars(length(min = 1, max = 128))]
     pub session_id: String,
@@ -1101,7 +1099,6 @@ pub struct HistoryChunk {
     pub compaction: Option<maka_agent_ports::session::history::Compaction>,
     /// Display metadata only, on the first user-message fragment; no storage capability.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(length(max = 8))]
     pub attachments: Vec<HistoryAttachment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<maka_agent_ports::session::history::TurnTiming>,

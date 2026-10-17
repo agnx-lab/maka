@@ -136,9 +136,6 @@ impl Owner {
         if ids.is_empty() {
             return Ok(None);
         }
-        if ids.len() > 8 {
-            return Err("agent_attachments_invalid".into());
-        }
         let mut seen = std::collections::BTreeSet::new();
         let mut attachments = Vec::with_capacity(ids.len());
         for id in ids {

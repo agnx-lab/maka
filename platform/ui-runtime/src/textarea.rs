@@ -133,9 +133,8 @@ pub fn inline_token_ranges(text: &str, literals: &[String]) -> Vec<std::ops::Ran
 pub struct FilePastePolicy {
     #[schemars(length(min = 1, max = 512))]
     pub context: String,
-    /// Zero still permits clipboard text, but no new file attachments.
-    #[schemars(range(max = 8))]
-    pub max_files: usize,
+    /// Clipboard text remains available when file attachments are disabled.
+    pub allow_files: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -144,7 +143,6 @@ pub struct FilePasteObservation {
     pub context: String,
     pub selection: FileObservation,
     /// Includes the currently reading, ready or failed item.
-    #[schemars(range(max = 8))]
     pub remaining: usize,
     /// A failed original path can be reread. Clipboard reads require a new gesture.
     pub retryable: bool,

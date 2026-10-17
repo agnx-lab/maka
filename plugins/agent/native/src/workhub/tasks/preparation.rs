@@ -103,9 +103,6 @@ impl Hub {
         source: &Invocation,
         attachments: &[AttachmentRef],
     ) -> Result<Vec<Transfer>, String> {
-        if attachments.len() > 8 {
-            return Err("workhub_attachment_limit".into());
-        }
         let mut transfers = Vec::with_capacity(attachments.len());
         let mut seen = std::collections::BTreeSet::new();
         for attachment in attachments {
