@@ -455,7 +455,7 @@ const historyWindow = {
   through: 16,
   chunks: [],
   before: null,
-  after: { sequence: 4096, offset: 0 },
+  after: { position: { sourceSequence: 16, itemIndex: 0 }, offset: 0 },
 } satisfies AgentHistoryPage;
 // @ts-expect-error Missing boundaries are not end-of-history receipts.
 const missingHistoryBoundary: AgentHistoryPage = {
@@ -467,7 +467,7 @@ const missingHistoryBoundary: AgentHistoryPage = {
 const removedHistoryPosition = {
   // @ts-expect-error The removed one-way cursor position is not an alias.
   kind: 'cursor',
-  cursor: { sequence: 4096, offset: 0 },
+  cursor: { position: { sourceSequence: 16, itemIndex: 0 }, offset: 0 },
 } satisfies HistoryPosition;
 void [historyWindow, missingHistoryBoundary, removedHistoryPosition];
 

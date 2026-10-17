@@ -30,8 +30,8 @@ pub async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {
         .transcript_headers(
             session,
             &TranscriptRead {
-                through: maka_presentation::watermark(through).unwrap(),
-                position: 0,
+                through,
+                position: None,
                 direction: TranscriptDirection::Newer,
                 limit: 100,
             },
@@ -42,7 +42,7 @@ pub async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {
     for header in headers {
         rows.push(
             serde_json::from_slice(
-                &log.transcript_fragment(session, header.sequence, 0, header.total_bytes)
+                &log.transcript_fragment(session, header.position, 0, header.total_bytes)
                     .await
                     .unwrap(),
             )

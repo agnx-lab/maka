@@ -123,9 +123,9 @@ function sameIdentity(state: State, props: ToolDetailsProps) {
   return (
     state.context.sessionId === props.context.sessionId &&
     state.tool.toolUseId === props.tool.toolUseId &&
-    state.tool.call?.sequence === props.tool.call?.sequence &&
+    sameValue(state.tool.call?.position, props.tool.call?.position) &&
     state.tool.call?.presentation === props.tool.call?.presentation &&
-    state.tool.result?.sequence === props.tool.result?.sequence
+    sameValue(state.tool.result?.position, props.tool.result?.position)
   );
 }
 function add(
@@ -148,9 +148,9 @@ function add(
   };
 }
 function request(state: State, part: Part, position: SourcePosition, actions: Action[]) {
-  const sequence =
-    part.field === 'arguments' ? state.tool.call?.sequence : state.tool.result?.sequence;
-  if (!sequence || part.pending) return;
+  const rowPosition =
+    part.field === 'arguments' ? state.tool.call?.position : state.tool.result?.position;
+  if (!rowPosition || part.pending) return;
   const key = 'tool-value-' + ++state.serial;
   part.pending = { key, position };
   part.position = position;
@@ -164,7 +164,7 @@ function request(state: State, part: Part, position: SourcePosition, actions: Ac
     resources: {},
     input: {
       ...state.context,
-      source: { kind: 'sequence', sequence },
+      source: { kind: 'row', position: rowPosition },
       field: part.field,
       path: part.path,
       position,
@@ -202,15 +202,15 @@ function accept(state: State, part: Part, value: AgentHistorySourcePage, positio
   }
   const page = value.source,
     end = page.offset + bytes(page.text);
-  const sequence =
-    part.field === 'arguments' ? state.tool.call?.sequence : state.tool.result?.sequence;
+  const rowPosition =
+    part.field === 'arguments' ? state.tool.call?.position : state.tool.result?.position;
   if (
-    page.sequence !== sequence ||
+    !sameValue(page.position, rowPosition) ||
     page.field !== part.field ||
     !sameValue(page.path ?? null, part.path) ||
     (part.format !== null && page.format !== part.format) ||
     page.tool?.toolUseId !== state.tool.toolUseId ||
-    page.tool.call?.sequence !== state.tool.call?.sequence ||
+    !sameValue(page.tool.call?.position, state.tool.call?.position) ||
     page.tool.call?.presentation !== state.tool.call?.presentation ||
     end > page.totalBytes ||
     (!page.text && page.totalBytes > 0) ||
@@ -722,8 +722,8 @@ export function toolDetails<N extends Node>(
       ...props.context,
       toolUseId: props.tool.toolUseId,
       presentation: props.tool.call?.presentation ?? null,
-      call: props.tool.call?.sequence ?? null,
-      result: props.tool.result?.sequence ?? null,
+      call: props.tool.call?.position ?? null,
+      result: props.tool.result?.position ?? null,
       path: filePath || null,
       status,
       expandable:

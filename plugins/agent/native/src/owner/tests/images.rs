@@ -163,7 +163,7 @@ async fn canonical_images_use_original_agent_grants_and_bounded_base64() {
             .iter()
             .find(|row| row["role"] == "tool_result")
         {
-            break row["sequence"].as_u64().unwrap();
+            break row["position"].clone();
         }
         assert!(
             !page["after"].is_null(),
@@ -171,7 +171,7 @@ async fn canonical_images_use_original_agent_grants_and_bounded_base64() {
         );
         position = json!({"kind":"after","cursor":page["after"]});
     };
-    let request = json!({"sessionId":session,"through":fence,"sequence":sequence,"offset":0});
+    let request = json!({"sessionId":session,"through":fence,"position":sequence,"offset":0});
     let mut assembled = Vec::new();
     loop {
         let mut input = request.clone();
@@ -179,7 +179,7 @@ async fn canonical_images_use_original_agent_grants_and_bounded_base64() {
         let page = fixture.query("toolImage", input).await.unwrap();
         assert_eq!(page["kind"], "ready");
         assert_eq!(page["through"], fence);
-        assert_eq!(page["sequence"], sequence);
+        assert_eq!(page["position"], sequence);
         assert_eq!(page["offset"], assembled.len());
         assert_eq!(page["totalBytes"], bytes.len());
         assert_eq!(page["mimeType"], "image/gif");
@@ -317,7 +317,7 @@ pub(super) async fn canonical_image(f: &Fixture, session: &str, bytes: &[u8]) ->
             .iter()
             .find(|row| row["role"] == "tool_result")
         {
-            break row["sequence"].as_u64().unwrap();
+            break row["position"].clone();
         }
         assert!(
             !page["after"].is_null(),
@@ -325,7 +325,7 @@ pub(super) async fn canonical_image(f: &Fixture, session: &str, bytes: &[u8]) ->
         );
         position = json!({"kind":"after","cursor":page["after"]});
     };
-    let request = json!({"sessionId":session,"through":fence,"sequence":sequence,"offset":0});
+    let request = json!({"sessionId":session,"through":fence,"position":sequence,"offset":0});
     let mut assembled = Vec::new();
     while assembled.len() < bytes.len() {
         let mut input = request.clone();

@@ -43,7 +43,7 @@ pub(super) async fn build(
             session_id: sources[hit.session].summary.id.clone(),
             session_title: sources[hit.session].summary.title.clone(),
             anchor_message_id: hit.message_id.clone(),
-            anchor_sequence: hit.sequence,
+            anchor_position: hit.row_position,
             turn_id: hit.turn_id.clone(),
             messages: Vec::new(),
             matched_terms: terms

@@ -59,7 +59,7 @@ for (const target of ['tui']) {
           role: 'failure',
           text: 'Provider stream closed before completion',
           timestamp: 10000,
-          source: 8,
+          source: { sourceSequence: 8, itemIndex: 0 },
           image: false,
           continued: false,
           tool: null,
@@ -85,7 +85,10 @@ for (const target of ['tui']) {
     assert.ok(
       source.events.some(
         (event) =>
-          event.name === 'source' && event.value.sequence === 8 && event.value.field === 'body',
+          event.name === 'source' &&
+          event.value.position.sourceSequence === 8 &&
+          event.value.position.itemIndex === 0 &&
+          event.value.field === 'body',
       ),
     );
   });

@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { comparePosition, type RowPosition } from './history-position.js';
 import { scrollBoundary } from './scroll.js';
 import type {
   Action,
@@ -238,17 +239,17 @@ export function searchEvent(
 
 interface HistorySearch {
   through: number;
-  start: number;
-  next: number | null;
+  start: RowPosition | null;
+  next: RowPosition | null;
   offset: number;
-  back: { start: number; offset: number }[];
+  back: { start: RowPosition | null; offset: number }[];
   matches: AgentHistoryMatch[];
   selected: number;
   reveal: ReadingCommand | null;
   selectLast: boolean;
   scanning: boolean;
   failed: boolean;
-  pending: { key: string; after: number } | null;
+  pending: { key: string; after: RowPosition | null } | null;
   preview: {
     key: string;
     hit: AgentHistoryMatch;
@@ -269,12 +270,12 @@ function action(search: ConversationSearch, method: string, input: unknown): Act
     resources: {},
   };
 }
-function scan(search: ConversationSearch, actions: Action[]) {
+function scan(search: ConversationSearch, actions: Action[], initial = false) {
   const history = search.history!;
   if (
     !search.query ||
     history.pending ||
-    history.next === null ||
+    (history.next === null && !initial) ||
     history.matches.length >= 32 ||
     history.failed
   ) {
@@ -300,8 +301,8 @@ function restartHistory(state: SearchReading, props: TimelineProps, actions: Act
   search.waiting = null;
   search.history = {
     through: props.search!.through,
-    start: 0,
-    next: search.query ? 0 : null,
+    start: null,
+    next: null,
     offset: 0,
     back: [],
     matches: [],
@@ -314,7 +315,7 @@ function restartHistory(state: SearchReading, props: TimelineProps, actions: Act
     pending: null,
     preview: null,
   };
-  scan(search, actions);
+  scan(search, actions, true);
 }
 function readPreview(
   search: ConversationSearch,
@@ -328,7 +329,7 @@ function readPreview(
   const request = action(search, 'source', {
     sessionId: search.context.sessionId,
     through: history.through,
-    source: { kind: 'sequence', sequence: preview.hit.cursor.sequence },
+    source: { kind: 'row', position: preview.hit.cursor.position },
     field,
     position,
   });
@@ -347,7 +348,7 @@ function pick(search: ConversationSearch, index: number, actions: Action[]) {
   };
   const sequence = (history.preview?.command?.sequence ?? 0) + 1;
   history.preview = {
-    key: `find-preview-reading-${hit.cursor.sequence}-${hit.field}`,
+    key: `find-preview-reading-${hit.cursor.position.sourceSequence}-${hit.cursor.position.itemIndex}-${hit.field}`,
     hit,
     sections: [{ field: hit.field, source: null, failed: false }],
     expanded: true,
@@ -386,7 +387,7 @@ function navigate(state: SearchReading, forward: boolean, actions: Action[]) {
   history.matches = [];
   history.selected = -1;
   history.preview = null;
-  scan(search, actions);
+  scan(search, actions, history.start === null);
 }
 function utf8Bytes(text: string) {
   let bytes = 0;
@@ -421,7 +422,7 @@ function historyEvent(
       return true;
     }
     if (page.kind === 'preparing') {
-      scan(search, actions);
+      scan(search, actions, request.after === null);
       return true;
     }
     let after = request.after;
@@ -429,13 +430,15 @@ function historyEvent(
       page.matches.length > 16 ||
       page.matches.some((hit) => {
         const invalid =
-          hit.cursor.sequence <= after ||
+          (after !== null && comparePosition(hit.cursor.position, after) <= 0) ||
           hit.cursor.offset !== 0 ||
-          hit.cursor.sequence > history.through * 256 + 255;
-        after = hit.cursor.sequence;
+          hit.cursor.position.sourceSequence > history.through;
+        after = hit.cursor.position;
         return invalid;
       }) ||
-      (page.nextAfter !== null && (page.nextAfter <= request.after || page.nextAfter < after))
+      (page.nextAfter !== null &&
+        ((request.after !== null && comparePosition(page.nextAfter, request.after) <= 0) ||
+          (after !== null && comparePosition(page.nextAfter, after) < 0)))
     ) {
       history.failed = true;
       history.scanning = false;
@@ -444,7 +447,7 @@ function historyEvent(
     const remaining = 32 - history.matches.length;
     history.matches.push(...page.matches.slice(0, remaining));
     history.next =
-      page.matches.length > remaining ? history.matches.at(-1)!.cursor.sequence : page.nextAfter;
+      page.matches.length > remaining ? history.matches.at(-1)!.cursor.position : page.nextAfter;
     if (!history.selectLast && history.selected < 0 && history.matches.length)
       pick(search, 0, actions);
     scan(search, actions);
@@ -486,7 +489,7 @@ function historyEvent(
       position = request.position,
       header = preview.sections.find((section) => section.source)?.source;
     if (
-      source.sequence !== preview.hit.cursor.sequence ||
+      comparePosition(source.position, preview.hit.cursor.position) !== 0 ||
       source.path != null ||
       source.field !== request.field ||
       !source.fields.includes(source.field) ||
@@ -649,7 +652,7 @@ function historyEvent(
 }
 
 function sourceKey(source: HistorySource) {
-  return `find-preview-text-${source.sequence}-${source.field}-${source.offset}`;
+  return `find-preview-text-${source.position.sourceSequence}-${source.position.itemIndex}-${source.field}-${source.offset}`;
 }
 export function historyView<N extends Node>(
   presentation: Presentation<N>,

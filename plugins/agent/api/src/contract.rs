@@ -19,6 +19,7 @@
 
 use maka_agent_facts::execution::DirectoryIdentity;
 use maka_agent_facts::execution::WorkspaceIdentity;
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Cursor;
 use maka_agent_ports::session::history::Role;
 use maka_plugin_core::contract::{Contract, Interface, Method, MethodMode, Transport};
@@ -1109,7 +1110,7 @@ pub struct HistoryChunk {
     pub turn_id: String,
     pub timestamp: u64,
     pub role: Role,
-    pub sequence: u64,
+    pub position: RowPosition,
     pub offset: u64,
     pub total_bytes: u64,
     pub text: String,
@@ -1143,8 +1144,7 @@ pub struct HistoryPromptRead {
     pub session_id: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
     pub through: u64,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1156,9 +1156,8 @@ pub struct HistorySearch {
     /// Original raw-event fence, shared with history reads.
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
-    /// Exclusive transcript-row sequence returned by the previous batch; zero starts a scan.
-    #[schemars(range(max = 9_007_199_254_740_991u64))]
-    pub after: u64,
+    /// Exclusive transcript-row position; null starts a scan.
+    pub after: Option<RowPosition>,
     /// Literal query, additionally limited to 512 UTF-8 bytes; no normalization.
     #[schemars(length(min = 1, max = 512))]
     pub query: String,
@@ -1199,8 +1198,8 @@ pub enum HistorySearchPage {
         #[schemars(length(max = 16))]
         matches: Vec<HistoryMatch>,
         /// Continue even when this batch has no matches. Null is the end of the scan.
-        #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<u64>")]
-        next_after: Option<u64>,
+        #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<RowPosition>")]
+        next_after: Option<RowPosition>,
     },
 }
 
@@ -1251,9 +1250,8 @@ pub struct HistorySourceRead {
 )]
 #[schemars(rename = "AgentHistorySourceReference")]
 pub enum HistorySourceReference {
-    Sequence {
-        #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-        sequence: u64,
+    Row {
+        position: RowPosition,
     },
     ToolUse {
         #[schemars(length(min = 1, max = 256))]
@@ -1286,8 +1284,7 @@ pub struct ToolImageRead {
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
     #[schemars(range(max = 5_242_880u64))]
     pub offset: u64,
 }
@@ -1305,7 +1302,7 @@ pub enum ToolImagePage {
     },
     Ready {
         through: u64,
-        sequence: u64,
+        position: RowPosition,
         offset: u64,
         #[schemars(range(min = 1, max = 5_242_880u64))]
         total_bytes: u64,
@@ -1667,7 +1664,10 @@ mod tests {
             before: None,
             after: Some(Cursor {
                 field: Default::default(),
-                sequence: 4096,
+                position: RowPosition {
+                    source_sequence: 16,
+                    item_index: 0,
+                },
                 offset: 0,
             }),
         })
@@ -1675,8 +1675,8 @@ mod tests {
         assert!(validator.is_valid(&page));
         page["chunks"] = json!([{
             "messageId":"result", "field":"body", "turnId":"turn", "timestamp":1, "role":"tool_result",
-            "sequence":1, "offset":0, "totalBytes":0, "text":"",
-            "tool":{"toolUseId":"call", "call":null, "result":{"sequence":1,"isError":true, "image":false,"settlement":null}}
+            "position":{"sourceSequence":1,"itemIndex":0}, "offset":0, "totalBytes":0, "text":"",
+            "tool":{"toolUseId":"call", "call":null, "result":{"position":{"sourceSequence":1,"itemIndex":0},"isError":true, "image":false,"settlement":null}}
         }]);
         assert!(validator.is_valid(&page));
         let tool = page["chunks"][0]

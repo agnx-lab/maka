@@ -122,7 +122,7 @@ async function client(target, kind) {
     },
     ready() {
       const source = {
-        sequence: 6,
+        position: { sourceSequence: 6, itemIndex: 0 },
         timestamp: 1,
         role: 'assistant',
         fields: ['arguments'],
@@ -131,7 +131,10 @@ async function client(target, kind) {
         offset: 0,
         text: '{}',
         totalBytes: 2,
-        tool: { toolUseId: 'tool', call: { sequence: 6, name: 'write' } },
+        tool: {
+          toolUseId: 'tool',
+          call: { position: { sourceSequence: 6, itemIndex: 0 }, name: 'write' },
+        },
       };
       return c.event({
         kind: 'action',

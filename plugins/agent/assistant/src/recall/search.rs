@@ -93,7 +93,7 @@ pub async fn more(
             break rank::Hit {
                 session: 0,
                 position,
-                sequence: message.sequence,
+                row_position: message.position,
                 message_id: message.message_id,
                 turn_id: message.turn_id,
                 timestamp: message.timestamp,

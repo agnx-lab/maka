@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { RowPosition } from './history-position.js';
 import { editorMenu } from './editor-menu.js';
 import { scrollBoundary } from './scroll.js';
 import { tuiText, copy } from './locale-catalogs/components.js';
@@ -99,7 +100,7 @@ function groupOpen(state: Navigation, key: string) {
 }
 interface Reading extends Revision {
   promptShown?: boolean;
-  promptTarget?: { id: string | null; source: number | null };
+  promptTarget?: { id: string | null; source: RowPosition | null };
   promptSuppressed?: string;
   copy: MessageCopy | null;
   browse: { request: number; id: string } | null;
@@ -422,7 +423,9 @@ export function timeline<N extends Node>(
             .find(({ message }) => message.role === 'user')?.message
         : null;
     const prompt = preceding
-      ? preceding.continued && props.leadingPrompt?.source === preceding.source
+      ? preceding.continued &&
+        props.leadingPrompt &&
+        sameValue(props.leadingPrompt.position, preceding.source)
         ? props.leadingPrompt.text
         : preceding.text
       : props.leadingPrompt?.text;
@@ -448,7 +451,7 @@ export function timeline<N extends Node>(
     state.promptTarget = promptText
       ? {
           id: preceding && !preceding.continued ? preceding.id : null,
-          source: preceding ? preceding.source : (props.leadingPrompt?.source ?? null),
+          source: preceding ? preceding.source : (props.leadingPrompt?.position ?? null),
         }
       : undefined;
     const detached = (props.latest && !props.live) || state.observation?.viewport?.atEnd === false;
@@ -477,8 +480,8 @@ export function timeline<N extends Node>(
         context.through === props.toolContext.through &&
         context.toolUseId === message?.tool?.toolUseId &&
         context.presentation === (message.tool.call?.presentation ?? null) &&
-        context.call === (message.tool.call?.sequence ?? null) &&
-        context.result === (message.tool.result?.sequence ?? null)
+        sameValue(context.call, message.tool.call?.position ?? null) &&
+        sameValue(context.result, message.tool.result?.position ?? null)
       );
     };
     state.details = Object.fromEntries(
@@ -1240,7 +1243,7 @@ export function timeline<N extends Node>(
             target: { kind: 'reveal_child', key: 'message-' + prompt.id },
           };
         else if (prompt.source !== null)
-          events.push({ name: 'prompt', value: { sequence: prompt.source } });
+          events.push({ name: 'prompt', value: { position: prompt.source } });
         const out = timelineFrame(next, props);
         out.events.push(...events);
         return out;
@@ -1380,7 +1383,7 @@ export function timeline<N extends Node>(
             name: 'markRead',
             value: {
               sessionId: props.toolContext.sessionId,
-              sequence: tail.source,
+              position: tail.source,
               field: 'body',
             },
           });
@@ -1432,7 +1435,7 @@ export function timeline<N extends Node>(
               name: 'markRead',
               value: {
                 sessionId: props.toolContext.sessionId,
-                sequence: message.source,
+                position: message.source,
                 field: message.role === 'thinking' ? 'thinking' : 'body',
               },
             });
@@ -1457,12 +1460,12 @@ export function timeline<N extends Node>(
               next.expanded.includes(message.id) &&
               input.key === 'image-' + message.id,
           );
-        if (image) out.events.push({ name: 'viewImage', value: { sequence: image.source } });
+        if (image) out.events.push({ name: 'viewImage', value: { position: image.source } });
         if (tool)
           out.events.push({
             name: 'toolSource',
             value: {
-              sequence: tool.source,
+              position: tool.source,
               field: input.key.endsWith('-arguments') ? 'arguments' : 'result',
             },
           });
@@ -1480,7 +1483,7 @@ export function timeline<N extends Node>(
           out.events.push({
             name: 'source',
             value: {
-              sequence: message.source,
+              position: message.source,
               field: message.role === 'thinking' ? 'thinking' : 'body',
             },
           });

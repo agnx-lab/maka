@@ -26,12 +26,13 @@ use maka_agent_facts::event::MessageInput;
 use maka_agent_facts::event::ModelInterruption;
 use maka_agent_facts::event::RuntimeEvent;
 use maka_agent_facts::event::StoredEvent;
+use maka_agent_facts::history::RowPosition;
 use maka_agent_facts::model::ModelEvent;
 use maka_agent_facts::model::ModelPart;
 use maka_agent_facts::model::ModelStep;
 use maka_agent_facts::model::ModelUsage;
 use maka_agent_facts::model::TextKind;
-use maka_presentation::{Content, InvocationView, ProjectionError, watermark};
+use maka_presentation::{Content, InvocationView, ProjectionError};
 use serde_json::json;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -258,11 +259,9 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time() {
         );
         assert!(
             rows.windows(2)
-                .all(|rows| rows[0].sequence < rows[1].sequence)
+                .all(|rows| rows[0].position < rows[1].position)
         );
-        assert!(
-            rows.last().unwrap().sequence <= watermark(events.last().unwrap().sequence).unwrap()
-        );
+        assert!(rows.last().unwrap().position.source_sequence <= events.last().unwrap().sequence);
         let terminal = serde_json::to_value(&rows.last().unwrap().message).unwrap();
         let expected = match outcome {
             InvocationOutcome::Completed | InvocationOutcome::ContextCompactFinished { .. } => {
@@ -384,7 +383,12 @@ fn malformed_or_oversized_evidence_poison_the_view_instead_of_publishing_partial
         view.push(&events[0]).is_err(),
         "sequence replay is not another message"
     );
-    assert!(watermark(9_007_199_254_740_991).is_err());
+    let mut oversized = events.remove(0);
+    oversized.sequence = 9_007_199_254_740_992;
+    assert!(matches!(
+        InvocationView::new(1024).unwrap().push(&oversized),
+        Err(ProjectionError::OutOfRange)
+    ));
 }
 
 #[test]
@@ -498,7 +502,7 @@ fn annotated_openings_preserve_source_identity_and_unannotated_batches_stay_aggr
                 assert_eq!(inline_references, &source.message.content.inline_references);
                 assert_eq!(origin, &source.message.origin);
             }
-            assert!(rows[0].sequence < rows[1].sequence && rows[1].sequence < rows[2].sequence);
+            assert!(rows[0].position < rows[1].position && rows[1].position < rows[2].position);
             let mut delivered = sources[1].message.clone();
             delivered.message_id = "graph-steering".into();
             delivered.origin = Some(MessageOrigin::WorkhubGraph {
@@ -541,7 +545,11 @@ fn annotated_openings_preserve_source_identity_and_unannotated_batches_stay_aggr
     }
 }
 
-fn project_tool_fanout(count: usize, item_acceptance: bool) -> Vec<maka_presentation::Row> {
+fn project_tool_fanout(
+    count: usize,
+    item_acceptance: bool,
+    with_usage: bool,
+) -> Vec<maka_presentation::Row> {
     use maka_agent_facts::model::{ModelFinishReason, ModelToolCall, ToolInput};
     use maka_agent_facts::tool_call::ToolCallIdentity;
     let mut original = events(InvocationOutcome::Completed);
@@ -586,11 +594,20 @@ fn project_tool_fanout(count: usize, item_acceptance: bool) -> Vec<maka_presenta
             event: ModelEvent::ToolCall(call.clone()),
         });
     }
+    let usage = if with_usage {
+        ModelUsage {
+            input_tokens: Some(7),
+            output_tokens: Some(11),
+            ..Default::default()
+        }
+    } else {
+        ModelUsage::default()
+    };
     push(Fact::ModelObserved {
         step_id: "step".into(),
         event: ModelEvent::Finished {
             reason: ModelFinishReason::ToolCalls,
-            usage: ModelUsage::default(),
+            usage: usage.clone(),
             provider_options: None,
         },
     });
@@ -603,7 +620,7 @@ fn project_tool_fanout(count: usize, item_acceptance: bool) -> Vec<maka_presenta
                 .map(|call| ModelPart::ToolCall { call })
                 .collect(),
             finish_reason: ModelFinishReason::ToolCalls,
-            usage: ModelUsage::default(),
+            usage,
             provider_options: None,
             response_id: None,
             model: None,
@@ -632,7 +649,7 @@ fn project_tool_fanout(count: usize, item_acceptance: bool) -> Vec<maka_presenta
 
 #[test]
 fn completion_accepted_fanout_projects_129_original_calls_and_results() {
-    let rows = project_tool_fanout(129, false);
+    let rows = project_tool_fanout(129, false, false);
     let calls: Vec<_> = rows
         .iter()
         .filter_map(|row| match &row.message.content {
@@ -659,7 +676,7 @@ fn completion_accepted_fanout_projects_129_original_calls_and_results() {
 
 #[test]
 fn item_accepted_fanout_projects_257_calls_with_distinct_original_positions() {
-    let rows = project_tool_fanout(257, true);
+    let rows = project_tool_fanout(257, true, false);
     let calls: Vec<_> = rows
         .iter()
         .filter(|row| matches!(row.message.content, Content::ToolCall { .. }))
@@ -668,10 +685,22 @@ fn item_accepted_fanout_projects_257_calls_with_distinct_original_positions() {
     assert!(
         calls
             .windows(2)
-            .all(|pair| pair[0].sequence < pair[1].sequence)
+            .all(|pair| pair[0].position < pair[1].position)
     );
-    assert_eq!(calls[0].sequence, 3328);
-    assert_eq!(calls[256].sequence, 68864);
+    assert_eq!(
+        calls[0].position,
+        RowPosition {
+            source_sequence: 13,
+            item_index: 0
+        }
+    );
+    assert_eq!(
+        calls[256].position,
+        RowPosition {
+            source_sequence: 269,
+            item_index: 0
+        }
+    );
     assert!(
         matches!(&calls[256].message.content, Content::ToolCall { args, .. } if args == &json!({"note":"input-256"}))
     );
@@ -782,4 +811,59 @@ fn retained_text_metadata_is_bounded_after_start_delta_and_finish() {
             );
         }
     }
+}
+
+#[test]
+fn completion_usage_after_256_calls_has_a_distinct_original_position() {
+    let rows = project_tool_fanout(256, false, true);
+    let calls: Vec<_> = rows
+        .iter()
+        .filter(|row| matches!(row.message.content, Content::ToolCall { .. }))
+        .collect();
+    assert_eq!(calls.len(), 256);
+    assert_eq!(
+        calls[0].position,
+        RowPosition {
+            source_sequence: 270,
+            item_index: 0
+        }
+    );
+    assert_eq!(
+        calls[255].position,
+        RowPosition {
+            source_sequence: 270,
+            item_index: 255
+        }
+    );
+    let usage = rows
+        .iter()
+        .find(|row| matches!(row.message.content, Content::TokenUsage { .. }))
+        .unwrap();
+    assert_eq!(
+        usage.position,
+        RowPosition {
+            source_sequence: 270,
+            item_index: 256
+        }
+    );
+    assert!(matches!(
+        usage.message.content,
+        Content::TokenUsage {
+            input: 7,
+            output: 11,
+            ..
+        }
+    ));
+    let next = rows
+        .iter()
+        .find(|row| matches!(row.message.content, Content::ToolActivity { .. }))
+        .unwrap();
+    assert_eq!(
+        next.position,
+        RowPosition {
+            source_sequence: 271,
+            item_index: 0
+        }
+    );
+    assert!(usage.position < next.position);
 }

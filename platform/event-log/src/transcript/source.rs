@@ -18,10 +18,11 @@
  */
 
 use super::{
-    read::{prepared, sql_number},
+    read::{prepared, row_position, sql_number, sql_position},
     tool_metadata::read as tool_metadata,
 };
 use crate::{EventLog, StoreError, sequence_number};
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::HistorySource;
 use maka_agent_ports::session::history::SourceField;
 use maka_agent_ports::session::history::SourceFormat;
@@ -32,7 +33,7 @@ use sqlx::{Connection, Row};
 
 fn source_sql() -> String {
     format!("WITH original AS (SELECT
-    CASE ?3
+    CASE ?4
     WHEN 'body' THEN CASE WHEN json_extract(payload, '$.type') IN ('user', 'assistant', 'tool_call', 'tool_result', 'model_interruption') OR (json_extract(payload, '$.type') = 'turn_state' AND json_extract(payload, '$.status') = 'failed') THEN {body} END
     WHEN 'thinking' THEN CASE WHEN json_extract(payload, '$.type') = 'assistant' THEN json_extract(payload, '$.thinking.text') END
     WHEN 'tool_name' THEN CASE WHEN json_extract(payload, '$.type') = 'tool_call' THEN json_extract(payload, '$.toolName') END
@@ -44,7 +45,7 @@ fn source_sql() -> String {
         WHEN 'json' THEN payload -> '$.content.value' WHEN 'image' THEN payload -> '$.content'
         WHEN 'operation' THEN payload -> '$.content.reply.receipt.outcome.value' END END
     WHEN 'receipt' THEN CASE WHEN json_extract(payload, '$.type') = 'tool_result' AND json_extract(payload, '$.content.kind') = 'operation' THEN payload -> '$.content.reply' END END AS body,
-    CASE ?3 WHEN 'arguments' THEN 'json' WHEN 'receipt' THEN 'json' WHEN 'result' THEN
+    CASE ?4 WHEN 'arguments' THEN 'json' WHEN 'receipt' THEN 'json' WHEN 'result' THEN
         CASE json_extract(payload, '$.content.kind') WHEN 'text' THEN 'text' WHEN 'json' THEN 'json'
         WHEN 'image' THEN 'image_descriptor' WHEN 'operation' THEN 'json' END ELSE 'text' END AS format,
     json_extract(payload, '$.type') AS role,
@@ -54,26 +55,26 @@ fn source_sql() -> String {
     json_type(payload, '$.failureMessage') IS 'text' AS failure_message,
     json_type(payload, '$.errorClass') IS 'text' AS error_class,
     json_extract(payload, '$.content.kind') IS 'operation' AS operation
-    FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2),
+    FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3),
     source AS (SELECT
-        CASE WHEN ?4 IS NULL THEN body WHEN format = 'json' THEN
-            CASE json_type(body, ?4) WHEN 'text' THEN json_extract(body, ?4) ELSE body -> ?4 END END AS body,
-        CASE WHEN ?4 IS NULL THEN format WHEN format = 'json' THEN
-            CASE json_type(body, ?4) WHEN 'text' THEN 'text' ELSE 'json' END END AS format,
+        CASE WHEN ?5 IS NULL THEN body WHEN format = 'json' THEN
+            CASE json_type(body, ?5) WHEN 'text' THEN json_extract(body, ?5) ELSE body -> ?5 END END AS body,
+        CASE WHEN ?5 IS NULL THEN format WHEN format = 'json' THEN
+            CASE json_type(body, ?5) WHEN 'text' THEN 'text' ELSE 'json' END END AS format,
         role, timestamp, thinking, failure_message, error_class, operation, message_origin FROM original)", body = super::history::BODY)
 }
 
 impl EventLog {
     /// Locate the original call in an already prepared immutable transcript.
-    pub async fn tool_source_sequence(
+    pub async fn tool_source_position(
         &self,
         session: &str,
         through: u64,
         tool_use_id: &str,
-    ) -> Result<u64, StoreError> {
+    ) -> Result<RowPosition, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        let fence = maka_presentation::watermark(through)?;
+        let fence = through;
         let fence_sql = sql_number(fence)?;
         let session = session.to_owned();
         let tool_use_id = tool_use_id.to_owned();
@@ -82,9 +83,9 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
                     prepared(&mut tx, &session, fence).await?;
-                    let sequence: i64 = sqlx::query_scalar(
-                        "SELECT sequence FROM transcript_rows
-                 WHERE session_id = ? AND message_id = ? AND sequence <= ?
+                    let (source, item): (i64, i64) = sqlx::query_as(
+                        "SELECT source_sequence,item_index FROM transcript_rows
+                 WHERE session_id = ? AND message_id = ? AND source_sequence <= ?
                  AND json_extract(payload, '$.type') = 'tool_call'",
                     )
                     .bind(&session)
@@ -94,7 +95,7 @@ impl EventLog {
                     .await?
                     .ok_or_else(|| invalid("history source was not found"))?;
                     tx.commit().await?;
-                    sequence_number(sequence)
+                    row_position(source, item)
                 })
             })
             .await
@@ -105,7 +106,7 @@ impl EventLog {
         &self,
         session: &str,
         through: u64,
-        sequence: u64,
+        locator: RowPosition,
         field: SourceField,
         path: Option<Vec<SourceSegment>>,
         position: SourcePosition,
@@ -119,11 +120,11 @@ impl EventLog {
             return Err(invalid("invalid history source limits"));
         }
         let json_path = json_path(field, path.as_deref())?;
-        let fence = maka_presentation::watermark(through)?;
-        if sequence == 0 || sequence > fence {
+        let fence = through;
+        if locator.source_sequence > fence {
             return Err(invalid("history source exceeds its fence"));
         }
-        let sequence_sql = sql_number(sequence)?;
+        let (source_sequence_sql, item_sql) = sql_position(locator)?;
         let fence_sql = sql_number(fence)?;
         let session = session.to_owned();
         let selected = match field {
@@ -156,7 +157,7 @@ impl EventLog {
                     );
                     let header = sqlx::query(sqlx::AssertSqlSafe(header.as_str()))
                             .bind(&session)
-                            .bind(sequence_sql)
+                            .bind(source_sequence_sql).bind(item_sql)
                             .bind(selected)
                             .bind(json_path.as_deref())
                             .fetch_optional(&mut *tx)
@@ -197,7 +198,7 @@ impl EventLog {
                     };
                     if !fields.contains(&field) { return Err(invalid("field is not a history source")); }
                     let read =
-                        format!("{sql} SELECT substr(CAST(body AS BLOB), ?5, ?6) FROM source");
+                        format!("{sql} SELECT substr(CAST(body AS BLOB), ?6, ?7) FROM source");
                     let offset = match position {
                         SourcePosition::Start => 0,
                         SourcePosition::Tail => total,
@@ -211,7 +212,7 @@ impl EventLog {
                     }
                     let byte: Vec<u8> = sqlx::query_scalar(sqlx::AssertSqlSafe(read.as_str()))
                         .bind(&session)
-                        .bind(sequence_sql)
+                        .bind(source_sequence_sql).bind(item_sql)
                         .bind(selected)
                         .bind(json_path.as_deref())
                         .bind(sql_number(offset)? + 1)
@@ -232,7 +233,7 @@ impl EventLog {
                     };
                     let bytes: Vec<u8> = sqlx::query_scalar(sqlx::AssertSqlSafe(read.as_str()))
                         .bind(&session)
-                        .bind(sequence_sql)
+                        .bind(source_sequence_sql).bind(item_sql)
                         .bind(selected)
                         .bind(json_path.as_deref())
                         .bind(sql_number(start)? + 1)
@@ -262,7 +263,7 @@ impl EventLog {
                     }
                     let tool = if matches!(role, SourceRole::ToolCall | SourceRole::ToolResult) {
                         Some(
-                            tool_metadata(&mut tx, &session, sequence, fence_sql, max_json_bytes)
+                            tool_metadata(&mut tx, &session, locator, fence_sql, max_json_bytes)
                                 .await?
                                 .ok_or_else(|| {
                                     invalid("history source metadata exceeds JSON budget")
@@ -272,12 +273,12 @@ impl EventLog {
                         None
                     };
                     let model = if role == SourceRole::Assistant {
-                        super::model::resolve(&mut tx, &session, sequence, sql_number(through)?).await?
+                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?
                     } else { None };
                     let source = HistorySource {
                         model,
                         origin: origin.map(|value| serde_json::from_str(&value)).transpose()?,
-                        sequence,
+                        position: locator,
                         timestamp: sequence_number(timestamp)?,
                         role,
                         fields,

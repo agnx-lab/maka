@@ -18,7 +18,8 @@
  */
 
 use crate::{StoreError, sequence_number};
-use maka_presentation::{Content, Message, Row, watermark};
+use maka_agent_facts::history::RowPosition;
+use maka_presentation::{Content, Message, Row};
 use sqlx::{Row as SqlRow, SqliteConnection};
 
 /// Project only adoption metadata, without hydrating the private summary body.
@@ -45,7 +46,10 @@ pub(super) async fn project(tx: &mut SqliteConnection, sequence: i64) -> Result<
     let ts = sequence_number(row.try_get("adopted_at")?)?;
     let started = sequence_number(row.try_get("started_at")?)?;
     Ok(Row {
-        sequence: watermark(sequence_number(sequence)?)? - 255,
+        position: RowPosition {
+            source_sequence: sequence_number(sequence)?,
+            item_index: 0,
+        },
         message: Message {
             id: row.try_get("event_id")?,
             turn_id: row.try_get("turn_id")?,

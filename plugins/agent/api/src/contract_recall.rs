@@ -34,7 +34,7 @@ pub struct RecallPage {
 pub struct RecallPassage {
     pub session: Session,
     pub anchor_message_id: String,
-    pub anchor_sequence: u64,
+    pub anchor_position: RowPosition,
     pub excerpt: String,
     pub matched_terms: Vec<String>,
 }

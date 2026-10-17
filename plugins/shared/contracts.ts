@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { RowPosition } from './history-position.js';
 import {
   contracts as native,
   type Contract,
@@ -85,6 +86,10 @@ export interface Theme {
   menu: MenuAppearance;
   markdown: MarkdownAppearance;
 }
+const rowPosition = object({
+  sourceSequence: { type: 'integer', minimum: 1 },
+  itemIndex: { type: 'integer', minimum: 0 },
+});
 export interface Message {
   origin?: AgentHistoryChunk['origin'];
   model?: AgentHistoryChunk['model'];
@@ -98,14 +103,14 @@ export interface Message {
   text: string;
   tool: AgentHistoryChunk['tool'];
   continued: boolean;
-  source: number | null;
+  source: RowPosition | null;
   image: boolean;
 }
 export interface ImageViewerProps {
   theme: Theme;
   locale: string;
   active: boolean;
-  image: { sessionId: string; through: number; sequence: number } | null;
+  image: { sessionId: string; through: number; position: RowPosition } | null;
 }
 export interface SelectedModel {
   choice: SettingsModelChoice;
@@ -140,8 +145,8 @@ export interface ToolDetailsContext {
   through: number;
   toolUseId: string;
   presentation: string | null;
-  call: number | null;
-  result: number | null;
+  call: RowPosition | null;
+  result: RowPosition | null;
   path: string | null;
   status: ToolDisplayStatus | null;
   expandable: boolean;
@@ -278,7 +283,7 @@ export interface ToolDetailsProps {
 }
 export interface TimelineProps {
   active?: boolean;
-  leadingPrompt?: { source: number; text: string } | null;
+  leadingPrompt?: { position: RowPosition; text: string } | null;
   activeOutput?: Message | null;
   copyRequest: number | null;
   browse: number | null;
@@ -432,7 +437,7 @@ const messageSchema = object(
     tool: { anyOf: [{ $ref: '#/$defs/HistoryTool' }, { type: 'null' }] },
     continued: { type: 'boolean' },
     image: { type: 'boolean' },
-    source: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+    source: { anyOf: [rowPosition, { type: 'null' }] },
   },
   ['id', 'contentKey', 'role', 'timestamp', 'text', 'tool', 'continued', 'image', 'source'],
 );
@@ -625,7 +630,7 @@ export const recallContract = component(
     selected: withDefs(
       object({
         session: { $ref: '#/$defs/AgentSession' },
-        anchor: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+        anchor: { anyOf: [rowPosition, { type: 'null' }] },
       }),
     ),
     chrome: pageChrome,
@@ -835,7 +840,7 @@ export const imageViewerContract = component(
         object({
           sessionId: string,
           through: { type: 'integer', minimum: 1 },
-          sequence: { type: 'integer', minimum: 1 },
+          position: rowPosition,
         }),
         { type: 'null' },
       ],
@@ -864,8 +869,8 @@ export const toolDetailsContract = component(
       through: { type: 'integer', minimum: 1 },
       toolUseId: string,
       presentation: { anyOf: [string, { type: 'null' }] },
-      call: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-      result: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+      call: { anyOf: [rowPosition, { type: 'null' }] },
+      result: { anyOf: [rowPosition, { type: 'null' }] },
       path: filePath,
       status: { enum: ['succeeded', 'failed', 'running', 'cancelled', 'unknown', null] },
       expandable: { type: 'boolean' },
@@ -878,10 +883,7 @@ export const timelineContract = component(
     {
       active: { type: 'boolean' },
       leadingPrompt: {
-        anyOf: [
-          object({ source: { type: 'integer', minimum: 1 }, text: string }),
-          { type: 'null' },
-        ],
+        anyOf: [object({ position: rowPosition, text: string }), { type: 'null' }],
       },
       activeOutput: { anyOf: [{ $ref: '#/$defs/Message' }, { type: 'null' }] },
       copyRequest: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
@@ -975,22 +977,22 @@ export const timelineContract = component(
     older: object({}),
     newer: object({}),
     fill: object({}),
-    prompt: object({ sequence: { type: 'integer', minimum: 1 } }),
+    prompt: object({ position: rowPosition }),
     latest: object({}),
     source: object({
-      sequence: { type: 'integer', minimum: 1 },
+      position: rowPosition,
       field: { enum: ['body', 'thinking'] },
     }),
     markRead: object({
       sessionId: string,
-      sequence: { type: 'integer', minimum: 1 },
+      position: rowPosition,
       field: { enum: ['body', 'thinking'] },
     }),
     toolSource: object({
-      sequence: { type: 'integer', minimum: 1 },
+      position: rowPosition,
       field: { enum: ['arguments', 'result'] },
     }),
-    viewImage: object({ sequence: { type: 'integer', minimum: 1 } }),
+    viewImage: object({ position: rowPosition }),
     sourceFirst: object({}),
     sourcePrevious: object({}),
     sourceNext: object({}),

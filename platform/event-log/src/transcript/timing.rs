@@ -27,16 +27,16 @@ use sqlx::SqliteConnection;
 // follows original sequence order, not the wall clock (which can move backward).
 const SQL: &str = "WITH first AS (
     SELECT json_extract(payload, '$.ts') AS at FROM transcript_rows
-    WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3
+    WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
       AND json_extract(payload, '$.type') = 'turn_state'
       AND json_extract(payload, '$.status') = 'running'
-    ORDER BY sequence LIMIT 1
+    ORDER BY source_sequence, item_index LIMIT 1
 ), last AS (
     SELECT json_extract(payload, '$.ts') AS at,
         json_extract(payload, '$.status') AS status FROM transcript_rows
-    WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3
+    WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
       AND json_extract(payload, '$.type') = 'turn_state'
-    ORDER BY sequence DESC LIMIT 1
+    ORDER BY source_sequence DESC, item_index DESC LIMIT 1
 ) SELECT first.at, last.at, last.status FROM first, last";
 
 pub(super) async fn read(
@@ -83,12 +83,9 @@ mod tests {
     #[tokio::test]
     async fn turn_boundaries_are_scoped_fenced_and_do_not_restart_at_handoff_or_tail() {
         let mut db = SqliteConnection::connect(":memory:").await.unwrap();
-        sqlx::query("CREATE TABLE transcript_rows(session_id TEXT, turn_id TEXT, sequence INTEGER, payload BLOB)")
+        sqlx::query("CREATE TABLE transcript_rows(session_id TEXT, turn_id TEXT, source_sequence INTEGER, item_index INTEGER, payload BLOB)")
             .execute(&mut db).await.unwrap();
-        sqlx::raw_sql(include_str!("../../migrations/0012_tool_activity.sql"))
-            .execute(&mut db)
-            .await
-            .unwrap();
+        sqlx::raw_sql("CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'turn_state';").execute(&mut db).await.unwrap();
         for (session, turn, sequence, status, at) in [
             ("a", "t", 1, "running", 1000),
             ("a", "t", 2, "running", 2000),
@@ -101,7 +98,7 @@ mod tests {
             ("a", "backward", 1, "running", 5000),
             ("a", "backward", 2, "completed", 4999),
         ] {
-            sqlx::query("INSERT INTO transcript_rows VALUES (?,?,?,?)")
+            sqlx::query("INSERT INTO transcript_rows VALUES (?,?,?,0,?)")
                 .bind(session)
                 .bind(turn)
                 .bind(sequence)

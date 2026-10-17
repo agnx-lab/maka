@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { RowPosition } from '../../shared/history-position.js';
 import { type AppearanceEditor } from '../../shared/appearance-editor.js';
 import { type SettingsCategory } from '../../shared/settings.js';
 import type {
@@ -110,7 +111,7 @@ export type Request =
       epoch: number;
       navigation: number;
       through: number;
-      sequence: number;
+      rowPosition: RowPosition;
       field: SourceField;
       position: SourcePosition;
     }
@@ -211,10 +212,10 @@ export interface Visit {
   })[];
   detached?: boolean;
   activityWanted?: number;
-  prompt?: { anchor: string; value: { source: number; text: string } | null };
+  prompt?: { anchor: string; value: { position: RowPosition; text: string } | null };
   activity?: {
     through: number;
-    sequence: number;
+    position: RowPosition | null;
     turnId: string;
     message: import('../../shared/contracts.js').Message | null;
   };
@@ -279,7 +280,7 @@ export interface State {
   openedPages: Page[];
   pageChrome: Partial<Record<Page, PageChrome>>;
   pageBack: Partial<Record<Page, number>>;
-  recallAnchor: number | null;
+  recallAnchor: RowPosition | null;
   scheduledTasks: boolean;
   web: boolean;
   jev: boolean;
@@ -349,10 +350,10 @@ export interface State {
     latest: boolean;
   } | null;
   navigation: number;
-  image: { sessionId: string; through: number; sequence: number } | null;
+  image: { sessionId: string; through: number; position: RowPosition } | null;
   source: {
     through: number;
-    chunk: Pick<AgentHistoryChunk, 'sequence' | 'offset' | 'totalBytes' | 'text'>;
+    chunk: Pick<AgentHistoryChunk, 'position' | 'offset' | 'totalBytes' | 'text'>;
     navigation: number;
     landing: { sequence: number; edge: 'start' | 'end' };
     loading: boolean;

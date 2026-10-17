@@ -102,7 +102,7 @@ async fn one_invocation_transcript() {
                 .prepare(
                     "SELECT json_extract(payload, '$.text') FROM transcript_rows
                  WHERE session_id='a' AND json_extract(payload, '$.type')='assistant'
-                 ORDER BY sequence",
+                 ORDER BY source_sequence, item_index",
                 )
                 .unwrap()
                 .query_map([], |row| row.get(0))

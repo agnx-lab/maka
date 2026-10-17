@@ -80,7 +80,7 @@ for (const target of ['tui'])
         {
           session,
           anchorMessageId: 'original-message',
-          anchorSequence: 1793,
+          anchorPosition: { sourceSequence: 7, itemIndex: 256 },
           excerpt: 'original café text',
           matchedTerms: ['café'],
         },
@@ -89,7 +89,9 @@ for (const target of ['tui'])
       gaps: ['source unavailable'],
     });
     raw('open-0');
-    assert.deepEqual(out.events, [{ name: 'selected', value: { session, anchor: 1793 } }]);
+    assert.deepEqual(out.events, [
+      { name: 'selected', value: { session, anchor: { sourceSequence: 7, itemIndex: 256 } } },
+    ]);
     raw('scope');
     assert.ok(validate('list')(out.actions[0].input));
     assert.equal(out.actions[0].input.filter, 'all');

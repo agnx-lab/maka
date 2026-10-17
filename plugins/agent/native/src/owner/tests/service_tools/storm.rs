@@ -37,6 +37,7 @@ struct Case {
     bytes: usize,
     javascript: bool,
     query: bool,
+    model_usage: bool,
 }
 
 impl Case {
@@ -50,6 +51,7 @@ impl Case {
             bytes: number("MAKA_TOOL_STORM_PAYLOAD_BYTES", 128),
             javascript: backend == "javascript",
             query,
+            model_usage: false,
         };
         assert!(case.calls > 0);
         case
@@ -101,7 +103,11 @@ async fn reply(
     if final_text {
         body.push_str(&format!("data: {}\n\n", json!({"id":"storm-model","choices":[{"index":0,"delta":{"content":FINAL},"finish_reason":null}]})));
     }
-    body.push_str(&format!("data: {}\n\ndata: [DONE]\n\n", json!({"id":"storm-model","choices":[{"index":0,"delta":{},"finish_reason":if final_text {"stop"} else {"tool_calls"}}]})));
+    let mut end = json!({"id":"storm-model","choices":[{"index":0,"delta":{},"finish_reason":if final_text {"stop"} else {"tool_calls"}}]});
+    if case.model_usage {
+        end["usage"] = json!({"prompt_tokens":7,"completion_tokens":11,"total_tokens":18});
+    }
+    body.push_str(&format!("data: {end}\n\ndata: [DONE]\n\n"));
     let wire = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -334,6 +340,10 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
                 }
                 Fact::ModelRequested { purpose, .. } => purposes.push(*purpose),
                 Fact::ModelCompleted { output, .. } => {
+                    if case.model_usage {
+                        assert_eq!(output.usage.input_tokens, Some(7));
+                        assert_eq!(output.usage.output_tokens, Some(11));
+                    }
                     let text: String = output
                         .parts
                         .iter()
@@ -388,6 +398,7 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
         })
         .collect();
     let mut result_offsets = BTreeMap::new();
+    let mut history_calls = BTreeSet::new();
     loop {
         let page = match fixture.query("history", input.clone()).await {
             Ok(page) => page,
@@ -402,6 +413,17 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
             continue;
         }
         for chunk in page["chunks"].as_array().unwrap() {
+            if chunk["role"] == "tool_call" && chunk["field"] == "body" {
+                let tool = &chunk["tool"];
+                let id = tool["toolUseId"].as_str().unwrap();
+                assert!(expected_tools.contains_key(id));
+                assert!(history_calls.insert(id.to_owned()));
+                assert_eq!(tool["call"]["position"], chunk["position"]);
+                assert_eq!(tool["call"]["name"], "Counter");
+                assert_eq!(tool["call"]["pending"], false);
+                assert_eq!(tool["call"]["dispatched"], true);
+                assert!(!tool["result"].is_null());
+            }
             if chunk["role"] == "tool_result" && chunk["field"] == "body" {
                 let tool = chunk["tool"]["toolUseId"].as_str().unwrap();
                 let index = expected_tools[tool];
@@ -425,6 +447,7 @@ async fn verify(fixture: &Fixture, session: &str, invocation: &str, case: Case) 
         input["position"] = json!({"kind":"after","cursor":page["after"]});
     }
     assert_eq!(final_text, FINAL);
+    assert_eq!(history_calls.len(), case.calls);
     assert_eq!(result_offsets.len(), case.calls);
     assert!(result_offsets.values().all(|bytes| *bytes == case.bytes));
     let execution = fixture
@@ -737,6 +760,19 @@ async fn public_history_preserves_129_real_service_query_results() {
         bytes: 128,
         javascript: false,
         query: true,
+        model_usage: false,
+    };
+    assert_eq!(run(case).await["status"], "completed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn public_history_preserves_256_real_service_query_results_with_usage() {
+    let case = Case {
+        calls: 256,
+        bytes: 128,
+        javascript: false,
+        query: true,
+        model_usage: true,
     };
     assert_eq!(run(case).await["status"], "completed");
 }

@@ -132,7 +132,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
         .iter()
         .find(|chunk| chunk.role == Role::ToolResult)
         .unwrap()
-        .sequence;
+        .position;
     assert!(chunks.iter().any(|chunk| {
         chunk
             .tool
@@ -179,7 +179,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
         .iter()
         .find(|chunk| chunk.role == Role::ToolCall)
         .unwrap()
-        .sequence;
+        .position;
     assert!(
         log.tool_image("images", through, call, 0, 8192)
             .await
@@ -250,7 +250,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
         .iter()
         .find(|chunk| chunk.role == Role::ToolResult)
         .unwrap()
-        .sequence;
+        .position;
     assert_eq!(
         log.tool_image("copy", copy_fence, copied_sequence, 0, 8192)
             .await
@@ -304,7 +304,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
             .is_err()
     );
     db.execute("UPDATE artifacts SET record_json=json_set(record_json,'$.mimeType','image/gif','$.source','user_upload') WHERE session_id='images' AND id=?",[&artifact.id]).unwrap();
-    let copied_id: String = db.query_row("SELECT json_extract(payload,'$.content.ref.relativePath') FROM transcript_rows WHERE session_id='copy' AND sequence=?",[copied_sequence as i64],|row|row.get(0)).unwrap();
+    let copied_id: String = db.query_row("SELECT json_extract(payload,'$.content.ref.relativePath') FROM transcript_rows WHERE session_id='copy' AND source_sequence=? AND item_index=?",[copied_sequence.source_sequence as i64, copied_sequence.item_index as i64],|row|row.get(0)).unwrap();
     db.execute("UPDATE artifacts SET record_json=json_set(record_json,'$.source','user_upload') WHERE session_id='copy' AND id=?",[&copied_id]).unwrap();
     assert!(
         log.tool_image("copy", copy_fence, copied_sequence, 0, 8192)
@@ -534,7 +534,7 @@ async fn borrowed_upload_is_frozen_at_settlement_before_any_history_copy() {
             .iter()
             .find(|chunk| chunk.role == Role::ToolResult)
             .unwrap()
-            .sequence;
+            .position;
         assert_eq!(
             log.tool_image(session, through, sequence, 0, 8192)
                 .await

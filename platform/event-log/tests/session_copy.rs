@@ -659,16 +659,16 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             b"hello"
         );
         let fence = log.navigation_fence(session).await.unwrap().unwrap();
-        assert_eq!(
-            fence,
-            maka_presentation::watermark(root.high_water).unwrap()
-        );
+        assert_eq!(fence, root.high_water);
         assert!(
             log.prepare_transcript(session, root.high_water, 32)
                 .await
                 .unwrap()
         );
-        let turns = log.navigation_turns(session, fence, 0, 32).await.unwrap();
+        let turns = log
+            .navigation_turns(session, fence, None, 32)
+            .await
+            .unwrap();
         assert_eq!(turns.contributions.len(), 1);
         assert_eq!(turns.contributions[0].turn_id, "first");
         assert_eq!(
@@ -920,7 +920,7 @@ async fn revisions_own_excluded_inputs_and_allocate_one_durable_family() {
         );
         assert!(log.prepare_transcript(&record.id, 0, 32).await.unwrap());
         assert!(
-            log.navigation_turns(&record.id, 0, 0, 32)
+            log.navigation_turns(&record.id, 0, None, 32)
                 .await
                 .unwrap()
                 .contributions

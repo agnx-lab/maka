@@ -138,7 +138,7 @@ impl Recall {
             passages.push(RecallPassage {
                 session: crate::service::summary_for(&self.data_source, session),
                 anchor_message_id: passage.anchor_message_id,
-                anchor_sequence: passage.anchor_sequence,
+                anchor_position: passage.anchor_position,
                 excerpt,
                 matched_terms: passage.matched_terms,
             });

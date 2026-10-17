@@ -17,8 +17,9 @@
  * under the License.
  */
 
-use super::read::{prepared, sql_number};
+use super::read::{prepared, row_position, sql_number, sql_position};
 use crate::{EventLog, StoreError, sequence_number, sessions};
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::SourceField;
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
@@ -26,8 +27,8 @@ use sqlx::{Connection, Row, SqliteConnection};
 
 pub struct TranscriptSearch {
     pub through: u64,
-    /// Last scanned message sequence, exclusive. Zero starts at the beginning.
-    pub after: u64,
+    /// Exclusive last scanned row; None starts at the beginning.
+    pub after: Option<RowPosition>,
     pub query: String,
     pub case_sensitive: bool,
     pub whole_word: bool,
@@ -35,13 +36,13 @@ pub struct TranscriptSearch {
     pub max_matches: usize,
 }
 pub struct TranscriptMatch {
-    pub sequence: u64,
+    pub position: RowPosition,
     pub field: SourceField,
     pub preview: String,
 }
 pub struct TranscriptSearchBatch {
     pub matches: Vec<TranscriptMatch>,
-    pub next_after: Option<u64>,
+    pub next_after: Option<RowPosition>,
 }
 
 impl EventLog {
@@ -55,11 +56,13 @@ impl EventLog {
         self.validate_root()?;
         sessions::validate_id(session)?;
         let through = sql_number(input.through)?;
-        let after = sql_number(input.after)?;
+        let after = input.after.map(sql_position).transpose()?;
         if input.query.is_empty()
             || input.query.len() > 512
             || !(1..=64).contains(&input.max_matches)
-            || after > through
+            || input
+                .after
+                .is_some_and(|position| position.source_sequence > input.through)
         {
             return Err(StoreError::InvalidTransition(
                 "invalid transcript search".into(),
@@ -81,16 +84,14 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
                     prepared(&mut tx, &session, input.through).await?;
-                    let headers = sqlx::query(
-                        "SELECT sequence, total_bytes FROM transcript_rows
-                 WHERE session_id = ?1 AND sequence > ?2 AND sequence <= ?3
-                 ORDER BY sequence LIMIT 65",
-                    )
-                    .bind(&session)
-                    .bind(after)
-                    .bind(through)
-                    .fetch_all(&mut *tx)
-                    .await?;
+                    let query = if after.is_some() {
+                        "SELECT source_sequence,item_index,total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?3,?4) ORDER BY source_sequence,item_index LIMIT 65"
+                    } else {
+                        "SELECT source_sequence,item_index,total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT 65"
+                    };
+                    let mut query=sqlx::query(sqlx::AssertSqlSafe(query)).bind(&session).bind(through);
+                    if let Some((source,item))=after { query=query.bind(source).bind(item); }
+                    let headers=query.fetch_all(&mut *tx).await?;
                     let mut result = TranscriptSearchBatch {
                         matches: vec![],
                         next_after: None,
@@ -98,7 +99,7 @@ impl EventLog {
                     let mut bytes = 0;
                     let mut position = input.after;
                     for (index, header) in headers.iter().enumerate() {
-                        let size = sequence_number(header.try_get(1)?)?;
+                        let size = sequence_number(header.try_get(2)?)?;
                         if size > maka_presentation::MAX_TOOL_ROW_BYTES as u64 {
                             return Err(StoreError::PrefixTooLarge);
                         }
@@ -106,23 +107,24 @@ impl EventLog {
                             || (index > 0 && bytes + size > 16 * 1024 * 1024)
                             || result.matches.len() == input.max_matches
                         {
-                            result.next_after = Some(position);
+                            result.next_after = position;
                             break;
                         }
                         bytes += size;
-                        position = sequence_number(header.try_get(0)?)?;
+                        let locator = row_position(header.try_get(0)?,header.try_get(1)?)?;
+                        position = Some(locator);
                         let payload: Vec<u8> = sqlx::query_scalar(
-                    "SELECT payload FROM transcript_rows WHERE session_id = ? AND sequence = ?"
-                ).bind(&session).bind(position as i64).fetch_one(&mut *tx).await?;
+                    "SELECT payload FROM transcript_rows WHERE session_id = ? AND source_sequence = ? AND item_index = ?"
+                ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         let row: Value = serde_json::from_slice(&payload)?;
                         if !input.include_internal
-                            && internal(&mut tx, &session, through, position, &row).await?
+                            && internal(&mut tx, &session, through, locator, &row).await?
                         {
                             continue;
                         }
                         if let Some((field, preview)) = matching_text(&row, &matcher) {
                             result.matches.push(TranscriptMatch {
-                                sequence: position,
+                                position: locator,
                                 field,
                                 preview,
                             });
@@ -139,7 +141,7 @@ async fn internal(
     tx: &mut SqliteConnection,
     session: &str,
     through: i64,
-    sequence: u64,
+    position: RowPosition,
     row: &Value,
 ) -> Result<bool, StoreError> {
     // Errors remain discoverable even when normal orchestration is hidden.
@@ -148,7 +150,7 @@ async fn internal(
     }
     let owned;
     let call = if row["type"] == "tool_result" {
-        owned = super::tool_metadata::read(tx, session, sequence, through, 64 * 1024).await?;
+        owned = super::tool_metadata::read(tx, session, position, through, 64 * 1024).await?;
         let Some(call) = owned.as_ref().and_then(|tool| tool.call.as_ref()) else {
             return Ok(false);
         };

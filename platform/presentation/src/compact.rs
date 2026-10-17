@@ -247,7 +247,13 @@ mod tests {
                         },
                     );
                     assert_eq!(rows.len(), 1);
-                    assert_eq!(rows[0].sequence, 6 * 256);
+                    assert_eq!(
+                        rows[0].position,
+                        maka_agent_facts::history::RowPosition {
+                            source_sequence: 6,
+                            item_index: 0
+                        }
+                    );
                     assert_eq!(
                         serde_json::to_value(&rows[0].message).unwrap(),
                         json!({

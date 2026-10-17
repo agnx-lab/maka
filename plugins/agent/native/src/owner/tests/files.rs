@@ -192,12 +192,12 @@ async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() 
                 let call = page["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "tool_call").unwrap();
                 if matches!(method, "glob" | "grep") {
                     let pattern = f.query("source", json!({"sessionId":session,"through":through,
-                        "source":{"kind":"sequence","sequence":call["sequence"]},"field":"arguments",
+                        "source":{"kind":"row","position":call["position"]},"field":"arguments",
                         "path":["pattern"],"position":{"kind":"start"}})).await.unwrap();
                     assert_eq!(pattern["source"]["text"], if method == "glob" { "*.txt" } else { "needle" });
                     assert!(pattern["filePath"].is_null());
                     let arguments = f.query("source", json!({"sessionId":session,"through":through,
-                        "source":{"kind":"sequence","sequence":call["sequence"]},"field":"arguments",
+                        "source":{"kind":"row","position":call["position"]},"field":"arguments",
                         "path":[],"position":{"kind":"start"}})).await.unwrap();
                     assert_eq!(serde_json::from_str::<Value>(arguments["source"]["text"].as_str().unwrap()).unwrap(), input);
                     // Historical display must remain the recorded search, even after the workspace changes.
@@ -205,7 +205,7 @@ async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() 
                     std::fs::write(f.workspace.join("later.txt"), "later needle\n").unwrap();
                     for field in ["complete", if method == "glob" { "files" } else { "matches" }] {
                         let source = f.query("source", json!({"sessionId":session,"through":through,
-                            "source":{"kind":"sequence","sequence":call["tool"]["result"]["sequence"]},
+                            "source":{"kind":"row","position":call["tool"]["result"]["position"]},
                             "field":"result","path":["value",field],"position":{"kind":"start"}})).await.unwrap();
                         assert_eq!(serde_json::from_str::<Value>(source["source"]["text"].as_str().unwrap()).unwrap(), result["value"][field]);
                         assert!(source["filePath"].is_null());
@@ -213,12 +213,12 @@ async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() 
                 } else {
                 let path = if method == "applyPatch" { json!(["operation", "path"]) } else { json!(["path"]) };
                 let source = f.query("source", json!({"sessionId":session,"through":through,
-                    "source":{"kind":"sequence","sequence":call["sequence"]},"field":"arguments",
+                    "source":{"kind":"row","position":call["position"]},"field":"arguments",
                     "path":path,"position":{"kind":"start"}})).await.unwrap();
                 assert_eq!(source["filePath"], f.workspace.join(if method == "applyPatch" { "new.txt" } else { "original.txt" }).to_str().unwrap());
                 if matches!(method, "write" | "edit") {
                     let source = f.query("source", json!({"sessionId":session,"through":through,
-                        "source":{"kind":"sequence","sequence":call["tool"]["result"]["sequence"]},
+                        "source":{"kind":"row","position":call["tool"]["result"]["position"]},
                         "field":"result","path":["value", "path"],"position":{"kind":"start"}})).await.unwrap();
                     assert_eq!(source["filePath"], result["value"]["path"]);
                 }

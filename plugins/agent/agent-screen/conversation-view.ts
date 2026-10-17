@@ -82,7 +82,7 @@ function readingProps(state: State, theme: Theme, locale: string): TimelineProps
           fields: state.source.fields,
           format: state.source.format ?? 'text',
           ready: state.source.ready,
-          key: `${state.source.field}-${state.source.through}-${state.source.chunk.sequence}-${state.source.chunk.offset}`,
+          key: `${state.source.field}-${state.source.through}-${state.source.chunk.position.sourceSequence}-${state.source.chunk.position.itemIndex}-${state.source.chunk.offset}`,
           text: state.source.chunk.text,
           atStart: state.source.chunk.offset === 0,
           atEnd:

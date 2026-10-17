@@ -35,7 +35,7 @@ function props() {
     tool: {
       toolUseId: 'read-file',
       call: {
-        sequence: 7,
+        position: { sourceSequence: 7, itemIndex: 0 },
         name: 'Read',
         title: null,
         presentation: 'maka.workspace.Files@1/readText',
@@ -43,7 +43,12 @@ function props() {
         pending: false,
         dispatched: true,
       },
-      result: { sequence: 8, isError: false, settlement: 'returned', image: false },
+      result: {
+        position: { sourceSequence: 8, itemIndex: 0 },
+        isError: false,
+        settlement: 'returned',
+        image: false,
+      },
     },
     expanded: false,
     focusOnPointer: true,
@@ -63,7 +68,7 @@ function page(action, current, text) {
     through: 8,
     filePath: null,
     source: {
-      sequence: action.input.source.sequence,
+      position: action.input.source.position,
       field: action.input.field,
       path: action.input.path,
       format: 'text',

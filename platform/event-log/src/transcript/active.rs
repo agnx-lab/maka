@@ -20,7 +20,7 @@
 use super::{MAX_TEXT_BYTES, evidence};
 use crate::{EventLog, StoreError};
 use maka_agent_facts::event::Invocation;
-use maka_presentation::{Content, InvocationView, Message, ProjectionError, watermark};
+use maka_presentation::{Content, InvocationView, Message, ProjectionError};
 use sqlx::Connection;
 
 /// The same failed-fragment verdict drives durable rows and live completion frames.
@@ -59,7 +59,7 @@ impl EventLog {
         invocation: &Invocation,
         through: u64,
     ) -> Result<Vec<Message>, StoreError> {
-        watermark(through)?;
+        super::read::sql_number(through)?;
         self.validate_root()?;
         let invocation = invocation.clone();
         self.connection

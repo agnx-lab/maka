@@ -858,7 +858,7 @@ async fn independent_public_agent_client_searches_history_with_case_and_word_fla
         let observed = support::query(&fixture.native, "agent", "observe", json!({"sessionId":session})).await;
         let through = observed["through"].as_u64().unwrap();
         let input = json!({
-            "sessionId":session,"through":through,"after":0,"query":"CAT",
+            "sessionId":session,"through":through,"after":null,"query":"CAT",
             "includeInternal":false,"caseSensitive":false,"wholeWord":true,
         });
         // Keep a rejected future contract as a value until the real Host has settled.
@@ -874,13 +874,13 @@ async fn independent_public_agent_client_searches_history_with_case_and_word_fla
             assert_eq!(hits[0]["cursor"]["offset"], 0);
             let source = support::query(&fixture.native, "agent", "source", json!({
                 "sessionId":session,"through":through,
-                "source":{"kind":"sequence","sequence":hits[0]["cursor"]["sequence"]},
+                "source":{"kind":"row","position":hits[0]["cursor"]["position"]},
                 "field":hits[0]["field"],"position":{"kind":"start"},
             })).await;
             assert_eq!(source["kind"], "ready");
             assert_eq!(source["through"], through);
             assert_eq!(source["source"]["role"], "user");
-            assert_eq!(source["source"]["sequence"], hits[0]["cursor"]["sequence"]);
+            assert_eq!(source["source"]["position"], hits[0]["cursor"]["position"]);
             assert_eq!(source["source"]["field"], "body");
             assert_eq!(source["source"]["text"], "catalog Cat");
             for (query, case_sensitive, whole_word, expected) in [
@@ -889,7 +889,7 @@ async fn independent_public_agent_client_searches_history_with_case_and_word_fla
                 ("CATAL", false, false, 1),
             ] {
                 let page = search(&fixture.native, json!({
-                    "sessionId":session,"through":through,"after":0,"query":query,
+                    "sessionId":session,"through":through,"after":null,"query":query,
                     "includeInternal":false,"caseSensitive":case_sensitive,"wholeWord":whole_word,
                 })).await?;
                 assert_eq!(page["kind"], "ready");

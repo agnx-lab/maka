@@ -19,6 +19,7 @@
 
 //! Scalar canonical evidence for the model that produced an assistant row.
 use crate::StoreError;
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::HistoryModel;
 use sqlx::{Row, SqliteConnection};
 
@@ -59,10 +60,10 @@ WHERE e.invocation_id = ?2 AND e.kind = 'executor_started' AND e.sequence <= ?3
 pub(super) async fn resolve(
     tx: &mut SqliteConnection,
     session: &str,
-    row_sequence: u64,
+    position: RowPosition,
     through: i64,
 ) -> Result<Option<HistoryModel>, StoreError> {
-    let producer_sequence = super::read::sql_number(row_sequence / 256)?;
+    let producer_sequence = super::read::sql_position(position)?.0;
     let producer = sqlx::query(PRODUCER)
         .bind(session)
         .bind(producer_sequence)

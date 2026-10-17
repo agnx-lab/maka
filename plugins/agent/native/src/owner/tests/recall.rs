@@ -96,7 +96,7 @@ async fn recall_native_queries_keep_unicode_dates_titles_namespace_and_exact_his
         let hit = &passages[0];
         assert_eq!(hit["session"]["id"], session);
         let through = f.query("observe", json!({"sessionId":session})).await.unwrap()["through"].clone();
-        let page = f.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"after","cursor":{"sequence":hit["anchorSequence"],"offset":0,"field":"body"}}})).await.unwrap();
+        let page = f.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"after","cursor":{"position":hit["anchorPosition"],"offset":0,"field":"body"}}})).await.unwrap();
         assert_eq!(page["chunks"][0]["messageId"], hit["anchorMessageId"]);
         assert!(page["chunks"][0]["text"].as_str().unwrap().contains("café"));
         let title = f.query("recall", json!({"terms":["conversation"],"session_id":session})).await.unwrap();

@@ -32,6 +32,7 @@ use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::StoredEvent;
+use maka_agent_facts::history::RowPosition;
 use maka_agent_facts::tool_output::ToolOutput;
 use message::timestamp;
 pub use message::tool_message_id;
@@ -57,8 +58,8 @@ pub enum ProjectionError {
 
 #[derive(Debug, PartialEq)]
 pub struct Row {
-    /// Separate sparse message space, not subscription sequence or log position.
-    pub sequence: u64,
+    /// Original emitting fact and its full row ordinal, before UI filtering.
+    pub position: RowPosition,
     pub message: Message,
 }
 
@@ -141,17 +142,15 @@ impl InvocationView {
         }
         let event = &stored.event;
         let ts = timestamp(event)?;
-        let base = watermark(stored.sequence)? - 255;
+        RowPosition {
+            source_sequence: stored.sequence,
+            item_index: 0,
+        }
+        .validate()
+        .map_err(|_| ProjectionError::OutOfRange)?;
         if let Some(messages) = self.compact(event, ts)? {
             self.last_sequence = stored.sequence;
-            return Ok(messages
-                .into_iter()
-                .enumerate()
-                .map(|(index, message)| Row {
-                    sequence: base + index as u64,
-                    message,
-                })
-                .collect());
+            return rows(stored.sequence, messages);
         }
         let mut messages = Vec::new();
         match &event.fact {
@@ -421,17 +420,7 @@ impl InvocationView {
             }
         }
         self.last_sequence = stored.sequence;
-        if messages.len() > 256 {
-            return Err(ProjectionError::OutOfRange);
-        }
-        Ok(messages
-            .into_iter()
-            .enumerate()
-            .map(|(index, message)| Row {
-                sequence: base + index as u64,
-                message,
-            })
-            .collect())
+        rows(stored.sequence, messages)
     }
 
     /// Frozen caller-owned copies of observed text, including closed parts whose
@@ -449,10 +438,19 @@ impl InvocationView {
     }
 }
 
-pub fn watermark(sequence: u64) -> Result<u64, ProjectionError> {
-    sequence
-        .checked_mul(256)
-        .and_then(|base| base.checked_add(255))
-        .filter(|value| *value <= 9_007_199_254_740_991)
-        .ok_or(ProjectionError::OutOfRange)
+fn rows(source_sequence: u64, messages: Vec<Message>) -> Result<Vec<Row>, ProjectionError> {
+    messages
+        .into_iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let position = RowPosition {
+                source_sequence,
+                item_index: u64::try_from(index).map_err(|_| ProjectionError::OutOfRange)?,
+            };
+            position
+                .validate()
+                .map_err(|_| ProjectionError::OutOfRange)?;
+            Ok(Row { position, message })
+        })
+        .collect()
 }

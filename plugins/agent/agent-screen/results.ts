@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { comparePosition, type RowPosition } from '../../shared/history-position.js';
 import { compactQuery, compactSettled } from './compact.js';
 import { hostLogResult } from './host-logs.js';
 import { diagnosticResult } from './diagnostics.js';
@@ -616,7 +617,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
           actions,
           anchor === null
             ? { kind: 'tail' }
-            : { kind: 'after', cursor: { sequence: anchor, offset: 0, field: 'body' } },
+            : { kind: 'after', cursor: { position: anchor, offset: 0, field: 'body' } },
           observation.through,
           anchor === null,
         );
@@ -651,7 +652,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
         intent(state, actions, request, 'agent', 'source', {
           sessionId: state.selected!.id,
           through: request.through,
-          source: { kind: 'sequence', sequence: request.sequence },
+          source: { kind: 'row', position: request.rowPosition },
           field: request.field,
           position: request.position,
         });
@@ -660,7 +661,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
       const next = page.source;
       const end = next.offset + utf8Bytes(next.text);
       if (
-        next.sequence !== request.sequence ||
+        comparePosition(next.position, request.rowPosition) !== 0 ||
         next.path != null ||
         next.field !== request.field ||
         !next.fields.includes(next.field) ||
@@ -678,7 +679,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
       }
       source.chunk = {
         ...source.chunk,
-        sequence: next.sequence,
+        position: next.position,
         offset: next.offset,
         totalBytes: next.totalBytes,
         text: next.text,
@@ -706,7 +707,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
       if (visit)
         visit.prompt = {
           anchor: request.anchor,
-          value: value as { source: number; text: string } | null,
+          value: value as { position: RowPosition; text: string } | null,
         };
       break;
     }
@@ -801,7 +802,11 @@ export function querySucceeded(state: State, actions: Action[], request: Request
         const chunks = [
           ...new Map(
             adjacent.map(
-              (chunk) => [`${chunk.sequence}-${chunk.field}-${chunk.offset}`, chunk] as const,
+              (chunk) =>
+                [
+                  `${chunk.position.sourceSequence}-${chunk.position.itemIndex}-${chunk.field}-${chunk.offset}`,
+                  chunk,
+                ] as const,
             ),
           ).values(),
         ].map((chunk) => {
@@ -811,8 +816,10 @@ export function querySucceeded(state: State, actions: Action[], request: Request
           const current = page.chunks.find(
             (next) =>
               next.tool?.toolUseId === chunk.tool?.toolUseId &&
-              (next.tool?.call?.sequence === chunk.sequence ||
-                next.tool?.result?.sequence === chunk.sequence),
+              ((next.tool?.call &&
+                comparePosition(next.tool.call.position, chunk.position) === 0) ||
+                (next.tool?.result &&
+                  comparePosition(next.tool.result.position, chunk.position) === 0)),
           );
           return current ? { ...chunk, tool: current.tool } : chunk;
         });
@@ -829,10 +836,10 @@ export function querySucceeded(state: State, actions: Action[], request: Request
           const removed = before ? chunks.pop()! : chunks.shift()!;
           bytes -= size(removed);
           if (before)
-            last = { sequence: removed.sequence, offset: removed.offset, field: removed.field };
+            last = { position: removed.position, offset: removed.offset, field: removed.field };
           else {
             const start = chunks[0]!;
-            first = { sequence: start.sequence, offset: start.offset, field: start.field };
+            first = { position: start.position, offset: start.offset, field: start.field };
           }
         }
         state.window = {

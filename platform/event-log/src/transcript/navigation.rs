@@ -17,10 +17,11 @@
  * under the License.
  */
 
+use super::read::{row_position, sql_position};
 use crate::{EventLog, StoreError, sequence_number, sessions};
-use maka_presentation::{
-    navigation::{RecordedTurnState, TurnContribution, TurnLandmark, TurnStateMessage, truncate},
-    watermark,
+use maka_agent_facts::{configuration::validation::MAX_SAFE_INTEGER, history::RowPosition};
+use maka_presentation::navigation::{
+    RecordedTurnState, TurnContribution, TurnLandmark, TurnStateMessage, truncate,
 };
 use sqlx::{Connection, Row};
 use std::collections::HashMap;
@@ -29,11 +30,11 @@ mod queries;
 
 pub struct TurnPage {
     pub contributions: Vec<TurnContribution>,
-    pub next_position: Option<u64>,
+    pub next_position: Option<RowPosition>,
 }
 
 impl EventLog {
-    /// Visible history watermark, including running Turns, captured with Session existence.
+    /// Visible raw history fence, including running Turns, captured with Session existence.
     pub async fn navigation_fence(&self, session: &str) -> Result<Option<u64>, StoreError> {
         self.validate_root()?;
         sessions::validate_id(session)?;
@@ -55,25 +56,25 @@ impl EventLog {
                         .bind(&session)
                         .fetch_one(&mut *tx)
                         .await?;
-                    raw.map(|n| Ok(watermark(sequence_number(n)?)?)).transpose()
+                    raw.map(sequence_number).transpose()
                 })
             })
             .await
     }
 
     /// A bounded message-index walk. Contributions may split a logical Turn;
-    /// the original client merges them by Turn ID and recorded-state sequence.
+    /// the original client merges them by Turn ID and recorded-state position.
     pub async fn navigation_turns(
         &self,
         session: &str,
         through: u64,
-        position: u64,
+        position: Option<RowPosition>,
         limit: usize,
     ) -> Result<TurnPage, StoreError> {
         self.validate_root()?;
         sessions::validate_id(session)?;
         let through_sql = super::read::sql_number(through)?;
-        let position = super::read::sql_number(position)?;
+        let position = position.map(sql_position).transpose()?;
         if !(1..=128).contains(&limit) {
             return Err(invalid("invalid contribution limit"));
         }
@@ -86,22 +87,27 @@ impl EventLog {
                     let rows = sqlx::query(queries::ROWS)
                         .bind(&session)
                         .bind(through_sql)
-                        .bind(position)
+                        .bind(position.map(|p| p.0))
+                        .bind(position.map(|p| p.1))
                         .fetch_all(&mut *tx)
                         .await?;
                     let mut contributions: Vec<TurnContribution> = Vec::new();
                     let mut indices = HashMap::new();
                     let mut next_position = None;
-                    // Fixed envelope keys, punctuation and two safe integers fit in128 bytes.
-                    let budget = 192 * 1024 - serde_json::to_vec(&session)?.len() - 128;
+                    // Charge the full envelope, including the largest serialized pair metadata.
+                    let envelope = serde_json::json!({
+                        "sessionId": session, "throughSequence": through, "contributions": [],
+                        "nextPosition": { "sourceSequence": MAX_SAFE_INTEGER, "itemIndex": MAX_SAFE_INTEGER }
+                    });
+                    let budget = 192 * 1024 - serde_json::to_vec(&envelope)?.len();
                     let mut bytes = 0usize;
                     for (index, row) in rows.into_iter().enumerate() {
-                        let sequence = sequence_number(row.try_get(0)?)?;
-                        let turn: String = row.try_get(1)?;
+                        let position = row_position(row.try_get(0)?, row.try_get(1)?)?;
+                        let turn: String = row.try_get(2)?;
                         if index == 256
                             || !indices.contains_key(&turn) && contributions.len() == limit
                         {
-                            next_position = Some(sequence);
+                            next_position = Some(position);
                             break;
                         }
                         let previous = indices.get(&turn).copied();
@@ -113,7 +119,7 @@ impl EventLog {
                             None => (
                                 TurnContribution {
                                     turn_id: turn.clone(),
-                                    first_sequence: sequence,
+                                    first_position: position,
                                     latest_state: None,
                                     user_prompt_preview: None,
                                 },
@@ -121,9 +127,9 @@ impl EventLog {
                             ),
                         };
                         if contribution.user_prompt_preview.is_none() {
-                            contribution.user_prompt_preview = row.try_get(2)?;
+                            contribution.user_prompt_preview = row.try_get(3)?;
                         }
-                        if let Some(bytes) = row.try_get::<Option<Vec<u8>>, _>(3)? {
+                        if let Some(bytes) = row.try_get::<Option<Vec<u8>>, _>(4)? {
                             let mut message: TurnStateMessage = serde_json::from_slice(&bytes)?;
                             if message.turn_id != contribution.turn_id {
                                 return Err(StoreError::TranscriptConflict);
@@ -133,7 +139,7 @@ impl EventLog {
                             message.error_class =
                                 message.error_class.map(|s| truncate(&s, 128).to_owned());
                             contribution.latest_state =
-                                Some(RecordedTurnState { sequence, message });
+                                Some(RecordedTurnState { position, message });
                         }
                         let updated_bytes =
                             bytes - old_bytes + serde_json::to_vec(&contribution)?.len() + 1;
@@ -141,7 +147,7 @@ impl EventLog {
                             if contributions.is_empty() {
                                 return Err(StoreError::PrefixTooLarge);
                             }
-                            next_position = Some(sequence);
+                            next_position = Some(position);
                             break;
                         }
                         bytes = updated_bytes;
@@ -186,26 +192,24 @@ impl EventLog {
                     let mut tx = connection.begin().await?;
                     super::read::prepared(&mut tx, &session, through).await?;
                     if let Some(turn) = turn {
-                        let bounds: (Option<i64>, Option<i64>) = sqlx::query_as(
-                            "SELECT MIN(sequence), MAX(sequence) FROM transcript_rows
-                             WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3",
-                        ).bind(&session).bind(&turn).bind(through_sql).fetch_one(&mut *tx).await?;
-                        let Some((first, last)) = bounds.0.zip(bounds.1) else { return Ok(vec![]); };
+                        let bounds: Option<(i64, i64, i64, i64)> = sqlx::query_as(queries::BOUNDS)
+                            .bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?;
+                        let Some((first_source, first_index, last_source, last_index)) = bounds else { return Ok(vec![]); };
                         let label: Option<String> = sqlx::query_scalar(
                             "SELECT navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
                                 json_extract(row.payload, '$.text')), 96)
-                             FROM transcript_rows row JOIN runtime_events source ON source.sequence = row.sequence / 256
-                             WHERE row.session_id = ?1 AND row.turn_id = ?2 AND row.sequence <= ?3
-                             AND source.kind IN ('invocation_opened', 'message_steered') ORDER BY row.sequence LIMIT 1",
+                             FROM transcript_rows row JOIN runtime_events source ON source.sequence = row.source_sequence
+                             WHERE row.session_id = ?1 AND row.turn_id = ?2 AND row.source_sequence <= ?3
+                             AND source.kind IN ('invocation_opened', 'message_steered') ORDER BY row.source_sequence, row.item_index LIMIT 1",
                         ).bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?.flatten();
                         return Ok(vec![TurnLandmark {
-                            turn_id: turn, sequence: sequence_number(first)?, last_sequence: sequence_number(last)?,
+                            turn_id: turn, position: row_position(first_source, first_index)?, last_position: row_position(last_source, last_index)?,
                             label: label.unwrap_or_default(),
                         }]);
                     }
                     let selected: Vec<String> = sqlx::query_scalar(queries::LANDMARKS)
                         .bind(&session)
-                        .bind(through_sql / 256)
+                        .bind(through_sql)
                         .bind(limit as i64)
                         .fetch_all(&mut *tx)
                         .await?;
@@ -218,16 +222,14 @@ impl EventLog {
                             .fetch_optional(&mut *tx)
                             .await?
                         {
-                            let label: Option<String> = row.try_get(2)?;
+                            let label: Option<String> = row.try_get(1)?;
                             if let Some(label) = label {
-                                let turn_id: String = row.try_get(1)?;
-                                let (first, last): (i64, i64) = sqlx::query_as(
-                                    "SELECT MIN(sequence), MAX(sequence) FROM transcript_rows
-                                     WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3",
-                                ).bind(&session).bind(&turn_id).bind(through_sql).fetch_one(&mut *tx).await?;
+                                let turn_id: String = row.try_get(0)?;
+                                let (first_source, first_index, last_source, last_index): (i64, i64, i64, i64) = sqlx::query_as(queries::BOUNDS)
+                                    .bind(&session).bind(&turn_id).bind(through_sql).fetch_one(&mut *tx).await?;
                                 result.push(TurnLandmark {
-                                    sequence: sequence_number(first)?,
-                                    last_sequence: sequence_number(last)?,
+                                    position: row_position(first_source, first_index)?,
+                                    last_position: row_position(last_source, last_index)?,
                                     turn_id,
                                     label,
                                 });

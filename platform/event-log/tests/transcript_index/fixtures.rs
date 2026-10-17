@@ -113,15 +113,23 @@ pub(super) async fn end(log: &EventLog, session: &str, outcome: InvocationOutcom
         .await
         .unwrap()
 }
-pub(super) type Row = (i64, Vec<u8>, String, i64);
+pub(super) type Row = (RowPosition, Vec<u8>, String, i64);
 pub(super) fn rows(db: &Connection, session: &str) -> Vec<Row> {
     db.prepare(
-        "SELECT sequence, payload, digest, total_bytes FROM transcript_rows
-        WHERE session_id = ? ORDER BY sequence",
+        "SELECT source_sequence, item_index, payload, digest, total_bytes FROM transcript_rows
+        WHERE session_id = ? ORDER BY source_sequence, item_index",
     )
     .unwrap()
     .query_map([session], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        Ok((
+            RowPosition {
+                source_sequence: row.get::<_, i64>(0)? as u64,
+                item_index: row.get::<_, i64>(1)? as u64,
+            },
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
     })
     .unwrap()
     .collect::<Result<_, _>>()

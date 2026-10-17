@@ -21,7 +21,7 @@
 // draws it.
 //
 // Rows. A canonical row is one transcript row and field from `agent.history`
-// (key `<sequence>/<field>`); the fragments a page boundary split it into are
+// (key `<sourceSequence>/<itemIndex>/<field>`); the fragments a page boundary split it into are
 // joined back into one row. A live row holds the `delta` text of a part that
 // history does not have yet (key `live/<messageId>/<field>`), and a pending
 // row is a sent message the history has not recorded yet (key
@@ -47,6 +47,7 @@ import { div, list } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Scrollbar } from 'gpui-base';
 import { query, subscribe, next, close, log, readHistory, readSource } from './host.js';
 import { Interactions } from './interactions.js';
+import { compareRowPositions, rowPositionKey } from './history-position.js';
 import {
   palette,
   typeset,
@@ -69,7 +70,7 @@ const TOOL_PAIR_WINDOW = 64;
 const FIELD_ORDER = { thinking: 0, body: 1 };
 
 function rowKey(chunk) {
-  return `${chunk.sequence}/${chunk.field}`;
+  return `${rowPositionKey(chunk.position)}/${chunk.field}`;
 }
 
 function textOf(fragments) {
@@ -82,7 +83,7 @@ function rowFromChunk(chunk) {
   const fragments = [{ offset: chunk.offset, text: chunk.text }];
   return {
     key: rowKey(chunk),
-    sequence: chunk.sequence,
+    position: chunk.position,
     field: chunk.field,
     role: chunk.field === 'thinking' ? 'thinking' : chunk.role,
     messageId: chunk.messageId,
@@ -130,7 +131,10 @@ function joinRows(older, newer) {
 
 /** Negative when the chunk comes before the row in transcript order. */
 function compareToRow(chunk, row) {
-  return chunk.sequence - row.sequence || FIELD_ORDER[chunk.field] - FIELD_ORDER[row.field];
+  return (
+    compareRowPositions(chunk.position, row.position) ||
+    FIELD_ORDER[chunk.field] - FIELD_ORDER[row.field]
+  );
 }
 
 function partField(textKind) {
@@ -181,8 +185,8 @@ export class Transcript {
    * @param {{ changed: () => void, report: (message: string) => void }} hooks
    * @param {string} endpoint the Agent endpoint that holds the session: `agent`
    *   for a task, `coordinator` for WorkHub's conversation; every call goes to it
-   * @param {{ anchor?: number | null }} options `anchor`, a transcript row
-   *   sequence (a Search passage's `anchorSequence`), opens the transcript at
+   * @param {{ anchor?: import('./history-position.js').RowPosition | null }} options `anchor`, a transcript row
+   *   position (a Search passage's `anchorPosition`), opens the transcript at
    *   that row instead of at the newest
    */
   constructor(session, hooks, endpoint = 'agent', options = {}) {
@@ -237,7 +241,7 @@ export class Transcript {
     this.view = null;
     /**
      * Tool arguments and results read with `agent.source`, by
-     * `<sequence>/<field>/<path>`: `{ text, complete, totalBytes, tail }` once
+     * `<sourceSequence>/<itemIndex>/<field>/<path>`: `{ text, complete, totalBytes, tail }` once
      * read (with `failed` when the read failed), null while it is under way.
      * A conversation page carries tool metadata only.
      */
@@ -311,7 +315,7 @@ export class Transcript {
       log(
         `transcript "${this.session.title}": first page ${this.rows.length} rows in ${this.stats.firstPageMs} ms ` +
           `(${this.stats.tailCalls} history call(s), fence ${fence}, older ${this.before ? 'available' : 'none'}` +
-          `${anchored === null ? '' : `, at row ${this.anchor}`})`,
+          `${anchored === null ? '' : `, at row ${rowPositionKey(this.anchor)}`})`,
       );
       this.hooks.changed();
       // Facts after the observed fence arrive on the first pages; any that
@@ -330,17 +334,17 @@ export class Transcript {
    * nothing, and the transcript then opens at the newest row as usual.
    */
   async readAnchor(fence) {
-    const position = { kind: 'after', cursor: { sequence: this.anchor, offset: 0, field: 'body' } };
+    const position = { kind: 'after', cursor: { position: this.anchor, offset: 0, field: 'body' } };
     try {
       const { page, calls } = await readHistory(this.historyInput(fence, position), this.endpoint);
       this.stats.tailCalls += calls;
       if (page.chunks.length > 0) return page;
       log(
-        `transcript "${this.session.title}": nothing at row ${this.anchor}; opening at the newest`,
+        `transcript "${this.session.title}": nothing at row ${rowPositionKey(this.anchor)}; opening at the newest`,
       );
     } catch (error) {
       log(
-        `transcript "${this.session.title}": reading at row ${this.anchor} failed: ${error.message}; opening at the newest`,
+        `transcript "${this.session.title}": reading at row ${rowPositionKey(this.anchor)} failed: ${error.message}; opening at the newest`,
       );
     }
     this.anchored = false;
@@ -643,7 +647,7 @@ export class Transcript {
     const fragment = last.fragments[last.fragments.length - 1];
     return {
       kind: 'after',
-      cursor: { sequence: last.sequence, field: last.field, offset: fragment.offset },
+      cursor: { position: last.position, field: last.field, offset: fragment.offset },
     };
   }
 
@@ -673,10 +677,14 @@ export class Transcript {
    */
   pairTool(rows, chunk) {
     const call = chunk.tool?.call;
-    if (!call || !chunk.tool.result || call.sequence === chunk.sequence) return;
+    if (!call || !chunk.tool.result || compareRowPositions(call.position, chunk.position) === 0)
+      return;
     const floor = Math.max(0, rows.length - TOOL_PAIR_WINDOW);
     for (let index = rows.length - 1; index >= floor; index -= 1) {
-      if (rows[index].sequence === call.sequence && rows[index].role === 'tool_call') {
+      if (
+        compareRowPositions(rows[index].position, call.position) === 0 &&
+        rows[index].role === 'tool_call'
+      ) {
         rows[index] = { ...rows[index], tool: chunk.tool };
         return;
       }
@@ -789,8 +797,8 @@ export class Transcript {
    * then). An output block shows both ends, since a command's last lines say
    * how it ended.
    */
-  source(sequence, field, path = [], ends = false) {
-    const key = `${sequence}/${field}/${path.join('/')}`;
+  source(rowPosition, field, path = [], ends = false) {
+    const key = `${rowPositionKey(rowPosition)}/${field}/${path.join('/')}`;
     if (this.sources.has(key)) {
       const known = this.sources.get(key);
       if (
@@ -800,12 +808,12 @@ export class Transcript {
         known.failed === undefined &&
         known.tail === undefined
       ) {
-        this.readRest(key, sequence, field, path, known);
+        this.readRest(key, rowPosition, field, path, known);
       }
       return known;
     }
     this.sources.set(key, null);
-    this.excerpt(sequence, field, path, { kind: 'start' }).then(
+    this.excerpt(rowPosition, field, path, { kind: 'start' }).then(
       (source) => {
         const complete = source.offset === 0 && utf8Length(source.text) === source.totalBytes;
         const read = {
@@ -815,7 +823,7 @@ export class Transcript {
           tail: undefined,
         };
         this.sources.set(key, read);
-        if (ends && !complete) this.readRest(key, sequence, field, path, read);
+        if (ends && !complete) this.readRest(key, rowPosition, field, path, read);
         if (!this.closed) this.hooks.changed();
       },
       (error) => {
@@ -832,14 +840,14 @@ export class Transcript {
    * value of at most WHOLE_BYTES, else its end. On a failure the start still
    * shows; only the rest is missing.
    */
-  async readRest(key, sequence, field, path, read) {
+  async readRest(key, rowPosition, field, path, read) {
     read.tail = null;
     try {
       if (read.totalBytes <= WHOLE_BYTES) {
         let text = read.text;
         let end = utf8Length(text);
         while (end < read.totalBytes) {
-          const page = await this.excerpt(sequence, field, path, { kind: 'after', offset: end });
+          const page = await this.excerpt(rowPosition, field, path, { kind: 'after', offset: end });
           if (page.offset !== end || page.text === '') throw new Error(`no excerpt after ${end}`);
           text += page.text;
           end += utf8Length(page.text);
@@ -847,7 +855,7 @@ export class Transcript {
         read.text = text;
         read.complete = true;
       } else {
-        const page = await this.excerpt(sequence, field, path, { kind: 'tail' });
+        const page = await this.excerpt(rowPosition, field, path, { kind: 'tail' });
         read.tail = { text: page.text, offset: page.offset };
       }
       if (!this.closed) this.hooks.changed();
@@ -856,13 +864,13 @@ export class Transcript {
     }
   }
 
-  excerpt(sequence, field, path, position) {
+  excerpt(rowPosition, field, path, position) {
     return readSource(
       {
         sessionId: this.id,
         // An event fence, not a row position: every loaded row is at or below it.
         through: this.latestKnown,
-        source: { kind: 'sequence', sequence },
+        source: { kind: 'row', position: rowPosition },
         field,
         path: path.length > 0 ? path : null,
         position,
@@ -916,7 +924,7 @@ function displayItems(transcript) {
   ) {
     return cached.items;
   }
-  // A result goes with the call the Host paired it with (`tool.call.sequence`);
+  // A result goes with the call the Host paired it with (`tool.call.position`);
   // tool use ids are only unique within a step.
   const calls = new Set();
   const results = new Map();
@@ -924,20 +932,25 @@ function displayItems(transcript) {
   /** Turns with reply text, the only ones whose footer copies. */
   const replied = new Set();
   for (const row of rows) {
-    if (row.role === 'tool_call') calls.add(row.sequence);
+    if (row.role === 'tool_call') calls.add(rowPositionKey(row.position));
     if (row.role === 'assistant' && row.text.trim() !== '') replied.add(row.turnId);
-    const call = row.tool?.call?.sequence;
-    if (row.role === 'tool_result' && call !== undefined) results.set(call, row);
+    const call = row.tool?.call?.position;
+    if (row.role === 'tool_result' && call !== undefined) results.set(rowPositionKey(call), row);
     if (row.timing) timings.set(row.turnId, row.timing);
   }
   /** @type {any[]} */
   const items = [];
   if (history !== null) items.push({ key: 'history', kind: 'history', state: history });
   rows.forEach((row, index) => {
-    if (row.role === 'tool_result' && calls.has(row.tool?.call?.sequence)) {
+    if (
+      row.role === 'tool_result' &&
+      row.tool?.call &&
+      calls.has(rowPositionKey(row.tool.call.position))
+    ) {
       // Drawn with its call.
     } else if (row.role === 'tool_call' || row.role === 'tool_result') {
-      const result = row.role === 'tool_call' ? (results.get(row.sequence) ?? null) : row;
+      const result =
+        row.role === 'tool_call' ? (results.get(rowPositionKey(row.position)) ?? null) : row;
       items.push({
         key: row.key,
         kind: 'tool',
@@ -1512,7 +1525,7 @@ function toolSummary(tool, kind, transcript) {
   const call = tool?.call;
   if (!call) return '';
   if (call.title) return call.title.fallback;
-  const source = transcript.source(call.sequence, 'arguments', kind?.[2] ?? []);
+  const source = transcript.source(call.position, 'arguments', kind?.[2] ?? []);
   if (source === null) return '';
   return kind ? source.text.trim().split('\n', 1)[0] : firstLine(parsed(source) ?? '');
 }
@@ -1526,8 +1539,8 @@ function toolSummary(tool, kind, transcript) {
  * a long one still shows as text. Any other result is read whole.
  */
 function outputParts(tool, kind, status, transcript) {
-  const sequence = tool.result.sequence;
-  const read = (path) => transcript.source(sequence, 'result', path, true);
+  const position = tool.result.position;
+  const read = (path) => transcript.source(position, 'result', path, true);
   const whole = [{ label: null, source: read([]), format: 'result' }];
   if (kind === null) return whole;
   if (status === null) return [{ label: null, source: null, format: 'text' }];
@@ -1538,7 +1551,7 @@ function outputParts(tool, kind, status, transcript) {
   if (PROCESS_METHODS.has(method)) {
     // A command started in the background answers before it has any output
     // (tool-details/index.ts:281-292); its output comes with a later call.
-    const state = transcript.source(sequence, 'result', ['value', 'status']);
+    const state = transcript.source(position, 'result', ['value', 'status']);
     if (state === null) return [{ label: null, source: null, format: 'text' }];
     if (
       method === 'execute' &&
@@ -1547,10 +1560,10 @@ function outputParts(tool, kind, status, transcript) {
     ) {
       return [{ note: t('runningInBackground') }];
     }
-    const mode = transcript.source(sequence, 'result', ['value', 'output', 'mode']);
+    const mode = transcript.source(position, 'result', ['value', 'output', 'mode']);
     if (mode === null) return [{ label: null, source: null, format: 'text' }];
     const flag = (name) =>
-      transcript.source(sequence, 'result', ['value', 'output', name])?.text === 'true';
+      transcript.source(position, 'result', ['value', 'output', name])?.text === 'true';
     // A stream is captured up to its last 64 KB; the flag says whether
     // earlier output was dropped, and then the stream starts mid-line.
     if (mode.failed === undefined && mode.text === 'pipes') {
@@ -1702,7 +1715,7 @@ function toolRow(item, transcript, cx) {
   // reads it (tool-details/index.ts:257, 268, 325).
   const outcome =
     kind !== null && tool?.result
-      ? transcript.source(tool.result.sequence, 'result', ['kind'])
+      ? transcript.source(tool.result.position, 'result', ['kind'])
       : null;
   const [status, statusIcon, statusColor] = toolStatus(row, result, outcome?.text === 'failed', m);
   const summary = toolSummary(tool, kind, transcript);
@@ -1713,13 +1726,13 @@ function toolRow(item, transcript, cx) {
   if (item.open && tool?.call && kind === null) {
     parts.push({
       label: null,
-      source: transcript.source(tool.call.sequence, 'arguments', [], true),
+      source: transcript.source(tool.call.position, 'arguments', [], true),
       format: 'arguments',
     });
   } else if (item.open && tool?.call?.title) {
     parts.push({
       label: null,
-      source: transcript.source(tool.call.sequence, 'arguments', kind[2], true),
+      source: transcript.source(tool.call.position, 'arguments', kind[2], true),
       format: 'text',
     });
   }

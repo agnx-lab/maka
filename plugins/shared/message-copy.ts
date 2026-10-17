@@ -27,6 +27,7 @@ import type {
   SourceFormat,
 } from '../../packages/plugin-sdk/src/index.js';
 import type { Message, TimelineProps, MessageCopyObservation } from './contracts.js';
+import { comparePosition, type RowPosition } from './history-position.js';
 import { sameValue } from './value.js';
 import { copy as localized } from './locale-catalogs/message-copy.js';
 
@@ -51,7 +52,7 @@ export interface MessageCopy {
     sessionId: string;
     through: number;
     landing: number;
-    sequence: number | null;
+    position: RowPosition | null;
     field: SourceField;
     markdown: boolean;
     tool: Message['tool'];
@@ -79,7 +80,7 @@ function action(copy: MessageCopy, actions: Action[], kind: 'source' | 'format')
   const key = copy.key + '-' + ++copy.serial;
   copy.pending = { key, kind };
   const { basis } = copy;
-  const sequence = copy.arguments ? basis.tool!.call!.sequence : basis.sequence!;
+  const position = copy.arguments ? basis.tool!.call!.position : basis.position!;
   const field = copy.arguments ? 'arguments' : basis.field;
   actions.push({
     key,
@@ -92,7 +93,7 @@ function action(copy: MessageCopy, actions: Action[], kind: 'source' | 'format')
         ? {
             sessionId: basis.sessionId,
             through: basis.through,
-            source: { kind: 'sequence', sequence },
+            source: { kind: 'row', position },
             field,
             position: copy.text
               ? { kind: 'after', offset: utf8Bytes(copy.text) }
@@ -127,11 +128,11 @@ export function syncMessageCopy(
     : message.role === 'thinking'
       ? 'thinking'
       : 'body';
-  const sequence = tool
-    ? (result?.sequence ??
+  const position = tool
+    ? (result?.position ??
       (message.role === 'tool_result'
         ? message.source
-        : (message.tool?.call?.sequence ?? message.source)))
+        : (message.tool?.call?.position ?? message.source)))
     : message.source;
   const text = localized(props.locale);
   const label = toolLabel(
@@ -155,7 +156,7 @@ export function syncMessageCopy(
     request: props.copyRequest,
     ...props.toolContext,
     landing: props.landing.sequence,
-    sequence,
+    position,
     field,
     markdown: message.role === 'assistant' || message.role === 'thinking',
     tool: tool ? message.tool : null,
@@ -176,9 +177,9 @@ export function syncMessageCopy(
     raw: null,
     rawFormat: null,
     rendered: null,
-    status: sequence === null ? 'streaming' : 'loading',
+    status: position === null ? 'streaming' : 'loading',
   };
-  if (sequence !== null) action(state.copy, actions, 'source');
+  if (position !== null) action(state.copy, actions, 'source');
 }
 export function messageCopyEvent(state: State, input: ComponentInput, actions: Action[]): boolean {
   if (input.kind !== 'action' || !state.copy?.pending || state.copy.pending.key !== input.key)
@@ -215,7 +216,10 @@ export function messageCopyEvent(state: State, input: ComponentInput, actions: A
     offset = utf8Bytes(copy.text),
     end = source.offset + utf8Bytes(source.text);
   if (
-    source.sequence !== (copy.arguments ? copy.basis.tool!.call!.sequence : copy.basis.sequence) ||
+    comparePosition(
+      source.position,
+      (copy.arguments ? copy.basis.tool!.call!.position : copy.basis.position)!,
+    ) !== 0 ||
     source.field !== (copy.arguments ? 'arguments' : copy.basis.field) ||
     (copy.basis.tool && !sameValue(source.tool, copy.basis.tool)) ||
     source.path != null ||

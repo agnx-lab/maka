@@ -44,7 +44,12 @@ struct Message {
 pub struct Projection {
     streams: HashMap<(String, String, MessageKind), Message>,
     tools: HashMap<String, Tool>,
-    assembly: Option<(u64, HistoryField, String, acp::Meta)>,
+    assembly: Option<(
+        maka_agent_ports::session::history::RowPosition,
+        HistoryField,
+        String,
+        acp::Meta,
+    )>,
 }
 
 struct Tool {
@@ -67,13 +72,13 @@ impl Projection {
             if !chunk.attachments.is_empty() {
                 meta["maka"]["attachments"] = serde_json::to_value(&chunk.attachments)?;
             }
-            self.assembly = Some((chunk.sequence, chunk.field, String::new(), meta));
+            self.assembly = Some((chunk.position, chunk.field, String::new(), meta));
         }
         let (sequence, field, text, _) = self
             .assembly
             .as_mut()
             .ok_or("History field starts with a missing fragment")?;
-        if *sequence != chunk.sequence || *field != chunk.field || text.len() as u64 != chunk.offset
+        if *sequence != chunk.position || *field != chunk.field || text.len() as u64 != chunk.offset
         {
             return Err("History field fragments are discontinuous".into());
         }

@@ -271,7 +271,9 @@ export function refreshActivity(state: State, actions: Action[], through = state
 // second reading window. A page anchor makes late replies harmless while paging.
 export function promptAnchor(page: NonNullable<State['window']>['page']): string {
   const first = page.chunks[0];
-  return first ? `${first.sequence}/${first.field}/${first.offset}` : '';
+  return first
+    ? `${first.position.sourceSequence}/${first.position.itemIndex}/${first.field}/${first.offset}`
+    : '';
 }
 
 export function readingPrompt(
@@ -284,7 +286,7 @@ export function readingPrompt(
   const anchor = promptAnchor(page);
   if (!visit || !first || visit.prompt?.anchor === anchor) return;
   if (first.role === 'user' && first.offset === 0) {
-    visit.prompt = { anchor, value: { source: first.sequence, text: first.text.slice(0, 4096) } };
+    visit.prompt = { anchor, value: { position: first.position, text: first.text.slice(0, 4096) } };
     return;
   }
   if (!page.before && first.role !== 'user') {
@@ -309,7 +311,7 @@ export function readingPrompt(
     {
       sessionId: state.selected!.id,
       through: page.through,
-      sequence: first.sequence,
+      position: first.position,
     },
   );
 }
@@ -364,7 +366,7 @@ export function follow(state: State, actions: Action[]) {
       {
         kind: 'after',
         cursor: window.page.after ?? {
-          sequence: last.sequence,
+          position: last.position,
           // Refresh the boundary segment's recorded timing/tool metadata at
           // the new fence, then append the following immutable segments.
           offset: last.offset,
@@ -536,7 +538,7 @@ export function readHistorySource(state: State, actions: Action[], position: Sou
       epoch: state.epoch,
       navigation: source.navigation,
       through: source.through,
-      sequence: source.chunk.sequence,
+      rowPosition: source.chunk.position,
       field: source.field,
       position,
     },
@@ -545,7 +547,7 @@ export function readHistorySource(state: State, actions: Action[], position: Sou
     {
       sessionId: state.selected.id,
       through: source.through,
-      source: { kind: 'sequence', sequence: source.chunk.sequence },
+      source: { kind: 'row', position: source.chunk.position },
       field: source.field,
       position,
     },

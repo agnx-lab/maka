@@ -73,7 +73,7 @@ pub(crate) fn file_path(source: &HistorySource, workspace: &str) -> Option<Strin
     };
     let arguments = source.role == SourceRole::ToolCall
         && source.field == SourceField::Arguments
-        && source.sequence == call.sequence
+        && source.position == call.position
         && selector(
             source,
             if patch {
@@ -92,7 +92,7 @@ pub(crate) fn file_path(source: &HistorySource, workspace: &str) -> Option<Strin
         && tool
             .result
             .as_ref()
-            .is_some_and(|result| result.sequence == source.sequence && !result.is_error);
+            .is_some_and(|result| result.position == source.position && !result.is_error);
     (arguments || result)
         .then(|| absolute(&source.text, workspace))
         .flatten()
@@ -104,12 +104,12 @@ mod tests {
     use serde_json::json;
     fn source() -> HistorySource {
         serde_json::from_value(json!({
-            "sequence":4,"timestamp":1,"role":"tool_call","fields":["arguments"],
+            "position":{"sourceSequence":4,"itemIndex":0},"timestamp":1,"role":"tool_call","fields":["arguments"],
             "field":"arguments","path":["path"],"format":"text","offset":0,
             "totalBytes":8,"text":"test.txt","tool":{"toolUseId":"call",
-                "call":{"ancestorToolUseIds":[],"sequence":4,"name":"arbitrary alias","title":null,"pending":false,"dispatched":true,
+                "call":{"ancestorToolUseIds":[],"position":{"sourceSequence":4,"itemIndex":0},"name":"arbitrary alias","title":null,"pending":false,"dispatched":true,
                     "presentation":"maka.workspace.Files@1/write"},
-                "result":{"sequence":5,"isError":false,"image":false,"settlement":"returned"}}
+                "result":{"position":{"sourceSequence":5,"itemIndex":0},"isError":false,"image":false,"settlement":"returned"}}
         }))
         .unwrap()
     }
@@ -174,7 +174,7 @@ mod tests {
                 5 => source.path = None,
                 6 => source.path = Some(vec![SourceSegment::Key("content".into())]),
                 7 => source.field = SourceField::Result,
-                _ => source.sequence = 99,
+                _ => source.position.source_sequence = 99,
             }
             assert_eq!(file_path(&source, cwd), None, "variant {variant}");
         }
@@ -196,7 +196,7 @@ mod tests {
         let mut result = base;
         result.role = SourceRole::ToolResult;
         result.field = SourceField::Result;
-        result.sequence = 5;
+        result.position.source_sequence = 5;
         result.path = Some(vec![
             SourceSegment::Key("value".into()),
             SourceSegment::Key("path".into()),

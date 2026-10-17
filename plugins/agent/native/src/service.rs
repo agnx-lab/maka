@@ -491,7 +491,7 @@ impl Handler for Agent {
                                     turn_id: chunk.turn_id,
                                     timestamp: chunk.timestamp,
                                     role: chunk.role,
-                                    sequence: chunk.sequence,
+                                    position: chunk.position,
                                     offset: chunk.offset,
                                     total_bytes: chunk.total_bytes,
                                     text: chunk.text,
@@ -517,7 +517,7 @@ impl Handler for Agent {
                     }
                     let result = owner
                         .store
-                        .history_prompt(&input.session_id, input.through, input.sequence)
+                        .history_prompt(&input.session_id, input.through, input.position)
                         .await
                         .map_err(|_| "agent_history_unavailable")?;
                     owner.session(&input.session_id).await?;
@@ -529,10 +529,11 @@ impl Handler for Agent {
                 "search" => {
                     let input: HistorySearch = decode(input)?;
                     owner.session(&input.session_id).await?;
-                    let fence = maka_presentation::watermark(input.through)
-                        .map_err(|_| "agent_cursor_invalid")?;
+
                     if input.through > *owner.store.subscribe_commits().borrow()
-                        || input.after > fence
+                        || input.after.is_some_and(|after| {
+                            after.validate().is_err() || after.source_sequence > input.through
+                        })
                         || input.query.is_empty()
                         || input.query.len() > 512
                     {
@@ -549,7 +550,7 @@ impl Handler for Agent {
                             .search_transcript(
                                 &input.session_id,
                                 maka_event_log::transcript::search::TranscriptSearch {
-                                    through: fence,
+                                    through: input.through,
                                     after: input.after,
                                     query: input.query,
                                     case_sensitive: input.case_sensitive,
@@ -569,7 +570,7 @@ impl Handler for Agent {
                                     field: found.field,
                                     cursor: maka_agent_ports::session::history::Cursor {
                                         field: Default::default(),
-                                        sequence: found.sequence,
+                                        position: found.position,
                                         offset: 0,
                                     },
                                     preview: found.preview,
@@ -603,11 +604,11 @@ impl Handler for Agent {
                         .await
                         .map_err(|_| "agent_history_unavailable")?
                     {
-                        let sequence = match input.source {
-                            HistorySourceReference::Sequence { sequence } => sequence,
+                        let position = match input.source {
+                            HistorySourceReference::Row { position } => position,
                             HistorySourceReference::ToolUse { tool_use_id } => owner
                                 .store
-                                .tool_source_sequence(
+                                .tool_source_position(
                                     &input.session_id,
                                     input.through,
                                     &tool_use_id,
@@ -620,7 +621,7 @@ impl Handler for Agent {
                             .history_source(
                                 &input.session_id,
                                 input.through,
-                                sequence,
+                                position,
                                 input.field,
                                 input.path,
                                 input.position,
@@ -669,7 +670,7 @@ impl Handler for Agent {
                             .tool_image(
                                 &input.session_id,
                                 input.through,
-                                input.sequence,
+                                input.position,
                                 input.offset,
                                 32 * 1024,
                             )
@@ -677,7 +678,7 @@ impl Handler for Agent {
                             .map_err(|_| "agent_image_unavailable")?;
                         ToolImagePage::Ready {
                             through: input.through,
-                            sequence: input.sequence,
+                            position: input.position,
                             offset: input.offset,
                             total_bytes: image.total_bytes,
                             mime_type: image.mime_type,

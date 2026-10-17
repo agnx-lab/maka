@@ -72,7 +72,7 @@ impl Reader {
                     ));
                 }
                 if let Some(current) = &mut self.assembling {
-                    if current.sequence != chunk.sequence
+                    if current.position != chunk.position
                         || current.text.len() as u64 != chunk.offset
                         || current.total_bytes != chunk.total_bytes
                     {

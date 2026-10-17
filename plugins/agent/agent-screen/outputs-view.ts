@@ -153,7 +153,7 @@ export function outputsView<N extends Node>(
                           ? [
                               ui.button(
                                 (tool?.result ? 'output-result-' : 'output-source-') +
-                                  message.source,
+                                  message.contentKey,
                                 text.readSource,
                                 !active || state.loading,
                                 false,

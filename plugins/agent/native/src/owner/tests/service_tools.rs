@@ -1223,7 +1223,7 @@ async fn installed_javascript_service_is_a_real_model_tool_with_business_project
                         .history_source(
                             &session,
                             through,
-                            result.sequence,
+                            result.position,
                             field,
                             None,
                             position,
@@ -1264,7 +1264,7 @@ async fn installed_javascript_service_is_a_real_model_tool_with_business_project
                 &session,
                 maka_event_log::transcript::search::TranscriptSearch {
                     through,
-                    after: 0,
+                    after: None,
                     query: "journal_v1".into(),
                     case_sensitive: true,
                     whole_word: false,

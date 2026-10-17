@@ -28,7 +28,7 @@ test('history fragments keep distinct controls and navigate the original tool ev
   const tool = {
     toolUseId: 'computer-call',
     call: {
-      sequence: 7,
+      position: { sourceSequence: 7, itemIndex: 0 },
       name: 'cua_repl',
       title: null,
       presentation: null,
@@ -68,7 +68,7 @@ test('history fragments keep distinct controls and navigate the original tool ev
       role: index < 2 ? 'tool_call' : 'assistant',
       text: 'Original fragment ' + index,
       timestamp: null,
-      source: index < 2 ? 7 : 8,
+      source: { sourceSequence: index < 2 ? 7 : 8, itemIndex: 0 },
       image: false,
       continued: true,
       tool: index < 2 ? tool : null,
@@ -115,13 +115,21 @@ test('history fragments keep distinct controls and navigate the original tool ev
   );
   raw('tool-source-call-offset-64-arguments');
   assert.deepEqual(out.events, [
-    { name: 'toolSource', value: { sequence: 7, field: 'arguments' } },
+    {
+      name: 'toolSource',
+      value: { position: { sourceSequence: 7, itemIndex: 0 }, field: 'arguments' },
+    },
   ]);
   raw('source-answer-offset-64');
-  assert.deepEqual(out.events, [{ name: 'source', value: { sequence: 8, field: 'body' } }]);
+  assert.deepEqual(out.events, [
+    { name: 'source', value: { position: { sourceSequence: 8, itemIndex: 0 }, field: 'body' } },
+  ]);
   raw('mark-read-answer-offset-64');
   assert.deepEqual(out.events, [
-    { name: 'markRead', value: { sessionId: 'session', sequence: 8, field: 'body' } },
+    {
+      name: 'markRead',
+      value: { sessionId: 'session', position: { sourceSequence: 8, itemIndex: 0 }, field: 'body' },
+    },
   ]);
   const find = (node, key) => {
     if (!node || typeof node !== 'object') return undefined;
@@ -142,7 +150,7 @@ test('history fragments keep distinct controls and navigate the original tool ev
   ]) {
     props.messages[0].tool = {
       ...tool,
-      result: { sequence: 8, isError, settlement, image: false },
+      result: { position: { sourceSequence: 8, itemIndex: 0 }, isError, settlement, image: false },
     };
     out = component.update(out.frame.state, props, {});
     const marker = find(out.frame.view, 'marker-call');
@@ -182,7 +190,7 @@ test('history prefetches before an edge without treating stale or commanded view
       role: 'assistant',
       text: 'Message ' + i,
       timestamp: null,
-      source: i + 1,
+      source: { sourceSequence: i + 1, itemIndex: 0 },
       image: false,
       continued: false,
       tool: null,
@@ -324,7 +332,7 @@ test('prompt header follows the visible answer, yields to user rows, and never f
     contentKey: id,
     role,
     text,
-    source: Number(id),
+    source: { sourceSequence: Number(id), itemIndex: 0 },
     timestamp: 1,
     tool: null,
     image: false,
@@ -411,12 +419,22 @@ test('prompt header follows the visible answer, yields to user rows, and never f
   observe(4, '1');
   assert.equal(find('prompt-bar'), undefined);
   props.messages = [message('4', 'assistant', 'Latest answer')];
-  props.leadingPrompt = { source: 3, text: 'A question outside the retained page' };
+  props.leadingPrompt = {
+    position: { sourceSequence: 3, itemIndex: 0 },
+    text: 'A question outside the retained page',
+  };
   out = component.update(out.frame.state, props, {});
   observe(5, '4');
   assert.equal(find('prompt-text').label, '❯ A question outside the retained page');
   out = component.event(out.frame.state, { kind: 'raw', key: 'prompt-text', event: {} }, props, {});
-  assert.ok(out.events.some((event) => event.name === 'prompt' && event.value.sequence === 3));
+  assert.ok(
+    out.events.some(
+      (event) =>
+        event.name === 'prompt' &&
+        event.value.position.sourceSequence === 3 &&
+        event.value.position.itemIndex === 0,
+    ),
+  );
   validateEvents();
   assert.deepEqual(
     find('reading').props.content.children.map((n) => n.key),
@@ -489,13 +507,13 @@ test('trace keeps visible ancestry and keyboard disclosure across bounded histor
     role: 'tool_call',
     text: '{}',
     timestamp: null,
-    source: sequence,
+    source: { sourceSequence: sequence, itemIndex: 0 },
     image: false,
     continued: false,
     tool: {
       toolUseId: id,
       call: {
-        sequence,
+        position: { sourceSequence: sequence, itemIndex: 0 },
         name: id,
         title: { fallback: id },
         presentation: null,
@@ -503,7 +521,12 @@ test('trace keeps visible ancestry and keyboard disclosure across bounded histor
         dispatched: true,
         ancestorToolUseIds: ancestors,
       },
-      result: { sequence: sequence + 10, isError: false, settlement: 'returned', image: false },
+      result: {
+        position: { sourceSequence: sequence + 10, itemIndex: 0 },
+        isError: false,
+        settlement: 'returned',
+        image: false,
+      },
     },
   });
   const props = {
@@ -580,7 +603,7 @@ test('user-to-response spacing is one plain row above the response, not part of 
     role,
     text: 'Message',
     timestamp: null,
-    source: index + 1,
+    source: { sourceSequence: index + 1, itemIndex: 0 },
     image: false,
     continued: false,
     tool:
@@ -588,7 +611,7 @@ test('user-to-response spacing is one plain row above the response, not part of 
         ? {
             toolUseId: `${role}-${index}`,
             call: {
-              sequence: index + 1,
+              position: { sourceSequence: index + 1, itemIndex: 0 },
               name: 'Read',
               title: null,
               presentation: null,
@@ -710,7 +733,7 @@ test('only an observed latest tail acknowledges the displayed message', () => {
         role: 'assistant',
         text: 'Answer',
         timestamp: null,
-        source: 8,
+        source: { sourceSequence: 8, itemIndex: 0 },
         image: false,
         continued: false,
         tool: null,
@@ -749,7 +772,7 @@ test('only an observed latest tail acknowledges the displayed message', () => {
   };
   assert.deepEqual(read(), {
     name: 'markRead',
-    value: { sessionId: 'session', sequence: 8, field: 'body' },
+    value: { sessionId: 'session', position: { sourceSequence: 8, itemIndex: 0 }, field: 'body' },
   });
   assert.ok(
     read({ messages: [{ ...props.messages[0], continued: true }] }),
@@ -768,7 +791,12 @@ test('only an observed latest tail acknowledges the displayed message', () => {
     assert.equal(read(changes), undefined, JSON.stringify(changes));
   assert.equal(read({}, { ...observation, pendingCommand: 1 }), undefined);
   assert.equal(
-    read({ messages: [...props.messages, { ...props.messages[0], id: 'new-answer', source: 9 }] }),
+    read({
+      messages: [
+        ...props.messages,
+        { ...props.messages[0], id: 'new-answer', source: { sourceSequence: 9, itemIndex: 0 } },
+      ],
+    }),
     undefined,
     'a queued observation of the previous tail cannot acknowledge a newly appended message',
   );
@@ -826,13 +854,13 @@ for (const target of ['tui']) {
         role: 'tool_call',
         text: 'Read',
         timestamp: null,
-        source: 7,
+        source: { sourceSequence: 7, itemIndex: 0 },
         image: false,
         continued: false,
         tool: {
           toolUseId: 'read-' + i,
           call: {
-            sequence: 7,
+            position: { sourceSequence: 7, itemIndex: 0 },
             name: 'Read',
             title: null,
             presentation: 'maka.workspace.Files@1/readText',
@@ -840,7 +868,12 @@ for (const target of ['tui']) {
             pending: false,
             dispatched: true,
           },
-          result: { sequence: 8, isError: false, settlement: 'returned', image: false },
+          result: {
+            position: { sourceSequence: 8, itemIndex: 0 },
+            isError: false,
+            settlement: 'returned',
+            image: false,
+          },
         },
       })),
     };
@@ -872,7 +905,7 @@ for (const target of ['tui']) {
               through: 8,
               filePath: null,
               source: {
-                sequence: action.input.source.sequence,
+                position: action.input.source.position,
                 field: action.input.field,
                 path: action.input.path,
                 format: 'text',
@@ -917,6 +950,8 @@ for (const target of ['tui']) {
       );
       const read = out.actions.find((action) => action.binding === 'reader');
       assert.ok(read, 'search reads the actual query editor snapshot');
+      assert.equal(read.method, 'read');
+      assert.deepEqual(read.input, { start: 0, end: Buffer.byteLength(query) });
       out = timeline.event(
         out.frame.state,
         {

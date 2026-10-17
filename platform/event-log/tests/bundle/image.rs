@@ -122,7 +122,10 @@ async fn rows(
     log: &EventLog,
     session: &str,
     invocation: &Invocation,
-) -> (u64, BTreeMap<String, u64>) {
+) -> (
+    u64,
+    BTreeMap<String, maka_agent_facts::history::RowPosition>,
+) {
     let through = log
         .scoped_prefix(LogScope::Root, 1000, 8 * 1024 * 1024)
         .await
@@ -149,7 +152,7 @@ async fn rows(
                         &format!("{step}:{step}"),
                     );
                     if tool_use_id == expected {
-                        rows.insert(step.to_owned(), chunk.sequence);
+                        rows.insert(step.to_owned(), chunk.position);
                     }
                 }
             }
@@ -250,7 +253,7 @@ async fn transferred_generated_borrowed_and_later_frozen_images_keep_exact_row_c
             .await
             .is_err()
     );
-    assert_ne!(rows["borrowed"] / 256, borrowed_at);
+    assert_ne!(rows["borrowed"].source_sequence, borrowed_at);
     assert_eq!(import(&destination, &bytes).await, receipt);
     destination.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();

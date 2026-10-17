@@ -27,7 +27,9 @@
 
 `history` 分页保持同一个 `through` 边界，`watch` 从最后的 `nextAfter` 继续，并发布队列与待处理交互更新。`send` 接受工作并返回其身份，`stop` 指定该次 invocation。重连后通过 `pendingInteractions`、`interaction` 和 `respond` 重建并回答原请求。修改保留原操作回执；丢失响应不代表可以重新发送。参见[原生接入验收](../native/README.zh-CN.md)及[传输所有权与退出方式](../../../platform/transport/README.zh-CN.md)。
 
-`search` 在所选 Session 的历史中按字面量查询，显式传入 `caseSensitive` 和 `wholeWord`。忽略大小写使用 Unicode 简单大小写折叠，不做规范化；全字匹配要求两侧不紧邻 Unicode 单词字符（字母、组合标记、十进制数字、连接标点或连接控制符）。分页时保持查询、选项和 `through` 不变，沿 `nextAfter` 继续，即使当前页没有命中；null 表示扫描结束。每条命中标明原始字段，可通过 `source` 精确读取。
+历史行引用使用 `position: { sourceSequence, itemIndex }`，先按产生该行的原始事件排序，再按该事件内的行序号排序。游标、来源读取、提示词锚点及工具图片引用共用这一位置。`through` 和 `{ kind: "event", sequence }` 仍指向原始事件；模型完成时产生的所有历史行都归属于该完成事件。
+
+`search` 在所选 Session 的历史中按字面量查询，显式传入 `caseSensitive` 和 `wholeWord`。忽略大小写使用 Unicode 简单大小写折叠，不做规范化；全字匹配要求两侧不紧邻 Unicode 单词字符（字母、组合标记、十进制数字、连接标点或连接控制符）。以 `after: null` 开始，分页时保持查询、选项和 `through` 不变，沿 `nextAfter` 继续，即使当前页没有命中；null 表示扫描结束。每条命中标明原始字段，可通过 `source` 精确读取。
 
 `fork` 根据来源版本，从完整一轮或全部当前历史创建旁支会话。所包含的工作必须已结算；后续轮次仍在运行时，也可分叉更早的完整轮次。新 Session 保留这段历史和附件，共享已验证的工作区，收窄权限且不带入运行中的工作；`branch` 标明来源。丢失响应后使用原操作引用恢复；Host 结果仍未知时，`forkReceipt` 可查找已发布的分叉。返回 null 不代表操作未发生，也不授权创建替代分叉。字段见[分叉声明](src/contract_fork.rs)。
 

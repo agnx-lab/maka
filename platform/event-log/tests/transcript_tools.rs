@@ -114,10 +114,10 @@ async fn accepted(log: &EventLog, step: &str, name: &str) -> u64 {
         .last()
         .unwrap()
 }
-fn rows(db: &Connection) -> Vec<(i64, Vec<u8>, String)> {
-    db.prepare("SELECT sequence, payload, digest FROM transcript_rows ORDER BY sequence")
+fn rows(db: &Connection) -> Vec<(maka_agent_facts::history::RowPosition, Vec<u8>, String)> {
+    db.prepare("SELECT source_sequence, item_index, payload, digest FROM transcript_rows ORDER BY source_sequence, item_index")
         .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .query_map([], |row| Ok((maka_agent_facts::history::RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 }, row.get(2)?, row.get(3)?)))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap()
@@ -291,7 +291,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         ("toolCalls", true, 1),
         ("path required", false, 1),
     ] {
-        let mut after = 0;
+        let mut after = None;
         let mut sequences = Vec::new();
         let mut batches = 0;
         loop {
@@ -299,7 +299,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
                 .search_transcript(
                     "session",
                     maka_event_log::transcript::search::TranscriptSearch {
-                        through: maka_presentation::watermark(through).unwrap(),
+                        through,
                         after,
                         query: query.into(),
                         case_sensitive: true,
@@ -312,7 +312,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
                 .unwrap();
             batches += 1;
             for found in result.matches {
-                let (sequence, preview) = (found.sequence, found.preview);
+                let (sequence, preview) = (found.position, found.preview);
                 assert!(preview.len() <= 384 && preview.contains(query));
                 assert!(sequences.last().is_none_or(|last| sequence > *last));
                 sequences.push(sequence);
@@ -320,8 +320,8 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
             let Some(next) = result.next_after else {
                 break;
             };
-            assert!(next > after && batches < 8);
-            after = next;
+            assert!(after.is_none_or(|after| next > after) && batches < 8);
+            after = Some(next);
         }
         assert_eq!(sequences.len(), expected, "{query}");
         assert!(batches >= 2, "18 MiB of siblings must not fit in one scan");

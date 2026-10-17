@@ -40,7 +40,7 @@ function tool(id, call, result, name = id, presentation = null, ancestors = []) 
   return {
     toolUseId: id,
     call: {
-      sequence: call,
+      position: { sourceSequence: call, itemIndex: 0 },
       name,
       title: null,
       presentation,
@@ -48,14 +48,19 @@ function tool(id, call, result, name = id, presentation = null, ancestors = []) 
       dispatched: true,
       pending: false,
     },
-    result: { sequence: result, settlement: 'returned', isError: false, image: false },
+    result: {
+      position: { sourceSequence: result, itemIndex: 0 },
+      settlement: 'returned',
+      isError: false,
+      image: false,
+    },
   };
 }
 function message(id, sequence, metadata, role = 'tool_call', text = '') {
   return {
     id,
     contentKey: 'body-' + id,
-    source: sequence,
+    source: { sourceSequence: sequence, itemIndex: 0 },
     role,
     text,
     timestamp: null,
@@ -123,7 +128,7 @@ function detailClient(metadata, expanded = true) {
               kind: 'ready',
               through: 20,
               source: {
-                sequence: action.input.source.sequence,
+                position: action.input.source.position,
                 field: action.input.field,
                 ...(action.input.path === null ? {} : { path: action.input.path }),
                 format,
@@ -205,7 +210,7 @@ for (const name of ['exec', 'cua_repl', 'cua_operation', 'ReadSkill']) {
     assert.deepEqual(argumentsRequest.input, {
       sessionId: 'session',
       through: 20,
-      source: { kind: 'sequence', sequence: 1 },
+      source: { kind: 'row', position: { sourceSequence: 1, itemIndex: 0 } },
       field: 'arguments',
       path: null,
       position: { kind: 'start' },
@@ -213,7 +218,7 @@ for (const name of ['exec', 'cua_repl', 'cua_operation', 'ReadSkill']) {
     assert.deepEqual(resultRequest.input, {
       sessionId: 'session',
       through: 20,
-      source: { kind: 'sequence', sequence: 2 },
+      source: { kind: 'row', position: { sourceSequence: 2, itemIndex: 0 } },
       field: 'result',
       path: null,
       position: { kind: 'start' },
@@ -258,7 +263,7 @@ test('process evidence drives heading colors without treating a returned failure
       kind: 'component',
       child: 'tool-details-shell',
       name: 'context',
-      event: { ...context.value, result: 19, status: 'succeeded' },
+      event: { ...context.value, result: { sourceSequence: 2, itemIndex: 1 }, status: 'succeeded' },
     },
     p,
     {},
@@ -274,7 +279,12 @@ test('a truly empty original result closes its disclosure and removes the empty 
   const metadata = {
     toolUseId: 'empty-result',
     call: null,
-    result: { sequence: 2, settlement: 'returned', isError: false, image: false },
+    result: {
+      position: { sourceSequence: 2, itemIndex: 0 },
+      settlement: 'returned',
+      isError: false,
+      image: false,
+    },
   };
   const p = props([message('empty-result', 2, metadata, 'tool_result')]);
   let out = raw(timeline.mount(p, {}), p, 'toggle-empty-result');

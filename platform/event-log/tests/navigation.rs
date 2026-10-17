@@ -23,9 +23,17 @@ use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::RuntimeEvent;
+use maka_agent_facts::history::RowPosition;
 use maka_event_log::{EventLog, StoreError};
 use maka_presentation::navigation::{TurnContribution, TurnStatus};
 use serde_json::json;
+
+fn position(source_sequence: u64, item_index: u64) -> RowPosition {
+    RowPosition {
+        source_sequence,
+        item_index,
+    }
+}
 
 fn event(run: &str, turn: &str, fact: Fact) -> EventWrite {
     EventWrite::plain(RuntimeEvent::new(
@@ -70,7 +78,7 @@ async fn prepare(log: &EventLog, raw: u64) {
     while !log.prepare_transcript("session", raw, 32).await.unwrap() {}
 }
 async fn pages(log: &EventLog, through: u64, limit: usize) -> Vec<TurnContribution> {
-    let mut position = 0;
+    let mut position = None;
     let mut all = Vec::new();
     loop {
         let page = log
@@ -85,8 +93,8 @@ async fn pages(log: &EventLog, through: u64, limit: usize) -> Vec<TurnContributi
         all.extend(page.contributions);
         match page.next_position {
             Some(next) => {
-                assert!(next > position);
-                position = next;
+                assert!(position.is_none_or(|position| next > position));
+                position = Some(next);
             }
             None => break,
         }
@@ -159,8 +167,12 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
     assert_eq!(empty.context.source_evidence.high_water, 0);
     assert!(empty.context.tail.is_empty());
     prepare(&log, last).await;
-    let fence = maka_presentation::watermark(last).unwrap();
-    for cut in [first * 256, child * 256, child_end * 256] {
+    let fence = last;
+    for cut in [
+        position(first, 0),
+        position(child, 0),
+        position(child_end, 0),
+    ] {
         assert!(
             !log.transcript_between_turns("session", fence, cut)
                 .await
@@ -168,7 +180,7 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
         );
     }
     assert!(
-        log.transcript_between_turns("session", fence, last * 256)
+        log.transcript_between_turns("session", fence, position(last, 0))
             .await
             .unwrap()
     );
@@ -177,8 +189,8 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
         .await
         .unwrap();
     assert_eq!(
-        (parent[0].sequence, parent[0].last_sequence),
-        (first * 256, last * 256)
+        (parent[0].position, parent[0].last_position),
+        (position(first, 0), position(last, 0))
     );
     assert!(
         log.navigation_landmarks("session", fence, 1, Some("missing"))
@@ -190,12 +202,7 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
     let last = end(&log, "resumed-parent", "parent").await;
     prepare(&log, last).await;
     let sampled = log
-        .navigation_landmarks(
-            "session",
-            maka_presentation::watermark(last).unwrap(),
-            64,
-            None,
-        )
+        .navigation_landmarks("session", last, 64, None)
         .await
         .unwrap();
     assert_eq!(
@@ -225,10 +232,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         &format!("\u{feff}  {}  ", "😀".repeat(100)),
     )
     .await;
-    assert_eq!(
-        log.navigation_fence("session").await.unwrap(),
-        Some(maka_presentation::watermark(first).unwrap())
-    );
+    assert_eq!(log.navigation_fence("session").await.unwrap(), Some(first));
     end(&log, "first", "shared").await;
     let second = open(&log, "middle", "middle", "middle").await;
     let ending = end(&log, "middle", "middle").await;
@@ -236,8 +240,8 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     let fence = log.navigation_fence("session").await.unwrap().unwrap();
     let initial = pages(&log, fence, 1).await;
     assert_eq!(initial.len(), 2);
-    assert_eq!(initial[0].first_sequence, first * 256);
-    assert_eq!(initial[1].first_sequence, second * 256);
+    assert_eq!(initial[0].first_position, position(first, 0));
+    assert_eq!(initial[1].first_position, position(second, 0));
     assert!(
         initial
             .iter()
@@ -253,7 +257,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         .unwrap();
     assert_eq!(landmarks.len(), 2);
     assert_eq!(landmarks[0].label, "😀".repeat(24));
-    assert_eq!(landmarks[0].sequence, first * 256);
+    assert_eq!(landmarks[0].position, position(first, 0));
     assert_eq!(
         log.navigation_landmarks("session", fence, 1, None)
             .await
@@ -262,7 +266,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         "middle"
     );
     let mid = log
-        .navigation_turns("session", fence, first * 256 + 1, 1)
+        .navigation_turns("session", fence, Some(position(first, 1)), 1)
         .await
         .unwrap();
     assert_eq!(mid.contributions[0].user_prompt_preview, None);
@@ -270,7 +274,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
 
     let active = open(&log, "active", "active", "not settled").await;
     prepare(&log, active).await;
-    let active_fence = maka_presentation::watermark(active).unwrap();
+    let active_fence = active;
     assert_eq!(
         log.navigation_fence("session").await.unwrap(),
         Some(active_fence)
@@ -280,8 +284,8 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         .await
         .unwrap();
     assert_eq!(active_landmark.len(), 1);
-    assert_eq!(active_landmark[0].sequence, active * 256);
-    assert_eq!(active_landmark[0].last_sequence, active * 256 + 1);
+    assert_eq!(active_landmark[0].position, position(active, 0));
+    assert_eq!(active_landmark[0].last_position, position(active, 1));
     let active_turn = pages(&log, active_fence, 128)
         .await
         .into_iter()
@@ -292,7 +296,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         maka_presentation::navigation::TurnStatus::Running
     );
     assert_eq!(pages(&log, fence, 1).await, initial);
-    end(&log, "active", "active").await;
+    let active_end = end(&log, "active", "active").await;
     open(&log, "successor", "shared", "successor").await;
     end(&log, "successor", "shared").await;
     // Deliberately adversarial JSON escaping: byte length is not encoded length.
@@ -302,14 +306,28 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         end(&log, &run, &run).await;
     }
     let current = log.navigation_fence("session").await.unwrap().unwrap();
-    prepare(&log, current / 256).await;
+    prepare(&log, current).await;
     assert_eq!(
         pages(&log, fence, 1).await,
         initial,
         "later settlement must not alter the old fence"
     );
+    // The final ordinal resets at a later source fact: bounds must use actual ordered pairs.
+    let settled_active = log
+        .navigation_landmarks("session", current, 1, Some("active"))
+        .await
+        .unwrap();
+    assert_eq!(settled_active[0].position, position(active, 0));
+    assert_eq!(settled_active[0].last_position, position(active_end, 0));
+    assert_eq!(
+        log.navigation_landmarks("session", active_fence, 1, Some("active"))
+            .await
+            .unwrap()[0]
+            .last_position,
+        position(active, 1)
+    );
     let all = pages(&log, current, 128).await;
-    assert!(all.iter().any(|c| c.first_sequence == active * 256));
+    assert!(all.iter().any(|c| c.first_position == position(active, 0)));
     assert_eq!(all.iter().filter(|c| c.turn_id == "shared").count(), 1);
     assert_eq!(
         all.iter()
@@ -318,7 +336,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         128
     );
     let first_page = log
-        .navigation_turns("session", current, 0, 128)
+        .navigation_turns("session", current, None, 128)
         .await
         .unwrap();
     assert!(first_page.next_position.is_some());
@@ -331,8 +349,8 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     {
         let payload: Vec<u8> = db
             .query_row(
-                "SELECT payload FROM transcript_rows WHERE sequence=? AND session_id='session'",
-                [landmark.sequence as i64],
+                "SELECT payload FROM transcript_rows WHERE source_sequence=? AND item_index=? AND session_id='session'",
+                [landmark.position.source_sequence as i64, landmark.position.item_index as i64],
                 |row| row.get(0),
             )
             .unwrap();

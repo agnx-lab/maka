@@ -18,14 +18,15 @@
  */
 
 //! Small transcript navigation projections. No model history or mutable Turn state.
+use maka_agent_facts::history::RowPosition;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TurnLandmark {
     pub turn_id: String,
-    pub sequence: u64,
-    pub last_sequence: u64,
+    pub position: RowPosition,
+    pub last_position: RowPosition,
     pub label: String,
 }
 
@@ -33,7 +34,7 @@ pub struct TurnLandmark {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TurnContribution {
     pub turn_id: String,
-    pub first_sequence: u64,
+    pub first_position: RowPosition,
     pub latest_state: Option<RecordedTurnState>,
     pub user_prompt_preview: Option<String>,
 }
@@ -41,7 +42,7 @@ pub struct TurnContribution {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RecordedTurnState {
-    pub sequence: u64,
+    pub position: RowPosition,
     pub message: TurnStateMessage,
 }
 

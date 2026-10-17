@@ -19,6 +19,7 @@
 
 use futures_util::future::BoxFuture;
 use maka_agent_facts::attachment::AttachmentRef;
+pub use maka_agent_facts::history::RowPosition;
 use maka_capabilities::authorization::CommandError;
 use maka_capabilities::call::Scope;
 use schemars::JsonSchema;
@@ -33,8 +34,7 @@ pub use maka_agent_facts::session::CopyPurpose;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryPrompt")]
 pub struct Prompt {
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub source: u64,
+    pub position: RowPosition,
     #[schemars(length(max = 4096))]
     pub text: String,
 }
@@ -145,13 +145,12 @@ pub enum HistoryField {
 pub struct Cursor {
     #[serde(default)]
     pub field: HistoryField,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub offset: u64,
 }
 
-/// Cursor sequence addresses a sparse transcript row; Event addresses the raw
+/// Cursor position addresses a transcript row; Event addresses the raw
 /// event log. Before excludes its end and After includes its start. Returned
 /// chunks always retain ascending source order, including a reverse window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -195,8 +194,10 @@ impl Read {
         match self.position {
             Position::Before { cursor } | Position::After { cursor }
                 if self.through.is_none()
-                    || cursor.sequence == 0
-                    || cursor.sequence > MAX
+                    || cursor.position.validate().is_err()
+                    || self
+                        .through
+                        .is_some_and(|through| cursor.position.source_sequence > through)
                     || cursor.offset > MAX
                     || (!self.include_thinking && cursor.field == HistoryField::Thinking) =>
             {
@@ -250,8 +251,7 @@ pub struct ToolCall {
     #[serde(default)]
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<String>")]
     pub presentation: Option<Box<str>>,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
     pub name: String,
     #[schemars(
         with = "maka_plugin_core::wire_schema::RequiredNullable<maka_agent_facts::display::Text>"
@@ -270,8 +270,7 @@ pub struct ToolResult {
         with = "maka_plugin_core::wire_schema::RequiredNullable<maka_agent_facts::tool_call::ToolSettlement>"
     )]
     pub settlement: Option<maka_agent_facts::tool_call::ToolSettlement>,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
     /// Does not distinguish failed from unknown effects.
     pub is_error: bool,
     /// Canonical content is an image; this does not grant artifact reads.
@@ -362,8 +361,7 @@ pub struct HistorySource {
     pub model: Option<HistoryModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<maka_agent_facts::message::MessageOrigin>,
-    #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
-    pub sequence: u64,
+    pub position: RowPosition,
     /// Host-recorded milliseconds of this immutable row; not a client clock.
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub timestamp: u64,
@@ -401,7 +399,7 @@ pub struct Chunk {
     pub turn_id: String,
     pub timestamp: u64,
     pub role: Role,
-    pub sequence: u64,
+    pub position: RowPosition,
     pub offset: u64,
     pub total_bytes: u64,
     pub text: String,
@@ -510,7 +508,10 @@ mod tests {
     fn history_positions_require_fixed_cursor_fences_and_distinguish_raw_events() {
         let cursor = Cursor {
             field: Default::default(),
-            sequence: 4096,
+            position: RowPosition {
+                source_sequence: 16,
+                item_index: 0,
+            },
             offset: 0,
         };
         for position in [Position::Before { cursor }, Position::After { cursor }] {
@@ -524,7 +525,12 @@ mod tests {
             read.through = Some(16);
             assert!(
                 read.validate().is_ok(),
-                "row sequence is not compared to raw fence"
+                "row source sequence is checked against the raw fence"
+            );
+            read.through = Some(15);
+            assert!(
+                read.validate().is_err(),
+                "a later row cannot enter an older raw fence"
             );
         }
         for position in [
@@ -557,7 +563,10 @@ mod tests {
             Position::Before {
                 cursor: Cursor {
                     field: Default::default(),
-                    sequence: 0,
+                    position: RowPosition {
+                        source_sequence: 0,
+                        item_index: 0,
+                    },
                     offset: 0,
                 },
             },

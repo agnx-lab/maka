@@ -238,7 +238,7 @@ async fn native_process_foreground_enforces_workspace_and_protected_boundaries()
         let row=result_row.expect("bounded process history");
         assert_eq!(row["tool"]["call"]["presentation"], "maka.workspace.Processes@1/execute");
         for (path, expected) in [(json!(["value","output","stdout"]),"native"),(json!(["value","exitCode"]),"0")] {
-            let source=f.query("source",json!({"sessionId":session,"through":through,"source":{"kind":"sequence","sequence":row["sequence"]},"field":"result","path":path,"position":{"kind":"start"}})).await.unwrap();
+            let source=f.query("source",json!({"sessionId":session,"through":through,"source":{"kind":"row","position":row["position"]},"field":"result","path":path,"position":{"kind":"start"}})).await.unwrap();
             assert_eq!(source["source"]["text"], expected);
             assert_eq!(source["source"]["tool"]["call"]["presentation"], "maka.workspace.Processes@1/execute");
             assert!(source["filePath"].is_null());

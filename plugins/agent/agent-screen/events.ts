@@ -144,22 +144,23 @@ export function handleEvent<N extends Node>(
           key: input.key,
           child: readingKey(state),
           name: 'source',
-          event: { sequence: row.source, field: 'body' },
+          event: { position: row.source, field: 'body' },
         };
       }
     } else if (input.key.startsWith('output-result-') || input.key.startsWith('output-source-')) {
       const result = input.key.startsWith('output-result-');
-      const sequence = Number(
-        input.key.slice(result ? 'output-result-'.length : 'output-source-'.length),
-      );
-      if (Number.isSafeInteger(sequence) && sequence > 0 && !state.loading) {
+      const id = input.key.slice(result ? 'output-result-'.length : 'output-source-'.length);
+      const row = toolCards(messages(state)).find(
+        ({ message }) => message.contentKey === id,
+      )?.message;
+      if (row?.source != null && !state.loading) {
         state.inspector = null;
         input = {
           kind: 'component',
           key: input.key,
           child: readingKey(state),
           name: result ? 'toolSource' : 'source',
-          event: { sequence, field: result ? 'result' : 'body' },
+          event: { position: row.source, field: result ? 'result' : 'body' },
         };
       }
     } else if (input.key === 'outputs-older' || input.key === 'outputs-newer') {

@@ -321,18 +321,13 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
     );
     assert_eq!(
         log.navigation_fence("session").await.unwrap(),
-        Some(maka_presentation::watermark(terminal).unwrap())
+        Some(terminal)
     );
     assert_eq!(
-        log.navigation_landmarks(
-            "session",
-            maka_presentation::watermark(terminal).unwrap(),
-            64,
-            None,
-        )
-        .await
-        .unwrap()
-        .len(),
+        log.navigation_landmarks("session", terminal, 64, None,)
+            .await
+            .unwrap()
+            .len(),
         1
     );
     log.close().await.unwrap();
@@ -345,8 +340,8 @@ async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {
         .transcript_headers(
             session,
             &TranscriptRead {
-                through: maka_presentation::watermark(through).unwrap(),
-                position: 0,
+                through,
+                position: None,
                 direction: TranscriptDirection::Newer,
                 limit: 100,
             },
@@ -357,7 +352,7 @@ async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {
     for row in headers {
         rows.push(
             serde_json::from_slice(
-                &log.transcript_fragment(session, row.sequence, 0, row.total_bytes)
+                &log.transcript_fragment(session, row.position, 0, row.total_bytes)
                     .await
                     .unwrap(),
             )

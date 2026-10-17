@@ -33,6 +33,7 @@
 import { View, div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { query, operation, log, setDebug } from './host.js';
+import { rowPositionKey } from './history-position.js';
 import { SessionCatalog, SidebarState, sidebar } from './sessions.js';
 import { Transcript, transcriptPane } from './transcript.js';
 import { Composer, composerPane } from './composer.js';
@@ -276,7 +277,7 @@ export default class MakaDesktop extends View {
     this.transcript = transcript;
     const leaving = this.workhub.hide();
     this.search.hide();
-    log(`select "${session.title}"${anchor === null ? '' : ` at row ${anchor}`}`);
+    log(`select "${session.title}"${anchor === null ? '' : ` at row ${rowPositionKey(anchor)}`}`);
     this.cx.notify();
     if (previous !== null) await previous.close();
     await leaving;

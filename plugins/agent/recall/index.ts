@@ -460,7 +460,7 @@ export function recall<N extends Node>(
               if (passage)
                 events.push({
                   name: 'selected',
-                  value: { session: passage.session, anchor: passage.anchorSequence },
+                  value: { session: passage.session, anchor: passage.anchorPosition },
                 });
             }
           }

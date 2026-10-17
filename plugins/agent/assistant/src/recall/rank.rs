@@ -39,7 +39,7 @@ pub(super) struct Source {
 pub(super) struct Hit {
     pub session: usize,
     pub position: usize,
-    pub sequence: u64,
+    pub row_position: maka_agent_ports::session::history::RowPosition,
     pub message_id: String,
     pub turn_id: String,
     pub timestamp: u64,
@@ -173,7 +173,7 @@ fn inspect(session: usize, position: usize, message: Chunk, terms: &[String]) ->
     Some(Hit {
         session,
         position,
-        sequence: message.sequence,
+        row_position: message.position,
         message_id: message.message_id,
         turn_id: message.turn_id,
         timestamp: message.timestamp,
@@ -263,7 +263,10 @@ mod tests {
                     timing: None,
                     compaction: None,
                     role,
-                    sequence: 1,
+                    position: maka_agent_ports::session::history::RowPosition {
+                        source_sequence: 1,
+                        item_index: 0,
+                    },
                     offset: 0,
                     total_bytes: text.len() as u64,
                     text: text.into(),

@@ -206,11 +206,11 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
                 match chunk.role {
                     Role::ToolCall => {
                         assert_eq!(tool.tool_use_id, chunk.message_id);
-                        assert_eq!(tool.call.as_ref().unwrap().sequence, chunk.sequence);
+                        assert_eq!(tool.call.as_ref().unwrap().position, chunk.position);
                     }
                     Role::ToolResult => {
                         let result = tool.result.as_ref().unwrap();
-                        assert_eq!(result.sequence, chunk.sequence);
+                        assert_eq!(result.position, chunk.position);
                         assert!(!result.is_error);
                         assert!(!result.image);
                         assert!(messages.contains_key(&tool.tool_use_id));
@@ -279,8 +279,8 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
     let cache = rusqlite::Connection::open(&path).unwrap();
     cache
         .execute(
-            "INSERT INTO transcript_rows
-         SELECT sequence, 'b', turn_id, message_id, payload, digest, total_bytes
+            "INSERT INTO transcript_rows (source_sequence, item_index, session_id, turn_id, message_id, payload, digest, total_bytes)
+         SELECT source_sequence, item_index, 'b', turn_id, message_id, payload, digest, total_bytes
          FROM transcript_rows WHERE session_id = 'a'",
             [],
         )
@@ -295,7 +295,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
     cache
         .execute(
             "INSERT INTO transcript_text
-         SELECT 'b', sequence, field, timestamp, role, CASE WHEN role IN ('user', 'assistant', 'tool_call', 'tool_result') THEN CAST('destination cache' AS BLOB) ELSE body END
+         SELECT 'b', source_sequence, item_index, field, timestamp, role, CASE WHEN role IN ('user', 'assistant', 'tool_call', 'tool_result') THEN CAST('destination cache' AS BLOB) ELSE body END
          FROM transcript_text WHERE session_id = 'a'",
             [],
         )
@@ -552,7 +552,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                             .history_source(
                                 session,
                                 through,
-                                chunk.sequence,
+                                chunk.position,
                                 field,
                                 None,
                                 SourcePosition::Start,
@@ -586,7 +586,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                                         .history_source(
                                             session,
                                             call_fence,
-                                            chunk.sequence,
+                                            chunk.position,
                                             field,
                                             None,
                                             SourcePosition::Start,
@@ -987,7 +987,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
             } else {
                 Position::Start
             };
-            let mut collected: BTreeMap<u64, (u64, String)> = BTreeMap::new();
+            let mut collected: BTreeMap<RowPosition, (u64, String)> = BTreeMap::new();
             let mut previous = None;
             let mut done = false;
             for _ in 0..512 {
@@ -1009,10 +1009,10 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
                 assert!(
                     chunks
                         .windows(2)
-                        .all(|pair| pair[0].sequence < pair[1].sequence)
+                        .all(|pair| pair[0].position < pair[1].position)
                 );
                 for chunk in chunks {
-                    let entry = collected.entry(chunk.sequence).or_insert_with(|| {
+                    let entry = collected.entry(chunk.position).or_insert_with(|| {
                         (if reverse { chunk.total_bytes } else { 0 }, String::new())
                     });
                     if reverse {
@@ -1025,8 +1025,8 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
                         entry.0 += chunk.text.len() as u64;
                     }
                     assert!(
-                        chunk.sequence > through,
-                        "sparse row positions differ from raw event fence"
+                        chunk.position.source_sequence <= through,
+                        "row positions retain the original raw event fence"
                     );
                 }
                 let cursor = if reverse { before } else { after };
@@ -1053,7 +1053,11 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
                 .collect::<Vec<_>>();
             assert_eq!(texts, expected);
             let sequences = collected.keys().copied().collect::<Vec<_>>();
-            assert!(sequences.windows(2).all(|pair| pair[1] - pair[0] > 1));
+            assert!(
+                sequences
+                    .windows(2)
+                    .all(|pair| pair[1].source_sequence > pair[0].source_sequence)
+            );
             canonical.get_or_insert(collected);
         }
     }
@@ -1065,7 +1069,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
         for reverse in [false, true] {
             let cursor = Cursor {
                 field: Default::default(),
-                sequence: first,
+                position: first,
                 offset: offset as u64,
             };
             let result = log
@@ -1093,17 +1097,23 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
     for cursor in [
         Cursor {
             field: Default::default(),
-            sequence: first + 1,
+            position: RowPosition {
+                item_index: first.item_index + 1,
+                ..first
+            },
             offset: 0,
         },
         Cursor {
             field: Default::default(),
-            sequence: first,
+            position: first,
             offset: text.len() as u64 + 1,
         },
         Cursor {
             field: Default::default(),
-            sequence: 0,
+            position: RowPosition {
+                source_sequence: 0,
+                item_index: 0,
+            },
             offset: 0,
         },
     ] {
@@ -1133,7 +1143,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
             Position::After {
                 cursor: Cursor {
                     field: Default::default(),
-                    sequence: first,
+                    position: first,
                     offset: 0
                 }
             },
@@ -1182,7 +1192,7 @@ async fn history_text_requires_the_actual_prepared_raw_fence() {
         log.history_text("a", later, Position::Start, false, 16, 2, 1024 * 1024)
             .await
             .is_err(),
-        "raw fence must not be compared directly with a prepared row watermark"
+        "reads require preparation through the requested raw fence"
     );
     assert!(log.prepare_transcript("a", later, 32).await.unwrap());
     let Page::Ready { chunks, .. } = log
@@ -1257,7 +1267,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
             // two sequence digits so consuming the next empty row still grows
             // the wire cursor even when that offset returns to zero. Other
             // Sessions advance the real log without adding rows to this one.
-            let gap = (0..400)
+            let gap = (0..1000)
                 .map(|index| event(&format!("gap-{index}"), opening()))
                 .collect::<Vec<_>>();
             log.append_batch(&gap).await.unwrap();
@@ -1282,10 +1292,10 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
     };
     let cursor = maka_agent_ports::session::history::Cursor {
         field: Default::default(),
-        sequence: chunks[0].sequence,
+        position: chunks[0].position,
         offset: 0,
     };
-    assert!(cursor.sequence < 10000);
+    assert!(cursor.position.source_sequence < 100);
     let baseline = log
         .history_text(
             "a",
@@ -1323,7 +1333,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
     };
     assert_eq!(chunks.len(), 1);
     assert!(
-        cursor.sequence < 10000,
+        cursor.position.source_sequence < 100,
         "oversized empty-row boundary was not consumed"
     );
     let mut cursor = cursor;
@@ -1350,7 +1360,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
             ended = true;
             break;
         };
-        assert!(after.sequence > cursor.sequence);
+        assert!(after.position > cursor.position);
         cursor = after;
     }
     assert!(ended, "empty projection windows reach the actual end");
@@ -1439,7 +1449,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
         assert_eq!(chunks.len(), 1, "material-only prompts remain visible");
         assert_eq!(chunks[0].text, expected);
         assert_eq!(chunks[0].timestamp, timestamp);
-        let sequence = chunks[0].sequence;
+        let sequence = chunks[0].position;
         for budget in [4, 19, 8192] {
             for reverse in [false, true] {
                 let mut position = if reverse {
@@ -1561,7 +1571,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
             panic!("ready")
         };
         assert_eq!(chunks[0].text, expected);
-        assert_eq!(chunks[0].sequence, sequence);
+        assert_eq!(chunks[0].position, sequence);
         assert_eq!(chunks[0].timestamp, timestamp);
     }
     drop(db);
@@ -1688,7 +1698,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
                     Position::Start
                 };
                 let mut last = None;
-                let mut collected = BTreeMap::<(u64, u8), (u64, String)>::new();
+                let mut collected = BTreeMap::<(RowPosition, u8), (u64, String)>::new();
                 let mut done = false;
                 for _ in 0..2048 {
                     let page = log
@@ -1711,7 +1721,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
                         .iter()
                         .map(|c| {
                             (
-                                c.sequence,
+                                c.position,
                                 if c.field == HistoryField::Thinking {
                                     0
                                 } else {
@@ -1731,7 +1741,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
                             assert_eq!(chunk.role, Role::Assistant);
                             assert!(chunk.tool.is_none() && chunk.attachments.is_empty());
                             thinking_cursor.get_or_insert(Cursor {
-                                sequence: chunk.sequence,
+                                position: chunk.position,
                                 field: chunk.field,
                                 offset: 0,
                             });
@@ -1843,7 +1853,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
         .history_source(
             "thinking",
             through,
-            cursor.sequence,
+            cursor.position,
             maka_agent_ports::session::history::SourceField::Thinking,
             None,
             maka_agent_ports::session::history::SourcePosition::Start,
@@ -1878,11 +1888,16 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
     // text, but must preserve canonical identities, fences and both fields.
     let db = Connection::open(&path).unwrap();
     db.execute_batch("ALTER TABLE transcript_text RENAME TO field_cache;
-        CREATE TABLE transcript_text AS SELECT session_id, sequence, timestamp, role, body FROM field_cache WHERE field = 'body';
+        CREATE TABLE transcript_text AS SELECT session_id, source_sequence AS sequence, timestamp, role, body FROM field_cache WHERE field = 'body';
         DROP TABLE field_cache;
-        DELETE FROM _sqlx_migrations WHERE version = 10;").unwrap();
+        DELETE FROM _sqlx_migrations WHERE version IN (10, 31);").unwrap();
     drop(db);
     let reopened = EventLog::open(&path).await.unwrap();
+    while !reopened
+        .prepare_transcript("thinking", through, 32)
+        .await
+        .unwrap()
+    {}
     let Page::Ready {
         chunks,
         through: restored_fence,
@@ -1964,7 +1979,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
     assert!(log.prepare_transcript("failed", through, 32).await.unwrap());
     for view in [HistoryView::Text, HistoryView::Conversation] {
         let mut position = Position::Start;
-        let mut failures = BTreeMap::<u64, String>::new();
+        let mut failures = BTreeMap::<RowPosition, String>::new();
         for _ in 0..64 {
             let Page::Ready { chunks, after, .. } = log
                 .history_view("failed", through, position, false, view, 17, Some(1), 8192)
@@ -1981,7 +1996,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
                     .history_source(
                         "failed",
                         through,
-                        chunk.sequence,
+                        chunk.position,
                         SourceField::Body,
                         None,
                         SourcePosition::After {
@@ -1996,7 +2011,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
                 assert!(source.fields.contains(&SourceField::Body));
                 assert_eq!(source.text, chunk.text);
                 failures
-                    .entry(chunk.sequence)
+                    .entry(chunk.position)
                     .or_default()
                     .push_str(&chunk.text);
             }
@@ -2151,7 +2166,7 @@ async fn notification_origin_survives_every_history_and_source_fragment_within_j
             assert_eq!(chunk.message_id, "notification");
             assert_eq!(chunk.origin.as_ref(), Some(&origin));
             assert_eq!(chunk.offset, assembled.len() as u64);
-            source_sequence = Some(chunk.sequence);
+            source_sequence = Some(chunk.position);
             assembled.push_str(&chunk.text);
             fragments += 1;
         }
@@ -2393,7 +2408,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                         .history_source(
                             session,
                             through,
-                            chunk.sequence,
+                            chunk.position,
                             if *field == HistoryField::Thinking {
                                 SourceField::Thinking
                             } else {

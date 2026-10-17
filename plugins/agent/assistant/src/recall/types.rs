@@ -121,7 +121,7 @@ pub struct Passage {
     pub session_id: String,
     pub session_title: String,
     pub anchor_message_id: String,
-    pub anchor_sequence: u64,
+    pub anchor_position: maka_agent_ports::session::history::RowPosition,
     pub turn_id: String,
     pub messages: Vec<PassageMessage>,
     pub matched_terms: Vec<String>,

@@ -231,7 +231,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
         assert_eq!(&projected[..before_rows.len()], before_rows.as_slice());
         assert_eq!(projected.len(), expected.len());
         for ((sequence, bytes, _), row) in projected.iter().zip(expected) {
-            assert_eq!(*sequence as u64, row.sequence);
+            assert_eq!(*sequence, row.position);
             assert_eq!(
                 serde_json::from_slice::<Value>(bytes).unwrap(),
                 serde_json::to_value(row.message).unwrap()

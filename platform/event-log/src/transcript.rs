@@ -36,7 +36,7 @@ mod tools;
 use crate::{EventLog, StoreError};
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::ToolOutcome;
-use maka_presentation::{InvocationView, MAX_TOOL_ROW_BYTES, ProjectionError, Row, watermark};
+use maka_presentation::{InvocationView, MAX_TOOL_ROW_BYTES, ProjectionError, Row};
 pub use read::*;
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Row as SqlRow, SqliteConnection};
@@ -61,7 +61,7 @@ impl EventLog {
                 "invalid transcript boundary limit".into(),
             ));
         }
-        watermark(through)?;
+        read::sql_number(through)?;
         self.validate_root()?;
         let session = session.to_owned();
         self.connection
@@ -234,16 +234,16 @@ async fn owned_references(
 
 async fn persist(tx: &mut SqliteConnection, session: &str, row: Row) -> Result<(), StoreError> {
     let bytes = serde_json::to_vec(&row.message)?;
-    let sequence =
-        i64::try_from(row.sequence).map_err(|_| maka_presentation::ProjectionError::OutOfRange)?;
+    let (source_sequence, item_index) = read::sql_position(row.position)?;
     let size = i64::try_from(bytes.len()).map_err(|_| StoreError::PrefixTooLarge)?;
     let digest = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
     sqlx::query(
         "INSERT OR IGNORE INTO transcript_rows
-         (sequence, session_id, turn_id, message_id, payload, digest, total_bytes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (source_sequence, item_index, session_id, turn_id, message_id, payload, digest, total_bytes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
-    .bind(sequence)
+    .bind(source_sequence)
+    .bind(item_index)
     .bind(session)
     .bind(&row.message.turn_id)
     .bind(&row.message.id)
@@ -255,10 +255,11 @@ async fn persist(tx: &mut SqliteConnection, session: &str, row: Row) -> Result<(
     // Neither a conflicting identity nor a payload update is an idempotent replay.
     let matches: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM transcript_rows
-         WHERE sequence = ?1 AND session_id = ?2 AND turn_id = ?3 AND message_id = ?4
-         AND payload = ?5 AND digest = ?6 AND total_bytes = ?7)",
+         WHERE source_sequence = ?1 AND item_index = ?2 AND session_id = ?3 AND turn_id = ?4 AND message_id = ?5
+         AND payload = ?6 AND digest = ?7 AND total_bytes = ?8)",
     )
-    .bind(sequence)
+    .bind(source_sequence)
+    .bind(item_index)
     .bind(session)
     .bind(&row.message.turn_id)
     .bind(&row.message.id)

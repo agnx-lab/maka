@@ -71,7 +71,7 @@ async fn history_search_options_match_persisted_unicode_literals_and_original_pr
             ("mark", false, false, vec!["MARK\u{301} MARK_ MARK\u{200d} MARK界".into(), "mark".into()]),
         ] {
             let mut actual = Vec::new();
-            let mut after = 0;
+            let mut after: Option<maka_agent_ports::session::history::RowPosition> = None;
             let mut finished = false;
             for _ in 0..32 {
                 let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":after,"query":query,"caseSensitive":case_sensitive,"wholeWord":whole_word,"includeInternal":false})).await.unwrap();
@@ -81,9 +81,9 @@ async fn history_search_options_match_persisted_unicode_literals_and_original_pr
                     assert_eq!(hit["field"], "body");
                     actual.push(hit["preview"].as_str().unwrap().to_owned());
                 }
-                let Some(next) = page["nextAfter"].as_u64() else { finished = true; break; };
-                assert!(next > after);
-                after = next;
+                let Some(next) = serde_json::from_value::<Option<maka_agent_ports::session::history::RowPosition>>(page["nextAfter"].clone()).unwrap() else { finished = true; break; };
+                assert!(after.is_none_or(|after| next > after));
+                after = Some(next);
             }
             assert!(finished, "{query}");
             assert_eq!(actual, expected, "query={query} caseSensitive={case_sensitive} wholeWord={whole_word}");
@@ -121,7 +121,7 @@ async fn history_search_preserves_empty_batches_and_exact_cursors_with_original_
         }, &configuration, records, 1).await.unwrap();
 
         let through = *fixture.store.subscribe_commits().borrow();
-        let request = json!({"sessionId":session,"through":through,"after":0,"query":"中😀","caseSensitive":true,"wholeWord":false,"includeInternal":false});
+        let request = json!({"sessionId":session,"through":through,"after":null,"query":"中😀","caseSensitive":true,"wholeWord":false,"includeInternal":false});
         let mut input = request.clone();
         let mut matches = Vec::new();
         let mut empty_continuation = false;
@@ -135,29 +135,29 @@ async fn history_search_preserves_empty_batches_and_exact_cursors_with_original_
             let found = page["matches"].as_array().unwrap();
             assert!(found.len() <= 16);
             for item in found {
-                assert!(item["cursor"]["sequence"].as_u64().unwrap() > input["after"].as_u64().unwrap());
+                assert!(input["after"].is_null() || serde_json::from_value::<maka_agent_ports::session::history::RowPosition>(item["cursor"]["position"].clone()).unwrap() > serde_json::from_value(input["after"].clone()).unwrap());
                 assert_eq!(item["cursor"]["offset"], 0);
                 let preview = item["preview"].as_str().unwrap();
                 assert!(preview.len() <= 384 && preview.contains("中😀"));
                 matches.push(item.clone());
             }
-            let Some(after) = page["nextAfter"].as_u64() else { ended = true; break; };
+            let Some(after) = serde_json::from_value::<Option<maka_agent_ports::session::history::RowPosition>>(page["nextAfter"].clone()).unwrap() else { ended = true; break; };
             empty_continuation |= found.is_empty();
-            assert!(after > input["after"].as_u64().unwrap());
-            assert!(after <= maka_presentation::watermark(through).unwrap());
+            assert!(input["after"].is_null() || after > serde_json::from_value(input["after"].clone()).unwrap());
+            assert!(after.source_sequence <= through);
             input["after"] = json!(after);
         }
         assert!(preparing && empty_continuation && ended);
         assert_eq!(matches.len(), 40);
-        assert!(matches.windows(2).all(|pair| pair[0]["cursor"]["sequence"].as_u64() < pair[1]["cursor"]["sequence"].as_u64()));
+        assert!(matches.windows(2).all(|pair| serde_json::from_value::<maka_agent_ports::session::history::RowPosition>(pair[0]["cursor"]["position"].clone()).unwrap() < serde_json::from_value(pair[1]["cursor"]["position"].clone()).unwrap()));
         let located = fixture.query("history", json!({"sessionId":session,"through":through,
             "position":{"kind":"after","cursor":matches[17]["cursor"]}})).await.unwrap();
-        assert_eq!(located["chunks"][0]["sequence"], matches[17]["cursor"]["sequence"]);
+        assert_eq!(located["chunks"][0]["position"], matches[17]["cursor"]["position"]);
         assert!(located["chunks"][0]["text"].as_str().unwrap().starts_with("中😀 match 89 "));
         for (key, value) in [
             ("sessionId", json!("foreign_session")),
             ("through", json!(through + 1)),
-            ("after", json!(maka_presentation::watermark(through).unwrap() + 1)),
+            ("after", json!({"sourceSequence":through + 1,"itemIndex":0})),
             ("query", json!("")),
             ("query", json!("界".repeat(171))),
         ] {
@@ -237,21 +237,21 @@ async fn search_hits_read_the_exact_field_when_history_body_is_absent_or_differe
         ] {
             let mut hit = None;
             for _ in 0..8 {
-                let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":0,"query":query,"caseSensitive":!matches!(field, "thinking" | "result"),"wholeWord":false,"includeInternal":false})).await.unwrap();
+                let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":null,"query":query,"caseSensitive":!matches!(field, "thinking" | "result"),"wholeWord":false,"includeInternal":false})).await.unwrap();
                 if page["kind"] == "preparing" { continue; }
                 assert_eq!(page["matches"].as_array().unwrap().len(), 1, "{query}");
                 hit = Some(page["matches"][0].clone()); break;
             }
             let hit = hit.unwrap();
             assert_eq!(hit["field"], field);
-            let sequence = hit["cursor"]["sequence"].as_u64().unwrap();
+            let sequence = hit["cursor"]["position"].clone();
             for reverse in [false, true] {
                 let mut position = json!({"kind":if reverse {"tail"} else {"start"}});
                 let mut text = String::new();
                 let mut finished = false;
                 for _ in 0..16 {
                     let page = fixture.query("source", json!({"sessionId":session,"through":through,
-                        "source":{"kind":"sequence","sequence":sequence},"field":field,"position":position})).await.unwrap();
+                        "source":{"kind":"row","position":sequence},"field":field,"position":position})).await.unwrap();
                     assert_eq!(page["kind"], "ready");
                     assert_eq!(page["through"], through);
                     let source = &page["source"];
@@ -270,15 +270,15 @@ async fn search_hits_read_the_exact_field_when_history_body_is_absent_or_differe
                     if !reverse && source["offset"] == 0 {
                         for other in fields.as_array().unwrap() {
                             let related = fixture.query("source", json!({"sessionId":session,"through":through,
-                                "source":{"kind":"sequence","sequence":sequence},"field":other,"position":{"kind":"start"}})).await.unwrap();
-                            assert_eq!(related["source"]["sequence"], sequence);
+                                "source":{"kind":"row","position":sequence},"field":other,"position":{"kind":"start"}})).await.unwrap();
+                            assert_eq!(related["source"]["position"], sequence);
                             assert_eq!(related["source"]["role"], role);
                             assert_eq!(related["source"]["fields"], fields);
                             assert_eq!(related["source"]["timestamp"], source["timestamp"]);
                             if query == "THINKING-HIT 中" && other == "body" { assert_eq!(related["source"]["text"], ""); }
                         }
                     }
-                    assert_eq!(source["sequence"], sequence);
+                    assert_eq!(source["position"], sequence);
                     assert_eq!(source["field"], field);
                     assert_eq!(source["totalBytes"], expected.len());
                     assert_eq!(source["tool"].is_object(), is_tool);
@@ -294,36 +294,36 @@ async fn search_hits_read_the_exact_field_when_history_body_is_absent_or_differe
             }
             if is_tool {
                 let body = fixture.query("source", json!({"sessionId":session,"through":through,
-                    "source":{"kind":"sequence","sequence":sequence},"field":"body","position":{"kind":"start"}})).await.unwrap();
+                    "source":{"kind":"row","position":sequence},"field":"body","position":{"kind":"start"}})).await.unwrap();
                 let page = fixture.query("history", json!({"sessionId":session,"through":through,
                     "position":{"kind":"after","cursor":hit["cursor"]}})).await.unwrap();
                 assert_eq!(body["source"]["field"], "body");
                 assert_eq!(body["source"]["format"], "text");
-                assert_eq!(body["source"]["sequence"], sequence);
+                assert_eq!(body["source"]["position"], sequence);
                 if body["source"]["totalBytes"] == 0 {
                     assert_eq!(body["source"]["text"], "");
-                    assert_eq!(body["source"]["tool"]["call"]["sequence"], body["source"]["sequence"]);
+                    assert_eq!(body["source"]["tool"]["call"]["position"], body["source"]["position"]);
                     assert_eq!(body["source"]["tool"]["call"]["name"], "tool-name-hit");
                     // A zero offset is already the end of an empty projected body.
                     // Exact source must retain the row even when history advances.
-                    assert_ne!(page["chunks"][0]["sequence"], sequence);
+                    assert_ne!(page["chunks"][0]["position"], sequence);
                 } else {
                     assert!(page["chunks"][0]["text"].as_str().unwrap().starts_with(body["source"]["text"].as_str().unwrap()), "history and source have independent page sizes but the same text prefix");
-                    for field in ["sequence", "timestamp", "offset", "totalBytes", "tool"] {
+                    for field in ["position", "timestamp", "offset", "totalBytes", "tool"] {
                         assert_eq!(body["source"][field], page["chunks"][0][field], "tool body {field}");
                     }
                 }
             }
             if query == "THINKING-HIT 中" {
                 let page = fixture.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"after","cursor":hit["cursor"]}})).await.unwrap();
-                assert_ne!(page["chunks"][0]["sequence"], sequence, "body projection must not be mistaken for the search source");
+                assert_ne!(page["chunks"][0]["position"], sequence, "body projection must not be mistaken for the search source");
                 for (key, value) in [("sessionId", json!("foreign")), ("through", json!(0)), ("field", json!("arguments"))] {
-                    let mut input = json!({"sessionId":session,"through":through,"source":{"kind":"sequence","sequence":sequence},"field":field,"position":{"kind":"start"}});
+                    let mut input = json!({"sessionId":session,"through":through,"source":{"kind":"row","position":sequence},"field":field,"position":{"kind":"start"}});
                     input[key] = value;
                     assert!(fixture.query("source", input).await.is_err(), "{key}");
                 }
                 let denied = fixture.app.client().start(fixture.binding(2).await, "source".into(),
-                    json!({"sessionId":session,"through":through,"source":{"kind":"sequence","sequence":sequence},"field":field,"position":{"kind":"start"}}),
+                    json!({"sessionId":session,"through":through,"source":{"kind":"row","position":sequence},"field":field,"position":{"kind":"start"}}),
                     scope(&fixture.issuer, false), Attachments::new().into()).await;
                 assert!(denied.is_err());
             }
@@ -394,17 +394,17 @@ async fn reading_prompt_is_indexed_fenced_and_keeps_original_session_authority()
             break page;
         }
     };
-    let first_user = first["chunks"][0]["sequence"].as_u64().unwrap();
-    let answer = first["chunks"][1]["sequence"].as_u64().unwrap();
+    let first_user = first["chunks"][0]["position"].clone();
+    let answer = first["chunks"][1]["position"].clone();
     assert_eq!(
         fixture
             .query(
                 "historyPrompt",
-                json!({"sessionId":session,"through":through,"sequence":answer})
+                json!({"sessionId":session,"through":through,"position":answer})
             )
             .await
             .unwrap(),
-        json!({"source":first_user,"text":"First question"})
+        json!({"position":first_user,"text":"First question"})
     );
     let last = fixture.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
     let last_user = last["chunks"]
@@ -413,24 +413,23 @@ async fn reading_prompt_is_indexed_fenced_and_keeps_original_session_authority()
         .iter()
         .rev()
         .find(|chunk| chunk["role"] == "user")
-        .unwrap()["sequence"]
-        .as_u64()
-        .unwrap();
+        .unwrap()["position"]
+        .clone();
     assert_eq!(
         fixture
             .query(
                 "historyPrompt",
-                json!({"sessionId":session,"through":through,"sequence":last_user})
+                json!({"sessionId":session,"through":through,"position":last_user})
             )
             .await
             .unwrap(),
-        json!({"source":last_user,"text":"?"})
+        json!({"position":last_user,"text":"?"})
     );
     assert!(
         fixture
             .query(
                 "historyPrompt",
-                json!({"sessionId":session,"through":first_user / 256,"sequence":last_user})
+                json!({"sessionId":session,"through":first_user["sourceSequence"],"position":last_user})
             )
             .await
             .is_err()
@@ -439,7 +438,7 @@ async fn reading_prompt_is_indexed_fenced_and_keeps_original_session_authority()
         fixture
             .query(
                 "historyPrompt",
-                json!({"sessionId":"foreign-session","through":through,"sequence":answer})
+                json!({"sessionId":"foreign-session","through":through,"position":answer})
             )
             .await
             .is_err()

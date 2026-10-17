@@ -534,7 +534,10 @@ mod tests {
                         timestamp: 1,
                         timing: None,
                         role: history::Role::Assistant,
-                        sequence: if second { 7 } else { 1 },
+                        position: history::RowPosition {
+                            source_sequence: if second { 7 } else { 1 },
+                            item_index: 0,
+                        },
                         offset: 0,
                         total_bytes: text.len() as u64,
                         text,
@@ -545,7 +548,10 @@ mod tests {
                     after: (!second || self.endless.load(Ordering::SeqCst)).then_some(
                         history::Cursor {
                             field: Default::default(),
-                            sequence: 2,
+                            position: history::RowPosition {
+                                source_sequence: 2,
+                                item_index: 0,
+                            },
                             offset: 0,
                         },
                     ),

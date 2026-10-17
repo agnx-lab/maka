@@ -12925,7 +12925,7 @@ export const contracts = {
             $defs: {
               HistoryPosition: {
                 description:
-                  'Cursor sequence addresses a sparse transcript row; Event addresses the raw\nevent log. Before excludes its end and After includes its start. Returned\nchunks always retain ascending source order, including a reverse window.',
+                  'Cursor position addresses a transcript row; Event addresses the raw\nevent log. Before excludes its end and After includes its start. Returned\nchunks always retain ascending source order, including a reverse window.',
                 oneOf: [
                   {
                     type: 'object',
@@ -13007,11 +13007,8 @@ export const contracts = {
                     $ref: '#/$defs/HistoryField',
                     default: 'body',
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   offset: {
                     type: 'integer',
@@ -13021,12 +13018,33 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['sequence', 'offset'],
+                required: ['position', 'offset'],
               },
               HistoryField: {
                 description: 'A readable field in a conversation window, in presentation order.',
                 type: 'string',
                 enum: ['thinking', 'body'],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
               HistoryView: {
                 description:
@@ -13169,10 +13187,8 @@ export const contracts = {
                   role: {
                     $ref: '#/$defs/Role',
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   offset: {
                     type: 'integer',
@@ -13205,7 +13221,7 @@ export const contracts = {
                   'turnId',
                   'timestamp',
                   'role',
-                  'sequence',
+                  'position',
                   'offset',
                   'totalBytes',
                   'text',
@@ -13378,6 +13394,27 @@ export const contracts = {
                 type: 'string',
                 enum: ['compaction', 'failure', 'user', 'assistant', 'tool_call', 'tool_result'],
               },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
               HistoryTool: {
                 description:
                   'Canonical references at the requested fence, never execution authority.\nBoth references are present only for a unique same-Turn call/result pair\nwith matching origin and parentage. An unpaired row retains its own reference.',
@@ -13428,11 +13465,8 @@ export const contracts = {
                     type: ['string', 'null'],
                     default: null,
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   name: {
                     type: 'string',
@@ -13461,7 +13495,7 @@ export const contracts = {
                 additionalProperties: false,
                 required: [
                   'ancestorToolUseIds',
-                  'sequence',
+                  'position',
                   'name',
                   'title',
                   'pending',
@@ -13500,11 +13534,8 @@ export const contracts = {
                       },
                     ],
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   isError: {
                     description: 'Does not distinguish failed from unknown effects.',
@@ -13517,7 +13548,7 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['settlement', 'sequence', 'isError', 'image'],
+                required: ['settlement', 'position', 'isError', 'image'],
               },
               ToolSettlement: {
                 description:
@@ -13534,11 +13565,8 @@ export const contracts = {
                     $ref: '#/$defs/HistoryField',
                     default: 'body',
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   offset: {
                     type: 'integer',
@@ -13548,7 +13576,7 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['sequence', 'offset'],
+                required: ['position', 'offset'],
               },
             },
           },
@@ -13572,15 +13600,35 @@ export const contracts = {
                 minimum: 1,
                 maximum: 9007199254740991,
               },
-              sequence: {
-                type: 'integer',
-                format: 'uint64',
-                minimum: 1,
-                maximum: 9007199254740991,
+              position: {
+                $ref: '#/$defs/HistoryRowPosition',
               },
             },
             additionalProperties: false,
-            required: ['sessionId', 'through', 'sequence'],
+            required: ['sessionId', 'through', 'position'],
+            $defs: {
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
           },
           output: {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -13599,11 +13647,8 @@ export const contracts = {
                   'A bounded presentation preview; the original message remains in history.',
                 type: 'object',
                 properties: {
-                  source: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   text: {
                     type: 'string',
@@ -13611,7 +13656,28 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['source', 'text'],
+                required: ['position', 'text'],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
             },
           },
@@ -20312,10 +20378,8 @@ export const contracts = {
                   anchorMessageId: {
                     type: 'string',
                   },
-                  anchorSequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
+                  anchorPosition: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   excerpt: {
                     type: 'string',
@@ -20331,10 +20395,31 @@ export const contracts = {
                 required: [
                   'session',
                   'anchorMessageId',
-                  'anchorSequence',
+                  'anchorPosition',
                   'excerpt',
                   'matchedTerms',
                 ],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
             },
           },
@@ -23314,12 +23399,15 @@ export const contracts = {
                 maximum: 9007199254740991,
               },
               after: {
-                description:
-                  'Exclusive transcript-row sequence returned by the previous batch; zero starts a scan.',
-                type: 'integer',
-                format: 'uint64',
-                minimum: 0,
-                maximum: 9007199254740991,
+                description: 'Exclusive transcript-row position; null starts a scan.',
+                anyOf: [
+                  {
+                    $ref: '#/$defs/HistoryRowPosition',
+                  },
+                  {
+                    type: 'null',
+                  },
+                ],
               },
               query: {
                 description:
@@ -23346,12 +23434,34 @@ export const contracts = {
             required: [
               'sessionId',
               'through',
-              'after',
               'query',
               'caseSensitive',
               'wholeWord',
               'includeInternal',
             ],
+            $defs: {
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
           },
           output: {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -23391,9 +23501,14 @@ export const contracts = {
                   nextAfter: {
                     description:
                       'Continue even when this batch has no matches. Null is the end of the scan.',
-                    type: ['integer', 'null'],
-                    format: 'uint64',
-                    minimum: 0,
+                    anyOf: [
+                      {
+                        $ref: '#/$defs/HistoryRowPosition',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
                   },
                   kind: {
                     type: 'string',
@@ -23459,11 +23574,8 @@ export const contracts = {
                     $ref: '#/$defs/HistoryField',
                     default: 'body',
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   offset: {
                     type: 'integer',
@@ -23473,12 +23585,33 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['sequence', 'offset'],
+                required: ['position', 'offset'],
               },
               HistoryField: {
                 description: 'A readable field in a conversation window, in presentation order.',
                 type: 'string',
                 enum: ['thinking', 'body'],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
             },
           },
@@ -24667,19 +24800,16 @@ export const contracts = {
                   {
                     type: 'object',
                     properties: {
-                      sequence: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 1,
-                        maximum: 9007199254740991,
+                      position: {
+                        $ref: '#/$defs/HistoryRowPosition',
                       },
                       kind: {
                         type: 'string',
-                        const: 'sequence',
+                        const: 'row',
                       },
                     },
                     additionalProperties: false,
-                    required: ['kind', 'sequence'],
+                    required: ['kind', 'position'],
                   },
                   {
                     type: 'object',
@@ -24698,6 +24828,27 @@ export const contracts = {
                     required: ['kind', 'toolUseId'],
                   },
                 ],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
               SourceField: {
                 description:
@@ -24872,11 +25023,8 @@ export const contracts = {
                       },
                     ],
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   timestamp: {
                     description:
@@ -24942,7 +25090,7 @@ export const contracts = {
                 },
                 additionalProperties: false,
                 required: [
-                  'sequence',
+                  'position',
                   'timestamp',
                   'role',
                   'fields',
@@ -25023,6 +25171,27 @@ export const contracts = {
                     required: ['kind', 'graphId'],
                   },
                 ],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
               },
               HistorySourceRole: {
                 description:
@@ -25123,11 +25292,8 @@ export const contracts = {
                     type: ['string', 'null'],
                     default: null,
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   name: {
                     type: 'string',
@@ -25156,7 +25322,7 @@ export const contracts = {
                 additionalProperties: false,
                 required: [
                   'ancestorToolUseIds',
-                  'sequence',
+                  'position',
                   'name',
                   'title',
                   'pending',
@@ -25195,11 +25361,8 @@ export const contracts = {
                       },
                     ],
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   isError: {
                     description: 'Does not distinguish failed from unknown effects.',
@@ -25212,7 +25375,7 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['settlement', 'sequence', 'isError', 'image'],
+                required: ['settlement', 'position', 'isError', 'image'],
               },
               ToolSettlement: {
                 description:
@@ -25277,11 +25440,8 @@ export const contracts = {
                 minimum: 0,
                 maximum: 9007199254740991,
               },
-              sequence: {
-                type: 'integer',
-                format: 'uint64',
-                minimum: 1,
-                maximum: 9007199254740991,
+              position: {
+                $ref: '#/$defs/HistoryRowPosition',
               },
               offset: {
                 type: 'integer',
@@ -25291,7 +25451,30 @@ export const contracts = {
               },
             },
             additionalProperties: false,
-            required: ['sessionId', 'through', 'sequence', 'offset'],
+            required: ['sessionId', 'through', 'position', 'offset'],
+            $defs: {
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
           },
           output: {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -25321,10 +25504,8 @@ export const contracts = {
                     format: 'uint64',
                     minimum: 0,
                   },
-                  sequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   offset: {
                     type: 'integer',
@@ -25360,7 +25541,7 @@ export const contracts = {
                 required: [
                   'kind',
                   'through',
-                  'sequence',
+                  'position',
                   'offset',
                   'totalBytes',
                   'mimeType',
@@ -25369,6 +25550,29 @@ export const contracts = {
                 ],
               },
             ],
+            $defs: {
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
           },
           resources: {},
         },

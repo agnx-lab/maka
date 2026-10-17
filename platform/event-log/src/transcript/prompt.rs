@@ -17,16 +17,17 @@
  * under the License.
  */
 
-use crate::{EventLog, StoreError, sequence_number};
+use crate::{EventLog, StoreError};
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Prompt;
 use sqlx::{Connection, Row};
 
-const QUERY: &str = "SELECT sequence,
+const QUERY: &str = "SELECT source_sequence, item_index,
     COALESCE(navigation_preview(COALESCE(json_extract(payload, '$.displayText'),
         json_extract(payload, '$.text'), ''), 4096), '[attachments]')
     FROM transcript_rows
-    WHERE session_id = ?1 AND sequence <= ?2 AND json_extract(payload, '$.type') = 'user'
-    ORDER BY sequence DESC LIMIT 1";
+    WHERE session_id = ?1 AND (source_sequence, item_index) <= (?2, ?3) AND json_extract(payload, '$.type') = 'user'
+    ORDER BY source_sequence DESC, item_index DESC LIMIT 1";
 
 impl EventLog {
     /// Inclusive reading anchor, fenced to an already prepared transcript.
@@ -35,32 +36,36 @@ impl EventLog {
         &self,
         session: &str,
         through: u64,
-        sequence: u64,
+        position: RowPosition,
     ) -> Result<Option<Prompt>, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        let fence = maka_presentation::watermark(through)?;
-        if sequence == 0 || sequence > fence {
+        super::read::sql_number(through)?;
+        if position.source_sequence > through {
             return Err(StoreError::InvalidTransition(
                 "prompt anchor exceeds history fence".into(),
             ));
         }
-        let sequence = super::read::sql_number(sequence)?;
+        let (source_sequence, item_index) = super::read::sql_position(position)?;
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    super::read::prepared(&mut tx, &session, fence).await?;
+                    super::read::prepared(&mut tx, &session, through).await?;
                     sqlx::query(QUERY)
                         .bind(session)
-                        .bind(sequence)
+                        .bind(source_sequence)
+                        .bind(item_index)
                         .fetch_optional(&mut *tx)
                         .await?
                         .map(|row| {
                             Ok(Prompt {
-                                source: sequence_number(row.try_get(0)?)?,
-                                text: row.try_get(1)?,
+                                position: super::read::row_position(
+                                    row.try_get(0)?,
+                                    row.try_get(1)?,
+                                )?,
+                                text: row.try_get(2)?,
                             })
                         })
                         .transpose()
@@ -79,13 +84,10 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         super::super::navigation::register(&db).unwrap();
         db.execute_batch(
-            "CREATE TABLE transcript_rows(session_id TEXT, sequence INTEGER, payload BLOB);",
+            "CREATE TABLE transcript_rows(session_id TEXT, source_sequence INTEGER, item_index INTEGER, payload BLOB);",
         )
         .unwrap();
-        db.execute_batch(include_str!(
-            "../../migrations/0018_transcript_user_prompt.sql"
-        ))
-        .unwrap();
+        db.execute_batch("CREATE INDEX transcript_user_prompt ON transcript_rows (session_id, source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'user';").unwrap();
         for (session, sequence, payload) in [
             (
                 "a",
@@ -105,7 +107,7 @@ mod tests {
             ("a", 4, serde_json::json!({"type":"user","text":"?"})),
         ] {
             db.execute(
-                "INSERT INTO transcript_rows VALUES(?1,?2,?3)",
+                "INSERT INTO transcript_rows VALUES(?1,?2,0,?3)",
                 params![session, sequence, serde_json::to_vec(&payload).unwrap()],
             )
             .unwrap();
@@ -113,7 +115,7 @@ mod tests {
         let plan: String = db
             .prepare(&format!("EXPLAIN QUERY PLAN {QUERY}"))
             .unwrap()
-            .query_map(params!["a", 3], |row| row.get::<_, String>(3))
+            .query_map(params!["a", 3, 0], |row| row.get::<_, String>(3))
             .unwrap()
             .map(Result::unwrap)
             .collect::<Vec<_>>()
@@ -123,12 +125,30 @@ mod tests {
             "{plan}"
         );
         for (anchor, expected) in [(3, (1, "First question")), (4, (4, "?"))] {
-            let actual: (i64, String) = db
-                .query_row(QUERY, params!["a", anchor], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
+            let actual: (i64, i64, String) = db
+                .query_row(QUERY, params!["a", anchor, 0], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
                 })
                 .unwrap();
-            assert_eq!(actual, (expected.0, expected.1.into()));
+            assert_eq!(actual, (expected.0, 0, expected.1.into()));
+        }
+        db.execute(
+            "INSERT INTO transcript_rows VALUES('a',4,300,?1)",
+            params![
+                serde_json::to_vec(&serde_json::json!({"type":"user","text":"Later within fact"}))
+                    .unwrap()
+            ],
+        )
+        .unwrap();
+        for (index, expected_index, expected_text) in
+            [(299, 0, "?"), (300, 300, "Later within fact")]
+        {
+            let actual: (i64, i64, String) = db
+                .query_row(QUERY, params!["a", 4, index], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .unwrap();
+            assert_eq!(actual, (4, expected_index, expected_text.into()));
         }
     }
 }

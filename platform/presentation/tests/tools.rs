@@ -202,7 +202,7 @@ fn accepted_tools_replay_with_distinct_ids_parentage_rejections() {
     }
     assert!(
         rows.windows(2)
-            .all(|pair| pair[0].sequence < pair[1].sequence)
+            .all(|pair| pair[0].position < pair[1].position)
     );
     let messages: Vec<Value> = rows
         .iter()

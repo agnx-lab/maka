@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { comparePosition, type RowPosition } from '../../shared/history-position.js';
 import { compactComponent } from './compact.js';
 import type {
   Action,
@@ -342,7 +343,7 @@ export function handleComponent<N extends Node>(
       !mutationPending(state) &&
       !catalogPending(state)
     ) {
-      const selected = input.event as { session: AgentSession; anchor: number | null };
+      const selected = input.event as { session: AgentSession; anchor: RowPosition | null };
       select(state, actions, selected.session);
       state.recallAnchor = selected.anchor;
       state.pages = [];
@@ -683,15 +684,15 @@ export function handleComponent<N extends Node>(
     state.window &&
     !state.loading
   ) {
-    const sequence = (input.event as { sequence: number }).sequence;
+    const position = (input.event as { position: RowPosition }).position;
     const chunk = state.window.page.chunks.find(
-      (c) => c.sequence === sequence && c.tool?.result?.image,
+      (c) => comparePosition(c.position, position) === 0 && c.tool?.result?.image,
     );
     if (chunk)
       state.image = {
         sessionId: state.selected.id,
         through: state.window.page.through,
-        sequence: chunk.tool!.result!.sequence,
+        position: chunk.tool!.result!.position,
       };
   } else if (input.child === readingKey(state) && state.source) {
     const source = state.source;
@@ -738,14 +739,14 @@ export function handleComponent<N extends Node>(
     ) {
       const event = input.event as {
         sessionId: string;
-        sequence: number;
+        position: RowPosition;
         field: 'body' | 'thinking';
       };
       const chunk =
         event.sessionId === state.selected.id &&
         page.chunks.find(
           (chunk) =>
-            chunk.sequence === event.sequence &&
+            comparePosition(chunk.position, event.position) === 0 &&
             (chunk.field ?? 'body') === event.field &&
             (chunk.role === 'user' || chunk.role === 'assistant'),
         );
@@ -762,18 +763,23 @@ export function handleComponent<N extends Node>(
           },
         );
     } else if (input.name === 'prompt') {
-      const sequence = (input.event as { sequence: number }).sequence;
+      const position = (input.event as { position: RowPosition }).position;
       const visit = state.visits.find((entry) => entry.id === state.selected?.id);
       const prompt = visit?.prompt;
       if (
-        page.chunks.some((chunk) => chunk.sequence === sequence && chunk.role === 'user') ||
-        (prompt?.anchor === promptAnchor(page) && prompt.value?.source === sequence)
+        page.chunks.some(
+          (chunk) => comparePosition(chunk.position, position) === 0 && chunk.role === 'user',
+        ) ||
+        (prompt?.anchor === promptAnchor(page) &&
+          prompt.value !== null &&
+          prompt.value !== undefined &&
+          comparePosition(prompt.value.position, position) === 0)
       ) {
         if (visit) visit.following = false;
         history(
           state,
           actions,
-          { kind: 'after', cursor: { sequence, offset: 0, field: 'body' } },
+          { kind: 'after', cursor: { position, offset: 0, field: 'body' } },
           page.through,
           false,
         );
@@ -781,14 +787,14 @@ export function handleComponent<N extends Node>(
     } else if (input.name === 'source') {
       const chunk = page.chunks.find(
         (chunk) =>
-          chunk.sequence === (input.event as { sequence: number }).sequence &&
-          (chunk.field ?? 'body') === ((input.event as { field?: string }).field ?? 'body'),
+          comparePosition(chunk.position, (input.event as { position: RowPosition }).position) ===
+            0 && (chunk.field ?? 'body') === ((input.event as { field?: string }).field ?? 'body'),
       );
       if (chunk)
         state.source = {
           through: page.through,
           chunk: {
-            sequence: chunk.sequence,
+            position: chunk.position,
             offset: chunk.offset,
             totalBytes: chunk.totalBytes,
             text: chunk.text,
@@ -804,8 +810,10 @@ export function handleComponent<N extends Node>(
           position: { kind: 'after', offset: chunk.offset },
         };
     } else if (input.name === 'toolSource') {
-      const event = input.event as { sequence: number; field: 'arguments' | 'result' };
-      const chunk = page.chunks.find((chunk) => chunk.sequence === event.sequence);
+      const event = input.event as { position: RowPosition; field: 'arguments' | 'result' };
+      const chunk = page.chunks.find(
+        (chunk) => comparePosition(chunk.position, event.position) === 0,
+      );
       const reference =
         event.field === 'arguments'
           ? chunk?.tool?.call
@@ -815,7 +823,7 @@ export function handleComponent<N extends Node>(
       if (reference) {
         state.source = {
           through: page.through,
-          chunk: { sequence: reference.sequence, offset: 0, totalBytes: 0, text: '' },
+          chunk: { position: reference.position, offset: 0, totalBytes: 0, text: '' },
           navigation: state.navigation,
           landing: { sequence: state.navigation, edge: 'start' },
           loading: false,

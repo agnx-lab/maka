@@ -18,28 +18,32 @@
  */
 
 import type { Message } from './contracts.js';
+import { comparePosition, type RowPosition } from './history-position.js';
 import { sameValue } from './value.js';
 
 /** Merge only reciprocal Host references, retaining both native source bodies.
  * A counterpart outside this bounded window remains accessible by its reference.
  */
+function key(position: RowPosition | null): string {
+  return position ? `${position.sourceSequence}:${position.itemIndex}` : '';
+}
 export function toolCards(
   messages: readonly Message[],
 ): { message: Message; result: Message | null; depth: number }[] {
-  const bySequence = new Map<number, Message[]>();
+  const bySequence = new Map<string, Message[]>();
   for (const message of messages) {
     if (message.source !== null && message.tool) {
-      const rows = bySequence.get(message.source) ?? [];
+      const rows = bySequence.get(key(message.source)) ?? [];
       rows.push(message);
-      bySequence.set(message.source, rows);
+      bySequence.set(key(message.source), rows);
     }
   }
-  const resultsByCall = new Map<number, Set<number>>();
+  const resultsByCall = new Map<string, Set<string>>();
   for (const message of messages) {
     if (message.role === 'tool_result' && message.source !== null && message.tool?.call) {
-      const sequences = resultsByCall.get(message.tool.call.sequence) ?? new Set<number>();
-      sequences.add(message.source);
-      resultsByCall.set(message.tool.call.sequence, sequences);
+      const sequences = resultsByCall.get(key(message.tool.call.position)) ?? new Set<string>();
+      sequences.add(key(message.source));
+      resultsByCall.set(key(message.tool.call.position), sequences);
     }
   }
   const paired = new Map<Message, Message>();
@@ -48,23 +52,25 @@ export function toolCards(
     const metadata = call.tool;
     if (
       call.role !== 'tool_call' ||
-      (resultsByCall.get(call.source!)?.size ?? 0) > 1 ||
+      (resultsByCall.get(key(call.source!))?.size ?? 0) > 1 ||
       !metadata?.call ||
       !metadata.result ||
-      metadata.call.sequence !== call.source ||
-      bySequence.get(call.source)?.length !== 1
+      !sameValue(metadata.call.position, call.source) ||
+      bySequence.get(key(call.source))?.length !== 1
     )
       continue;
-    const candidates = bySequence.get(metadata.result.sequence);
+    const candidates = bySequence.get(key(metadata.result.position));
     if (candidates?.length !== 1) continue;
     const result = candidates[0]!;
     if (
       result.role !== 'tool_result' ||
-      result.source! <= call.source ||
+      !result.tool?.result ||
+      !result.tool?.call ||
+      comparePosition(result.source!, call.source!) <= 0 ||
       result.tool?.toolUseId !== metadata.toolUseId ||
-      result.tool.call?.sequence !== call.source ||
+      !sameValue(result.tool.call?.position, call.source) ||
       !sameValue(result.tool.call, metadata.call) ||
-      result.tool.result?.sequence !== result.source ||
+      !sameValue(result.tool.result?.position, result.source) ||
       result.tool.result.isError !== metadata.result.isError ||
       result.tool.result.image !== metadata.result.image ||
       result.tool.result.settlement !== metadata.result.settlement
@@ -78,10 +84,10 @@ export function toolCards(
     .map((message) => ({
       message:
         message.tool?.call &&
-        bySequence.get(message.source!)?.length === 1 &&
+        bySequence.get(key(message.source!))?.length === 1 &&
         (message.role === 'tool_call' ||
-          (!bySequence.has(message.tool.call.sequence) &&
-            (resultsByCall.get(message.tool.call.sequence)?.size ?? 0) === 1))
+          (!bySequence.has(key(message.tool.call.position)) &&
+            (resultsByCall.get(key(message.tool.call.position))?.size ?? 0) === 1))
           ? { ...message, id: message.tool.toolUseId }
           : message,
       result: paired.get(message) ?? null,
@@ -89,15 +95,15 @@ export function toolCards(
     }));
   // Only visible, unambiguous earlier calls establish indentation. A parent
   // outside this bounded window does not invent an empty ancestor row.
-  const parents = new Map<string, { sequence: number; depth: number }>();
+  const parents = new Map<string, { position: RowPosition; depth: number }>();
   for (const row of rows) {
     const tool = row.message.tool;
     if (!tool?.call || row.message.id !== tool.toolUseId) continue;
     const parent = tool.call.ancestorToolUseIds
       .map((id) => parents.get(id))
-      .find((parent) => parent && parent.sequence < tool.call!.sequence);
+      .find((parent) => parent && comparePosition(parent.position, tool.call!.position) < 0);
     row.depth = parent ? parent.depth + 1 : 0;
-    parents.set(tool.toolUseId, { sequence: tool.call.sequence, depth: row.depth });
+    parents.set(tool.toolUseId, { position: tool.call.position, depth: row.depth });
   }
   return rows;
 }

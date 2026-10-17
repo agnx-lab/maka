@@ -4565,7 +4565,7 @@ export type TitleFailureCause =
       kind: 'empty_output';
     };
 /**
- * Cursor sequence addresses a sparse transcript row; Event addresses the raw
+ * Cursor position addresses a transcript row; Event addresses the raw
  * event log. Before excludes its end and After includes its start. Returned
  * chunks always retain ascending source order, including a reverse window.
  */
@@ -4868,7 +4868,7 @@ export type AgentHistorySearchPage =
       /**
        * Continue even when this batch has no matches. Null is the end of the scan.
        */
-      nextAfter: number | null;
+      nextAfter: HistoryRowPosition | null;
       kind: 'ready';
     };
 /**
@@ -4879,8 +4879,8 @@ export type SourceField =
   | 'receipt';
 export type AgentHistorySourceReference =
   | {
-      sequence: number;
-      kind: 'sequence';
+      position: HistoryRowPosition;
+      kind: 'row';
     }
   | {
       toolUseId: string;
@@ -4948,7 +4948,7 @@ export type AgentToolImagePage =
     }
   | {
       through: number;
-      sequence: number;
+      position: HistoryRowPosition;
       offset: number;
       totalBytes: number;
       mimeType: string;
@@ -9266,9 +9266,17 @@ export interface AgentRecallPage {
 export interface AgentRecallPassage {
   session: AgentSession;
   anchorMessageId: string;
-  anchorSequence: number;
+  anchorPosition: HistoryRowPosition;
   excerpt: string;
   matchedTerms: string[];
+}
+/**
+ * Disposable presentation locator, never authority or a canonical execution fact.
+ * The source is the original emitting fact; the index precedes UI filtering.
+ */
+export interface HistoryRowPosition {
+  sourceSequence: number;
+  itemIndex: number;
 }
 export interface AgentImportSourceRef {
   id: string;
@@ -10109,19 +10117,19 @@ export interface AgentHistoryRead {
  */
 export interface Cursor {
   field?: HistoryField & string;
-  sequence: number;
+  position: HistoryRowPosition;
   offset: number;
 }
 export interface AgentHistoryPromptRead {
   sessionId: string;
   through: number;
-  sequence: number;
+  position: HistoryRowPosition;
 }
 /**
  * A bounded presentation preview; the original message remains in history.
  */
 export interface AgentHistoryPrompt {
-  source: number;
+  position: HistoryRowPosition;
   text: string;
 }
 export interface AgentQueue {
@@ -10207,7 +10215,7 @@ export interface AgentHistoryChunk {
   turnId: string;
   timestamp: number;
   role: Role;
-  sequence: number;
+  position: HistoryRowPosition;
   offset: number;
   totalBytes: number;
   text: string;
@@ -10258,7 +10266,7 @@ export interface HistoryToolCall {
    * Opaque display contract captured at dispatch; no execution authority.
    */
   presentation?: string | null;
-  sequence: number;
+  position: HistoryRowPosition;
   name: string;
   title: DisplayText | null;
   /**
@@ -10272,7 +10280,7 @@ export interface HistoryToolCall {
 }
 export interface HistoryToolResult {
   settlement: ToolSettlement | null;
-  sequence: number;
+  position: HistoryRowPosition;
   /**
    * Does not distinguish failed from unknown effects.
    */
@@ -10289,9 +10297,9 @@ export interface AgentHistorySearch {
    */
   through: number;
   /**
-   * Exclusive transcript-row sequence returned by the previous batch; zero starts a scan.
+   * Exclusive transcript-row position; null starts a scan.
    */
-  after: number;
+  after?: HistoryRowPosition | null;
   /**
    * Literal query, additionally limited to 512 UTF-8 bytes; no normalization.
    */
@@ -10494,7 +10502,7 @@ export interface AgentHistorySourceRead {
 export interface HistorySource {
   model?: HistoryModel | null;
   origin?: MessageOrigin | null;
-  sequence: number;
+  position: HistoryRowPosition;
   /**
    * Host-recorded milliseconds of this immutable row; not a client clock.
    */
@@ -10686,7 +10694,7 @@ export interface HistorySource {
 export interface AgentToolImageRead {
   sessionId: string;
   through: number;
-  sequence: number;
+  position: HistoryRowPosition;
   offset: number;
 }
 /**

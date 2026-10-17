@@ -136,7 +136,7 @@ async fn executor_invocation_transcript() {
             }
             let transcript_prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
             let db = Connection::open(&path).unwrap();
-            let rows: Vec<Value> = db.prepare("SELECT CAST(payload AS TEXT) FROM transcript_rows WHERE session_id='a' ORDER BY sequence").unwrap()
+            let rows: Vec<Value> = db.prepare("SELECT CAST(payload AS TEXT) FROM transcript_rows WHERE session_id='a' ORDER BY source_sequence, item_index").unwrap()
                 .query_map([], |row| row.get::<_, String>(0)).unwrap()
                 .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();
             assert_eq!(rows, expected);

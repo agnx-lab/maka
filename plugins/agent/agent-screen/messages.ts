@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { comparePosition } from '../../shared/history-position.js';
 import type { Message, TimelineProps } from '../../shared/contracts.js';
 
 import { type DisplayPart, type State } from './state.js';
@@ -45,7 +46,7 @@ export function appendLive(
     const previous = visit.activity?.turnId === state.run.turnId ? visit.activity : null;
     visit.activity = {
       through: previous?.through ?? 0,
-      sequence,
+      position: null,
       turnId: state.run.turnId,
       message: {
         id,
@@ -150,7 +151,7 @@ function historyMessage(chunk: NonNullable<State['window']>['page']['chunks'][nu
     text: chunk.text,
     tool: chunk.tool,
     continued: chunk.offset !== 0 || utf8Bytes(chunk.text) !== chunk.totalBytes,
-    source: chunk.role === 'compaction' ? null : chunk.sequence,
+    source: chunk.role === 'compaction' ? null : chunk.position,
     image: chunk.tool?.result?.image ?? false,
   };
 }
@@ -251,13 +252,19 @@ export function rememberActivity(state: State, page: NonNullable<State['window']
   const chunk = page.chunks
     .filter((entry) => entry.turnId === turnId && entry.role !== 'user')
     .at(-1);
-  const sequence = chunk?.sequence ?? 0;
+  const position = chunk?.position ?? null;
   const message = chunk ? historyMessage(chunk) : null;
   visit.activity = {
     through: Math.max(page.through, previous?.through ?? 0),
-    sequence: Math.max(sequence, previous?.sequence ?? 0),
+    position:
+      previous?.position && (!position || comparePosition(previous.position, position) > 0)
+        ? previous.position
+        : position,
     turnId,
-    message: previous && previous.sequence > sequence ? previous.message : message,
+    message:
+      previous?.position && (!position || comparePosition(previous.position, position) > 0)
+        ? previous.message
+        : message,
   };
 }
 

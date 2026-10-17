@@ -947,7 +947,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
             input["through"] = json!(through);
             if page["kind"] == "preparing" { continue; }
             for chunk in page["chunks"].as_array().unwrap() {
-                assert!(chunk["sequence"].as_u64().unwrap() > maka_presentation::watermark(event_fence).unwrap());
+                assert!(chunk["position"]["sourceSequence"].as_u64().unwrap() > event_fence);
                 match chunk["role"].as_str().unwrap() {
                     "user" => newer_user.push_str(chunk["text"].as_str().unwrap()),
                     "assistant" => newer_assistant.push_str(chunk["text"].as_str().unwrap()),
@@ -960,7 +960,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
         assert!(finished);
         assert_eq!(newer_user, "Hello");
         assert_eq!(newer_assistant, "Later response");
-        let search = |through| json!({"sessionId":session,"through":through,"after":0,"query":"Later response","caseSensitive":true,"wholeWord":false,"includeInternal":false});
+        let search = |through| json!({"sessionId":session,"through":through,"after":null,"query":"Later response","caseSensitive":true,"wholeWord":false,"includeInternal":false});
         let original_search = fixture.query("search", search(event_fence)).await.unwrap();
         assert_eq!(original_search["matches"], json!([]));
         let current_search = fixture.query("search", search(newer_fence.unwrap())).await.unwrap();
@@ -996,7 +996,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
         assert!(reverse_done);
         assert_eq!(reverse_user, message);
         assert_eq!(reverse_assistant, reply);
-        assert!(fixture.query("history", json!({"sessionId":session,"position":{"kind":"after","cursor":{"sequence":0,"offset":0}}})).await.is_err());
+        assert!(fixture.query("history", json!({"sessionId":session,"position":{"kind":"after","cursor":{"position":{"sourceSequence":0,"itemIndex":0},"offset":0}}})).await.is_err());
         assert!(fixture.query("history", json!({"sessionId":"foreign_session","position":{"kind":"start"}})).await.is_err());
         server.await.unwrap();
         fixture.app.shutdown().await.unwrap();
@@ -1740,13 +1740,12 @@ async fn tool_source_uses_original_agent_grant_and_frozen_canonical_fields() {
         .unwrap()
         .iter()
         .find(|chunk| chunk["role"] == "tool_call")
-        .unwrap()["sequence"]
-        .as_u64()
-        .unwrap();
+        .unwrap()["position"]
+        .clone();
     let mut position = json!({"kind":"start"});
     let mut complete = String::new();
     loop {
-        let page = fixture.query("source", json!({"sessionId":session,"through":fence,"source":{"kind":"sequence","sequence":sequence},"field":"arguments","position":position})).await.unwrap();
+        let page = fixture.query("source", json!({"sessionId":session,"through":fence,"source":{"kind":"row","position":sequence},"field":"arguments","position":position})).await.unwrap();
         assert!(serde_json::to_vec(&page).unwrap().len() <= 64 * 1024);
         assert_eq!(page["kind"], "ready");
         assert_eq!(page["through"], fence);
@@ -1770,7 +1769,7 @@ async fn tool_source_uses_original_agent_grant_and_frozen_canonical_fields() {
             .query(
                 "source",
                 json!({"sessionId":session,"through":fence,
-            "source":{"kind":"sequence","sequence":sequence},"field":"arguments","path":["text"],
+            "source":{"kind":"row","position":sequence},"field":"arguments","path":["text"],
             "position":{"kind":"after","offset":offset}}),
             )
             .await
@@ -1786,7 +1785,7 @@ async fn tool_source_uses_original_agent_grant_and_frozen_canonical_fields() {
         }
     }
     assert_eq!(literal, input["text"].as_str().unwrap());
-    let request = json!({"sessionId":session,"through":fence,"source":{"kind":"sequence","sequence":sequence},"field":"arguments","path":["text"],"position":{"kind":"start"}});
+    let request = json!({"sessionId":session,"through":fence,"source":{"kind":"row","position":sequence},"field":"arguments","path":["text"],"position":{"kind":"start"}});
     for (key, value) in [
         ("sessionId", json!("foreign_session")),
         ("through", json!(fence + 1)),

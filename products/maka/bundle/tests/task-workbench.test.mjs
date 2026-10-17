@@ -50,7 +50,7 @@ const chunk = (sequence, text, extra = {}) => ({
   timestamp: 1,
   role: 'assistant',
   field: 'body',
-  sequence,
+  position: { sourceSequence: sequence, itemIndex: 0 },
   offset: 0,
   totalBytes: Buffer.byteLength(text),
   text,
@@ -186,7 +186,7 @@ test('an active turn retains compact history across pages without a tool or mess
       tool: {
         toolUseId: 'tool-' + sequence,
         call: {
-          sequence,
+          position: { sourceSequence: sequence, itemIndex: 0 },
           name: 'Read',
           title: null,
           presentation: null,
@@ -200,13 +200,19 @@ test('an active turn retains compact history across pages without a tool or mess
   });
   const c = client()
     .observe(40, { invocationId: 'run-a', turnId: 'turn-1', state: 'running' })
-    .history(page(40, calls.slice(32), { before: { sequence: 33, offset: 0, field: 'body' } }));
+    .history(
+      page(40, calls.slice(32), {
+        before: { position: { sourceSequence: 33, itemIndex: 0 }, offset: 0, field: 'body' },
+      }),
+    );
   const reader = c.reader();
   for (let start = 24; start >= 0; start -= 8) {
     c.child(reader, 'older').history(
       page(40, calls.slice(start, start + 8), {
-        before: start ? { sequence: start + 1, offset: 0, field: 'body' } : null,
-        after: { sequence: start + 9, offset: 0, field: 'body' },
+        before: start
+          ? { position: { sourceSequence: start + 1, itemIndex: 0 }, offset: 0, field: 'body' }
+          : null,
+        after: { position: { sourceSequence: start + 9, itemIndex: 0 }, offset: 0, field: 'body' },
       }),
     );
   }
@@ -253,7 +259,7 @@ test('switching tasks preserves the native reading owner, page, search basis and
   );
   assert.equal(c.find(first).props.latest, true);
   assert.equal(c.find('task-latest'), undefined);
-  c.child('timeline-noncurrent', 'source', { sequence: 10 });
+  c.child('timeline-noncurrent', 'source', { position: { sourceSequence: 10, itemIndex: 0 } });
   assert.equal(
     c.state.source,
     null,
@@ -340,10 +346,14 @@ test('failure arriving during the initial empty history read is not stranded beh
 test('a failure with no assistant reply traverses empty state pages and retains the failure timing', () => {
   const c = client()
     .observe(30)
-    .history(page(30, [], { before: { sequence: 25, offset: 0, field: 'body' } }));
+    .history(
+      page(30, [], {
+        before: { position: { sourceSequence: 25, itemIndex: 0 }, offset: 0, field: 'body' },
+      }),
+    );
   assert.deepEqual(c.action('history').input.position, {
     kind: 'before',
-    cursor: { sequence: 25, offset: 0, field: 'body' },
+    cursor: { position: { sourceSequence: 25, itemIndex: 0 }, offset: 0, field: 'body' },
   });
   assert.equal(c.action('history').input.through, 30);
   c.history(
@@ -355,7 +365,7 @@ test('a failure with no assistant reply traverses empty state pages and retains 
           timing: { startedAt: 1, finished: { at: 2, outcome: 'failed' } },
         }),
       ],
-      { after: { sequence: 25, offset: 0, field: 'body' } },
+      { after: { position: { sourceSequence: 25, itemIndex: 0 }, offset: 0, field: 'body' } },
     ),
   );
   assert.equal(c.state.window.latest, true);
@@ -477,7 +487,7 @@ test('output review opens original structured evidence and full output at the sa
   const tool = {
     toolUseId: 'write-1',
     call: {
-      sequence: 4,
+      position: { sourceSequence: 4, itemIndex: 0 },
       name: 'Write',
       title: null,
       presentation: 'maka.workspace.Files@1/write',
@@ -485,14 +495,23 @@ test('output review opens original structured evidence and full output at the sa
       ancestorToolUseIds: [],
       dispatched: true,
     },
-    result: { sequence: 8, settlement: 'returned', isError: false, image: false },
+    result: {
+      position: { sourceSequence: 4, itemIndex: 256 },
+      settlement: 'returned',
+      isError: false,
+      image: false,
+    },
   };
   const c = client()
     .observe(20)
     .history(
       page(20, [
         chunk(4, 'write arguments', { role: 'tool_call', tool }),
-        chunk(8, 'write result', { role: 'tool_result', tool }),
+        chunk(8, 'write result', {
+          role: 'tool_result',
+          position: { sourceSequence: 4, itemIndex: 256 },
+          tool,
+        }),
         chunk(10, 'Delivery description'),
       ]),
     );
@@ -505,11 +524,96 @@ test('output review opens original structured evidence and full output at the sa
     nodes(c.out.frame.view).find((node) => node.binding === 'tools').props.expanded,
     true,
   );
-  c.raw('output-result-4');
+  c.raw('output-result-body-message-4');
   assert.equal(c.state.inspector, null);
   assert.equal(c.action('source').input.through, 20);
-  assert.equal(c.action('source').input.source.sequence, 8);
+  assert.deepEqual(c.action('source').input.source.position, { sourceSequence: 4, itemIndex: 256 });
   assert.equal(c.action('source').input.field, 'result');
+});
+
+test('output evidence resolves the original row when two turns reuse a tool id', () => {
+  const tool = (call, result) => ({
+    toolUseId: 'reused-call',
+    call: {
+      position: { sourceSequence: call, itemIndex: 0 },
+      name: 'Write',
+      title: null,
+      presentation: 'maka.workspace.Files@1/write',
+      pending: false,
+      ancestorToolUseIds: [],
+      dispatched: true,
+    },
+    result: {
+      position: { sourceSequence: result, itemIndex: 0 },
+      settlement: 'returned',
+      isError: false,
+      image: false,
+    },
+  });
+  const first = tool(4, 8);
+  const second = tool(12, 16);
+  const c = client()
+    .observe(20)
+    .history(
+      page(20, [
+        chunk(4, 'first arguments', { turnId: 'first-turn', role: 'tool_call', tool: first }),
+        chunk(8, 'first result', { turnId: 'first-turn', role: 'tool_result', tool: first }),
+        chunk(12, 'second arguments', { turnId: 'second-turn', role: 'tool_call', tool: second }),
+        chunk(16, 'second result', { turnId: 'second-turn', role: 'tool_result', tool: second }),
+      ]),
+    );
+  c.raw('outputs-open');
+  assert.ok(c.find('output-result-body-message-4'));
+  assert.ok(c.find('output-result-body-message-12'));
+  c.raw('output-result-body-message-12');
+  assert.deepEqual(c.action('source').input, {
+    sessionId: 'Task A',
+    through: 20,
+    source: { kind: 'row', position: { sourceSequence: 16, itemIndex: 0 } },
+    field: 'result',
+    position: { kind: 'start' },
+  });
+});
+
+test('history paging orders sibling rows from one fact and retains their exact identities', () => {
+  const first = chunk(10, 'First sibling', {
+    messageId: 'first-sibling',
+    position: { sourceSequence: 10, itemIndex: 255 },
+  });
+  const second = chunk(10, 'Second sibling', {
+    messageId: 'second-sibling',
+    position: { sourceSequence: 10, itemIndex: 256 },
+  });
+  const boundary = {
+    position: { sourceSequence: 10, itemIndex: 256 },
+    offset: 0,
+    field: 'body',
+  };
+  const c = client()
+    .observe(10)
+    .history(page(10, [second], { before: boundary }));
+  const reader = c.reader();
+  c.child(reader, 'older').history(page(10, [first], { after: boundary }));
+  const messages = c.find(reader).props.messages;
+  assert.deepEqual(
+    messages.map(({ text }) => text),
+    ['First sibling', 'Second sibling'],
+  );
+  assert.deepEqual(
+    messages.map(({ source }) => source),
+    [
+      { sourceSequence: 10, itemIndex: 255 },
+      { sourceSequence: 10, itemIndex: 256 },
+    ],
+  );
+  assert.equal(new Set(messages.map(({ id }) => id)).size, 2);
+  c.state.selected.hasUnread = true;
+  c.child(reader, 'markRead', {
+    sessionId: 'Task A',
+    position: { sourceSequence: 10, itemIndex: 256 },
+    field: 'body',
+  });
+  assert.equal(c.action('markRead').input.messageId, 'second-sibling');
 });
 
 test('long task visits stay within the UI call envelope while recent readers remain retained', () => {
@@ -532,7 +636,11 @@ test('long task visits stay within the UI call envelope while recent readers rem
 
 test('prefetching adjacent sections of one long message preserves the visible section and anchor', () => {
   const part = (offset, text) => chunk(10, text, { offset, totalBytes: 60000 });
-  const cursor = (offset) => ({ sequence: 10, offset, field: 'body' });
+  const cursor = (offset) => ({
+    position: { sourceSequence: 10, itemIndex: 0 },
+    offset,
+    field: 'body',
+  });
   const c = client()
     .observe(20)
     .history(page(20, [part(40000, 'Tail')], { before: cursor(40000) }));
@@ -558,7 +666,11 @@ test('prefetching adjacent sections of one long message preserves the visible se
 });
 
 test('scrolling traverses empty history pages without another gesture or losing the visible anchor', () => {
-  const cursor = (sequence) => ({ sequence, offset: 0, field: 'body' });
+  const cursor = (sequence) => ({
+    position: { sourceSequence: sequence, itemIndex: 0 },
+    offset: 0,
+    field: 'body',
+  });
   for (const direction of ['older', 'newer']) {
     const backward = direction === 'older';
     const c = client()
@@ -608,18 +720,18 @@ test('reading prompt context belongs to the retained page and ignores late repli
   assert.equal(c.find(reader).props.leadingPrompt.text, 'Old question');
   c.raw('task-latest').history(
     page(20, [chunk(18, 'New answer', { turnId: 'turn-2' })], {
-      before: { sequence: 18, offset: 0, field: 'body' },
+      before: { position: { sourceSequence: 18, itemIndex: 0 }, offset: 0, field: 'body' },
     }),
   );
   const pending = c.action('historyPrompt');
   assert.equal(c.find(reader).props.leadingPrompt, null);
   c.raw('task-latest').history(page(20, [chunk(8, 'Earlier question', { role: 'user' })]));
-  c.reply(pending, { source: 16, text: 'New question' });
+  c.reply(pending, { position: { sourceSequence: 16, itemIndex: 0 }, text: 'New question' });
   assert.equal(c.find(reader).props.leadingPrompt.text, 'Earlier question');
-  c.child(reader, 'prompt', { sequence: 8 });
+  c.child(reader, 'prompt', { position: { sourceSequence: 8, itemIndex: 0 } });
   assert.deepEqual(c.action('history').input.position, {
     kind: 'after',
-    cursor: { sequence: 8, offset: 0, field: 'body' },
+    cursor: { position: { sourceSequence: 8, itemIndex: 0 }, offset: 0, field: 'body' },
   });
   assert.equal(c.action('history').input.through, 20);
   assert.equal(c.find('task-goal'), undefined);
@@ -630,7 +742,7 @@ test('reading older content on a short page suspends automatic following includi
     .observe(10, { invocationId: 'run-a', turnId: 'turn-1', state: 'running' })
     .history(
       page(10, [chunk(9, 'Visible')], {
-        before: { sequence: 8, offset: 0, field: 'body' },
+        before: { position: { sourceSequence: 8, itemIndex: 0 }, offset: 0, field: 'body' },
       }),
     );
   const reader = c.reader();
@@ -646,7 +758,7 @@ test('reading older content on a short page suspends automatic following includi
   );
   c.child(reader, 'older').history(
     page(10, [chunk(7, 'Older')], {
-      after: { sequence: 8, offset: 0, field: 'body' },
+      after: { position: { sourceSequence: 8, itemIndex: 0 }, offset: 0, field: 'body' },
     }),
   );
   c.child(reader, 'tailReady', { landing: c.state.landing.sequence, readingRevision: 2 });
@@ -951,7 +1063,7 @@ test('floating activity follows deltas and canonical tools without moving the hi
   const tool = {
     toolUseId: 'call',
     call: {
-      sequence: 4,
+      position: { sourceSequence: 4, itemIndex: 0 },
       name: 'read',
       title: null,
       presentation: null,
@@ -991,7 +1103,7 @@ test('a cold long conversation queries its preceding prompt without paging the r
     .observe(20)
     .history(
       page(20, [chunk(18, 'Long answer tail')], {
-        before: { sequence: 18, offset: 0, field: 'thinking' },
+        before: { position: { sourceSequence: 18, itemIndex: 0 }, offset: 0, field: 'thinking' },
       }),
     );
   const window = structuredClone(c.state.window);
@@ -999,10 +1111,13 @@ test('a cold long conversation queries its preceding prompt without paging the r
   assert.deepEqual(c.action('historyPrompt').input, {
     sessionId: 'Task A',
     through: 20,
-    sequence: 18,
+    position: { sourceSequence: 18, itemIndex: 0 },
   });
   assert.equal(c.action('history'), undefined, 'context never walks answer pages');
-  c.reply(c.action('historyPrompt'), { source: 2, text: 'Earlier user message' });
+  c.reply(c.action('historyPrompt'), {
+    position: { sourceSequence: 2, itemIndex: 0 },
+    text: 'Earlier user message',
+  });
   assert.equal(c.find(c.reader()).props.leadingPrompt.text, 'Earlier user message');
   assert.deepEqual(c.state.window, window);
   assert.deepEqual(c.state.landing, landing);
@@ -1354,7 +1469,11 @@ test('read acknowledgement cannot replace newer unread observations or clear a d
     .observe(4)
     .history(page(4, [chunk(4, 'Old answer')]));
   c.state.selected.hasUnread = true;
-  c.child(c.reader(), 'markRead', { sessionId: 'Task A', sequence: 4, field: 'body' });
+  c.child(c.reader(), 'markRead', {
+    sessionId: 'Task A',
+    position: { sourceSequence: 4, itemIndex: 0 },
+    field: 'body',
+  });
   const action = c.action('markRead');
   assert.equal(action.input.messageId, 'message-4');
   c.state.selected = { ...c.state.selected, revision: 3, hasUnread: true };
@@ -1382,10 +1501,18 @@ test('read acknowledgement cannot replace newer unread observations or clear a d
   });
   assert.equal(c.state.selected.hasUnread, true);
   assert.equal(c.state.catalog.sessions[0].hasUnread, true);
-  c.child(c.reader(), 'markRead', { sessionId: 'Task B', sequence: 4, field: 'body' });
+  c.child(c.reader(), 'markRead', {
+    sessionId: 'Task B',
+    position: { sourceSequence: 4, itemIndex: 0 },
+    field: 'body',
+  });
   assert.equal(c.action('markRead'), undefined);
-  c.child(c.reader(), 'markRead', { sessionId: 'Task A', sequence: 99, field: 'body' });
-  assert.equal(c.action('markRead'), undefined, 'an unexposed sequence cannot be acknowledged');
+  c.child(c.reader(), 'markRead', {
+    sessionId: 'Task A',
+    position: { sourceSequence: 99, itemIndex: 0 },
+    field: 'body',
+  });
+  assert.equal(c.action('markRead'), undefined, 'an unexposed position cannot be acknowledged');
 });
 
 test('background readers, inspectors, dialogs and other pages disable read acknowledgements', () => {
@@ -1393,7 +1520,7 @@ test('background readers, inspectors, dialogs and other pages disable read ackno
     { inspector: 'outputs' },
     { dialog: 'palette' },
     { pages: ['settings'] },
-    { image: { sessionId: 'Task A', through: 4, sequence: 4 } },
+    { image: { sessionId: 'Task A', through: 4, position: { sourceSequence: 4, itemIndex: 0 } } },
   ]) {
     const c = client()
       .observe(4)
@@ -1413,7 +1540,11 @@ test('background readers, inspectors, dialogs and other pages disable read ackno
     .observe(5)
     .history(page(5, [chunk(5, 'Another answer')]));
   assert.equal(c.find(oldReader).props.markReadEnabled, false);
-  c.child(oldReader, 'markRead', { sessionId: 'Task A', sequence: 4, field: 'body' });
+  c.child(oldReader, 'markRead', {
+    sessionId: 'Task A',
+    position: { sourceSequence: 4, itemIndex: 0 },
+    field: 'body',
+  });
   assert.equal(c.action('markRead'), undefined);
 });
 

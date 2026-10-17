@@ -17,9 +17,10 @@
  * under the License.
  */
 
-use super::read::{prepared, sql_number};
+use super::read::{prepared, sql_number, sql_position};
 use crate::{EventLog, StoreError, artifacts::ImageChunk};
 use maka_agent_facts::attachment::StorageRef;
+use maka_agent_facts::history::RowPosition;
 use maka_agent_facts::tool_output::ImageOutput;
 use sqlx::Connection;
 
@@ -29,33 +30,34 @@ impl EventLog {
         &self,
         session: &str,
         through: u64,
-        sequence: u64,
+        position: RowPosition,
         offset: u64,
         limit: usize,
     ) -> Result<ImageChunk, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        let fence = maka_presentation::watermark(through)?;
-        if sequence == 0 || sequence > fence || limit == 0 || limit > 32 * 1024 {
+        sql_number(through)?;
+        if position.source_sequence > through || limit == 0 || limit > 32 * 1024 {
             return Err(invalid("invalid tool image window"));
         }
-        let sequence = sql_number(sequence)?;
+        let (source_sequence, item_index) = sql_position(position)?;
         sql_number(offset)?;
         let session = session.to_owned();
         self.connection
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    prepared(&mut tx, &session, fence).await?;
+                    prepared(&mut tx, &session, through).await?;
                     let raw: String = sqlx::query_scalar(
                         "SELECT json_remove(json_extract(payload, '$.content'), '$.kind')
-                 FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2
+                 FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
                  AND json_extract(payload, '$.type') = 'tool_result'
                  AND json_extract(payload, '$.content.kind') = 'image'
                  AND length(CAST(json_extract(payload, '$.content') AS BLOB)) <= 16384",
                     )
                     .bind(&session)
-                    .bind(sequence)
+                    .bind(source_sequence)
+                    .bind(item_index)
                     .fetch_optional(&mut *tx)
                     .await?
                     .ok_or_else(|| invalid("canonical tool image not found"))?;
@@ -77,7 +79,7 @@ impl EventLog {
                         &image.mime_type,
                         offset,
                         limit,
-                        sequence as u64 / 256,
+                        position.source_sequence,
                     )
                     .await?;
                     tx.commit().await?;

@@ -117,10 +117,10 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
     // Long projected JSON strings can split one row into several text chunks.
     let sequences = Connection::open(dir.path().join("source.sqlite"))
         .unwrap()
-        .prepare("SELECT sequence FROM transcript_rows WHERE session_id='source' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY sequence")
+        .prepare("SELECT source_sequence, item_index FROM transcript_rows WHERE session_id='source' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY source_sequence, item_index")
         .unwrap()
         .query_map([], |row| {
-            row.get::<_, i64>(0).map(|sequence| sequence as u64)
+            Ok(RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 })
         })
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
@@ -396,8 +396,8 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
             .search_transcript(
                 "failed",
                 maka_event_log::transcript::search::TranscriptSearch {
-                    through: maka_presentation::watermark(through).unwrap(),
-                    after: 0,
+                    through,
+                    after: None,
                     query: query.into(),
                     case_sensitive: false,
                     whole_word: true,
@@ -436,8 +436,8 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
             .search_transcript(
                 "failed",
                 maka_event_log::transcript::search::TranscriptSearch {
-                    through: maka_presentation::watermark(through).unwrap(),
-                    after: 0,
+                    through,
+                    after: None,
                     query: query.into(),
                     case_sensitive: true,
                     whole_word: false,
@@ -457,7 +457,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
                 .history_source(
                     "failed",
                     through,
-                    hit.sequence,
+                    hit.position,
                     field,
                     None,
                     position,
@@ -466,7 +466,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
                 )
                 .await
                 .unwrap();
-            assert_eq!(page.sequence, hit.sequence);
+            assert_eq!(page.position, hit.position);
             assert_eq!(page.field, field);
             assert_eq!(page.role, SourceRole::Failure);
             assert_eq!(
@@ -491,7 +491,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
             .history_source(
                 "failed",
                 through,
-                hit.sequence,
+                hit.position,
                 SourceField::Body,
                 None,
                 SourcePosition::Start,
@@ -506,7 +506,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
             log.history_source(
                 "failed",
                 through - 1,
-                hit.sequence,
+                hit.position,
                 field,
                 None,
                 SourcePosition::Start,
@@ -583,11 +583,11 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
         .await
         .unwrap()
     {}
-    let sequences = Connection::open(&database).unwrap().prepare("SELECT sequence FROM transcript_rows WHERE session_id='structured' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY sequence").unwrap().query_map([], |row| row.get::<_,i64>(0)).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+    let sequences = Connection::open(&database).unwrap().prepare("SELECT source_sequence, item_index FROM transcript_rows WHERE session_id='structured' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY source_sequence, item_index").unwrap().query_map([], |row| Ok(RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 })).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
     assert_eq!(sequences.len(), 2);
     for (sequence, field) in [
-        (sequences[0] as u64, SourceField::Arguments),
-        (sequences[1] as u64, SourceField::Result),
+        (sequences[0], SourceField::Arguments),
+        (sequences[1], SourceField::Result),
     ] {
         for budget in [13, 8192] {
             for reverse in [false, true] {
@@ -613,7 +613,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                         .await
                         .unwrap();
                     assert_eq!(source.path, Some(vec![Key("content".into())]));
-                    assert_eq!(source.sequence, sequence);
+                    assert_eq!(source.position, sequence);
                     assert_eq!(source.field, field);
                     assert_eq!(source.format, SourceFormat::Text);
                     assert_eq!(source.total_bytes, text.len() as u64);
@@ -790,7 +790,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
         .history_source(
             "structured",
             through,
-            sequences[1] as u64,
+            sequences[1],
             SourceField::Result,
             Some(vec![Key("content".into())]),
             SourcePosition::Tail,

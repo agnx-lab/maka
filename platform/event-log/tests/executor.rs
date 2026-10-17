@@ -239,7 +239,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         .history_source(
             "session",
             through,
-            answer.sequence,
+            answer.position,
             maka_agent_ports::session::history::SourceField::Body,
             None,
             maka_agent_ports::session::history::SourcePosition::After { offset: 6 },

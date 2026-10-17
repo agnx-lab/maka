@@ -89,15 +89,17 @@ function accept(state: State, value: AgentHistorySourcePage, position: SourcePos
   const next = value.source,
     end = next.offset + bytes(next.text);
   if (
+    !next.tool?.call ||
     next.path != null ||
     next.field !== 'arguments' ||
     next.format !== 'json' ||
-    next.tool?.call?.sequence !== next.sequence ||
+    !sameValue(next.tool?.call?.position, next.position) ||
     next.tool.toolUseId !== request.toolUseId ||
     next.tool.call.name !== request.toolName ||
     end > next.totalBytes ||
     (state.page &&
-      (state.page.sequence !== next.sequence || state.page.totalBytes !== next.totalBytes)) ||
+      (!sameValue(state.page.position, next.position) ||
+        state.page.totalBytes !== next.totalBytes)) ||
     (position.kind === 'after' && next.offset !== position.offset) ||
     (position.kind === 'before' && end !== position.offset) ||
     (position.kind === 'start' && next.offset !== 0) ||

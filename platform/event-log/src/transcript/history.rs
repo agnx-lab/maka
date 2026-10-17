@@ -18,10 +18,11 @@
  */
 
 use super::{
-    read::{prepared, sql_number},
+    read::{prepared, row_position, sql_number, sql_position},
     tool_metadata::read as tool_metadata,
 };
 use crate::{EventLog, StoreError, sequence_number};
+use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Chunk;
 use maka_agent_ports::session::history::Cursor;
 use maka_agent_ports::session::history::Page;
@@ -108,7 +109,7 @@ impl EventLog {
             return Err(invalid("invalid history window limits"));
         }
         crate::sessions::validate_id(session)?;
-        let fence = maka_presentation::watermark(through)?;
+        let fence = through;
         let through_sql = sql_number(fence)?;
         // A serialized chunk occupies at least one byte. The delivery budget
         // therefore bounds rows even when a caller needs no item-count limit.
@@ -123,18 +124,18 @@ impl EventLog {
             if !exists { return Err(invalid("Session no longer exists")); }
             let anchor = match position {
                 Position::Before { cursor } | Position::After { cursor } => {
-                    if cursor.sequence == 0 || cursor.sequence > fence || (!include_thinking && cursor.field == HistoryField::Thinking) {
+                    if cursor.position.source_sequence > fence || (!include_thinking && cursor.field == HistoryField::Thinking) {
                         return Err(invalid("history cursor exceeds its fence"));
                     }
                     sql_number(cursor.offset)?;
-                    materialize(&mut tx, &session, cursor.sequence, view, through_sql).await?;
-                    let row = header(&mut tx, &session, cursor.sequence, cursor.field, view, through_sql).await?;
+                    materialize(&mut tx, &session, cursor.position, view, through_sql).await?;
+                    let row = header(&mut tx, &session, cursor.position, cursor.field, view, through_sql).await?;
                     if cursor.offset > row.total {
                         return Err(invalid("history offset exceeds message"));
                     }
                     let byte: Vec<u8> = if cursor.offset == row.total { Vec::new() } else { sqlx::query_scalar(
-                        "SELECT substr(body, ?3, 1) FROM transcript_text WHERE session_id = ?1 AND sequence = ?2 AND field = ?4"
-                    ).bind(&session).bind(sql_number(cursor.sequence)?).bind(sql_number(cursor.offset)? + 1).bind(field_name(cursor.field))
+                        "SELECT substr(body, ?4, 1) FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?5"
+                    ).bind(&session).bind(sql_position(cursor.position)?.0).bind(sql_position(cursor.position)?.1).bind(sql_number(cursor.offset)? + 1).bind(field_name(cursor.field))
                         .fetch_one(&mut *tx).await? };
                     if byte.first().is_some_and(|byte| byte & 0xc0 == 0x80) {
                         return Err(invalid("history offset splits UTF-8"));
@@ -144,55 +145,60 @@ impl EventLog {
                 _ => None,
             };
             let (reverse, boundary, inclusive) = match position {
-                Position::Start => (false, 0, true),
-                Position::Tail => (true, through_sql, true),
-                Position::Before { cursor } => (true, sql_number(cursor.sequence)?, cursor.offset > 0 || (include_thinking && cursor.field == HistoryField::Body)),
-                Position::After { cursor } => (false, sql_number(cursor.sequence)?, cursor.offset < anchor.as_ref().unwrap().1.total || cursor.field == HistoryField::Thinking),
+                Position::Start => (false, None, true),
+                Position::Tail => (true, None, true),
+                Position::Before { cursor } => (true, Some(cursor.position), cursor.offset > 0 || (include_thinking && cursor.field == HistoryField::Body)),
+                Position::After { cursor } => (false, Some(cursor.position), cursor.offset < anchor.as_ref().unwrap().1.total || cursor.field == HistoryField::Thinking),
                 Position::Event { sequence } => {
                     if sequence == 0 || sequence > through { return Err(invalid("history event exceeds its fence")); }
-                    (false, sql_number(maka_presentation::watermark(sequence - 1)? + 1)?, true)
+                    (false, Some(RowPosition { source_sequence: sequence, item_index: 0 }), true)
                 }
             };
-            let query = if reverse {
-                "SELECT sequence FROM transcript_rows WHERE session_id = ?1 AND sequence <= ?2
-                    AND sequence <= ?3 AND (?4 OR sequence < ?3) ORDER BY sequence DESC LIMIT ?5"
-            } else {
-                "SELECT sequence FROM transcript_rows WHERE session_id = ?1 AND sequence <= ?2
-                    AND sequence >= ?3 AND (?4 OR sequence > ?3) ORDER BY sequence ASC LIMIT ?5"
+            let query = match (reverse, boundary.is_some(), inclusive) {
+                (true, false, _) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence DESC,item_index DESC LIMIT ?3",
+                (false, false, _) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT ?3",
+                (true, true, true) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
+                (true, true, false) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND (source_sequence,item_index)<(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
+                (false, true, true) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
+                (false, true, false) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
             };
-            let rows: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(query))
-                .bind(&session).bind(through_sql).bind(boundary).bind(inclusive)
-                .bind((max_chunks + 1) as i64).fetch_all(&mut *tx).await?;
+            let mut query = sqlx::query_as::<_,(i64,i64)>(sqlx::AssertSqlSafe(query)).bind(&session);
+            // A validated reverse anchor already implies the raw fence. Keep the
+            // cursor pair as the sole upper bound so SQLite seeks directly to it.
+            if !(reverse && boundary.is_some()) { query=query.bind(through_sql); }
+            query=query.bind((max_chunks + 1) as i64);
+            if let Some(boundary)=boundary { let (source,item)=sql_position(boundary)?; query=query.bind(source).bind(item); }
+            let rows = query.fetch_all(&mut *tx).await?;
             let mut chunks = Vec::new();
             let mut chunks_json_bytes = 0;
             let mut bytes = 0;
             let mut projected = 0;
             let mut left = None;
             let mut right = None;
-            'rows: for sequence in rows {
+            'rows: for locator in rows {
                 if chunks.len() == max_chunks || bytes == max_bytes || (projected >= 1024 * 1024 && left.is_some()) {
                     break;
                 }
-                let sequence = sequence_number(sequence)?;
+                let locator = row_position(locator.0, locator.1)?;
                 // Materialize only actually visited rows, never a long message's
                 // following rows. One oversized first row still progresses.
-                projected += materialize(&mut tx, &session, sequence, view, through_sql).await?;
+                projected += materialize(&mut tx, &session, locator, view, through_sql).await?;
                 let has_thinking: bool = include_thinking && sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND sequence = ?2 AND field = 'thinking')"
-                ).bind(&session).bind(sql_number(sequence)?).fetch_one(&mut *tx).await?;
+                    "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = 'thinking')"
+                ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                 let mut fields = vec![HistoryField::Body];
                 if include_thinking && has_thinking { fields.insert(0, HistoryField::Thinking); }
                 if reverse { fields.reverse(); }
                 for field in fields {
                     if chunks.len() == max_chunks || bytes == max_bytes { break 'rows; }
-                    let row = header(&mut tx, &session, sequence, field, view, through_sql).await?;
-                    if let Some((cursor, _)) = &anchor && cursor.sequence == sequence {
+                    let row = header(&mut tx, &session, locator, field, view, through_sql).await?;
+                    if let Some((cursor, _)) = &anchor && cursor.position == locator {
                         let before = field == HistoryField::Thinking && cursor.field == HistoryField::Body;
                         let after = field == HistoryField::Body && cursor.field == HistoryField::Thinking;
                         if (reverse && after) || (!reverse && before) { continue; }
                         if field == cursor.field && ((reverse && cursor.offset == 0) || (!reverse && cursor.offset == row.total)) { continue; }
                     }
-                    let cursor_offset = anchor.as_ref().filter(|(cursor, _)| cursor.sequence == sequence && cursor.field == field)
+                    let cursor_offset = anchor.as_ref().filter(|(cursor, _)| cursor.position == locator && cursor.field == field)
                         .map(|(cursor, _)| cursor.offset);
                     let (mut start, end) = if reverse {
                         let end = cursor_offset.unwrap_or(row.total);
@@ -202,8 +208,8 @@ impl EventLog {
                         (start, row.total.min(start + (max_bytes - bytes) as u64))
                     };
                     let fragment: Vec<u8> = if row.total == 0 { Vec::new() } else { sqlx::query_scalar(
-                        "SELECT substr(body, ?3, ?4) FROM transcript_text WHERE session_id = ?1 AND sequence = ?2 AND field = ?5"
-                    ).bind(&session).bind(sql_number(sequence)?).bind(sql_number(start)? + 1)
+                        "SELECT substr(body, ?4, ?5) FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?6"
+                    ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(sql_number(start)? + 1)
                         .bind(sql_number(end - start)?).bind(field_name(field)).fetch_one(&mut *tx).await? };
                     let text = if reverse {
                         let skip = fragment.iter().take_while(|byte| **byte & 0xc0 == 0x80).count();
@@ -219,8 +225,8 @@ impl EventLog {
                     };
                     if text.is_empty() && row.total > 0 { break 'rows; }
                     let end = start + text.len() as u64;
-                    let beginning = Cursor { field, sequence, offset: start };
-                    let ending = (Cursor { field, sequence, offset: end }, row.total);
+                    let beginning = Cursor { field, position: locator, offset: start };
+                    let ending = (Cursor { field, position: locator, offset: end }, row.total);
                     let candidate_left = if reverse { Some(beginning) } else { left.or(Some(beginning)) };
                     let candidate_right = if reverse { right.or(Some(ending)) } else { Some(ending) };
                     let emit = row.total != 0 || matches!(row.role.as_str(), "tool_call" | "tool_result")
@@ -235,12 +241,12 @@ impl EventLog {
                     };
                     let attachments = if start == 0 && role == Role::User {
                         let encoded: Option<String> = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.attachments') FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2"
-                        ).bind(&session).bind(sql_number(sequence)?).fetch_one(&mut *tx).await?;
+                            "SELECT json_extract(payload, '$.attachments') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         encoded.map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default()
                     } else { Vec::new() };
                     let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
-                        let Some(tool) = tool_metadata(&mut tx, &session, sequence, through_sql, max_json_bytes).await? else {
+                        let Some(tool) = tool_metadata(&mut tx, &session, locator, through_sql, max_json_bytes).await? else {
                             if left.is_none() { return Err(invalid("history fragment exceeds JSON window budget")); }
                             break 'rows;
                         };
@@ -249,16 +255,16 @@ impl EventLog {
                     let timing = super::timing::read(&mut tx, &session, &row.turn, through_sql).await?;
                     let compaction = if role == Role::Compaction {
                         let duration: i64 = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.durationMs') FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2"
-                        ).bind(&session).bind(sql_number(sequence)?).fetch_one(&mut *tx).await?;
+                            "SELECT json_extract(payload, '$.durationMs') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         Some(maka_agent_ports::session::history::Compaction { duration_ms: sequence_number(duration)? })
                     } else { None };
                     let model = if role == Role::Assistant {
-                        super::model::resolve(&mut tx, &session, sequence, sql_number(through)?).await?
+                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?
                     } else { None };
                     let chunk = Chunk { field, timing, compaction, origin: row.origin, model,
                         message_id: row.message, turn_id: row.turn, timestamp: row.timestamp, role,
-                        sequence, offset: start, total_bytes: row.total, text: text.to_owned(), attachments, tool,
+                        position: locator, offset: start, total_bytes: row.total, text: text.to_owned(), attachments, tool,
                     };
                     chunks_json_bytes += serde_json::to_vec(&chunk)?.len();
                     chunks.push(chunk);
@@ -289,14 +295,14 @@ impl EventLog {
                 if let Some((cursor, row)) = anchor {
                     left = Some(cursor); right = Some((cursor, row.total));
                 } else if matches!(position, Position::Event { .. }) {
-                    let last: Option<i64> = sqlx::query_scalar(
-                        "SELECT MAX(sequence) FROM transcript_rows WHERE session_id = ?1 AND sequence <= ?2"
-                    ).bind(&session).bind(through_sql).fetch_one(&mut *tx).await?;
-                    if let Some(sequence) = last {
-                        let sequence = sequence_number(sequence)?;
-                        materialize(&mut tx, &session, sequence, view, through_sql).await?;
-                        let row = header(&mut tx, &session, sequence, HistoryField::Body, view, through_sql).await?;
-                        let cursor = Cursor { field: HistoryField::Body, sequence, offset: row.total };
+                    let last: Option<(i64,i64)> = sqlx::query_as(
+                        "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 ORDER BY source_sequence DESC,item_index DESC LIMIT 1"
+                    ).bind(&session).bind(through_sql).fetch_optional(&mut *tx).await?;
+                    if let Some(locator) = last {
+                        let locator = row_position(locator.0, locator.1)?;
+                        materialize(&mut tx, &session, locator, view, through_sql).await?;
+                        let row = header(&mut tx, &session, locator, HistoryField::Body, view, through_sql).await?;
+                        let cursor = Cursor { field: HistoryField::Body, position: locator, offset: row.total };
                         left = Some(cursor); right = Some((cursor, row.total));
                     }
                 }
@@ -348,22 +354,22 @@ struct Header {
 async fn header(
     tx: &mut SqliteConnection,
     session: &str,
-    sequence: u64,
+    locator: RowPosition,
     field: HistoryField,
     view: HistoryView,
     through: i64,
 ) -> Result<Header, StoreError> {
     if view == HistoryView::Conversation
-        && let Some(row) = conversation_tool(tx, session, sequence, through).await?
+        && let Some(row) = conversation_tool(tx, session, locator, through).await?
     {
         return Ok(row);
     }
     let row = sqlx::query(
         "SELECT source.message_id, source.turn_id, cached.timestamp, cached.role, length(cached.body),
             CASE WHEN cached.role = 'user' THEN source.payload -> '$.origin' END
-            FROM transcript_rows source JOIN transcript_text cached USING(session_id, sequence)
-            WHERE source.session_id = ?1 AND source.sequence = ?2 AND cached.field = ?3"
-    ).bind(session).bind(sql_number(sequence)?).bind(field_name(field)).fetch_one(tx).await?;
+            FROM transcript_rows source JOIN transcript_text cached USING(session_id, source_sequence, item_index)
+            WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND item_index = ?3 AND cached.field = ?4"
+    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(tx).await?;
     Ok(Header {
         origin: row
             .try_get::<Option<String>, _>(5)?
@@ -379,7 +385,7 @@ async fn header(
 async fn conversation_tool(
     tx: &mut SqliteConnection,
     session: &str,
-    sequence: u64,
+    locator: RowPosition,
     through: i64,
 ) -> Result<Option<Header>, StoreError> {
     let row = sqlx::query(
@@ -391,9 +397,9 @@ async fn conversation_tool(
             ON call.session_id = row.session_id AND call.turn_id = row.turn_id
             AND call.message_id = json_extract(row.payload, '$.toolUseId')
             AND json_extract(call.payload, '$.type') = 'tool_call'
-        WHERE row.session_id = ?1 AND row.sequence = ?2 AND row.sequence <= ?3
+        WHERE row.session_id = ?1 AND row.source_sequence = ?2 AND row.item_index = ?3 AND row.source_sequence <= ?4
             AND json_extract(row.payload, '$.type') IN ('tool_call', 'tool_result')"
-    ).bind(session).bind(sql_number(sequence)?).bind(through).fetch_optional(tx).await?;
+    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(through).fetch_optional(tx).await?;
     let Some(row) = row else {
         return Ok(None);
     };
@@ -434,43 +440,44 @@ async fn neighbor(
         }
         if before && cursor.field == HistoryField::Body {
             let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND sequence = ?2 AND field = 'thinking')"
-            ).bind(session).bind(sql_number(cursor.sequence)?).fetch_one(&mut *tx).await?;
+                "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = 'thinking')"
+            ).bind(session).bind(sql_position(cursor.position)?.0).bind(sql_position(cursor.position)?.1).fetch_one(&mut *tx).await?;
             if exists {
                 return Ok(true);
             }
         }
     }
     let query = if before {
-        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND sequence <= ?2 AND sequence < ?3)"
+        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 AND (source_sequence,item_index) < (?3,?4))"
     } else {
-        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND sequence <= ?2 AND sequence > ?3)"
+        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 AND (source_sequence,item_index) > (?3,?4))"
     };
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(query))
         .bind(session)
         .bind(through)
-        .bind(sql_number(cursor.sequence)?)
+        .bind(sql_position(cursor.position)?.0)
+        .bind(sql_position(cursor.position)?.1)
         .fetch_one(tx)
         .await?)
 }
 async fn materialize(
     tx: &mut SqliteConnection,
     session: &str,
-    sequence: u64,
+    locator: RowPosition,
     view: HistoryView,
     through: i64,
 ) -> Result<usize, StoreError> {
     if view == HistoryView::Conversation
-        && conversation_tool(tx, session, sequence, through)
+        && conversation_tool(tx, session, locator, through)
             .await?
             .is_some()
     {
         return Ok(0);
     }
     let source: Option<(i64, bool)> = sqlx::query_as(
-        "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_text cached WHERE cached.session_id = source.session_id AND cached.sequence = source.sequence AND cached.field = 'body')
-            FROM transcript_rows source WHERE session_id = ?1 AND sequence = ?2"
-    ).bind(session).bind(sql_number(sequence)?).fetch_optional(&mut *tx).await?;
+        "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_text cached WHERE cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence AND cached.item_index = source.item_index AND cached.field = 'body')
+            FROM transcript_rows source WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_optional(&mut *tx).await?;
     let Some((bytes, cached)) = source else {
         return Err(invalid("history row was not found"));
     };
@@ -479,18 +486,19 @@ async fn materialize(
     }
     let query = format!(
         "INSERT INTO transcript_text
-            SELECT session_id, sequence, 'body', json_extract(payload, '$.ts'), json_extract(payload, '$.type'),
+            SELECT session_id, source_sequence, item_index, 'body', json_extract(payload, '$.ts'), json_extract(payload, '$.type'),
                 CAST({BODY} AS BLOB)
-            FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2
+            FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
             UNION ALL
-            SELECT session_id, sequence, 'thinking', json_extract(payload, '$.ts'), 'assistant',
+            SELECT session_id, source_sequence, item_index, 'thinking', json_extract(payload, '$.ts'), 'assistant',
                 CAST(json_extract(payload, '$.thinking.text') AS BLOB)
-            FROM transcript_rows WHERE session_id = ?1 AND sequence = ?2
+            FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3
                 AND json_extract(payload, '$.type') = 'assistant' AND json_type(payload, '$.thinking.text') = 'text'"
     );
     sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
         .bind(session)
-        .bind(sql_number(sequence)?)
+        .bind(sql_position(locator)?.0)
+        .bind(sql_position(locator)?.1)
         .execute(tx)
         .await?;
     usize::try_from(sequence_number(bytes)?)
@@ -515,7 +523,7 @@ mod tests {
     #[tokio::test]
     async fn conversation_retains_trace_parents_and_hides_transport_helpers() {
         let mut db = SqliteConnection::connect(":memory:").await.unwrap();
-        sqlx::query("CREATE TABLE transcript_rows (session_id TEXT, sequence INTEGER, message_id TEXT, turn_id TEXT, payload BLOB)").execute(&mut db).await.unwrap();
+        sqlx::query("CREATE TABLE transcript_rows (session_id TEXT, source_sequence INTEGER, item_index INTEGER, message_id TEXT, turn_id TEXT, payload BLOB)").execute(&mut db).await.unwrap();
         let rows = [
             json!({"type":"tool_call","origin":"provider","toolName":"exec"}),
             json!({"type":"tool_call","origin":"code_mode","toolName":"code_cell"}),
@@ -527,7 +535,7 @@ mod tests {
         ];
         for (i, mut value) in rows.into_iter().enumerate() {
             value["ts"] = json!(1);
-            sqlx::query("INSERT INTO transcript_rows VALUES ('a', ?, ?, 'turn', ?)")
+            sqlx::query("INSERT INTO transcript_rows VALUES ('a', ?, 0, ?, 'turn', ?)")
                 .bind((i + 1) as i64)
                 .bind((i + 1).to_string())
                 .bind(serde_json::to_vec(&value).unwrap())
@@ -535,7 +543,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        for (sequence, visible) in [
+        for (locator, visible) in [
             (1, true),
             (2, false),
             (3, true),
@@ -544,20 +552,36 @@ mod tests {
             (6, true),
             (7, true),
         ] {
-            let row = conversation_tool(&mut db, "a", sequence, 7)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(!row.role.is_empty(), visible, "sequence {sequence}");
+            let row = conversation_tool(
+                &mut db,
+                "a",
+                RowPosition {
+                    source_sequence: locator,
+                    item_index: 0,
+                },
+                7,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(!row.role.is_empty(), visible, "locator {locator}");
             assert_eq!(row.total, 0);
         }
         // A parent without a child at the requested fence remains visible.
         assert_eq!(
-            conversation_tool(&mut db, "a", 4, 4)
-                .await
-                .unwrap()
-                .unwrap()
-                .role,
+            conversation_tool(
+                &mut db,
+                "a",
+                RowPosition {
+                    source_sequence: 4,
+                    item_index: 0
+                },
+                4
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .role,
             "tool_call"
         );
     }

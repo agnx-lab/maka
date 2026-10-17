@@ -31,16 +31,17 @@ SELECT MAX(sequence) FROM (
  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff'))";
 
 pub(super) const ROWS: &str = "
-SELECT row.sequence, row.turn_id,
+SELECT row.source_sequence, row.item_index, row.turn_id,
  CASE WHEN source.kind IN ('invocation_opened', 'message_steered')
       AND json_extract(row.payload, '$.type') = 'user' THEN
    navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
                               json_extract(row.payload, '$.text')), 256) END,
  CASE WHEN json_extract(row.payload, '$.type') = 'turn_state' THEN row.payload END
 FROM transcript_rows row
-JOIN runtime_events source ON source.sequence = row.sequence / 256
-WHERE row.session_id = ?1 AND row.sequence <= ?2 AND row.sequence >= ?3
-ORDER BY row.sequence LIMIT 257";
+JOIN runtime_events source ON source.sequence = row.source_sequence
+WHERE row.session_id = ?1 AND row.source_sequence <= ?2
+AND (row.source_sequence, row.item_index) >= (COALESCE(?3, 1), COALESCE(?4, 0))
+ORDER BY row.source_sequence, row.item_index LIMIT 257";
 
 pub(super) const LANDMARKS: &str = "
 WITH openings AS (
@@ -61,12 +62,24 @@ JOIN samples ON rank = CASE WHEN ?3 = 1 THEN total - 1 ELSE n * (total - 1) / (?
 ORDER BY sequence";
 
 pub(super) const PROMPT: &str = "
-SELECT row.sequence, row.turn_id,
+SELECT row.turn_id,
  navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
                              json_extract(row.payload, '$.text')), 96)
 FROM runtime_events source
-JOIN transcript_rows row ON row.sequence >= source.sequence * 256 AND row.sequence < (source.sequence + 1) * 256
+JOIN transcript_rows row ON row.source_sequence = source.sequence
 WHERE source.invocation_id = ?2 AND source.kind IN ('invocation_opened', 'message_steered')
 AND json_extract(row.payload, '$.type') = 'user'
-AND row.session_id = ?1 AND row.sequence <= ?3
-ORDER BY row.sequence LIMIT 1";
+AND row.session_id = ?1 AND row.source_sequence <= ?3
+ORDER BY row.source_sequence, row.item_index LIMIT 1";
+
+pub(super) const BOUNDS: &str = "
+SELECT first.source_sequence, first.item_index, last.source_sequence, last.item_index
+FROM (
+ SELECT source_sequence, item_index FROM transcript_rows
+ WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
+ ORDER BY source_sequence, item_index LIMIT 1
+) first CROSS JOIN (
+ SELECT source_sequence, item_index FROM transcript_rows
+ WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
+ ORDER BY source_sequence DESC, item_index DESC LIMIT 1
+) last";

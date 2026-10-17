@@ -112,7 +112,7 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
         .unwrap();
     // A projection upgrade discards only the derived cache, never accepted work.
     connection
-        .execute("DELETE FROM _sqlx_migrations WHERE version = 2", [])
+        .execute("DELETE FROM _sqlx_migrations WHERE version = 31", [])
         .unwrap();
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();

@@ -76,7 +76,10 @@ async fn ten_mib_raw_fragments_rebuild_after_restart_from_durable_facts() {
         let fragment = log
             .transcript_fragment(
                 "session",
-                through * 256,
+                maka_agent_facts::history::RowPosition {
+                    source_sequence: through,
+                    item_index: 0,
+                },
                 assembled.len() as u64,
                 length as u64,
             )

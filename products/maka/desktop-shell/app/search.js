@@ -34,6 +34,7 @@
 import { div, list } from 'gpui-kit';
 import { v_flex, h_flex, InputState, TextView, Scrollbar } from 'gpui-base';
 import { query, log } from './host.js';
+import { rowPositionKey } from './history-position.js';
 import {
   palette,
   typeset,
@@ -79,7 +80,7 @@ function titleKey(session) {
 
 /** A passage by its task and its row: one message can be found in several tasks' copies of it. */
 function passageKey(passage) {
-  return `passage/${passage.session.id}/${passage.anchorSequence}`;
+  return `passage/${passage.session.id}/${rowPositionKey(passage.anchorPosition)}`;
 }
 
 export class Search {
@@ -87,7 +88,7 @@ export class Search {
    * Creates retained input state and a focus handle, so it belongs in the
    * view's `init`, whose context it keeps for the pause and the Host calls.
    * @param {{ changed: () => void, openTask: (session: object) => void,
-   *   openPassage: (session: object, anchor: number) => void, back: () => void }} hooks
+   *   openPassage: (session: object, anchor: import('./history-position.js').RowPosition) => void, back: () => void }} hooks
    *   `openTask` shows a task at its newest message, `openPassage` at the
    *   passage's row, and `back` goes back from the page
    */
@@ -374,8 +375,8 @@ export class Search {
     for (const group of answer.groups) {
       const passage = group.passages.find((entry) => passageKey(entry) === key);
       if (passage === undefined) continue;
-      log(`search: opening ${passage.session.id} at row ${passage.anchorSequence}`);
-      this.hooks.openPassage(passage.session, passage.anchorSequence);
+      log(`search: opening ${passage.session.id} at row ${rowPositionKey(passage.anchorPosition)}`);
+      this.hooks.openPassage(passage.session, passage.anchorPosition);
       return;
     }
   }
