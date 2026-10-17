@@ -1012,6 +1012,8 @@ impl Presenter {
                 paint::TargetKind::Item { .. } => "activate",
                 _ => "click",
             };
+            // Focus belongs to admitted physical input, even if its callback rejects.
+            self.focus = Some(target.clone());
             if let paint::TargetKind::Action {
                 copy_text: Some(text),
             } = &target.kind
@@ -1034,7 +1036,6 @@ impl Presenter {
                 )?;
             }
             self.close_context_action(target.scope.as_ref());
-            self.focus = Some(target);
             self.sync_native()?;
         }
         if self.dismiss_escape(&event)? {

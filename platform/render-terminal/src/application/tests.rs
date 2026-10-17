@@ -958,6 +958,118 @@ fn duplicate_native_terminal_placement_rejects_pending_scene_before_input_public
 }
 
 #[test]
+fn synchronous_click_rejection_keeps_focus_on_the_original_painted_target() {
+    use maka_plugin_core::package::{EntryTarget, Implementation};
+    use maka_ui_runtime::{
+        ComponentCall, ComponentOutput, NativeCapability, NativeComponent, NativeExport, NativeView,
+    };
+    use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+
+    struct RejectClick(Rc<Cell<u64>>);
+    impl NativeComponent<dyn Widget> for RejectClick {
+        fn call(
+            &self,
+            call: ComponentCall<'_>,
+            _: &maka_ui_runtime::abi::ValueBindings,
+        ) -> maka_ui_runtime::Result<ComponentOutput<NativeView<dyn Widget>>> {
+            match call {
+                ComponentCall::Event { key, input, .. } => {
+                    assert_eq!(key, "reject");
+                    assert_eq!(input, &json!({"kind":"click"}));
+                    self.0.set(self.0.get() + 1);
+                    return Err(Error::Invalid("synchronous click rejected".into()));
+                }
+                ComponentCall::Mount { .. } => {}
+                ComponentCall::Update { .. } => panic!("unexpected fixture update"),
+            }
+            Ok(maka_ui_runtime::Frame {
+                revision: 0,
+                state: json!({"revision":0}),
+                surface: Some(Surface::Terminal {
+                    binding: "surface".into(),
+                }),
+                view: scene::compile(
+                    &json!({"kind":"button","key":"reject","label":"Reject click"}),
+                )?,
+            }
+            .output(vec![]))
+        }
+    }
+
+    let (runtime, mut input, mut packages) = fixture("");
+    let original = packages.pop().unwrap();
+    let mut declaration = original
+        .manifest()
+        .application
+        .as_ref()
+        .unwrap()
+        .declaration()
+        .clone();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
+    entry.scene = None;
+    entry.implementation = Implementation::Native {
+        implementation: "test.reject-click".into(),
+    };
+    let contract = entry.exports["App"].contract.clone();
+    let package = support::package("dynamic.app", declaration, None);
+    input.instances.get_mut("app").unwrap().package = package.application_ref().into();
+    packages.push(package);
+    let calls = Rc::new(Cell::new(0));
+    let observed = calls.clone();
+    let mut native = registry();
+    native
+        .register("test.reject-click", move |_, _| {
+            Ok(BTreeMap::from([(
+                "App".into(),
+                NativeExport {
+                    contract: contract.clone(),
+                    value: NativeCapability::Component(Rc::new(RejectClick(observed.clone()))),
+                },
+            )]))
+        })
+        .unwrap();
+    let mut tui = Presenter::new(
+        &input,
+        packages,
+        runtime.handle().clone(),
+        native,
+        json!({}),
+        maka_ui_js::execution(Default::default()),
+    )
+    .unwrap();
+    draw(&mut tui, 30, 12);
+    let painted = tui
+        .scene
+        .iter()
+        .find(|target| target.key == "reject")
+        .unwrap()
+        .clone();
+    let hit = painted.area.visible();
+    tui.focus = None;
+    let error = tui
+        .input(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: hit.x,
+            row: hit.y,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .unwrap_err();
+    assert!(matches!(error, Error::Invalid(reason) if reason == "synchronous click rejected"));
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        tui.application.frame(&tui.root).unwrap().state,
+        json!({"revision":0})
+    );
+    assert_eq!(tui.application.frame(&tui.root).unwrap().revision, 0);
+    assert!(
+        tui.focus.as_ref().is_some_and(|focus| focus.same(&painted)),
+        "a synchronous business rejection must retain the clicked target's mechanical focus"
+    );
+    tui.surface_closed(&tui.surface(), Ok(())).unwrap();
+    tui.shutdown_settled().unwrap();
+}
+
+#[test]
 fn raw_click_focus_is_immediate_even_when_business_candidate_is_rejected() {
     for (handler, accepts, focuses) in [
         (
