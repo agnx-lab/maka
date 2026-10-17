@@ -32,6 +32,36 @@ pub(crate) async fn digest_selected(
     source: &SourceEvidence,
     before: u64,
 ) -> Result<String, StoreError> {
+    let mut hash = Sha256::new();
+    hash.update(b"maka.effective-context.v1\0");
+    hash.update(source.digest.as_bytes());
+    fold_selected(connection, selection, source.high_water, before, &mut hash).await?;
+    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
+}
+
+pub(crate) async fn validate_selected(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    high_water: u64,
+    before: u64,
+) -> Result<(), StoreError> {
+    fold_selected(
+        connection,
+        selection,
+        high_water,
+        before,
+        &mut Sha256::new(),
+    )
+    .await
+}
+
+async fn fold_selected(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    high_water: u64,
+    before: u64,
+    hash: &mut Sha256,
+) -> Result<(), StoreError> {
     let session = selection.session.as_deref().ok_or(ArchiveError::Corrupt)?;
     let archive_filter = Selection::predicate("a", "?4");
     let target_filter = Selection::predicate("t", "?5");
@@ -49,7 +79,7 @@ pub(crate) async fn digest_selected(
              AND (t.kind!='tool_settled' OR a.kind IS NOT 'tool_result_archived' OR a.sequence<=t.sequence
                OR json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id') IS NOT t.event_id))"
     ))).bind(before as i64).bind(session).bind(session).bind(&selection.lineage)
-        .bind(source.high_water as i64).fetch_one(&mut *connection).await?;
+        .bind(high_water as i64).fetch_one(&mut *connection).await?;
     if broken {
         return Err(ArchiveError::Corrupt.into());
     }
@@ -66,9 +96,6 @@ pub(crate) async fn digest_selected(
         "{} ORDER BY sequence LIMIT 129",
         branches.join(" UNION ALL ")
     );
-    let mut hash = Sha256::new();
-    hash.update(b"maka.effective-context.v1\0");
-    hash.update(source.digest.as_bytes());
     let mut after = 0_i64;
     loop {
         let rows: Vec<(i64, String, String, i64)> =
@@ -76,7 +103,7 @@ pub(crate) async fn digest_selected(
                 .bind(before as i64)
                 .bind(session)
                 .bind(after)
-                .bind(source.high_water as i64)
+                .bind(high_water as i64)
                 .bind(&selection.lineage)
                 .fetch_all(&mut *connection)
                 .await?;
@@ -110,7 +137,7 @@ pub(crate) async fn digest_selected(
             after = sequence;
         }
     }
-    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
+    Ok(())
 }
 
 pub(crate) async fn affected_after(

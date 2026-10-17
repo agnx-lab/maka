@@ -70,10 +70,55 @@ impl EventLog {
         self.validate_root()?;
         let events = events.to_vec();
         let commits = self.commits.clone();
+        let cache = self.context_cache.clone();
+        let ingress = self.connection.writer();
         self.connection
             .run(move |connection| {
                 Box::pin(async move {
+                    let context = if let Some(consumer) =
+                        events.iter().find(|write| match &write.event().fact {
+                            Fact::ContextCheckpointRecorded { .. } => true,
+                            Fact::ModelRequested {
+                                purpose,
+                                checkpoint_event_id,
+                                source_scope,
+                                ..
+                            } => {
+                                checkpoint_event_id.is_some()
+                                    || *purpose == maka_agent_facts::context::ModelPurpose::Summary
+                                    || (matches!(
+                                        source_scope,
+                                        maka_agent_facts::event::LogScope::Lineage { .. }
+                                    ) && cache.has_raw(&write.event().invocation.session_id))
+                            }
+                            _ => false,
+                        }) {
+                        let origin = cache.stamp(connection, ingress.failures()).await?;
+                        let certificate =
+                            cache.get(&consumer.event().invocation.session_id, &origin)?;
+                        Some((origin, certificate))
+                    } else {
+                        None
+                    };
                     let mut transaction = connection.begin_with("BEGIN IMMEDIATE").await?;
+                    let (origin, mut verification) = if let Some((origin, certificate)) = context {
+                        let certificate = if cache
+                            .confirm_append(&mut transaction, &origin, ingress.failures())
+                            .await?
+                        {
+                            certificate
+                        } else {
+                            None
+                        };
+                        let verification = crate::context::cache::Verification::new(
+                            cache.clone(),
+                            origin.clone(),
+                            certificate,
+                        );
+                        (Some(origin), verification)
+                    } else {
+                        (None, crate::context::cache::Verification::default())
+                    };
                     let mut sequences = Vec::with_capacity(events.len());
                     let mut last_inserted = None;
                     for event in &events {
@@ -88,7 +133,9 @@ impl EventLog {
                         {
                             return Err(StoreError::PermissionRevoked);
                         }
-                        let result = Self::append_in_transaction(&mut transaction, event).await?;
+                        let result =
+                            Self::append_verified(&mut transaction, event, &mut verification)
+                                .await?;
                         let sequence = match result {
                             AppendResult::Existing(sequence) => sequence,
                             AppendResult::Inserted(sequence) => {
@@ -105,6 +152,20 @@ impl EventLog {
                             .await
                             .map_err(StoreError::CommitUnknown)?;
                         commits.send_replace(sequence);
+                        // Optional cache work cannot change a confirmed commit's outcome.
+                        if let Some(origin) = origin
+                            && let Some(candidate) = verification.candidate()
+                        {
+                            match cache.stamp(connection, ingress.failures()).await {
+                                Ok(stamp) if stamp == origin => {
+                                    if cache.publish(candidate).is_err() {
+                                        cache.invalidate();
+                                    }
+                                }
+                                Ok(_) => {}
+                                Err(_) => cache.invalidate(),
+                            }
+                        }
                     } else {
                         transaction.rollback().await?;
                     }
@@ -118,6 +179,19 @@ impl EventLog {
     pub(crate) async fn append_in_transaction(
         transaction: &mut SqliteConnection,
         write: &EventWrite,
+    ) -> Result<AppendResult, StoreError> {
+        Self::append_verified(
+            transaction,
+            write,
+            &mut crate::context::cache::Verification::default(),
+        )
+        .await
+    }
+
+    async fn append_verified(
+        transaction: &mut SqliteConnection,
+        write: &EventWrite,
+        verification: &mut crate::context::cache::Verification,
     ) -> Result<AppendResult, StoreError> {
         let event = write.event();
         crate::recovery::require_local(transaction, &event.invocation.invocation_id).await?;
@@ -154,7 +228,7 @@ impl EventLog {
             return Err(StoreError::SessionRetired);
         }
         let id = &event.invocation.invocation_id;
-        history::validate(transaction, event).await?;
+        history::validate_cached(transaction, event, verification).await?;
         if matches!(event.fact, Fact::InvocationOpened { .. }) {
             crate::sessions::retain(transaction, &event.invocation.session_id).await?;
             let archived: bool = sqlx::query_scalar(

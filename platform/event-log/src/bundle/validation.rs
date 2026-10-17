@@ -226,7 +226,13 @@ async fn request(
     if source.digest != *source_digest {
         return Err(invalid("request original source digest mismatch"));
     }
-    let baseline = context::read::latest_selected(db, &selection, *source_high_water).await?;
+    let baseline = context::read::latest_selected(
+        db,
+        &selection,
+        *source_high_water,
+        &mut context::cache::Verification::default(),
+    )
+    .await?;
     if baseline.as_ref().map(|b| &b.event_id) != checkpoint_event_id.as_ref() {
         return Err(invalid("request original baseline mismatch"));
     }

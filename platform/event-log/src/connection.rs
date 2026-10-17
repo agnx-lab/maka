@@ -23,7 +23,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -57,6 +57,7 @@ enum Command {
 /// Ingress is bounded; accepted work and the database lease belong to a dedicated
 /// thread, independent of the caller's executor. Dropping ingress drains work.
 pub struct OwnedConnection {
+    failures: Arc<AtomicU64>,
     jobs: mpsc::Sender<Command>,
     read_jobs: mpsc::Sender<ReadJob>,
     read_stop: CancellationToken,
@@ -65,7 +66,54 @@ pub struct OwnedConnection {
     changes: watch::Receiver<()>,
 }
 
+/// Short writer observations can be sent from a reader without retaining a
+/// second database owner or its reader/shutdown authority.
+#[derive(Clone)]
+pub(crate) struct WriterIngress {
+    jobs: mpsc::Sender<Command>,
+    failures: Arc<AtomicU64>,
+}
+
+impl WriterIngress {
+    pub(crate) fn failures(&self) -> u64 {
+        self.failures.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn run<T: Send + 'static>(
+        &self,
+        operation: impl for<'c> FnOnce(&'c mut SqliteConnection) -> BoxFuture<'c, Result<T, StoreError>>
+        + Send
+        + 'static,
+    ) -> Result<T, StoreError> {
+        let (reply, result) = oneshot::channel();
+        let failures = self.failures.clone();
+        self.jobs
+            .send(Command::Run(Box::new(move |connection, valid| {
+                Box::pin(async move {
+                    let result = match valid {
+                        Ok(()) => operation(connection).await,
+                        Err(error) => Err(error),
+                    };
+                    if result.is_err() {
+                        failures.fetch_add(1, Ordering::AcqRel);
+                    }
+                    let _ = reply.send(result);
+                })
+            })))
+            .await
+            .map_err(|_| StoreError::ConnectionClosed)?;
+        result.await.map_err(|_| StoreError::OperationUnknown)?
+    }
+}
+
 impl OwnedConnection {
+    pub(crate) fn writer(&self) -> WriterIngress {
+        WriterIngress {
+            jobs: self.jobs.clone(),
+            failures: self.failures.clone(),
+        }
+    }
+
     /// Disposable write hints. Re-read canonical state after each wakeup;
     /// rolled-back work may also notify. Only the original worker owns ingress.
     pub fn subscribe_changes(&self) -> watch::Receiver<()> {
@@ -203,6 +251,7 @@ impl OwnedConnection {
             })?;
         match startup.await {
             Ok(Ok(())) => Ok(Self {
+                failures: Arc::new(AtomicU64::new(0)),
                 jobs,
                 read_jobs,
                 read_stop,
@@ -262,20 +311,7 @@ impl OwnedConnection {
         + Send
         + 'static,
     ) -> Result<T, StoreError> {
-        let (reply, result) = oneshot::channel();
-        self.jobs
-            .send(Command::Run(Box::new(move |connection, valid| {
-                Box::pin(async move {
-                    let result = match valid {
-                        Ok(()) => operation(connection).await,
-                        Err(error) => Err(error),
-                    };
-                    let _ = reply.send(result);
-                })
-            })))
-            .await
-            .map_err(|_| StoreError::ConnectionClosed)?;
-        result.await.map_err(|_| StoreError::OperationUnknown)?
+        self.writer().run(operation).await
     }
 
     pub async fn shutdown(&self) -> Result<(), StoreError> {

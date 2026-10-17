@@ -18,6 +18,7 @@
  */
 
 mod boundary;
+pub(crate) mod cache;
 pub(crate) mod evidence;
 pub(crate) mod frozen;
 pub(crate) mod history;

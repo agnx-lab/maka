@@ -59,22 +59,34 @@ pub(super) async fn digests(
     selection: &Selection,
     throughs: &[u64],
 ) -> Result<Vec<String>, StoreError> {
+    Ok(scan(connection, selection, throughs, None).await?.0)
+}
+
+pub(super) async fn scan(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    throughs: &[u64],
+    raw: Option<&super::cache::Raw>,
+) -> Result<(Vec<String>, Option<super::cache::Raw>), StoreError> {
     if throughs.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let session = selection
         .session
         .as_deref()
         .ok_or_else(|| invalid("context requires a Session"))?;
-    let result: String = sqlx::query_scalar("SELECT context_source_digests(?, ?, ?, ?)")
+    let result: String = sqlx::query_scalar("SELECT context_source_digests(?, ?, ?, ?, ?)")
         .bind(session)
         .bind(&selection.lineage)
         .bind(serde_json::to_vec(&selection.scope)?)
         .bind(serde_json::to_string(throughs)?)
+        .bind(raw.map(serde_json::to_string).transpose()?)
         .fetch_one(connection)
         .await?;
-    serde_json::from_str::<Result<Vec<String>, String>>(&result)?
-        .map_err(StoreError::InvalidTransition)
+    let (digests, raw) =
+        serde_json::from_str::<Result<(Vec<String>, super::cache::Raw), String>>(&result)?
+            .map_err(StoreError::InvalidTransition)?;
+    Ok((digests, Some(raw)))
 }
 
 pub(super) async fn high_water(

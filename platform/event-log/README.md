@@ -27,4 +27,6 @@ Original operation contracts are stored once by digest. Operation requests and r
 
 Checkpoint reads validate every raw source commitment, including predecessors hidden by the latest summary. Prefix digests bind the scope, ordered sequence/byte-length/raw-byte records, then the high-water suffix; identical selections can share a streamed scan across multiple cuts. Lineage selections and archive request fences remain independently checked. This internal encoding has no legacy compatibility path.
 
+An open store can reuse a verified checkpoint chain and extend its authenticated prefix within the same selection. Fresh writer confirmations bind that evidence to the reader's pinned snapshot or the writer's locked transaction; protected history mutations, external commits, schema changes and failed writes revoke stale evidence. Selection, admission, settlement and archive validation remain fresh. Opening-only reads use full validation without warming a certificate. These disposable certificates are never persisted or used as authority.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

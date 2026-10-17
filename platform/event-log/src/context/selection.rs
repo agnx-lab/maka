@@ -26,7 +26,7 @@ use maka_agent_facts::event::LogScope;
 use maka_agent_facts::event::RuntimeEvent;
 use sqlx::SqliteConnection;
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Selection {
     pub scope: LogScope,
     pub session: Option<String>,

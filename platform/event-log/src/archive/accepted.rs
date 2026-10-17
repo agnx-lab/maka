@@ -95,7 +95,13 @@ pub(crate) async fn validate_append(
     }
     let selection = Selection::for_invocation(connection, &event.invocation).await?;
     validate_selection(connection, &selection, &target.event_id).await?;
-    let baseline = read::latest_selected(connection, &selection, i64::MAX as u64).await?;
+    let baseline = read::latest_selected(
+        connection,
+        &selection,
+        i64::MAX as u64,
+        &mut crate::context::cache::Verification::default(),
+    )
+    .await?;
     if baseline
         .as_ref()
         .is_some_and(|b| target.sequence <= b.checkpoint.covered_through)

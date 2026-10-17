@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "cc8eb758caeae9c4e69b57afc5edbc421b8013b9c051a92f5f16a1d013fdf769",
+    "Cargo.lock": "812c6b26f81f98e9b1cacca52957dd2c9e35d110350887feb6590d4f0b57d872",
     "Cargo.toml": "84dad9aaa98e01f9d194633a830d2c886c1e81de823436efc8057ad10a44f894",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
@@ -15,7 +15,7 @@
     "platform/capabilities/Cargo.toml": "b6a0d3d90f3289fcc2f263fcad661df3d76ac2f5c953c07940f2b5c9c8afa5c8",
     "platform/computer-use/Cargo.toml": "fc8a60fbb29acf1c9391a95dbca312203bf893fa28e873264ccf26226c22241f",
     "platform/computer-use/THIRD_PARTY_NOTICES": "709951ed2ee5c4b9ed933f375a37c5b15ec0efa2dea340dc0f289906d72a7bde",
-    "platform/event-log/Cargo.toml": "785b29ae887f80ac0b1ac7f64afa126580846cab06ae6a5d49455774c47e7216",
+    "platform/event-log/Cargo.toml": "e78dc980b90d9eb1934736ba856dd77e28e5c102c832c8e6793d8a5f1688be76",
     "platform/host-js/Cargo.toml": "ad83d0133b55b69298aeb65db408c6de4170bf1d55afb47f93b121992335a3b5",
     "platform/host-runtime/Cargo.toml": "6ac21566be141265f87876bd25bf30de562db4f5407b8cb77080b38984de967f",
     "platform/js-runtime/Cargo.toml": "fff266ae188ff641e0dc13a7088fb023624d6446470fe2445de26c53947c824c",

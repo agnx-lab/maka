@@ -160,6 +160,7 @@ pub enum StoreError {
 }
 
 pub struct EventLog {
+    context_cache: Arc<context::cache::Cache>,
     // The independent owner drains SQLx and closes it before releasing its lease.
     connection: OwnedConnection,
     root_owner: Option<Arc<root::RootOwner>>,
@@ -253,9 +254,12 @@ impl EventLog {
             |connection| Box::pin(schema::initialize_connection(connection)),
         )
         .await?;
+        let context_cache = Arc::new(context::cache::Cache::default());
+        let install = context_cache.clone();
         let high_water = connection
-            .run(|connection| {
+            .run(move |connection| {
                 Box::pin(async move {
+                    install.install(connection).await?;
                     sequence_number(
                         sqlx::query_scalar::<_, i64>(
                             "SELECT COALESCE(MAX(sequence), 0) FROM event_log",
@@ -280,6 +284,7 @@ impl EventLog {
             }
         };
         Ok(Self {
+            context_cache,
             connection,
             root_owner,
             commits: tokio::sync::watch::channel(high_water).0,

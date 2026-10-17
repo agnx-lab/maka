@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{evidence, invalid, proof, read, safety, selection::Selection};
+use super::{invalid, proof, read, safety, selection::Selection};
 use crate::StoreError;
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::context::CompactOutcome;
@@ -30,8 +30,9 @@ use sqlx::SqliteConnection;
 pub(crate) async fn validate_append(
     connection: &mut SqliteConnection,
     event: &RuntimeEvent,
+    verification: &mut super::cache::Verification,
 ) -> Result<(), StoreError> {
-    super::request::validate(connection, event).await?;
+    super::request::validate(connection, event, verification).await?;
     match &event.fact {
         Fact::ContextCheckpointRecorded { checkpoint } => {
             safety::current_opening(
@@ -62,7 +63,16 @@ pub(crate) async fn validate_append(
             if current != checkpoint.previous_checkpoint_id {
                 return Err(invalid("checkpoint predecessor changed before adoption"));
             }
-            chain(connection, event, i64::MAX as u64, false, None).await?;
+            verification.select(&selection);
+            chain_cached(
+                connection,
+                event,
+                i64::MAX as u64,
+                false,
+                None,
+                verification,
+            )
+            .await?;
         }
         Fact::InvocationEnded { outcome } => {
             let compact: bool = sqlx::query_scalar(
@@ -107,12 +117,13 @@ pub(crate) async fn validate_append(
 
 /// Strictly decreasing coverage and record sequence make cycles impossible.
 /// An optional current source cut must be at or after the first record.
-pub(super) async fn chain(
+pub(super) async fn chain_cached(
     connection: &mut SqliteConnection,
     first: &RuntimeEvent,
     first_sequence: u64,
     committed: bool,
     source: Option<(&Selection, u64)>,
+    verification: &mut super::cache::Verification,
 ) -> Result<Option<String>, StoreError> {
     let mut event = first.clone();
     let mut sequence = first_sequence;
@@ -122,6 +133,11 @@ pub(super) async fn chain(
         let Fact::ContextCheckpointRecorded { checkpoint } = &event.fact else {
             return Err(invalid("predecessor is not a checkpoint"));
         };
+        if verification.anchor(&event.id, sequence, checkpoint.covered_through) {
+            break;
+        }
+        #[cfg(test)]
+        verification.validated_link();
         let selection = proof::validate(connection, &event, sequence, checkpoint).await?;
         if needs_terminal && matches!(checkpoint.mode, CheckpointMode::Standalone) {
             require_terminal(connection, &event).await?;
@@ -176,7 +192,9 @@ pub(super) async fn chain(
         if let Some((_, through)) = current {
             throughs.push(through);
         }
-        let mut actual = evidence::digests(connection, &selection, &throughs).await?;
+        let mut actual = verification
+            .digests(connection, &selection, &throughs)
+            .await?;
         if current.is_some() {
             // Current coverage follows the first checkpoint record, so its
             // digest is after every checkpoint source boundary in the stream.
@@ -194,10 +212,15 @@ pub(super) async fn chain(
         && source_digest.is_none()
     {
         source_digest = Some(
-            evidence::selected(connection, selection, through)
+            verification
+                .digests(connection, selection, &[through])
                 .await?
-                .digest,
+                .pop()
+                .expect("one requested prefix"),
         );
+    }
+    if committed {
+        verification.adopt(first, first_sequence);
     }
     Ok(source_digest)
 }

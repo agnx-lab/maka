@@ -18,17 +18,21 @@
  */
 
 //! Reduce exact source bytes on SQLite's worker, returning only digest cuts.
-//! No authenticated state survives this function or the calling transaction.
+//! Serialized state is temporary, owner-local evidence, never a wire fact.
 
+use crate::context::cache::Raw;
 use crate::context::{invalid, selection::Selection};
 use crate::{StoreError, sequence_number};
 use rusqlite::{Connection, functions::FunctionFlags, params, types::ValueRef};
-use sha2::{Digest, Sha256};
+use sha2::{
+    Digest, Sha256,
+    digest::common::hazmat::{SerializableState, SerializedState},
+};
 
 pub(crate) fn register(connection: &Connection) -> Result<(), StoreError> {
     connection.create_scalar_function(
         "context_source_digests",
-        4,
+        5,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
         |context| {
             let session: String = context.get(0)?;
@@ -37,11 +41,24 @@ pub(crate) fn register(connection: &Connection) -> Result<(), StoreError> {
             let cuts: String = context.get(3)?;
             let cuts: Vec<u64> = serde_json::from_str(&cuts)
                 .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
+            let raw: Option<String> = context.get(4)?;
+            let raw: Option<Raw> = raw
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
             // SAFETY: synchronous read-only use on SQLite's current worker and
             // transaction. No handle, row, or reference escapes the callback;
             // it never awaits, changes threads, or recursively invokes this UDF.
             let connection = unsafe { context.get_connection() }?;
-            let result = match digests(&connection, &session, lineage.as_deref(), &scope, &cuts) {
+            let result = match digests(
+                &connection,
+                &session,
+                lineage.as_deref(),
+                &scope,
+                &cuts,
+                raw.as_ref(),
+            ) {
                 Ok(digests) => Ok(digests),
                 // Keep domain failures typed across the SQLx/UDF boundary.
                 Err(StoreError::InvalidTransition(message)) => Err(message),
@@ -61,14 +78,24 @@ fn digests(
     lineage: Option<&str>,
     scope: &[u8],
     throughs: &[u64],
-) -> Result<Vec<String>, StoreError> {
-    let Some(through) = throughs.last().copied() else {
-        return Ok(Vec::new());
+    raw: Option<&Raw>,
+) -> Result<(Vec<String>, Raw), StoreError> {
+    let through = *throughs
+        .last()
+        .ok_or_else(|| invalid("missing source cut"))?;
+    let raw = raw.filter(|raw| throughs[0] >= raw.through);
+    let after = raw.map_or(0, |raw| raw.through);
+    let mut digest = if let Some(raw) = raw {
+        let state = SerializedState::<Sha256>::try_from(raw.state.as_slice())
+            .map_err(|_| invalid("invalid internal SHA state"))?;
+        Sha256::deserialize(&state).map_err(|_| invalid("invalid internal SHA state"))?
+    } else {
+        let mut digest = Sha256::new();
+        digest.update(b"maka.log-prefix.v1\0");
+        digest.update((scope.len() as u64).to_be_bytes());
+        digest.update(scope);
+        digest
     };
-    let mut digest = Sha256::new();
-    digest.update(b"maka.log-prefix.v1\0");
-    digest.update((scope.len() as u64).to_be_bytes());
-    digest.update(scope);
     let mut boundaries = throughs.iter().copied().peekable();
     let mut result = Vec::new();
     let mut finish = |digest: &Sha256, sequence: u64| -> Result<(), StoreError> {
@@ -85,7 +112,7 @@ fn digests(
         }
         Ok(())
     };
-    finish(&digest, 0)?;
+    finish(&digest, after)?;
     let filter = Selection::predicate("e", "?4");
     let payload = "length(CAST(e.event_json AS BLOB)),
         CASE WHEN length(CAST(e.event_json AS BLOB)) <= 65536 THEN CAST(e.event_json AS BLOB) END";
@@ -102,8 +129,8 @@ fn digests(
     let mut slices = connection.prepare(
         "SELECT substr(CAST(event_json AS BLOB), ?, 65536) FROM runtime_events WHERE sequence = ?",
     )?;
-    let mut previous = 0i64;
-    let mut rows = statement.query(params![0i64, through as i64, session, lineage])?;
+    let mut previous = after as i64;
+    let mut rows = statement.query(params![after as i64, through as i64, session, lineage])?;
     while let Some(row) = rows.next()? {
         let sequence: i64 = row.get(0)?;
         let bytes: i64 = row.get(1)?;
@@ -143,5 +170,11 @@ fn digests(
     if boundaries.peek().is_some() {
         return Err(invalid("coverage is not a selected source high-water"));
     }
-    Ok(result)
+    Ok((
+        result,
+        Raw {
+            through,
+            state: digest.serialize().to_vec(),
+        },
+    ))
 }

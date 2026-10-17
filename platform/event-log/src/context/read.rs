@@ -19,8 +19,7 @@
 
 use super::selection::Selection;
 use super::{
-    ContextBaseline, ModelContextSource, boundary, evidence, invalid, latest_main, proof, safety,
-    validate,
+    ContextBaseline, ModelContextSource, boundary, invalid, latest_main, proof, safety, validate,
 };
 use crate::{EventLog, StoreError};
 use maka_agent_facts::context::CheckpointMode;
@@ -86,9 +85,21 @@ impl EventLog {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
         let (session, current) = (session.to_owned(), current.map(str::to_owned));
+        let cache = self.context_cache.clone();
+        let writer = self.connection.writer();
         self.connection
             .read_interruptible(move |connection| {
                 Box::pin(async move {
+                    let attempt = match cache.has_proof(&session) {
+                        Some(true) => true,
+                        Some(false) => super::cache::history_hint(connection, &session).await,
+                        None => false,
+                    };
+                    let observation = if attempt {
+                        Some(super::cache::observe(cache.clone(), &writer, session.clone()).await?)
+                    } else {
+                        None
+                    };
                     let mut tx = connection.begin().await?;
                     let opening =
                         safety::current_opening(&mut tx, &session, current.as_deref()).await?;
@@ -115,6 +126,21 @@ impl EventLog {
                     let selection = match &opening {
                         Some((_, event)) => Selection::for_opening(&mut tx, event).await?,
                         None => Selection::session(&session),
+                    };
+                    let (origin, mut verification) = if let Some((origin, certificate)) =
+                        observation
+                    {
+                        let (confirmed, _) =
+                            super::cache::observe(cache.clone(), &writer, session.clone()).await?;
+                        let certificate = certificate.filter(|_| confirmed == origin);
+                        let verification = super::cache::Verification::new(
+                            cache.clone(),
+                            origin.clone(),
+                            certificate,
+                        );
+                        (Some(origin), verification)
+                    } else {
+                        (None, super::cache::Verification::default())
                     };
                     let high_water = if let Some(mode) = &mode {
                         if let Some((_, event)) = &opening {
@@ -146,17 +172,21 @@ impl EventLog {
                     let before = i64::MAX as u64;
                     let latest_main =
                         latest_main::read_selected(&mut tx, &selection, high_water).await?;
-                    let source = materialize_selected(
+                    let source = materialize_cached(
                         &mut tx,
                         &selection,
                         high_water,
                         before,
                         usize::MAX,
                         usize::MAX,
-                        latest_main,
+                        (latest_main, &mut verification),
                     )
                     .await?;
                     tx.commit().await?;
+                    if let Some(origin) = origin {
+                        super::cache::promote(cache, &writer, origin, verification.candidate())
+                            .await?;
+                    }
                     Ok(source)
                 })
             })
@@ -195,8 +225,29 @@ pub(super) async fn materialize_selected(
     max_bytes: usize,
     latest_main: super::LatestMainContext,
 ) -> Result<ModelContextSource, StoreError> {
+    materialize_cached(
+        connection,
+        selection,
+        high_water,
+        before,
+        max_events,
+        max_bytes,
+        (latest_main, &mut super::cache::Verification::default()),
+    )
+    .await
+}
+
+async fn materialize_cached(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    high_water: u64,
+    before: u64,
+    max_events: usize,
+    max_bytes: usize,
+    (latest_main, verification): (super::LatestMainContext, &mut super::cache::Verification),
+) -> Result<ModelContextSource, StoreError> {
     let (baseline, source_evidence) =
-        latest_with_evidence(connection, selection, high_water).await?;
+        latest_with_evidence(connection, selection, high_water, verification).await?;
     let anchor = if let Some(ContextBaseline { checkpoint, .. }) = &baseline {
         if let CheckpointMode::MidTurn { anchor_event_id } = &checkpoint.mode {
             let (sequence, event) = proof::by_id(connection, anchor_event_id).await?;
@@ -247,13 +298,15 @@ pub(crate) async fn latest_selected(
     connection: &mut SqliteConnection,
     selection: &Selection,
     through: u64,
+    verification: &mut super::cache::Verification,
 ) -> Result<Option<ContextBaseline>, StoreError> {
+    verification.select(selection);
     let Some(StoredEvent { sequence, event }) =
         latest_record(connection, selection, through).await?
     else {
         return Ok(None);
     };
-    validate::chain(connection, &event, sequence, true, None).await?;
+    validate::chain_cached(connection, &event, sequence, true, None, verification).await?;
     let Fact::ContextCheckpointRecorded { checkpoint } = event.fact else {
         return Err(invalid("checkpoint kind mismatch"));
     };
@@ -269,21 +322,32 @@ pub(super) async fn latest_with_evidence(
     connection: &mut SqliteConnection,
     selection: &Selection,
     through: u64,
+    verification: &mut super::cache::Verification,
 ) -> Result<(Option<ContextBaseline>, super::SourceEvidence), StoreError> {
+    verification.select(selection);
     let Some(StoredEvent { sequence, event }) =
         latest_record(connection, selection, through).await?
     else {
         return Ok((
             None,
-            evidence::selected(connection, selection, through).await?,
+            super::SourceEvidence {
+                scope: selection.scope.clone(),
+                high_water: through,
+                digest: verification
+                    .digests(connection, selection, &[through])
+                    .await?
+                    .pop()
+                    .expect("one requested prefix"),
+            },
         ));
     };
-    let digest = validate::chain(
+    let digest = validate::chain_cached(
         connection,
         &event,
         sequence,
         true,
         Some((selection, through)),
+        verification,
     )
     .await?
     .expect("requested current source digest");
