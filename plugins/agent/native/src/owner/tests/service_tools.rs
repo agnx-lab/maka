@@ -289,6 +289,7 @@ impl Setup {
     pub(super) fn skill_import(&self) -> Option<String> {
         self.prepare_skills.then(|| "service".into())
     }
+    #[cfg(target_os = "macos")]
     pub(super) fn protocol() -> Self {
         Self {
             protocol: true,
@@ -307,6 +308,7 @@ impl Setup {
             ..Self::javascript()
         }
     }
+    #[cfg(target_os = "macos")]
     pub(super) fn isolated_processes() -> Self {
         Self {
             isolated_workspaces: true,
