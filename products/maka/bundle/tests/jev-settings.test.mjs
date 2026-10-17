@@ -22,7 +22,7 @@ import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const ajv = new Ajv({
   strict: false,
@@ -44,7 +44,7 @@ function slots(value) {
     ...Object.values(value).flatMap(slots),
   ];
 }
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Jev ${target} preserves the settings CAS basis during private credential changes and original-receipt recovery`, async () => {
     const { component } = await import(`../dist/packages/jev-settings/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };

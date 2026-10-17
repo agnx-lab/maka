@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.locale',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '语言检测', description: '未指定语言时使用设备的语言。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.locale)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.locale) },
   },
 };

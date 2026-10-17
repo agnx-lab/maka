@@ -41,7 +41,6 @@ pub enum ExecutionLocation {
 #[serde(rename_all = "snake_case")]
 pub enum PresentationTarget {
     Tui,
-    Desktop,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -57,7 +56,6 @@ impl Environment {
         match (self.location, self.presentation) {
             (ExecutionLocation::Host, None) => Ok(EntryTarget::Host),
             (ExecutionLocation::Ui, Some(PresentationTarget::Tui)) => Ok(EntryTarget::Tui),
-            (ExecutionLocation::Ui, Some(PresentationTarget::Desktop)) => Ok(EntryTarget::Desktop),
             _ => Err(Error::Composition(
                 "invalid execution and presentation combination".into(),
             )),

@@ -658,7 +658,7 @@ async fn rejected_bundle_cas_role_and_unknown_revision_leave_original_plan_healt
     let mut input = current.source.input;
     input.environment = Environment {
         location: ExecutionLocation::Ui,
-        presentation: Some(maka_plugin_core::composition::PresentationTarget::Desktop),
+        presentation: Some(maka_plugin_core::composition::PresentationTarget::Tui),
     };
     let refused = f
         .mutate(
@@ -801,128 +801,124 @@ async fn concurrent_installation_commits_once_and_records_the_other_cas_as_confl
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ui_target_uses_original_root_but_keeps_host_journal_and_fixed_presentation() {
     use maka_plugin_core::composition::PresentationTarget;
-    for presentation in [PresentationTarget::Tui, PresentationTarget::Desktop] {
-        let f = Fixture::create(Some(presentation)).await;
-        let current = f.read().await;
-        assert_eq!(current.source.reference, f.managed);
-        assert_ne!(f.managed.deployment, f.source.deployment);
-        assert!(
-            f.app
-                .client()
-                .prepare_mutation(
-                    f.binding.clone(),
-                    "install".into(),
-                    json!({"expectedRevision":1}),
-                    scope(&f.issuer, false),
-                    Uuid::new_v4(),
-                    resource(extension().to_bundle()).into(),
-                )
-                .await
-                .is_err()
-        );
-        let install = f
-            .mutate(
-                "install",
+    let presentation = PresentationTarget::Tui;
+    let f = Fixture::create(Some(presentation)).await;
+    let current = f.read().await;
+    assert_eq!(current.source.reference, f.managed);
+    assert_ne!(f.managed.deployment, f.source.deployment);
+    assert!(
+        f.app
+            .client()
+            .prepare_mutation(
+                f.binding.clone(),
+                "install".into(),
                 json!({"expectedRevision":1}),
-                resource(extension().to_bundle()),
-            )
-            .await;
-        let installed: PackageInstalled =
-            serde_json::from_value(returned(&install)["value"].clone()).unwrap();
-        assert_eq!(installed.source.deployment, f.managed.deployment);
-        assert_eq!(installed.source.revision, 2);
-        assert_eq!(install.reference.source, f.source);
-        assert_eq!(
-            f.app.client().snapshot().effective.as_ref(),
-            Some(&f.source)
-        );
-        let mut current = f.read().await;
-        assert_eq!(current.source.input.instances.len(), 0);
-        current.source.input.environment.presentation = Some(match presentation {
-            PresentationTarget::Tui => PresentationTarget::Desktop,
-            PresentationTarget::Desktop => PresentationTarget::Tui,
-        });
-        let refused = f
-            .mutate(
-                "replace",
-                json!({"expectedRevision":2}),
-                document_resource(DeploymentDocument {
-                    input: current.source.input,
-                    remote_exports: vec![],
-                    packages: current.packages,
-                }),
-            )
-            .await;
-        assert_eq!(
-            returned(&refused),
-            json!({"status":"rejected","reason":"execution_environment"})
-        );
-        let current = f.read().await;
-        let replaced = f
-            .mutate(
-                "replace",
-                json!({"expectedRevision":2}),
-                document_resource(DeploymentDocument {
-                    input: current.source.input,
-                    remote_exports: vec![],
-                    packages: current.packages,
-                }),
-            )
-            .await;
-        let next: DeploymentRef =
-            serde_json::from_value(returned(&replaced)["value"].clone()).unwrap();
-        assert_eq!(next.deployment, f.managed.deployment);
-        assert_eq!(next.revision, 3);
-        assert_eq!(
-            f.store.application_head(f.source.deployment).await.unwrap(),
-            Some(f.source.clone())
-        );
-        assert_eq!(
-            f.store
-                .operation_observation(&install.reference)
-                .await
-                .unwrap()
-                .unwrap()
-                .outcome,
-            OperationOutcome::Returned {
-                value: returned(&install)
-            }
-        );
-        let old = f
-            .store
-            .read_application_metadata_at(&f.managed)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(old.packages.is_empty());
-        let mut foreign = f.managed.clone();
-        foreign.state_domain = "0".repeat(64);
-        assert!(
-            maka_host_runtime::application::management::ManagementTarget::from_source(
-                f.store.clone(),
-                foreign
+                scope(&f.issuer, false),
+                Uuid::new_v4(),
+                resource(extension().to_bundle()).into(),
             )
             .await
             .is_err()
-        );
-        assert_eq!(
-            RootOwner::open(&f.root, &f.namespaces)
-                .err()
-                .unwrap()
-                .kind(),
-            std::io::ErrorKind::WouldBlock
-        );
-        f.close().await;
-    }
+    );
+    let install = f
+        .mutate(
+            "install",
+            json!({"expectedRevision":1}),
+            resource(extension().to_bundle()),
+        )
+        .await;
+    let installed: PackageInstalled =
+        serde_json::from_value(returned(&install)["value"].clone()).unwrap();
+    assert_eq!(installed.source.deployment, f.managed.deployment);
+    assert_eq!(installed.source.revision, 2);
+    assert_eq!(install.reference.source, f.source);
+    assert_eq!(
+        f.app.client().snapshot().effective.as_ref(),
+        Some(&f.source)
+    );
+    let mut current = f.read().await;
+    assert_eq!(current.source.input.instances.len(), 0);
+    current.source.input.environment = Environment {
+        location: ExecutionLocation::Host,
+        presentation: None,
+    };
+    let refused = f
+        .mutate(
+            "replace",
+            json!({"expectedRevision":2}),
+            document_resource(DeploymentDocument {
+                input: current.source.input,
+                remote_exports: vec![],
+                packages: current.packages,
+            }),
+        )
+        .await;
+    assert_eq!(
+        returned(&refused),
+        json!({"status":"rejected","reason":"execution_environment"})
+    );
+    let current = f.read().await;
+    let replaced = f
+        .mutate(
+            "replace",
+            json!({"expectedRevision":2}),
+            document_resource(DeploymentDocument {
+                input: current.source.input,
+                remote_exports: vec![],
+                packages: current.packages,
+            }),
+        )
+        .await;
+    let next: DeploymentRef = serde_json::from_value(returned(&replaced)["value"].clone()).unwrap();
+    assert_eq!(next.deployment, f.managed.deployment);
+    assert_eq!(next.revision, 3);
+    assert_eq!(
+        f.store.application_head(f.source.deployment).await.unwrap(),
+        Some(f.source.clone())
+    );
+    assert_eq!(
+        f.store
+            .operation_observation(&install.reference)
+            .await
+            .unwrap()
+            .unwrap()
+            .outcome,
+        OperationOutcome::Returned {
+            value: returned(&install)
+        }
+    );
+    let old = f
+        .store
+        .read_application_metadata_at(&f.managed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(old.packages.is_empty());
+    let mut foreign = f.managed.clone();
+    foreign.state_domain = "0".repeat(64);
+    assert!(
+        maka_host_runtime::application::management::ManagementTarget::from_source(
+            f.store.clone(),
+            foreign
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        RootOwner::open(&f.root, &f.namespaces)
+            .err()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    f.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fixed_target_factory_rejects_another_original_root_owner() {
     use maka_host_runtime::application::management::{ManagementTarget, provide_target};
-    let original = Fixture::create(Some(
-        maka_plugin_core::composition::PresentationTarget::Desktop,
-    ))
-    .await;
+    let original =
+        Fixture::create(Some(maka_plugin_core::composition::PresentationTarget::Tui)).await;
     let target = ManagementTarget::from_source(original.store.clone(), original.managed.clone())
         .await
         .unwrap();
@@ -964,10 +960,10 @@ async fn fixed_target_factory_rejects_another_original_root_owner() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn instance_pages_freeze_source_and_nested_enabled_intents_preserve_original_overrides() {
     use maka_plugin_core::composition::{Override, Parameter, PresentationTarget, Template};
-    let f = Fixture::create(Some(PresentationTarget::Desktop)).await;
+    let f = Fixture::create(Some(PresentationTarget::Tui)).await;
     let leaf = Package::new(BTreeMap::from([(MANIFEST_FILE.into(), serde_json::to_vec(&json!({
         "schemaVersion":1,"id":"nested.leaf","application":Declaration {
-            entries: BTreeMap::from([(EntryTarget::Desktop, EntryDeclaration {
+            entries: BTreeMap::from([(EntryTarget::Tui, EntryDeclaration {
                 scene: None, implementation: Implementation::Native { implementation:"unused.ui.availability".into() },
                 configuration: json!({"type":"object"}), imports: BTreeMap::new(), exports: BTreeMap::new(),
             })]), composition: None,
@@ -1010,7 +1006,7 @@ async fn instance_pages_freeze_source_and_nested_enabled_intents_preserve_origin
             Input {
                 environment: Environment {
                     location: ExecutionLocation::Ui,
-                    presentation: Some(PresentationTarget::Desktop),
+                    presentation: Some(PresentationTarget::Tui),
                 },
                 instances: BTreeMap::from([("product".into(), root)]),
                 recovery: None,

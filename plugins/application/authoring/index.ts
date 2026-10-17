@@ -95,24 +95,14 @@ export function worker<N extends Node>(
     return { key, binding, member: 0, method: 'read', input: reference, resources: {} };
   };
   const frame = (state: State, actions: Action[] = []) => {
-    const view =
-      presentation.target === 'tui'
-        ? ui.terminal.stack({
-            key: 'authoring-worker',
-            children: [],
-            direction: 'column',
-            gap: 0,
-            padding: 0,
-            background: 0,
-          })
-        : ui.desktop.stack({
-            key: 'authoring-worker',
-            children: [],
-            direction: 'column',
-            gap: 0,
-            padding: 0,
-            background: 0,
-          });
+    const view = ui.terminal.stack({
+      key: 'authoring-worker',
+      children: [],
+      direction: 'column',
+      gap: 0,
+      padding: 0,
+      background: 0,
+    });
     const out = output(state, view as N);
     out.actions = actions;
     out.subscriptions =

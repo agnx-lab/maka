@@ -39,7 +39,7 @@ pub use message::{
     Content, Hidden, Message, Thinking, ToolContent, ToolMetadata, TurnState, Visible,
 };
 
-/// Original Desktop limit for a complete serialized tool-result message.
+/// Shared presentation budget for a complete serialized tool-result message.
 /// Durable raw payloads have a separate, larger budget.
 pub const MAX_TOOL_ROW_BYTES: usize = 16 * 1024 * 1024;
 

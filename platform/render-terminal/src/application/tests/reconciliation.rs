@@ -55,17 +55,16 @@ fn replacement(mut input: Input, mut packages: Vec<Package>) -> (Input, Vec<Pack
         .position(|p| p.manifest().id == "dynamic.app")
         .unwrap();
     let old = packages.remove(index);
-    let source = std::str::from_utf8(old.file("terminal.mjs").unwrap())
+    let source = std::str::from_utf8(old.file("index.mjs").unwrap())
         .unwrap()
         .replace("count:props.count??0", "count:props.count??100");
-    assert_ne!(source.as_bytes(), old.file("terminal.mjs").unwrap());
+    assert_ne!(source.as_bytes(), old.file("index.mjs").unwrap());
     let package = Package::new(BTreeMap::from([
         (
             maka_packages::MANIFEST_FILE.into(),
             old.file(maka_packages::MANIFEST_FILE).unwrap().to_vec(),
         ),
-        ("index.mjs".into(), old.file("index.mjs").unwrap().to_vec()),
-        ("terminal.mjs".into(), source.into_bytes()),
+        ("index.mjs".into(), source.into_bytes()),
     ]))
     .unwrap();
     input.instances.get_mut("app").unwrap().package = package.application_ref().into();
@@ -566,7 +565,8 @@ fn committed_repair_returns_from_recovery_only_after_its_original_surface_closes
         .unwrap();
     let broken = packages.remove(index);
     let mut files = broken.files().clone();
-    for name in ["index.mjs", "terminal.mjs"] {
+    {
+        let name = "index.mjs";
         let source = std::str::from_utf8(&files[name]).unwrap().replace(
             "throw new Error('primary fault');",
             "return frame({count:state.count+1,revision:state.revision+1});",
@@ -656,7 +656,8 @@ fn failed_committed_launch_replacement_can_mount_ordinary_recovery() {
         } else {
             "mount(props){"
         };
-        for name in ["index.mjs", "terminal.mjs"] {
+        {
+            let name = "index.mjs";
             let source = std::str::from_utf8(&files[name]).unwrap();
             assert!(source.contains(needle));
             let source = source.replace(

@@ -23,16 +23,10 @@ export { contracts } from './contracts.js';
 export { configurations } from './configurations.js';
 export { ui } from './ui.js';
 export type {
-  Presentation,
-  SceneTarget,
-  Scene,
-  DesktopNode,
   TerminalNode,
-  DesktopKind,
   TerminalKind,
   ComponentDeclaration,
   ReadingDeclaration,
-  DesktopProps,
   TerminalProps,
 } from './ui.js';
 

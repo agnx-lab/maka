@@ -143,9 +143,6 @@ fn main() -> std::process::ExitCode {
             };
         }
     }
-    if let Some(exit) = desktop::bootstrap() {
-        return exit;
-    }
     let cli = args::Cli::parse();
     if cli.logs_to_stderr()
         && let Err(error) = logging::initialize()

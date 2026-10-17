@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.source-text',
@@ -28,9 +28,6 @@ export default {
     'zh-CN': { displayName: '源码预览', description: '显示带语法高亮的源码。' },
   },
   application: {
-    entries: {
-      desktop: native(sdk.nativeImplementations.sourceText),
-      tui: native(sdk.nativeImplementations.sourceText),
-    },
+    entries: { tui: native(sdk.nativeImplementations.sourceText) },
   },
 };

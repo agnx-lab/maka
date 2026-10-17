@@ -55,7 +55,7 @@ async function client(target) {
     },
   };
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} authoring dispatches a large source once without duplicating its document in state`, async () => {
     const c = await client(target);
     const large = structuredClone(request);

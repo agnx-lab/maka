@@ -40,8 +40,7 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Present the selected plugin product in a native desktop window.
-    #[command(disable_help_flag = true)]
+    /// Open the desktop shell connected to a business Host Root.
     Desktop(crate::desktop::Args),
     /// Author, inspect and run plugin applications.
     #[command(subcommand)]
@@ -203,7 +202,7 @@ impl Cli {
             return Ok(std::process::ExitCode::SUCCESS);
         };
         let result = match command {
-            Command::Desktop(args) => return Ok(args.run()?),
+            Command::Desktop(args) => return args.run().await,
             Command::Application(args) => args.run().await,
             Command::Sandbox(args) => return args.run(self.timeout_ms).await,
             Command::Host(HostCommand::Fetch(args)) => args.run().await,
@@ -300,7 +299,7 @@ mod tests {
         }
         for arguments in [
             vec!["maka"],
-            vec!["maka", "desktop"],
+            vec!["maka", "desktop", "--root", "/tmp/desktop-host"],
             vec!["maka", "application", "launch"],
             vec![
                 "maka",

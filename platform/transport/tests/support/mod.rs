@@ -243,7 +243,7 @@ pub fn host() -> (Input, Vec<Package>) {
     )
 }
 pub fn ui(target: PresentationTarget) -> (Input, Vec<Package>, Vec<RemoteObservation>) {
-    let (mut input, mut packages) = counter::dual_fixture("");
+    let (mut input, mut packages) = counter::fixture("");
     input.environment.presentation = Some(target);
     let original = packages.pop().unwrap();
     let mut declaration = original
@@ -264,17 +264,9 @@ pub fn ui(target: PresentationTarget) -> (Input, Vec<Package>, Vec<RemoteObserva
         serde_json::to_vec(&json!({"schemaVersion":1,"id":"local.ui","application":declaration}))
             .unwrap(),
     )]);
-    for (entry_target, module) in [
-        (EntryTarget::Desktop, "index.mjs"),
-        (EntryTarget::Tui, "terminal.mjs"),
-    ] {
-        let contract = &declaration.entries[&entry_target].exports["App"].contract;
-        let surface = if entry_target == EntryTarget::Desktop {
-            "{kind:'window',binding:'surface',title:'Local connections',width:640,height:400}"
-        } else {
-            "{kind:'terminal',binding:'surface'}"
-        };
-        files.insert(module.into(),format!(r#"
+    let contract = &declaration.entries[&EntryTarget::Tui].exports["App"].contract;
+    let surface = "{kind:'terminal',binding:'surface'}";
+    files.insert("index.mjs".into(),format!(r#"
             const contract={}; export function activate(){{return {{App:{{contract,kind:'component',component:['app']}}}};}}
             function frame(state,actions=[]){{return {{actions,events:[],frame:{{revision:state.revision,state,surface:{surface},view:{{kind:'stack',key:'root',direction:'column',padding:1,gap:1,background:1513239,children:[{{kind:'text',key:'value',text:state.outcome?.value?.receipt?'Original receipt '+state.outcome.value.receipt.kind:JSON.stringify(state.outcome?.reply?.receipt??state.outcome??'Ready'),color:16777215}},{{kind:'button',key:'read',label:'Read Host'}},{{kind:'button',key:'write',label:'Write Host'}},{{kind:'button',key:'recover',label:'Read original receipt'}},{{kind:'button',key:'cancel',label:'Cancel operation'}}]}}}}}};}}
             export const app={{mount(){{return frame({{revision:0,outcome:null,reference:null}});}},event(state,input){{
@@ -284,7 +276,6 @@ pub fn ui(target: PresentationTarget) -> (Input, Vec<Package>, Vec<RemoteObserva
                 return frame({{...state,revision:state.revision+1,outcome:null}},[{{key:'result',binding:recovery?'receipts':'business',member:0,method:recovery?'read':key,input:recovery?state.reference:null,resources:{{}}}}]);
             }},update(state){{return frame(state);}}}};
         "#,serde_json::to_string(contract).unwrap()).into_bytes());
-    }
     let package = Package::new(files).unwrap();
     let app = input.instances.get_mut("app").unwrap();
     app.package = package.application_ref().into();

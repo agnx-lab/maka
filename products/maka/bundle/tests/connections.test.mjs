@@ -19,7 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const identity = {
   packageId: 'maka.codex',
@@ -111,7 +111,7 @@ async function client(name, platform, extra = {}) {
     },
   };
 }
-for (const platform of ['tui', 'desktop']) {
+for (const platform of ['tui']) {
   test(`${platform} saved model restoration ignores late sessions and never substitutes the global default`, async () => {
     const preferred = { connectionId: 'saved', modelId: 'original', thinkingLevel: 'high' };
     const c = await client('models', platform, {
@@ -267,7 +267,7 @@ for (const platform of ['tui', 'desktop']) {
     c.reply(second, { providers: [summary(provider)], next: null });
     assert.equal(c.state.providers.length, 2);
     assert.equal(c.state.search.query, 'oauth');
-    if (platform === 'tui') {
+    {
       c.raw('provider-1', 'activate');
       assert.equal(c.state.provider, null);
     }
@@ -773,7 +773,7 @@ for (const platform of ['tui', 'desktop']) {
   });
 }
 
-for (const platform of ['tui', 'desktop']) {
+for (const platform of ['tui']) {
   test(`${platform} model settings capture token overrides and retain an uncertain save`, async () => {
     const selection = { connectionId: 'connection-a', revision: 7, modelId: 'model' };
     const c = await client('model-default', platform, {

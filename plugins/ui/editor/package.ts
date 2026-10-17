@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.editor',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '文本编辑器', description: '编辑多行文本和草稿。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.textarea)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.textarea) },
   },
 };

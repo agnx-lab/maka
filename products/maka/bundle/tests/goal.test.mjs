@@ -57,8 +57,8 @@ async function client(target) {
       },
       thinkingLevel: null,
     },
-    inspector: target === 'tui' ? 'goal' : null,
-    dialog: target === 'desktop' ? 'goal' : null,
+    inspector: 'goal',
+    dialog: null,
     modelRefreshing: false,
     pending: {},
     restoring: false,
@@ -115,7 +115,7 @@ async function client(target) {
   };
   return c;
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} Goal captures exact Unicode fields and immutable approval before a mutation`, async () => {
     const c = await client(target);
     c.ready();

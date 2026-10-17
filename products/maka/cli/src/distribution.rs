@@ -525,7 +525,12 @@ mod tests {
         assert!(!root.path().join("receipt.json").exists());
     }
 
-    fn package(target: Target, extra: Option<&str>, desktop_gui: Option<bool>) -> Vec<u8> {
+    fn package(
+        target: Target,
+        extra: Option<&str>,
+        desktop_gui: Option<bool>,
+        omitted: Option<&str>,
+    ) -> Vec<u8> {
         let manifest = serde_json::json!({
             "name": target.package_name(), "version": "1.2.3",
             "os": [target.os()], "cpu": [target.cpu()],
@@ -533,6 +538,9 @@ mod tests {
         });
         let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
         let mut append = |name: &str, bytes: &[u8]| {
+            if omitted == Some(name) {
+                return;
+            }
             let mut header = tar::Header::new_ustar();
             header.set_size(bytes.len() as u64);
             header.set_mode(0o755);
@@ -588,6 +596,9 @@ mod tests {
             binary[156..158].copy_from_slice(&2_u16.to_le_bytes());
             append(service, &binary);
         }
+        append("bin/app/gpui-shell.json", b"{\"main\":\"main.js\"}");
+        append("bin/app/main.js", b"export const title = 'Maka shell';\n");
+        append("bin/app/icons/mark.svg", b"<svg>Maka</svg>\n");
         if let Some(name) = extra {
             append(name, b"not an executable");
         }
@@ -657,7 +668,7 @@ mod tests {
             Target::Win32X64,
         ] {
             let root = tempfile::tempdir().unwrap();
-            let bytes = package(target, None, Some(true));
+            let bytes = package(target, None, Some(true), None);
             let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
             let registry = registry(target, bytes, integrity.clone()).await;
             let client = Client::builder().no_proxy().build().unwrap();
@@ -670,6 +681,26 @@ mod tests {
             let desktop = artifact.directory.join(target.desktop_executable());
             assert!(desktop.is_file());
             assert_eq!(
+                target.desktop_executable(),
+                if target == Target::Win32X64 {
+                    "bin/maka-desktop-shell.exe"
+                } else {
+                    "bin/maka-desktop-shell"
+                }
+            );
+            assert_eq!(
+                std::fs::read(artifact.directory.join("bin/app/gpui-shell.json")).unwrap(),
+                b"{\"main\":\"main.js\"}"
+            );
+            assert_eq!(
+                std::fs::read(artifact.directory.join("bin/app/main.js")).unwrap(),
+                b"export const title = 'Maka shell';\n"
+            );
+            assert_eq!(
+                std::fs::read(artifact.directory.join("bin/app/icons/mark.svg")).unwrap(),
+                b"<svg>Maka</svg>\n"
+            );
+            assert_eq!(
                 artifact.service_executable.is_some(),
                 target == Target::Win32X64
             );
@@ -680,6 +711,14 @@ mod tests {
                 .unwrap();
             assert_eq!(artifact.directory, reused.directory);
             let receipt = std::fs::read(artifact.directory.join("receipt.json")).unwrap();
+            let recorded: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+            assert_eq!(
+                recorded["files"]["bin/app/icons/mark.svg"],
+                serde_json::json!({
+                    "size":16,
+                    "sha256":hex::encode(sha2::Sha256::digest(b"<svg>Maka</svg>\n"))
+                })
+            );
             let receipt_sha256 = hex::encode(sha2::Sha256::digest(&receipt));
             let transferred = |cache: &str, digest: String| Fetch {
                 directory: Some(artifact.directory.clone()),
@@ -696,6 +735,10 @@ mod tests {
                 receipt
             );
             assert_eq!(
+                std::fs::read(copied.directory.join("bin/app/icons/mark.svg")).unwrap(),
+                b"<svg>Maka</svg>\n"
+            );
+            assert_eq!(
                 transferred("transferred", receipt_sha256.clone())
                     .resolve(client.clone(), offline.clone())
                     .await
@@ -710,7 +753,104 @@ mod tests {
                     .is_err(),
                 "cache hit must authenticate the supplied receipt"
             );
-            // Same-user tampering must not silently execute through a cache hit.
+            for (extra, cache) in [
+                ("bin/app/dev.js", "filtered-dev"),
+                ("bin/app/icons/injected.js", "filtered-nested"),
+            ] {
+                let path = artifact.directory.join(extra);
+                std::fs::write(&path, b"export const unrecorded = true;\n").unwrap();
+                let error = request(target, root.path())
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .err()
+                    .unwrap();
+                assert!(error.to_string().contains("unrecorded"), "{error}");
+                let filtered = transferred(cache, receipt_sha256.clone())
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .unwrap();
+                assert!(!filtered.directory.join(extra).exists());
+                assert_eq!(
+                    std::fs::read(filtered.directory.join("bin/app/main.js")).unwrap(),
+                    b"export const title = 'Maka shell';\n"
+                );
+                assert_eq!(
+                    std::fs::read(filtered.directory.join("receipt.json")).unwrap(),
+                    receipt
+                );
+                std::fs::remove_file(path).unwrap();
+                assert_eq!(
+                    request(target, root.path())
+                        .resolve(client.clone(), offline.clone())
+                        .await
+                        .unwrap()
+                        .directory,
+                    artifact.directory
+                );
+            }
+            #[cfg(unix)]
+            {
+                let extra = artifact.directory.join("bin/app/icons/unrecorded-link.svg");
+                std::os::unix::fs::symlink(root.path().join("outside-missing"), &extra).unwrap();
+                assert!(
+                    request(target, root.path())
+                        .resolve(client.clone(), offline.clone())
+                        .await
+                        .is_err()
+                );
+                std::fs::remove_file(extra).unwrap();
+                assert_eq!(
+                    request(target, root.path())
+                        .resolve(client.clone(), offline.clone())
+                        .await
+                        .unwrap()
+                        .directory,
+                    artifact.directory
+                );
+            }
+            assert_eq!(
+                std::fs::read(artifact.directory.join("receipt.json")).unwrap(),
+                receipt
+            );
+            let icon = artifact.directory.join("bin/app/icons/mark.svg");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&icon, std::fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            std::fs::write(&icon, b"changed asset").unwrap();
+            assert!(
+                transferred("corrupted-app", receipt_sha256.clone())
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_dir(root.path().join("corrupted-app/cache"))
+                    .unwrap()
+                    .count(),
+                0
+            );
+            let error = request(target, root.path())
+                .resolve(client.clone(), offline.clone())
+                .await
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains("cache integrity mismatch"));
+            std::fs::write(&icon, b"<svg>Maka</svg>\n").unwrap();
+            assert_eq!(
+                std::fs::read(artifact.directory.join("receipt.json")).unwrap(),
+                receipt
+            );
+            assert_eq!(
+                request(target, root.path())
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .unwrap()
+                    .directory,
+                artifact.directory
+            );
+            // Binary tampering must also refuse both transfer and cache reuse.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -743,14 +883,16 @@ mod tests {
     #[tokio::test]
     async fn rejects_bad_integrity_and_archive_members_without_publishing_a_cache_entry() {
         let target = Target::LinuxX64Gnu;
-        for (extra, bad_hash) in [
-            (None, true),
-            (Some("bin/maka"), false),
-            (Some("bin/extra"), false),
-            (Some("bin/maka-desktop"), false),
+        for (extra, bad_hash, omitted) in [
+            (None, true, None),
+            (Some("bin/maka"), false, None),
+            (Some("bin/extra"), false, None),
+            (Some("bin/maka-desktop"), false, None),
+            (None, false, Some("bin/app/gpui-shell.json")),
+            (None, false, Some("bin/app/main.js")),
         ] {
             let root = tempfile::tempdir().unwrap();
-            let bytes = package(target, extra, Some(true));
+            let bytes = package(target, extra, Some(true), omitted);
             let digest = if bad_hash {
                 [0; 64]
             } else {
@@ -775,7 +917,7 @@ mod tests {
         for (target, desktop_gui) in [(Target::LinuxX64Gnu, None), (Target::Win32X64, Some(false))]
         {
             let root = tempfile::tempdir().unwrap();
-            let bytes = package(target, None, desktop_gui);
+            let bytes = package(target, None, desktop_gui, None);
             let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
             let origin = registry(target, bytes, integrity).await;
             let client = Client::builder().no_proxy().build().unwrap();
@@ -795,6 +937,12 @@ mod tests {
         // Links and traversal must be rejected before creating their targets.
         for (name, kind) in [
             ("package/bin/maka", tar::EntryType::Symlink),
+            ("package/bin/app/icons/mark.svg", tar::EntryType::Symlink),
+            ("package/bin/app/../escaped", tar::EntryType::Regular),
+            (
+                "package/bin/app/icons/../../escaped",
+                tar::EntryType::Regular,
+            ),
             ("../escaped", tar::EntryType::Regular),
         ] {
             let root = tempfile::tempdir().unwrap();

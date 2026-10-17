@@ -30,7 +30,7 @@ const nodes = (node) =>
         ),
       ]
     : [];
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} active context keeps an explicit last-known reading alongside token speed`, async () => {
     const { component } = await import(`../dist/packages/composer-footer/${target}.js`);
     const props = {
@@ -54,7 +54,7 @@ for (const target of ['tui', 'desktop']) {
     const node = (out, key) => nodes(out.frame.view).find((node) => node.key === key);
     assert.equal(node(last, 'session-context-text').text, 'Context ≈100k / 200k · 50% (last)');
     assert.equal(node(last, 'session-rate-text').text, ' · 15.6 tok/s');
-    if (target === 'tui') {
+    {
       assert.equal(
         node(last, 'session-context-text').hint,
         'Last known context usage; newer additions are not yet counted.',
@@ -79,7 +79,7 @@ for (const target of ['tui', 'desktop']) {
     });
     assert.equal(node(unknown, 'session-context-text').text, 'Context — / 200k');
     assert.equal(node(unknown, 'session-rate-text').text, ' · 15.6 tok/s');
-    if (target === 'tui') {
+    {
       assert.equal(node(unknown, 'metrics-percent-text').text, 'Context —');
       assert.equal(node(unknown, 'metrics-percent-rate').text, ' · 15.6 tok/s');
     }
@@ -172,7 +172,7 @@ for (const target of ['tui', 'desktop']) {
     assert.ok(tree.some((node) => node.key === 'compact-rule-rightcheckpoint'));
     assert.ok(!tree.some((node) => node.key === 'source-checkpoint'));
     assert.ok(!tree.some((node) => node.key === 'mark-read-checkpoint'));
-    if (target === 'tui') {
+    {
       props.browse = 1;
       const ordinary = (id) => ({
         ...props.messages[0],

@@ -90,12 +90,7 @@ export function handleEvent<N extends Node>(
     events: Emission[] = [];
   if (
     state.historyOpen &&
-    scrollRows(
-      state,
-      input,
-      presentation.target === 'tui' ? 'deployment-history-reading' : 'deployment-list',
-      state.earlier.length,
-    )
+    scrollRows(state, input, 'deployment-history-reading', state.earlier.length)
   )
     input = { kind: 'raw', key: 'deployment-history-more', event: {} };
   if (
@@ -138,7 +133,7 @@ export function handleEvent<N extends Node>(
       readSettings(state, actions);
     }
   }
-  if (presentation.target === 'tui') {
+  {
     const restored = observeBookmark(
       state.bookmark,
       input,
@@ -371,7 +366,7 @@ export function handleEvent<N extends Node>(
                 ?.instance ??
               value.instances[0]?.instance ??
               null;
-            if (presentation.target === 'tui' && state.selected)
+            if (state.selected)
               state.focus = {
                 sequence: (state.focus?.sequence ?? 0) + 1,
                 target: {
@@ -432,8 +427,7 @@ export function handleEvent<N extends Node>(
   } else if (input.kind === 'raw') {
     // Until the original draft/intent has been reconciled, editing it would
     // break the correlation needed to query an accepted save after reload.
-    if (state.restoreFailed || (presentation.target === 'tui' && !state.bookmark.restored))
-      return frame(presentation, state, props);
+    if (state.restoreFailed || !state.bookmark.restored) return frame(presentation, state, props);
     if (
       state.document?.phase === 'loading' &&
       input.key !== 'deployment-document-back' &&
@@ -487,9 +481,8 @@ export function handleEvent<N extends Node>(
         !settings.conflict &&
         !settings.field &&
         !state.restoreFailed &&
-        (presentation.target !== 'tui' ||
-          (props.navigationReady !== false &&
-            bookmarkReady(state.bookmark, settingsBookmark(state))))
+        props.navigationReady !== false &&
+        bookmarkReady(state.bookmark, settingsBookmark(state))
       ) {
         const configuration: InstanceConfigure = {
           expectedRevision: settings.source.revision,

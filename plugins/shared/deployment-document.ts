@@ -26,7 +26,7 @@ import type {
 import type { ConnectionsProps } from './contracts.js';
 import { copy } from './locale-catalogs/deployment-document.js';
 import { sameValue } from './value.js';
-import { fill, pixels, type Presentation, type Node } from './view.js';
+import { type Presentation, type Node } from './view.js';
 
 export const documentLimit = 1024 * 1024;
 export interface DocumentEditor {
@@ -147,7 +147,6 @@ export function documentView<N extends Node>(
   recoverable: boolean,
   pending: boolean,
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const confirming = !!editor.confirmation || editor.reloadConfirmation;
@@ -155,14 +154,12 @@ export function documentView<N extends Node>(
     ui.text(
       'deployment-document-confirm-title',
       editor.reloadConfirmation ? text.deploymentReloadQuestion : text.deploymentSaveQuestion,
-      17,
       props.theme.text,
       550,
     ),
     ui.text(
       'deployment-document-confirm-help',
       editor.reloadConfirmation ? text.deploymentReloadHelp : text.deploymentSaveHelp,
-      14,
       props.theme.muted,
     ),
   ];
@@ -176,70 +173,44 @@ export function documentView<N extends Node>(
             'deployment-document-heading',
             [
               ui.button('deployment-document-back', text.back),
-              ui.text('deployment-document-title', text.deploymentEdit, 22, props.theme.text, 600),
+              ui.text('deployment-document-title', text.deploymentEdit, props.theme.text, 600),
             ],
             {
               visible: !props.shell,
               row: true,
-              gap: target === 'desktop' ? 8 : 1,
+              gap: 1,
               terminal: { wrap: true },
             },
           ),
-          ui.text('deployment-document-help', text.deploymentEditHelp, 13, props.theme.muted),
+          ui.text('deployment-document-help', text.deploymentEditHelp, props.theme.muted),
           ...(editor.phase === 'loading'
-            ? [
-                ui.text(
-                  'deployment-document-loading',
-                  text.deploymentLoading,
-                  13,
-                  props.theme.muted,
-                ),
-              ]
+            ? [ui.text('deployment-document-loading', text.deploymentLoading, props.theme.muted)]
             : []),
           ...(editor.phase === 'failed'
-            ? [
-                ui.text(
-                  'deployment-document-failed',
-                  text.deploymentLoadFailed,
-                  13,
-                  props.theme.muted,
-                ),
-              ]
+            ? [ui.text('deployment-document-failed', text.deploymentLoadFailed, props.theme.muted)]
             : []),
           ...(editor.observation && editor.observation.snapshot.text.bytes > documentLimit
             ? [
                 ui.text(
                   'deployment-document-too-large',
                   text.deploymentDocumentTooLarge,
-                  13,
                   props.theme.muted,
                 ),
               ]
             : []),
           ...(editor.conflict && notice !== text.deploymentConflict
-            ? [
-                ui.text(
-                  'deployment-document-conflict',
-                  text.deploymentConflict,
-                  13,
-                  props.theme.muted,
-                ),
-              ]
+            ? [ui.text('deployment-document-conflict', text.deploymentConflict, props.theme.muted)]
             : []),
-          ...(notice ? [ui.text('deployment-document-notice', notice, 13, props.theme.muted)] : []),
+          ...(notice ? [ui.text('deployment-document-notice', notice, props.theme.muted)] : []),
         ],
-        { gap: target === 'desktop' ? 8 : 1, style: { shrink: 0 } },
+        { gap: 1 },
       ),
       ...(diagnostic
         ? [
             ui.box(
               'deployment-document-diagnostic-region',
-              [ui.text('deployment-document-diagnostic', diagnostic, 13, props.theme.text)],
-              {
-                scroll: 'manual',
-                terminal: { basis: 3 },
-                style: { width: fill, height: pixels(80), shrink: 0 },
-              },
+              [ui.text('deployment-document-diagnostic', diagnostic, props.theme.text)],
+              { scroll: 'manual', terminal: { basis: 3 } },
             ),
           ]
         : []),
@@ -281,69 +252,43 @@ export function documentView<N extends Node>(
             { changed: 'deployment-document-changed' },
           ),
         ],
-        {
-          visible: target === 'tui' || !confirming,
-          terminal: { grow: 1 },
-          style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
-        },
+        { visible: true, terminal: { grow: 1 } },
       ),
-      ...(confirming && target === 'desktop'
-        ? [
-            ui.box('deployment-document-question', question, {
-              style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
-            }),
-          ]
-        : []),
       ui.box(
         'deployment-document-footer',
-        confirming && target === 'desktop'
-          ? [
-              ui.button(
-                editor.reloadConfirmation
-                  ? 'deployment-document-reload-confirm'
-                  : 'deployment-document-confirm',
-                text.confirmDefault,
-                busy,
-              ),
-              ui.button('deployment-document-cancel', text.cancel, busy),
-            ]
-          : [
-              ui.button(
-                'deployment-document-save',
-                text.deploymentSave,
-                !canSaveDocument(editor, busy),
-              ),
-              ui.button(
-                'deployment-document-reload',
-                text.deploymentReload,
-                busy || editor.phase === 'loading',
-              ),
-              ...(recoverable ? [ui.button('deployment-document-check', text.check, pending)] : []),
-              ui.button('deployment-document-history', text.deploymentHistory, pending),
-            ],
-        { row: true, gap: 0, terminal: { wrap: true }, style: { shrink: 0, wrap: true } },
+        [
+          ui.button(
+            'deployment-document-save',
+            text.deploymentSave,
+            !canSaveDocument(editor, busy),
+          ),
+          ui.button(
+            'deployment-document-reload',
+            text.deploymentReload,
+            busy || editor.phase === 'loading',
+          ),
+          ...(recoverable ? [ui.button('deployment-document-check', text.check, pending)] : []),
+          ui.button('deployment-document-history', text.deploymentHistory, pending),
+        ],
+        { row: true, gap: 0, terminal: { wrap: true } },
       ),
     ],
     {
       visible: open,
       autoFocus: true,
-      shortcuts:
-        target === 'tui'
-          ? [
-              {
-                key: 'escape',
-                modifiers: [],
-                input: 'deployment-document-back',
-                enabled: true,
-              },
-            ]
-          : [],
-      gap: target === 'desktop' ? 16 : 1,
+      shortcuts: [
+        {
+          key: 'escape',
+          modifiers: [],
+          input: 'deployment-document-back',
+          enabled: true,
+        },
+      ],
+      gap: 1,
       terminal: { grow: 1 },
-      style: { width: fill, height: fill },
     },
   );
-  if (target === 'desktop') return panel;
+
   return ui.box(
     'deployment-document-page',
     [
@@ -378,7 +323,6 @@ export function documentView<N extends Node>(
           { terminal: { grow: 1 } },
         ),
         confirming,
-        undefined,
         { width: 64, height: 12 },
       ),
     ],

@@ -101,7 +101,6 @@ impl Identity {
                 .name
                 .chars()
                 .any(|c| c.is_control() || c.is_whitespace())
-            || self.scope == Scope::DesktopUi
         {
             return Err("invalid model provider identity".into());
         }

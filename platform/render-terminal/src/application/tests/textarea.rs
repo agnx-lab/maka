@@ -30,19 +30,11 @@ pub(super) fn editor_fixture() -> (tokio::runtime::Runtime, Input, Vec<Package>)
     let (mut input, packages) = support::resource_fixture();
     input.environment.presentation = Some(PresentationTarget::Tui);
     let packages = packages.into_iter().map(|original| {
-        let mut declaration = original.manifest().application.as_ref().unwrap().declaration().clone();
-        let mut entry = declaration.entries.remove(&EntryTarget::Desktop).unwrap();
+        let declaration = original.manifest().application.as_ref().unwrap().declaration().clone();
+        let entry = &declaration.entries[&EntryTarget::Tui];
         let mut files = BTreeMap::new();
-        match &mut entry.implementation {
-            Implementation::Native {implementation} if implementation == "maka.ui.surface.desktop" => {
-                *implementation = "maka.ui.surface.tui".into();
-                entry.exports.get_mut("Surface").unwrap().contract = maka_ui_runtime::surface_contract(PresentationTarget::Tui);
-            }
-            Implementation::JavaScript {module, ..} => {
-                if entry.scene.is_some() { entry.scene = Some(support::scene::language(PresentationTarget::Tui)); }
-                if let Some(surface) = entry.imports.get_mut("surface") { surface.contract = maka_ui_runtime::surface_contract(PresentationTarget::Tui); }
+        if let Implementation::JavaScript {module, ..} = &entry.implementation {
                 let mut source = std::str::from_utf8(original.file(module).unwrap()).unwrap()
-                    .replace("{kind:'window',binding:'surface',title:'Immutable draft',width:640,height:480}", "{kind:'terminal',binding:'surface'}")
                     .replace("padding:16,gap:12", "padding:1,gap:1");
                 if original.manifest().id == "dynamic.app" {
                     // The capture result remains complete in workflow state;
@@ -56,10 +48,7 @@ pub(super) fn editor_fixture() -> (tokio::runtime::Runtime, Input, Vec<Package>)
                     .replace("name:'changed',value:event.event", "name:event.name,value:event.event")
                     .replace("else if(event.kind==='component')next.observation=event.event;", "else if(event.kind==='component'){if(event.name==='navigated'){next.navigation=event.event;next.navigations=(state.navigations??0)+1;}else next.observation=event.event;if(event.name==='submitted')next.submissions=(state.submissions??0)+1;}");
                 files.insert(module.clone(), source.into_bytes());
-            }
-            _ => {}
         }
-        declaration.entries.insert(EntryTarget::Tui, entry);
         files.insert("maka.extension.json".into(), serde_json::to_vec(&json!({"schemaVersion":1,"id":original.manifest().id,"application":declaration})).unwrap());
         let package = Package::new(files).unwrap();
         for node in input.instances.values_mut().filter(|node| matches!(&node.package,maka_plugin_core::package::PackageSelection::Pinned {package} if package.id == original.manifest().id)) {

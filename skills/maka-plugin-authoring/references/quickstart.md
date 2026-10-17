@@ -36,13 +36,13 @@ For a product feature, add the plugin to `products/maka/bundle/package-inputs.js
 
 ## Standalone starter
 
-Copy the four files from this skill's `assets/starter/` directory together: `create.mjs`, `host.mjs`, `tui.mjs` and `desktop.mjs`. Then run:
+Copy the three files from this skill's `assets/starter/` directory together: `create.mjs`, `host.mjs` and `tui.mjs`. Then run:
 
 ```sh
 node create.mjs --output /tmp/my-plugin --target tui --maka /path/to/maka
 ```
 
-The output directory must be new. `--target host` creates an Echo service graph; `tui` and `desktop` create native counter graphs. The helper reads the executable's schemas, computes exact package references and checks the composition. It does not initialize a Root or start execution. Use the emitted input and package paths for later commands.
+The output directory must be new. `--target host` creates an Echo service graph; `--target tui` creates a native terminal counter graph. The helper reads the executable's schemas, computes exact package references and checks the composition. It does not initialize a Root or start execution. Use the emitted input and package paths for later commands.
 
 The generated `maka.extension.json` uses `schemaVersion: 1` and `application.entries`. A JavaScript entry declares its bundled module and realm; component entries also declare the target's scene language. The composition selects pinned package references, instance UUIDs, entry names and bindings.
 

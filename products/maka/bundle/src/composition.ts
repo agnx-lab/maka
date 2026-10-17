@@ -83,7 +83,6 @@ export const packageNames = [
   'deployment-manager',
   'deployment-gateway',
   'image-viewer',
-  'image',
   'composer',
   'composer-footer',
   'ui-authoring',
@@ -144,7 +143,7 @@ export interface AcpExecutor {
   configuration: AcpExecutorConfiguration;
 }
 export interface CompositionConfiguration {
-  presentation: 'desktop' | 'tui';
+  presentation: 'tui';
   locale: string;
   scheme: 'light' | 'dark';
   appearance?: Omit<AppearanceConfiguration, 'scheme'>;
@@ -311,15 +310,13 @@ function settingsComposition(
           surface: [local('surface', 'Surface')],
         },
       ),
-      ...(configuration.presentation === 'tui' ? { checkpoint: node('checkpoint') } : {}),
+      checkpoint: node('checkpoint'),
       'source-text': node('source-text'),
       deployment: node(
         'deployment-settings',
         {},
         {
-          ...(configuration.presentation === 'tui'
-            ? { checkpoint: [local('checkpoint', 'Checkpoint')] }
-            : {}),
+          checkpoint: [local('checkpoint', 'Checkpoint')],
           interface: [local('interface-deployment', 'Deployment')],
           services: [local('service-deployment', 'Deployment')],
         },
@@ -329,9 +326,7 @@ function settingsComposition(
         'deployment',
         {},
         {
-          ...(configuration.presentation === 'tui'
-            ? { checkpoint: [local('checkpoint', 'Checkpoint')] }
-            : {}),
+          checkpoint: [local('checkpoint', 'Checkpoint')],
           input: [local('input', 'TextInput')],
           reading: [local('recovery-reading', 'ReadingArea')],
           editor: [local('editor', 'Textarea')],
@@ -347,9 +342,7 @@ function settingsComposition(
         'deployment',
         {},
         {
-          ...(configuration.presentation === 'tui'
-            ? { checkpoint: [local('checkpoint', 'Checkpoint')] }
-            : {}),
+          checkpoint: [local('checkpoint', 'Checkpoint')],
           input: [local('input', 'TextInput')],
           reading: [local('recovery-reading', 'ReadingArea')],
           editor: [local('editor', 'Textarea')],
@@ -404,9 +397,7 @@ function settingsComposition(
         'insights',
         {},
         {
-          ...(configuration.presentation === 'tui'
-            ? { checkpoint: [local('checkpoint', 'Checkpoint')] }
-            : {}),
+          checkpoint: [local('checkpoint', 'Checkpoint')],
           settings: [remote('settings', 'Settings')],
           input: [local('input', 'TextInput')],
           reader: [local('reader', 'Reader')],
@@ -954,13 +945,9 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
         composer: [local('composer', 'Composer')],
         footer: [local('composer-footer', 'Footer')],
         authoring: [local('ui-authoring-worker', 'Worker')],
-        ...(configuration.presentation === 'tui'
-          ? {
-              rows: [local('rows', 'Rows')],
-              checkpoint: [local('checkpoint', 'Checkpoint')],
-              themeFile: [local('text-file', 'TextFile')],
-            }
-          : {}),
+        rows: [local('rows', 'Rows')],
+        checkpoint: [local('checkpoint', 'Checkpoint')],
+        themeFile: [local('text-file', 'TextFile')],
         palette: [local('command-palette', 'CommandPalette')],
         directories: [local('directory-picker', 'DirectoryPicker')],
         projects: [local('projects', 'Projects')],
@@ -1183,37 +1170,21 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
       },
       'ui-authoring-worker',
     ),
-    ...(configuration.presentation === 'tui'
-      ? {
-          rows: node('rows'),
-          checkpoint: node('checkpoint'),
-          'text-file': node('text-file', { path: configuration.themeFile ?? null }),
-          'morph-mark': node('morph-mark', { ...welcomeMark }),
-        }
-      : {}),
+    rows: node('rows'),
+    checkpoint: node('checkpoint'),
+    'text-file': node('text-file', { path: configuration.themeFile ?? null }),
+    'morph-mark': node('morph-mark', { ...welcomeMark }),
     navigation: node('navigation', {}, { reading: [local('reading-area', 'ReadingArea')] }),
-    'image-viewer': node(
-      'image-viewer',
-      {},
-      {
-        agent: [remote('agent', 'agent')],
-        ...(configuration.presentation === 'desktop' ? { image: [local('image', 'Image')] } : {}),
-      },
-    ),
-    ...(configuration.presentation === 'desktop' ? { image: node('image') } : {}),
+    'image-viewer': node('image-viewer'),
     timeline: node(
       'timeline',
       {},
       {
         reading: [local('reading-area', 'ReadingArea')],
-        ...(configuration.presentation === 'tui'
-          ? {
-              input: [local('input', 'TextInput')],
-              reader: [local('reader', 'Reader')],
-              agent: [remote('agent', 'agent')],
-              formatter: [local('markdown-text', 'MarkdownText')],
-            }
-          : {}),
+        input: [local('input', 'TextInput')],
+        reader: [local('reader', 'Reader')],
+        agent: [remote('agent', 'agent')],
+        formatter: [local('markdown-text', 'MarkdownText')],
       },
     ),
     'reading-area': node(
@@ -1227,7 +1198,7 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
       },
     ),
     markdown: node('markdown'),
-    ...(configuration.presentation === 'tui' ? { 'markdown-text': node('markdown-text') } : {}),
+    'markdown-text': node('markdown-text'),
     label: node('label'),
     'tool-details': node(
       'tool-details',
@@ -1236,10 +1207,10 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
         agent: [remote('agent', 'agent')],
         reading: [local('recovery-reading', 'ReadingArea')],
         source: [local('source-text', 'SourceText')],
-        ...(configuration.presentation === 'tui' ? { diff: [local('diff', 'Diff')] } : {}),
+        diff: [local('diff', 'Diff')],
       },
     ),
-    ...(configuration.presentation === 'tui' ? { diff: node('diff') } : {}),
+    diff: node('diff'),
   });
   ui.launch = local('agent-screen', 'AgentScreen');
   remoteExports.push({

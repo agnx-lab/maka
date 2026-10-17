@@ -54,13 +54,12 @@ import {
 import { toolCards } from './tool-cards.js';
 import { filePresentation } from '../agent/tool-details/index.js';
 import { toolLabel, messageView, sourceFieldLabel } from './message-view.js';
-import { output, fill, pixels, compactLabel, type Presentation, type Node } from './view.js';
+import { output, type Presentation, type Node } from './view.js';
 import { sameValue } from './value.js';
 interface Revision {
   revision: number;
 }
 interface Navigation extends Revision {
-  menu: string | null;
   toggled: string[];
   scrollRevision: number;
   focused: string | null;
@@ -150,7 +149,6 @@ function expandable(
 export function navigation<N extends Node>(
   presentation: Presentation<N>,
 ): Component<Navigation, NavigationProps, N> {
-  const target = presentation.target;
   const navigationFrame = (state: Navigation, props: NavigationProps) => {
     const ui = presentation.paint(props.theme);
     return output(
@@ -163,112 +161,77 @@ export function navigation<N extends Node>(
             sessionGroups(props).flatMap((group, index) => {
               const open = groupOpen(state, group.key);
               const heading = `${open ? (props.theme.ascii ? 'v' : '▾') : props.theme.ascii ? '>' : '▸'} ${group.label}  ${group.sessions.length}`;
-              const label = ui.text(`${group.key}-label`, heading, 12, props.theme.muted, 500, {
+              const label = ui.text(`${group.key}-label`, heading, props.theme.muted, 500, {
                 truncate: true,
               });
               return [
                 ...(index ? [ui.box(`${group.key}-gap`, [], { terminal: { basis: 1 } })] : []),
-                ui.item
-                  ? ui.item(group.key, label, false, props.busy)
-                  : ui.button(group.key, heading, props.busy, false, {
-                      width: fill,
-                      minWidth: 0,
-                      justify: 'start',
-                      truncate: true,
-                    }),
+                ui.item(group.key, label, false, props.busy),
                 ...(open
                   ? group.sessions.map((session, at) => {
                       const current = session.id === props.selected;
-                      const row = ui.item
-                        ? ui.item(
-                            session.id,
+                      const row = ui.item(
+                        session.id,
+                        ui.box(
+                          `session-row-${index}-${at}`,
+                          [
                             ui.box(
-                              `session-row-${index}-${at}`,
+                              `session-status-${index}-${at}`,
                               [
-                                ui.box(
-                                  `session-status-${index}-${at}`,
-                                  [
-                                    ui.text(
-                                      `session-glyph-${index}-${at}`,
-                                      session.hasUnread
-                                        ? props.theme.ascii
-                                          ? '  * '
-                                          : '  ● '
-                                        : '    ',
-                                      13,
-                                      props.theme.accent,
-                                    ),
-                                  ],
-                                  { terminal: { basis: 4, shrink: false } },
+                                ui.text(
+                                  `session-glyph-${index}-${at}`,
+                                  session.hasUnread
+                                    ? props.theme.ascii
+                                      ? '  * '
+                                      : '  ● '
+                                    : '    ',
+                                  props.theme.accent,
                                 ),
-                                ui.box(
-                                  `session-name-${index}-${at}`,
-                                  [
-                                    ui.text(
-                                      `session-label-${index}-${at}`,
-                                      session.title,
-                                      13,
-                                      session.archived ? props.theme.muted : props.theme.text,
-                                      session.hasUnread ? 650 : 400,
-                                      { truncate: true },
-                                    ),
-                                  ],
-                                  { terminal: { grow: 1, shrink: true } },
-                                ),
-                                ...(session.activity === 'waiting'
-                                  ? [
-                                      ui.text(
-                                        `session-waiting-${index}-${at}`,
-                                        ` ${copy(props.locale).needsYou} `,
-                                        12,
-                                        props.theme.accent,
-                                        400,
-                                        { truncate: true },
-                                      ),
-                                    ]
-                                  : []),
                               ],
-                              { row: true, gap: 0 },
+                              { terminal: { basis: 4, shrink: false } },
                             ),
-                            current,
-                            props.busy,
-                            { followFocus: true, submit: true },
-                          )
-                        : ui.button(
-                            session.id,
-                            session.title +
-                              (session.activity === 'waiting'
-                                ? ' · ' + copy(props.locale).needsYou
-                                : session.activity === 'working'
-                                  ? ' · ' + copy(props.locale).working
-                                  : session.hasUnread
-                                    ? ' · ' + copy(props.locale).unread
-                                    : ''),
-                            props.busy,
-                            false,
-                            {
-                              width: fill,
-                              minWidth: 0,
-                              justify: 'start',
-                              truncate: true,
-                              ...(current ? { background: props.theme.selected } : {}),
-                            },
-                          );
+                            ui.box(
+                              `session-name-${index}-${at}`,
+                              [
+                                ui.text(
+                                  `session-label-${index}-${at}`,
+                                  session.title,
+                                  session.archived ? props.theme.muted : props.theme.text,
+                                  session.hasUnread ? 650 : 400,
+                                  { truncate: true },
+                                ),
+                              ],
+                              { terminal: { grow: 1, shrink: true } },
+                            ),
+                            ...(session.activity === 'waiting'
+                              ? [
+                                  ui.text(
+                                    `session-waiting-${index}-${at}`,
+                                    ` ${copy(props.locale).needsYou} `,
+                                    props.theme.accent,
+                                    400,
+                                    { truncate: true },
+                                  ),
+                                ]
+                              : []),
+                          ],
+                          { row: true, gap: 0 },
+                        ),
+                        current,
+                        props.busy,
+                        { followFocus: true, submit: true },
+                      );
                       const text = copy(props.locale);
                       const actions = [
                         ...(!session.archived
                           ? [ui.button('rename-' + session.id, text.renameSession, props.busy)]
                           : []),
                         ui.button('details-' + session.id, text.detailsTitle, props.busy),
-                        ...(target === 'tui'
-                          ? [
-                              ui.button(
-                                'usage-' + session.id,
-                                tuiText(props.locale, 'insights-this-session'),
-                                props.busy,
-                              ),
-                            ]
-                          : []),
+                        ui.button(
+                          'usage-' + session.id,
+                          tuiText(props.locale, 'insights-this-session'),
+                          props.busy,
+                        ),
                         ...(session.activity !== 'idle'
                           ? [ui.button('stop-' + session.id, text.stop, props.busy)]
                           : []),
@@ -283,56 +246,17 @@ export function navigation<N extends Node>(
                           props.busy || session.activity !== 'idle',
                         ),
                       ];
-                      if (ui.contextMenu)
-                        return ui.contextMenu(
-                          'session-menu-' + session.id,
-                          session.title,
-                          row,
-                          actions,
-                        );
-                      const menu = presentation.popup!({
-                        key: 'session-actions-' + session.id,
-                        label: session.title,
-                        trigger: ui.button(
-                          'menu-' + session.id,
-                          '⋯',
-                          props.busy,
-                          false,
-                          {},
-                          undefined,
-                          text.detailsTitle,
-                        ),
-                        content: ui.box('session-actions-content-' + session.id, actions, {
-                          gap: 4,
-                          padding: 6,
-                        }),
-                        open: state.menu === session.id,
-                        anchor: 'bottom_right',
-                        offset: 4,
-                        style: {
-                          width: pixels(200),
-                          background: props.theme.menu.background,
-                          border: props.theme.menu.border,
-                          borderWidth: props.theme.menu.borderWidth,
-                          radius: props.theme.menu.radius,
-                        },
-                      });
-                      return ui.box('session-row-' + session.id, [row, menu], {
-                        row: true,
-                        gap: 0,
-                        style: { width: fill, minWidth: 0 },
-                      });
+                      return ui.contextMenu(
+                        'session-menu-' + session.id,
+                        session.title,
+                        row,
+                        actions,
+                      );
                     })
                   : []),
               ];
             }),
-            {
-              scroll: 'anchor',
-              focusGroup: target === 'tui',
-              gap: target === 'tui' ? 0 : 2,
-              style: { width: fill, height: pixels(0), grow: 1, minHeight: 0 },
-              terminal: { grow: 1 },
-            },
+            { scroll: 'anchor', focusGroup: true, gap: 0, terminal: { grow: 1 } },
           ),
         },
         { input: 'session-input', observed: 'session-viewport' },
@@ -341,10 +265,7 @@ export function navigation<N extends Node>(
   };
   return {
     mount: (props) =>
-      navigationFrame(
-        { revision: 0, menu: null, toggled: [], scrollRevision: 0, focused: null },
-        props,
-      ),
+      navigationFrame({ revision: 0, toggled: [], scrollRevision: 0, focused: null }, props),
     update: (state, props) => navigationFrame({ ...state, revision: state.revision + 1 }, props),
     event(state, input, props) {
       const next = { ...state, revision: state.revision + 1 };
@@ -383,13 +304,7 @@ export function navigation<N extends Node>(
           }
         }
       }
-      if (input.kind === 'raw' && (input.event as { kind?: string }).kind === 'dismiss')
-        next.menu = null;
       if (input.kind === 'raw' && !props.busy) {
-        if (input.key.startsWith('menu-') && input.key !== 'menu-close') {
-          const id = input.key.slice(5);
-          if (props.sessions.some((session) => session.id === id)) next.menu = id;
-        }
         const groups = sessionGroups(props);
         const group = groups.find((group) => group.key === input.key);
         if (group)
@@ -411,7 +326,7 @@ export function navigation<N extends Node>(
             );
           if (
             session &&
-            target === 'tui' &&
+            true &&
             (input.event as { kind?: string }).kind === 'activate' &&
             input.key === session.id
           ) {
@@ -439,7 +354,6 @@ export function navigation<N extends Node>(
             });
         }
       }
-      if (events.length) next.menu = null;
       const out = navigationFrame(next, props);
       out.events.push(...events);
       return out;
@@ -450,7 +364,6 @@ export function navigation<N extends Node>(
 export function timeline<N extends Node>(
   presentation: Presentation<N>,
 ): Component<Reading, TimelineProps, N> {
-  const target = presentation.target;
   const focusMessage = (state: Reading, id: string) => {
     state.browse!.id = id;
     state.command = {
@@ -459,7 +372,7 @@ export function timeline<N extends Node>(
     };
   };
   const syncBrowse = (state: Reading, props: TimelineProps) => {
-    if (target !== 'tui' || !props.browse || props.source || props.search || props.loading) {
+    if (!props.browse || props.source || props.search || props.loading) {
       state.browse = null;
       return;
     }
@@ -519,7 +432,6 @@ export function timeline<N extends Node>(
     if ((userVisible || first < 0) && state.promptShown) state.promptSuppressed = promptPosition;
     if (state.promptSuppressed !== promptPosition) state.promptSuppressed = undefined;
     const promptText =
-      target === 'tui' &&
       !props.source &&
       !search?.history &&
       first >= 0 &&
@@ -584,12 +496,8 @@ export function timeline<N extends Node>(
         const rule = (side: string) =>
           ui.box(
             'compact-rule-' + side + message.id,
-            ui.rule ? [ui.rule('compact-line-' + side + message.id, 'row')] : [],
-            {
-              terminal: { grow: 1, shrink: true },
-              style: { grow: 1, height: pixels(1) },
-              ...(target === 'desktop' ? { background: props.theme.border } : {}),
-            },
+            [ui.rule('compact-line-' + side + message.id, 'row')],
+            { terminal: { grow: 1, shrink: true } },
           );
         return [
           ui.box(
@@ -599,12 +507,11 @@ export function timeline<N extends Node>(
               ui.text(
                 'compacted-label-' + message.id,
                 tuiText(props.locale, 'context-compacted', { seconds }),
-                12,
                 props.theme.muted,
               ),
               rule('right'),
             ],
-            { row: true, gap: target === 'tui' ? 1 : 12, style: { width: fill, align: 'center' } },
+            { row: true, gap: 1 },
           ),
         ];
       }
@@ -616,19 +523,7 @@ export function timeline<N extends Node>(
         text.readSource,
         props.loading,
         false,
-        {
-          padding: { top: 4, right: 0, bottom: 4, left: 0 },
-          text: {
-            foreground: props.theme.muted,
-            font: {
-              family: '.SystemUIFont',
-              fallbacks: [],
-              size: 12,
-              lineHeight: 1.55,
-              weight: 400,
-            },
-          },
-        },
+        { foreground: props.theme.muted },
       );
 
       const body =
@@ -639,7 +534,7 @@ export function timeline<N extends Node>(
               {
                 source: message.text,
                 appearance:
-                  message.role === 'thinking' && target === 'tui'
+                  message.role === 'thinking' && true
                     ? {
                         ...props.theme.markdown,
                         body: { ...props.theme.markdown.body, foreground: props.theme.thinking },
@@ -677,7 +572,7 @@ export function timeline<N extends Node>(
       const messageTheme = message.pending
         ? { ...props.theme, accent: props.theme.muted, text: props.theme.muted }
         : props.theme;
-      const messageNode = messageView(presentation, target, messageTheme, props.locale, {
+      const messageNode = messageView(presentation, messageTheme, props.locale, {
         ...message,
         role: message.role,
         traceDepth: depth,
@@ -740,7 +635,7 @@ export function timeline<N extends Node>(
                       ]
                     : []),
                 ],
-                { surface: target === 'desktop', style: { width: fill } },
+                { surface: false },
               )
             : body,
         actions: [
@@ -793,13 +688,7 @@ export function timeline<N extends Node>(
                         ]
                       : []),
                   ],
-                  {
-                    row: true,
-                    gap: target === 'desktop' ? 12 : 1,
-                    terminal: { wrap: true },
-                    style: { width: fill, wrap: true },
-                    surface: message.role === 'user',
-                  },
+                  { row: true, gap: 1, terminal: { wrap: true }, surface: message.role === 'user' },
                 ),
               ]
             : [],
@@ -827,41 +716,12 @@ export function timeline<N extends Node>(
         ),
       ];
     });
-    const content = ui.box(
-      'timeline',
-      [
-        ...(target === 'desktop' && !messages.length && !props.loading
-          ? [
-              ui.box(
-                'welcome-column',
-                [
-                  ui.text('welcome', text.welcome, 30, props.theme.text, 600),
-                  ui.text('welcome-copy', text.welcomeCopy, 16, props.theme.muted),
-                ],
-                {
-                  gap: target === 'desktop' ? 12 : 1,
-                  style: { width: fill, maxWidth: 760, shrink: 0 },
-                },
-              ),
-            ]
-          : messages),
-        ...(props.loading && target !== 'tui'
-          ? [ui.text('loading', text.loading, 14, props.theme.muted)]
-          : []),
-      ],
-      {
-        gap: target === 'desktop' ? 24 : 0,
-        style: {
-          width: fill,
-          height: fill,
-          align: 'center',
-          padding: { top: 24, right: 24, bottom: 24, left: 24 },
-        },
-        focusGroup: !!browsing,
-        scroll: props.live && !props.browse ? 'follow_end' : 'anchor',
-        terminal: { grow: 1 },
-      },
-    );
+    const content = ui.box('timeline', [...messages], {
+      gap: 0,
+      focusGroup: !!browsing,
+      scroll: props.live && !props.browse ? 'follow_end' : 'anchor',
+      terminal: { grow: 1 },
+    });
     const controls: N[] = props.source
       ? [
           ui.button('source-back', text.sourceBack),
@@ -884,30 +744,21 @@ export function timeline<N extends Node>(
             : []),
           ...(props.source.failed ? [ui.button('source-retry', text.sourceRetry)] : []),
         ]
-      : target === 'tui'
-        ? detached
-          ? [
-              ui.box('reading-control-space', [], { terminal: { grow: 1 } }),
-              ui.button(
-                props.latest ? 'latest' : 'end',
-                (props.theme.ascii ? 'v ' : '↓ ') + (props.latest ? text.latest : text.toEnd),
-                props.loading,
-                false,
-                { background: 0 },
-                undefined,
-                props.latest ? text.latest : text.toEnd,
-              ),
-              ui.box('reading-control-space-end', [], { terminal: { grow: 1 } }),
-            ]
-          : []
-        : [
-            ...(props.older ? [ui.button('older', text.older, props.loading)] : []),
-            ...(props.newer ? [ui.button('newer', text.newer, props.loading)] : []),
-            ...(props.latest ? [ui.button('latest', text.latest, props.loading)] : []),
-            ...(state.observation?.viewport && !state.observation.viewport.atEnd
-              ? [ui.button('end', text.toEnd, state.observation.pendingCommand != null)]
-              : []),
-          ];
+      : detached
+        ? [
+            ui.box('reading-control-space', [], { terminal: { grow: 1 } }),
+            ui.button(
+              props.latest ? 'latest' : 'end',
+              (props.theme.ascii ? 'v ' : '↓ ') + (props.latest ? text.latest : text.toEnd),
+              props.loading,
+              false,
+              { background: 0 },
+              undefined,
+              props.latest ? text.latest : text.toEnd,
+            ),
+            ui.box('reading-control-space-end', [], { terminal: { grow: 1 } }),
+          ]
+        : [];
     const out = output(
       state,
       ui.box(
@@ -927,7 +778,6 @@ export function timeline<N extends Node>(
                           ui.text(
                             'find-scope-text',
                             search.history ? text.findHistory : text.findLocal,
-                            12,
                             props.theme.muted,
                             400,
                             { truncate: true },
@@ -959,12 +809,11 @@ export function timeline<N extends Node>(
                           { changed: 'find-changed', submitted: 'find-submitted' },
                         ),
                       ],
-                      { terminal: { grow: 1, shrink: true }, style: { grow: 1, minWidth: 0 } },
+                      { terminal: { grow: 1, shrink: true } },
                     ),
                     ui.text(
                       'find-count',
                       search.failed ? text.findFailed : searchCount(state),
-                      12,
                       props.theme.muted,
                     ),
                     ui.button('find-previous', '↑', !searchReady(search)),
@@ -976,7 +825,6 @@ export function timeline<N extends Node>(
                     gap: 1,
                     wide: { min_width: 60, direction: 'row', children: { 'find-scope-label': {} } },
                     terminal: { basis: 1, shrink: false },
-                    style: { width: fill, shrink: 0 },
                   },
                 ),
               ]
@@ -996,12 +844,7 @@ export function timeline<N extends Node>(
                       tuiText(props.locale, 'chat-prompt-jump'),
                     ),
                   ],
-                  {
-                    gap: 0,
-                    surface: true,
-                    terminal: { basis: 1, shrink: false },
-                    style: { width: fill, shrink: 0, background: props.theme.surface },
-                  },
+                  { gap: 0, surface: true, terminal: { basis: 1, shrink: false } },
                 ),
               ]
             : []),
@@ -1014,11 +857,7 @@ export function timeline<N extends Node>(
                 { observed: 'reading-observed', input: 'reading-input' },
               ),
             ],
-            {
-              visible: !props.source && !search?.history,
-              style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
-              terminal: { grow: 1 },
-            },
+            { visible: !props.source && !search?.history, terminal: { grow: 1 } },
           ),
           ...(search?.history ? [historyView(presentation, props, search)] : []),
           ...(props.source
@@ -1037,7 +876,6 @@ export function timeline<N extends Node>(
                             : source.kind === 'receipt'
                               ? text.findFieldReceipt
                               : text.sourceTitle,
-                        20,
                         props.theme.text,
                         600,
                       ),
@@ -1054,7 +892,6 @@ export function timeline<N extends Node>(
                               : source.atEnd
                                 ? text.sourceEnding
                                 : text.partial,
-                        13,
                         props.theme.muted,
                       ),
                       presentation.slot(
@@ -1073,22 +910,13 @@ export function timeline<N extends Node>(
                         {},
                       ),
                       ...(source.loading
-                        ? [ui.text('source-loading', text.loading, 13, props.theme.muted)]
+                        ? [ui.text('source-loading', text.loading, props.theme.muted)]
                         : []),
                       ...(source.failed
-                        ? [ui.text('source-failed', text.sourceFailed, 13, props.theme.muted)]
+                        ? [ui.text('source-failed', text.sourceFailed, props.theme.muted)]
                         : []),
                     ],
-                    {
-                      gap: target === 'desktop' ? 16 : 1,
-                      scroll: 'anchor',
-                      terminal: { grow: 1 },
-                      style: {
-                        width: fill,
-                        height: fill,
-                        padding: { top: 24, right: 24, bottom: 24, left: 24 },
-                      },
-                    },
+                    { gap: 1, scroll: 'anchor', terminal: { grow: 1 } },
                   );
                   return ui.box(
                     'source-pane',
@@ -1105,10 +933,7 @@ export function timeline<N extends Node>(
                         { input: 'source-input', observed: 'source-observed' },
                       ),
                     ],
-                    {
-                      style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
-                      terminal: { grow: 1 },
-                    },
+                    { terminal: { grow: 1 } },
                   );
                 })(),
               ]
@@ -1124,7 +949,6 @@ export function timeline<N extends Node>(
                         ui.text(
                           'active-output-marker',
                           active.role === 'assistant' ? ' ' : props.theme.ascii ? '*' : '•',
-                          14,
                           activity ? props.theme[activity.tone] : props.theme.accent,
                           400,
                           {},
@@ -1139,34 +963,26 @@ export function timeline<N extends Node>(
                         ui.text(
                           'active-output-text',
                           activityText,
-                          14,
                           active.role === 'thinking' ? props.theme.muted : props.theme.text,
                           400,
                           { truncate: true },
                         ),
                       ],
-                      { terminal: { grow: 1, shrink: true }, style: { width: fill, minWidth: 0 } },
+                      { terminal: { grow: 1, shrink: true } },
                     ),
                     ui.box('active-output-inset', [], { terminal: { basis: 1, shrink: false } }),
                   ],
-                  {
-                    surface: true,
-                    row: true,
-                    gap: 0,
-                    terminal: { basis: 1, shrink: false },
-                    style: { width: fill, shrink: 0, background: props.theme.surface },
-                  },
+                  { surface: true, row: true, gap: 0, terminal: { basis: 1, shrink: false } },
                 ),
               ]
             : []),
-          ...(browsing ? [ui.text('browse-hint', text.browseHint, 12, props.theme.muted)] : []),
+          ...(browsing ? [ui.text('browse-hint', text.browseHint, props.theme.muted)] : []),
           ...(!search?.history && controls.length
             ? [
                 ui.box('reading-controls', controls, {
                   row: true,
-                  gap: target === 'desktop' ? 8 : 1,
+                  gap: 1,
                   terminal: { wrap: true },
-                  style: { width: fill, shrink: 0, wrap: true },
                 }),
               ]
             : []),
@@ -1209,8 +1025,7 @@ export function timeline<N extends Node>(
                   { key: 'right', modifiers: [], input: 'browse-expand', enabled: true },
                 ]
               : [],
-          gap: target === 'desktop' ? 8 : 1,
-          style: { width: fill, height: fill },
+          gap: 1,
           terminal: { grow: 1 },
         },
       ),
@@ -1227,7 +1042,6 @@ export function timeline<N extends Node>(
           ...props.toolContext,
           landing: props.landing.sequence,
           path:
-            target === 'tui' &&
             !props.source &&
             !search &&
             !props.loading &&
@@ -1249,7 +1063,7 @@ export function timeline<N extends Node>(
       state.fileContext = context;
       out.events.push({ name: 'fileContext', value: context });
     }
-    syncMessageCopy(state, props, target === 'tui' ? (row?.message ?? null) : null, out.actions);
+    syncMessageCopy(state, props, row?.message ?? null, out.actions);
     const copied = messageCopyObservation(state);
     if (!sameValue(previousCopy, copied)) {
       out.events.push({ name: 'messageCopy', value: copied });
@@ -1272,7 +1086,7 @@ export function timeline<N extends Node>(
           props.landing.sequence > 0 ? { sequence: 1, target: { kind: props.landing.edge } } : null,
         landing: props.landing,
       };
-      syncSearch(initial, target === 'tui' ? props.search : null);
+      syncSearch(initial, props.search);
       return timelineFrame(initial, props);
     },
     update(state, props) {
@@ -1309,7 +1123,7 @@ export function timeline<N extends Node>(
           focusMessage(next, row.message.id);
         }
       }
-      syncSearch(next, target === 'tui' ? props.search : null);
+      syncSearch(next, props.search);
       return timelineFrame(next, props, messageCopyObservation(state));
     },
     event(state, input, props) {
@@ -1463,7 +1277,6 @@ export function timeline<N extends Node>(
       const out = timelineFrame(next, props, messageCopyObservation(state));
       const observed = next.observation;
       if (
-        target === 'tui' &&
         props.live &&
         !props.latest &&
         props.older &&
@@ -1481,7 +1294,6 @@ export function timeline<N extends Node>(
       )
         out.events.push({ name: 'fill', value: {} });
       if (
-        target === 'tui' &&
         !props.source &&
         !next.search &&
         !props.loading &&

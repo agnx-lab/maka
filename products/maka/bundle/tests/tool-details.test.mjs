@@ -121,7 +121,7 @@ test('omitting load keeps compact summaries eager', () => {
   assert.equal(component.mount(current, {}).actions.length, 2);
 });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   const { component: details } = await import(`../dist/packages/tool-details/${target}.js`);
   test(`${target}: background completion caches values without starting dependent reads`, () => {
     const current = props();

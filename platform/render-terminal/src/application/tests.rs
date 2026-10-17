@@ -49,7 +49,7 @@ pub(super) fn fixture(handler: &str) -> (tokio::runtime::Runtime, Input, Vec<Pac
         .enable_time()
         .build()
         .unwrap();
-    let (mut input, packages) = support::dual_fixture(handler);
+    let (mut input, packages) = support::fixture(handler);
     input.environment.presentation = Some(PresentationTarget::Tui);
     (runtime, input, packages)
 }
@@ -113,26 +113,24 @@ fn idle_presentation_waits_for_input_and_committed_changes() {
 }
 
 #[test]
-fn same_package_has_native_surfaces_and_distinct_layouts_and_paint_never_calls_guest() {
+fn independent_terminal_owners_keep_state_and_paint_never_calls_guest() {
     let (runtime, input, packages) =
         fixture("return frame({count:state.count+1,revision:state.revision+1});");
-    let mut desktop_input = input.clone();
-    desktop_input.environment.presentation = Some(PresentationTarget::Desktop);
-    let mut desktop = Application::<()>::new(
-        &desktop_input,
+    let mut independent = Application::<()>::new(
+        &input,
         packages.clone(),
         runtime.handle().clone(),
         maka_ui_js::execution(Default::default()),
-        support::scene::registry(PresentationTarget::Desktop),
+        support::scene::registry(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
-    runtime.block_on(desktop.wait_ready()).unwrap();
-    let mount = desktop.mount_launch(json!({})).unwrap();
-    runtime.block_on(desktop.wait_frame(&mount)).unwrap();
+    runtime.block_on(independent.wait_ready()).unwrap();
+    let mount = independent.mount_launch(json!({})).unwrap();
+    runtime.block_on(independent.wait_frame(&mount)).unwrap();
     assert!(matches!(
-        desktop.frame(&mount).unwrap().surface,
-        Some(Surface::Window { width: 640, .. })
+        independent.frame(&mount).unwrap().surface,
+        Some(Surface::Terminal { .. })
     ));
     let mut tui = Presenter::new(
         &input,
@@ -173,11 +171,15 @@ fn same_package_has_native_surfaces_and_distinct_layouts_and_paint_never_calls_g
     tui.surface_closed(&tui.surface(), Ok(())).unwrap();
     assert!(tui.can_shutdown());
     tui.shutdown_settled().unwrap();
-    desktop.close(&mount, Ok(())).unwrap();
+    assert_eq!(
+        independent.frame(&mount).unwrap().state,
+        json!({"count":0,"revision":0})
+    );
+    independent.close(&mount, Ok(())).unwrap();
     runtime
         .block_on(std::future::poll_fn(|cx| {
-            desktop.set_waker(cx.waker().clone());
-            match desktop.shutdown() {
+            independent.set_waker(cx.waker().clone());
+            match independent.shutdown() {
                 Err(Error::Core(maka_plugin_core::Error::CleanupPending)) => {
                     std::task::Poll::Pending
                 }
@@ -367,7 +369,7 @@ fn accepted_worker_survives_surface_close_and_cleanup_failure_keeps_actual_capac
 }
 
 #[test]
-fn surface_variant_and_obsolete_window_wire_shape_are_rejected() {
+fn terminal_surface_rejects_window_variants_and_unknown_fields() {
     assert!(serde_json::from_value::<maka_ui_runtime::Frame>(json!({"revision":0,"state":{},"window":{"binding":"surface","width":640,"height":400,"title":"old"},"view":{"kind":"text","key":"a","text":"x","color":0}})).is_err());
     assert!(
         serde_json::from_value::<Surface>(
@@ -375,72 +377,25 @@ fn surface_variant_and_obsolete_window_wire_shape_are_rejected() {
         )
         .is_err()
     );
-    let (runtime, input, mut packages) = fixture("");
-    let original = packages.pop().unwrap();
-    let app = Package::new(std::collections::BTreeMap::from([
-        (
-            maka_packages::MANIFEST_FILE.into(),
-            original
-                .file(maka_packages::MANIFEST_FILE)
-                .unwrap()
-                .to_vec(),
-        ),
-        (
-            "index.mjs".into(),
-            original.file("index.mjs").unwrap().to_vec(),
-        ),
-        (
-            "terminal.mjs".into(),
-            original.file("index.mjs").unwrap().to_vec(),
-        ),
-    ]))
-    .unwrap();
-    let mut input = input;
-    input.instances.get_mut("app").unwrap().package = app.application_ref().into();
-    packages.push(app);
     assert!(
-        Presenter::new(
-            &input,
-            packages,
-            runtime.handle().clone(),
-            registry(),
-            json!({}),
-            maka_ui_js::execution(Default::default()),
+        serde_json::from_value::<Surface>(
+            json!({"kind":"window","binding":"surface","width":640,"height":400,"title":"removed"})
         )
-        .err()
-        .unwrap()
-        .to_string()
-        .contains("surface variant mismatch")
+        .is_err()
     );
 }
 
 fn terminal_packages(mut input: Input, packages: Vec<Package>) -> (Input, Vec<Package>) {
-    use maka_plugin_core::package::{EntryTarget, Implementation};
     use std::collections::BTreeMap;
     let mut adapted = Vec::new();
     for original in packages {
-        let mut declaration = original
+        let declaration = original
             .manifest()
             .application
             .as_ref()
             .unwrap()
             .declaration()
             .clone();
-        let mut entry = declaration.entries.remove(&EntryTarget::Desktop).unwrap();
-        if let Implementation::Native { implementation } = &mut entry.implementation
-            && implementation == "maka.ui.surface.desktop"
-        {
-            *implementation = "maka.ui.surface.tui".into();
-            entry.exports.get_mut("Surface").unwrap().contract =
-                maka_ui_runtime::surface_contract(PresentationTarget::Tui);
-        }
-        if let Some(surface) = entry.imports.get_mut("surface") {
-            surface.contract = maka_ui_runtime::surface_contract(PresentationTarget::Tui);
-        }
-        if entry.scene.is_some() {
-            entry.scene = Some(super::scene::language());
-        }
-        declaration.entries.insert(EntryTarget::Tui, entry);
         let mut files = BTreeMap::from([(
             maka_packages::MANIFEST_FILE.into(),
             serde_json::to_vec(
@@ -449,11 +404,11 @@ fn terminal_packages(mut input: Input, packages: Vec<Package>) -> (Input, Vec<Pa
             .unwrap(),
         )]);
         if let Some(source) = original.file("index.mjs") {
-            let source=std::str::from_utf8(source).unwrap()
-                .replace("{kind:'window',binding:'surface',title:'Composed product',width:640,height:400}","{kind:'terminal',binding:'surface'}")
-                .replace("gap:8,padding:16","gap:1,padding:1")
-                .replace("gap:8,padding:8","gap:1,padding:0")
-                .replace("gap:16,padding:0","gap:2,padding:0");
+            let source = std::str::from_utf8(source)
+                .unwrap()
+                .replace("gap:8,padding:16", "gap:1,padding:1")
+                .replace("gap:8,padding:8", "gap:1,padding:0")
+                .replace("gap:16,padding:0", "gap:2,padding:0");
             files.insert("index.mjs".into(), source.into_bytes());
         }
         let package = Package::new(files).unwrap();
@@ -580,11 +535,7 @@ fn narrow_row_uses_the_same_remaining_width_for_measure_and_unicode_paint() {
                 .unwrap()
                 .to_vec(),
         ),
-        (
-            "index.mjs".into(),
-            original.file("index.mjs").unwrap().to_vec(),
-        ),
-        ("terminal.mjs".into(), source.into_bytes()),
+        ("index.mjs".into(), source.into_bytes()),
     ]))
     .unwrap();
     input.instances.get_mut("app").unwrap().package = app.application_ref().into();
@@ -682,10 +633,6 @@ fn service_fixture(
         (
             "index.mjs".into(),
             original.file("index.mjs").unwrap().to_vec(),
-        ),
-        (
-            "terminal.mjs".into(),
-            original.file("terminal.mjs").unwrap().to_vec(),
         ),
     ]))
     .unwrap();
@@ -812,7 +759,7 @@ fn native_slots_fixture(runtime: &tokio::runtime::Runtime, duplicate: bool) -> P
             .unwrap()
             .declaration()
             .clone();
-        let mut entry = declaration.entries.remove(&EntryTarget::Desktop).unwrap();
+        let mut entry = declaration.entries.remove(&EntryTarget::Tui).unwrap();
         let is_root = old.manifest().id == "dynamic.app";
         if is_root {
             entry.scene = None;
@@ -1039,7 +986,11 @@ fn raw_click_focus_is_immediate_even_when_business_candidate_is_rejected() {
             row: hit.y,
             modifiers: KeyModifiers::NONE,
         }));
-        assert_eq!(result.is_ok(), accepts);
+        assert_eq!(
+            result.is_ok(),
+            accepts,
+            "click result for handler {handler}: {result:?}"
+        );
         assert_eq!(tui.focus.is_some(), focuses);
         assert_eq!(
             tui.application.frame(&tui.root).unwrap().revision,

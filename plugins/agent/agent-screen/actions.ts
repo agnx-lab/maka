@@ -698,7 +698,6 @@ export function openInteraction(state: State, actions: Action[], requestId: stri
 export function rootCommands(
   state: State,
   locale: string,
-  target: 'tui' | 'desktop',
 ): (PaletteCommand & { kind: RootCommand })[] {
   const text = copy(locale);
   const shellRoute = state.dialog === null || state.dialog === 'palette';
@@ -745,77 +744,73 @@ export function rootCommands(
       hint: '/compact',
       disabled: !route || !canCompact(state),
     },
-    ...(target === 'tui'
-      ? [
-          {
-            kind: 'outputs-open' as const,
-            id: 'outputs-open',
-            label: tuiText(locale, 'task-outputs'),
-            hint: 'F4',
-            disabled: !route || !state.selected || state.loading || !!state.source || !!state.image,
-          },
-          {
-            kind: 'browse' as const,
-            id: 'browse',
-            label: text.browseMessages,
-            hint: '',
-            disabled:
-              !route ||
-              !state.selected ||
-              state.loading ||
-              !!state.source ||
-              !!state.image ||
-              !(state.window?.page.chunks.length || (state.window?.latest && state.live.length)),
-          },
-          {
-            kind: 'search-open' as const,
-            id: 'search-open',
-            label: text.findConversation,
-            hint: 'Ctrl F',
-            disabled: !route || !state.selected || state.loading || !!state.source || !!state.image,
-          },
-          ...(['copy-message', 'copy-source'] as const).map((kind) => {
-            const value = kind === 'copy-message' ? readyCopy?.message : readyCopy?.source;
-            const result = readyCopy?.field === 'result',
-              args = readyCopy?.field === 'arguments';
-            return {
-              kind,
-              id: kind,
-              label:
-                kind === 'copy-message'
-                  ? text.copyMessage
-                  : result
-                    ? text.copyToolResultSource
-                    : args
-                      ? text.copyToolArgumentsSource
-                      : text.copySource,
-              hint: value
-                ? ''
-                : readyCopy?.status === 'loading'
-                  ? text.copyLoading
-                  : readyCopy?.status === 'too_large'
-                    ? text.copyTooLarge
-                    : readyCopy?.status === 'empty'
-                      ? text.copyEmpty
-                      : readyCopy?.status === 'streaming'
-                        ? text.copyStreaming
-                        : text.copyUnavailable,
-              disabled: !route || !value,
-              ...(value ? { copyText: value } : {}),
-            };
-          }),
-          {
-            kind: 'copy-file-path' as const,
-            id: 'copy-file-path',
-            label: text.toolCopyPath,
-            hint: filePath
-              ? compactLabel(filePath.split(/[/\\]/u).filter(Boolean).at(-1) || filePath, 32)
-              : '',
-            disabled: !route || !filePath,
-            ...(filePath ? { copyText: filePath } : {}),
-          },
-        ]
-      : []),
+    {
+      kind: 'outputs-open' as const,
+      id: 'outputs-open',
+      label: tuiText(locale, 'task-outputs'),
+      hint: 'F4',
+      disabled: !route || !state.selected || state.loading || !!state.source || !!state.image,
+    },
+    {
+      kind: 'browse' as const,
+      id: 'browse',
+      label: text.browseMessages,
+      hint: '',
+      disabled:
+        !route ||
+        !state.selected ||
+        state.loading ||
+        !!state.source ||
+        !!state.image ||
+        !(state.window?.page.chunks.length || (state.window?.latest && state.live.length)),
+    },
+    {
+      kind: 'search-open' as const,
+      id: 'search-open',
+      label: text.findConversation,
+      hint: 'Ctrl F',
+      disabled: !route || !state.selected || state.loading || !!state.source || !!state.image,
+    },
+    ...(['copy-message', 'copy-source'] as const).map((kind) => {
+      const value = kind === 'copy-message' ? readyCopy?.message : readyCopy?.source;
+      const result = readyCopy?.field === 'result',
+        args = readyCopy?.field === 'arguments';
+      return {
+        kind,
+        id: kind,
+        label:
+          kind === 'copy-message'
+            ? text.copyMessage
+            : result
+              ? text.copyToolResultSource
+              : args
+                ? text.copyToolArgumentsSource
+                : text.copySource,
+        hint: value
+          ? ''
+          : readyCopy?.status === 'loading'
+            ? text.copyLoading
+            : readyCopy?.status === 'too_large'
+              ? text.copyTooLarge
+              : readyCopy?.status === 'empty'
+                ? text.copyEmpty
+                : readyCopy?.status === 'streaming'
+                  ? text.copyStreaming
+                  : text.copyUnavailable,
+        disabled: !route || !value,
+        ...(value ? { copyText: value } : {}),
+      };
+    }),
+    {
+      kind: 'copy-file-path' as const,
+      id: 'copy-file-path',
+      label: text.toolCopyPath,
+      hint: filePath
+        ? compactLabel(filePath.split(/[/\\]/u).filter(Boolean).at(-1) || filePath, 32)
+        : '',
+      disabled: !route || !filePath,
+      ...(filePath ? { copyText: filePath } : {}),
+    },
     {
       kind: 'help-open',
       id: 'help-open',
@@ -878,17 +873,13 @@ export function rootCommands(
       hint: '',
       disabled: !route || !state.selected || state.loading,
     },
-    ...(target === 'tui'
-      ? [
-          {
-            kind: 'usage-open' as const,
-            id: 'usage-open',
-            label: tuiText(locale, 'insights-this-session'),
-            hint: '',
-            disabled: !route || !state.selected,
-          },
-        ]
-      : []),
+    {
+      kind: 'usage-open' as const,
+      id: 'usage-open',
+      label: tuiText(locale, 'insights-this-session'),
+      hint: '',
+      disabled: !route || !state.selected,
+    },
     ...(state.graph.enabled
       ? [
           {
@@ -948,17 +939,13 @@ export function rootCommands(
       hint: 'Ctrl/⌘ B',
       disabled: !shellRoute,
     },
-    ...(target === 'tui'
-      ? [
-          {
-            kind: 'appearance-open' as const,
-            id: 'appearance-open',
-            label: tuiText(locale, 'settings-appearance'),
-            hint: '',
-            disabled: !shellRoute,
-          },
-        ]
-      : []),
+    {
+      kind: 'appearance-open' as const,
+      id: 'appearance-open',
+      label: tuiText(locale, 'settings-appearance'),
+      hint: '',
+      disabled: !shellRoute,
+    },
     ...(state.embedding.workhub && !state.embedding.fixed
       ? [
           {
@@ -1008,7 +995,7 @@ export function rootCommands(
     {
       kind: 'settings',
       id: 'settings',
-      label: target === 'tui' ? tuiText(locale, 'route-settings') : text.settings,
+      label: tuiText(locale, 'route-settings'),
       hint: '',
       disabled: !shellRoute,
     },
@@ -1075,7 +1062,7 @@ export function controlSidebar(state: State, op: TerminalPaneCommand['op']) {
 }
 
 // Aliases only name existing root actions; availability and labels stay in rootCommands.
-export function composerCommands(state: State, locale: string, target: 'tui' | 'desktop') {
+export function composerCommands(state: State, locale: string) {
   const aliases: Partial<Record<RootCommand, string>> = {
     'compact-open': 'compact',
     create: 'new',
@@ -1089,27 +1076,16 @@ export function composerCommands(state: State, locale: string, target: 'tui' | '
     'usage-open': 'usage',
     'terminal-open': 'terminal',
   };
-  return rootCommands(state, locale, target).flatMap(({ kind, id, label, disabled }) =>
+  return rootCommands(state, locale).flatMap(({ kind, id, label, disabled }) =>
     aliases[kind] ? [{ id, command: aliases[kind]!, label, disabled }] : [],
   );
 }
 
-export function rootCommand(
-  state: State,
-  actions: Action[],
-  locale: string,
-  kind: RootCommand,
-  target: 'tui' | 'desktop',
-) {
-  if (
-    !rootCommands(state, locale, target).some(
-      (command) => command.kind === kind && !command.disabled,
-    )
-  )
+export function rootCommand(state: State, actions: Action[], locale: string, kind: RootCommand) {
+  if (!rootCommands(state, locale).some((command) => command.kind === kind && !command.disabled))
     return false;
   if (kind === 'diagnostics-open') {
-    if (target === 'tui') state.inspector = 'diagnostics';
-    else state.dialog = 'diagnostics';
+    state.inspector = 'diagnostics';
     if (!state.selected && state.hostLogsEnabled) state.diagnostics.source = 'host';
     if (state.diagnostics.source === 'host' && state.hostLogsEnabled) readHostLogs(state, actions);
     else readDiagnostics(state, actions);
@@ -1145,61 +1121,54 @@ export function rootCommand(
   else if (kind === 'create-workspace') {
     state.pages = [];
     state.dialog = 'directories';
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'terminal-open') {
-    if (target === 'tui') state.inspector = state.inspector === 'terminal' ? null : 'terminal';
-    else state.dialog = 'terminal';
+    state.inspector = state.inspector === 'terminal' ? null : 'terminal';
   } else if (kind === 'skills-open') state.dialog = 'skills';
   else if (kind === 'checklist-open') {
     if (!state.checklist.watch) watchChecklist(state);
-    if (target === 'tui') state.inspector = state.inspector === 'checklist' ? null : 'checklist';
-    else state.dialog = 'checklist';
+    state.inspector = state.inspector === 'checklist' ? null : 'checklist';
   } else if (kind === 'graph-open') {
     if (!state.graph.watch) watchGraph(state);
-    if (target === 'tui') state.inspector = state.inspector === 'graph' ? null : 'graph';
-    else state.dialog = 'graph';
+    state.inspector = state.inspector === 'graph' ? null : 'graph';
   } else if (kind === 'plan-open') {
     if (!state.plan.watch) watchPlan(state);
-    if (target === 'tui') state.inspector = state.inspector === 'plan' ? null : 'plan';
-    else state.dialog = 'plan';
+    state.inspector = state.inspector === 'plan' ? null : 'plan';
   } else if (kind === 'goal-open') {
     if (!state.goal.watch) watchGoal(state);
-    if (target === 'tui') state.inspector = state.inspector === 'goal' ? null : 'goal';
-    else state.dialog = 'goal';
+    state.inspector = state.inspector === 'goal' ? null : 'goal';
   } else if (kind === 'recap-open') {
     readRecap(state, actions);
-    if (target === 'tui') state.inspector = state.inspector === 'recap' ? null : 'recap';
-    else state.dialog = 'recap';
+    state.inspector = state.inspector === 'recap' ? null : 'recap';
   } else if (kind === 'details-open') {
-    if (target === 'tui') state.inspector = state.inspector === 'details' ? null : 'details';
-    else state.dialog = 'details';
+    state.inspector = state.inspector === 'details' ? null : 'details';
   } else if (kind === 'usage-open' && state.selected) openUsage(state, state.selected);
   else if (kind === 'navigation-toggle') controlSidebar(state, 'toggle');
   else if (kind === 'settings') {
     state.insightsScope = { sequence: ++state.serial, sessionId: null, label: '' };
-    state.pages = [target === 'tui' ? 'settings' : 'connections'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    state.pages = ['settings'];
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'workhub-open') {
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'apps-open') {
     state.pages = ['apps'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'scheduler-open') {
     state.pages = ['scheduler'];
     if (!state.scheduleWatch) state.scheduleWatch = 'schedule-alerts-' + ++state.serial;
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'recall-open') {
     state.pages = ['recall'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'imports-open') {
     state.pages = ['imports'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'projects-open') {
     state.pages = ['projects'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'deployment-open') {
     state.pages = ['deployment'];
-    if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+    controlSidebar(state, 'dismiss_transient');
   } else if (kind === 'stop' && state.selected && state.run)
     intent(state, actions, { kind: 'stop', sessionId: state.selected.id }, 'agent', 'stop', {
       sessionId: state.selected.id,

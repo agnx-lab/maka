@@ -45,7 +45,7 @@ fn ready(
             synchronous_slice: Duration::from_millis(500),
             ..Default::default()
         }),
-        support::scene::registry::<()>(PresentationTarget::Desktop),
+        support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
@@ -240,7 +240,7 @@ fn a_slow_deployment_loads_modules_sequentially() {
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .implementation = Implementation::JavaScript {
         module: "index.mjs".into(),
@@ -269,7 +269,7 @@ fn a_slow_deployment_loads_modules_sequentially() {
             synchronous_slice: Duration::from_millis(500),
             ..Default::default()
         }),
-        support::scene::registry::<()>(PresentationTarget::Desktop),
+        support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
@@ -315,7 +315,7 @@ fn shutdown_drains_a_large_composition_behind_its_original_busy_worker() {
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .implementation = Implementation::JavaScript {
         module: "index.mjs".into(),
@@ -347,7 +347,7 @@ fn shutdown_drains_a_large_composition_behind_its_original_busy_worker() {
             synchronous_slice: Duration::from_secs(2),
             ..Default::default()
         }),
-        support::scene::registry::<()>(PresentationTarget::Desktop),
+        support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();

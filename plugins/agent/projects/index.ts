@@ -46,7 +46,7 @@ import { projectsContract, type ProjectsProps } from '../../shared/contracts.js'
 import { pageHeader, withPageShell, type PageState } from '../../shared/page-shell.js';
 import { copy, type Copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { compactLabel, fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 type Request =
   | { kind: 'page'; append: boolean }
@@ -189,42 +189,30 @@ export function projects<N extends Node>(
           ui.text(
             'name-' + id,
             project.name + (project.archived ? ' · ' + text.projectsArchived : ''),
-            15,
             props.theme.text,
             500,
             { truncate: true },
           ),
-          ui.text(
-            'path-' + id,
-            project.path ?? text.projectsUnavailable,
-            13,
-            props.theme.muted,
-            400,
-            { truncate: true },
-          ),
+          ui.text('path-' + id, project.path ?? text.projectsUnavailable, props.theme.muted, 400, {
+            truncate: true,
+          }),
         ],
         { gap: 0 },
       );
-      if (ui.item && ui.contextMenu)
-        return ui.contextMenu(
-          'project-' + id,
-          text.projectsActions,
-          ui.item(
-            'select-' + id,
-            content,
-            state.selected === id,
-            disabled && state.pending?.request.kind !== 'page',
-            {
-              followFocus: true,
-              submit: true,
-            },
-          ),
-          controls(project),
-        );
-      return ui.box(
+      return ui.contextMenu(
         'project-' + id,
-        [content, ui.box('actions-' + id, controls(project), { row: true, style: { wrap: true } })],
-        { surface: true, padding: 8 },
+        text.projectsActions,
+        ui.item(
+          'select-' + id,
+          content,
+          state.selected === id,
+          disabled && state.pending?.request.kind !== 'page',
+          {
+            followFocus: true,
+            submit: true,
+          },
+        ),
+        controls(project),
       );
     });
     const selected = state.projects.find((project) => project.reference.id === state.selected);
@@ -232,13 +220,11 @@ export function projects<N extends Node>(
       'projects-body',
       [
         ...pageHeader(presentation, state, props, events, text.projectsTitle, 'back', false),
-        ...(state.restoring
-          ? [ui.text('checking', text.projectsChecking, 13, props.theme.muted)]
-          : []),
+        ...(state.restoring ? [ui.text('checking', text.projectsChecking, props.theme.muted)] : []),
         ...(state.pending && !state.restoring
-          ? [ui.text('loading', text.connecting, 13, props.theme.muted)]
+          ? [ui.text('loading', text.connecting, props.theme.muted)]
           : []),
-        ...(state.notice ? [ui.text('notice', text[state.notice], 13, props.theme.muted)] : []),
+        ...(state.notice ? [ui.text('notice', text[state.notice], props.theme.muted)] : []),
         ...(state.historyFailed
           ? [ui.button('history-retry', text.sourceRetry, !!state.pending)]
           : []),
@@ -252,7 +238,7 @@ export function projects<N extends Node>(
             ]
           : []),
         ...(!state.projects.length && !state.pending
-          ? [ui.text('empty', text.projectsEmpty, 14, props.theme.muted)]
+          ? [ui.text('empty', text.projectsEmpty, props.theme.muted)]
           : []),
         presentation.reading(
           'project-list',
@@ -263,7 +249,6 @@ export function projects<N extends Node>(
               focusGroup: true,
               gap: 1,
               terminal: { grow: 1, basis: 0 },
-              style: { width: fill, height: fill, minHeight: 0 },
             }),
           },
           { input: 'list-input', observed: 'list-viewport' },
@@ -273,7 +258,6 @@ export function projects<N extends Node>(
               ui.box('selected-actions', controls(selected, 'footer-'), {
                 row: true,
                 terminal: { wrap: true },
-                style: { wrap: true },
               }),
             ]
           : []),
@@ -283,13 +267,12 @@ export function projects<N extends Node>(
             ui.button('add', text.projectsAdd, disabled),
             ui.button('refresh', text.directoryRefresh, disabled),
           ],
-          { row: true, terminal: { wrap: true }, style: { wrap: true } },
+          { row: true, terminal: { wrap: true } },
         ),
       ],
       {
         gap: 1,
         terminal: { grow: 1 },
-        style: { width: fill, height: fill },
         shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
       },
     );
@@ -311,7 +294,6 @@ export function projects<N extends Node>(
       body,
       picker,
       state.picker,
-      {},
       { width: 76, height: 24 },
     );
     const rename = ui.box(
@@ -333,9 +315,7 @@ export function projects<N extends Node>(
           } satisfies InputProps,
           { changed: 'name-changed', submitted: 'rename-save' },
         ),
-        ...(state.notice
-          ? [ui.text('rename-notice', text[state.notice], 13, props.theme.muted)]
-          : []),
+        ...(state.notice ? [ui.text('rename-notice', text[state.notice], props.theme.muted)] : []),
         ...(state.current
           ? [
               ui.button(
@@ -364,42 +344,34 @@ export function projects<N extends Node>(
         ],
       },
     );
-    view = ui.dialog(
-      'project-rename-dialog',
-      text.projectsRename,
-      view,
-      rename,
-      !!state.rename,
-      {},
-      { width: 64 },
-    );
+    view = ui.dialog('project-rename-dialog', text.projectsRename, view, rename, !!state.rename, {
+      width: 64,
+    });
     const confirmation = ui.box(
       'project-confirm',
       [
-        ...(state.source ? [ui.text('source-name', state.source.name, 15)] : []),
+        ...(state.source ? [ui.text('source-name', state.source.name)] : []),
         ...(state.location
           ? [
-              ui.text('destination', compactLabel(state.location.path, 200), 14),
+              ui.text('destination', compactLabel(state.location.path, 200)),
               ...(state.location.project
-                ? [ui.text('destination-project', state.location.project.name, 14)]
+                ? [ui.text('destination-project', state.location.project.name)]
                 : []),
             ]
           : []),
         ...(state.confirm?.kind === 'relocate'
           ? [
-              ui.text('relocate-help', text.projectsRelocateHelp, 14),
+              ui.text('relocate-help', text.projectsRelocateHelp),
               ...(state.location?.project &&
               state.location.project.reference.id !== state.source?.reference.id
-                ? [ui.text('merge-help', text.projectsMergeHelp, 14, props.theme.warning)]
+                ? [ui.text('merge-help', text.projectsMergeHelp, props.theme.warning)]
                 : []),
             ]
           : []),
         ...(state.confirm?.kind === 'archive'
-          ? [ui.text('archive-help', text.projectsArchiveHelp, 14)]
+          ? [ui.text('archive-help', text.projectsArchiveHelp)]
           : []),
-        ...(state.notice
-          ? [ui.text('confirm-notice', text[state.notice], 13, props.theme.muted)]
-          : []),
+        ...(state.notice ? [ui.text('confirm-notice', text[state.notice], props.theme.muted)] : []),
         ...(state.current
           ? [
               ui.button(
@@ -430,16 +402,11 @@ export function projects<N extends Node>(
       view,
       confirmation,
       !!state.confirm,
-      {},
       { width: 70 },
     );
     const result = output(
       state,
-      ui.box('projects-root', [view], {
-        visible: props.open,
-        terminal: { grow: 1 },
-        style: { width: fill, height: fill },
-      }),
+      ui.box('projects-root', [view], { visible: props.open, terminal: { grow: 1 } }),
       events,
     );
     result.actions = actions;
@@ -639,7 +606,7 @@ export function projects<N extends Node>(
               state.selected = state.projects.some((p) => p.reference.id === state.selected)
                 ? state.selected
                 : (value.projects[0]?.reference.id ?? null);
-              if (presentation.target === 'tui' && state.selected && !r.append)
+              if (state.selected && !r.append)
                 state.focus = {
                   sequence: (state.focus?.sequence ?? 0) + 1,
                   target: { kind: 'focus_item', key: 'select-' + state.selected },

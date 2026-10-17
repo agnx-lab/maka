@@ -54,10 +54,10 @@ fn start(timer: &tokio::runtime::Runtime, store: Arc<EventLog>, id: Uuid) -> App
         .block_on(Application::start_from_store(
             store,
             source,
-            PresentationTarget::Desktop,
+            PresentationTarget::Tui,
             timer.handle().clone(),
             maka_ui_js::execution(Default::default()),
-            crate::support::scene::registry(PresentationTarget::Desktop),
+            crate::support::scene::registry(PresentationTarget::Tui),
             vec![],
         ))
         .unwrap()
@@ -171,27 +171,67 @@ fn missing_or_wrong_selected_presentation_never_activates_native_code() {
     let source = timer
         .block_on(store.commit_application(id, 0, input, vec![], packages))
         .unwrap();
+    let (mut host_input, packages) = support::fixture("");
+    host_input.environment = maka_plugin_core::composition::Environment {
+        location: maka_plugin_core::composition::ExecutionLocation::Host,
+        presentation: None,
+    };
+    host_input.instances.retain(|name, _| name == "surface");
+    host_input.launch = None;
+    let surface = packages
+        .into_iter()
+        .find(|package| package.manifest().id == "native.surface")
+        .unwrap();
+    let mut declaration = surface
+        .manifest()
+        .application
+        .as_ref()
+        .unwrap()
+        .declaration()
+        .clone();
+    let entry = declaration
+        .entries
+        .remove(&maka_plugin_core::package::EntryTarget::Tui)
+        .unwrap();
+    declaration
+        .entries
+        .insert(maka_plugin_core::package::EntryTarget::Host, entry);
+    let host_surface = support::package("native.surface", declaration, None);
+    host_input.instances.get_mut("surface").unwrap().package =
+        host_surface.application_ref().into();
+    let host_source = timer
+        .block_on(store.commit_application(
+            Uuid::new_v4(),
+            0,
+            host_input,
+            vec![],
+            vec![host_surface],
+        ))
+        .unwrap();
     let calls = Rc::new(Cell::new(0));
-    for (deployment, target) in [
-        (Uuid::new_v4(), PresentationTarget::Desktop),
-        (id, PresentationTarget::Tui),
+    for selected in [
+        maka_plugin_core::deployment::DeploymentRef {
+            deployment: Uuid::new_v4(),
+            ..source
+        },
+        host_source,
     ] {
         let observed = calls.clone();
         let mut native = NativeRegistry::<()>::default()
             .with_scene_compiler(
-                support::scene::language(PresentationTarget::Desktop),
+                support::scene::language(PresentationTarget::Tui),
                 support::scene::prepare,
                 support::scene::finish::<()>,
             )
             .unwrap();
         native
-            .register("maka.ui.surface.desktop", move |_, _values| {
+            .register("maka.ui.surface.tui", move |_, _values| {
                 observed.set(observed.get() + 1);
                 Ok(BTreeMap::from([(
                     "Surface".into(),
                     NativeExport {
-                        contract: maka_ui_runtime::surface_contract(PresentationTarget::Desktop),
-                        value: NativeCapability::Surface(PresentationTarget::Desktop),
+                        contract: maka_ui_runtime::surface_contract(PresentationTarget::Tui),
+                        value: NativeCapability::Surface(PresentationTarget::Tui),
                     },
                 )]))
             })
@@ -200,11 +240,8 @@ fn missing_or_wrong_selected_presentation_never_activates_native_code() {
             timer
                 .block_on(Application::start_from_store(
                     store.clone(),
-                    maka_plugin_core::deployment::DeploymentRef {
-                        deployment,
-                        ..source.clone()
-                    },
-                    target,
+                    selected,
+                    PresentationTarget::Tui,
                     timer.handle().clone(),
                     maka_ui_js::execution(Default::default()),
                     native,
@@ -236,7 +273,7 @@ fn unavailable_native_implementation_is_rejected_before_an_earlier_factory_execu
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .implementation = Implementation::Native {
         implementation: "missing.surface".into(),
@@ -261,19 +298,19 @@ fn unavailable_native_implementation_is_rejected_before_an_earlier_factory_execu
     let observed = calls.clone();
     let mut native = NativeRegistry::<()>::default()
         .with_scene_compiler(
-            support::scene::language(PresentationTarget::Desktop),
+            support::scene::language(PresentationTarget::Tui),
             support::scene::prepare,
             support::scene::finish::<()>,
         )
         .unwrap();
     native
-        .register("maka.ui.surface.desktop", move |_, _values| {
+        .register("maka.ui.surface.tui", move |_, _values| {
             observed.set(observed.get() + 1);
             Ok(BTreeMap::from([(
                 "Surface".into(),
                 NativeExport {
-                    contract: maka_ui_runtime::surface_contract(PresentationTarget::Desktop),
-                    value: NativeCapability::Surface(PresentationTarget::Desktop),
+                    contract: maka_ui_runtime::surface_contract(PresentationTarget::Tui),
+                    value: NativeCapability::Surface(PresentationTarget::Tui),
                 },
             )]))
         })
@@ -281,7 +318,7 @@ fn unavailable_native_implementation_is_rejected_before_an_earlier_factory_execu
     let result = timer.block_on(Application::start_from_store(
         store.clone(),
         desired,
-        PresentationTarget::Desktop,
+        PresentationTarget::Tui,
         timer.handle().clone(),
         maka_ui_js::execution(Default::default()),
         native,

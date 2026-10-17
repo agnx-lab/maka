@@ -76,7 +76,7 @@ impl Fixture {
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
         let owner = Arc::new(RootOwner::create(&caller_root, &namespaces).unwrap());
         let caller = Arc::new(EventLog::for_root(owner).await.unwrap());
-        let (input, packages, observations) = support::ui(PresentationTarget::Desktop);
+        let (input, packages, observations) = support::ui(PresentationTarget::Tui);
         let source = caller
             .commit_application(Uuid::new_v4(), 0, input, observations, packages)
             .await
@@ -550,10 +550,10 @@ async fn native_ui_at(
     let ui = maka_ui_runtime::Application::start_from_store(
         f.caller.clone(),
         f.source.clone(),
-        PresentationTarget::Desktop,
+        PresentationTarget::Tui,
         tokio::runtime::Handle::current(),
         maka_ui_js::execution(Default::default()),
-        support::counter::scene::registry(PresentationTarget::Desktop),
+        support::counter::scene::registry(PresentationTarget::Tui),
         registrations,
     )
     .await

@@ -19,16 +19,10 @@
 
 import type { Theme } from '../../shared/contracts.js';
 import { tuiText, copy } from './locale.js';
-import { fill, pixels, type Presentation, type Node } from '../../shared/view.js';
+import { type Presentation, type Node } from '../../shared/view.js';
 
 import { type State } from './state.js';
-import {
-  canExecute,
-  mutationPending,
-  conversationRoute,
-  rootCommands,
-  sidebarLabel,
-} from './actions.js';
+import { mutationPending, conversationRoute } from './actions.js';
 
 export function headerView<N extends Node>(
   presentation: Presentation<N>,
@@ -38,7 +32,6 @@ export function headerView<N extends Node>(
   title: N,
   models: N,
 ): N {
-  const target = presentation.target;
   const ui = presentation.paint(theme),
     text = copy(locale),
     busy = mutationPending(state);
@@ -46,160 +39,103 @@ export function headerView<N extends Node>(
   const header = ui.box(
     'header',
     [
-      ...(target === 'desktop'
-        ? [
-            ui.box(
-              'context',
-              [
-                title,
-                ...(!state.embedding.fixed
-                  ? [ui.button('navigation-toggle', sidebarLabel(state, text))]
-                  : []),
-              ],
-              {
-                row: true,
-                gap: 8,
-                style: { width: fill, align: 'center' },
-              },
-            ),
-            ui.box(
-              'toolbar',
-              [
-                ui.box('model-control', [models], {
-                  style: { width: pixels(0), grow: 1, minWidth: 0 },
-                }),
-                ui.button('palette-open', text.paletteTitle),
-                ui.button(
-                  'diagnostics-open',
-                  text.diagnosticsTitleLabel,
-                  !rootCommands(state, locale, target).some(
-                    (command) => command.kind === 'diagnostics-open' && !command.disabled,
-                  ),
-                ),
-                ui.button(
-                  'details-open',
-                  text.detailsOpen,
-                  !rootCommands(state, locale, target).some(
-                    (command) => command.kind === 'details-open' && !command.disabled,
-                  ),
-                ),
-                ui.button('terminal-open', text.terminalTitle, !state.selected || state.loading),
-                ...(!state.embedding.fixed
-                  ? [
-                      ui.button('projects-open', text.projectsTitle),
-                      ...(state.embedding.workhub ? [ui.button('workhub-open', 'WorkHub')] : []),
-                      ui.button('apps-open', text.appsTitle),
-                      ui.button('imports-open', text.importsTitle),
-                      ...(state.scheduledTasks
-                        ? [ui.button('scheduler-open', text.scheduleTitle)]
-                        : []),
-                    ]
-                  : []),
-                ui.button('settings', text.settings),
-                ui.button('deployment-open', text.deploymentTitle),
-              ],
-              { row: true, gap: 8, style: { width: fill, align: 'center' } },
-            ),
-          ]
-        : [
-            ui.box(
-              'header-left',
-              [
-                ...(!state.embedding.fixed
-                  ? [
-                      ui.box(
-                        'navigation-cell',
-                        [
-                          ui.button(
-                            'navigation-toggle',
-                            theme.ascii ? '=' : '≡',
-                            false,
-                            false,
-                            { background: 0 },
-                            undefined,
-                            text.toggleSidebar + ' · Ctrl+B',
-                          ),
-                        ],
-                        { terminal: { basis: 3 } },
-                      ),
-                    ]
-                  : []),
-                ...(currentPage
-                  ? [
-                      ui.box(
-                        'back-cell',
-                        [
-                          ui.button(
-                            'page-back',
-                            theme.ascii ? '<' : '‹',
-                            currentPage !== 'settings' &&
-                              state.pageChrome[currentPage]?.backEnabled !== true,
-                            false,
-                            { background: 0 },
-                            undefined,
-                            text.back,
-                          ),
-                        ],
-                        { terminal: { basis: 3 } },
-                      ),
-                    ]
-                  : []),
-              ],
-              {
-                visible: !state.embedding.fixed || !conversationRoute(state),
-                row: true,
-                gap: 0,
-                terminal: { basis: (state.embedding.fixed ? 0 : 3) + (currentPage ? 3 : 0) },
-              },
-            ),
-            ui.box(
-              'header-task',
-              [
-                ...(!conversationRoute(state)
-                  ? [ui.box('header-title', [title], { terminal: { shrink: true } })]
-                  : []),
-                ui.box('header-title-trailing', [], { terminal: { grow: 1 } }),
-              ],
-              { row: true, gap: 1, terminal: { grow: 1, shrink: true } },
-            ),
-            ui.box(
-              'toolbar',
-              [
-                ...[
-                  ['diagnostics-open', text.diagnosticsTitleLabel, '!'],
-                  ['outputs-open', tuiText(locale, 'task-outputs'), theme.ascii ? '[o]' : '▧'],
-                  ['details-open', text.detailsOpen, theme.ascii ? '(i)' : 'ⓘ'],
-                  ['terminal-open', text.terminalTitle, '>_'],
-                  ['palette-open', text.paletteTitle, theme.ascii ? ':' : '⌘'],
-                ]
-                  .filter(([key]) => key === 'palette-open' || conversationRoute(state))
-                  .map(([key, label, icon]) =>
-                    ui.box(
-                      `${key}-cell`,
-                      [
-                        ui.button(
-                          key!,
-                          icon!,
-                          key !== 'palette-open' &&
-                            !state.selected &&
-                            !(key === 'diagnostics-open' && state.hostLogsEnabled),
-                          false,
-                          { background: 0 },
-                          undefined,
-                          label + (key === 'palette-open' ? ' · Ctrl+K' : ''),
-                        ),
-                      ],
-                      { terminal: { basis: 4, shrink: false } },
+      ui.box(
+        'header-left',
+        [
+          ...(!state.embedding.fixed
+            ? [
+                ui.box(
+                  'navigation-cell',
+                  [
+                    ui.button(
+                      'navigation-toggle',
+                      theme.ascii ? '=' : '≡',
+                      false,
+                      false,
+                      { background: 0 },
+                      undefined,
+                      text.toggleSidebar + ' · Ctrl+B',
                     ),
+                  ],
+                  { terminal: { basis: 3 } },
+                ),
+              ]
+            : []),
+          ...(currentPage
+            ? [
+                ui.box(
+                  'back-cell',
+                  [
+                    ui.button(
+                      'page-back',
+                      theme.ascii ? '<' : '‹',
+                      currentPage !== 'settings' &&
+                        state.pageChrome[currentPage]?.backEnabled !== true,
+                      false,
+                      { background: 0 },
+                      undefined,
+                      text.back,
+                    ),
+                  ],
+                  { terminal: { basis: 3 } },
+                ),
+              ]
+            : []),
+        ],
+        {
+          visible: !state.embedding.fixed || !conversationRoute(state),
+          row: true,
+          gap: 0,
+          terminal: { basis: (state.embedding.fixed ? 0 : 3) + (currentPage ? 3 : 0) },
+        },
+      ),
+      ui.box(
+        'header-task',
+        [
+          ...(!conversationRoute(state)
+            ? [ui.box('header-title', [title], { terminal: { shrink: true } })]
+            : []),
+          ui.box('header-title-trailing', [], { terminal: { grow: 1 } }),
+        ],
+        { row: true, gap: 1, terminal: { grow: 1, shrink: true } },
+      ),
+      ui.box(
+        'toolbar',
+        [
+          ...[
+            ['diagnostics-open', text.diagnosticsTitleLabel, '!'],
+            ['outputs-open', tuiText(locale, 'task-outputs'), theme.ascii ? '[o]' : '▧'],
+            ['details-open', text.detailsOpen, theme.ascii ? '(i)' : 'ⓘ'],
+            ['terminal-open', text.terminalTitle, '>_'],
+            ['palette-open', text.paletteTitle, theme.ascii ? ':' : '⌘'],
+          ]
+            .filter(([key]) => key === 'palette-open' || conversationRoute(state))
+            .map(([key, label, icon]) =>
+              ui.box(
+                `${key}-cell`,
+                [
+                  ui.button(
+                    key!,
+                    icon!,
+                    key !== 'palette-open' &&
+                      !state.selected &&
+                      !(key === 'diagnostics-open' && state.hostLogsEnabled),
+                    false,
+                    { background: 0 },
+                    undefined,
+                    label + (key === 'palette-open' ? ' · Ctrl+K' : ''),
                   ),
-              ],
-              { row: true, gap: 1, terminal: { shrink: true, wrap: true } },
+                ],
+                { terminal: { basis: 4, shrink: false } },
+              ),
             ),
-          ]),
+        ],
+        { row: true, gap: 1, terminal: { shrink: true, wrap: true } },
+      ),
       ...(!conversationRoute(state) || !state.selected
         ? [
             ...(state.notice && !['completed', 'failed', 'stopping'].includes(state.notice)
-              ? [ui.text('page-notice', text[state.notice], 13, theme.muted)]
+              ? [ui.text('page-notice', text[state.notice], theme.muted)]
               : []),
             ...(state.uncertain
               ? [
@@ -215,43 +151,8 @@ export function headerView<N extends Node>(
               : []),
           ]
         : []),
-      ...(target === 'desktop' && !canExecute(state)
-        ? [
-            ui.text(
-              'model-setup-hint',
-              state.hasBackends
-                ? text.executionBackend
-                : state.modelSetup === 'loading'
-                  ? text.loadingModels
-                  : state.modelSetup === 'unavailable'
-                    ? text.modelsUnavailable
-                    : state.modelSetup === 'connect'
-                      ? text.setupConnectionHint
-                      : text.setupModelHint,
-              13,
-              theme.muted,
-            ),
-            ...(state.modelSetup === 'connect'
-              ? [
-                  ui.button(
-                    'model-setup',
-                    state.hasBackends ? text.executionBackend : text.configureModels,
-                    busy,
-                  ),
-                ]
-              : []),
-          ]
-        : []),
     ],
-    {
-      row: target === 'tui',
-      gap: target === 'desktop' ? 8 : 0,
-      style: {
-        width: fill,
-        shrink: 0,
-        padding: { top: 16, right: 24, bottom: 16, left: 24 },
-      },
-    },
+    { row: true, gap: 0 },
   );
 
   return header;

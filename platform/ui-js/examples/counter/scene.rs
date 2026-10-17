@@ -174,14 +174,12 @@ pub(crate) fn registry<V: Default + 'static>(
         .expect("valid fixture scene language")
 }
 
-// This fixture compiles the common subset used by the two platform languages.
-// It is a test adapter, not a kernel language or production fallback.
+// This fixture compiles the terminal subset used by lifecycle tests.
 pub(crate) fn language(
     target: maka_plugin_core::composition::PresentationTarget,
 ) -> maka_plugin_core::package::SceneLanguage {
     maka_plugin_core::package::SceneLanguage {
         name: match target {
-            maka_plugin_core::composition::PresentationTarget::Desktop => "maka.desktop.scene",
             maka_plugin_core::composition::PresentationTarget::Tui => "maka.tui.scene",
         }
         .into(),

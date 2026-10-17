@@ -118,7 +118,7 @@ test('closed runtime states resolve to translated feature messages', () => {
 });
 
 test('feature-owned dynamic notices render in all three locales', async () => {
-  for (const target of ['desktop', 'tui']) {
+  for (const target of ['tui']) {
     const { component } = await import(`../dist/packages/recall/${target}.js`);
     const { activate } = await import(`../dist/packages/appearance/${target}.js`);
     const theme = activate({ scheme: 'light' }).Appearance.value;
@@ -149,7 +149,7 @@ test('feature-owned dynamic notices render in all three locales', async () => {
 });
 
 test('built Help payload carries only the feature messages', async () => {
-  for (const target of ['desktop', 'tui']) {
+  for (const target of ['tui']) {
     const bytes = await readFile(new URL(`../dist/packages/help/${target}.js`, import.meta.url));
     assert.ok(bytes.byteLength < 50_000, `${target}: ${bytes.byteLength} bytes`);
     const { component } = await import(`../dist/packages/help/${target}.js`);

@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const uuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const session = {
@@ -173,7 +173,7 @@ async function client(target) {
   };
   return c;
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} full service pages remain traversable within the native input budget`, async () => {
     const c = await client(target);
     const resources = Array.from({ length: 64 }, (_, i) => resource(`shell:${i}`));

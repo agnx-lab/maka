@@ -29,7 +29,7 @@ import type {
 import type { Theme } from '../../shared/contracts.js';
 import { createCopy } from '../../shared/locale.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import { intent, mutationPending, observe } from './actions.js';
 import type { State } from './state.js';
 
@@ -235,7 +235,7 @@ export function compactView<N extends Node>(
   return ui.box(
     'compact-content',
     [
-      ui.text('compact-help', text.help, 14, theme.muted),
+      ui.text('compact-help', text.help, theme.muted),
       ...(edit?.prompt === null ? [ui.text('compact-loading', text.loading)] : []),
       presentation.slot(
         'compact-prompt',
@@ -255,10 +255,10 @@ export function compactView<N extends Node>(
         } satisfies TextareaProps,
         { changed: 'changed' },
       ),
-      ...(edit?.failed ? [ui.text('compact-error', text.failed, 13, theme.warning)] : []),
+      ...(edit?.failed ? [ui.text('compact-error', text.failed, theme.warning)] : []),
       ...(state.uncertain?.reference.method === 'compact'
         ? [
-            ui.text('compact-unknown', text.unknown, 13, theme.warning),
+            ui.text('compact-unknown', text.unknown, theme.warning),
             ui.button(
               'compact-check',
               text.check,
@@ -279,6 +279,6 @@ export function compactView<N extends Node>(
         { row: true, gap: 1 },
       ),
     ],
-    { gap: 1, terminal: { grow: 1, shrink: true }, style: { width: fill } },
+    { gap: 1, terminal: { grow: 1, shrink: true } },
   );
 }

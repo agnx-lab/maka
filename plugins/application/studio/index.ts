@@ -25,7 +25,7 @@ import type {
 import { studioContract, type Theme } from '../../shared/contracts.js';
 import { resolveLocale } from '../../shared/locale.js';
 import { copy } from './locale.js';
-import { fill, output, pixels, type Presentation, type Node } from '../../shared/view.js';
+import { output, type Presentation, type Node } from '../../shared/view.js';
 
 type Route = 'overview' | 'connections' | 'models' | 'deployment';
 interface State {
@@ -41,7 +41,7 @@ function frame<N extends Node>(
   values: ComponentValues,
 ) {
   locale = resolveLocale(locale, values.locale?.[0]);
-  const target = presentation.target;
+
   const theme = values.appearance![0] as unknown as Theme;
   const text = copy(locale);
   const ui = presentation.paint(theme);
@@ -56,7 +56,6 @@ function frame<N extends Node>(
       visible: state.route === route,
       scroll: route === 'overview' ? 'manual' : 'none',
       terminal: { grow: 1 },
-      style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
     });
   const out = output(
     state,
@@ -66,31 +65,20 @@ function frame<N extends Node>(
         ui.box(
           'heading',
           [
-            ui.text(
-              'title',
-              text.studioTitle,
-              state.route === 'overview' ? 26 : 18,
-              theme.text,
-              600,
-            ),
-            ui.box('introduction', [ui.text('intro', text.studioIntro, 14, theme.muted)], {
+            ui.text('title', text.studioTitle, theme.text, 600),
+            ui.box('introduction', [ui.text('intro', text.studioIntro, theme.muted)], {
               visible: state.route === 'overview',
               gap: 0,
             }),
           ],
-          { gap: target === 'desktop' ? 8 : 0, style: { shrink: 0 } },
+          { gap: 0 },
         ),
         ui.box(
           'navigation',
           (Object.keys(labels) as Route[]).map((route) =>
             ui.button('route-' + route, labels[route], false, state.route === route),
           ),
-          {
-            row: true,
-            gap: target === 'desktop' ? 8 : 1,
-            terminal: { wrap: true },
-            style: { width: fill, wrap: true, shrink: 0 },
-          },
+          { row: true, gap: 1, terminal: { wrap: true } },
         ),
         page('overview', [
           ...(['connections', 'models', 'deployment'] as const).map((route) =>
@@ -108,15 +96,10 @@ function frame<N extends Node>(
                     : route === 'models'
                       ? text.studioModelsHelp
                       : text.studioPluginsHelp,
-                  15,
                   theme.muted,
                 ),
               ],
-              {
-                padding: target === 'desktop' ? 20 : 1,
-                surface: true,
-                style: { width: fill, radius: 12, shrink: 0, align: 'start' },
-              },
+              { padding: 1, surface: true },
             ),
           ),
         ]),
@@ -129,8 +112,8 @@ function frame<N extends Node>(
           ),
         ]),
         page('models', [
-          ui.text('models-title', text.models, 20, theme.text, 600),
-          ui.text('models-help', text.studioModelsHelp, 14, theme.muted),
+          ui.text('models-title', text.models, theme.text, 600),
+          ui.text('models-help', text.studioModelsHelp, theme.muted),
           presentation.slot(
             'models',
             'models',
@@ -149,24 +132,11 @@ function frame<N extends Node>(
           presentation.slot('deployment', 'deployment', { theme, locale }, { closed: 'closed' }),
         ]),
       ],
-      {
-        padding: target === 'desktop' ? 28 : 1,
-        background: theme.background,
-        gap: target === 'desktop' ? (state.route === 'overview' ? 24 : 12) : 1,
-        terminal: { grow: 1 },
-        style: { width: fill, height: fill, maxWidth: 960, minWidth: 0 },
-      },
+      { padding: 1, background: theme.background, gap: 1, terminal: { grow: 1 } },
     ),
   );
-  if (target === 'desktop')
-    out.frame.view = ui.box('studio-surface', [out.frame.view], {
-      gap: 0,
-      style: { width: fill, height: fill, align: 'center' },
-    });
-  out.frame.surface =
-    target === 'desktop'
-      ? { kind: 'window', binding: 'surface', title: text.studioTitle, width: 980, height: 760 }
-      : { kind: 'terminal', binding: 'surface' };
+
+  out.frame.surface = { kind: 'terminal', binding: 'surface' };
   return out;
 }
 export function studio<N extends Node>(

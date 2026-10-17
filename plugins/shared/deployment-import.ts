@@ -27,7 +27,7 @@ import type {
 import type { ConnectionsProps } from './contracts.js';
 import { copy } from './locale-catalogs/deployment-import.js';
 import { sameValue } from './value.js';
-import { fill, pixels, type Presentation, type Node } from './view.js';
+import { type Presentation, type Node } from './view.js';
 
 export type InstallIntent =
   | { source: DeploymentRef; file: FileObservation }
@@ -86,7 +86,7 @@ export function packageSourceView<N extends Node>(
           ui.button(prefix + '-local', text.deploymentLocal, busy, importer.mode === 'file'),
           ui.button(prefix + '-remote', text.deploymentUrl, busy, importer.mode === 'url'),
         ],
-        { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
       ui.box(
         prefix + '-url-owner',
@@ -102,7 +102,7 @@ export function packageSourceView<N extends Node>(
               readOnly: busy,
               disabled: false,
               autoFocus: true,
-              softWrap: presentation.target === 'tui',
+              softWrap: true,
               terminalRows: { min: 1, max: 2 },
               submit: 'enter',
               command: null,
@@ -147,22 +147,10 @@ export function packageSourceView<N extends Node>(
             { changed: prefix + '-changed' },
           ),
         ],
-        {
-          visible: importer.mode === 'file',
-          terminal: { grow: 1 },
-          style: { width: fill, height: fill, minHeight: 0 },
-        },
+        { visible: importer.mode === 'file', terminal: { grow: 1 } },
       ),
     ],
-    {
-      gap: 1,
-      terminal: { grow: importer.mode === 'file' && !importer.observation?.file ? 1 : 0 },
-      style: {
-        width: fill,
-        height: importer.mode === 'file' && !importer.observation?.file ? fill : undefined,
-        minHeight: 0,
-      },
-    },
+    { gap: 1, terminal: { grow: importer.mode === 'file' && !importer.observation?.file ? 1 : 0 } },
   );
 }
 
@@ -176,7 +164,6 @@ export function importView<N extends Node>(
   recoverable: boolean,
   pending: boolean,
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale),
     observed = importer.observation;
@@ -203,25 +190,22 @@ export function importView<N extends Node>(
           ui.box(
             'deployment-import-heading',
             [
-              ui.button(
-                'deployment-import-back',
-                text.back,
-                false,
-                false,
-                target === 'tui' ? { background: 0, align: 'start' } : {},
-              ),
-              ui.text('deployment-import-title', text.deploymentInstall, 22, props.theme.text, 600),
+              ui.button('deployment-import-back', text.back, false, false, {
+                background: 0,
+                align: 'start',
+              }),
+              ui.text('deployment-import-title', text.deploymentInstall, props.theme.text, 600),
             ],
             {
               visible: !props.shell,
               row: true,
-              gap: target === 'desktop' ? 8 : 1,
+              gap: 1,
               terminal: { wrap: true },
             },
           ),
-          ui.text('deployment-import-help', text.deploymentInstallHelp, 13, props.theme.muted),
+          ui.text('deployment-import-help', text.deploymentInstallHelp, props.theme.muted),
         ],
-        { gap: target === 'desktop' ? 8 : 1, style: { shrink: 0 } },
+        { gap: 1 },
       ),
       ui.box(
         'deployment-import-body',
@@ -233,139 +217,92 @@ export function importView<N extends Node>(
             importer,
             busy || !!confirmation,
           ),
-          ...(notice ? [ui.text('deployment-import-notice', notice, 13, props.theme.muted)] : []),
-          ...(confirmation && target === 'desktop'
-            ? [
-                ui.text(
-                  'deployment-import-question',
-                  text.deploymentInstallQuestion,
-                  17,
-                  props.theme.text,
-                  550,
-                ),
-                ui.text(
-                  'deployment-import-confirm-help',
-                  text.deploymentInstallHelp,
-                  14,
-                  props.theme.muted,
-                ),
-              ]
-            : []),
+          ...(notice ? [ui.text('deployment-import-notice', notice, props.theme.muted)] : []),
           ...(file
             ? [
-                ui.text('deployment-import-name', file.name, 15, props.theme.text, 550),
-                ui.text('deployment-import-size', String(file.bytes) + ' B', 13, props.theme.muted),
+                ui.text('deployment-import-name', file.name, props.theme.text, 550),
+                ui.text('deployment-import-size', String(file.bytes) + ' B', props.theme.muted),
               ]
             : []),
           ...(observed?.phase === 'choosing'
-            ? [
-                ui.text(
-                  'deployment-import-loading',
-                  text.deploymentFileLoading,
-                  13,
-                  props.theme.muted,
-                ),
-              ]
+            ? [ui.text('deployment-import-loading', text.deploymentFileLoading, props.theme.muted)]
             : []),
           ...(observed?.phase === 'failed'
-            ? [ui.text('deployment-import-failed', failure, 13, props.theme.muted)]
+            ? [ui.text('deployment-import-failed', failure, props.theme.muted)]
             : []),
           ...(importer.installed
             ? [
                 ui.text(
                   'deployment-import-package',
                   importer.installed.package.id,
-                  15,
                   props.theme.text,
                   550,
                 ),
                 ui.text(
                   'deployment-import-package-revision',
                   importer.installed.package.revision,
-                  13,
                   props.theme.muted,
                 ),
                 ui.text(
                   'deployment-import-activation-help',
                   text.deploymentActivateHelp,
-                  13,
                   props.theme.muted,
                 ),
               ]
             : []),
         ],
         {
-          scroll: target === 'desktop' ? 'manual' : undefined,
+          scroll: undefined,
           terminal: { grow: importer.mode === 'file' && !importer.observation?.file ? 1 : 0 },
-          style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
         },
       ),
       ui.box(
         'deployment-import-footer',
-        confirmation && target === 'desktop'
-          ? [
-              ui.button(
-                'deployment-import-confirm',
-                text.confirmDefault,
-                busy || conflict || !matchesImport(importer),
-                true,
-              ),
-              ui.button('deployment-import-cancel', text.cancel, busy),
-            ]
-          : [
-              ui.button(
-                'deployment-import-install',
-                text.deploymentInstall,
-                !canInstall(importer, busy, conflict),
-                true,
-              ),
-              ...(conflict
-                ? [
-                    ui.button(
-                      'deployment-import-refresh',
-                      target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.deploymentRefresh,
-                      busy,
-                      false,
-                      target === 'tui' ? { background: 0 } : {},
-                      undefined,
-                      text.deploymentRefresh,
-                    ),
-                  ]
-                : []),
-              ...(recoverable ? [ui.button('deployment-import-check', text.check, pending)] : []),
-              ui.button('deployment-import-history', text.deploymentHistory, pending),
-              ...(importer.installed
-                ? [ui.button('deployment-import-advanced', text.deploymentEdit, busy)]
-                : []),
-            ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          terminal: { wrap: true },
-          style: { wrap: true, shrink: 0 },
-        },
+        [
+          ui.button(
+            'deployment-import-install',
+            text.deploymentInstall,
+            !canInstall(importer, busy, conflict),
+            true,
+          ),
+          ...(conflict
+            ? [
+                ui.button(
+                  'deployment-import-refresh',
+                  props.theme.ascii ? 'r' : '↻',
+                  busy,
+                  false,
+                  { background: 0 },
+                  undefined,
+                  text.deploymentRefresh,
+                ),
+              ]
+            : []),
+          ...(recoverable ? [ui.button('deployment-import-check', text.check, pending)] : []),
+          ui.button('deployment-import-history', text.deploymentHistory, pending),
+          ...(importer.installed
+            ? [ui.button('deployment-import-advanced', text.deploymentEdit, busy)]
+            : []),
+        ],
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       visible: importer.open,
       autoFocus: true,
-      shortcuts:
-        target === 'tui'
-          ? [
-              {
-                key: 'escape',
-                modifiers: [],
-                input: 'deployment-import-back',
-                enabled: true,
-              },
-            ]
-          : [],
-      style: { width: fill, height: fill },
+      shortcuts: [
+        {
+          key: 'escape',
+          modifiers: [],
+          input: 'deployment-import-back',
+          enabled: true,
+        },
+      ],
       terminal: { grow: 1 },
-      gap: target === 'desktop' ? 16 : 1,
+      gap: 1,
     },
   );
-  if (target === 'desktop') return panel;
+
   return ui.box(
     'deployment-import-page',
     [
@@ -382,39 +319,23 @@ export function importView<N extends Node>(
                 ui.text(
                   'deployment-import-question',
                   text.deploymentInstallQuestion,
-                  17,
                   props.theme.text,
                   550,
                 ),
                 ui.text(
                   'deployment-import-confirm-help',
                   text.deploymentInstallHelp,
-                  14,
                   props.theme.muted,
                 ),
                 ...(confirmation && 'url' in confirmation
-                  ? [
-                      ui.text(
-                        'deployment-import-confirm-url',
-                        confirmation.url,
-                        13,
-                        props.theme.text,
-                      ),
-                    ]
+                  ? [ui.text('deployment-import-confirm-url', confirmation.url, props.theme.text)]
                   : []),
                 ...(file
                   ? [
-                      ui.text(
-                        'deployment-import-confirm-name',
-                        file.name,
-                        15,
-                        props.theme.text,
-                        550,
-                      ),
+                      ui.text('deployment-import-confirm-name', file.name, props.theme.text, 550),
                       ui.text(
                         'deployment-import-confirm-size',
                         String(file.bytes) + ' B',
-                        13,
                         props.theme.muted,
                       ),
                     ]
@@ -439,7 +360,6 @@ export function importView<N extends Node>(
           { terminal: { grow: 1 } },
         ),
         !!confirmation,
-        undefined,
         { width: 64, height: 14 },
       ),
     ],

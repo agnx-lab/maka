@@ -114,10 +114,7 @@ fn fixture() -> (Input, Packages) {
         .insert(
             package("content", 1),
             Declaration {
-                entries: BTreeMap::from([
-                    (EntryTarget::Tui, entry()),
-                    (EntryTarget::Desktop, entry()),
-                ]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry())]),
                 composition: None,
             },
         )
@@ -134,7 +131,7 @@ fn fixture() -> (Input, Packages) {
     let input = Input {
         environment: Environment {
             location: ExecutionLocation::Ui,
-            presentation: Some(PresentationTarget::Desktop),
+            presentation: Some(PresentationTarget::Tui),
         },
         instances: BTreeMap::from([
             (
@@ -283,7 +280,7 @@ fn removed_source_or_template_child_cannot_silently_discard_other_intent() {
         .insert(
             package("consumer", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, consumer_entry)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, consumer_entry)]),
                 composition: None,
             },
         )
@@ -333,7 +330,7 @@ fn structural_imports_forward_exact_capabilities_and_detect_dependency_cycles() 
         .insert(
             package("dependent", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, content)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, content)]),
                 composition: None,
             },
         )
@@ -393,35 +390,7 @@ fn structural_imports_forward_exact_capabilities_and_detect_dependency_cycles() 
 }
 
 #[test]
-fn variant_and_actual_export_checks_use_the_full_public_contract() {
-    let mut declaration = Declaration {
-        entries: BTreeMap::from([(EntryTarget::Tui, entry()), (EntryTarget::Desktop, entry())]),
-        composition: None,
-    };
-    declaration
-        .entries
-        .get_mut(&EntryTarget::Tui)
-        .unwrap()
-        .scene = Some(crate::package::SceneLanguage {
-        name: "different.terminal.scene".into(),
-        version: 2,
-    });
-    // A variant's local syntax does not change its public component semantics.
-    declaration.validate().unwrap();
-    declaration
-        .entries
-        .get_mut(&EntryTarget::Desktop)
-        .unwrap()
-        .exports
-        .get_mut("Content")
-        .unwrap()
-        .contract
-        .interface = Interface::Component {
-        props: json!({"type":"string"}),
-        events: BTreeMap::new(),
-        captures: BTreeMap::new(),
-    };
-    assert!(declaration.validate().is_err());
+fn actual_export_checks_use_the_full_public_contract() {
     let entry = entry();
     assert!(
         entry
@@ -531,7 +500,7 @@ fn incompatible_binding_missing_variant_and_optional_provider_fail_before_activa
         .insert(
             package("consumer", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, entry.clone())]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry.clone())]),
                 composition: None,
             },
         )
@@ -546,23 +515,20 @@ fn incompatible_binding_missing_variant_and_optional_provider_fail_before_activa
         .insert(
             package("consumer", 2),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, entry)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry)]),
                 composition: None,
             },
         )
         .unwrap();
     input.instances.get_mut("consumer").unwrap().package = package("consumer", 2).into();
     Plan::prepare(&input, &packages, &RemoteExports::new()).unwrap();
-    input.environment.presentation = Some(PresentationTarget::Tui);
-    assert!(Plan::prepare(&input, &packages, &RemoteExports::new()).is_err());
-    input.environment.presentation = Some(PresentationTarget::Desktop);
     let mut provider = self::entry();
     provider.exports.get_mut("Content").unwrap().availability = Availability::Optional;
     packages
         .insert(
             package("content", 2),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, provider)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, provider)]),
                 composition: None,
             },
         )
@@ -621,7 +587,7 @@ fn remote_binding_requires_a_remotable_observed_contract() {
         .insert(
             package("consumer", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, entry)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry)]),
                 composition: None,
             },
         )
@@ -687,7 +653,7 @@ fn nested_override_precedence_preserves_unrelated_template_defaults() {
         .insert(
             package("replacement", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, replacement)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, replacement)]),
                 composition: None,
             },
         )
@@ -758,7 +724,7 @@ fn template_can_use_its_own_package_without_a_self_referential_revision() {
         .insert(
             reference.clone(),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, entry())]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry())]),
                 composition: Some(own),
             },
         )
@@ -791,7 +757,7 @@ fn explicit_null_parameter_default_survives_package_metadata_roundtrip() {
         .insert(
             package("nullable", 1),
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, nullable)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, nullable)]),
                 composition: None,
             },
         )

@@ -641,7 +641,7 @@ impl Editor {
                 };
                 if next == self.top {
                     // Keep an overflowing editor's wheel gesture at its edge,
-                    // matching desktop. Text that fits still yields to the page.
+                    // matching native editor behavior. Text that fits still yields to the page.
                     return !self.single_line && self.layout.rows.len() > area.height as usize;
                 }
                 self.top = next;

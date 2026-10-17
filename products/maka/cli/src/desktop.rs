@@ -17,56 +17,91 @@
  * under the License.
  */
 
-use std::{
-    ffi::OsString,
-    process::{Command, ExitCode},
+use maka_host_runtime::{
+    HostError,
+    application::host::{Client, discovery},
 };
+use std::{path::PathBuf, process::ExitCode};
+use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 #[derive(clap::Args)]
+#[command(version)]
 pub(super) struct Args {
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    arguments: Vec<OsString>,
-}
-
-pub(super) fn bootstrap() -> Option<ExitCode> {
-    (std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("desktop"))).then(|| {
-        match launch(std::env::args_os().skip(2)) {
-            Ok(exit) => exit,
-            Err(error) => {
-                eprintln!("desktop startup: {error}");
-                ExitCode::FAILURE
-            }
-        }
-    })
+    /// Business Host Root to initialize or reopen.
+    #[arg(long)]
+    root: PathBuf,
 }
 
 impl Args {
-    pub(super) fn run(self) -> std::io::Result<ExitCode> {
-        launch(self.arguments)
+    pub(super) async fn run(self) -> Result<ExitCode, HostError> {
+        let stop = CancellationToken::new();
+        let _signals = crate::signals::watch(stop.clone())?;
+        let mut client = crate::deployment::connect_local(self.root.clone()).await?;
+        let result = self.launch(&client, &stop).await;
+        let cleanup = client.quit().await;
+        match (result, cleanup) {
+            (Ok(code), Ok(())) => {
+                #[cfg(windows)]
+                std::process::exit(code);
+                #[cfg(unix)]
+                Ok(ExitCode::from(code as u8))
+            }
+            (Err(error), Ok(())) => Err(error),
+            (Ok(_), Err(cleanup)) => Err(format!("desktop Host cleanup: {cleanup}").into()),
+            (Err(error), Err(cleanup)) => {
+                Err(format!("{error}; desktop Host cleanup: {cleanup}").into())
+            }
+        }
     }
-}
 
-fn launch(arguments: impl IntoIterator<Item = OsString>) -> std::io::Result<ExitCode> {
-    let executable = std::env::current_exe()?;
-    let desktop = executable.with_file_name(if cfg!(windows) {
-        "maka-desktop.exe"
-    } else {
-        "maka-desktop"
-    });
-    let mut command = Command::new(&desktop);
-    command.args(arguments);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        Err(command.exec()).map_err(|error| {
-            std::io::Error::new(error.kind(), format!("{}: {error}", desktop.display()))
-        })
-    }
-    #[cfg(windows)]
-    {
-        let status = command.status()?;
-        // ExitCode only exposes a portable u8 constructor. Preserve the native
-        // Windows exit status after the frontend and its owned workers finish.
-        std::process::exit(status.code().unwrap_or(1));
+    async fn launch(self, client: &Client, stop: &CancellationToken) -> Result<i32, HostError> {
+        let registered = discovery::read(&self.root)?;
+        if registered.host_epoch != client.epoch() || &registered.source != client.source() {
+            return Err("application Host changed during desktop startup admission".into());
+        }
+        registered.verify(&Client::status(&registered.endpoint, Some(client.epoch())).await?)?;
+        if stop.is_cancelled() {
+            return Ok(0);
+        }
+        let executable = std::env::current_exe()?.with_file_name(if cfg!(windows) {
+            "maka-desktop-shell.exe"
+        } else {
+            "maka-desktop-shell"
+        });
+        let mut child = Command::new(&executable)
+            .env("MAKA_HOST_ENDPOINT", &registered.endpoint)
+            .env("MAKA_HOST_EPOCH", registered.host_epoch.to_string())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| format!("{}: {error}", executable.display()))?;
+        let waited = tokio::select! {
+            status = child.wait() => status,
+            _ = stop.cancelled() => {
+                // Stop and reap only the shell admitted by this launcher.
+                child.kill().await?;
+                return Ok(0);
+            }
+        };
+        let status = match waited {
+            Ok(status) => status,
+            Err(error) => {
+                if let Err(cleanup) = child.kill().await {
+                    return Err(format!("desktop wait: {error}; child cleanup: {cleanup}").into());
+                }
+                return Err(error.into());
+            }
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            Ok(status
+                .code()
+                .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)))
+        }
+        #[cfg(windows)]
+        {
+            Ok(status.code().unwrap_or(1))
+        }
     }
 }

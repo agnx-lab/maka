@@ -45,7 +45,7 @@ import { assistantPreferencesContract, type ProjectsProps } from '../../shared/c
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Name = 'name' | 'compaction';
 interface Field {
@@ -230,7 +230,7 @@ export function assistantPreferences<N extends Node>(
             );
       return ui.box(
         'assistant-field-' + name,
-        [ui.text('assistant-label-' + name, t('assistant-' + name), 14, props.theme.muted), editor],
+        [ui.text('assistant-label-' + name, t('assistant-' + name), props.theme.muted), editor],
         { gap: 0 },
       );
     });
@@ -239,7 +239,7 @@ export function assistantPreferences<N extends Node>(
       [
         fields[0]!,
         ...(state.notice && !state.pending
-          ? [ui.text('assistant-notice', t(state.notice), 13, props.theme.muted)]
+          ? [ui.text('assistant-notice', t(state.notice), props.theme.muted)]
           : []),
         ui.button(
           'save',
@@ -296,12 +296,7 @@ export function assistantPreferences<N extends Node>(
           : []),
         ui.button('reload', t('assistant-reload'), busy),
       ],
-      {
-        gap: 1,
-        scroll: 'manual',
-        terminal: { grow: 1 },
-        style: { width: fill, height: fill },
-      },
+      { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
     );
     const result = output(
       state,
@@ -312,7 +307,6 @@ export function assistantPreferences<N extends Node>(
           visible: props.open,
           gap: 1,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
         },
       ),

@@ -71,7 +71,7 @@ fn approval_actions_and_close_survive_commits_between_output_receipts() {
     let (runtime, mut input, originals) = fixture("");
     let packages = originals.into_iter().map(|old| {
         if old.manifest().id != "dynamic.app" { return old; }
-        let mut source = std::str::from_utf8(old.file("terminal.mjs").unwrap()).unwrap().to_owned();
+        let mut source = std::str::from_utf8(old.file("index.mjs").unwrap()).unwrap().to_owned();
         source.push_str(r#"
         frame=(state)=>({actions:[],events:[],frame:{revision:state.revision,state,surface:{kind:'terminal',binding:'surface'},view:{kind:'stack',key:'root',direction:'column',gap:1,padding:1,background:0,children:[
         {kind:'button',key:'close',label:'Close'},
@@ -83,8 +83,7 @@ fn approval_actions_and_close_survive_commits_between_output_receipts() {
         "#);
         let package=Package::new(BTreeMap::from([
             (maka_packages::MANIFEST_FILE.into(),old.file(maka_packages::MANIFEST_FILE).unwrap().to_vec()),
-            ("index.mjs".into(),old.file("index.mjs").unwrap().to_vec()),
-            ("terminal.mjs".into(),source.into_bytes())])).unwrap();
+            ("index.mjs".into(),source.into_bytes())])).unwrap();
         input.instances.get_mut("app").unwrap().package=package.application_ref().into();
         package
     }).collect();
@@ -407,9 +406,9 @@ fn held_input_gets_an_idle_gap_before_ready_service_feedback() {
     );
     let packages=packages.into_iter().map(|old| {
         if old.manifest().id!="dynamic.app" {return old;}
-        let mut source=std::str::from_utf8(old.file("terminal.mjs").unwrap()).unwrap().to_owned();
+        let mut source=std::str::from_utf8(old.file("index.mjs").unwrap()).unwrap().to_owned();
         source.push_str("const baseFrame=frame;frame=(state)=>{const out=baseFrame(state);out.frame.view.shortcuts=[{key:'k',modifiers:['control'],input:'inc',enabled:true}];return out;};");
-        let package=Package::new(BTreeMap::from([(maka_packages::MANIFEST_FILE.into(),old.file(maka_packages::MANIFEST_FILE).unwrap().to_vec()),("index.mjs".into(),old.file("index.mjs").unwrap().to_vec()),("terminal.mjs".into(),source.into_bytes())])).unwrap();
+        let package=Package::new(BTreeMap::from([(maka_packages::MANIFEST_FILE.into(),old.file(maka_packages::MANIFEST_FILE).unwrap().to_vec()),("index.mjs".into(),source.into_bytes())])).unwrap();
         input.instances.get_mut("app").unwrap().package=package.application_ref().into();package
     }).collect();
     let mut native = registry();

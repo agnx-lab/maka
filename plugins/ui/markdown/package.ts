@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.markdown',
@@ -28,9 +28,6 @@ export default {
     'zh-CN': { displayName: 'Markdown 显示', description: '显示排版后的 Markdown 文档。' },
   },
   application: {
-    entries: {
-      desktop: native(sdk.nativeImplementations.markdown),
-      tui: native(sdk.nativeImplementations.markdown),
-    },
+    entries: { tui: native(sdk.nativeImplementations.markdown) },
   },
 };

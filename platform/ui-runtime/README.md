@@ -23,7 +23,7 @@
 
 Owns component activation, state, input dispatch and atomic frame updates. `Application` runs a checked UI composition; `NativeRegistry` supplies compiled factories and a scene compiler. Products inject a JavaScript execution adapter through the `backend` module when needed.
 
-A callback proposes state, a frame and one-shot actions. Rust owns the committed state and advances one logical transaction at a time. Background preparation does not publish actions or replace native resources. The original renderer owner checks the candidate's mount and frame basis, completes necessary fallible native preparation, then commits the whole batch atomically. Layout and paint consume committed frames; terminal and desktop retain their own layout and scene languages.
+A callback proposes state, a frame and one-shot actions. Rust owns the committed state and advances one logical transaction at a time. Background preparation does not publish actions or replace native resources. The original renderer owner checks the candidate's mount and frame basis, completes necessary fallible native preparation, then commits the whole batch atomically. Layout and paint consume committed frames; the terminal renderer retains its layout and scene language.
 
 Native defaults and editing do not await JavaScript. Components declare their supported native behavior in committed props; business input is queued in order. Native observations have bounded publication custody: enqueueing is not publication, and only the original logical commit acknowledges an observation. Rejection retains its exact value for retry after a real business/source change. Only complete replaceable snapshots may coalesce; command receipts and terminal outcomes remain ordered.
 

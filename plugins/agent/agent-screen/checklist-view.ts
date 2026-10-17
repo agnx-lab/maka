@@ -19,7 +19,7 @@
 
 import type { Theme } from '../../shared/contracts.js';
 import { copy } from './locale.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import type { State } from './state.js';
 
 export function checklistView<N extends Node>(
@@ -31,22 +31,19 @@ export function checklistView<N extends Node>(
   const ui = presentation.paint(theme),
     text = copy(locale),
     page = state.checklist.page;
-  const open =
-    presentation.target === 'tui'
-      ? state.inspector === 'checklist' && state.dialog === null
-      : state.dialog === 'checklist';
+  const open = state.inspector === 'checklist' && state.dialog === null;
   return ui.box(
     'checklist-panel',
     [
       ui.box(
         'checklist-header',
         [
-          ui.text('checklist-title', text.checklistTitle, 17, theme.text, 550),
+          ui.text('checklist-title', text.checklistTitle, theme.text, 550),
           ui.button('checklist-close', text.closeModels),
         ],
         { row: true, gap: 1 },
       ),
-      ui.text('checklist-reported', text.checklistReported, 12, theme.muted),
+      ui.text('checklist-reported', text.checklistReported, theme.muted),
       ...(state.checklist.failed
         ? [
             ui.text('checklist-error', text.checklistFailed),
@@ -55,7 +52,7 @@ export function checklistView<N extends Node>(
         : !page
           ? [ui.text('checklist-loading', text.checklistLoading)]
           : [
-              ui.text('checklist-count', `${page.completed}/${page.total}`, 13, theme.muted),
+              ui.text('checklist-count', `${page.completed}/${page.total}`, theme.muted),
               presentation.reading(
                 'checklist-reading',
                 {
@@ -67,18 +64,12 @@ export function checklistView<N extends Node>(
                           ui.text(
                             `checklist-item-${page.offset + index}`,
                             `${item.status === 'completed' ? '[x]' : item.status === 'in_progress' ? '[>]' : '[ ]'} ${item.content}`,
-                            13,
                             item.status === 'completed' ? theme.muted : theme.text,
                             item.status === 'in_progress' ? 550 : 400,
                           ),
                         )
-                      : [ui.text('checklist-empty', text.checklistEmpty, 13, theme.muted)],
-                    {
-                      gap: 1,
-                      scroll: 'manual',
-                      terminal: { grow: 1 },
-                      style: { width: fill, height: fill },
-                    },
+                      : [ui.text('checklist-empty', text.checklistEmpty, theme.muted)],
+                    { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
                   ),
                 },
                 {},
@@ -101,11 +92,6 @@ export function checklistView<N extends Node>(
                 : []),
             ]),
     ],
-    {
-      visible: open,
-      gap: 1,
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    },
+    { visible: open, gap: 1, terminal: { grow: 1 } },
   );
 }

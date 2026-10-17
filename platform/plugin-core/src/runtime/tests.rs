@@ -661,7 +661,7 @@ fn component_fixture() -> Fixture {
     let mut fixture = Fixture::new();
     fixture.input.environment = Environment {
         location: ExecutionLocation::Ui,
-        presentation: Some(crate::composition::PresentationTarget::Desktop),
+        presentation: Some(crate::composition::PresentationTarget::Tui),
     };
     fixture.input.launch = Some(target("p"));
     fixture.packages = Packages::default();
@@ -678,7 +678,7 @@ fn component_fixture() -> Fixture {
             .insert(
                 reference(name),
                 Declaration {
-                    entries: BTreeMap::from([(EntryTarget::Desktop, declaration)]),
+                    entries: BTreeMap::from([(EntryTarget::Tui, declaration)]),
                     composition: None,
                 },
             )
@@ -783,7 +783,7 @@ fn owned_mount_children_close_before_parent_without_retiring_providers() {
             .insert(
                 reference(name),
                 Declaration {
-                    entries: BTreeMap::from([(EntryTarget::Desktop, entry)]),
+                    entries: BTreeMap::from([(EntryTarget::Tui, entry)]),
                     composition: None,
                 },
             )

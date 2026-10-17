@@ -34,7 +34,6 @@ pub mod file;
 pub mod focus;
 mod frame;
 pub use deployment::{CommittedUpdate, DeploymentStatus, PreparedUpdate};
-pub mod image;
 pub mod input;
 pub mod locale;
 pub mod markdown;
@@ -1036,7 +1035,6 @@ fn event_schemas(
 
 pub fn surface_contract(target: PresentationTarget) -> Contract {
     let resource = match target {
-        PresentationTarget::Desktop => "surface.desktop",
         PresentationTarget::Tui => "surface.tui",
     };
     Contract {

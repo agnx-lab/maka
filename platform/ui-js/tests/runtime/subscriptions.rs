@@ -190,11 +190,8 @@ impl NativeComponent<()> for Parent {
         let mut output = Frame {
             revision: state["revision"].as_u64().unwrap(),
             state: state.clone(),
-            surface: Some(Surface::Window {
+            surface: Some(Surface::Terminal {
                 binding: "surface".into(),
-                title: "Native stream".into(),
-                width: 640,
-                height: 400,
             }),
             view: NativeView::new(
                 Rc::new(()),
@@ -335,7 +332,7 @@ fn native_package(name: &str, implementation: &str, contract: Contract) -> maka_
         name,
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::Native {
@@ -374,7 +371,7 @@ fn fixture_data(
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.scene = None;
     entry.implementation = Implementation::Native {
         implementation: "test.parent".into(),
@@ -416,7 +413,7 @@ fn fixture_data(
     packages.extend([service, child]);
     let starts = Arc::new(AtomicUsize::new(0));
     let observed = starts.clone();
-    let mut native = support::scene::registry(PresentationTarget::Desktop);
+    let mut native = support::scene::registry(PresentationTarget::Tui);
     native
         .register("test.parent", move |_, _| {
             Ok(BTreeMap::from([(
@@ -709,7 +706,7 @@ fn mutation_factory_panic_cancels_stream_waiting_ack_and_preserves_failed_prepar
         .block_on(Application::start_from_store(
             store.clone(),
             source,
-            PresentationTarget::Desktop,
+            PresentationTarget::Tui,
             timer.handle().clone(),
             maka_ui_js::execution(Default::default()),
             native,

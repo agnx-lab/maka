@@ -34,7 +34,7 @@ import { sessionDefaultsContract, type ProjectsProps } from '../../shared/contra
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Request =
   | { kind: 'source' | 'settings' | 'mutate' | 'receipt' }
@@ -126,12 +126,11 @@ export function sessionDefaults<N extends Node>(
           ui.box(
             'session-defaults-content',
             [
-              ui.text('sessions-help', t('sessions-defaults-help'), 13, props.theme.muted),
+              ui.text('sessions-help', t('sessions-defaults-help'), props.theme.muted),
               ui.text(
                 'sessions-access-label',
                 t('sessions-access') +
                   (state.saved ? ': ' + t('sessions-' + state.saved.access) : ''),
-                14,
                 props.theme.text,
               ),
               ...(['read_only', 'workspace_write', 'danger_full_access'] as const).map((access) =>
@@ -150,7 +149,7 @@ export function sessionDefaults<N extends Node>(
                 disabled,
               ),
               ...(state.notice && !state.pending
-                ? [ui.text('sessions-notice', t(state.notice), 13, props.theme.muted)]
+                ? [ui.text('sessions-notice', t(state.notice), props.theme.muted)]
                 : []),
               ...(state.current
                 ? [
@@ -166,19 +165,13 @@ export function sessionDefaults<N extends Node>(
                 : []),
               ui.button('reload', t('extensions-refresh'), busy(state, props)),
             ],
-            {
-              gap: 1,
-              scroll: 'manual',
-              terminal: { grow: 1 },
-              style: { width: fill, height: fill },
-            },
+            { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
           ),
         ],
         {
           visible: props.open,
           gap: 0,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
         },
       ),

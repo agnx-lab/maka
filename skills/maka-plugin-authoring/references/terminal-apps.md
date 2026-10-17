@@ -17,7 +17,7 @@
   under the License.
 -->
 
-# TUI and Desktop components
+# TUI components
 
 An entry exports `activate(configuration)` with a Component descriptor:
 `{ Counter: { contract, kind: "component", component: ["counter"] } }`.
@@ -25,12 +25,10 @@ The `counter` module export implements synchronous `mount`, `update`, `event` an
 optional `capture` callbacks. Each callback returns actions/events and a frame with
 `revision`, private JSON `state`, `surface` and platform-specific `view`.
 
-Use the SDK's `Component<State, Props, TerminalNode>` or `DesktopNode` and the
-corresponding `ui.terminal` / `ui.desktop` constructors. TUI declares
-`{ name: "maka.tui.scene", version: 1 }`; Desktop declares
-`{ name: "maka.desktop.scene", version: 1 }`. There is no kernel-wide layout DSL.
-Use separate presentation entries when native scenes differ, and share the reducer
-or business contract where it helps.
+Use the SDK's `Component<State, Props, TerminalNode>` and `ui.terminal`
+constructors. Declare `{ name: "maka.tui.scene", version: 1 }` for the TUI entry.
+The desktop-shell application uses its separate gpui-shell script API, not this
+plugin component scene language.
 
 Native controls own editing, IME, selection, pointer capture, layout and scroll
 measurement. Compose them through declared Component imports and stable child keys.
@@ -49,6 +47,6 @@ Return `decision: { preventDefault: true, stopPropagation: true }` only when the
 accepted event is handled. Programmatic observations cannot acquire physical input
 authority. Test focus, scrolling and closure through the actual native presenter.
 
-`assets/starter/tui.mjs` and `desktop.mjs` are complete minimal counter components.
+`assets/starter/tui.mjs` is a complete minimal counter component.
 For editors, forms and dialogs use the exact generated props and public contracts in
 `references/sdk/contracts.ts` and `references/sdk/generated/runtime.ts`.

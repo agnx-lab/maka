@@ -51,9 +51,12 @@ fn main() {
     let components = match window::components() {
         Ok(components) => components,
         Err(error) => {
-            eprintln!("maka-desktop: {error}");
+            eprintln!("maka-desktop-shell: {error}");
             std::process::exit(1);
         }
     };
-    gpui_shell::host::main_with_components(components);
+    gpui_shell::host::main_with_brand_and_components(
+        gpui_shell::host::HostBrand::new("maka-desktop-shell", env!("CARGO_PKG_VERSION")),
+        components,
+    );
 }

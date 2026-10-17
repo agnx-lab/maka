@@ -38,7 +38,7 @@ import { networkSettingsContract, type ProjectsProps } from '../../shared/contra
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 const names = ['host', 'port', 'username', 'bypass'] as const;
 type Name = (typeof names)[number];
@@ -201,7 +201,7 @@ export function networkSettings<N extends Node>(
       ui.box(
         'network-field-' + name,
         [
-          ui.text('network-label-' + name, t('network-' + name), 13, props.theme.muted),
+          ui.text('network-label-' + name, t('network-' + name), props.theme.muted),
           presentation.slot(
             'network-' + name,
             'input',
@@ -214,14 +214,11 @@ export function networkSettings<N extends Node>(
               readOnly: false,
               disabled: disabled || !state.fields[name].ready || !!state.fields[name].command,
               command: state.fields[name].command,
-              appearance:
-                presentation.target === 'tui'
-                  ? {
-                      ...props.theme.input,
-                      borderWidth: 0,
-                      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                    }
-                  : props.theme.input,
+              appearance: {
+                ...props.theme.input,
+                borderWidth: 0,
+                padding: { top: 0, right: 0, bottom: 0, left: 0 },
+              },
             } satisfies InputProps,
             { changed: 'changed' },
           ),
@@ -272,7 +269,6 @@ export function networkSettings<N extends Node>(
                     ? 'network-secret-present'
                     : 'network-secret-absent',
                 ),
-                13,
                 props.theme.muted,
               ),
               ui.box(
@@ -300,20 +296,17 @@ export function networkSettings<N extends Node>(
                   disabled:
                     disabled || state.credential !== 'replace' || !!state.fields.secret.command,
                   command: state.fields.secret.command,
-                  appearance:
-                    presentation.target === 'tui'
-                      ? {
-                          ...props.theme.input,
-                          borderWidth: 0,
-                          padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                        }
-                      : props.theme.input,
+                  appearance: {
+                    ...props.theme.input,
+                    borderWidth: 0,
+                    padding: { top: 0, right: 0, bottom: 0, left: 0 },
+                  },
                 } satisfies InputProps,
                 { changed: 'changed' },
               ),
-              ui.text('network-delete-help', t('network-delete-help'), 13, props.theme.muted),
+              ui.text('network-delete-help', t('network-delete-help'), props.theme.muted),
               ...(state.notice && !state.pending
-                ? [ui.text('network-notice', t(state.notice), 13, props.theme.muted)]
+                ? [ui.text('network-notice', t(state.notice), props.theme.muted)]
                 : []),
               ui.button(
                 'save',
@@ -336,37 +329,25 @@ export function networkSettings<N extends Node>(
               ui.button('reload', t('network-reload'), busy(state, props)),
               ...(state.saved
                 ? [
-                    ui.text(
-                      'network-root-id',
-                      'Root: ' + state.saved.rootId,
-                      12,
-                      props.theme.muted,
-                    ),
-                    ui.text('network-root-path', state.saved.rootPath, 12, props.theme.muted),
+                    ui.text('network-root-id', 'Root: ' + state.saved.rootId, props.theme.muted),
+                    ui.text('network-root-path', state.saved.rootPath, props.theme.muted),
                     ui.text(
                       'network-auto-bypass',
                       t('network-auto-bypass') +
                         ': ' +
                         state.saved.proxy.autoBypassDomains.join(', '),
-                      12,
                       props.theme.muted,
                     ),
                   ]
                 : []),
             ],
-            {
-              gap: 1,
-              scroll: 'manual',
-              terminal: { grow: 1 },
-              style: { width: fill, height: fill },
-            },
+            { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
           ),
         ],
         {
           visible: props.open,
           gap: 0,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
         },
       ),

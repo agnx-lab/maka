@@ -32,9 +32,9 @@ product:
 run *args: product
     cargo run --locked -p maka-cli -- "$@"
 
-# Build the native CLI and Desktop; additional arguments go to Cargo.
+# Build the native CLI, desktop shell and authored app (--release / --target).
 build *args: product
-    cargo build --locked -p maka-cli -p maka-desktop "$@"
+    node scripts/rust/build-cli.mjs "$@"
 
 # Check all maintained code and behavior.
 check: fmt-check lint typecheck test-js test licenses

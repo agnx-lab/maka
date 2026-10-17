@@ -61,9 +61,19 @@ export async function verifyRelease(directory) {
     const { stdout } = await run(process.execPath, [command, '--version'], options);
     if (stdout.trim() !== 'maka ' + native.source.version)
       throw new Error('Installed launcher reports another source version');
-    const desktop = await run(process.execPath, [command, 'desktop', '--version'], options);
-    if (desktop.stdout.trim() !== 'maka desktop ' + native.source.version)
-      throw new Error('Installed Desktop reports another source version');
+    const desktop = await run(
+      join(
+        stage,
+        'node_modules',
+        native.name,
+        'bin',
+        process.platform === 'win32' ? 'maka-desktop-shell.exe' : 'maka-desktop-shell',
+      ),
+      ['--version'],
+      options,
+    );
+    if (desktop.stdout.trim() !== 'maka-desktop-shell ' + native.source.version)
+      throw new Error('Installed desktop shell reports another source version');
     const result = await new Promise((resolveResult, reject) => {
       const child = execFile(
         process.execPath,

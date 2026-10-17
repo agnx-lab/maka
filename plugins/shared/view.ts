@@ -19,33 +19,35 @@
 
 import { ui } from '../../packages/plugin-sdk/src/index.js';
 import type {
-  DesktopNode,
   TerminalNode,
   TerminalColor,
-  DesktopStyle,
-  DesktopDimension,
-  DesktopProps,
   Emission,
   Output,
   TerminalLayout,
   TerminalResponsiveStack,
   Shortcut,
   FocusShortcut,
-  TextAppearance,
   ReadingProps,
   TerminalChoiceOption,
   TerminalPaneCommand,
 } from '../../packages/plugin-sdk/src/index.js';
 import { animation, type ActivityAnimation } from './motion.js';
 import type { Theme } from './contracts.js';
-export type Target = 'desktop' | 'tui';
-export type Node = DesktopNode | TerminalNode;
+export type Node = TerminalNode;
+interface TextOptions {
+  align?: 'start' | 'center' | 'end';
+  truncate?: boolean;
+}
+interface ButtonOptions {
+  align?: 'start' | 'center' | 'end';
+  background?: number;
+  foreground?: number;
+}
 interface BoxOptions {
   row?: boolean;
   gap?: number;
   padding?: number;
   surface?: boolean;
-  style?: DesktopStyle;
   scroll?: 'none' | 'manual' | 'anchor' | 'follow_end';
   visible?: boolean;
   terminal?: TerminalLayout;
@@ -72,10 +74,9 @@ interface Painter<N extends Node> {
   text(
     key: string,
     text: string,
-    size?: number,
     color?: number,
     weight?: number,
-    style?: DesktopStyle,
+    options?: TextOptions,
     hint?: string,
   ): N;
   button(
@@ -83,26 +84,26 @@ interface Painter<N extends Node> {
     label: string,
     disabled?: boolean,
     primary?: boolean,
-    style?: DesktopStyle,
+    options?: ButtonOptions,
     copyText?: string,
     hint?: string,
   ): N;
   toggle(key: string, label: string, checked: boolean, disabled?: boolean, hint?: string): N;
-  contextMenu?(
+  contextMenu(
     key: string,
     label: string,
     background: N,
     actions: N[],
     copySelectionLabel?: string,
   ): N;
-  choice?(
+  choice(
     key: string,
     label: string,
     options: TerminalChoiceOption[],
     current: string | null,
     disabled: boolean,
   ): N;
-  item?(
+  item(
     key: string,
     content: N,
     current: boolean,
@@ -113,9 +114,9 @@ interface Painter<N extends Node> {
       submitSpace?: boolean;
     },
   ): N;
-  focusButton?(key: string, label: string, child: string): N;
-  rule?(key: string, direction: 'row' | 'column'): N;
-  adaptivePane?(
+  focusButton(key: string, label: string, child: string): N;
+  rule(key: string, direction: 'row' | 'column'): N;
+  adaptivePane(
     key: string,
     label: string,
     background: N,
@@ -128,7 +129,6 @@ interface Painter<N extends Node> {
     background: N,
     content: N,
     open: boolean,
-    style?: DesktopStyle,
     terminalSize?: {
       width?: number;
       height?: number;
@@ -139,7 +139,6 @@ interface Painter<N extends Node> {
   box(key: string, children: N[], options?: BoxOptions): N;
 }
 export interface Presentation<N extends Node> {
-  readonly target: Target;
   paint(theme: Theme): Painter<N>;
   slot<P>(key: string, binding: string, props: P, on: Record<string, string>, member?: number): N;
   reading(
@@ -147,126 +146,10 @@ export interface Presentation<N extends Node> {
     props: Omit<ReadingProps, 'content'> & { content: N },
     on: Record<string, string>,
   ): N;
-  popup?: (
-    value: Omit<DesktopProps<'popup'>, 'trigger' | 'content'> & { trigger: N; content: N },
-  ) => N;
 }
 const rgba = (n: number) => n >>> 8;
 function toggleSymbol(checked: boolean, ascii: boolean): string {
   return ascii ? (checked ? '[x]' : '[ ]') : checked ? '━●' : '○─';
-}
-function font(theme: Theme, size: number, weight = 400, color = theme.text): TextAppearance {
-  return {
-    font: { family: '.SystemUIFont', fallbacks: [], size, lineHeight: 1.55, weight },
-    foreground: color,
-  };
-}
-function desktopPaint(theme: Theme): Painter<DesktopNode> {
-  return {
-    toggle: (key, label, checked, disabled = false) =>
-      ui.desktop.stack({
-        key: key + '-row',
-        direction: 'row',
-        gap: 16,
-        padding: 0,
-        background: rgba(theme.background),
-        style: { width: fill, maxWidth: 520, align: 'center' },
-        children: [
-          ui.desktop.text({
-            key: key + '-label',
-            text: label,
-            color: rgba(theme.text),
-            style: { text: font(theme, 14), grow: 1 },
-          }),
-          ui.desktop.button({
-            key,
-            label: toggleSymbol(checked, theme.ascii),
-            disabled,
-            style: {
-              text: font(
-                theme,
-                14,
-                500,
-                disabled ? theme.muted : checked ? theme.accent : theme.subtle,
-              ),
-              background: 0,
-              padding: { top: 4, right: 4, bottom: 4, left: 4 },
-              radius: 8,
-            },
-            hover: disabled ? {} : { background: theme.selected },
-            focus: { border: theme.accent, borderWidth: 2 },
-          }),
-        ],
-      }),
-    activity: (key, kind, foreground = theme.accent, prefix = '', suffix = '') =>
-      ui.desktop.text({
-        key,
-        text: animation(kind, true, false, prefix, suffix)[0]!.text,
-        color: rgba(foreground),
-        style: { text: font(theme, 14, 400, foreground) },
-      }),
-    text: (key, text, size = 15, color = theme.text, weight = 400, style = {}) =>
-      ui.desktop.text({
-        key,
-        text,
-        color: rgba(color),
-        style: { text: font(theme, size, weight, color), ...style },
-      }),
-    button: (key, label, disabled = false, primary = false, style = {}, copyText, hint = '') =>
-      ui.desktop.button({
-        key,
-        label,
-        disabled,
-        copy_text: copyText,
-        style: {
-          text: font(
-            theme,
-            14,
-            500,
-            disabled ? theme.muted : primary ? theme.background : theme.accent,
-          ),
-          background: disabled ? theme.surface : primary ? theme.accent : 0,
-          padding: { top: 8, right: 12, bottom: 8, left: 12 },
-          radius: 8,
-          ...style,
-        },
-        hover: disabled ? {} : { background: primary ? theme.accent : theme.selected },
-        focus: { border: theme.accent, borderWidth: 2 },
-        active: disabled ? {} : { background: primary ? theme.accent : theme.selected },
-      }),
-    dialog: (key, label, background, content, open, style = {}) =>
-      ui.desktop.dialog({
-        key,
-        label,
-        background,
-        content,
-        open,
-        style: {
-          width: pixels(560),
-          padding: { top: 20, right: 20, bottom: 20, left: 20 },
-          background: theme.surface,
-          radius: 16,
-          border: theme.border,
-          borderWidth: 1,
-          ...style,
-        },
-      }),
-    box: (key, children, options = {}) =>
-      ui.desktop.stack({
-        key,
-        direction: options.row ? 'row' : 'column',
-        gap: options.gap ?? 12,
-        padding: options.padding ?? 0,
-        background: rgba(
-          options.background ?? (options.surface ? theme.surface : theme.background),
-        ),
-        children,
-        visible: options.visible ?? true,
-        shortcuts: options.shortcuts ?? [],
-        style: options.style ?? {},
-        scroll: options.scroll ?? 'none',
-      }),
-  };
 }
 function terminalPaint(theme: Theme): Painter<TerminalNode> {
   const color = (value: number): TerminalColor => {
@@ -452,17 +335,17 @@ function terminalPaint(theme: Theme): Painter<TerminalNode> {
         background: color(theme.surface),
         hover_background: color(theme.border),
       }),
-    text: (key, text, _size = 15, foreground = theme.text, weight = 400, style = {}, hint = '') =>
+    text: (key, text, foreground = theme.text, weight = 400, options = {}, hint = '') =>
       ui.terminal.text({
         key,
         text,
         color: color(foreground),
         hint,
-        truncate: style.truncate ?? false,
+        truncate: options.truncate ?? false,
         bold: weight >= 600,
-        align: style.align === 'center' ? 'center' : style.align === 'end' ? 'end' : 'start',
+        align: options.align === 'center' ? 'center' : options.align === 'end' ? 'end' : 'start',
       }),
-    button: (key, label, disabled = false, primary = false, style = {}, copyText, hint = '') =>
+    button: (key, label, disabled = false, primary = false, options = {}, copyText, hint = '') =>
       ui.terminal.button({
         key,
         label,
@@ -470,22 +353,16 @@ function terminalPaint(theme: Theme): Painter<TerminalNode> {
         copy_text: copyText,
         hint,
         color: color(
-          disabled
-            ? theme.muted
-            : (style.text?.foreground ?? (primary ? theme.accent : theme.text)),
+          disabled ? theme.muted : (options.foreground ?? (primary ? theme.accent : theme.text)),
         ),
-        align:
-          (style.align ?? style.justify) === 'start'
-            ? 'start'
-            : (style.align ?? style.justify) === 'end'
-              ? 'end'
-              : 'center',
-        background: style.background === 0 ? undefined : color(style.background ?? theme.surface),
+        align: options.align === 'start' ? 'start' : options.align === 'end' ? 'end' : 'center',
+        background:
+          options.background === 0 ? undefined : color(options.background ?? theme.surface),
         hover_background:
-          style.background === 0 || theme.terminal?.terminal ? undefined : color(theme.border),
+          options.background === 0 || theme.terminal?.terminal ? undefined : color(theme.border),
         bold: primary,
       }),
-    dialog: (key, label, background, content, open, _style, terminalSize = {}) =>
+    dialog: (key, label, background, content, open, terminalSize = {}) =>
       ui.terminal.dialog({
         ascii: theme.ascii,
         key,
@@ -535,20 +412,8 @@ function terminalPaint(theme: Theme): Painter<TerminalNode> {
       }),
   };
 }
-export const presentations: {
-  desktop: Presentation<DesktopNode>;
-  tui: Presentation<TerminalNode>;
-} = {
-  desktop: {
-    target: 'desktop',
-    paint: desktopPaint,
-    slot: (key, binding, props, on, member) =>
-      ui.desktop.component({ key, binding, props, on, member }),
-    reading: (key, props, on) => ui.desktop.reading({ key, binding: 'reading', props, on }),
-    popup: ui.desktop.popup,
-  },
+export const presentations: { tui: Presentation<TerminalNode> } = {
   tui: {
-    target: 'tui',
     paint: terminalPaint,
     slot: (key, binding, props, on, member) =>
       ui.terminal.component({ key, binding, props, on, member }),
@@ -567,8 +432,6 @@ export function output<S extends { revision: number }, N extends Node>(
     subscriptions: [],
   };
 }
-export const fill: DesktopDimension = { unit: 'fraction', value: 1 };
-export const pixels = (value: number): DesktopDimension => ({ unit: 'pixels', value });
 
 // Disposable labels must not turn one catalog entry into an unbounded terminal
 // layout. The full immutable identity/configuration remains in the domain DTO.

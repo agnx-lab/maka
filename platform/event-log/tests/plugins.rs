@@ -201,12 +201,6 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
             .await,
         Err(StoreError::EventConflict)
     ));
-    let foreign = Namespace::new("graph", Scope::DesktopUi).unwrap();
-    assert!(
-        log.admit_plugin_execution(&foreign, request.clone(), pending(&request))
-            .await
-            .is_err()
-    );
     let separate = Namespace::new("schedule", Scope::Profile).unwrap();
     let other = log
         .admit_plugin_execution(&separate, request.clone(), pending(&request))

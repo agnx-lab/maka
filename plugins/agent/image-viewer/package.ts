@@ -17,16 +17,15 @@
  * under the License.
  */
 
-import * as sdk from '../../../packages/plugin-sdk/src/index.js';
 import * as own from '../../shared/contracts.js';
-import { one, uiEntries } from '../../shared/package.js';
+import { uiEntries } from '../../shared/package.js';
 
 const entries = uiEntries({
   contract: own.imageViewerContract,
   export: 'ImageViewer',
-  imports: { agent: one(sdk.contracts.agent) },
+  imports: {},
 });
-entries.desktop.imports.image = one(sdk.contracts.image);
+
 export default {
   schemaVersion: 1,
   id: 'maka.agent.image-viewer',

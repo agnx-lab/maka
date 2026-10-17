@@ -23,7 +23,7 @@ import type {
   HostLogPage,
 } from '../../../packages/plugin-sdk/src/index.js';
 import type { Theme } from '../../shared/contracts.js';
-import { type Node, type Presentation, fill } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import { copy } from './locale.js';
 import { intent, conversationRoute } from './actions.js';
 import type { State } from './state.js';
@@ -197,26 +197,25 @@ export function hostLogsView<N extends Node>(
   return ui.box(
     'host-logs',
     [
-      ui.text('host-log-scope', text.hostLogsLabel, 15, theme.text, 550),
+      ui.text('host-log-scope', text.hostLogsLabel, theme.text, 550),
       ...(host.failed
-        ? [ui.text('host-log-error', text.recoveryRefreshFailed, 13, theme.warning)]
+        ? [ui.text('host-log-error', text.recoveryRefreshFailed, theme.warning)]
         : []),
-      ...(host.omitted ? [ui.text('host-log-omitted', text.hostLogsOmitted, 12, theme.muted)] : []),
+      ...(host.omitted ? [ui.text('host-log-omitted', text.hostLogsOmitted, theme.muted)] : []),
       ...(host.reset
         ? [
             ui.text(
               'host-log-reset',
               host.reset === 'replaced' ? text.hostLogsReplaced : text.hostLogsTruncated,
-              12,
               theme.warning,
             ),
           ]
         : []),
       ...(host.status === 'missing'
-        ? [ui.text('host-log-missing', text.hostLogsMissing, 13, theme.muted)]
+        ? [ui.text('host-log-missing', text.hostLogsMissing, theme.muted)]
         : []),
       ...(host.status === 'unread' && host.loading !== null
-        ? [ui.text('host-log-loading', text.loading, 13, theme.muted)]
+        ? [ui.text('host-log-loading', text.loading, theme.muted)]
         : []),
       presentation.reading(
         'host-log-reading',
@@ -239,11 +238,7 @@ export function hostLogsView<N extends Node>(
                 {},
               ),
             ],
-            {
-              scroll: host.watch ? 'follow_end' : 'manual',
-              terminal: { grow: 1 },
-              style: { width: fill, height: fill },
-            },
+            { scroll: host.watch ? 'follow_end' : 'manual', terminal: { grow: 1 } },
           ),
         },
         {},
@@ -259,6 +254,6 @@ export function hostLogsView<N extends Node>(
         { row: true, gap: 1 },
       ),
     ],
-    { gap: 1, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { gap: 1, terminal: { grow: 1 } },
   );
 }

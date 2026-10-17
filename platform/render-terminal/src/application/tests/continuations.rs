@@ -18,7 +18,6 @@
  */
 
 use super::*;
-use maka_plugin_core::package::EntryTarget;
 use maka_ui_runtime::actions::{CaptureCall, CapturePlan, CaptureTarget, ContinuationWitness};
 use maka_ui_runtime::{
     ComponentCall, ComponentOutput, NativeCapability, NativeComponent, NativeExport, NativeView,
@@ -119,32 +118,15 @@ fn terminal_fixture() -> (Input, Vec<Package>, maka_plugin_core::contract::Contr
     let (mut input, mut packages, contract) = support::continuation_fixture();
     input.environment.presentation = Some(PresentationTarget::Tui);
     for original in &mut packages {
-        let mut declaration = original
+        let declaration = original
             .manifest()
             .application
             .as_ref()
             .unwrap()
             .declaration()
             .clone();
-        let mut entry = declaration.entries.remove(&EntryTarget::Desktop).unwrap();
-        if entry.scene.is_some() {
-            entry.scene = Some(scene::language());
-        }
-        if let Some(surface) = entry.imports.get_mut("surface") {
-            surface.contract = maka_ui_runtime::surface_contract(PresentationTarget::Tui);
-        }
-        if let Some(surface) = entry.exports.get_mut("Surface") {
-            surface.contract = maka_ui_runtime::surface_contract(PresentationTarget::Tui);
-            entry.implementation = maka_plugin_core::package::Implementation::Native {
-                implementation: "maka.ui.surface.tui".into(),
-            };
-        }
-        declaration.entries.insert(EntryTarget::Tui, entry);
         let source = original.file("index.mjs").map(|bytes| {
-            let source = std::str::from_utf8(bytes).unwrap().replace(
-                "{kind:'window',binding:'surface',title:'Immutable draft',width:640,height:480}",
-                "{kind:'terminal',binding:'surface'}",
-            );
+            let source = std::str::from_utf8(bytes).unwrap().to_owned();
             if original.manifest().id == "dynamic.app" {
                 source.replace("initialText:'Start'", "initialText:state.label??'Start'")
                     .replace("else if(event.key==='remove')next.show=false;", "else if(event.key==='refresh')next.label=event.event.label;else if(event.key==='remove')next.show=false;")

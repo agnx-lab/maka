@@ -29,7 +29,7 @@ import { pluginDescription } from '../../shared/plugin-description.js';
 import { pageHeader } from '../../shared/page-shell.js';
 import { visibleRows } from '../../shared/scroll.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 import { filteredInstances, page, request } from './operations.js';
 import { settingsBookmark, type State } from './state.js';
 
@@ -40,7 +40,6 @@ export function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   if (state.settings?.changes.length && state.notice === 'deploymentSaved') state.notice = null;
   if (state.restoreSettings && !state.pending) {
     state.restoreSettings = false;
@@ -52,8 +51,8 @@ export function frame<N extends Node>(
   }
   const navigationReady =
     !state.restoreFailed &&
-    (target !== 'tui' ||
-      (props.navigationReady !== false && bookmarkReady(state.bookmark, settingsBookmark(state))));
+    props.navigationReady !== false &&
+    bookmarkReady(state.bookmark, settingsBookmark(state));
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const loading = state.document?.phase === 'loading';
@@ -62,7 +61,7 @@ export function frame<N extends Node>(
     !!state.current ||
     loading ||
     state.restoreFailed ||
-    (target === 'tui' && !state.bookmark.restored);
+    !state.bookmark.restored;
   const basis = state.queryObservation?.snapshot.text;
   if (!state.pending && basis && !sameValue(basis, state.queryBasis) && basis.bytes <= 1024) {
     if (!basis.bytes) {
@@ -101,28 +100,23 @@ export function frame<N extends Node>(
         ui.text(
           'deployment-question',
           current.enabled ? text.deploymentConfirmEnable : text.deploymentConfirmDisable,
-          16,
           props.theme.text,
           550,
         ),
-        ui.text('deployment-confirm-path', current.instance.path.join(' / '), 14),
-        ui.text('deployment-confirm-package', current.instance.package.id, 13, props.theme.muted),
-        ui.text('deployment-confirm-help', text.deploymentChangeHelp, 13, props.theme.muted),
+        ui.text('deployment-confirm-path', current.instance.path.join(' / ')),
+        ui.text('deployment-confirm-package', current.instance.package.id, props.theme.muted),
+        ui.text('deployment-confirm-help', text.deploymentChangeHelp, props.theme.muted),
       ]
     : [];
   const historyBody = [
-    ...(target === 'tui' && state.notice
-      ? [ui.text('deployment-history-notice', text[state.notice], 13, props.theme.muted)]
+    ...(state.notice
+      ? [ui.text('deployment-history-notice', text[state.notice], props.theme.muted)]
       : []),
-    ...(target === 'tui' && state.pending
-      ? [ui.text('deployment-history-loading', text.connecting, 13, props.theme.muted)]
+    ...(state.pending
+      ? [ui.text('deployment-history-loading', text.connecting, props.theme.muted)]
       : []),
-    ui.text('deployment-history-help', text.deploymentHistoryHelp, 13, props.theme.muted),
-    ...visibleRows(
-      state,
-      target === 'tui' ? 'deployment-history-reading' : 'deployment-list',
-      state.earlier,
-    ).map(({ entry, at }) =>
+    ui.text('deployment-history-help', text.deploymentHistoryHelp, props.theme.muted),
+    ...visibleRows(state, 'deployment-history-reading', state.earlier).map(({ entry, at }) =>
       ui.box(
         'deployment-earlier-' + at,
         [
@@ -132,7 +126,6 @@ export function frame<N extends Node>(
               entry.reply.receipt.outcome.kind === 'returned'
               ? text.deploymentRecorded
               : text.deploymentUnknown,
-            13,
           ),
           ui.button('deployment-earlier-check-' + at, text.check, !!state.pending),
         ],
@@ -161,7 +154,7 @@ export function frame<N extends Node>(
       entry.disabled ? text.deploymentEnable : text.deploymentDisable,
       busy || state.conflict || (entry.disabled && entry.parentDisabled),
     );
-    if (ui.item) {
+    {
       const selected = sameValue(state.selected, entry.instance);
       return ui.contextMenu!(
         'deployment-instance-' + at,
@@ -174,7 +167,6 @@ export function frame<N extends Node>(
               ui.text(
                 'deployment-path-' + at,
                 `${selected ? (props.theme.ascii ? '>' : '›') : ' '} ${info.name}`,
-                14,
                 props.theme.text,
                 400,
                 { truncate: true },
@@ -184,7 +176,6 @@ export function frame<N extends Node>(
                     ui.text(
                       'deployment-description-' + at,
                       '  ' + info.description,
-                      13,
                       props.theme.muted,
                     ),
                   ]
@@ -192,7 +183,6 @@ export function frame<N extends Node>(
               ui.text(
                 'deployment-detail-' + at,
                 `  ${status} · ${entry.path.join(' / ')}`,
-                13,
                 props.theme.muted,
                 400,
                 { truncate: true },
@@ -207,45 +197,8 @@ export function frame<N extends Node>(
         [configure, toggle],
       );
     }
-    return ui.box(
-      'deployment-instance-' + at,
-      [
-        ui.box(
-          'deployment-identity-' + at,
-          [
-            ui.text('deployment-path-' + at, info.name, 15, props.theme.text, 550),
-            ...(info.description
-              ? [ui.text('deployment-description-' + at, info.description, 13, props.theme.muted)]
-              : []),
-            ui.text('deployment-package-' + at, entry.package.id, 13, props.theme.muted),
-          ],
-          {
-            gap: target === 'desktop' ? 4 : 0,
-            surface: target === 'desktop',
-            style: { grow: 1, minWidth: 0 },
-          },
-        ),
-        ui.box(
-          'deployment-row-' + at,
-          [ui.text('deployment-state-' + at, status, 13, props.theme.muted), configure, toggle],
-          {
-            row: target === 'desktop',
-            gap: 0,
-            surface: target === 'desktop',
-            style: { wrap: true, align: 'center', shrink: 0 },
-          },
-        ),
-      ],
-      {
-        row: target === 'desktop',
-        gap: target === 'desktop' ? 16 : 1,
-        padding: target === 'desktop' ? 12 : 1,
-        surface: target === 'desktop',
-        style: { width: fill, wrap: true, shrink: 0, radius: 10, align: 'center' },
-      },
-    );
   });
-  const body = target === 'tui' ? rows : current ? confirmationBody : history ? historyBody : rows;
+  const body = rows;
   const header = ui.box(
     'deployment-header',
     [
@@ -264,31 +217,24 @@ export function frame<N extends Node>(
         'deployment-back',
         !!state.settings?.open && busy,
       ),
-      ...(target !== 'tui' && !current && !history
-        ? [ui.text('deployment-help', text.deploymentHelp, 13, props.theme.muted)]
-        : []),
-      ...(target === 'tui'
-        ? [
-            ui.box(
-              'deployment-toolbar',
-              [
-                ui.button('deployment-import', text.deploymentInstall, busy || !state.page, true),
-                ui.button('deployment-advanced', text.deploymentEdit, busy || !state.page),
-                ui.button('deployment-history', text.deploymentHistory, !!state.pending || loading),
-                ui.button(
-                  'deployment-refresh',
-                  props.theme.ascii ? 'r' : '↻',
-                  busy,
-                  false,
-                  { background: 0 },
-                  undefined,
-                  text.deploymentRefresh,
-                ),
-              ],
-              { row: true, gap: 1, terminal: { wrap: true } },
-            ),
-          ]
-        : []),
+      ui.box(
+        'deployment-toolbar',
+        [
+          ui.button('deployment-import', text.deploymentInstall, busy || !state.page, true),
+          ui.button('deployment-advanced', text.deploymentEdit, busy || !state.page),
+          ui.button('deployment-history', text.deploymentHistory, !!state.pending || loading),
+          ui.button(
+            'deployment-refresh',
+            props.theme.ascii ? 'r' : '↻',
+            busy,
+            false,
+            { background: 0 },
+            undefined,
+            text.deploymentRefresh,
+          ),
+        ],
+        { row: true, gap: 1, terminal: { wrap: true } },
+      ),
       presentation.slot(
         'deployment-query',
         'input',
@@ -305,63 +251,20 @@ export function frame<N extends Node>(
         { changed: 'deployment-query-changed' },
       ),
       ...(state.notice
-        ? [ui.text('deployment-notice', text[state.notice], 13, props.theme.muted)]
+        ? [ui.text('deployment-notice', text[state.notice], props.theme.muted)]
         : []),
-      ...(state.pending
-        ? [ui.text('deployment-loading', text.connecting, 13, props.theme.muted)]
-        : []),
+      ...(state.pending ? [ui.text('deployment-loading', text.connecting, props.theme.muted)] : []),
     ],
-    { gap: target === 'desktop' ? 8 : 1, style: { shrink: 0 } },
+    { gap: 1 },
   );
   const footer = ui.box(
     'deployment-controls',
-    target === 'desktop' && current
-      ? [
-          ui.button('deployment-confirm', text.confirmDefault, busy),
-          ui.button('deployment-cancel', text.cancel, busy),
-        ]
-      : target === 'desktop' && history
-        ? [
-            ui.button('deployment-history-back', text.back, false, false, {}),
-            ui.button(
-              'deployment-history-refresh',
-              text.refreshDefaultOperations,
-              !!state.pending,
-              false,
-              {},
-              undefined,
-              text.refreshDefaultOperations,
-            ),
-          ]
-        : target === 'tui'
-          ? [
-              ...(state.current?.reference
-                ? [ui.button('deployment-check', text.check, !!state.pending)]
-                : []),
-            ]
-          : [
-              ui.button(
-                'deployment-refresh',
-                text.deploymentRefresh,
-                busy,
-                false,
-                {},
-                undefined,
-                text.deploymentRefresh,
-              ),
-              ...(state.current?.reference
-                ? [ui.button('deployment-check', text.check, !!state.pending)]
-                : []),
-              ui.button('deployment-history', text.deploymentHistory, !!state.pending || loading),
-              ui.button('deployment-advanced', text.deploymentEdit, busy || !state.page),
-              ui.button('deployment-import', text.deploymentInstall, busy || !state.page),
-            ],
-    {
-      row: true,
-      gap: target === 'desktop' ? 8 : 1,
-      terminal: { wrap: true },
-      style: { wrap: true, shrink: 0 },
-    },
+    [
+      ...(state.current?.reference
+        ? [ui.button('deployment-check', text.check, !!state.pending)]
+        : []),
+    ],
+    { row: true, gap: 1, terminal: { wrap: true } },
   );
   const out = output(
     state,
@@ -379,14 +282,8 @@ export function frame<N extends Node>(
                 ? body
                 : state.pending
                   ? []
-                  : [ui.text('deployment-empty', text.deploymentEmpty, 14, props.theme.muted)],
-              {
-                scroll: 'anchor',
-                focusGroup: target === 'tui',
-                terminal: { grow: 1, basis: 0 },
-                style: { width: fill, height: fill, minHeight: 0 },
-                gap: target === 'desktop' ? 16 : 1,
-              },
+                  : [ui.text('deployment-empty', text.deploymentEmpty, props.theme.muted)],
+              { scroll: 'anchor', focusGroup: true, terminal: { grow: 1, basis: 0 }, gap: 1 },
             ),
           },
           { input: 'deployment-input', observed: 'deployment-observed' },
@@ -394,20 +291,16 @@ export function frame<N extends Node>(
         footer,
       ],
       {
-        style: { width: fill, height: fill },
         visible: !state.documentOpen && !state.importer.open && !state.settings?.open,
         terminal: { grow: 1 },
         autoFocus: true,
-        shortcuts:
-          target === 'tui'
-            ? [{ key: 'escape', modifiers: [], input: 'deployment-back', enabled: true }]
-            : [],
-        gap: target === 'desktop' ? 16 : 1,
+        shortcuts: [{ key: 'escape', modifiers: [], input: 'deployment-back', enabled: true }],
+        gap: 1,
       },
     ),
     events,
   );
-  if (target === 'tui') {
+  {
     const modalBody = current ? confirmationBody : historyBody;
     out.frame.view = ui.dialog(
       'deployment-dialog',
@@ -458,7 +351,6 @@ export function frame<N extends Node>(
         },
       ),
       !!current || history,
-      undefined,
       { width: 64, height: history ? 18 : 14 },
     );
     out.frame.view = ui.box('deployment-main', [out.frame.view], {
@@ -511,14 +403,9 @@ export function frame<N extends Node>(
           ]
         : []),
     ],
-    {
-      gap: 0,
-      padding: target === 'desktop' ? 24 : props.shell ? 0 : 1,
-      style: { width: fill, height: fill, maxWidth: 808, minWidth: 0 },
-      terminal: { grow: 1 },
-    },
+    { gap: 0, padding: props.shell ? 0 : 1, terminal: { grow: 1 } },
   );
-  if (target === 'tui') {
+  {
     const checkpoint = bookmarkView(
       presentation,
       state.bookmark,
@@ -541,7 +428,6 @@ export function frame<N extends Node>(
                       state.bookmark.command.sequence > (state.bookmark.observed?.sequence ?? 0)
                       ? text.restoringView
                       : text.viewSaveFailed,
-                    13,
                     props.theme.warning,
                   ),
                   ...(state.bookmark.command &&
@@ -555,14 +441,10 @@ export function frame<N extends Node>(
           : []),
         out.frame.view,
       ],
-      { gap: 0, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+      { gap: 0, terminal: { grow: 1 } },
     );
   }
-  if (target === 'desktop')
-    out.frame.view = ui.box('deployment-surface', [out.frame.view], {
-      gap: 0,
-      style: { width: fill, height: fill, align: 'center' },
-    });
+
   out.actions = actions;
   return out;
 }

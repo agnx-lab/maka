@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const entry = {
   reference: 'source:local:review',
@@ -133,7 +133,7 @@ async function client(target, writable = true, preferencesWritable = false) {
   };
   return c;
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} retained import and browser buttons have distinct native keys`, async () => {
     const c = await client(target);
     const unique = () => {
@@ -586,7 +586,7 @@ for (const target of ['tui', 'desktop']) {
   });
 }
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} preference writes have separate authority and retain original unknown operations`, async () => {
     const readonly = (await client(target, true, false)).open();
     readonly.raw('toggle-enabled').raw('toggle-pinned');

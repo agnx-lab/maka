@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const appearance = await import('../dist/packages/appearance/desktop.js');
+const appearance = await import('../dist/packages/appearance/tui.js');
 const values = { appearance: [appearance.activate({ scheme: 'light' }).Appearance.value] };
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const reference = (n) => ({
@@ -83,7 +83,7 @@ async function client(target) {
   };
   return c;
 }
-for (const target of ['desktop', 'tui']) {
+for (const target of ['tui']) {
   test(`${target} recovery uses original references and never dispatches another effect`, async () => {
     const c = await client(target);
     assert.deepEqual(

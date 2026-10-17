@@ -283,11 +283,7 @@ export function handleEvent<N extends Node>(
           sessions(state, actions);
         } else if (state.picker && key.startsWith('source-')) {
           const session = state.sessions?.sessions.find((s) => key === 'source-' + s.id);
-          if (
-            session &&
-            presentation.target === 'tui' &&
-            (input.event as { kind?: string }).kind === 'activate'
-          ) {
+          if (session && true && (input.event as { kind?: string }).kind === 'activate') {
             state.focused = key;
             const at = state.sessions!.sessions.indexOf(session);
             if (at >= state.sessions!.sessions.length - 3) sessions(state, actions, 'down');
@@ -311,11 +307,7 @@ export function handleEvent<N extends Node>(
           else list(state);
         } else if (key.startsWith('task-')) {
           const task = state.page?.tasks.find((t) => key === 'task-' + t.id);
-          if (
-            task &&
-            presentation.target === 'tui' &&
-            (input.event as { kind?: string }).kind === 'activate'
-          ) {
+          if (task && true && (input.event as { kind?: string }).kind === 'activate') {
             state.focused = key;
             const at = state.page!.tasks.indexOf(task);
             if (at >= state.page!.tasks.length - 3) moveList(state, 'down');

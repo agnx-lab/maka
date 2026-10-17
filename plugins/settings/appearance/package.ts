@@ -19,7 +19,7 @@
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
 import * as own from '../../shared/contracts.js';
-import { one, uiEntries } from '../../shared/package.js';
+import { uiEntries } from '../../shared/package.js';
 
 const entries = uiEntries({
   contract: own.themeContract,

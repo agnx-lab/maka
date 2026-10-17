@@ -18,7 +18,6 @@
  */
 
 //! Pure presentation protocols shared by schema generation and native renderers.
-pub mod desktop;
 pub mod terminal;
 
 #[cfg(test)]
@@ -118,28 +117,11 @@ mod tests {
         source["shortcuts"] =
             json!([{"key":"k","modifiers":["primary"],"input":"target","enabled":true}]);
         source.as_object_mut().unwrap().remove("wheel");
-        source["children"] = json!([{"kind":"dialog","key":"target","label":"Dialog","open":true,
-            "background":text("background"),"content":text("body")}]);
-        let desktop = |source| {
-            let node: desktop::Node = serde_json::from_value(source).unwrap();
-            node.validate_root().unwrap();
-            node.metadata(Default::default())
-        };
-        assert_eq!(
-            desktop(source.clone()).err().unwrap(),
-            "shortcut collides with typed native input"
-        );
-        source["children"][0]["open"] = json!(false);
-        assert_eq!(
-            desktop(source.clone()).unwrap().inputs["target"],
-            json!(true)
-        );
         source["children"] = json!([{"kind":"button","key":"target","label":"Action"}]);
         assert_eq!(
             terminal(source.clone()).unwrap().inputs["target"],
             json!(true)
         );
-        assert_eq!(desktop(source).unwrap().inputs["target"], json!(true));
     }
 
     #[test]
@@ -152,20 +134,10 @@ mod tests {
                     .validate_root()
                     .is_err()
             );
-            assert!(
-                serde_json::from_value::<desktop::Node>(value)
-                    .unwrap()
-                    .validate_root()
-                    .is_err()
-            );
         }
         let value =
             json!({"kind":"button","key":"copy","label":"Copy","copy_text":"x".repeat(64 * 1024)});
         serde_json::from_value::<terminal::Node>(value.clone())
-            .unwrap()
-            .validate_root()
-            .unwrap();
-        serde_json::from_value::<desktop::Node>(value.clone())
             .unwrap()
             .validate_root()
             .unwrap();

@@ -41,18 +41,11 @@ import type {
   TextChunk,
 } from '../../../packages/plugin-sdk/src/index.js';
 import { sessionDetailsContract, type SessionDetailsProps } from '../../shared/contracts.js';
-import { scrollRows, visibleRows, resetScroll } from '../../shared/scroll.js';
+import { scrollRows, resetScroll } from '../../shared/scroll.js';
 import { copy, type Copy } from './locale.js';
 import { panelHeader } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 const names = ['title', 'labels'] as const;
 type FieldName = (typeof names)[number];
@@ -274,7 +267,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const locked = !active(state, props) || busy(state) || !!state.reviewed || state.historyOpen;
@@ -286,9 +278,7 @@ function frame<N extends Node>(
     state.target.id !== props.session?.id ||
     state.conflict;
   const choice = (key: string, label: string, selected: boolean) =>
-    ui.item
-      ? ui.item(key, ui.text(key + '-label', label), selected, policyLocked)
-      : ui.button(key, label, policyLocked, selected);
+    ui.item(key, ui.text(key + '-label', label), selected, policyLocked);
   const form = ui.box(
     'details-form',
     [
@@ -299,8 +289,7 @@ function frame<N extends Node>(
             ? [
                 ui.text(
                   'details-workspace',
-                  compactLabel(state.target.workspace.path, target === 'tui' ? 66 : 160),
-                  12,
+                  compactLabel(state.target.workspace.path, 66),
                   props.theme.muted,
                 ),
               ]
@@ -326,7 +315,6 @@ function frame<N extends Node>(
                 ui.text(
                   `details-label-${name}`,
                   name === 'title' ? text.detailsName : text.detailsLabels,
-                  13,
                   props.theme.muted,
                 ),
                 ui.box(
@@ -350,25 +338,17 @@ function frame<N extends Node>(
                       { changed: name, submitted: 'save' },
                     ),
                   ],
-                  {
-                    gap: 0,
-                    terminal: name === 'labels' ? { basis: 5 } : {},
-                    style:
-                      name === 'labels' ? { width: fill, height: pixels(110) } : { width: fill },
-                  },
+                  { gap: 0, terminal: name === 'labels' ? { basis: 5 } : {} },
                 ),
                 ...(field.phase === 'failed'
                   ? [ui.button(`retry-${name}`, text.detailsRetry, locked)]
                   : []),
               ],
-              {
-                gap: 0,
-                style: { width: fill },
-              },
+              { gap: 0 },
             );
           }),
-          ui.text('details-help', text.detailsLabelsHelp, 12, props.theme.muted),
-          ui.text('details-permissions', text.permissionsTitle, 13, props.theme.muted),
+          ui.text('details-help', text.detailsLabelsHelp, props.theme.muted),
+          ui.text('details-permissions', text.permissionsTitle, props.theme.muted),
           ui.box(
             'details-access',
             [
@@ -388,13 +368,7 @@ function frame<N extends Node>(
                 state.permissions?.access === 'workspace_write',
               ),
             ],
-            {
-              row: true,
-              gap: 1,
-              focusGroup: true,
-              terminal: { wrap: true },
-              style: { wrap: true },
-            },
+            { row: true, gap: 1, focusGroup: true, terminal: { wrap: true } },
           ),
           ui.box(
             'details-permission-prompts',
@@ -410,33 +384,20 @@ function frame<N extends Node>(
                 state.permissions?.requestPermissions === false,
               ),
             ],
-            {
-              row: true,
-              gap: 1,
-              focusGroup: true,
-              terminal: { wrap: true },
-              style: { wrap: true },
-            },
+            { row: true, gap: 1, focusGroup: true, terminal: { wrap: true } },
           ),
           choice('permissions-revoke', text.permissionRevoke, state.revokeGrants),
-          ui.text('details-permissions-help', text.permissionPolicyHelp, 12, props.theme.muted),
+          ui.text('details-permissions-help', text.permissionPolicyHelp, props.theme.muted),
         ],
-        {
-          gap: target === 'desktop' ? 8 : 1,
-          scroll: 'anchor',
-          terminal: { shrink: true },
-          style: { width: fill, maxHeight: 420 },
-        },
+        { gap: 1, scroll: 'anchor', terminal: { shrink: true } },
       ),
       ...(state.target?.archived || props.session?.archived
-        ? [ui.text('details-archived', text.archivedConversation, 13, props.theme.muted)]
+        ? [ui.text('details-archived', text.archivedConversation, props.theme.muted)]
         : []),
       ...(state.target?.id !== props.session?.id
-        ? [ui.text('details-target-changed', text.detailsTargetChanged, 13, props.theme.muted)]
+        ? [ui.text('details-target-changed', text.detailsTargetChanged, props.theme.muted)]
         : []),
-      ...(state.notice
-        ? [ui.text('details-notice', text[state.notice], 13, props.theme.muted)]
-        : []),
+      ...(state.notice ? [ui.text('details-notice', text[state.notice], props.theme.muted)] : []),
       ui.box(
         'details-actions',
         [
@@ -453,28 +414,15 @@ function frame<N extends Node>(
                 ),
               ]
             : []),
-          ui.button(
-            'history',
-            text.detailsHistory,
-            !!state.reviewed,
-            false,
-            target === 'tui' ? { background: 0, align: 'start' } : {},
-          ),
+          ui.button('history', text.detailsHistory, !!state.reviewed, false, {
+            background: 0,
+            align: 'start',
+          }),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          style: { wrap: true },
-          terminal: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
-    {
-      gap: target === 'desktop' ? 8 : 1,
-      visible: !state.reviewed && !state.historyOpen,
-      terminal: { grow: 1 },
-      style: { width: fill },
-    },
+    { gap: 1, visible: !state.reviewed && !state.historyOpen, terminal: { grow: 1 } },
   );
   const reviewed = state.reviewed;
   const review = ui.box(
@@ -483,7 +431,6 @@ function frame<N extends Node>(
       ui.text(
         'details-review-help',
         state.discard ? text.detailsReloadHelp : text.detailsRebaseHelp,
-        13,
         props.theme.muted,
       ),
       presentation.reading(
@@ -492,11 +439,11 @@ function frame<N extends Node>(
           content: ui.box(
             'details-review-lines',
             [
-              ui.text('review-title', reviewed?.title ?? '', 15),
+              ui.text('review-title', reviewed?.title ?? ''),
               ...(reviewed?.labels ?? []).map((label, at) =>
-                ui.text(`review-label-${at}`, label, 13, props.theme.muted),
+                ui.text(`review-label-${at}`, label, props.theme.muted),
               ),
-              ui.text('review-workspace', reviewed?.workspace.path ?? '', 13, props.theme.muted),
+              ui.text('review-workspace', reviewed?.workspace.path ?? '', props.theme.muted),
               ...(reviewed
                 ? [
                     ui.text(
@@ -506,24 +453,17 @@ function frame<N extends Node>(
                         : reviewed.permissions.access === 'danger_full_access'
                           ? text.permissionFullAccess
                           : text.permissionWorkspaceWrite,
-                      13,
                     ),
                     ui.text(
                       'review-permission-prompts',
                       reviewed.permissions.requestPermissions
                         ? text.permissionAsk
                         : text.permissionNoAsk,
-                      13,
                     ),
                   ]
                 : []),
             ],
-            {
-              scroll: 'manual',
-              gap: 0,
-              style: { width: fill, height: pixels(260) },
-              terminal: { grow: 1, basis: 0 },
-            },
+            { scroll: 'manual', gap: 0, terminal: { grow: 1, basis: 0 } },
           ),
           command: null,
         },
@@ -543,20 +483,10 @@ function frame<N extends Node>(
             ? [ui.button('reload', text.detailsReload, !active(state, props) || busy(state))]
             : []),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          style: { wrap: true },
-          terminal: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
-    {
-      visible: !!reviewed && !state.historyOpen,
-      gap: target === 'desktop' ? 8 : 1,
-      terminal: { grow: 1 },
-      style: { width: fill },
-    },
+    { visible: !!reviewed && !state.historyOpen, gap: 1, terminal: { grow: 1 } },
   );
   const earlier = state.historyOpen
     ? presentation.reading(
@@ -565,16 +495,9 @@ function frame<N extends Node>(
           content: ui.box(
             'details-earlier',
             [
-              ui.text('details-history-help', text.detailsHistoryHelp, 12, props.theme.muted),
+              ui.text('details-history-help', text.detailsHistoryHelp, props.theme.muted),
               ...(state.historyFailed
-                ? [
-                    ui.text(
-                      'details-history-failed',
-                      text.historyUnavailable,
-                      13,
-                      props.theme.muted,
-                    ),
-                  ]
+                ? [ui.text('details-history-failed', text.historyUnavailable, props.theme.muted)]
                 : []),
               ...state.earlier.map((entry) => {
                 const receipt = entry.result?.receipt;
@@ -594,7 +517,6 @@ function frame<N extends Node>(
                           : value?.kind === 'rejected'
                             ? text.detailsRejected
                             : text.historyUnknown,
-                      12,
                       props.theme.muted,
                     ),
                     ui.button(
@@ -605,7 +527,7 @@ function frame<N extends Node>(
                       ),
                     ),
                   ],
-                  { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+                  { row: true, gap: 1, terminal: { wrap: true } },
                 );
               }),
               ui.box(
@@ -613,28 +535,18 @@ function frame<N extends Node>(
                 [
                   ui.button(
                     'history-refresh',
-                    target === 'tui'
-                      ? props.theme.ascii
-                        ? 'r'
-                        : '↻'
-                      : text.refreshDefaultOperations,
+                    props.theme.ascii ? 'r' : '↻',
                     false,
                     false,
-                    target === 'tui' ? { background: 0 } : {},
+                    { background: 0 },
                     undefined,
                     text.refreshDefaultOperations,
                   ),
                 ],
-                { row: true, gap: 1, style: { wrap: true }, terminal: { wrap: true } },
+                { row: true, gap: 1, terminal: { wrap: true } },
               ),
             ],
-            {
-              visible: state.historyOpen,
-              gap: target === 'desktop' ? 8 : 1,
-              scroll: 'anchor',
-              terminal: { grow: 1 },
-              style: { width: fill },
-            },
+            { visible: state.historyOpen, gap: 1, scroll: 'anchor', terminal: { grow: 1 } },
           ),
         },
         { input: 'history-input', observed: 'history-observed' },
@@ -666,7 +578,6 @@ function frame<N extends Node>(
         visible: props.open,
         gap: 0,
         terminal: { grow: 1 },
-        style: { width: fill, minWidth: 0 },
         shortcuts: [
           {
             key: 'escape',
@@ -685,7 +596,6 @@ function frame<N extends Node>(
 export function sessionDetails<N extends Node>(
   presentation: Presentation<N>,
 ): Component<State, SessionDetailsProps, N> {
-  const target = presentation.target;
   return {
     mount(props) {
       const field = (): Field => ({

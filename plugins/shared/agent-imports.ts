@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../packages/plugin-sdk/src/index.js';
-import { one } from './package.js';
+
 export const agentImports = {
   ui: { contract: sdk.contracts.uiAuthoring, cardinality: { kind: 'optional' } },
   executorSetups: {

@@ -39,9 +39,6 @@ pub struct PluginSession {
 impl PluginSession {
     pub(super) fn validate(&self) -> Result<(), StoreError> {
         validate_id(&self.session_id)?;
-        if self.creator.scope() == &Scope::DesktopUi {
-            return Err(super::invalid("Desktop UI cannot create Host Sessions"));
-        }
         if let Some(source) = &self.authority_session_id {
             validate_id(source)?;
             if source == &self.session_id {

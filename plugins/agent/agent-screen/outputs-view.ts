@@ -57,14 +57,7 @@ export function outputsView<N extends Node>(
                 'output-records',
                 [
                   ...(!rows.length
-                    ? [
-                        ui.text(
-                          'output-empty',
-                          tuiText(locale, 'task-outputs-empty'),
-                          13,
-                          theme.muted,
-                        ),
-                      ]
+                    ? [ui.text('output-empty', tuiText(locale, 'task-outputs-empty'), theme.muted)]
                     : []),
                   ...rows.map(({ message }) => {
                     const tool = message.tool;
@@ -94,7 +87,6 @@ export function outputsView<N extends Node>(
                                   ui.text(
                                     'output-tool-marker-' + message.id,
                                     theme.ascii ? '*' : '•',
-                                    13,
                                     theme[label!.tone],
                                     400,
                                     {},
@@ -105,7 +97,6 @@ export function outputsView<N extends Node>(
                                     ui.text(
                                       'output-label-' + message.id,
                                       `${expanded ? '−' : '+'} ${label?.name ?? text.toolOutput}`,
-                                      13,
                                       theme.text,
                                       550,
                                     ),
@@ -116,16 +107,6 @@ export function outputsView<N extends Node>(
                                 ],
                                 { row: true, gap: 1 },
                               ),
-                              ...(presentation.target === 'desktop' && label?.status
-                                ? [
-                                    ui.text(
-                                      'output-state-' + message.id,
-                                      label.status,
-                                      12,
-                                      tool.result?.isError ? theme.warning : theme.muted,
-                                    ),
-                                  ]
-                                : []),
                             ]
                           : [
                               ui.item!(
@@ -133,7 +114,6 @@ export function outputsView<N extends Node>(
                                 ui.text(
                                   'output-reply-' + message.id,
                                   compactLabel(message.text, 180),
-                                  13,
                                   theme.text,
                                 ),
                                 false,
@@ -165,7 +145,6 @@ export function outputsView<N extends Node>(
                                 ui.text(
                                   'output-summary-' + message.id,
                                   compactLabel(message.text, 120),
-                                  12,
                                   theme.muted,
                                 ),
                               ]
@@ -206,7 +185,7 @@ export function outputsView<N extends Node>(
         tuiText(locale, 'task-outputs'),
         'inspector-close',
       ),
-      ui.text('outputs-explainer', tuiText(locale, 'task-evidence-hint'), 12, theme.muted),
+      ui.text('outputs-explainer', tuiText(locale, 'task-evidence-hint'), theme.muted),
       ...readers,
       ui.box(
         'outputs-navigation',

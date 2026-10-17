@@ -29,7 +29,7 @@ import { type InsightsProps } from '../../shared/contracts.js';
 import { copy, tuiText } from './locale.js';
 import { pageHeader } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
-import { compactLabel, fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 import { refresh } from './operations.js';
 import { fields, money, type State, type Tab } from './state.js';
 
@@ -61,7 +61,7 @@ export function frame<N extends Node>(
     state.restoring ||
     !!state.capture;
   const label = (id: string, value: string, muted = false) =>
-    ui.text(id, value, 13, muted ? props.theme.muted : props.theme.text);
+    ui.text(id, value, muted ? props.theme.muted : props.theme.text);
   const button = (key: string, value: string, disabled = busy) =>
     ui.button(key, value, disabled, false, { background: 0, align: 'start' });
   const cost = (m: UsageModelTotals) =>
@@ -73,19 +73,7 @@ export function frame<N extends Node>(
     options: { key: string; label: string }[],
     current: string,
     disabled: boolean,
-  ) =>
-    ui.choice
-      ? ui.choice(key, title, options, current, disabled)
-      : ui.box(
-          key,
-          [
-            label(key + '-label', title),
-            ...options.map((option) =>
-              ui.button(key + ':' + option.key, option.label, disabled, current === option.key),
-            ),
-          ],
-          { row: true, gap: 1, style: { wrap: true } },
-        );
+  ) => ui.choice(key, title, options, current, disabled);
   const rows: N[] = [];
   const tabs: Tab[] = ['overview', 'activity', 'pricing'];
   const tabBar = ui.box(
@@ -377,14 +365,11 @@ export function frame<N extends Node>(
               'input',
               {
                 menu: editorMenu(props.theme, props.locale),
-                appearance:
-                  presentation.target === 'tui'
-                    ? {
-                        ...props.theme.input,
-                        borderWidth: 0,
-                        padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                      }
-                    : props.theme.input,
+                appearance: {
+                  ...props.theme.input,
+                  borderWidth: 0,
+                  padding: { top: 0, right: 0, bottom: 0, left: 0 },
+                },
                 accessibilityLabel: t('insights-' + name),
                 placeholder: '',
                 autoFocus: name === 'model',
@@ -425,7 +410,7 @@ export function frame<N extends Node>(
     editorRows.push(button('price-close', t('insights-close')));
   }
   const feedback: N[] = [];
-  if (presentation.target === 'tui' && state.bookmark.observed?.state.kind === 'failed')
+  if (state.bookmark.observed?.state.kind === 'failed')
     feedback.push(button('view-retry', t('insights-view-retry'), false));
   if (state.notice) feedback.push(label('insights-notice', t(state.notice), true));
   if (state.current)
@@ -441,52 +426,46 @@ export function frame<N extends Node>(
       [
         ...pageHeader(presentation, state, props, events, t('settings-insights')),
         tabBar,
-        ...(presentation.target === 'tui'
-          ? [
-              ui.box(
-                'insights-checkpoint',
-                [
-                  bookmarkView(
-                    presentation,
-                    state.bookmark,
-                    'insights-bookmark',
-                    'insights/view',
-                    state.savedView,
-                  ),
-                ],
-                { visible: false },
+        ui.box(
+          'insights-checkpoint',
+          [
+            bookmarkView(
+              presentation,
+              state.bookmark,
+              'insights-bookmark',
+              'insights/view',
+              state.savedView,
+            ),
+          ],
+          { visible: false },
+        ),
+        ui.box(
+          'insights-view-actions',
+          [
+            button(
+              'view-save',
+              t(
+                state.bookmark.saved &&
+                  !state.bookmark.command &&
+                  sameValue(state.bookmark.saved, {
+                    tab: state.tab,
+                    period: state.period,
+                    group: state.group,
+                    selection: state.selection,
+                  })
+                  ? 'insights-view-saved'
+                  : 'insights-view-save',
               ),
-              ui.box(
-                'insights-view-actions',
-                [
-                  button(
-                    'view-save',
-                    t(
-                      state.bookmark.saved &&
-                        !state.bookmark.command &&
-                        sameValue(state.bookmark.saved, {
-                          tab: state.tab,
-                          period: state.period,
-                          group: state.group,
-                          selection: state.selection,
-                        })
-                        ? 'insights-view-saved'
-                        : 'insights-view-save',
-                    ),
-                    busy ||
-                      state.bookmark.observed?.state.kind !== 'ready' ||
-                      !!state.bookmark.command,
-                  ),
-                  button(
-                    'view-load',
-                    t('insights-view-load'),
-                    busy || !state.bookmark.saved || !!state.bookmark.command,
-                  ),
-                ],
-                { row: true, gap: 1 },
-              ),
-            ]
-          : []),
+              busy || state.bookmark.observed?.state.kind !== 'ready' || !!state.bookmark.command,
+            ),
+            button(
+              'view-load',
+              t('insights-view-load'),
+              busy || !state.bookmark.saved || !!state.bookmark.command,
+            ),
+          ],
+          { row: true, gap: 1 },
+        ),
         ...feedback,
         ui.box(
           'insights-search',
@@ -496,14 +475,11 @@ export function frame<N extends Node>(
               'input',
               {
                 menu: editorMenu(props.theme, props.locale),
-                appearance:
-                  presentation.target === 'tui'
-                    ? {
-                        ...props.theme.input,
-                        borderWidth: 0,
-                        padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                      }
-                    : props.theme.input,
+                appearance: {
+                  ...props.theme.input,
+                  borderWidth: 0,
+                  padding: { top: 0, right: 0, bottom: 0, left: 0 },
+                },
                 accessibilityLabel: t('insights-search'),
                 placeholder: t('insights-search'),
                 autoFocus: false,
@@ -527,7 +503,6 @@ export function frame<N extends Node>(
           gap: 1,
           scroll: 'manual',
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
         }),
         ...(state.editing
           ? [
@@ -536,7 +511,6 @@ export function frame<N extends Node>(
                 gap: 1,
                 scroll: 'manual',
                 terminal: { grow: 1 },
-                style: { width: fill, height: fill },
               }),
             ]
           : []),
@@ -545,7 +519,6 @@ export function frame<N extends Node>(
         visible: props.open,
         gap: 1,
         terminal: { grow: 1 },
-        style: { width: fill, height: fill },
         shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
       },
     ),

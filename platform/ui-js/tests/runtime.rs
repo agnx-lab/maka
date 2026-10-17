@@ -60,7 +60,7 @@ fn app(handler: &str, timer: &tokio::runtime::Runtime) -> Application {
             synchronous_slice: Duration::from_millis(100),
             ..Default::default()
         }),
-        crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap()
@@ -121,7 +121,7 @@ fn realm_failure_retires_all_its_mounts_and_unknown_cleanup_keeps_the_owner() {
     assert!(app.is_retiring(&a));
     assert!(app.is_retiring(&b));
     assert!(
-        app.close(&a, Err("native window close unknown".into()))
+        app.close(&a, Err("native presentation close unknown".into()))
             .is_err()
     );
     assert!(app.frame(&a).is_ok());
@@ -151,7 +151,7 @@ fn structural_imports_route_to_owned_providers_without_startup_deadlock() {
                 imports: BTreeMap::from([(
                     "surface".into(),
                     Import {
-                        contract: surface_contract(PresentationTarget::Desktop),
+                        contract: surface_contract(PresentationTarget::Tui),
                         cardinality: Cardinality::One,
                     },
                 )]),
@@ -188,7 +188,7 @@ fn structural_imports_route_to_owned_providers_without_startup_deadlock() {
         packages,
         timer.handle().clone(),
         maka_ui_js::execution(Default::default()),
-        crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
@@ -203,7 +203,7 @@ fn structural_imports_route_to_owned_providers_without_startup_deadlock() {
 }
 
 #[test]
-fn unimplemented_window_mutation_is_rejected_without_scene_commit() {
+fn invalid_terminal_surface_field_is_rejected_without_scene_commit() {
     let timer = timer();
     let mut app = app(
         "const next=frame({count:state.count+1,revision:state.revision+1});next.frame.surface.width=900;return next;",
@@ -214,11 +214,8 @@ fn unimplemented_window_mutation_is_rejected_without_scene_commit() {
     assert_eq!(app.frame(&mount).unwrap().revision, 0);
     assert_eq!(
         app.frame(&mount).unwrap().surface,
-        Some(maka_ui_runtime::Surface::Window {
-            binding: "surface".into(),
-            title: "Dynamic product".into(),
-            width: 640,
-            height: 400
+        Some(maka_ui_runtime::Surface::Terminal {
+            binding: "surface".into()
         })
     );
     app.close(&mount, Ok(())).unwrap();
@@ -239,7 +236,7 @@ fn composed(
             synchronous_slice: Duration::from_millis(200),
             ..Default::default()
         }),
-        crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap()
@@ -357,7 +354,7 @@ fn invalid_child_initialization_rolls_back_all_private_mounts_without_native_ack
         source
             .replace(
                 "surface:null",
-                "surface:state.label.startsWith('Right')?{kind:'window',binding:'surface',title:'Invalid child window',width:640,height:400}:null",
+                "surface:state.label.startsWith('Right')?{kind:'terminal',binding:'surface'}:null",
             )
             .into_bytes(),
     );
@@ -370,7 +367,7 @@ fn invalid_child_initialization_rolls_back_all_private_mounts_without_native_ack
         packages,
         timer.handle().clone(),
         maka_ui_js::execution(Default::default()),
-        crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
@@ -399,7 +396,7 @@ fn a_component_without_a_real_required_callback_cannot_publish() {
             packages,
             timer.handle().clone(),
             maka_ui_js::execution(Default::default()),
-            crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+            crate::support::scene::registry::<()>(PresentationTarget::Tui),
             Default::default()
         )
         .is_err()
@@ -436,7 +433,7 @@ fn dispatch_at_a_deep_mount_cannot_restart_the_whole_tree_depth_budget() {
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     if let maka_plugin_core::package::Implementation::JavaScript { realm, .. } =
         &mut entry.implementation
     {
@@ -483,7 +480,7 @@ fn dispatch_at_a_deep_mount_cannot_restart_the_whole_tree_depth_budget() {
         packages,
         timer.handle().clone(),
         maka_ui_js::execution(Default::default()),
-        crate::support::scene::registry::<()>(PresentationTarget::Desktop),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap();
@@ -498,32 +495,4 @@ fn dispatch_at_a_deep_mount_cannot_restart_the_whole_tree_depth_budget() {
     assert!(app.child_mount(&deepest, "nested").is_err());
     assert!(app.retiring_mounts().is_empty());
     close_all(&mut app, &root);
-}
-
-#[test]
-fn one_immutable_revision_selects_both_presentation_variants() {
-    let timer = timer();
-    let (mut input, packages) =
-        support::dual_fixture("return frame({count:state.count+1,revision:state.revision+1});");
-    for target in [PresentationTarget::Desktop, PresentationTarget::Tui] {
-        input.environment.presentation = Some(target);
-        let mut app = Application::new(
-            &input,
-            packages.clone(),
-            timer.handle().clone(),
-            maka_ui_js::execution(Default::default()),
-            crate::support::scene::registry::<()>(target),
-            Default::default(),
-        )
-        .unwrap();
-        let root = app.mount_launch(json!({})).unwrap();
-        assert_eq!(
-            app.frame(&root).unwrap().surface.as_ref().unwrap().target(),
-            target
-        );
-        app.dispatch(&root, 0, "inc", json!({})).unwrap();
-        assert_eq!(app.frame(&root).unwrap().state["count"], 1);
-        app.close(&root, Ok(())).unwrap();
-        app.shutdown().unwrap();
-    }
 }

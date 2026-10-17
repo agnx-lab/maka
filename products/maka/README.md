@@ -28,10 +28,12 @@ This directory turns reusable plugins and platform owners into the Maka applicat
 | [bundle](bundle/README.md) | Select packages and author Host/UI compositions |
 | [native](native/README.md) | Select compiled Host factories |
 | [cli](cli/README.md) | Start the terminal product and expose CLI commands |
-| [desktop](desktop/README.md) | Start native desktop windows |
+| [desktop-shell](desktop-shell/README.md) | Run the authored desktop app against public Host services |
 | [acp](acp/README.md) | Serve editor clients over ACP |
 
 Run `just run` from the repository root. It builds the TypeScript product first, then starts Cargo. Development binaries read the bundle from disk, so a TypeScript-only edit does not invalidate Rust compilation. Release binaries embed the same bundle.
+
+Build the CLI and desktop shell with `just build` (`--release` and `--target` are supported). The build stages the authored app beside the shell executable. Run `target/debug/maka desktop --root HOST_ROOT` to initialize or reopen a business Host and launch the desktop from any working directory. The launcher verifies its endpoint and epoch and retains its own client until the child exits.
 
 Bundled packages are installation inputs. Reopening an existing installation uses its committed source and package bytes; rebuilding the checkout does not overwrite a user's composition.
 

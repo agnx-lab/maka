@@ -31,7 +31,6 @@ export function connectionForm<N extends Node>(
   presentation: Presentation<N>,
   validation: SettingsValidation,
 ): Component<State, ConnectionFormProps, N> {
-  const target = presentation.target;
   return withPageShell<State, ConnectionFormProps, N>(
     {
       mount(props) {

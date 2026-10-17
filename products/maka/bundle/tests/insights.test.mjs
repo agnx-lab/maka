@@ -22,7 +22,7 @@ import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const ajv = new Ajv({ strict: false, formats: { uint64: true } });
 addFormats(ajv);
@@ -39,7 +39,7 @@ function slots(value, found = []) {
   for (const child of Object.values(value)) if (typeof child === 'object') slots(child, found);
   return found;
 }
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Insights ${target} retains settlement fence, captures reviewed prices and recovers the original mutation`, async () => {
     const { component } = await import(`../dist/packages/insights/${target}.js`);
     const props = { scope: null, theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };

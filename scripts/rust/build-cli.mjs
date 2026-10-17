@@ -20,7 +20,8 @@
 import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -55,7 +56,7 @@ export async function buildCli({
     '-p',
     'maka-cli',
     '-p',
-    'maka-desktop',
+    'maka-desktop-shell',
     '--target-dir',
     targetDirectory,
   ];
@@ -75,12 +76,44 @@ export async function buildCli({
     });
   });
   const windows = triple.includes('-windows-');
-  return join(
+  const binary = join(
     targetDirectory,
     ...(outputTarget ? [outputTarget] : []),
     release ? 'release' : 'debug',
     windows ? 'maka.exe' : 'maka',
   );
+  await stageDesktopApp(repositoryRoot, join(dirname(binary), 'app'));
+  return binary;
+}
+
+/** Stage only regular authored app files; executable lookup is independent of cwd. */
+export async function stageDesktopApp(repositoryRoot, destination) {
+  const source = join(repositoryRoot, 'products/maka/desktop-shell/app');
+  // Validate before replacing a previous successful development sidecar.
+  const files = [];
+  async function collect(directory, relative = '') {
+    const metadata = await lstat(directory);
+    if (!metadata.isDirectory())
+      throw new Error('Desktop app directory must not be a symlink or special file');
+    for (const name of await readdir(directory)) {
+      const file = join(directory, name);
+      const path = join(relative, name);
+      const metadata = await lstat(file);
+      if (metadata.isDirectory()) await collect(file, path);
+      else if (metadata.isFile()) files.push(path);
+      else throw new Error('Desktop app contains a non-regular file');
+    }
+  }
+  await collect(source);
+  if (!files.includes('gpui-shell.json') || !files.includes('main.js')) {
+    throw new Error('Desktop app manifest and main.js are required');
+  }
+  await rm(destination, { recursive: true, force: true });
+  await mkdir(destination, { recursive: true });
+  for (const file of files) {
+    await mkdir(dirname(join(destination, file)), { recursive: true });
+    await copyFile(join(source, file), join(destination, file));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

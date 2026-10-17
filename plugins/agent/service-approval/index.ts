@@ -33,7 +33,7 @@ import {
 } from '../../shared/contracts.js';
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type State = {
   revision: number;
@@ -183,15 +183,13 @@ export function serviceApproval<N extends Node>(
           ui.box(
             'approval-controls',
             [ui.button('close', text.closeModels), ui.button('check', text.check, props.checking)],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
-          ...(props.status
-            ? [ui.text('approval-status', props.status, 13, props.theme.muted)]
-            : []),
+          ...(props.status ? [ui.text('approval-status', props.status, props.theme.muted)] : []),
           ...(computer
             ? [
-                ui.text('computer-access-title', text.computerApprovalTitle, 16, props.theme.text),
-                ui.text('computer-access', text.computerApprovalDescription, 14, props.theme.text),
+                ui.text('computer-access-title', text.computerApprovalTitle, props.theme.text),
+                ui.text('computer-access', text.computerApprovalDescription, props.theme.text),
               ]
             : []),
           ...(request.kind === 'service_approval'
@@ -205,29 +203,20 @@ export function serviceApproval<N extends Node>(
                         content: ui.box(
                           'approval-target-document',
                           [
-                            ui.text('approval-tool', request.toolName, 17, props.theme.text, 550),
+                            ui.text('approval-tool', request.toolName, props.theme.text, 550),
                             ui.text(
                               'approval-target',
                               request.service + ' · ' + request.method,
-                              13,
                               props.theme.muted,
                             ),
                           ],
-                          {
-                            gap: 0,
-                            scroll: 'anchor',
-                            terminal: { grow: 1 },
-                            style: { width: fill, height: fill },
-                          },
+                          { gap: 0, scroll: 'anchor', terminal: { grow: 1 } },
                         ),
                       },
                       {},
                     ),
                   ],
-                  {
-                    terminal: { basis: 3, shrink: true },
-                    style: { width: fill, height: pixels(72), minHeight: 0 },
-                  },
+                  { terminal: { basis: 3, shrink: true } },
                 ),
               ]
             : []),
@@ -241,7 +230,6 @@ export function serviceApproval<N extends Node>(
                       ? text.approvalAllowed
                       : text.approvalDenied
                     : text.questionClosed,
-                  13,
                   props.theme.muted,
                 ),
               ]
@@ -260,13 +248,7 @@ export function serviceApproval<N extends Node>(
                 !available,
               ),
             ],
-            {
-              row: true,
-              gap: 1,
-              focusGroup: true,
-              terminal: { wrap: true },
-              style: { wrap: true },
-            },
+            { row: true, gap: 1, focusGroup: true, terminal: { wrap: true } },
           ),
           ...(!computer
             ? [
@@ -281,12 +263,7 @@ export function serviceApproval<N extends Node>(
               ]
             : []),
         ],
-        {
-          visible: props.open,
-          gap: presentation.target === 'tui' ? 1 : 12,
-          style: { width: fill, height: pixels(0), grow: 1, minHeight: 0 },
-          terminal: { grow: 1 },
-        },
+        { visible: props.open, gap: 1, terminal: { grow: 1 } },
       ),
       events,
     );

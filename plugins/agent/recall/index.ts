@@ -37,7 +37,7 @@ import { recallContract, type RecallProps } from '../../shared/contracts.js';
 import { pageHeader, withPageShell, type PageState } from '../../shared/page-shell.js';
 import { copy, type Copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { compactLabel, fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 const fields = ['query', 'since', 'until'] as const;
 type Field = (typeof fields)[number];
@@ -192,28 +192,19 @@ export function recall<N extends Node>(
       rows.push(ui.button('all', text.recallAll, disabled));
       for (const session of state.catalog?.sessions ?? [])
         rows.push(
-          ui.item
-            ? ui.item(
-                'session-' + session.id,
-                ui.text('label-' + session.id, compactLabel(session.title, 120)),
-                state.session?.id === session.id,
-                !props.open || props.busy,
-                { followFocus: true, submit: true },
-              )
-            : ui.button(
-                'session-' + session.id,
-                compactLabel(session.title, 120),
-                disabled,
-                false,
-                { width: fill, justify: 'start' },
-              ),
+          ui.item(
+            'session-' + session.id,
+            ui.text('label-' + session.id, compactLabel(session.title, 120)),
+            state.session?.id === session.id,
+            !props.open || props.busy,
+            { followFocus: true, submit: true },
+          ),
         );
     } else {
       for (const [index, session] of (state.page?.titles ?? []).entries())
         rows.push(
           ui.button('title-' + index, compactLabel(session.title, 120), disabled, false, {
-            width: fill,
-            justify: 'start',
+            align: 'start',
           }),
         );
       for (const [index, passage] of (state.page?.passages ?? []).entries())
@@ -226,25 +217,23 @@ export function recall<N extends Node>(
                 compactLabel(passage.session.title, 120),
                 disabled,
                 false,
-                { width: fill, justify: 'start' },
+                { align: 'start' },
               ),
-              ui.text('excerpt-' + index, passage.excerpt, 13, props.theme.muted),
+              ui.text('excerpt-' + index, passage.excerpt, props.theme.muted),
             ],
             { gap: 0 },
           ),
         );
       if (state.page && !rows.length)
-        rows.push(ui.text('recall-empty', text.recallEmpty, 14, props.theme.muted));
+        rows.push(ui.text('recall-empty', text.recallEmpty, props.theme.muted));
       if (state.page && !state.page.complete)
-        rows.push(ui.text('recall-partial', text.recallPartial, 13, props.theme.muted));
+        rows.push(ui.text('recall-partial', text.recallPartial, props.theme.muted));
     }
     const field = (name: Field, label: string) =>
       ui.box(
         'recall-field-' + name,
         [
-          ...(name === 'query'
-            ? []
-            : [ui.text('recall-label-' + name, label, 13, props.theme.muted)]),
+          ...(name === 'query' ? [] : [ui.text('recall-label-' + name, label, props.theme.muted)]),
           presentation.slot(
             'recall-' + name,
             'input',
@@ -261,12 +250,12 @@ export function recall<N extends Node>(
             { changed: 'changed', submitted: 'find' },
           ),
         ],
-        { gap: 0, terminal: { grow: 1 }, style: { grow: 1, minWidth: 0 } },
+        { gap: 0, terminal: { grow: 1 } },
       );
     const form = ui.box(
       'recall-form',
       [
-        ui.text('recall-intro', text.recallIntro, 14, props.theme.muted),
+        ui.text('recall-intro', text.recallIntro, props.theme.muted),
         ui.box(
           'recall-search',
           [field('query', text.recallFind), ui.button('find', text.recallFind, disabled, true)],
@@ -277,7 +266,7 @@ export function recall<N extends Node>(
           [field('since', text.recallSince), field('until', text.recallUntil)],
           { gap: 1, wide: { min_width: 45, direction: 'row' } },
         ),
-        ui.text('recall-date-hint', text.recallDateHint, 13, props.theme.muted),
+        ui.text('recall-date-hint', text.recallDateHint, props.theme.muted),
         ui.box(
           'recall-controls',
           [
@@ -297,7 +286,6 @@ export function recall<N extends Node>(
       gap: 1,
       focusGroup: state.picker,
       terminal: { grow: 1, basis: 0 },
-      style: { width: fill, height: fill },
     });
     const view = ui.box(
       'recall-page',
@@ -311,10 +299,8 @@ export function recall<N extends Node>(
           'back',
           false,
         ),
-        ...(state.notice
-          ? [ui.text('recall-notice', text[state.notice], 13, props.theme.error)]
-          : []),
-        ...(state.pending ? [ui.text('recall-loading', text.loading, 13, props.theme.muted)] : []),
+        ...(state.notice ? [ui.text('recall-notice', text[state.notice], props.theme.error)] : []),
+        ...(state.pending ? [ui.text('recall-loading', text.loading, props.theme.muted)] : []),
         form,
         presentation.reading(
           'recall-reading',
@@ -337,7 +323,6 @@ export function recall<N extends Node>(
         autoFocus: true,
         shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
         terminal: { grow: 1 },
-        style: { width: fill, height: fill },
       },
     );
     const result = output(state, view, events);
@@ -459,11 +444,7 @@ export function recall<N extends Node>(
               const session = state.catalog?.sessions.find(
                 (session) => input.kind === 'raw' && 'session-' + session.id === input.key,
               );
-              if (
-                session &&
-                presentation.target === 'tui' &&
-                (input.event as { kind?: string }).kind === 'activate'
-              ) {
+              if (session && true && (input.event as { kind?: string }).kind === 'activate') {
                 const at = state.catalog!.sessions.indexOf(session);
                 if (at >= state.catalog!.sessions.length - 3) catalog(state, actions, 'after');
                 else if (at < 3) catalog(state, actions, 'before');

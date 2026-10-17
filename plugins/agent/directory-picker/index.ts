@@ -34,14 +34,7 @@ import type {
 import { directoryPickerContract, type DirectoryPickerProps } from '../../shared/contracts.js';
 import { scrollRows, visibleRows, resetScroll, showRow } from '../../shared/scroll.js';
 import { copy } from './locale.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 type Navigation = 'roots' | 'child' | 'parent' | 'page';
 interface State {
@@ -182,7 +175,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const enabled = available(state, props);
@@ -192,18 +184,10 @@ function frame<N extends Node>(
     ({ entry: { key, directory }, at }) => {
       const active = at === state.active;
       const label =
-        (target === 'tui' ? (active ? (props.theme.ascii ? '> ' : '› ') : '  ') : '') +
-        compactLabel(directory.name, target === 'tui' ? 64 : 120);
+        (active ? (props.theme.ascii ? '> ' : '› ') : '  ') + compactLabel(directory.name, 64);
       const button = ui.button(key, label, !enabled, false, {
-        width: fill,
-        minWidth: 0,
-        truncate: true,
-        justify: 'start',
-        ...(target === 'tui'
-          ? { background: active ? props.theme.selected : 0 }
-          : active
-            ? { background: props.theme.selected }
-            : {}),
+        align: 'start',
+        ...{ background: active ? props.theme.selected : 0 },
       });
 
       return button;
@@ -212,18 +196,7 @@ function frame<N extends Node>(
   const view = ui.box(
     'directory-picker',
     [
-      ...(target === 'desktop'
-        ? [
-            ui.text(
-              'directory-title',
-              props.purpose === 'import' ? text.importsChooseSource : text.directoryTitle,
-              17,
-              props.theme.text,
-              550,
-            ),
-          ]
-        : []),
-      ui.text('directory-help', text.directoryHelp, 13, props.theme.muted),
+      ui.text('directory-help', text.directoryHelp, props.theme.muted),
       ui.box(
         'directory-query-scope',
         [
@@ -257,37 +230,28 @@ function frame<N extends Node>(
             ui.text(
               'directory-query-error',
               state.queryError === 'long' ? text.searchTooLong : text.directoryFailed,
-              13,
               props.theme.muted,
             ),
           ]
         : []),
       ...(current
-        ? [
-            ui.text(
-              'directory-path',
-              compactLabel(current.path, target === 'tui' ? 66 : 180),
-              13,
-              props.theme.muted,
-            ),
-          ]
+        ? [ui.text('directory-path', compactLabel(current.path, 66), props.theme.muted)]
         : []),
       ...(state.pending
-        ? [ui.text('directory-loading', text.directoryLoading, 13, props.theme.muted)]
+        ? [ui.text('directory-loading', text.directoryLoading, props.theme.muted)]
         : []),
       ...(state.failed
-        ? [ui.text('directory-failed', text.directoryFailed, 13, props.theme.muted)]
+        ? [ui.text('directory-failed', text.directoryFailed, props.theme.muted)]
         : []),
       ...(!state.pending && !state.failed && page && !buttons.length
-        ? [ui.text('directory-empty', text.directoryEmpty, 13, props.theme.muted)]
+        ? [ui.text('directory-empty', text.directoryEmpty, props.theme.muted)]
         : []),
       presentation.reading(
         'directory-rows',
         {
           content: ui.box('directory-viewport', buttons, {
             scroll: 'anchor',
-            gap: target === 'desktop' ? 2 : 0,
-            style: { width: fill, height: pixels(260), minWidth: 0, minHeight: 0 },
+            gap: 0,
             terminal: { grow: 1, basis: 0 },
           }),
           command: state.reveal,
@@ -302,10 +266,10 @@ function frame<N extends Node>(
             : []),
           ui.button(
             'refresh',
-            target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.directoryRefresh,
+            props.theme.ascii ? 'r' : '↻',
             !state.open || !props.open || props.busy || !!state.pending,
             false,
-            target === 'tui' ? { background: 0 } : {},
+            { background: 0 },
             undefined,
             text.directoryRefresh,
           ),
@@ -318,26 +282,14 @@ function frame<N extends Node>(
                 ),
               ]
             : []),
-          ui.button(
-            'close',
-            text.cancel,
-            false,
-            false,
-            target === 'tui' ? { background: 0, align: 'start' } : {},
-          ),
+          ui.button('close', text.cancel, false, false, { background: 0, align: 'start' }),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          style: { wrap: true },
-          terminal: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       visible: state.open && props.open,
-      gap: target === 'desktop' ? 8 : 0,
-      style: { width: fill, minWidth: 0 },
+      gap: 0,
       terminal: { grow: 1 },
       shortcuts: [{ key: 'escape', modifiers: [], input: 'close', enabled: true }],
     },

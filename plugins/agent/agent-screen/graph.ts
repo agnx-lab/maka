@@ -33,7 +33,7 @@ import type {
 import type { State } from './state.js';
 import type { Theme } from '../../shared/contracts.js';
 import { copy, graphStatuses } from './locale.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import { intent, mutationPending } from './actions.js';
 
 export type GraphRequest =
@@ -256,10 +256,7 @@ export function graphView<N extends Node>(
     text = copy(locale),
     g = state.graph,
     page = g.page;
-  const open =
-    presentation.target === 'tui'
-      ? state.inspector === 'graph' && !state.dialog
-      : state.dialog === 'graph';
+  const open = state.inspector === 'graph' && !state.dialog;
   const editable =
     !!page?.enabled && !g.pinned && !state.selected?.archived && !mutationPending(state);
   const closed = !page?.epoch || ['completed', 'stopped'].includes(page.status);
@@ -273,7 +270,7 @@ export function graphView<N extends Node>(
     [
       ui.box(
         'graph-heading',
-        [ui.text('graph-title', text.graphTitle, 17), ui.button('graph-close', text.closeModels)],
+        [ui.text('graph-title', text.graphTitle), ui.button('graph-close', text.closeModels)],
         { row: true, gap: 1 },
       ),
       ...(g.message
@@ -297,7 +294,6 @@ export function graphView<N extends Node>(
                     : g.message === 'graph_incognito'
                       ? text.graphIncognito
                       : text.graphRejected,
-              13,
               theme.warning,
             ),
           ]
@@ -308,19 +304,14 @@ export function graphView<N extends Node>(
       ...(!page
         ? [ui.text('graph-loading', text.loading)]
         : [
-            ui.text(
-              'graph-mode',
-              `${text.graphMode}: ${page.selectedMode ?? text.graphOrdinary}`,
-              13,
-            ),
+            ui.text('graph-mode', `${text.graphMode}: ${page.selectedMode ?? text.graphOrdinary}`),
             ui.text(
               'graph-status',
               `${page.epoch ? `${page.epoch.mode} #${page.epoch.epoch} · ` : ''}${label(page.status)}${!page.quiescent ? ` · ${text.graphSettling}` : ''}`,
-              13,
             ),
             ...(g.pinned
               ? [
-                  ui.text('graph-pinned', text.graphReadOnly, 13, theme.muted),
+                  ui.text('graph-pinned', text.graphReadOnly, theme.muted),
                   ui.button('graph-current', text.graphCurrent),
                 ]
               : [
@@ -344,9 +335,9 @@ export function graphView<N extends Node>(
                         !editable || page.selectedMode === null,
                       ),
                     ],
-                    { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+                    { row: true, gap: 1, terminal: { wrap: true } },
                   ),
-                  ui.text('graph-help', text.graphHelp, 12, theme.muted),
+                  ui.text('graph-help', text.graphHelp, theme.muted),
                 ]),
             ui.button('graph-history', text.graphHistory),
             ...(g.showHistory
@@ -382,14 +373,10 @@ export function graphView<N extends Node>(
                   ui.box(
                     `graph-item-${w.workId}`,
                     [
-                      ui.text(
-                        `graph-item-title-${w.workId}`,
-                        `${w.workId} · ${label(w.status)}`,
-                        13,
-                      ),
+                      ui.text(`graph-item-title-${w.workId}`, `${w.workId} · ${label(w.status)}`),
                       ui.text(`graph-item-instruction-${w.workId}`, w.instructionExcerpt),
                       ...(w.failure
-                        ? [ui.text(`graph-item-error-${w.workId}`, w.failure, 12, theme.warning)]
+                        ? [ui.text(`graph-item-error-${w.workId}`, w.failure, theme.warning)]
                         : []),
                       ui.button(
                         `graph-work-${w.workId}`,
@@ -434,14 +421,13 @@ export function graphView<N extends Node>(
                   (i) => `${i.sourceGraphId}: ${i.resultId}`,
                 ),
               ].join('\n'),
-              12,
               theme.muted,
             ),
           ]
         : []),
       ...(g.result
         ? [
-            ui.text('graph-result-id', g.result.resultId, 12, theme.muted),
+            ui.text('graph-result-id', g.result.resultId, theme.muted),
             ui.text('graph-result-text', g.result.text),
             ui.box(
               'graph-result-nav',
@@ -465,12 +451,6 @@ export function graphView<N extends Node>(
         ? [ui.button('graph-check', text.check)]
         : []),
     ],
-    {
-      visible: open,
-      gap: 1,
-      scroll: 'manual',
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    },
+    { visible: open, gap: 1, scroll: 'manual', terminal: { grow: 1 } },
   );
 }

@@ -34,7 +34,7 @@ import { copy, type Copy } from './locale.js';
 import { pluginDescription } from '../../shared/plugin-description.js';
 import { pageHeader } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 import { complete, entries, locked, value } from './operations.js';
 import { type State } from './state.js';
 
@@ -66,81 +66,56 @@ export function frame<N extends Node>(
   const rows: N[] =
     state.route === 'list'
       ? configuration.entries.map((app, index) =>
-          presentation.target === 'tui' && ui.contextMenu
-            ? ui.contextMenu(
-                'app-row-' + app.id,
-                app.label,
-                ui.button('open-' + app.id, app.label, disabled, false, {
-                  align: 'start',
-                  background: 0,
-                }),
-                [
-                  ...(state.opened.includes(app.id)
-                    ? [ui.button('close-' + app.id, text.appsClose, disabled)]
-                    : []),
-                  ui.button(
-                    'remove-' + index,
-                    text.appsRemove,
-                    disabled || !state.catalog || !sameValue(entries(state), configuration.entries),
-                  ),
-                ],
-              )
-            : ui.box(
-                'app-row-' + app.id,
-                [
-                  ui.button('open-' + app.id, app.label, disabled, false, { align: 'start' }),
-                  ...(state.opened.includes(app.id)
-                    ? [ui.button('close-' + app.id, text.appsClose, disabled)]
-                    : []),
-                  ui.button(
-                    'remove-' + index,
-                    text.appsRemove,
-                    disabled || !state.catalog || !sameValue(entries(state), configuration.entries),
-                  ),
-                ],
-                { row: true, terminal: { wrap: true }, style: { wrap: true } },
+          ui.contextMenu(
+            'app-row-' + app.id,
+            app.label,
+            ui.button('open-' + app.id, app.label, disabled, false, {
+              align: 'start',
+              background: 0,
+            }),
+            [
+              ...(state.opened.includes(app.id)
+                ? [ui.button('close-' + app.id, text.appsClose, disabled)]
+                : []),
+              ui.button(
+                'remove-' + index,
+                text.appsRemove,
+                disabled || !state.catalog || !sameValue(entries(state), configuration.entries),
               ),
+            ],
+          ),
         )
       : state.route === 'choose'
         ? (state.catalog?.candidates ?? [])
             .slice(state.listWindow, state.listWindow + 64)
             .map((choice, offset) =>
-              ui.item
-                ? ui.item(
-                    'candidate-' + (state.listWindow + offset),
-                    ui.box(
-                      'candidate-copy-' + (state.listWindow + offset),
-                      [
-                        ui.text(
-                          'candidate-label-' + (state.listWindow + offset),
-                          pluginDescription(choice.presentation, props.locale, choice.label).name,
-                        ),
-                        ...(pluginDescription(choice.presentation, props.locale, choice.label)
-                          .description
-                          ? [
-                              ui.text(
-                                'candidate-description-' + (state.listWindow + offset),
-                                pluginDescription(choice.presentation, props.locale, choice.label)
-                                  .description,
-                                13,
-                                props.theme.muted,
-                              ),
-                            ]
-                          : []),
-                      ],
-                      { gap: 0 },
+              ui.item(
+                'candidate-' + (state.listWindow + offset),
+                ui.box(
+                  'candidate-copy-' + (state.listWindow + offset),
+                  [
+                    ui.text(
+                      'candidate-label-' + (state.listWindow + offset),
+                      pluginDescription(choice.presentation, props.locale, choice.label).name,
                     ),
-                    state.focused === 'candidate-' + (state.listWindow + offset),
-                    disabled && state.pending?.request.kind !== 'catalog',
-                    { followFocus: true, submit: true },
-                  )
-                : ui.button(
-                    'candidate-' + (state.listWindow + offset),
-                    pluginDescription(choice.presentation, props.locale, choice.label).name,
-                    disabled,
-                    false,
-                    { align: 'start' },
-                  ),
+                    ...(pluginDescription(choice.presentation, props.locale, choice.label)
+                      .description
+                      ? [
+                          ui.text(
+                            'candidate-description-' + (state.listWindow + offset),
+                            pluginDescription(choice.presentation, props.locale, choice.label)
+                              .description,
+                            props.theme.muted,
+                          ),
+                        ]
+                      : []),
+                  ],
+                  { gap: 0 },
+                ),
+                state.focused === 'candidate-' + (state.listWindow + offset),
+                disabled && state.pending?.request.kind !== 'catalog',
+                { followFocus: true, submit: true },
+              ),
             )
         : state.route === 'bindings'
           ? (draft?.choices?.candidates ?? [])
@@ -153,25 +128,13 @@ export function frame<N extends Node>(
                   (draft.bindings[draft.choosing.name] ?? []).some((t) =>
                     sameValue(t, choice.target),
                   );
-                return ui.item
-                  ? ui.item(
-                      'binding-' + index,
-                      ui.text('binding-label-' + index, choice.label),
-                      selected,
-                      disabled && state.pending?.request.kind !== 'bindings',
-                      { followFocus: true, submit: true },
-                    )
-                  : ui.button(
-                      'binding-' + index,
-                      choice.label,
-                      disabled,
-                      choice.kind === 'bound' &&
-                        !!draft?.choosing &&
-                        (draft.bindings[draft.choosing.name] ?? []).some((t) =>
-                          sameValue(t, choice.target),
-                        ),
-                      { align: 'start' },
-                    );
+                return ui.item(
+                  'binding-' + index,
+                  ui.text('binding-label-' + index, choice.label),
+                  selected,
+                  disabled && state.pending?.request.kind !== 'bindings',
+                  { followFocus: true, submit: true },
+                );
               })
           : [];
   const title =
@@ -199,13 +162,13 @@ export function frame<N extends Node>(
         !!state.pending && !state.current,
       ),
       ...((state.pending || state.restoring) && state.route !== 'file'
-        ? [ui.text('apps-loading', text.connecting, 13, props.theme.muted)]
+        ? [ui.text('apps-loading', text.connecting, props.theme.muted)]
         : []),
       ...(state.notice && state.route !== 'file'
-        ? [ui.text('apps-notice', text[state.notice], 13, props.theme.muted)]
+        ? [ui.text('apps-notice', text[state.notice], props.theme.muted)]
         : []),
       ...(state.diagnostic && state.route !== 'file'
-        ? [ui.text('apps-diagnostic', state.diagnostic, 13, props.theme.warning)]
+        ? [ui.text('apps-diagnostic', state.diagnostic, props.theme.warning)]
         : []),
       ...(state.current
         ? [ui.button('receipt', text.executionReceipt, !!state.pending || !state.current.reference)]
@@ -230,7 +193,6 @@ export function frame<N extends Node>(
           row: true,
           gap: 1,
           terminal: { wrap: true },
-          style: { wrap: true },
         },
       ),
       ui.box(
@@ -250,19 +212,12 @@ export function frame<N extends Node>(
                         ui.text(
                           'apps-empty',
                           state.route === 'list' ? text.appsEmpty : text.appsNoCandidates,
-                          14,
                           props.theme.muted,
                         ),
                       ]
                     : []),
                 ],
-                {
-                  scroll: 'anchor',
-                  focusGroup: true,
-                  gap: 1,
-                  terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: fill, minHeight: 0 },
-                },
+                { scroll: 'anchor', focusGroup: true, gap: 1, terminal: { grow: 1, basis: 0 } },
               ),
               command: null,
             },
@@ -272,7 +227,6 @@ export function frame<N extends Node>(
         {
           visible: ['list', 'choose', 'bindings'].includes(state.route),
           terminal: { grow: 1, basis: 0 },
-          style: { width: fill, height: fill, minHeight: 0 },
         },
       ),
       ui.box(
@@ -281,10 +235,9 @@ export function frame<N extends Node>(
           ui.text(
             'apps-setup-help',
             draft?.candidate.kind === 'bound' ? text.appsExistingHelp : text.appsSetupHelp,
-            13,
             props.theme.muted,
           ),
-          ui.text('apps-name-label', text.appsName, 13, props.theme.muted),
+          ui.text('apps-name-label', text.appsName, props.theme.muted),
           presentation.slot(
             'apps-name',
             'input',
@@ -343,7 +296,6 @@ export function frame<N extends Node>(
                             ui.text(
                               'app-setting-description-' + index,
                               f.description,
-                              12,
                               props.theme.muted,
                             ),
                           ]
@@ -353,15 +305,15 @@ export function frame<N extends Node>(
                   );
                 }),
               ...(draft?.page && !draft.page.fields.length
-                ? [ui.text('apps-settings-empty', text.appsNoSettings, 13, props.theme.muted)]
+                ? [ui.text('apps-settings-empty', text.appsNoSettings, props.theme.muted)]
                 : []),
               ...(draft?.path.length
                 ? [ui.button('settings-up', text.directoryParent, suspended)]
                 : []),
               ...(draft?.candidate.kind === 'package' && draft.page?.imports.length
                 ? [
-                    ui.text('apps-bindings-title', text.appsBindings, 15, props.theme.text, 500),
-                    ui.text('apps-bindings-help', text.appsBindingHelp, 13, props.theme.muted),
+                    ui.text('apps-bindings-title', text.appsBindings, props.theme.text, 500),
+                    ui.text('apps-bindings-help', text.appsBindingHelp, props.theme.muted),
                     ...(draft.page?.imports ?? []).map((binding, index) =>
                       ui.button(
                         'choose-binding-' + index,
@@ -384,7 +336,6 @@ export function frame<N extends Node>(
               scroll: 'anchor',
               gap: 1,
               terminal: { grow: 0, shrink: true },
-              style: { width: fill, height: fill, minHeight: 0 },
             },
           ),
         },
@@ -393,20 +344,20 @@ export function frame<N extends Node>(
       ui.box(
         'apps-file-region',
         [
-          ui.text('apps-file-help', text.deploymentInstallHelp, 13, props.theme.muted),
+          ui.text('apps-file-help', text.deploymentInstallHelp, props.theme.muted),
           packageSourceView(presentation, props, 'apps', state.installSource, suspended),
           ...(state.notice
-            ? [ui.text('apps-install-notice', text[state.notice], 13, props.theme.warning)]
+            ? [ui.text('apps-install-notice', text[state.notice], props.theme.warning)]
             : []),
           ...(state.diagnostic
-            ? [ui.text('apps-install-diagnostic', state.diagnostic, 13, props.theme.warning)]
+            ? [ui.text('apps-install-diagnostic', state.diagnostic, props.theme.warning)]
             : []),
           ...(state.installSource.mode === 'file' && state.installSource.observation?.file
-            ? [ui.text('apps-file-name', state.installSource.observation.file.name, 14)]
+            ? [ui.text('apps-file-name', state.installSource.observation.file.name)]
             : []),
           ...(state.installSource.mode === 'file' &&
           state.installSource.observation?.phase === 'failed'
-            ? [ui.text('apps-file-error', text.deploymentFileFailed, 13, props.theme.warning)]
+            ? [ui.text('apps-file-error', text.deploymentFileFailed, props.theme.warning)]
             : []),
         ],
         {
@@ -417,7 +368,6 @@ export function frame<N extends Node>(
             grow:
               state.installSource.mode === 'file' && !state.installSource.observation?.file ? 1 : 0,
           },
-          style: { width: fill, height: fill, minHeight: 0 },
         },
       ),
       ...configuration.entries.flatMap((app, member) =>
@@ -441,7 +391,6 @@ export function frame<N extends Node>(
                 {
                   visible: state.route === 'app' && state.selected === app.id,
                   terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: fill, minHeight: 0 },
                 },
               ),
             ]
@@ -479,7 +428,6 @@ export function frame<N extends Node>(
           visible: !['list', 'choose'].includes(state.route),
           row: true,
           terminal: { wrap: true },
-          style: { wrap: true },
           gap: 1,
         },
       ),
@@ -489,7 +437,6 @@ export function frame<N extends Node>(
       gap: 1,
       autoFocus: true,
       terminal: { grow: 1 },
-      style: { width: fill, height: fill },
       shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
     },
   );
@@ -528,7 +475,7 @@ export function frame<N extends Node>(
         { row: true },
       ),
     ],
-    { gap: 1, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { gap: 1, terminal: { grow: 1 } },
   );
   const withEditor = ui.dialog(
     'apps-setting-overlay',
@@ -536,7 +483,6 @@ export function frame<N extends Node>(
     page,
     editor,
     !!setting,
-    {},
     { width: 64, height: 12 },
   );
   const confirmation = ui.box(
@@ -549,17 +495,16 @@ export function frame<N extends Node>(
           : state.confirm?.kind === 'edit' && state.confirm.outcome === 'remove'
             ? text.appsRemoveHelp
             : text.appsConfirmHelp,
-        14,
       ),
       ...(state.confirm?.kind === 'install' && 'file' in state.confirm && state.confirm.file.file
-        ? [ui.text('apps-confirm-file', state.confirm.file.file.name, 15)]
+        ? [ui.text('apps-confirm-file', state.confirm.file.file.name)]
         : []),
       ...(state.confirm?.kind === 'install' && 'url' in state.confirm
-        ? [ui.text('apps-confirm-url', state.confirm.url, 14)]
+        ? [ui.text('apps-confirm-url', state.confirm.url)]
         : []),
       ...(draft
         ? [
-            ui.text('apps-confirm-name', draft.label, 15, props.theme.text, 600),
+            ui.text('apps-confirm-name', draft.label, props.theme.text, 600),
             ...Object.entries(draft.bindings).map(([name, targets], index) =>
               ui.text(
                 'apps-confirm-binding-' + index,
@@ -574,17 +519,16 @@ export function frame<N extends Node>(
                           : t.name,
                     )
                     .join(', '),
-                13,
                 props.theme.muted,
               ),
             ),
           ]
         : []),
       ...(state.notice
-        ? [ui.text('apps-confirm-notice', text[state.notice], 13, props.theme.muted)]
+        ? [ui.text('apps-confirm-notice', text[state.notice], props.theme.muted)]
         : []),
       ...(state.diagnostic
-        ? [ui.text('apps-confirm-diagnostic', state.diagnostic, 13, props.theme.warning)]
+        ? [ui.text('apps-confirm-diagnostic', state.diagnostic, props.theme.warning)]
         : []),
       ...(state.current
         ? [
@@ -610,7 +554,7 @@ export function frame<N extends Node>(
             true,
           ),
         ],
-        { row: true, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, terminal: { wrap: true } },
       ),
     ],
     { gap: 1 },
@@ -621,16 +565,11 @@ export function frame<N extends Node>(
     withEditor,
     confirmation,
     !!state.confirm,
-    {},
     { width: 72 },
   );
   const result = output(
     state,
-    ui.box('apps-root', [view], {
-      visible: props.open,
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    }),
+    ui.box('apps-root', [view], { visible: props.open, terminal: { grow: 1 } }),
     events,
   );
   result.actions = actions;

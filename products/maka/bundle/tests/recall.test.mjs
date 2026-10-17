@@ -22,12 +22,12 @@ import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const ajv = new Ajv({ strict: false, formats: { uint64: true } });
 addFormats(ajv);
 const validate = (method) => ajv.compile(contracts.agent.interface.methods[method].input);
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Recall ${target} uses exact editor snapshots, validates date bounds, browses archived sessions and emits original anchors`, async () => {
     const { component } = await import(`../dist/packages/recall/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false };

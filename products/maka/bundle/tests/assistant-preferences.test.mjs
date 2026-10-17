@@ -21,12 +21,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const valid = new Ajv({ strict: false, formats: { uint64: true } }).compile(
   contracts.settings.interface.methods.updateAssistantPreferences.input,
 );
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Assistant ${target} mounts independently addressable preference editors`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
@@ -47,7 +47,7 @@ for (const target of ['tui', 'desktop'])
     );
   });
 
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Assistant ${target} privacy recovers the original operation without overwriting editor drafts`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
@@ -111,7 +111,7 @@ for (const target of ['tui', 'desktop'])
     );
   });
 
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Assistant ${target} shell titles toggle saves the observed preference revision`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
@@ -187,7 +187,7 @@ for (const target of ['tui', 'desktop'])
     });
   });
 
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Assistant ${target} saves a custom compression prompt and restores the built-in default`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
@@ -288,7 +288,7 @@ for (const target of ['tui', 'desktop'])
     assert.equal(out.frame.state.saved.compactionPrompt, 'Built-in instructions');
   });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   const globalFixture = async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };

@@ -36,7 +36,6 @@ import { diagnosticChange } from './diagnostics.js';
 import { observeBookmark, retryBookmark } from '../../shared/bookmark.js';
 import type { AgentScreenProps, Theme } from '../../shared/contracts.js';
 import { settingsCategory } from '../../shared/settings.js';
-import { resolveLocale } from '../../shared/locale.js';
 
 import { type Node, type Presentation } from '../../shared/view.js';
 
@@ -67,13 +66,11 @@ export function handleEvent<N extends Node>(
   props: AgentScreenProps,
   values: ComponentValues,
 ) {
-  const target = presentation.target;
-
   // Callbacks receive detached committed state. Mutations here belong only to
   // the candidate frame and publish with its intents in one UI transaction.
   const state = previous;
   state.embedding = props;
-  if (target === 'tui') {
+  {
     observeBookmark(
       state.recoveryCheckpoint,
       input,
@@ -186,12 +183,8 @@ export function handleEvent<N extends Node>(
   state.revision++;
   const actions: Action[] = [];
   const events: Emission[] = [];
-  const locale =
-    target === 'tui'
-      ? effectiveLocale(state.preferences, configuredLocale, values.locale?.[0])
-      : resolveLocale(configuredLocale, values.locale?.[0]);
+  const locale = effectiveLocale(state.preferences, configuredLocale, values.locale?.[0]);
   if (
-    target === 'tui' &&
     appearanceEvent(
       state.preferences,
       input,

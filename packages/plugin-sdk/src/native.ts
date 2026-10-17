@@ -67,11 +67,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
     exports: { FilePicker: typeof contracts.filePicker };
   };
-  image: {
-    implementation: string;
-    configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
-    exports: { Image: typeof contracts.image };
-  };
   terminalView: {
     implementation: string;
     configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
@@ -187,11 +182,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     implementation: string;
     configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
     exports: { SecretInput: typeof contracts.secretInput; TextInput: typeof contracts.textInput };
-  };
-  desktopSurface: {
-    implementation: string;
-    configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
-    exports: { Surface: typeof contracts.desktopSurface };
   };
   terminalSurface: {
     implementation: string;
@@ -458,11 +448,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
     exports: { FilePicker: contracts.filePicker },
   },
-  image: {
-    implementation: 'maka.ui.image',
-    configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    exports: { Image: contracts.image },
-  },
   terminalView: {
     implementation: 'maka.ui.terminal',
     configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
@@ -579,11 +564,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     implementation: 'maka.ui.input',
     configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
     exports: { SecretInput: contracts.secretInput, TextInput: contracts.textInput },
-  },
-  desktopSurface: {
-    implementation: 'maka.ui.surface.desktop',
-    configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    exports: { Surface: contracts.desktopSurface },
   },
   terminalSurface: {
     implementation: 'maka.ui.surface.tui',

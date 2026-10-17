@@ -23,7 +23,7 @@
 
 Apache Maka (Incubating) 是一个高性能 Agent 工作台，完整记录它做过的每一件事。
 
-Maka 通过原生 Rust 终端和桌面呈现器运行插件组合定义的产品。Runtime Host 统一管理执行、权限和持久状态，模型提供商、工具与业务能力通过公共插件接口接入。
+Maka 提供插件组合定义的终端产品和原生桌面 shell。Runtime Host 统一管理执行、权限和持久状态，模型提供商、工具与业务能力通过公共插件接口接入。
 
 ## 从源码运行
 
@@ -36,7 +36,9 @@ just setup
 just run
 ```
 
-`just run` 打开终端产品，首次确认当前工作目录并安装内置工具与技能，后续重开已保存的应用。`just run --help` 查看 CLI 命令。`just build --release` 生成 `target/release/maka`，Windows 下为 `maka.exe`。Node.js 负责构建时打包提供商 SDK，生成的可执行文件在内嵌 V8 中运行 JavaScript。 用 `just run application run --root PATH --deployment UUID --connections FILE` 启动已校验的终端组合，编写和安装方式见[普通 Agent 产品](products/maka/bundle/README.zh-CN.md)。
+`just run` 打开终端产品，首次确认当前工作目录并安装内置工具与技能，后续重开已保存的应用。`just run --help` 查看 CLI 命令。`just build --release` 生成 `target/release/maka`、`maka-desktop-shell` 及相邻的 `app/` 目录，Windows 可执行文件使用 `.exe` 后缀。构建入口支持 `--release` 和 `--target`。Node.js 在构建时为 CLI 打包提供商 SDK，CLI 在内嵌 V8 中运行 JavaScript，桌面 shell 通过 QuickJS 执行 app。用 `just run application run --root PATH --deployment UUID --connections FILE` 启动已校验的终端组合，编写和安装方式见[普通 Agent 产品](products/maka/bundle/README.zh-CN.md)。
+
+通过 `target/release/maka desktop --root HOST_ROOT` 启动桌面，显式选择实际业务 Host Root。启动器初始化或重开 Host，并在 shell 运行期间保留其客户端。产物布局和开发命令见 [desktop-shell](products/maka/desktop-shell/README.zh-CN.md)。
 
 ## 目录
 

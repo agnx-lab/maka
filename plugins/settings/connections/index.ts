@@ -33,10 +33,10 @@ import type {
 } from '../../../packages/plugin-sdk/src/index.js';
 import { connectionsContract, type ConnectionsProps } from '../../shared/contracts.js';
 import { searchState, searchEvent, matches, type Search } from '../search.js';
-import { compactLabel, pixels } from '../../shared/view.js';
+
 import { pageHeader, withPageShell, type PageState } from '../../shared/page-shell.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Presentation, type Node } from '../../shared/view.js';
+import { output, type Presentation, type Node } from '../../shared/view.js';
 interface State extends PageState {
   revision: number;
   setupRequest: number | null;
@@ -105,7 +105,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const matched = state.connections
@@ -124,7 +123,7 @@ function frame<N extends Node>(
         ui.button('edit-' + id, text.editConnection, state.pending?.kind === 'detail'),
         ui.button('remove-' + id, text.removeConnection, state.pending?.kind === 'detail'),
       ];
-      if (ui.item) {
+      {
         const identity =
           connection.slug === connection.provider.name
             ? connection.slug
@@ -141,14 +140,11 @@ function frame<N extends Node>(
               ui.text(
                 'name-' + id,
                 `${selected ? (props.theme.ascii ? '>' : '›') : ' '} ${connection.name}${connection.enabled ? '' : ' · ' + text.connectionDisabled}`,
-                14,
                 props.theme.text,
                 400,
                 { truncate: true },
               ),
-              ui.text('detail-' + id, '  ' + detail, 13, props.theme.muted, 400, {
-                truncate: true,
-              }),
+              ui.text('detail-' + id, '  ' + detail, props.theme.muted, 400, { truncate: true }),
             ],
             { gap: 0 },
           ),
@@ -165,26 +161,6 @@ function frame<N extends Node>(
             )
           : item;
       }
-      return [
-        ui.box(
-          'connection-' + id,
-          [
-            ui.text('name-' + id, compactLabel(connection.name, 100), 16, props.theme.text, 550),
-            ui.text(
-              'provider-' + id,
-              connection.provider.name + ' · ' + connection.slug,
-              13,
-              props.theme.muted,
-            ),
-            ui.box('connection-actions-' + id, actions, {
-              visible: connection.editable,
-              row: true,
-              gap: 8,
-            }),
-          ],
-          { gap: 6, padding: 16, surface: true, style: { width: fill } },
-        ),
-      ];
     });
   const catalog = ui.box(
     'connections',
@@ -210,29 +186,26 @@ function frame<N extends Node>(
             { changed: 'connection-query' },
           ),
         ],
-        { gap: 0, style: { width: fill, height: pixels(36) } },
+        { gap: 0 },
       ),
       ...(state.search.error ? [ui.text('search-error', text[state.search.error])] : []),
       ...(!rows.length && state.search.query && !state.pending
         ? [ui.text('no-matches', text.noSearchResults)]
         : []),
-      ...(state.pending ? [ui.text('loading', text.connecting, 13, props.theme.muted)] : []),
-      ...(state.failed
-        ? [ui.text('failed', text.connectionsUnavailable, 13, props.theme.muted)]
-        : []),
+      ...(state.pending ? [ui.text('loading', text.connecting, props.theme.muted)] : []),
+      ...(state.failed ? [ui.text('failed', text.connectionsUnavailable, props.theme.muted)] : []),
       ...(!state.pending && !state.failed && !state.connections.length
-        ? [ui.text('empty', text.noConnections, 15, props.theme.muted)]
+        ? [ui.text('empty', text.noConnections, props.theme.muted)]
         : []),
       presentation.reading(
         'connection-list',
         {
           command: state.focus,
           content: ui.box('connection-rows', rows, {
-            focusGroup: target === 'tui',
+            focusGroup: true,
             scroll: 'anchor',
-            gap: target === 'tui' ? 1 : 16,
+            gap: 1,
             terminal: { grow: 1, basis: 0 },
-            style: { width: fill, height: fill, minHeight: 0 },
           }),
         },
         { input: 'connection-input', observed: 'connection-viewport' },
@@ -240,8 +213,7 @@ function frame<N extends Node>(
       ui.box(
         'page-actions',
         [
-          ...(target === 'tui' &&
-          state.selected &&
+          ...(state.selected &&
           state.connections.some((c) => c.basis.connectionId === state.selected && c.editable)
             ? [
                 ui.button(
@@ -265,28 +237,26 @@ function frame<N extends Node>(
 
           ui.button(
             'refresh',
-            target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.refreshConnections,
+            props.theme.ascii ? 'r' : '↻',
             !!state.pending,
             false,
-            target === 'tui' ? { background: 0 } : {},
+            { background: 0 },
             undefined,
             text.refreshConnections,
           ),
         ],
-        { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       visible: state.route === 'catalog',
       autoFocus: true,
-      gap: target === 'desktop' ? 16 : 1,
-      padding: target === 'desktop' ? 24 : props.shell ? 0 : 1,
+      gap: 1,
+      padding: props.shell ? 0 : 1,
       terminal: { grow: 1 },
-      style: { width: fill, height: fill, maxWidth: 760, minWidth: 0, minHeight: 0 },
-      shortcuts:
-        target === 'tui'
-          ? [{ key: 'escape', modifiers: [], input: 'back', enabled: state.route === 'catalog' }]
-          : [],
+      shortcuts: [
+        { key: 'escape', modifiers: [], input: 'back', enabled: state.route === 'catalog' },
+      ],
     },
   );
   const view = ui.box(
@@ -326,7 +296,7 @@ function frame<N extends Node>(
             ]
           : []),
     ],
-    { gap: 0, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { gap: 0, terminal: { grow: 1 } },
   );
   const out = output(state, view, events);
   out.actions = actions;
@@ -452,7 +422,7 @@ export function connections<N extends Node>(
                   state.mount++;
                 }
               }
-              if (presentation.target === 'tui' && state.selected && !pending.append)
+              if (state.selected && !pending.append)
                 state.focus = {
                   sequence: (state.focus?.sequence ?? 0) + 1,
                   target: { kind: 'reveal_child', key: 'select-' + state.selected },

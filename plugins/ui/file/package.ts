@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.file',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '文件选择器', description: '浏览本地文件，选择要打开或安装的文件。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.filePicker)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.filePicker) },
   },
 };

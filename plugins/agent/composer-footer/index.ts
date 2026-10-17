@@ -68,7 +68,7 @@ export function footer<N extends Node>(presentation: Presentation<N>): Component
     );
     const contextColor = props.compacting ? theme.accent : theme.muted;
     const line = (key: string, text: string, color = contextColor) =>
-      ui.text(key, text, 12, color, 400, { truncate: true }, hint);
+      ui.text(key, text, color, 400, { truncate: true }, hint);
     const reducedLine = (key: string, text: string) =>
       ui.box(
         `${key}-row`,
@@ -89,7 +89,7 @@ export function footer<N extends Node>(presentation: Presentation<N>): Component
         ],
         { row: true, gap: 0 },
       );
-    if (presentation.target === 'desktop') return output(state, full());
+
     const layout = (basis: number) => ({
       basis,
       grow: 0,

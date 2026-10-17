@@ -49,12 +49,7 @@ import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
 import { type Node, type Presentation } from '../../shared/view.js';
 
-import {
-  attachmentChild,
-  attachmentFiles,
-  pastedFiles,
-  type DraftFilePaste,
-} from '../../shared/attachments.js';
+import { attachmentChild, pastedFiles, type DraftFilePaste } from '../../shared/attachments.js';
 
 import type { ComposerReadiness } from '../../shared/drafts.js';
 
@@ -104,17 +99,16 @@ export function handleComponent<N extends Node>(
   events: Emission[],
   locale: string,
 ) {
-  const target = presentation.target;
   if (input.child === 'composer' && input.name === 'command') {
     const command = input.event as Pick<ComposerSent, 'context' | 'dataSource'> & { id: string };
     if (
       command.context === state.selected?.id &&
       sameValue(command.dataSource, state.selected.dataSource)
     ) {
-      const available = rootCommands(state, locale, target).find(
+      const available = rootCommands(state, locale).find(
         (item) => item.id === command.id && !item.disabled,
       );
-      if (available) rootCommand(state, actions, locale, available.kind, target);
+      if (available) rootCommand(state, actions, locale, available.kind);
     }
     return frame(presentation, configuredLocale, state, values, actions);
   }
@@ -146,7 +140,7 @@ export function handleComponent<N extends Node>(
     }
     return frame(presentation, configuredLocale, state, values, actions);
   }
-  if (input.child === 'composer' && input.name === 'files' && target === 'tui') {
+  if (input.child === 'composer' && input.name === 'files' && true) {
     pastedFiles(state.attachments, input.event as DraftFilePaste);
     return frame(presentation, configuredLocale, state, values, actions);
   }
@@ -423,12 +417,12 @@ export function handleComponent<N extends Node>(
     if (state.dialog === 'palette') {
       if (input.name === 'closed') state.dialog = null;
       else if (input.name === 'invoked') {
-        const command = rootCommands(state, locale, target).find(
+        const command = rootCommands(state, locale).find(
           (command) => command.id === (input.event as { id: string }).id && !command.disabled,
         );
         if (
           command &&
-          rootCommand(state, actions, locale, command.kind, target) &&
+          rootCommand(state, actions, locale, command.kind) &&
           state.dialog === 'palette'
         ) {
           state.dialog = null;
@@ -448,7 +442,7 @@ export function handleComponent<N extends Node>(
     return frame(presentation, configuredLocale, state, values, actions, events);
   }
 
-  if (target === 'tui' && input.child === 'queue' && input.name === 'activated') {
+  if (input.child === 'queue' && input.name === 'activated') {
     const event = input.event as RowActivated;
     const queue = state.queue;
     const row = queue?.entries.find((row) => row.messageId === event.row);
@@ -590,7 +584,7 @@ export function handleComponent<N extends Node>(
   } else if (input.child === 'composer' && input.name === 'setup') {
     if ((input.event as { context: string }).context === state.selected?.id) openModelSetup(state);
   } else if (input.child === 'composer' && input.name === 'stop') {
-    rootCommand(state, actions, locale, 'stop', target);
+    rootCommand(state, actions, locale, 'stop');
   } else if (input.child === 'models' && input.name === 'backends') {
     state.hasBackends = (input.event as { available: boolean }).available;
   } else if (
@@ -669,15 +663,14 @@ export function handleComponent<N extends Node>(
       changeSession(state, actions, session, session.archived ? 'restore' : 'archive');
     else if (session && action === 'stop')
       intent(state, actions, { kind: 'stop', sessionId }, 'agent', 'stop', { sessionId });
-    else if (session && usage && target === 'tui') openUsage(state, session);
+    else if (session && usage && true) openUsage(state, session);
     else if (session) {
       state.pages = [];
       if (state.selected?.id !== session.id) select(state, actions, session);
       if (details && !executionPending(state)) {
-        if (target === 'tui') state.inspector = 'details';
-        else state.dialog = 'details';
+        state.inspector = 'details';
       }
-      if (target === 'tui') controlSidebar(state, 'dismiss_transient');
+      controlSidebar(state, 'dismiss_transient');
     }
   } else if (input.child === 'image-viewer' && input.name === 'closed') {
     state.image = null;
@@ -870,7 +863,7 @@ export function handleComponent<N extends Node>(
           page.through,
           false,
           false,
-          target === 'tui',
+          true,
         );
     } else if (
       input.name === 'newer' &&
@@ -886,7 +879,7 @@ export function handleComponent<N extends Node>(
         page.through,
         false,
         false,
-        target === 'tui',
+        true,
       );
     else if (input.name === 'latest')
       history(state, actions, { kind: 'tail' }, state.latestKnown, true);

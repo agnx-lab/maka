@@ -19,7 +19,7 @@
 
 import type { Theme } from '../../shared/contracts.js';
 import { copy, goalStatuses, tuiText } from './locale.js';
-import { compactLabel, fill, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, type Node, type Presentation } from '../../shared/view.js';
 import { mutationPending, reviewTarget, rootCommands } from './actions.js';
 import { goalTerminal } from './goal.js';
 import type { State } from './state.js';
@@ -103,7 +103,6 @@ export function composerStatus<N extends Node>(
               row: true,
               gap: 1,
               terminal: { wrap: true },
-              style: { justify: 'center', width: fill },
             }),
           ]
         : []),
@@ -112,21 +111,21 @@ export function composerStatus<N extends Node>(
             ui.box(
               'composer-attention',
               [
-                ui.box('attention-leading', [], { terminal: { grow: 1 }, style: { grow: 1 } }),
+                ui.box('attention-leading', [], { terminal: { grow: 1 } }),
                 attention.button(
                   review ? 'interaction-open' : 'plan-open',
                   `${theme.ascii ? '!' : '△'} ${tuiText(locale, question ? 'chat-reply-needed' : 'chat-approval-needed')}${review ? ' · Ctrl+G' : ''}`,
                   review
-                    ? !rootCommands(state, locale, presentation.target).some(
+                    ? !rootCommands(state, locale).some(
                         (command) => command.kind === 'interaction-open' && !command.disabled,
                       )
                     : !!state.dialog,
                   false,
                   { background: 0 },
                 ),
-                ui.box('attention-trailing', [], { terminal: { grow: 1 }, style: { grow: 1 } }),
+                ui.box('attention-trailing', [], { terminal: { grow: 1 } }),
               ],
-              { row: true, gap: 0, style: { width: fill, align: 'center' } },
+              { row: true, gap: 0 },
             ),
           ]
         : []),
@@ -141,7 +140,7 @@ export function composerStatus<N extends Node>(
             ),
           ]
         : notice
-          ? [ui.text('composer-notice', notice, 13, theme.muted, 400, { align: 'center' })]
+          ? [ui.text('composer-notice', notice, theme.muted, 400, { align: 'center' })]
           : []),
       ...(state.notice === 'unavailable'
         ? [

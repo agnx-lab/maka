@@ -19,7 +19,7 @@
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
 import * as own from '../../shared/contracts.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.reading-area',
@@ -30,15 +30,6 @@ export default {
   },
   application: {
     entries: {
-      desktop: {
-        ...native(sdk.nativeImplementations.readingArea),
-        imports: {
-          tools: { contract: own.toolDetailsContract, cardinality: { kind: 'optional' } },
-          markdown: { contract: sdk.contracts.markdown, cardinality: { kind: 'optional' } },
-          source: { contract: sdk.contracts.sourceText, cardinality: { kind: 'optional' } },
-          label: { contract: sdk.contracts.label, cardinality: { kind: 'optional' } },
-        },
-      },
       tui: {
         ...native(sdk.nativeImplementations.readingArea),
         imports: {

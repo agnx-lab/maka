@@ -60,7 +60,6 @@ export function handleEvent<N extends Node>(
   props: ConnectionFormProps,
   validation: SettingsValidation,
 ) {
-  const target = presentation.target;
   if (input.kind === 'component' && input.child === 'provider-list' && input.name === 'input')
     input = input.event as ComponentInput;
   if (
@@ -422,7 +421,7 @@ export function handleEvent<N extends Node>(
         const provider = state.providers[Number(key.slice(9))];
         if (provider && matchesProvider(state.search, provider)) {
           state.providerActive = Number(key.slice(9));
-          if (target === 'tui' && (input.event as { kind?: string }).kind !== 'submit')
+          if ((input.event as { kind?: string }).kind !== 'submit')
             return frame(presentation, state, props, actions, events);
           for (const [key, pending] of Object.entries(state.pending))
             if (pending.kind === 'provider') delete state.pending[key];

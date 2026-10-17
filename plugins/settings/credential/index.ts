@@ -45,14 +45,7 @@ import { credentialContract, type CredentialProps } from '../../shared/contracts
 import { pageHeader, withPageShell, type PageState } from '../../shared/page-shell.js';
 import { scrollBoundary, scrollRows, visibleRows, resetScroll } from '../../shared/scroll.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 type Request =
   | { kind: 'status' }
@@ -375,7 +368,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const apiKey = !!state.provider?.descriptor.authentication.some(
@@ -408,17 +400,13 @@ function frame<N extends Node>(
       ),
       ui.text(
         'connection',
-        compactLabel(
-          state.target.provider.name + ' · ' + state.target.slug,
-          target === 'tui' ? 60 : 120,
-        ),
-        14,
+        compactLabel(state.target.provider.name + ' · ' + state.target.slug, 60),
         props.theme.muted,
       ),
-      ui.text('status', status, 13, props.theme.muted),
+      ui.text('status', status, props.theme.muted),
       ...(state.statusFailed ? [ui.button('refresh-status', text.keyRefresh, busy(state))] : []),
       ...(!sameValue(state.openedTarget, props.target)
-        ? [ui.text('target-changed', text.connectionChanged, 13, props.theme.muted)]
+        ? [ui.text('target-changed', text.connectionChanged, props.theme.muted)]
         : []),
       ui.box(
         'key-input',
@@ -432,21 +420,15 @@ function frame<N extends Node>(
               readOnly: false,
               disabled: false,
               tabIndex: 0,
-              autoFocus: target === 'tui',
+              autoFocus: true,
               placeholder: text.keyPlaceholder,
               command: state.command,
             },
             { changed: 'changed', submitted: 'submitted' },
           ),
         ],
-        {
-          visible: apiKey && !state.finished,
-          style: { width: fill, height: pixels(44), shrink: 0 },
-        },
+        { visible: apiKey && !state.finished },
       ),
-      ...(apiKey && target === 'desktop'
-        ? [ui.text('help', text.keyHelp, 13, props.theme.muted)]
-        : []),
       ...(state.providerFailed
         ? [
             ui.text('provider-error', text.providersUnavailable),
@@ -458,11 +440,11 @@ function frame<N extends Node>(
             ui.box(
               'login-prompt',
               [
-                ui.text('login-help', text.loginInstructions, 14),
+                ui.text('login-help', text.loginInstructions),
                 ui.box(
                   'login-link-row',
                   [
-                    ui.text('login-address', state.loginPrompt.url, 14),
+                    ui.text('login-address', state.loginPrompt.url),
                     ui.button(
                       'login-url',
                       text.copyLoginLink,
@@ -472,12 +454,12 @@ function frame<N extends Node>(
                       state.loginPrompt.url,
                     ),
                   ],
-                  { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+                  { row: true, gap: 1, terminal: { wrap: true } },
                 ),
                 ui.box(
                   'login-code-row',
                   [
-                    ui.text('login-device-code', state.loginPrompt.userCode, 18),
+                    ui.text('login-device-code', state.loginPrompt.userCode),
                     ui.button(
                       'login-code',
                       text.copyLoginCode,
@@ -487,7 +469,7 @@ function frame<N extends Node>(
                       state.loginPrompt.userCode,
                     ),
                   ],
-                  { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+                  { row: true, gap: 1, terminal: { wrap: true } },
                 ),
               ],
               { gap: 1 },
@@ -552,11 +534,11 @@ function frame<N extends Node>(
             ? [ui.button('review', text.reviewConnection, !canReview)]
             : []),
         ],
-        { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
-      ...(state.notice ? [ui.text('notice', text[state.notice], 13, props.theme.muted)] : []),
+      ...(state.notice ? [ui.text('notice', text[state.notice], props.theme.muted)] : []),
       ...(state.loginMessage
-        ? [ui.text('login-error-detail', state.loginMessage, 13, props.theme.muted)]
+        ? [ui.text('login-error-detail', state.loginMessage, props.theme.muted)]
         : []),
       ...(state.confirmation && state.confirmation !== 'rebase'
         ? [
@@ -569,7 +551,6 @@ function frame<N extends Node>(
                 : state.confirmation === 'remove'
                   ? text.confirmRemoveKey
                   : text.reviewReady,
-              14,
               props.theme.text,
             ),
             ui.box(
@@ -590,7 +571,7 @@ function frame<N extends Node>(
                   state.confirmation === 'leave' ? text.keepEditing : text.cancel,
                 ),
               ],
-              { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ]
         : []),
@@ -599,22 +580,18 @@ function frame<N extends Node>(
         : []),
       ...(state.advanced
         ? [
-            ui.button(
-              'history',
-              text.earlierOperations,
-              false,
-              false,
-              target === 'tui' ? { background: 0, align: 'start' } : {},
-            ),
+            ui.button('history', text.earlierOperations, false, false, {
+              background: 0,
+              align: 'start',
+            }),
           ]
         : []),
     ],
     {
       visible: !state.historyOpen && state.confirmation !== 'rebase',
-      scroll: target === 'tui' ? 'anchor' : 'none',
+      scroll: 'anchor',
       terminal: { grow: 1 },
-      gap: target === 'desktop' ? 14 : 1,
-      style: { width: fill, minWidth: 0 },
+      gap: 1,
     },
   );
   // History has its own bounded pane. The hidden native input stays mounted;
@@ -626,41 +603,34 @@ function frame<N extends Node>(
           content: ui.box(
             'earlier-operations',
             [
-              ui.button(
-                'history-back',
-                text.back,
-                false,
-                false,
-                target === 'tui' ? { background: 0, align: 'start' } : {},
-              ),
-              ui.text('history-heading', text.earlierOperations, 18, props.theme.text, 550),
-              ui.text('history-help', text.earlierHelp, 13, props.theme.muted),
+              ui.button('history-back', text.back, false, false, { background: 0, align: 'start' }),
+              ui.text('history-heading', text.earlierOperations, props.theme.text, 550),
+              ui.text('history-help', text.earlierHelp, props.theme.muted),
               ui.box(
                 'history-actions',
                 [
                   ui.button(
                     'history-refresh',
-                    target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.keyRefresh,
+                    props.theme.ascii ? 'r' : '↻',
                     Object.values(state.pending).some(
                       (r) => r.kind === 'history' || r.kind === 'earlier',
                     ),
                     false,
-                    target === 'tui' ? { background: 0 } : {},
+                    { background: 0 },
                     undefined,
                     text.keyRefresh,
                   ),
                 ],
-                { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+                { row: true, gap: 1, terminal: { wrap: true } },
               ),
               ...(state.historyFailed
-                ? [ui.text('history-error', text.historyUnavailable, 13, props.theme.muted)]
+                ? [ui.text('history-error', text.historyUnavailable, props.theme.muted)]
                 : []),
               ...visibleRows(state, 'credential-history-reading', state.earlier).flatMap(
                 ({ entry, at }) => [
                   ui.text(
                     'earlier-label-' + at,
-                    compactLabel(earlierLabel(entry, text), target === 'tui' ? 60 : 120),
-                    13,
+                    compactLabel(earlierLabel(entry, text), 60),
                     props.theme.muted,
                   ),
                   ui.button(
@@ -673,13 +643,7 @@ function frame<N extends Node>(
                 ],
               ),
             ],
-            {
-              visible: state.historyOpen,
-              scroll: 'anchor',
-              terminal: { grow: 1 },
-              style: { width: fill, height: fill },
-              gap: target === 'desktop' ? 12 : 1,
-            },
+            { visible: state.historyOpen, scroll: 'anchor', terminal: { grow: 1 }, gap: 1 },
           ),
         },
         { input: 'history-input', observed: 'history-observed' },
@@ -703,21 +667,21 @@ function frame<N extends Node>(
         return rows;
       })
     : [];
-  const pageSize = target === 'tui' ? 8 : 24;
+  const pageSize = 8;
   const pages = Math.max(1, Math.ceil(details.length / pageSize));
   const page = Math.min(state.reviewPage, pages - 1);
   const reviewPane = ui.box(
     'review-target',
     [
-      ui.text('review-heading', text.reviewConnection, 20, props.theme.text, 550),
-      ui.text('review-question', text.reviewReady, 14, props.theme.text),
+      ui.text('review-heading', text.reviewConnection, props.theme.text, 550),
+      ui.text('review-question', text.reviewReady, props.theme.text),
       ui.box(
         'review-actions',
         [
           ui.button('review-confirm', text.useConnection, !state.reviewed || busy(state)),
           ui.button('review-cancel', text.cancel),
         ],
-        { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
       presentation.reading(
         'credential-review-reading',
@@ -726,51 +690,40 @@ function frame<N extends Node>(
             'review-lines',
             details
               .slice(page * pageSize, (page + 1) * pageSize)
-              .map((line, at) => ui.text('target-line-' + at, line, 14, props.theme.text)),
-            {
-              scroll: 'manual',
-              terminal: { grow: 1, basis: 0 },
-              style: { width: fill, height: fill, minHeight: 0 },
-            },
+              .map((line, at) => ui.text('target-line-' + at, line, props.theme.text)),
+            { scroll: 'manual', terminal: { grow: 1, basis: 0 } },
           ),
         },
         { observed: 'review-observed' },
       ),
     ],
-    { visible: state.confirmation === 'rebase', gap: target === 'desktop' ? 12 : 1 },
+    { visible: state.confirmation === 'rebase', gap: 1 },
   );
   const view = ui.box(
     'credential',
-    target !== 'tui'
-      ? [form, earlier, reviewPane]
-      : [
-          ui.dialog(
-            'credential-auxiliary',
-            state.historyOpen ? text.earlierOperations : text.reviewConnection,
-            form,
-            ui.box('credential-auxiliary-content', [earlier, reviewPane], { gap: 0 }),
-            state.historyOpen || state.confirmation === 'rebase',
-            undefined,
-            { width: 72, height: 24 },
-          ),
-        ],
+    [
+      ui.dialog(
+        'credential-auxiliary',
+        state.historyOpen ? text.earlierOperations : text.reviewConnection,
+        form,
+        ui.box('credential-auxiliary-content', [earlier, reviewPane], { gap: 0 }),
+        state.historyOpen || state.confirmation === 'rebase',
+        { width: 72, height: 24 },
+      ),
+    ],
     {
-      shortcuts:
-        target === 'tui'
-          ? [
-              {
-                key: 'escape',
-                modifiers: [],
-                input: state.confirmation ? 'cancel' : state.historyOpen ? 'history-back' : 'back',
-                enabled: true,
-              },
-            ]
-          : [],
+      shortcuts: [
+        {
+          key: 'escape',
+          modifiers: [],
+          input: state.confirmation ? 'cancel' : state.historyOpen ? 'history-back' : 'back',
+          enabled: true,
+        },
+      ],
       gap: 0,
-      padding: target === 'desktop' ? 24 : props.shell ? 0 : 1,
-      scroll: target === 'tui' ? 'none' : 'anchor',
+      padding: props.shell ? 0 : 1,
+      scroll: 'none',
       terminal: { grow: 1 },
-      style: { width: fill, height: fill, maxWidth: 680, minWidth: 0, minHeight: 0 },
     },
   );
   const out = output(state, view, events);
@@ -781,7 +734,6 @@ function frame<N extends Node>(
 export function credential<N extends Node>(
   presentation: Presentation<N>,
 ): Component<State, CredentialProps, N> {
-  const target = presentation.target;
   return withPageShell<State, CredentialProps, N>(
     {
       mount(props) {

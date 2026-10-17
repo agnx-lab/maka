@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const uuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const project = (n, extra = {}) => ({
@@ -104,7 +104,7 @@ async function client(target) {
     },
   };
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target}: project registration and relocation capture inspected destination and recover without replay`, async () => {
     const c = (await client(target)).loaded();
     const keys = nodes(c.out.frame.view)

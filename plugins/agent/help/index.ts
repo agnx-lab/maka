@@ -20,7 +20,7 @@
 import type { Component, Emission } from '../../../packages/plugin-sdk/src/index.js';
 import { helpContract, type HelpProps } from '../../shared/contracts.js';
 import { copy } from './locale.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type State = { revision: number };
 
@@ -30,31 +30,26 @@ export function help<N extends Node>(
   function frame(state: State, props: HelpProps, events: Emission[] = []) {
     const ui = presentation.paint(props.theme);
     const text = copy(props.locale);
-    const terminal = presentation.target === 'tui';
     const rows = [
-      [terminal ? 'Enter' : 'Ctrl/⌘ Enter', text.helpSend],
-      [terminal ? 'Shift Enter / Ctrl J' : 'Enter / Shift Enter', text.helpNewline],
+      ['Enter', text.helpSend],
+      ['Shift Enter / Ctrl J', text.helpNewline],
       ['Tab / Shift Tab', text.helpFocus],
       ['↑ / ↓', text.helpListNavigation],
       ['Enter / Space', text.helpActivate],
       ['Ctrl/⌘ K', text.helpCommands],
       ['Ctrl/⌘ G', text.reviewRequest],
-      ...(terminal
-        ? [
-            ['Ctrl V', text.helpClipboard],
-            ['Ctrl A / Ctrl Z', text.helpEditorSelection],
-            ['PageUp / PageDown', text.helpTranscriptScroll],
-            ['Shift + arrows', text.helpTextSelection],
-            ['Shift Home / End', text.helpLineSelection],
-            ['Shift PageUp / Down', text.helpPageSelection],
-            ['Alt + click', text.helpMouseSelection],
-            ['Shift + click', text.helpShiftSelection],
-            ['Ctrl Shift C', text.helpCopySelection],
-            ['Ctrl F', text.findConversation],
-            ['Alt F', text.findHistory],
-            ['Enter / F3 · Shift', text.findNavigate],
-          ]
-        : []),
+      ['Ctrl V', text.helpClipboard],
+      ['Ctrl A / Ctrl Z', text.helpEditorSelection],
+      ['PageUp / PageDown', text.helpTranscriptScroll],
+      ['Shift + arrows', text.helpTextSelection],
+      ['Shift Home / End', text.helpLineSelection],
+      ['Shift PageUp / Down', text.helpPageSelection],
+      ['Alt + click', text.helpMouseSelection],
+      ['Shift + click', text.helpShiftSelection],
+      ['Ctrl Shift C', text.helpCopySelection],
+      ['Ctrl F', text.findConversation],
+      ['Alt F', text.findHistory],
+      ['Enter / F3 · Shift', text.findNavigate],
       ['Ctrl/⌘ B', text.helpNavigation],
       ['Ctrl/⌘ N', text.helpNew],
       ['Esc', text.helpBack],
@@ -74,12 +69,12 @@ export function help<N extends Node>(
                   ui.box(
                     `shortcut-${index}`,
                     [
-                      ui.text(`shortcut-key-${index}`, key!, 14, props.theme.muted),
-                      ui.text(`shortcut-description-${index}`, label!, 14),
+                      ui.text(`shortcut-key-${index}`, key!, props.theme.muted),
+                      ui.text(`shortcut-description-${index}`, label!),
                     ],
                     {
-                      row: !terminal,
-                      gap: terminal ? 0 : 12,
+                      row: false,
+                      gap: 0,
                       wide: {
                         min_width: 54,
                         direction: 'row',
@@ -91,9 +86,8 @@ export function help<N extends Node>(
                 {
                   scroll: 'manual',
                   autoFocus: true,
-                  gap: terminal ? 0 : 12,
+                  gap: 0,
                   terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: pixels(280), minWidth: 0, minHeight: 0 },
                 },
               ),
             },
@@ -101,11 +95,7 @@ export function help<N extends Node>(
           ),
           ui.button('close', text.helpClose),
         ],
-        {
-          visible: props.open,
-          terminal: { grow: 1 },
-          style: { width: fill, minWidth: 0 },
-        },
+        { visible: props.open, terminal: { grow: 1 } },
       ),
       events,
     );

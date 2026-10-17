@@ -44,7 +44,7 @@ import {
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 const names = ['name', 'description'] as const;
 type Name = (typeof names)[number];
@@ -213,7 +213,7 @@ export function subagentSettings<N extends Node>(
       ui.box(
         'subagent-field-' + name,
         [
-          ui.text('subagent-label-' + name, t('subagents-' + name), 13, props.theme.muted),
+          ui.text('subagent-label-' + name, t('subagents-' + name), props.theme.muted),
           presentation.slot(
             'subagent-' + name,
             'input',
@@ -230,14 +230,11 @@ export function subagentSettings<N extends Node>(
                 !state.fields[name].ready ||
                 !!state.fields[name].command,
               command: state.fields[name].command,
-              appearance:
-                presentation.target === 'tui'
-                  ? {
-                      ...props.theme.input,
-                      borderWidth: 0,
-                      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                    }
-                  : props.theme.input,
+              appearance: {
+                ...props.theme.input,
+                borderWidth: 0,
+                padding: { top: 0, right: 0, bottom: 0, left: 0 },
+              },
             } satisfies InputProps,
             { changed: 'changed' },
           ),
@@ -248,7 +245,7 @@ export function subagentSettings<N extends Node>(
     const content = ui.box(
       'subagents-content',
       [
-        ui.text('subagents-help', t('subagents-help'), 13, props.theme.muted),
+        ui.text('subagents-help', t('subagents-help'), props.theme.muted),
         ...(state.saved?.entries ?? [])
           .filter((p) => p.worker === 'worker')
           .map((p) =>
@@ -263,12 +260,7 @@ export function subagentSettings<N extends Node>(
           'subagent-form',
           [
             ...names.map(editor),
-            ui.text(
-              'subagent-id',
-              t('subagents-id') + ': ' + (draft?.id ?? ''),
-              12,
-              props.theme.muted,
-            ),
+            ui.text('subagent-id', t('subagents-id') + ': ' + (draft?.id ?? ''), props.theme.muted),
             ui.toggle(
               'enabled',
               t('subagents-enabled'),
@@ -289,7 +281,6 @@ export function subagentSettings<N extends Node>(
                 ': ' +
                 (draft?.model.modelId || t('subagents-choose-model')) +
                 (draft?.thinkingLevel ? ' · ' + draft.thinkingLevel : ''),
-              13,
               props.theme.text,
             ),
             presentation.slot(
@@ -306,7 +297,7 @@ export function subagentSettings<N extends Node>(
               } satisfies ModelsProps,
               { selected: 'model', setup: 'setup', connections: 'connections' },
             ),
-            ui.text('subagent-tools-help', t('subagents-tools-help'), 13, props.theme.muted),
+            ui.text('subagent-tools-help', t('subagents-tools-help'), props.theme.muted),
             ui.box(
               'subagent-profiles',
               [
@@ -320,7 +311,6 @@ export function subagentSettings<N extends Node>(
             ui.text(
               'subagents-selected',
               t('subagents-selected') + ': ' + (draft?.tools.length ?? 0),
-              13,
               props.theme.muted,
             ),
             ...(state.tools ?? []).map((name, at) =>
@@ -334,14 +324,12 @@ export function subagentSettings<N extends Node>(
               ui.text(
                 'missing-' + name,
                 t('subagents-missing-tool') + ': ' + name,
-                13,
                 props.theme.muted,
               ),
             ),
             ui.text(
               'subagents-save-notice',
               state.pending ? t('subagents-loading') : state.notice ? t(state.notice) : ' ',
-              13,
               props.theme.muted,
             ),
             ui.button(
@@ -373,12 +361,12 @@ export function subagentSettings<N extends Node>(
           : []),
         ui.button('reload', t('subagents-reload'), busy(state, props) || state.removing),
       ],
-      { gap: 1, scroll: 'manual', terminal: { grow: 1 }, style: { width: fill, height: fill } },
+      { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
     );
     const confirmation = ui.box(
       'subagent-confirmation',
       [
-        ui.text('subagent-remove-question', t('subagents-remove-question'), 14, props.theme.text),
+        ui.text('subagent-remove-question', t('subagents-remove-question'), props.theme.text),
         ui.button('confirm-remove', t('subagents-remove'), busy(state, props)),
         ui.button('cancel', text.cancel),
       ],
@@ -394,10 +382,10 @@ export function subagentSettings<N extends Node>(
         [
           ...pageHeader(presentation, state, props, events, t('settings-subagents')),
           ...((state.pending || state.restoring) && !draft
-            ? [ui.text('subagents-loading', t('subagents-loading'), 13, props.theme.muted)]
+            ? [ui.text('subagents-loading', t('subagents-loading'), props.theme.muted)]
             : []),
           ...(state.notice && !state.pending && !draft
-            ? [ui.text('subagents-notice', t(state.notice), 13, props.theme.muted)]
+            ? [ui.text('subagents-notice', t(state.notice), props.theme.muted)]
             : []),
           ui.dialog(
             'subagent-removal',
@@ -405,7 +393,6 @@ export function subagentSettings<N extends Node>(
             content,
             confirmation,
             state.removing,
-            undefined,
             { width: 52, height: 10 },
           ),
         ],
@@ -413,7 +400,6 @@ export function subagentSettings<N extends Node>(
           visible: props.open,
           gap: 0,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [
             {
               key: 'escape',

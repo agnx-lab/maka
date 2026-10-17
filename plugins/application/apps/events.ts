@@ -408,7 +408,7 @@ export function handleEvent<N extends Node>(
             };
         } else if (
           (key.startsWith('candidate-') || key.startsWith('binding-')) &&
-          presentation.target === 'tui' &&
+          true &&
           (input.event as { kind?: string }).kind === 'activate'
         ) {
           state.focused = key;

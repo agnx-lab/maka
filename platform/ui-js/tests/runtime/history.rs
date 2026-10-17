@@ -36,10 +36,7 @@ use maka_plugin_core::{
     operation::{RecoveryProtocol, RecoveryRef},
     package::{Declaration, EntryDeclaration, EntryTarget, Implementation},
 };
-use maka_ui_runtime::{
-    operations::{CALLER_HISTORY, caller_history_contract},
-    surface_contract,
-};
+use maka_ui_runtime::operations::{CALLER_HISTORY, caller_history_contract};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, future::Future, sync::Arc, task::Poll, time::Duration};
 use uuid::Uuid;
@@ -50,85 +47,52 @@ fn identity(n: u128) -> InstanceId {
 fn fixture() -> (Input, Vec<Package>) {
     let handler = "if(event.kind==='action')return frame({...state,outcome:event.event,revision:state.revision+1});const out=frame({...state,outcome:null,count:state.count+1,revision:state.revision+1});out.actions.push({key:'history',binding:'history',member:0,method:'page',input:event.event,resources:{}});return out;";
     let (mut input, mut packages) = support::fixture(handler);
-    for name in ["native.surface", "dynamic.app"] {
-        let i = packages
-            .iter()
-            .position(|p| p.manifest().id == name)
-            .unwrap();
-        let old = packages.remove(i);
-        let mut declaration = old
-            .manifest()
-            .application
-            .as_ref()
-            .unwrap()
-            .declaration()
-            .clone();
-        let mut terminal = declaration.entries[&EntryTarget::Desktop].clone();
-        let mut files = old.files().clone();
-        if name == "native.surface" {
-            terminal.implementation = Implementation::Native {
-                implementation: "maka.ui.surface.tui".into(),
-            };
-            terminal.exports.get_mut("Surface").unwrap().contract =
-                surface_contract(PresentationTarget::Tui);
-        } else {
-            for entry in [
-                declaration.entries.get_mut(&EntryTarget::Desktop).unwrap(),
-                &mut terminal,
-            ] {
-                entry.imports.insert(
-                    "history".into(),
-                    Import {
-                        contract: caller_history_contract(),
-                        cardinality: Cardinality::One,
-                    },
-                );
-            }
-            terminal.scene = Some(support::scene::language(PresentationTarget::Tui));
-            terminal.implementation = Implementation::JavaScript {
-                module: "terminal.mjs".into(),
-                realm: maka_plugin_core::package::Realm::Dedicated,
-            };
-            terminal.imports.get_mut("surface").unwrap().contract =
-                surface_contract(PresentationTarget::Tui);
-            let source = std::str::from_utf8(old.file("index.mjs").unwrap())
-                .unwrap()
-                .replace(
-                    "count:props.count??0,revision:0",
-                    "count:props.count??0,revision:0,padding:props.padding??''",
-                );
-            let surface = "surface:{kind:'window',binding:'surface',title:'Dynamic product',width:640,height:400}";
-            assert!(source.contains(surface));
-            files.insert(
-                "terminal.mjs".into(),
-                source
-                    .replace(surface, "surface:{kind:'terminal',binding:'surface'}")
-                    .into_bytes(),
-            );
-            files.insert("index.mjs".into(), source.into_bytes());
-        }
-        declaration.entries.insert(EntryTarget::Tui, terminal);
-        files.insert(
-            MANIFEST_FILE.into(),
-            serde_json::to_vec(&json!({"schemaVersion":1,"id":name,"application":declaration}))
-                .unwrap(),
+    let index = packages
+        .iter()
+        .position(|package| package.manifest().id == "dynamic.app")
+        .unwrap();
+    let old = packages.remove(index);
+    let mut declaration = old
+        .manifest()
+        .application
+        .as_ref()
+        .unwrap()
+        .declaration()
+        .clone();
+    declaration
+        .entries
+        .get_mut(&EntryTarget::Tui)
+        .unwrap()
+        .imports
+        .insert(
+            "history".into(),
+            Import {
+                contract: caller_history_contract(),
+                cardinality: Cardinality::One,
+            },
         );
-        let package = Package::new(files).unwrap();
-        input
-            .instances
-            .get_mut(if name == "native.surface" {
-                "surface"
-            } else {
-                "app"
-            })
-            .unwrap()
-            .package = package.application_ref().into();
-        packages.push(package);
-    }
+    let source = std::str::from_utf8(old.file("index.mjs").unwrap())
+        .unwrap()
+        .replace(
+            "count:props.count??0,revision:0",
+            "count:props.count??0,revision:0,padding:props.padding??''",
+        );
+    let mut files = old.files().clone();
+    files.insert("index.mjs".into(), source.into_bytes());
+    files.insert(
+        MANIFEST_FILE.into(),
+        serde_json::to_vec(
+            &json!({"schemaVersion":1,"id":"dynamic.app","application":declaration}),
+        )
+        .unwrap(),
+    );
+    let package = Package::new(files).unwrap();
+    input.instances.get_mut("app").unwrap().package = package.application_ref().into();
+    packages.push(package);
     let history = support::package(
         "native.history",
         Declaration {
-            entries: [EntryTarget::Desktop, EntryTarget::Tui]
+            entries: [EntryTarget::Tui]
                 .into_iter()
                 .map(|target| {
                     (
@@ -349,12 +313,7 @@ fn explicit_deployment_history_reads_original_consumers_but_never_another_deploy
         .unwrap()
         .intent()
         .clone();
-    let (mut app, mount) = start(
-        &timer,
-        store.clone(),
-        deployment,
-        PresentationTarget::Desktop,
-    );
+    let (mut app, mount) = start(&timer, store.clone(), deployment, PresentationTarget::Tui);
     let first = page(&timer, &mut app, &mount, 0, 1);
     assert_eq!(
         serde_json::from_value::<Vec<CallerIntent>>(first["value"].clone())
@@ -376,10 +335,11 @@ fn explicit_deployment_history_reads_original_consumers_but_never_another_deploy
 }
 
 #[test]
-fn both_variants_read_original_caller_history_after_root_reopen_and_source_replacement() {
+fn terminal_reads_original_caller_history_after_root_reopen_and_source_replacement() {
     let timer = timer();
     let (template, packages) = fixture();
-    for target in [PresentationTarget::Desktop, PresentationTarget::Tui] {
+    {
+        let target = PresentationTarget::Tui;
         let dir = tempfile::tempdir().unwrap();
         let store1 = store(&timer, dir.path(), true);
         let deployment = Uuid::new_v4();
@@ -481,7 +441,7 @@ fn history_requires_persisted_source_and_rejects_configuration_selecting_another
     let timer = timer();
     let (mut input, packages) = fixture();
     assert!(
-        matches!(Application::<()>::new(&input,packages.clone(),timer.handle().clone(),maka_ui_js::execution(Default::default()),crate::support::scene::registry(PresentationTarget::Desktop),Default::default()),Err(maka_ui_runtime::Error::Invalid(reason)) if reason.contains(CALLER_HISTORY))
+        matches!(Application::<()>::new(&input,packages.clone(),timer.handle().clone(),maka_ui_js::execution(Default::default()),crate::support::scene::registry(PresentationTarget::Tui),Default::default()),Err(maka_ui_runtime::Error::Invalid(reason)) if reason.contains(CALLER_HISTORY))
     );
     // Even if a package declaration permits these keys, the actual factory
     // rejects attempts to turn caller observations into another namespace.
@@ -500,7 +460,7 @@ fn history_requires_persisted_source_and_rejects_configuration_selecting_another
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .configuration = json!({"type":"object"});
     let package = support::package("native.history", declaration, None);
@@ -518,7 +478,7 @@ fn history_requires_persisted_source_and_rejects_configuration_selecting_another
         .block_on(store.commit_application(deployment, 0, input, vec![], packages))
         .unwrap();
     assert!(
-        matches!(timer.block_on(Application::<()>::start_from_store(store.clone(),source,PresentationTarget::Desktop,timer.handle().clone(),maka_ui_js::execution(Default::default()),crate::support::scene::registry(PresentationTarget::Desktop),vec![])),Err(maka_ui_runtime::Error::Invalid(reason)) if reason.contains("unknown field"))
+        matches!(timer.block_on(Application::<()>::start_from_store(store.clone(),source,PresentationTarget::Tui,timer.handle().clone(),maka_ui_js::execution(Default::default()),crate::support::scene::registry(PresentationTarget::Tui),vec![])),Err(maka_ui_runtime::Error::Invalid(reason)) if reason.contains("unknown field"))
     );
     timer.block_on(store.shutdown()).unwrap();
 }
@@ -543,12 +503,7 @@ fn accepted_history_waiting_behind_real_sql_writer_retains_root_after_surface_ex
         .unwrap()
         .intent()
         .clone();
-    let (mut app, mount) = start(
-        &timer,
-        store.clone(),
-        deployment,
-        PresentationTarget::Desktop,
-    );
+    let (mut app, mount) = start(&timer, store.clone(), deployment, PresentationTarget::Tui);
     let weak = Arc::downgrade(&store);
     let sql = rusqlite::Connection::open(dir.path().join("root").join(ROOT_DATABASE)).unwrap();
     sql.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -630,7 +585,8 @@ fn accepted_history_waiting_behind_real_sql_writer_retains_root_after_surface_ex
 fn live_adoption_keeps_queued_history_source_and_retained_history_serves_new_consumer_epochs() {
     let timer = timer();
     let (template, packages) = fixture();
-    for target in [PresentationTarget::Desktop, PresentationTarget::Tui] {
+    {
+        let target = PresentationTarget::Tui;
         let dir = tempfile::tempdir().unwrap();
         let store = store(&timer, dir.path(), true);
         let deployment = Uuid::new_v4();

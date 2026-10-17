@@ -25,7 +25,7 @@ import type {
   AgentDiagnosticChange,
 } from '../../../packages/plugin-sdk/src/index.js';
 import type { Theme } from '../../shared/contracts.js';
-import { type Presentation, type Node, fill } from '../../shared/view.js';
+import { type Presentation, type Node } from '../../shared/view.js';
 import { copy, type Copy } from './locale.js';
 import { intent } from './actions.js';
 import type { State } from './state.js';
@@ -276,7 +276,7 @@ export function diagnosticsView<N extends Node>(
       ui.box(
         'diagnostics-header',
         [
-          ui.text('diagnostics-title', text.diagnosticsTitleLabel, 17, theme.text, 550),
+          ui.text('diagnostics-title', text.diagnosticsTitleLabel, theme.text, 550),
           ui.button('diagnostics-close', text.closeModels),
         ],
         { row: true, gap: 1 },
@@ -301,33 +301,30 @@ export function diagnosticsView<N extends Node>(
         ? [hostLogsView(presentation, state, theme, locale)]
         : [
             ...(diagnostics.failed
-              ? [ui.text('diagnostics-error', text.recoveryRefreshFailed, 13, theme.warning)]
+              ? [ui.text('diagnostics-error', text.recoveryRefreshFailed, theme.warning)]
               : []),
             ...(selected
               ? [
                   ui.button('diagnostics-back', text.back),
-                  ui.text('diagnostic-detail-source', source(selected, text), 15, theme.text, 550),
+                  ui.text('diagnostic-detail-source', source(selected, text), theme.text, 550),
                   ui.text(
                     'diagnostic-detail-cause',
                     cause(selected, text),
-                    14,
                     failureColor(selected, theme),
                   ),
                   ui.text(
                     'diagnostic-detail-time',
                     new Date(selected.recordedAt).toISOString(),
-                    12,
                     theme.muted,
                   ),
                   ui.text(
                     'diagnostic-detail-invocation',
                     selected.detail.invocation.invocation_id,
-                    12,
                     theme.muted,
                   ),
-                  ui.text('diagnostic-detail-event', selected.eventId, 12, theme.muted),
+                  ui.text('diagnostic-detail-event', selected.eventId, theme.muted),
                   ...(selected.detail.kind === 'model_step'
-                    ? [ui.text('diagnostic-detail-step', selected.detail.stepId, 12, theme.muted)]
+                    ? [ui.text('diagnostic-detail-step', selected.detail.stepId, theme.muted)]
                     : []),
                 ]
               : [
@@ -351,27 +348,20 @@ export function diagnosticsView<N extends Node>(
                                     ui.text(
                                       'diagnostic-cause-' + record.sequence,
                                       cause(record, text),
-                                      13,
                                       tone,
                                     ),
                                     ui.text(
                                       'diagnostic-time-' + record.sequence,
                                       new Date(record.recordedAt).toISOString(),
-                                      12,
                                       theme.muted,
                                     ),
                                   ],
                                   { gap: 0 },
                                 );
                               })
-                            : [ui.text('diagnostics-empty', text.diagnosticsEmpty, 13, theme.muted)]
-                          : [ui.text('diagnostics-loading', text.loading, 13, theme.muted)],
-                        {
-                          gap: 1,
-                          scroll: 'manual',
-                          terminal: { grow: 1 },
-                          style: { width: fill, height: fill },
-                        },
+                            : [ui.text('diagnostics-empty', text.diagnosticsEmpty, theme.muted)]
+                          : [ui.text('diagnostics-loading', text.loading, theme.muted)],
+                        { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
                       ),
                     },
                     {},
@@ -395,13 +385,9 @@ export function diagnosticsView<N extends Node>(
           ]),
     ],
     {
-      visible:
-        presentation.target === 'tui'
-          ? state.inspector === 'diagnostics' && state.dialog === null
-          : state.dialog === 'diagnostics',
+      visible: state.inspector === 'diagnostics' && state.dialog === null,
       gap: 1,
       terminal: { grow: 1 },
-      style: { width: fill, height: fill },
     },
   );
 }

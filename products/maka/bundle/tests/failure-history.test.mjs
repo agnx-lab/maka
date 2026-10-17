@@ -31,7 +31,7 @@ const nodes = (node) =>
         ),
       ]
     : [];
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} ordinary history accepts failures and links their diagnostic source`, async () => {
     const { component, activate } = await import(`../dist/packages/timeline/${target}.js`);
     const props = {
@@ -75,8 +75,7 @@ for (const target of ['tui', 'desktop']) {
     const out = component.mount(props, {});
     const tree = nodes(out.frame.view);
     assert.ok(tree.some((node) => node.source === props.messages[0].text));
-    if (target === 'tui')
-      assert.deepEqual(tree.find((node) => node.key === 'marker-failed').color, theme.error >>> 8);
+    assert.deepEqual(tree.find((node) => node.key === 'marker-failed').color, theme.error >>> 8);
     const source = component.event(
       out.frame.state,
       { kind: 'raw', key: 'source-failed', event: { kind: 'activate' } },

@@ -52,14 +52,7 @@ import {
 import { scrollBoundary } from '../../shared/scroll.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, type Copy } from './locale.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 type Page = Extract<SkillLibraryPage, { kind: 'page' }>;
 type Document = Extract<SkillLibraryDocument, { kind: 'page' }>;
@@ -325,18 +318,17 @@ function frame<N extends Node>(
 ) {
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
-  const tui = presentation.target === 'tui';
   const busy = !!state.pending;
   const available = state.open && props.open && !busy && !state.preview && readable(state);
   const document = state.document;
   const content: N[] = state.workspace
-    ? [ui.text('skills-project', state.workspace.path, 12, props.theme.muted)]
+    ? [ui.text('skills-project', state.workspace.path, props.theme.muted)]
     : [];
   if (state.preview) {
     const preview = state.preview;
     const kind = preview.review.change.kind;
     content.push(
-      ui.text('skills-preview-title', text.skillsConfirmTitle, 17, props.theme.text, 550),
+      ui.text('skills-preview-title', text.skillsConfirmTitle, props.theme.text, 550),
       ui.text('skills-preview-target', preview.target),
       ui.text(
         'skills-preview-summary',
@@ -372,7 +364,7 @@ function frame<N extends Node>(
   } else if (document) {
     const entry = document.entry;
     content.push(
-      ui.text('skill-name', entry.name, 17, props.theme.text, 550),
+      ui.text('skill-name', entry.name, props.theme.text, 550),
       ui.text(
         'skill-source',
         entry.imported
@@ -382,7 +374,6 @@ function frame<N extends Node>(
             : entry.installed
               ? text.skillsInstalled
               : entry.source,
-        13,
         props.theme.muted,
       ),
       ui.text('skill-description', entry.description),
@@ -395,7 +386,6 @@ function frame<N extends Node>(
       ui.text(
         'skill-range',
         `${text.toolByteRange}: ${document.totalBytes ? document.offset + 1 : 0}–${document.after ?? document.totalBytes} / ${document.totalBytes}`,
-        12,
         props.theme.muted,
       ),
     );
@@ -422,41 +412,32 @@ function frame<N extends Node>(
   } else {
     state.page?.entries.forEach((entry, at) => {
       const key = rowKey(state, at);
-      const label = compactLabel(entry.name, tui ? 100 : 200);
+      const label = compactLabel(entry.name, 100);
       const summary = compactLabel(
         `${entry.imported ? text.skillsImported : entry.bundled ? text.skillsBundled : entry.installed ? text.skillsInstalled : entry.source} · ${entry.description}`,
-        tui ? 160 : 240,
+        160,
       );
       content.push(
-        ui.item
-          ? ui.item(
-              key,
-              ui.box(
-                `${key}-content`,
-                [
-                  ui.text(`${key}-name`, label, 14, props.theme.text, 550),
-                  ui.text(`${key}-summary`, summary, 12, props.theme.muted),
-                ],
-                { gap: 0 },
-              ),
-              at === state.active,
-              !available,
-              { followFocus: false, submit: false },
-            )
-          : ui.box(
-              `${key}-content`,
-              [
-                ui.button(key, label, !available, false, { width: fill, justify: 'start' }),
-                ui.text(`${key}-summary`, summary, 12, props.theme.muted),
-              ],
-              { gap: 0 },
-            ),
+        ui.item(
+          key,
+          ui.box(
+            `${key}-content`,
+            [
+              ui.text(`${key}-name`, label, props.theme.text, 550),
+              ui.text(`${key}-summary`, summary, props.theme.muted),
+            ],
+            { gap: 0 },
+          ),
+          at === state.active,
+          !available,
+          { followFocus: false, submit: false },
+        ),
       );
     });
     if (!busy && state.page && !state.page.entries.length)
       content.push(ui.text('skills-empty', text.skillsEmpty));
     state.page?.diagnostics.forEach((diagnostic, at) =>
-      content.push(ui.text(`skills-diagnostic-${at}`, diagnostic, 12, props.theme.muted)),
+      content.push(ui.text(`skills-diagnostic-${at}`, diagnostic, props.theme.muted)),
     );
   }
   const view = ui.box(
@@ -483,25 +464,22 @@ function frame<N extends Node>(
         ],
         { visible: !document, gap: 0 },
       ),
-      ...(busy ? [ui.text('skills-loading', text.skillsLoading, 13, props.theme.muted)] : []),
+      ...(busy ? [ui.text('skills-loading', text.skillsLoading, props.theme.muted)] : []),
       ...(state.current
         ? [ui.button('check-change', text.skillsCheckResult, busy || !state.current.reference)]
         : []),
-      ...(state.notice
-        ? [ui.text('skills-notice', text[state.notice], 13, props.theme.muted)]
-        : []),
+      ...(state.notice ? [ui.text('skills-notice', text[state.notice], props.theme.muted)] : []),
       ...(state.cleanupUnconfirmed
-        ? [ui.text('skills-cleanup', text.skillsCleanupUnknown, 13, props.theme.muted)]
+        ? [ui.text('skills-cleanup', text.skillsCleanupUnknown, props.theme.muted)]
         : []),
       presentation.reading(
         'skills-reading',
         {
           content: ui.box('skills-viewport', content, {
             scroll: 'manual',
-            focusGroup: tui && !document,
+            focusGroup: !document,
             autoFocus: !!document,
-            gap: tui ? 0 : 6,
-            style: { width: fill, height: pixels(320), minHeight: 0, minWidth: 0 },
+            gap: 0,
             terminal: { grow: 1, basis: 0 },
           }),
           command: state.reveal,
@@ -524,7 +502,7 @@ function frame<N extends Node>(
                   !available || !!state.current,
                 ),
               ],
-              { row: true, gap: tui ? 1 : 8, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ]
         : []),
@@ -555,7 +533,7 @@ function frame<N extends Node>(
                         ]
                       : []),
                   ],
-              { row: true, gap: tui ? 1 : 8, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ]
         : []),
@@ -574,26 +552,17 @@ function frame<N extends Node>(
               ui.button('refresh', text.refreshSessions, busy || !!state.preview),
               ui.button('close', text.closeModels),
             ],
-        { row: true, gap: tui ? 1 : 8, style: { wrap: true }, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
-    {
-      visible: state.open && props.open,
-      gap: tui ? 0 : 8,
-      style: { width: fill, minWidth: 0 },
-      terminal: { grow: 1 },
-    },
+    { visible: state.open && props.open, gap: 0, terminal: { grow: 1 } },
   );
   const out = output(
     state,
     ui.box(
       'skills-root',
       [
-        ui.box('skills-browser', [view], {
-          visible: !state.importer.open,
-          style: { width: fill, minHeight: 0 },
-          terminal: { grow: 1 },
-        }),
+        ui.box('skills-browser', [view], { visible: !state.importer.open, terminal: { grow: 1 } }),
         importView(
           presentation,
           props,
@@ -607,7 +576,6 @@ function frame<N extends Node>(
       ],
       {
         visible: state.open && props.open,
-        style: { width: fill, minHeight: 0 },
         terminal: { grow: 1 },
         shortcuts: [{ key: 'escape', modifiers: [], input: 'close', enabled: true }],
       },

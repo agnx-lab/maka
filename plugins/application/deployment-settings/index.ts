@@ -33,7 +33,7 @@ import {
 } from '../../shared/bookmark.js';
 import { copy } from './locale.js';
 import { pageHeader, withPageShell, type PageState } from '../../shared/page-shell.js';
-import { fill, output, type Presentation, type Node } from '../../shared/view.js';
+import { output, type Presentation, type Node } from '../../shared/view.js';
 
 type Place = 'interface' | 'services';
 interface State extends PageState {
@@ -68,38 +68,33 @@ export function deploymentSettings<N extends Node>(
       ui.box(
         'deployment-settings',
         [
-          ...(presentation.target === 'tui'
+          bookmarkView(
+            presentation,
+            state.bookmark,
+            'deployment-place-checkpoint',
+            (props.bookmarkKey ?? 'deployment') + '/place',
+            state.selected,
+          ),
+          ...(state.bookmark.observed?.state.kind === 'failed'
             ? [
-                bookmarkView(
-                  presentation,
-                  state.bookmark,
-                  'deployment-place-checkpoint',
-                  (props.bookmarkKey ?? 'deployment') + '/place',
-                  state.selected,
+                ui.box(
+                  'deployment-place-error',
+                  [
+                    ui.text(
+                      'deployment-place-message',
+                      state.bookmark.command &&
+                        state.bookmark.command.sequence > state.bookmark.observed.sequence
+                        ? text.restoringView
+                        : text.viewSaveFailed,
+                      props.theme.warning,
+                    ),
+                    ...(state.bookmark.command &&
+                    state.bookmark.command.sequence > state.bookmark.observed.sequence
+                      ? []
+                      : [ui.button('deployment-place-retry', text.reloadView)]),
+                  ],
+                  { row: true, gap: 1, terminal: { wrap: true } },
                 ),
-                ...(state.bookmark.observed?.state.kind === 'failed'
-                  ? [
-                      ui.box(
-                        'deployment-place-error',
-                        [
-                          ui.text(
-                            'deployment-place-message',
-                            state.bookmark.command &&
-                              state.bookmark.command.sequence > state.bookmark.observed.sequence
-                              ? text.restoringView
-                              : text.viewSaveFailed,
-                            13,
-                            props.theme.warning,
-                          ),
-                          ...(state.bookmark.command &&
-                          state.bookmark.command.sequence > state.bookmark.observed.sequence
-                            ? []
-                            : [ui.button('deployment-place-retry', text.reloadView)]),
-                        ],
-                        { row: true, gap: 1, terminal: { wrap: true } },
-                      ),
-                    ]
-                  : []),
               ]
             : []),
           ui.box(
@@ -118,14 +113,13 @@ export function deploymentSettings<N extends Node>(
                 state.selected === 'services',
               ),
             ],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { shrink: 0, wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
           ui.text(
             'deployment-target-help',
             state.selected === 'interface'
               ? text.deploymentInterfaceHelp
               : text.deploymentServicesHelp,
-            13,
             props.theme.muted,
           ),
           ...state.opened.map((place) =>
@@ -141,28 +135,21 @@ export function deploymentSettings<N extends Node>(
                     bookmarkKey: (props.bookmarkKey ?? 'deployment') + '/' + place,
                     navigationReady:
                       props.navigationReady !== false &&
-                      (presentation.target !== 'tui' ||
-                        bookmarkReady(state.bookmark, state.selected)),
+                      bookmarkReady(state.bookmark, state.selected),
                   },
                   { closed: 'closed', chrome: 'chrome' },
                 ),
               ],
-              {
-                visible: state.selected === place,
-                terminal: { grow: 1, basis: 0 },
-                style: { width: fill, height: fill, grow: 1, shrink: 1, minHeight: 0 },
-              },
+              { visible: state.selected === place, terminal: { grow: 1, basis: 0 } },
             ),
           ),
         ],
         {
           gap: 0,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
-          shortcuts:
-            presentation.target === 'tui'
-              ? [{ key: 'escape', modifiers: [], input: 'deployment-settings-back', enabled: true }]
-              : [],
+          shortcuts: [
+            { key: 'escape', modifiers: [], input: 'deployment-settings-back', enabled: true },
+          ],
         },
       ),
       events,

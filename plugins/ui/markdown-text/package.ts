@@ -19,7 +19,7 @@
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
 import * as own from '../../shared/contracts.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.markdown-text',

@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.surface',
@@ -28,15 +28,6 @@ export default {
     'zh-CN': { displayName: '界面显示', description: '在本机呈现应用界面。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [
-        target,
-        native(
-          target === 'desktop'
-            ? sdk.nativeImplementations.desktopSurface
-            : sdk.nativeImplementations.terminalSurface,
-        ),
-      ]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.terminalSurface) },
   },
 };

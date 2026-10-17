@@ -45,7 +45,7 @@ fn fixture(
         .clone();
     declaration
         .entries
-        .get_mut(&maka_plugin_core::package::EntryTarget::Desktop)
+        .get_mut(&maka_plugin_core::package::EntryTarget::Tui)
         .unwrap()
         .scene = Some(language());
     let mut source = std::str::from_utf8(old.file("index.mjs").unwrap())
@@ -62,7 +62,7 @@ fn fixture(
 fn missing_scene_compiler_is_rejected_before_native_activation() {
     let timer = timer();
     let (input, packages) = fixture(0);
-    let native = NativeRegistry::<()>::with_surface(PresentationTarget::Desktop);
+    let native = NativeRegistry::<()>::with_surface(PresentationTarget::Tui);
     let error = Application::new(
         &input,
         packages,
@@ -82,7 +82,7 @@ fn scene_compile_failure_preserves_last_committed_frame_and_input_custody() {
     let (input, packages) = fixture(0);
     let fail = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let observed = fail.clone();
-    let native = NativeRegistry::with_surface(PresentationTarget::Desktop)
+    let native = NativeRegistry::with_surface(PresentationTarget::Tui)
         .with_scene_compiler(
             language(),
             move |_| {
@@ -151,7 +151,7 @@ fn selected_languages_are_checked_before_any_factory_or_guest_evaluates() {
             .unwrap()
             .declaration()
             .clone();
-        let mut other = declaration.entries[&EntryTarget::Desktop].clone();
+        let mut other = declaration.entries[&EntryTarget::Tui].clone();
         other.imports.clear();
         other.exports.get_mut("App").unwrap().availability = Availability::Optional;
         other.scene = Some(maka_plugin_core::package::SceneLanguage {
@@ -161,7 +161,7 @@ fn selected_languages_are_checked_before_any_factory_or_guest_evaluates() {
         let extra = support::package(
             "later.component",
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, other)]),
+                entries: BTreeMap::from([(EntryTarget::Tui, other)]),
                 composition: None,
             },
             Some("throw new Error('later guest must not evaluate');".into()),
@@ -189,13 +189,13 @@ fn selected_languages_are_checked_before_any_factory_or_guest_evaluates() {
             )
             .unwrap();
         native
-            .register("maka.ui.surface.desktop", move |_, _| {
+            .register("maka.ui.surface.tui", move |_, _| {
                 observed.set(observed.get() + 1);
                 Ok(BTreeMap::from([(
                     "Surface".into(),
                     NativeExport {
-                        contract: maka_ui_runtime::surface_contract(PresentationTarget::Desktop),
-                        value: NativeCapability::Surface(PresentationTarget::Desktop),
+                        contract: maka_ui_runtime::surface_contract(PresentationTarget::Tui),
+                        value: NativeCapability::Surface(PresentationTarget::Tui),
                     },
                 )]))
             })
@@ -253,7 +253,7 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
         .find(|p| p.manifest().id == "dynamic.app")
         .unwrap();
     let mut entry =
-        root.manifest().application.as_ref().unwrap().entries[&EntryTarget::Desktop].clone();
+        root.manifest().application.as_ref().unwrap().entries[&EntryTarget::Tui].clone();
     entry.imports.clear();
     entry.scene = None;
     entry.exports.get_mut("App").unwrap().contract.interface = Interface::Value {
@@ -264,7 +264,7 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
         let source = if undeclared {
             // Actual-export checking must reject this before it can ever mount.
             let component = root.manifest().application.as_ref().unwrap().entries
-                [&EntryTarget::Desktop]
+                [&EntryTarget::Tui]
                 .exports["App"]
                 .contract
                 .clone();
@@ -281,7 +281,7 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
         let package = support::package(
             "plain.value",
             Declaration {
-                entries: BTreeMap::from([(EntryTarget::Desktop, entry.clone())]),
+                entries: BTreeMap::from([(EntryTarget::Tui, entry.clone())]),
                 composition: None,
             },
             Some(source),
@@ -289,7 +289,7 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
         let input = Input {
             environment: Environment {
                 location: ExecutionLocation::Ui,
-                presentation: Some(PresentationTarget::Desktop),
+                presentation: Some(PresentationTarget::Tui),
             },
             instances: BTreeMap::from([("value".into(), support::node(&package, 1))]),
             recovery: None,
@@ -316,10 +316,10 @@ fn value_only_guest_needs_no_scene_compiler_and_cannot_publish_components() {
 fn composed_render_budget_rejects_child_only_updates_against_retained_ancestors() {
     let timer = timer();
     let (input, packages) = support::composed_fixture(support::CHILD_UPDATE, support::PARENT_EVENT);
-    let native = NativeRegistry::with_surface(PresentationTarget::Desktop)
+    let native = NativeRegistry::with_surface(PresentationTarget::Tui)
         .with_render_depth_limit(10)
         .with_scene_compiler(
-            support::scene::language(PresentationTarget::Desktop),
+            support::scene::language(PresentationTarget::Tui),
             |source| {
                 let view = support::scene::prepare(source)?;
                 let root = source["key"] == "root";
@@ -388,10 +388,10 @@ fn composed_render_budget_rejects_child_only_updates_against_retained_ancestors(
 fn hidden_native_slot_retains_custody_without_consuming_render_depth() {
     let timer = timer();
     let (input, packages) = support::composed_fixture(support::CHILD_UPDATE, support::PARENT_EVENT);
-    let native = NativeRegistry::with_surface(PresentationTarget::Desktop)
+    let native = NativeRegistry::with_surface(PresentationTarget::Tui)
         .with_render_depth_limit(10)
         .with_scene_compiler(
-            support::scene::language(PresentationTarget::Desktop),
+            support::scene::language(PresentationTarget::Tui),
             |source| {
                 let view = support::scene::prepare(source)?;
                 if source["key"] == "root" {
@@ -458,9 +458,9 @@ fn delayed_scene_preparation_does_not_expire_or_consume_the_next_callback_budget
         support::fixture("return frame({count:state.count+1,revision:state.revision+1});");
     let (release, waiting) = std::sync::mpsc::channel();
     let waiting = std::sync::Mutex::new(Some(waiting));
-    let native = NativeRegistry::with_surface(PresentationTarget::Desktop)
+    let native = NativeRegistry::with_surface(PresentationTarget::Tui)
         .with_scene_compiler(
-            support::scene::language(PresentationTarget::Desktop),
+            support::scene::language(PresentationTarget::Tui),
             move |source| {
                 if let Some(waiting) = waiting.lock().unwrap().take() {
                     waiting.recv().unwrap();

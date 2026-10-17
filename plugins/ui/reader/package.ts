@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.reader',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '文本读取', description: '读取编辑器和其他应用资源中的文本。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.textReader)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.textReader) },
   },
 };

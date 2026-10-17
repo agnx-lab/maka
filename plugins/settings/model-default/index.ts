@@ -42,14 +42,7 @@ import { modelDefaultContract, type ModelDefaultProps } from '../../shared/contr
 import { scrollRows, visibleRows, resetScroll } from '../../shared/scroll.js';
 import { copy, type Copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 const limitNames = [
   'contextWindow',
@@ -234,7 +227,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const saved = props.defaultModel;
@@ -251,21 +243,16 @@ function frame<N extends Node>(
     [
       ...(props.selection
         ? [
-            ui.text('model-tools-name', props.selection.label, 16, props.theme.text, 550),
-            ui.text(
-              'model-tools-connection',
-              props.selection.connectionName,
-              12,
-              props.theme.muted,
-            ),
-            ui.text('model-limits-help', text.modelLimitsHelp, 12, props.theme.muted),
+            ui.text('model-tools-name', props.selection.label, props.theme.text, 550),
+            ui.text('model-tools-connection', props.selection.connectionName, props.theme.muted),
+            ui.text('model-limits-help', text.modelLimitsHelp, props.theme.muted),
             ...limitNames.map((name) => {
               const field = state.limits[name];
               const known = name === 'compactionThreshold' ? null : props.selection?.limits?.[name];
               return ui.box(
                 'limit-row-' + name,
                 [
-                  ui.text('limit-label-' + name, text[limitLabels[name]], 13, props.theme.text),
+                  ui.text('limit-label-' + name, text[limitLabels[name]], props.theme.text),
                   presentation.slot(
                     'limit-' + name,
                     'input',
@@ -287,7 +274,6 @@ function frame<N extends Node>(
                         ui.text(
                           'limit-known-' + name,
                           `${text[name === 'maxOutputTokens' ? 'modelOutputCapacity' : 'modelCurrentLimit']}: ${known.toLocaleString('en-US')}`,
-                          12,
                           props.theme.muted,
                         ),
                       ]),
@@ -302,7 +288,6 @@ function frame<N extends Node>(
                   ui.text(
                     'tools-label-' + field,
                     field === 'codeMode' ? 'Code Mode' : 'Apply Patch',
-                    14,
                     props.theme.text,
                     550,
                   ),
@@ -323,19 +308,18 @@ function frame<N extends Node>(
                         state.tools[field] === value,
                       );
                     }),
-                    { row: true, gap: target === 'tui' ? 1 : 8 },
+                    { row: true, gap: 1 },
                   ),
                   ui.text(
                     'tools-help-' + field,
                     text[field === 'codeMode' ? 'modelCodeModeHelp' : 'modelApplyPatchHelp'],
-                    12,
                     props.theme.muted,
                   ),
                 ],
-                { gap: target === 'tui' ? 0 : 4 },
+                { gap: 0 },
               ),
             ),
-            ui.text('model-tools-scope', text.modelToolsScope, 12, props.theme.muted),
+            ui.text('model-tools-scope', text.modelToolsScope, props.theme.muted),
             ui.box(
               'tools-actions',
               [
@@ -351,12 +335,12 @@ function frame<N extends Node>(
                   !canStart(state, props) || !toolsChanged(state, props),
                 ),
               ],
-              { row: true, gap: target === 'tui' ? 1 : 8 },
+              { row: true, gap: 1 },
             ),
           ]
         : []),
-      ui.text('default-heading', text.defaultModel, 16, props.theme.text, 550),
-      ui.text('default-summary', summary, 13, props.theme.muted),
+      ui.text('default-heading', text.defaultModel, props.theme.text, 550),
+      ui.text('default-summary', summary, props.theme.muted),
       ui.box(
         'default-actions',
         [
@@ -377,25 +361,14 @@ function frame<N extends Node>(
             : []),
           ui.button('default-history', text.earlierDefaultOperations),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          terminal: { wrap: true },
-          style: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
-      ...(target === 'desktop'
-        ? [ui.text('default-help', text.defaultHelp, 13, props.theme.muted)]
-        : []),
-      ...(state.notice
-        ? [ui.text('default-notice', text[state.notice], 13, props.theme.muted)]
-        : []),
+      ...(state.notice ? [ui.text('default-notice', text[state.notice], props.theme.muted)] : []),
     ],
     {
       visible: !state.confirmation && !state.historyOpen,
-      gap: target === 'desktop' ? 8 : 0,
-      scroll: target === 'tui' ? 'manual' : 'anchor',
-      style: { width: fill, minHeight: 0, maxHeight: 520 },
+      gap: 0,
+      scroll: 'manual',
       terminal: { grow: 1 },
     },
   );
@@ -410,22 +383,15 @@ function frame<N extends Node>(
                 ui.text(
                   'default-question',
                   state.confirmation?.target ? text.confirmSetDefault : text.confirmClearDefault,
-                  13,
                 ),
                 ...(!canConfirm(state, props)
-                  ? [ui.text('default-stale', text.defaultConflict, 13, props.theme.muted)]
+                  ? [ui.text('default-stale', text.defaultConflict, props.theme.muted)]
                   : []),
                 ...(state.confirmation?.identity ?? []).map((value, at) =>
-                  ui.text('default-line-' + at, value, 13),
+                  ui.text('default-line-' + at, value),
                 ),
               ],
-              {
-                scroll: 'manual',
-                autoFocus: true,
-                gap: target === 'desktop' ? 8 : 1,
-                terminal: { grow: 1, basis: 0 },
-                style: { width: fill, height: pixels(220), minHeight: 0 },
-              },
+              { scroll: 'manual', autoFocus: true, gap: 1, terminal: { grow: 1, basis: 0 } },
             ),
           ]
         : []),
@@ -435,17 +401,12 @@ function frame<N extends Node>(
           ui.button('default-cancel', text.cancel),
           ui.button('default-confirm', text.confirmDefault, !canConfirm(state, props), true),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          terminal: { wrap: true },
-          style: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       visible: !!state.confirmation,
-      gap: target === 'desktop' ? 8 : 1,
+      gap: 1,
       terminal: { grow: 1 },
     },
   );
@@ -459,46 +420,24 @@ function frame<N extends Node>(
               ui.box(
                 'default-history-actions',
                 [
-                  ui.button(
-                    'default-history-back',
-                    text.back,
-                    false,
-                    false,
-                    target === 'tui' ? { background: 0, align: 'start' } : {},
-                  ),
+                  ui.button('default-history-back', text.back, false, false, {
+                    background: 0,
+                    align: 'start',
+                  }),
                   ui.button(
                     'default-history-refresh',
-                    target === 'tui'
-                      ? props.theme.ascii
-                        ? 'r'
-                        : '↻'
-                      : text.refreshDefaultOperations,
+                    props.theme.ascii ? 'r' : '↻',
                     false,
                     false,
-                    target === 'tui' ? { background: 0 } : {},
+                    { background: 0 },
                     undefined,
                     text.refreshDefaultOperations,
                   ),
                 ],
-                {
-                  row: true,
-                  gap: target === 'desktop' ? 8 : 1,
-                  terminal: { wrap: true },
-                  style: { wrap: true },
-                },
+                { row: true, gap: 1, terminal: { wrap: true } },
               ),
-              ...(target === 'desktop'
-                ? [ui.text('default-history-help', text.earlierDefaultHelp, 13, props.theme.muted)]
-                : []),
               ...(state.historyFailed
-                ? [
-                    ui.text(
-                      'default-history-failed',
-                      text.historyUnavailable,
-                      13,
-                      props.theme.muted,
-                    ),
-                  ]
+                ? [ui.text('default-history-failed', text.historyUnavailable, props.theme.muted)]
                 : []),
               ...visibleRows(state, 'default-history-reading', state.earlier).map(
                 ({ entry, at }) => {
@@ -524,7 +463,6 @@ function frame<N extends Node>(
                           : value
                             ? text.historyRejected
                             : text.historyUnknown,
-                        13,
                       ),
                     ],
                     { gap: 0 },
@@ -532,13 +470,7 @@ function frame<N extends Node>(
                 },
               ),
             ],
-            {
-              visible: state.historyOpen,
-              gap: target === 'desktop' ? 8 : 1,
-              scroll: 'anchor',
-              terminal: { grow: 1 },
-              style: { width: fill, maxHeight: 280 },
-            },
+            { visible: state.historyOpen, gap: 1, scroll: 'anchor', terminal: { grow: 1 } },
           ),
         },
         { input: 'history-input', observed: 'history-observed' },
@@ -549,22 +481,19 @@ function frame<N extends Node>(
     state,
     ui.box(
       'model-default',
-      target === 'tui'
-        ? [
-            ui.dialog(
-              'default-dialog',
-              state.historyOpen ? text.earlierDefaultOperations : text.defaultModel,
-              main,
-              ui.box('default-dialog-content', [confirmation, earlier], {
-                gap: 0,
-                terminal: { grow: 1 },
-              }),
-              !!state.confirmation || state.historyOpen,
-              undefined,
-              { width: 64, height: state.historyOpen ? 18 : 14 },
-            ),
-          ]
-        : [main, confirmation, earlier],
+      [
+        ui.dialog(
+          'default-dialog',
+          state.historyOpen ? text.earlierDefaultOperations : text.defaultModel,
+          main,
+          ui.box('default-dialog-content', [confirmation, earlier], {
+            gap: 0,
+            terminal: { grow: 1 },
+          }),
+          !!state.confirmation || state.historyOpen,
+          { width: 64, height: state.historyOpen ? 18 : 14 },
+        ),
+      ],
       { gap: 0, terminal: { grow: 1 } },
     ),
     events,
@@ -575,7 +504,6 @@ function frame<N extends Node>(
 export function modelDefault<N extends Node>(
   presentation: Presentation<N>,
 ): Component<State, ModelDefaultProps, N> {
-  const target = presentation.target;
   return {
     mount(props) {
       const state: State = {

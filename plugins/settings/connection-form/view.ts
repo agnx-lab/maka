@@ -24,17 +24,10 @@ import type {
   Identity,
 } from '../../../packages/plugin-sdk/src/index.js';
 import { type ConnectionFormProps } from '../../shared/contracts.js';
-import { scrollRows, visibleRows, resetScroll } from '../../shared/scroll.js';
+import { visibleRows } from '../../shared/scroll.js';
 import { copy, type Copy, tuiText } from './locale.js';
 import { pageHeader } from '../../shared/page-shell.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 import { matchesProvider, providerGroup } from '../search.js';
 import { busy, canRemove, canSave, fresh, sameConnection } from './operations.js';
 import { advancedFields, names, type FieldName, type State } from './state.js';
@@ -58,7 +51,6 @@ export function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const locked = busy(state);
@@ -99,22 +91,19 @@ export function frame<N extends Node>(
         : []),
       ...(expanded
         ? group.rows.map(({ provider, at }) =>
-            ui.item
-              ? ui.item(
-                  'provider-' + at,
-                  ui.text(
-                    'provider-label-' + at,
-                    (group.rows.length > 1 ? '  ' : '') + provider.label,
-                    14,
-                    props.theme.text,
-                    400,
-                    { truncate: true },
-                  ),
-                  state.providerActive === at,
-                  locked,
-                  { followFocus: true, submit: true },
-                )
-              : ui.button('provider-' + at, provider.label, locked),
+            ui.item(
+              'provider-' + at,
+              ui.text(
+                'provider-label-' + at,
+                (group.rows.length > 1 ? '  ' : '') + provider.label,
+                props.theme.text,
+                400,
+                { truncate: true },
+              ),
+              state.providerActive === at,
+              locked,
+              { followFocus: true, submit: true },
+            ),
           )
         : []),
     ];
@@ -137,19 +126,18 @@ export function frame<N extends Node>(
               'form-notice',
               text[state.notice] +
                 (state.invalidField ? ': ' + fieldLabel(state.invalidField, text) : ''),
-              13,
               props.theme.muted,
             ),
           ]
         : []),
       ...(!fresh(state, props)
-        ? [ui.text('form-target-changed', text.connectionChanged, 13, props.theme.muted)]
+        ? [ui.text('form-target-changed', text.connectionChanged, props.theme.muted)]
         : []),
       // Keep the original search owner alive while its captured read settles.
       ui.box(
         'provider-search',
         [
-          ui.text('provider-heading', text.chooseProvider, 16, props.theme.text, 550),
+          ui.text('provider-heading', text.chooseProvider, props.theme.text, 550),
           ui.box(
             'provider-query-box',
             [
@@ -170,21 +158,17 @@ export function frame<N extends Node>(
             ],
             {
               gap: 0,
-              shortcuts:
-                target === 'tui'
-                  ? ['down', 'up'].map((key) => ({
-                      key,
-                      modifiers: [],
-                      input: 'provider-focus',
-                      enabled: !locked && providerRows.length > 0,
-                    }))
-                  : [],
-              style: { width: fill, height: pixels(36) },
+              shortcuts: ['down', 'up'].map((key) => ({
+                key,
+                modifiers: [],
+                input: 'provider-focus',
+                enabled: !locked && providerRows.length > 0,
+              })),
             },
           ),
           ...(state.search.error ? [ui.text('search-error', text[state.search.error])] : []),
         ],
-        { visible: !state.baseline && !state.provider, gap: target === 'tui' ? 1 : 16 },
+        { visible: !state.baseline && !state.provider, gap: 1 },
       ),
       ...(!state.baseline && !state.provider
         ? [
@@ -193,18 +177,18 @@ export function frame<N extends Node>(
               [
                 ui.button(
                   'provider-refresh',
-                  target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.refreshConnections,
+                  props.theme.ascii ? 'r' : '↻',
                   locked || loadingProviders,
                   false,
-                  target === 'tui' ? { background: 0 } : {},
+                  { background: 0 },
                   undefined,
                   text.refreshConnections,
                 ),
               ],
-              { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
             ...(loadingProviders
-              ? [ui.text('provider-loading', text.connecting, 13, props.theme.muted)]
+              ? [ui.text('provider-loading', text.connecting, props.theme.muted)]
               : []),
             ...(state.providersFailed
               ? [ui.text('provider-failed', text.providersUnavailable)]
@@ -223,11 +207,10 @@ export function frame<N extends Node>(
               {
                 command: state.providerFocus,
                 content: ui.box('provider-rows', providerRows, {
-                  focusGroup: target === 'tui',
+                  focusGroup: true,
                   scroll: 'manual',
-                  gap: target === 'tui' ? 0 : 8,
+                  gap: 0,
                   terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: pixels(240), minHeight: 0 },
                 }),
               },
               { input: 'provider-input' },
@@ -249,11 +232,10 @@ export function frame<N extends Node>(
                 ui.text(
                   'provider-identity',
                   compactLabel(state.provider?.descriptor.label ?? identity?.name ?? '', 36),
-                  13,
                   props.theme.muted,
                 ),
               ],
-              { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ]),
       ...(!state.baseline && state.provider
@@ -263,7 +245,6 @@ export function frame<N extends Node>(
               state.provider.descriptor.anonymous
                 ? tuiText(props.locale, 'anonymous-setup')
                 : text.connectionSetupHelp,
-              13,
               props.theme.muted,
             ),
           ]
@@ -280,7 +261,7 @@ export function frame<N extends Node>(
             ui.box(
               'field-heading-' + name,
               [
-                ui.text('label-' + name, label, 15, props.theme.text, 550),
+                ui.text('label-' + name, label, props.theme.text, 550),
                 ...(state.baseline ||
                 (name === 'endpoint' && !state.provider?.descriptor.customEndpoint) ||
                 ['models', 'configuration', 'overrides', 'overlay'].includes(name)
@@ -301,27 +282,25 @@ export function frame<N extends Node>(
                     ]
                   : []),
               ],
-              { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
             ...(['models', 'overrides', 'overlay'].includes(name)
               ? [
                   ui.text(
                     'replace-help-' + name,
                     state.baseline ? text.replaceCollectionHelp : text.newCollectionHelp,
-                    12,
                     props.theme.muted,
                   ),
                 ]
               : []),
             ...(name === 'configuration'
-              ? [ui.text('configuration-help', text.configurationHelp, 12, props.theme.muted)]
+              ? [ui.text('configuration-help', text.configurationHelp, props.theme.muted)]
               : []),
             ...(f.failed
               ? [
                   ui.text(
                     'field-failed-' + name,
                     state.baseline ? text.fieldPrefillFailed : text.defaultPrefillFailed,
-                    12,
                     props.theme.muted,
                   ),
                   ui.button('empty-' + name, text.replaceFromEmpty, locked),
@@ -353,27 +332,13 @@ export function frame<N extends Node>(
                   },
                 ),
               ],
-              {
-                visible: f.enabled,
-                gap: 0,
-                style: {
-                  width: fill,
-                  height: pixels(
-                    ['slug', 'name', 'endpoint'].includes(name)
-                      ? 36
-                      : ['configuration', 'overrides', 'overlay'].includes(name)
-                        ? 180
-                        : 72,
-                  ),
-                },
-              },
+              { visible: f.enabled, gap: 0 },
             ),
             ...(!f.enabled
               ? [
                   ui.text(
                     'kept-' + name,
                     state.baseline ? text.savedFieldKept : text.defaultFieldKept,
-                    12,
                     props.theme.muted,
                   ),
                 ]
@@ -388,9 +353,8 @@ export function frame<N extends Node>(
                 !!state.baseline ||
                 !!state.provider?.descriptor.customEndpoint ||
                 !!state.provider?.descriptor.anonymous),
-            gap: target === 'desktop' ? 8 : 1,
+            gap: 1,
             padding: 0,
-            style: { width: fill },
           },
         );
       }),
@@ -419,8 +383,8 @@ export function frame<N extends Node>(
     ],
     {
       visible: !state.historyOpen && !state.confirmation,
-      scroll: target === 'tui' && (state.provider || state.baseline) ? 'anchor' : 'none',
-      gap: target === 'desktop' ? 16 : 1,
+      scroll: state.provider || state.baseline ? 'anchor' : 'none',
+      gap: 1,
       terminal: state.provider || state.baseline ? { shrink: true } : { grow: 1 },
     },
   );
@@ -459,7 +423,7 @@ export function frame<N extends Node>(
               ]
             : []),
         ],
-        { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
@@ -468,11 +432,7 @@ export function frame<N extends Node>(
       terminal: { shrink: false },
     },
   );
-  const main = ui.box('form-main', [form, footer], {
-    gap: 1,
-    terminal: { grow: 1 },
-    style: { width: fill, height: fill, minHeight: 0 },
-  });
+  const main = ui.box('form-main', [form, footer], { gap: 1, terminal: { grow: 1 } });
   const reviewValue =
     state.confirmation === 'remove'
       ? [
@@ -491,14 +451,13 @@ export function frame<N extends Node>(
   // Full human-readable identity, with bounded terminal lines. Native version
   // and package internals remain in the frozen request, not confirmation copy.
   const reviewLines = reviewValue.split(/\r?\n/u).flatMap((line) => {
-    if (state.confirmation === 'remove' && target === 'desktop') return [line];
     const characters = [...line],
       lines: string[] = [];
     for (let at = 0; at < characters.length; at += 36)
       lines.push(characters.slice(at, at + 36).join(''));
     return lines.length ? lines : [''];
   });
-  const pageSize = target === 'tui' ? 7 : 24;
+  const pageSize = 7;
   const pages = Math.max(1, Math.ceil(reviewLines.length / pageSize));
   const page = Math.min(state.reviewPage, pages - 1);
   const confirmation = ui.box(
@@ -513,7 +472,6 @@ export function frame<N extends Node>(
           : state.confirmation === 'remove'
             ? text.confirmRemoveConnection
             : text.connectionRebaseHelp,
-        14,
       ),
       ui.box(
         'confirm-actions',
@@ -539,7 +497,7 @@ export function frame<N extends Node>(
                     ]),
               ]),
         ],
-        { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
       ...(state.confirmation === 'rebase' || state.confirmation === 'remove'
         ? [
@@ -550,12 +508,8 @@ export function frame<N extends Node>(
                   'review-lines',
                   reviewLines
                     .slice(page * pageSize, (page + 1) * pageSize)
-                    .map((line, at) => ui.text('review-line-' + at, line, 13)),
-                  {
-                    scroll: 'manual',
-                    terminal: { grow: 1, basis: 0 },
-                    style: { width: fill, height: fill, minHeight: 0 },
-                  },
+                    .map((line, at) => ui.text('review-line-' + at, line)),
+                  { scroll: 'manual', terminal: { grow: 1, basis: 0 } },
                 ),
               },
               { observed: 'review-observed' },
@@ -563,7 +517,7 @@ export function frame<N extends Node>(
           ]
         : []),
     ],
-    { visible: !!state.confirmation, gap: target === 'desktop' ? 12 : 1 },
+    { visible: !!state.confirmation, gap: 1 },
   );
   const earlier = state.historyOpen
     ? presentation.reading(
@@ -572,35 +526,26 @@ export function frame<N extends Node>(
           content: ui.box(
             'form-earlier',
             [
-              ui.button(
-                'form-history-back',
-                text.back,
-                false,
-                false,
-                target === 'tui' ? { background: 0, align: 'start' } : {},
-              ),
-              ui.text(
-                'earlier-heading',
-                text.earlierConnectionOperations,
-                20,
-                props.theme.text,
-                550,
-              ),
-              ui.text('earlier-help', text.earlierConnectionHelp, 13, props.theme.muted),
+              ui.button('form-history-back', text.back, false, false, {
+                background: 0,
+                align: 'start',
+              }),
+              ui.text('earlier-heading', text.earlierConnectionOperations, props.theme.text, 550),
+              ui.text('earlier-help', text.earlierConnectionHelp, props.theme.muted),
               ui.box(
                 'earlier-actions',
                 [
                   ui.button(
                     'form-history-refresh',
-                    target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.refreshConnections,
+                    props.theme.ascii ? 'r' : '↻',
                     false,
                     false,
-                    target === 'tui' ? { background: 0 } : {},
+                    { background: 0 },
                     undefined,
                     text.refreshConnections,
                   ),
                 ],
-                { row: true, gap: target === 'desktop' ? 8 : 1, terminal: { wrap: true } },
+                { row: true, gap: 1, terminal: { wrap: true } },
               ),
               ...(state.historyFailed ? [ui.text('earlier-failed', text.historyUnavailable)] : []),
               ...visibleRows(state, 'connection-history-reading', state.earlier).map(
@@ -624,7 +569,6 @@ export function frame<N extends Node>(
                           : value
                             ? text.historyRejected
                             : text.historyUnknown,
-                        13,
                       ),
                       ui.button(
                         'form-earlier-' + at,
@@ -639,13 +583,7 @@ export function frame<N extends Node>(
                 },
               ),
             ],
-            {
-              visible: state.historyOpen,
-              scroll: 'anchor',
-              terminal: { grow: 1 },
-              style: { width: fill, height: fill },
-              gap: target === 'desktop' ? 12 : 1,
-            },
+            { visible: state.historyOpen, scroll: 'anchor', terminal: { grow: 1 }, gap: 1 },
           ),
         },
         { input: 'history-input', observed: 'history-observed' },
@@ -656,41 +594,34 @@ export function frame<N extends Node>(
     state,
     ui.box(
       'connection-form',
-      target !== 'tui'
-        ? [main, confirmation, earlier]
-        : [
-            ui.dialog(
-              'form-auxiliary',
-              state.historyOpen ? text.earlierConnectionOperations : text.editConnection,
-              main,
-              ui.box('form-auxiliary-content', [confirmation, earlier], { gap: 0 }),
-              !!state.confirmation || state.historyOpen,
-              undefined,
-              { width: 72, height: state.confirmation === 'leave' ? 8 : 24 },
-            ),
-          ],
+      [
+        ui.dialog(
+          'form-auxiliary',
+          state.historyOpen ? text.earlierConnectionOperations : text.editConnection,
+          main,
+          ui.box('form-auxiliary-content', [confirmation, earlier], { gap: 0 }),
+          !!state.confirmation || state.historyOpen,
+          { width: 72, height: state.confirmation === 'leave' ? 8 : 24 },
+        ),
+      ],
       {
         autoFocus: true,
-        shortcuts:
-          target === 'tui'
-            ? [
-                {
-                  key: 'escape',
-                  modifiers: [],
-                  input: state.confirmation
-                    ? 'form-cancel'
-                    : state.historyOpen
-                      ? 'form-history-back'
-                      : 'form-back',
-                  enabled: true,
-                },
-              ]
-            : [],
+        shortcuts: [
+          {
+            key: 'escape',
+            modifiers: [],
+            input: state.confirmation
+              ? 'form-cancel'
+              : state.historyOpen
+                ? 'form-history-back'
+                : 'form-back',
+            enabled: true,
+          },
+        ],
         gap: 0,
-        padding: target === 'desktop' ? 24 : props.shell ? 0 : 1,
-        scroll: target === 'tui' ? 'none' : 'anchor',
+        padding: props.shell ? 0 : 1,
+        scroll: 'none',
         terminal: { grow: 1 },
-        style: { width: fill, height: fill, maxWidth: 760, minWidth: 0, minHeight: 0 },
       },
     ),
     events,

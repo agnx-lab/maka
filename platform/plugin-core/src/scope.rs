@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 pub enum Scope {
     #[default]
     Profile,
-    DesktopUi,
     Session(String),
 }
 
@@ -34,7 +33,6 @@ impl TryFrom<String> for Scope {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_str() {
             "profile" => Ok(Self::Profile),
-            "desktop-ui" => Ok(Self::DesktopUi),
             _ => {
                 let session = value
                     .strip_prefix("session:")
@@ -55,7 +53,6 @@ impl From<Scope> for String {
     fn from(scope: Scope) -> String {
         match scope {
             Scope::Profile => "profile".into(),
-            Scope::DesktopUi => "desktop-ui".into(),
             Scope::Session(id) => format!("session:{id}"),
         }
     }

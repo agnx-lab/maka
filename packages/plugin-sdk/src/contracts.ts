@@ -785,252 +785,6 @@ export const contracts = {
       captures: {},
     },
   },
-  image: {
-    name: 'maka.ui.Image',
-    version: 1,
-    transport: 'local',
-    interface: {
-      kind: 'component',
-      props: {
-        $schema: 'https://json-schema.org/draft/2020-12/schema',
-        title: 'ImageProps',
-        type: 'object',
-        properties: {
-          source: {
-            anyOf: [
-              {
-                $ref: '#/$defs/ImageDescriptor',
-              },
-              {
-                type: 'null',
-              },
-            ],
-          },
-          packet: {
-            anyOf: [
-              {
-                $ref: '#/$defs/ImagePacket',
-              },
-              {
-                type: 'null',
-              },
-            ],
-          },
-          alt: {
-            type: 'string',
-            maxLength: 4096,
-          },
-          fit: {
-            $ref: '#/$defs/ImageFit',
-          },
-          height: {
-            type: 'number',
-            format: 'float',
-            minimum: 1,
-            maximum: 8192,
-          },
-          background: {
-            $ref: '#/$defs/Color',
-          },
-          border: {
-            $ref: '#/$defs/Color',
-          },
-          radius: {
-            type: 'number',
-            format: 'float',
-            minimum: 0,
-            maximum: 128,
-          },
-        },
-        additionalProperties: false,
-        required: ['alt', 'fit', 'height', 'background', 'border', 'radius'],
-        $defs: {
-          ImageDescriptor: {
-            type: 'object',
-            properties: {
-              key: {
-                type: 'string',
-                minLength: 1,
-                maxLength: 128,
-              },
-              digest: {
-                type: 'string',
-                pattern: '^sha256:[a-f0-9]{64}$',
-              },
-              mimeType: {
-                type: 'string',
-                pattern: '^image/(png|jpeg|gif|webp|avif)$',
-              },
-              totalBytes: {
-                type: 'integer',
-                format: 'uint64',
-                minimum: 1,
-                maximum: 5242880,
-              },
-            },
-            additionalProperties: false,
-            required: ['key', 'digest', 'mimeType', 'totalBytes'],
-          },
-          ImagePacket: {
-            type: 'object',
-            properties: {
-              owner: {
-                type: 'string',
-                minLength: 1,
-                maxLength: 128,
-              },
-              source: {
-                type: 'string',
-                minLength: 1,
-                maxLength: 128,
-              },
-              sequence: {
-                type: 'integer',
-                format: 'uint64',
-                minimum: 1,
-                maximum: 9007199254740991,
-              },
-              offset: {
-                type: 'integer',
-                format: 'uint64',
-                minimum: 0,
-                maximum: 5242880,
-              },
-              data: {
-                type: 'string',
-                minLength: 4,
-                maxLength: 43692,
-                pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
-              },
-            },
-            additionalProperties: false,
-            required: ['owner', 'source', 'sequence', 'offset', 'data'],
-          },
-          ImageFit: {
-            type: 'string',
-            enum: ['contain', 'cover'],
-          },
-          Color: {
-            description: 'Packed RGBA, including explicit alpha zero.',
-            type: 'integer',
-            format: 'uint32',
-            minimum: 0,
-          },
-        },
-      },
-      events: {
-        observed: {
-          $schema: 'https://json-schema.org/draft/2020-12/schema',
-          title: 'ImageObservation',
-          type: 'object',
-          properties: {
-            owner: {
-              type: 'string',
-            },
-            revision: {
-              type: 'integer',
-              format: 'uint64',
-              minimum: 0,
-            },
-            source: {
-              type: ['string', 'null'],
-            },
-            received: {
-              type: 'integer',
-              format: 'uint64',
-              minimum: 0,
-            },
-            phase: {
-              $ref: '#/$defs/ImagePhase',
-            },
-            width: {
-              type: ['integer', 'null'],
-              format: 'uint32',
-              minimum: 0,
-            },
-            height: {
-              type: ['integer', 'null'],
-              format: 'uint32',
-              minimum: 0,
-            },
-            error: {
-              anyOf: [
-                {
-                  $ref: '#/$defs/ImageError',
-                },
-                {
-                  type: 'null',
-                },
-              ],
-            },
-            receipt: {
-              anyOf: [
-                {
-                  $ref: '#/$defs/ImageReceipt',
-                },
-                {
-                  type: 'null',
-                },
-              ],
-            },
-          },
-          additionalProperties: false,
-          required: ['owner', 'revision', 'received', 'phase'],
-          $defs: {
-            ImagePhase: {
-              type: 'string',
-              enum: ['empty', 'receiving', 'decoding', 'ready', 'failed'],
-            },
-            ImageError: {
-              type: 'string',
-              enum: [
-                'budget_exhausted',
-                'limit_exceeded',
-                'source_conflict',
-                'packet_rejected',
-                'digest_mismatch',
-                'unsupported_format',
-                'invalid_image',
-                'decode_failed',
-              ],
-            },
-            ImageReceipt: {
-              type: 'object',
-              properties: {
-                owner: {
-                  type: 'string',
-                },
-                source: {
-                  type: 'string',
-                },
-                sequence: {
-                  type: 'integer',
-                  format: 'uint64',
-                  minimum: 0,
-                },
-                accepted: {
-                  type: 'boolean',
-                },
-                error: {
-                  anyOf: [
-                    {
-                      $ref: '#/$defs/ImageError',
-                    },
-                    {
-                      type: 'null',
-                    },
-                  ],
-                },
-              },
-              additionalProperties: false,
-              required: ['owner', 'source', 'sequence', 'accepted'],
-            },
-          },
-        },
-      },
-      captures: {},
-    },
-  },
   filePicker: {
     name: 'maka.ui.FilePicker',
     version: 1,
@@ -3981,7 +3735,7 @@ export const contracts = {
           },
           terminalRows: {
             description:
-              'Preferred terminal text rows, excluding native padding. A constrained\nviewport may shrink further. Desktop does not use terminal row sizing.',
+              'Preferred terminal text rows, excluding native padding. A constrained\nviewport may shrink further.',
             $ref: '#/$defs/TerminalTextareaRows',
             default: {
               min: 3,
@@ -4667,7 +4421,7 @@ export const contracts = {
           },
           SubmitKey: {
             description:
-              'Product-selected native submit gesture. PrimaryEnter uses the platform\naccelerator on Desktop and Control+Enter in a terminal.',
+              'Product-selected native submit gesture. PrimaryEnter uses the platform\nControl+Enter gesture in a terminal.',
             type: 'string',
             enum: ['enter', 'primary_enter', 'control_enter'],
           },
@@ -49114,7 +48868,7 @@ export const contracts = {
               },
               PresentationTarget: {
                 type: 'string',
-                enum: ['tui', 'desktop'],
+                enum: ['tui'],
               },
               CompositionNode: {
                 type: 'object',
@@ -50266,7 +50020,7 @@ export const contracts = {
               },
               PresentationTarget: {
                 type: 'string',
-                enum: ['tui', 'desktop'],
+                enum: ['tui'],
               },
               CompositionNode: {
                 type: 'object',
@@ -51349,19 +51103,6 @@ export const contracts = {
       },
     },
   },
-  desktopSurface: {
-    name: 'maka.ui.surface.desktop',
-    version: 1,
-    transport: 'local',
-    interface: {
-      kind: 'resource',
-      resource: 'surface.desktop',
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-      },
-    },
-  },
   terminalSurface: {
     name: 'maka.ui.surface.tui',
     version: 1,
@@ -51825,7 +51566,7 @@ export const contracts = {
               },
               PresentationTarget: {
                 type: 'string',
-                enum: ['tui', 'desktop'],
+                enum: ['tui'],
               },
               CompositionNode: {
                 type: 'object',
@@ -53080,7 +52821,7 @@ export const contracts = {
               },
               PresentationTarget: {
                 type: 'string',
-                enum: ['tui', 'desktop'],
+                enum: ['tui'],
               },
               CompositionNode: {
                 type: 'object',

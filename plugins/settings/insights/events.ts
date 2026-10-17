@@ -235,7 +235,7 @@ export function handleEvent<N extends Node>(
         else if (state.tab === 'activity' && !state.activity) activity(state, actions);
       } else if (
         key === 'view-save' &&
-        presentation.target === 'tui' &&
+        true &&
         state.bookmark.observed?.state.kind === 'ready' &&
         !state.bookmark.command
       ) {

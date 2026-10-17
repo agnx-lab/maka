@@ -53,7 +53,6 @@
   "deployment-manager": "plugins/application/deployment-manager",
   "deployment-gateway": "plugins/application/deployment-gateway",
   "file": "plugins/ui/file",
-  "image": "plugins/ui/image",
   "reading-area": "plugins/ui/reading-area",
   "label": "plugins/ui/label",
   "diff": "plugins/ui/diff",

@@ -26,6 +26,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 import { npmSpawnOptions } from '../npm-spawn.mjs';
+import { stageDesktopApp } from './build-cli.mjs';
 
 const run = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -63,13 +64,14 @@ export async function packNativeCli({
     const executable = platform.os === 'win32' ? 'maka.exe' : 'maka';
     await copyRegular(resolve(binary), join(directory, 'bin', executable), 512 * 1024 * 1024);
     await chmod(join(directory, 'bin', executable), 0o755);
-    const desktop = platform.os === 'win32' ? 'maka-desktop.exe' : 'maka-desktop';
+    const desktop = platform.os === 'win32' ? 'maka-desktop-shell.exe' : 'maka-desktop-shell';
     await copyRegular(
       join(dirname(resolve(binary)), desktop),
       join(directory, 'bin', desktop),
       512 * 1024 * 1024,
     );
     await chmod(join(directory, 'bin', desktop), 0o755);
+    await stageDesktopApp(repositoryRoot, join(directory, 'bin', 'app'));
     if (platform.os === 'win32') {
       await copyRegular(
         join(dirname(resolve(binary)), 'maka-service.exe'),

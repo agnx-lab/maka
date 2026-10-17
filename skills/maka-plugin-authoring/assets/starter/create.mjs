@@ -33,9 +33,9 @@ const { values } = parseArgs({
     target: { type: 'string', default: 'tui' },
   },
 });
-if (!values.output || !['host', 'tui', 'desktop'].includes(values.target))
+if (!values.output || !['host', 'tui'].includes(values.target))
   throw Error(
-    'Usage: node create.mjs --output NEW_DIRECTORY [--target host|tui|desktop] [--maka EXECUTABLE]',
+    'Usage: node create.mjs --output NEW_DIRECTORY [--target host|tui] [--maka EXECUTABLE]',
   );
 const target = values.target;
 const run = (args) =>
@@ -61,19 +61,19 @@ const entry = (module, exports, extra = {}) => ({
   exports,
   ...extra,
 });
-const entries = { host: entry('host.mjs', { Echo: required(host().Echo.contract) }) };
-for (const presentation of ['tui', 'desktop']) {
-  const surface = schema.contracts[presentation === 'tui' ? 'terminalSurface' : 'desktopSurface'];
-  entries[presentation] = entry(
-    `${presentation}.mjs`,
+const surface = schema.contracts.terminalSurface;
+const entries = {
+  host: entry('host.mjs', { Echo: required(host().Echo.contract) }),
+  tui: entry(
+    'tui.mjs',
     { Counter: required(ui().Counter.contract) },
     {
-      scene: { name: `maka.${presentation}.scene`, version: 1 },
+      scene: { name: 'maka.tui.scene', version: 1 },
       imports: { surface: { contract: surface, cardinality: { kind: 'one' } } },
     },
-  );
-}
-for (const file of ['host.mjs', 'tui.mjs', 'desktop.mjs'])
+  ),
+};
+for (const file of ['host.mjs', 'tui.mjs'])
   copyFileSync(join(source, file), join(packageDirectory, file));
 write(join(packageDirectory, 'maka.extension.json'), {
   schemaVersion: 1,
@@ -94,7 +94,6 @@ const input = {
 };
 const packages = [packageDirectory];
 if (target !== 'host') {
-  const surface = schema.contracts[target === 'tui' ? 'terminalSurface' : 'desktopSurface'];
   const path = join(output, 'surface');
   mkdirSync(path);
   write(join(path, 'maka.extension.json'), {

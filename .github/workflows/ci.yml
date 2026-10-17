@@ -112,6 +112,7 @@ jobs:
         run: |
           target/debug/maka --version
           target/debug/maka desktop --version
+          target/debug/maka-desktop-shell --version
       - name: Export compiled Rust cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.mbx-cache.outputs.cache-hit != 'true'
         run: mbx cache export --group "$MBX_CACHE_EXPORT_GROUP" --format directory "$RUNNER_TEMP/mbx-cache"

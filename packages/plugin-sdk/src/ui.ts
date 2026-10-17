@@ -19,7 +19,6 @@
 
 /** Typed declarations for the actual native scene protocols. */
 import type {
-  DesktopScene,
   TerminalScene,
   ComponentSlot,
   ReadingProps,
@@ -28,171 +27,107 @@ import type {
   LabelProps,
   MarkdownProps,
   FilePickerProps,
-  ImageProps,
   SourceTextProps,
   SelectionMenuProps,
 } from './generated/runtime.js';
 
-export type Presentation = 'desktop' | 'tui';
-const sceneTarget: unique symbol = Symbol('maka.scene.target');
-export interface SceneTarget<T extends Presentation> {
-  readonly [sceneTarget]: T;
+const authoredNode: unique symbol = Symbol('maka.terminal.node');
+export interface TerminalNodeBrand {
+  readonly [authoredNode]: true;
 }
 
-type Declaration<Wire, T extends Presentation> = Wire extends unknown
+type Declaration<Wire> = Wire extends unknown
   ? {
       [K in keyof Wire]: K extends 'children'
-        ? Scene<T>[]
+        ? TerminalNode[]
         : K extends 'background' | 'content' | 'trigger'
-          ? Wire[K] extends DesktopScene | TerminalScene
-            ? Scene<T>
+          ? Wire[K] extends TerminalScene
+            ? TerminalNode
             : Wire[K]
           : Wire[K];
-    } & SceneTarget<T>
+    } & TerminalNodeBrand
   : never;
-export type DesktopNode = Declaration<DesktopScene, 'desktop'>;
-export type TerminalNode = Declaration<TerminalScene, 'tui'>;
-export type Scene<T extends Presentation> = T extends 'desktop' ? DesktopNode : TerminalNode;
-export type DesktopKind<K extends DesktopNode['kind']> = Extract<DesktopNode, { kind: K }>;
+export type TerminalNode = Declaration<TerminalScene>;
 export type TerminalKind<K extends TerminalNode['kind']> = Extract<TerminalNode, { kind: K }>;
-export type DesktopProps<K extends DesktopNode['kind']> = Props<DesktopKind<K>>;
 export type TerminalProps<K extends TerminalNode['kind']> = Props<TerminalKind<K>>;
-type Props<N extends SceneTarget<Presentation>> = Omit<N, 'kind' | typeof sceneTarget> &
-  Partial<Pick<N, typeof sceneTarget>>;
+type Props<N extends TerminalNodeBrand> = Omit<N, 'kind' | typeof authoredNode> &
+  Partial<Pick<N, typeof authoredNode>>;
 export type ComponentDeclaration<P = unknown> = Omit<ComponentSlot, 'props' | 'member'> & {
   member?: number;
   props: P;
 };
-type ComponentFor<P, T extends Presentation> = ComponentDeclaration<P> & Partial<SceneTarget<T>>;
-export type ReadingDeclaration<T extends Presentation> = Omit<ReadingProps, 'content'> & {
-  content: Scene<T>;
+type ComponentFor<P> = ComponentDeclaration<P> & Partial<TerminalNodeBrand>;
+export type ReadingDeclaration = Omit<ReadingProps, 'content'> & {
+  content: TerminalNode;
 };
 
-// This symbol distinguishes authoring targets only. JSON ignores it; Rust
-// continues to admit the original scene and component contracts.
-function node<T extends Presentation, const N extends object>(
-  target: T,
-  value: N,
-): N & SceneTarget<T> {
-  const result = Object.assign(value, { [sceneTarget]: target });
-  Object.defineProperty(result, sceneTarget, { enumerable: false });
+// The non-enumerable brand distinguishes authored nodes from raw wire objects.
+// JSON preserves only the original scene and component contracts.
+function node<const N extends object>(value: N): N & TerminalNodeBrand {
+  const result = Object.assign(value, { [authoredNode]: true as const });
+  Object.defineProperty(result, authoredNode, { enumerable: false });
   return result;
 }
 
-function component<T extends Presentation, P>(target: T, value: ComponentFor<P, T>) {
-  return node(target, { ...value, member: value.member ?? 0, kind: 'component' });
+function component<P>(value: ComponentFor<P>) {
+  return node({ ...value, member: value.member ?? 0, kind: 'component' });
 }
 
 export const ui = {
-  desktop: {
-    text(value: Props<DesktopKind<'text'>>): DesktopKind<'text'> {
-      return node('desktop', { ...value, kind: 'text' });
-    },
-    button(value: Props<DesktopKind<'button'>>): DesktopKind<'button'> {
-      return node('desktop', { ...value, kind: 'button' });
-    },
-    stack(value: Props<DesktopKind<'stack'>>): DesktopKind<'stack'> {
-      return node('desktop', { ...value, kind: 'stack' });
-    },
-    dialog(value: Props<DesktopKind<'dialog'>>): DesktopKind<'dialog'> {
-      return node('desktop', { ...value, kind: 'dialog' });
-    },
-    popup(value: Props<DesktopKind<'popup'>>): DesktopKind<'popup'> {
-      return node('desktop', { ...value, kind: 'popup' });
-    },
-    canvas(value: Props<DesktopKind<'canvas'>>): DesktopKind<'canvas'> {
-      return node('desktop', { ...value, kind: 'canvas' });
-    },
-    component<P>(value: ComponentFor<P, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    input(value: ComponentFor<InputProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    textarea(value: ComponentFor<TextareaProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    label(value: ComponentFor<LabelProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    markdown(value: ComponentFor<MarkdownProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    filePicker(value: ComponentFor<FilePickerProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    image(value: ComponentFor<ImageProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    sourceText(value: ComponentFor<SourceTextProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    selectionMenu(value: ComponentFor<SelectionMenuProps, 'desktop'>): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-    reading(
-      value: ComponentFor<ReadingDeclaration<'desktop'>, 'desktop'>,
-    ): DesktopKind<'component'> {
-      return component('desktop', value);
-    },
-  },
   terminal: {
     contextMenu(value: Props<TerminalKind<'context_menu'>>): TerminalKind<'context_menu'> {
-      return node('tui', { ...value, kind: 'context_menu' });
+      return node({ ...value, kind: 'context_menu' });
     },
     adaptivePane(value: Props<TerminalKind<'adaptive_pane'>>): TerminalKind<'adaptive_pane'> {
-      return node('tui', { ...value, kind: 'adaptive_pane' });
+      return node({ ...value, kind: 'adaptive_pane' });
     },
     item(value: Props<TerminalKind<'item'>>): TerminalKind<'item'> {
-      return node('tui', { ...value, kind: 'item' });
+      return node({ ...value, kind: 'item' });
     },
     rule(value: Props<TerminalKind<'rule'>>): TerminalKind<'rule'> {
-      return node('tui', { ...value, kind: 'rule' });
+      return node({ ...value, kind: 'rule' });
     },
     choice(value: Props<TerminalKind<'choice'>>): TerminalKind<'choice'> {
-      return node('tui', { ...value, kind: 'choice' });
+      return node({ ...value, kind: 'choice' });
     },
     text(value: Props<TerminalKind<'text'>>): TerminalKind<'text'> {
-      return node('tui', { ...value, kind: 'text' });
+      return node({ ...value, kind: 'text' });
     },
     button(value: Props<TerminalKind<'button'>>): TerminalKind<'button'> {
-      return node('tui', { ...value, kind: 'button' });
+      return node({ ...value, kind: 'button' });
     },
     stack(value: Props<TerminalKind<'stack'>>): TerminalKind<'stack'> {
-      return node('tui', { ...value, kind: 'stack' });
+      return node({ ...value, kind: 'stack' });
     },
     dialog(value: Props<TerminalKind<'dialog'>>): TerminalKind<'dialog'> {
-      return node('tui', { ...value, kind: 'dialog' });
+      return node({ ...value, kind: 'dialog' });
     },
-    component<P>(value: ComponentFor<P, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    component<P>(value: ComponentFor<P>): TerminalKind<'component'> {
+      return component(value);
     },
-    input(value: ComponentFor<InputProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    input(value: ComponentFor<InputProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    textarea(value: ComponentFor<TextareaProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    textarea(value: ComponentFor<TextareaProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    label(value: ComponentFor<LabelProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    label(value: ComponentFor<LabelProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    markdown(value: ComponentFor<MarkdownProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    markdown(value: ComponentFor<MarkdownProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    filePicker(value: ComponentFor<FilePickerProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    filePicker(value: ComponentFor<FilePickerProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    image(value: ComponentFor<ImageProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    sourceText(value: ComponentFor<SourceTextProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    sourceText(value: ComponentFor<SourceTextProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    selectionMenu(value: ComponentFor<SelectionMenuProps>): TerminalKind<'component'> {
+      return component(value);
     },
-    selectionMenu(value: ComponentFor<SelectionMenuProps, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
-    },
-    reading(value: ComponentFor<ReadingDeclaration<'tui'>, 'tui'>): TerminalKind<'component'> {
-      return component('tui', value);
+    reading(value: ComponentFor<ReadingDeclaration>): TerminalKind<'component'> {
+      return component(value);
     },
   },
 };

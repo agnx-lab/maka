@@ -516,7 +516,6 @@ pub fn native() -> maka_plugin_core::package::NativeDefinition {
 
 fn surface_implementation(target: PresentationTarget) -> &'static str {
     match target {
-        PresentationTarget::Desktop => "maka.ui.surface.desktop",
         PresentationTarget::Tui => "maka.ui.surface.tui",
     }
 }

@@ -18,26 +18,8 @@
  */
 
 import { ui } from '../src/index.js';
-import type {
-  DesktopScene,
-  TerminalScene,
-  DesktopNode,
-  TerminalNode,
-  Component,
-} from '../src/index.js';
-
-const desktopText = ui.desktop.text({ key: 'desktop-text', text: 'Hello', color: 0xffffff });
+import type { TerminalScene, TerminalNode, Component } from '../src/index.js';
 const terminalText = ui.terminal.text({ key: 'terminal-text', text: 'Hello', color: 0xffffff });
-const desktop = ui.desktop.stack({
-  key: 'desktop',
-  direction: 'column',
-  gap: 8,
-  padding: 0,
-  background: 0,
-  children: [desktopText],
-  scroll: 'anchor',
-  style: { width: { unit: 'fraction', value: 1 } },
-});
 const terminal = ui.terminal.stack({
   key: 'terminal',
   direction: 'column',
@@ -48,19 +30,9 @@ const terminal = ui.terminal.stack({
   scroll: 'anchor',
   layout: { grow: 1 },
 });
-const desktopWire: DesktopScene = desktop;
 const terminalWire: TerminalScene = terminal;
-const desktopNode: DesktopNode = desktop;
 const terminalNode: TerminalNode = terminal;
-void [desktopWire, terminalWire, desktopNode, terminalNode];
-
-ui.desktop.dialog({
-  key: 'dialog',
-  label: 'Dialog',
-  background: desktop,
-  content: desktopText,
-  open: true,
-});
+void [terminalWire, terminalNode];
 ui.terminal.dialog({
   key: 'dialog',
   label: 'Dialog',
@@ -72,41 +44,11 @@ ui.terminal.dialog({
   background_color: 0,
   border_color: 0xffffff,
 });
-ui.desktop.popup({
-  key: 'popup',
-  label: 'Menu',
-  trigger: desktopText,
-  content: desktop,
-  open: true,
-});
-ui.desktop.canvas({
-  key: 'canvas',
-  contents: {
-    commands: [
-      { kind: 'line', from: { x: 0, y: 0 }, to: { x: 20, y: 20 }, color: 0xffffff, width: 1 },
-    ],
-    regions: [],
-    focusColor: null,
-    dragColor: null,
-  },
-});
-ui.desktop.reading({
-  key: 'reading',
-  binding: 'reading',
-  props: { content: desktop },
-  on: { observed: 'viewport' },
-});
 ui.terminal.reading({
   key: 'reading',
   binding: 'reading',
   props: { content: terminal },
   on: { observed: 'viewport' },
-});
-ui.desktop.component({
-  key: 'plugin',
-  binding: 'external',
-  props: { custom: true },
-  on: { changed: 'change' },
 });
 ui.terminal.component({
   key: 'plugin',
@@ -115,33 +57,9 @@ ui.terminal.component({
   props: { custom: true },
   on: { changed: 'change' },
 });
-
-ui.desktop.text({ ...desktopText, text: 'Updated' });
 ui.terminal.stack({ ...terminal, children: [terminalText] });
-
-const desktopReading = ui.desktop.reading({
-  key: 'reading',
-  binding: 'reading',
-  props: { content: desktop },
-  on: {},
-});
-// @ts-expect-error An opaque component leaf also retains its target when reconstructed.
-ui.terminal.component(desktopReading);
-// @ts-expect-error Native wrapper reconstruction cannot retarget a branded leaf.
-ui.terminal.reading(desktopReading);
-// Structurally compatible variables must retain their original target.
-// @ts-expect-error Constructing again cannot silently change a branded variable's target.
-ui.terminal.text(desktopText);
-// @ts-expect-error A copied desktop node still belongs to the desktop authoring target.
-ui.terminal.stack({ ...desktop, children: [terminalText] });
-// @ts-expect-error Desktop text cannot enter a terminal tree.
-ui.terminal.stack({ ...terminal, children: [desktopText] });
-// @ts-expect-error A terminal subtree cannot enter a desktop tree.
-ui.desktop.stack({ ...desktop, children: [terminal] });
-// @ts-expect-error The nested reading scene retains its target.
-ui.terminal.reading({ key: 'reading', binding: 'reading', props: { content: desktop }, on: {} });
-// @ts-expect-error Raw wire objects have no authoring target; construct them with ui.*.
-const inferredTerminal: TerminalNode = desktopWire;
+// @ts-expect-error Raw wire objects have no authoring target; construct them with ui.terminal.
+const inferredTerminal: TerminalNode = terminalWire;
 // @ts-expect-error Terminal presentation has no popup primitive.
 ui.terminal.popup({
   key: 'popup',
@@ -151,31 +69,30 @@ ui.terminal.popup({
   open: true,
 });
 // @ts-expect-error Built-in label requires its real appearance contract.
-ui.desktop.label({ key: 'label', binding: 'label', props: { text: 'Hello' }, on: {} });
+ui.terminal.label({ key: 'label', binding: 'label', props: { text: 'Hello' }, on: {} });
 // @ts-expect-error Input props cannot use string flags.
 ui.terminal.input({ key: 'input', binding: 'input', props: { disabled: 'yes' }, on: {} });
-const component: Component<null, null, DesktopNode> = {
+const component: Component<null, null, TerminalNode> = {
   mount: () => ({
-    frame: { state: null, revision: 0, surface: null, view: desktop },
+    frame: { state: null, revision: 0, surface: null, view: terminal },
     events: [],
     actions: [],
     subscriptions: [],
   }),
   update: () => ({
-    frame: { state: null, revision: 0, surface: null, view: desktop },
+    frame: { state: null, revision: 0, surface: null, view: terminal },
     events: [],
     actions: [],
     subscriptions: [],
   }),
   event: () => ({
-    frame: { state: null, revision: 0, surface: null, view: desktop },
+    frame: { state: null, revision: 0, surface: null, view: terminal },
     events: [],
     actions: [],
     subscriptions: [],
   }),
 };
 void [component, inferredTerminal];
-
 const terminalChoice = ui.terminal.choice({
   key: 'thinking',
   label: 'Thinking',
@@ -193,8 +110,6 @@ const terminalChoice = ui.terminal.choice({
 ui.terminal.stack({ ...terminal, children: [terminalChoice] });
 // @ts-expect-error Choice values are stable string keys, not array positions.
 ui.terminal.choice({ ...terminalChoice, current: 1 });
-// @ts-expect-error A terminal choice cannot enter a desktop scene.
-ui.desktop.stack({ ...desktop, children: [terminalChoice] });
 
 const terminalItem = ui.terminal.item({
   key: 'model-row',
@@ -204,7 +119,5 @@ const terminalItem = ui.terminal.item({
   submit: true,
 });
 ui.terminal.stack({ ...terminal, focus_group: true, children: [terminalItem] });
-// @ts-expect-error Rich item content keeps the terminal authoring target.
-ui.terminal.item({ key: 'wrong-item', content: desktop });
 // @ts-expect-error Interaction policy is a typed flag, not a callback or string.
 ui.terminal.item({ ...terminalItem, follow_focus: 'yes' });

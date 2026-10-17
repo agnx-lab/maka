@@ -34,7 +34,7 @@ and native rendering/input for the intended presenter. Include unknown mutation 
 cleanup behavior when the feature owns effects. Test receipt recovery against the
 original reference, rather than asserting that retrying succeeds.
 
-On macOS/Linux, copy `assets/starter/verify-host.py` beside the four starter modules
+On macOS/Linux, copy `assets/starter/verify-host.py` beside `create.mjs`, `host.mjs` and `tui.mjs`
 and run `python3 verify-host.py --maka /path/to/maka`. It generates a fresh Host
 package and an explicit consumer, creates a temporary Root, commits the graph,
 launches the real Host with only the Echo query grant, verifies ASCII/Unicode and
@@ -42,7 +42,7 @@ invalid inputs, then closes the Host and removes the temporary directory. This i
 a launcher test fixture: plugin business code uses bound capabilities, not the raw
 IPC framing shown in the fixture.
 
-The starter generator checks Host, TUI or Desktop graphs using the actual CLI. Its
+The starter generator checks Host or TUI graphs using the actual CLI. Its
 Echo service is a query, and its counter is local UI state. It does not demonstrate
 durable effects, cross-process grants or model execution; add those through their
 own explicit contracts when the requested feature needs them.
@@ -57,9 +57,8 @@ activation and cleanup.
 
 Run a committed TUI with `maka application run --root PATH --deployment UUID` in a
 foreground terminal. Cross-process services additionally require launcher connection
-configuration and explicit method/recovery grants. Use the Desktop executable for
-its native presentation. Do not claim Desktop visual/input verification from a TUI
-check or a pure component reducer test.
+configuration and explicit method/recovery grants. Verify native terminal input
+through the TUI presenter rather than only a pure component reducer test.
 
 In a checkout, run the relevant crate tests and SDK/product type checks. Product
 tests build once before running. To build another product artifact concurrently,

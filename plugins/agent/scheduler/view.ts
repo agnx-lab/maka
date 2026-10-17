@@ -31,7 +31,7 @@ import type {
 import { type SchedulerProps } from '../../shared/contracts.js';
 import { copy, type Copy } from './locale.js';
 import { pageHeader } from '../../shared/page-shell.js';
-import { compactLabel, fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 import { anchor, date, detail, locked, timing } from './operations.js';
 import { names, type FieldName, type State, type Timing } from './state.js';
 
@@ -120,19 +120,7 @@ export function frame<N extends Node>(
     label: string,
     options: { key: string; label: string }[],
     current: string,
-  ) =>
-    ui.choice
-      ? ui.choice(key, label, options, current, editing)
-      : ui.box(
-          key,
-          [
-            ui.text(key + '-label', label),
-            ...options.map((option) =>
-              ui.button(key + ':' + option.key, option.label, editing, option.key === current),
-            ),
-          ],
-          { row: true, gap: 1, style: { wrap: true } },
-        );
+  ) => ui.choice(key, label, options, current, editing);
   const input = (name: FieldName, label: string, visible = true) => {
     const value = state.fields[name],
       id = 'schedule-field-' + name;
@@ -152,10 +140,7 @@ export function frame<N extends Node>(
             'editor',
             {
               ...common,
-              appearance:
-                presentation.target === 'tui'
-                  ? { ...props.theme.textarea, borderWidth: 0 }
-                  : props.theme.textarea,
+              appearance: { ...props.theme.textarea, borderWidth: 0 },
               softWrap: true,
               terminalRows: { min: 3, max: 6 },
               submit: 'primary_enter',
@@ -180,10 +165,7 @@ export function frame<N extends Node>(
             {
               menu: editorMenu(props.theme, props.locale),
               ...common,
-              appearance:
-                presentation.target === 'tui'
-                  ? { ...props.theme.input, borderWidth: 0 }
-                  : props.theme.input,
+              appearance: { ...props.theme.input, borderWidth: 0 },
             } satisfies InputProps,
             { changed: 'field', submitted: 'review' },
           );
@@ -192,7 +174,7 @@ export function frame<N extends Node>(
       [
         ui.box(
           'schedule-label-' + name,
-          [ui.text('schedule-label-text-' + name, label, 13, props.theme.muted)],
+          [ui.text('schedule-label-text-' + name, label, props.theme.muted)],
           { gap: 0 },
         ),
         ui.box('schedule-editor-' + name, [field], { gap: 0 }),
@@ -235,12 +217,11 @@ export function frame<N extends Node>(
                 ui.text(
                   'schedule-workspace',
                   compactLabel(form.target.workspace.path, 400),
-                  13,
                   props.theme.muted,
                 ),
               ]
             : []),
-          ui.text('schedule-source-hint', text.scheduleSourceHint, 13, props.theme.muted),
+          ui.text('schedule-source-hint', text.scheduleSourceHint, props.theme.muted),
           presentation.slot(
             'schedule-models',
             'models',
@@ -267,7 +248,7 @@ export function frame<N extends Node>(
         form?.timing ?? 'once',
       ),
       input('at', text.scheduleAt),
-      ui.text('schedule-time-hint', text.scheduleTimeHint, 13, props.theme.muted),
+      ui.text('schedule-time-hint', text.scheduleTimeHint, props.theme.muted),
       input('seconds', text.scheduleSeconds, form?.timing === 'interval'),
       input('cron', text.scheduleCron, form?.timing === 'cron'),
       input('timezone', text.scheduleZone),
@@ -288,7 +269,6 @@ export function frame<N extends Node>(
       gap: 1,
       scroll: 'manual',
       terminal: { grow: 1, basis: 0 },
-      style: { width: fill, height: fill },
     },
   );
   const controls = (task: AgentScheduledSummary, prefix: string) => [
@@ -326,120 +306,87 @@ export function frame<N extends Node>(
   if (state.picker) {
     for (const session of state.sessions?.sessions ?? [])
       content.push(
-        ui.item
-          ? ui.item(
-              'source-' + session.id,
-              ui.text('source-label-' + session.id, compactLabel(session.title, 120)),
-              state.focused === 'source-' + session.id,
-              !props.open || props.busy || session.archived,
-              { followFocus: true, submit: true },
-            )
-          : ui.button(
-              'source-' + session.id,
-              compactLabel(session.title, 120),
-              disabled || session.archived,
-              false,
-              { width: fill, justify: 'start' },
-            ),
-      );
-  } else if (state.route === 'list') {
-    if (ui.item)
-      content.push(
         ui.item(
-          'new',
-          ui.box(
-            'schedule-new-row',
-            [
-              ui.box(
-                'schedule-new-label',
-                [ui.text('schedule-new-text', text.scheduleNew, 14, props.theme.text)],
-                { terminal: { grow: 1 } },
-              ),
-              ui.text('schedule-new-arrow', '›', 14, props.theme.muted),
-            ],
-            { row: true, gap: 1 },
-          ),
-          false,
-          disabled,
+          'source-' + session.id,
+          ui.text('source-label-' + session.id, compactLabel(session.title, 120)),
+          state.focused === 'source-' + session.id,
+          !props.open || props.busy || session.archived,
+          { followFocus: true, submit: true },
         ),
       );
+  } else if (state.route === 'list') {
+    content.push(
+      ui.item(
+        'new',
+        ui.box(
+          'schedule-new-row',
+          [
+            ui.box(
+              'schedule-new-label',
+              [ui.text('schedule-new-text', text.scheduleNew, props.theme.text)],
+              { terminal: { grow: 1 } },
+            ),
+            ui.text('schedule-new-arrow', '›', props.theme.muted),
+          ],
+          { row: true, gap: 1 },
+        ),
+        false,
+        disabled,
+      ),
+    );
     for (const task of state.page?.tasks ?? []) {
       const row = ui.box(
         'schedule-row-' + task.id,
         [
-          ...(ui.item
-            ? []
-            : [
-                ui.button('task-' + task.id, compactLabel(task.title, 120), disabled, false, {
-                  width: fill,
-                  justify: 'start',
-                }),
-              ]),
-          ...(ui.item ? [ui.text('schedule-title-' + task.id, compactLabel(task.title, 120))] : []),
+          ui.text('schedule-title-' + task.id, compactLabel(task.title, 120)),
           ui.text(
             'schedule-summary-' + task.id,
             `${status(task, text)} · ${text.scheduleNext}: ${date(task.nextFireAt)}`,
-            13,
             task.pendingFire ? props.theme.warning : props.theme.muted,
           ),
-          ...(presentation.target === 'desktop'
-            ? [
-                ui.box('schedule-actions-' + task.id, controls(task, 'row-'), {
-                  row: true,
-                  style: { wrap: true },
-                  gap: 1,
-                }),
-              ]
-            : []),
         ],
         { gap: 0 },
       );
-      const item = ui.item
-        ? ui.item('task-' + task.id, row, state.focused === 'task-' + task.id, disabled, {
-            followFocus: true,
-            submit: true,
-          })
-        : row;
+      const item = ui.item('task-' + task.id, row, state.focused === 'task-' + task.id, disabled, {
+        followFocus: true,
+        submit: true,
+      });
       content.push(
-        ui.contextMenu
-          ? ui.contextMenu(
-              'schedule-menu-' + task.id,
-              compactLabel(task.title, 120),
-              item,
-              controls(task, 'context-'),
-            )
-          : item,
+        ui.contextMenu(
+          'schedule-menu-' + task.id,
+          compactLabel(task.title, 120),
+          item,
+          controls(task, 'context-'),
+        ),
       );
     }
     if (state.page && !state.page.tasks.length)
-      content.push(ui.text('schedule-empty', text.scheduleEmpty, 14, props.theme.muted));
+      content.push(ui.text('schedule-empty', text.scheduleEmpty, props.theme.muted));
   } else if (state.detail) {
     const d = state.detail,
       task = d.task,
       effect = task.effect;
     content.push(
-      ui.text('schedule-detail-title', task.title, 18, props.theme.text, 600),
+      ui.text('schedule-detail-title', task.title, props.theme.text, 600),
       ui.text(
         'schedule-status',
         `${status(d, text)} · ${text.scheduleCount}: ${task.fireCount}${task.maxFires ? '/' + task.maxFires : ''}`,
-        13,
         props.theme.muted,
       ),
-      ui.text('schedule-next', `${text.scheduleNext}: ${date(task.nextFireAt)}`, 13),
+      ui.text('schedule-next', `${text.scheduleNext}: ${date(task.nextFireAt)}`),
       ui.text(
         'schedule-timing',
         `${scheduleSummary(task.schedule, text)} · ${d.timezone}`,
-        13,
         props.theme.muted,
       ),
-      ui.text('schedule-detail-effect', effectLabel(effect.kind, text), 14),
+      ui.text('schedule-detail-effect', effectLabel(effect.kind, text)),
       ...(effect.kind !== 'reminder'
         ? [
-            ui.text('schedule-detail-path', compactLabel(effect.target.workspace.path, 400), 13),
-            ui.text('schedule-detail-model', effect.model.modelId, 13),
+            ui.text('schedule-detail-path', compactLabel(effect.target.workspace.path, 400)),
+            ui.text('schedule-detail-model', effect.model.modelId),
           ]
         : []),
-      ui.text('schedule-instructions', task.intent.body, 14),
+      ui.text('schedule-instructions', task.intent.body),
     );
     if (d.pendingFire && effect.kind === 'reminder')
       content.push(
@@ -449,7 +396,7 @@ export function frame<N extends Node>(
             ui.button('acknowledge', text.scheduleDone, disabled, true),
             ui.button('snooze', text.scheduleSnooze, disabled),
           ],
-          { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+          { row: true, gap: 1, terminal: { wrap: true } },
         ),
       );
     const summary: AgentScheduledSummary = {
@@ -463,14 +410,12 @@ export function frame<N extends Node>(
       ui.box(
         'schedule-detail-actions',
         controls(summary, 'detail-').filter((_, index) => index !== 0),
-        { row: true, terminal: { wrap: true }, style: { wrap: true }, gap: 1 },
+        { row: true, terminal: { wrap: true }, gap: 1 },
       ),
-      ui.text('schedule-history', text.scheduleHistory, 16, props.theme.text, 600),
+      ui.text('schedule-history', text.scheduleHistory, props.theme.text, 600),
     );
     if (!task.runs.length)
-      content.push(
-        ui.text('schedule-history-empty', text.scheduleNoHistory, 13, props.theme.muted),
-      );
+      content.push(ui.text('schedule-history-empty', text.scheduleNoHistory, props.theme.muted));
     for (const [index, run] of task.runs.entries())
       content.push(
         ui.box(
@@ -479,7 +424,6 @@ export function frame<N extends Node>(
             ui.text(
               'schedule-run-status-' + run.id,
               `${date(run.at)} · ${run.outcome === 'ok' ? (run.sessionId ? text.scheduleAdmitted : text.scheduleAcknowledged) : run.outcome === 'blocked' ? text.scheduleBlocked : text.scheduleFailed}`,
-              13,
             ),
             ...(run.outcome !== 'ok'
               ? [
@@ -488,7 +432,6 @@ export function frame<N extends Node>(
                     run.message === 'scheduler_authorization_changed'
                       ? text.scheduleTargetChanged
                       : text.scheduleUnavailable,
-                    13,
                     props.theme.error,
                   ),
                 ]
@@ -521,10 +464,10 @@ export function frame<N extends Node>(
         false,
       ),
       ...(state.notice
-        ? [ui.text('schedule-notice', text[state.notice], 13, props.theme.warning)]
+        ? [ui.text('schedule-notice', text[state.notice], props.theme.warning)]
         : []),
       ...(state.pending || state.restoring
-        ? [ui.text('schedule-loading', text.terminalLoading, 13, props.theme.muted)]
+        ? [ui.text('schedule-loading', text.terminalLoading, props.theme.muted)]
         : []),
       ...(state.current
         ? [ui.button('receipt', text.executionReceipt, !!state.pending || !state.current.reference)]
@@ -545,17 +488,12 @@ export function frame<N extends Node>(
                 scroll: 'anchor',
                 focusGroup: state.picker || state.route === 'list',
                 terminal: { grow: 1, basis: 0 },
-                style: { width: fill, height: fill },
               }),
             },
             { input: 'schedule-input', observed: 'schedule-viewport' },
           ),
         ],
-        {
-          visible: state.route !== 'form' || state.picker,
-          terminal: { grow: 1, basis: 0 },
-          style: { width: fill, height: fill },
-        },
+        { visible: state.route !== 'form' || state.picker, terminal: { grow: 1, basis: 0 } },
       ),
       ui.box(
         'schedule-footer',
@@ -564,12 +502,9 @@ export function frame<N extends Node>(
           : state.route === 'form'
             ? [ui.button('review', text.scheduleReview, editing, true)]
             : state.route === 'list'
-              ? [
-                  ...(!ui.item ? [ui.button('new', text.scheduleNew, disabled, true)] : []),
-                  ui.button('refresh', text.directoryRefresh, disabled),
-                ]
+              ? [ui.button('refresh', text.directoryRefresh, disabled)]
               : [ui.button('refresh', text.directoryRefresh, disabled)],
-        { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
@@ -578,7 +513,6 @@ export function frame<N extends Node>(
       gap: 1,
       shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
       terminal: { grow: 1 },
-      style: { width: fill, height: fill },
     },
   );
   const confirmation = state.confirm;
@@ -594,7 +528,6 @@ export function frame<N extends Node>(
       ui.text(
         'schedule-confirm-title',
         reviewed?.task.title ?? state.confirmTask?.task.title ?? '',
-        16,
         props.theme.text,
         600,
       ),
@@ -603,38 +536,31 @@ export function frame<N extends Node>(
             ui.text(
               'schedule-confirm-time',
               `${scheduleSummary(reviewed.task.schedule, text)} · ${reviewed.timezone}`,
-              13,
             ),
-            ui.text('schedule-confirm-body', reviewed.task.intentBody, 14),
+            ui.text('schedule-confirm-body', reviewed.task.intentBody),
           ]
         : []),
       ...(consent && effect
         ? [
-            ui.text('schedule-confirm-effect', effectLabel(effect.kind, text), 14),
+            ui.text('schedule-confirm-effect', effectLabel(effect.kind, text)),
             ...(effect.kind !== 'reminder'
               ? [
-                  ui.text(
-                    'schedule-confirm-path',
-                    compactLabel(effect.target.workspace.path, 400),
-                    13,
-                  ),
-                  ui.text('schedule-confirm-model', effect.model.modelId, 13),
+                  ui.text('schedule-confirm-path', compactLabel(effect.target.workspace.path, 400)),
+                  ui.text('schedule-confirm-model', effect.model.modelId),
                   ui.text(
                     'schedule-confirm-permissions',
                     effect.target.permissions.access === 'read_only'
                       ? text.scheduleReadOnly
                       : text.scheduleWorkspaceWrite,
-                    13,
                   ),
                   ...(effect.target.permissions.requestPermissions
-                    ? [ui.text('schedule-confirm-additional', text.scheduleAdditional, 13)]
+                    ? [ui.text('schedule-confirm-additional', text.scheduleAdditional)]
                     : []),
                 ]
               : []),
             ui.text(
               'schedule-consent',
               effect.kind === 'reminder' ? text.scheduleReminderConsent : text.scheduleConsent,
-              13,
               props.theme.muted,
             ),
           ]
@@ -642,11 +568,10 @@ export function frame<N extends Node>(
             ui.text(
               'schedule-confirm-description',
               confirmation?.kind === 'delete' ? text.scheduleDeleteHelp : text.scheduleClearHelp,
-              14,
             ),
           ]),
       ...(state.notice
-        ? [ui.text('schedule-confirm-notice', text[state.notice], 13, props.theme.warning)]
+        ? [ui.text('schedule-confirm-notice', text[state.notice], props.theme.warning)]
         : []),
       ...(state.current
         ? [
@@ -676,20 +601,15 @@ export function frame<N extends Node>(
             true,
           ),
         ],
-        { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     { gap: 1, scroll: 'manual' },
   );
-  const view = ui.dialog(
-    'schedule-review',
-    text.scheduleReview,
-    body,
-    reviewView,
-    !!confirmation,
-    {},
-    { width: 72, height: 24 },
-  );
+  const view = ui.dialog('schedule-review', text.scheduleReview, body, reviewView, !!confirmation, {
+    width: 72,
+    height: 24,
+  });
   const out = output(state, view, events);
   out.actions = actions;
   out.subscriptions =

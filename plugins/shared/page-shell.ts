@@ -21,7 +21,7 @@ import type { Component, Emission } from '../../packages/plugin-sdk/src/index.js
 import type { PageChrome, PageShellProps, Theme } from './contracts.js';
 import { copy } from './locale-catalogs/page-shell.js';
 import { sameValue } from './value.js';
-import { fill, type Node, type Presentation } from './view.js';
+import { type Node, type Presentation } from './view.js';
 
 export interface PageState {
   pageBack?: number;
@@ -52,16 +52,13 @@ export function pageHeader<N extends Node>(
     ui.box(
       'page-heading',
       [
-        ui.button(
-          back,
-          copy(props.locale).back,
-          disabled,
-          false,
-          presentation.target === 'tui' ? { background: 0, align: 'start' } : {},
-        ),
-        ui.text('page-title', title, 20, props.theme.text, 600),
+        ui.button(back, copy(props.locale).back, disabled, false, {
+          background: 0,
+          align: 'start',
+        }),
+        ui.text('page-title', title, props.theme.text, 600),
       ],
-      { row: true, gap: presentation.target === 'tui' ? 1 : 8 },
+      { row: true, gap: 1 },
     ),
   ];
 }
@@ -124,8 +121,8 @@ export function panelHeader<N extends Node>(
         : []),
       ui.box(
         key + '-title-cell',
-        [ui.text(key + '-title', title, 15, props.theme.text, 650, { truncate: true })],
-        { terminal: { grow: 1, shrink: true }, style: { width: fill, minWidth: 0 } },
+        [ui.text(key + '-title', title, props.theme.text, 650, { truncate: true })],
+        { terminal: { grow: 1, shrink: true } },
       ),
       ui.box(
         key + '-close',
@@ -143,6 +140,6 @@ export function panelHeader<N extends Node>(
         { terminal: { basis: 3, shrink: false } },
       ),
     ],
-    { row: true, gap: 1, terminal: { basis: 1, shrink: false }, style: { width: fill, shrink: 0 } },
+    { row: true, gap: 1, terminal: { basis: 1, shrink: false } },
   );
 }

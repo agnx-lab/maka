@@ -58,16 +58,16 @@ pub(crate) fn package(id: &str, declaration: Declaration, source: Option<String>
     Package::new(files).unwrap()
 }
 pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
-    let surface = surface_contract(PresentationTarget::Desktop);
+    let surface = surface_contract(PresentationTarget::Tui);
     let provider = package(
         "native.surface",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::Native {
-                        implementation: "maka.ui.surface.desktop".into(),
+                        implementation: "maka.ui.surface.tui".into(),
                     },
                     configuration: json!({"type":"object"}),
                     imports: BTreeMap::new(),
@@ -98,7 +98,7 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
         r#"
         const contract = {};
         export function activate(configuration) {{ return {{App:{{contract,kind:'component',component:['app']}}}}; }}
-        function frame(state) {{ return {{actions:[],events:[],frame:{{revision:state.revision,state,surface:{{kind:'window',binding:'surface',title:'Dynamic product',width:640,height:400}},view:{{kind:'stack',key:'root',direction:'column',padding:16,gap:8,background:1513239,children:[{{kind:'text',key:'count',text:String(state.count),color:16777215}},{{kind:'button',key:'inc',label:'Increment'}}]}}}}}}; }}
+        function frame(state) {{ return {{actions:[],events:[],frame:{{revision:state.revision,state,surface:{{kind:'terminal',binding:'surface'}},view:{{kind:'stack',key:'root',direction:'column',padding:1,gap:1,background:1513239,children:[{{kind:'text',key:'count',text:String(state.count),color:16777215}},{{kind:'button',key:'inc',label:'Increment'}}]}}}}}}; }}
         export const app = {{mount(props){{ return frame({{count:props.count??0,revision:0}}); }},event(state,event){{ {} }},update(state,props){{ return frame({{...state,revision:state.revision+1}}); }} }};
     "#,
         serde_json::to_string(&component).unwrap(),
@@ -108,9 +108,9 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
         "dynamic.app",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
-                    scene: Some(scene::language(PresentationTarget::Desktop)),
+                    scene: Some(scene::language(PresentationTarget::Tui)),
                     implementation: Implementation::JavaScript {
                         module: "index.mjs".into(),
                         realm: Realm::Dedicated,
@@ -148,7 +148,7 @@ pub fn fixture(handler: &str) -> (Input, Vec<Package>) {
         Input {
             environment: Environment {
                 location: ExecutionLocation::Ui,
-                presentation: Some(PresentationTarget::Desktop),
+                presentation: Some(PresentationTarget::Tui),
             },
             instances: BTreeMap::from([
                 ("surface".into(), node(&provider, 1)),
@@ -174,7 +174,7 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
         .unwrap()
         .declaration()
         .clone();
-    let root_contract = declaration.entries[&EntryTarget::Desktop].exports["App"]
+    let root_contract = declaration.entries[&EntryTarget::Tui].exports["App"]
         .contract
         .clone();
     let counter_contract = Contract {
@@ -189,7 +189,7 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
     };
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(
@@ -205,7 +205,7 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
         function frame(state){{
             const children=[{{kind:'component',key:'left',binding:'counter',member:0,on:{{}},props:{{label:'Left '+state.version,initial:10}}}}];
             if(state.right)children.push({{kind:'component',key:'right',binding:'counter',member:0,on:{{}},props:{{label:'Right '+state.version,initial:20}}}});
-            return {{actions:[],events:[],frame:{{state,revision:state.revision,surface:{{kind:'window',binding:'surface',title:'Composed product',width:640,height:400}},view:{{kind:'stack',key:'root',direction:'column',gap:8,padding:16,background:1513239,children:[{{kind:'stack',key:'counters',direction:'row',gap:16,padding:0,background:1513239,children}},{{kind:'button',key:'parent',label:'Change labels'}},{{kind:'button',key:'toggle',label:'Toggle right counter'}}]}}}}}};
+            return {{actions:[],events:[],frame:{{state,revision:state.revision,surface:{{kind:'terminal',binding:'surface'}},view:{{kind:'stack',key:'root',direction:'column',gap:8,padding:16,background:1513239,children:[{{kind:'stack',key:'counters',direction:'row',gap:16,padding:0,background:1513239,children}},{{kind:'button',key:'parent',label:'Change labels'}},{{kind:'button',key:'toggle',label:'Toggle right counter'}}]}}}}}};
         }}
         export const app={{mount(){{return frame({{revision:0,version:0,right:true}});}},event(state,event){{{}}},update(state,props){{return frame({{...state,revision:state.revision+1}});}}}};
     "#,
@@ -226,9 +226,9 @@ pub(crate) fn composed_fixture(child_update: &str, parent_event: &str) -> (Input
         "dynamic.counter",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
-                    scene: Some(scene::language(PresentationTarget::Desktop)),
+                    scene: Some(scene::language(PresentationTarget::Tui)),
                     implementation: Implementation::JavaScript {
                         module: "index.mjs".into(),
                         realm: Realm::Dedicated,
@@ -308,7 +308,7 @@ fn bind_brand(input: &mut Input, packages: &mut Vec<Package>, declaration: &mut 
         "dynamic.brand",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::JavaScript {
@@ -335,7 +335,7 @@ fn bind_brand(input: &mut Input, packages: &mut Vec<Package>, declaration: &mut 
     );
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(
@@ -378,7 +378,7 @@ pub(crate) fn native_fixture() -> (Input, Vec<Package>) {
     let contract = maka_ui_runtime::label_contract();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(
@@ -398,7 +398,7 @@ pub(crate) fn native_fixture() -> (Input, Vec<Package>) {
         "native.label",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::Native {
@@ -450,7 +450,7 @@ pub(crate) fn editor_fixture() -> (Input, Vec<Package>) {
     let contract = maka_ui_runtime::textarea::textarea_contract();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(
@@ -472,7 +472,7 @@ pub(crate) fn editor_fixture() -> (Input, Vec<Package>) {
         "native.editor",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::Native {
@@ -509,9 +509,9 @@ pub(crate) fn editor_fixture() -> (Input, Vec<Package>) {
 
 /// A product component subscribes to the Textarea's public metadata event. No
 /// global lookup or text-resource read is granted by receiving this payload.
-#[allow(dead_code)] // Shared with tests that do not load the Desktop editor.
+#[allow(dead_code)] // Shared with tests that do not load the terminal editor.
 pub(crate) const EDITOR_RECEIVE: &str = "if(event.kind==='component'&&event.name==='changed'){return frame({...state,revision:state.revision+1,observation:event.event});}";
-#[allow(dead_code)] // Shared with tests that do not load the Desktop editor.
+#[allow(dead_code)] // Shared with tests that do not load the terminal editor.
 pub(crate) fn editor_events_fixture() -> (Input, Vec<Package>) {
     let (mut input, mut packages) = editor_fixture();
     let index = packages
@@ -554,7 +554,7 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.imports.remove("counter");
     entry.imports.remove("label");
     entry.imports.insert(
@@ -568,7 +568,7 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
         r#"
     const contract={};
     export function activate(){{return {{App:{{contract,kind:'component',component:['app']}}}};}}
-    function frame(state){{return {{actions:[],events:[],frame:{{revision:state.revision,state,surface:{{kind:'window',binding:'surface',title:'Immutable draft',width:640,height:480}},view:{{kind:'stack',key:'root',direction:'column',padding:16,gap:12,background:1513239,children:[{{kind:'text',key:'status',text:'Captured: '+(state.outcome?.value?.text??state.outcome?.status??'—'),color:16777215}},...(state.show?[{{kind:'component',key:'editor',binding:'editor',member:0,on:{{changed:'changed'}},props:{{initialText:'Start',placeholder:'Write here',appearance:state.brand.textarea,menu:state.brand.menu,accessibilityLabel:'Write a draft',readOnly:false,disabled:false,softWrap:true,tabIndex:0,command:state.command??null}}}}]:[]),{{kind:'button',key:'read',label:'Capture draft'}},{{kind:'button',key:'remove',label:'Remove composer'}}]}}}}}};}}
+    function frame(state){{return {{actions:[],events:[],frame:{{revision:state.revision,state,surface:{{kind:'terminal',binding:'surface'}},view:{{kind:'stack',key:'root',direction:'column',padding:16,gap:12,background:1513239,children:[{{kind:'text',key:'status',text:'Captured: '+(state.outcome?.value?.text??state.outcome?.status??'—'),color:16777215}},...(state.show?[{{kind:'component',key:'editor',binding:'editor',member:0,on:{{changed:'changed'}},props:{{initialText:'Start',placeholder:'Write here',appearance:state.brand.textarea,menu:state.brand.menu,accessibilityLabel:'Write a draft',readOnly:false,disabled:false,softWrap:true,tabIndex:0,command:state.command??null}}}}]:[]),{{kind:'button',key:'read',label:'Capture draft'}},{{kind:'button',key:'remove',label:'Remove composer'}}]}}}}}};}}
     export const app={{mount(props,values){{return frame({{revision:0,show:true,brand:values.brand[0]}});}},update(state,props,values){{return frame({{...state,revision:state.revision+1,brand:values.brand[0]}});}},event(state,event){{
         const next={{...state,revision:state.revision+1}};
         if(event.kind==='action')next.outcome=event.event;
@@ -587,9 +587,9 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
         Declaration {
             composition: None,
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
-                    scene: Some(scene::language(PresentationTarget::Desktop)),
+                    scene: Some(scene::language(PresentationTarget::Tui)),
                     implementation: Implementation::JavaScript {
                         module: "index.mjs".into(),
                         realm: Realm::Shared,
@@ -626,7 +626,7 @@ pub(crate) fn resource_fixture() -> (Input, Vec<Package>) {
         Declaration {
             composition: None,
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation: Implementation::Native {
@@ -749,61 +749,9 @@ pub(crate) fn continuation_fixture() -> (Input, Vec<Package>, maka_plugin_core::
     (input, packages, contract)
 }
 
-/// One immutable package revision provides distinct desktop and terminal entries.
-// Shared fixture modules intentionally select different subsets in each binary.
-#[allow(dead_code)]
-pub fn dual_fixture(handler: &str) -> (Input, Vec<Package>) {
-    let (mut input, packages) = fixture(handler);
-    let mut dual = Vec::new();
-    for original in packages {
-        let mut declaration = original
-            .manifest()
-            .application
-            .as_ref()
-            .unwrap()
-            .declaration()
-            .clone();
-        let mut terminal = declaration.entries[&EntryTarget::Desktop].clone();
-        let mut files = BTreeMap::new();
-        match &mut terminal.implementation {
-            Implementation::Native { implementation } => {
-                *implementation = "maka.ui.surface.tui".into();
-                terminal.exports.get_mut("Surface").unwrap().contract =
-                    surface_contract(PresentationTarget::Tui);
-            }
-            Implementation::JavaScript { module, .. } => {
-                *module = "terminal.mjs".into();
-                terminal.scene = Some(scene::language(PresentationTarget::Tui));
-                terminal.imports.get_mut("surface").unwrap().contract =
-                    surface_contract(PresentationTarget::Tui);
-                let source = std::str::from_utf8(original.file("index.mjs").unwrap()).unwrap();
-                files.insert("index.mjs".into(), source.as_bytes().to_vec());
-                files.insert("terminal.mjs".into(), source
-                    .replace("{kind:'window',binding:'surface',title:'Dynamic product',width:640,height:400}", "{kind:'terminal',binding:'surface'}")
-                    .replace("padding:16,gap:8", "padding:1,gap:1").into_bytes());
-            }
-        }
-        declaration.entries.insert(EntryTarget::Tui, terminal);
-        files.insert(
-            MANIFEST_FILE.into(),
-            serde_json::to_vec(
-                &json!({"schemaVersion":1,"id":original.manifest().id,"application":declaration}),
-            )
-            .unwrap(),
-        );
-        dual.push(Package::new(files).unwrap());
-    }
-    input.instances.insert("surface".into(), node(&dual[0], 1));
-    let bindings = input.instances["app"].bindings.clone();
-    let mut root = node(&dual[1], 2);
-    root.bindings = bindings;
-    input.instances.insert("app".into(), root);
-    (input, dual)
-}
-
 /// A layout/appearance fixture, not a completed agent product. All native
 /// children remain ordinary bindings of the original JavaScript parent.
-#[allow(dead_code)] // Shared support is also compiled by non-Desktop tests.
+#[allow(dead_code)] // Shared support is also compiled by other tests.
 pub(crate) fn workspace_fixture() -> (Input, Vec<Package>) {
     let (mut input, mut packages) = editor_fixture();
     let index = packages
@@ -894,38 +842,10 @@ frame=(state)=>{
     (input, packages)
 }
 
-/// A plain dynamically loaded component defines a new visual control and its
-/// business rules through the production desktop scene compiler.
-#[allow(dead_code)] // Shared by examples and desktop tests, not every support.rs consumer.
-pub(crate) fn canvas_fixture() -> (Input, Vec<Package>) {
-    let (mut input, mut packages) = fixture("");
-    let old = packages.pop().unwrap();
-    let declaration = old
-        .manifest()
-        .application
-        .as_ref()
-        .unwrap()
-        .declaration()
-        .clone();
-    let contract = &declaration.entries[&EntryTarget::Desktop].exports["App"].contract;
-    let source = include_str!("canvas.mjs").replace(
-        "const contract = null;",
-        &format!(
-            "const contract = {};",
-            serde_json::to_string(contract).unwrap()
-        ),
-    );
-    let app = package("dynamic.canvas", declaration, Some(source));
-    input.instances.get_mut("app").unwrap().package = app.application_ref().into();
-    packages.push(app);
-    (input, packages)
-}
-
-/// Ordinary independent component used by both native bootstrap fixtures.
-#[allow(dead_code)]
+#[allow(dead_code)] // Shared support is also compiled by tests without recovery.
 pub fn add_recovery(input: &mut Input, packages: &mut Vec<Package>) {
     let (source, recovery_packages) =
-        dual_fixture("return frame({count:state.count+1,revision:state.revision+1});");
+        fixture("return frame({count:state.count+1,revision:state.revision+1});");
     let mut root = source.instances["app"].clone();
     root.key = Uuid::from_u128(99);
     input.instances.insert("recovery".into(), root);

@@ -425,7 +425,7 @@ test('prompt header follows the visible answer, yields to user rows, and never f
   );
 });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} pending user message uses muted text and normalizes on admission`, async () => {
     const { component } = await import(`../dist/packages/timeline/${target}.js`);
     const props = {
@@ -797,7 +797,7 @@ function descendants(value) {
   ];
 }
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   const { component: timeline } = await import(`../dist/packages/timeline/${target}.js`);
   const { component: details } = await import(`../dist/packages/tool-details/${target}.js`);
   test(`${target}: every active compact summary loads before scroll and across viewport changes`, () => {
@@ -813,7 +813,7 @@ for (const target of ['tui', 'desktop']) {
       waitingTools: [],
       liveTools: [],
       source: null,
-      search: target === 'tui' ? { sessionId: 'session', epoch: 1, through: 8 } : null,
+      search: { sessionId: 'session', epoch: 1, through: 8 },
       loading: false,
       older: false,
       newer: false,
@@ -901,7 +901,7 @@ for (const target of ['tui', 'desktop']) {
         );
       }
     }
-    if (target === 'tui') {
+    {
       const query = '/src/a0.rs';
       const basis = { owner: 'find-editor', revision: 1, bytes: Buffer.byteLength(query) };
       out = timeline.event(
@@ -929,12 +929,11 @@ for (const target of ['tui', 'desktop']) {
       );
     }
     const reading = descendants(out.frame.view).find((node) => node.key === 'reading');
-    if (target === 'tui')
-      assert.deepEqual(reading.props.command.target, {
-        kind: 'find',
-        query: '/src/a0.rs',
-        step: 'first',
-      });
+    assert.deepEqual(reading.props.command.target, {
+      kind: 'find',
+      query: '/src/a0.rs',
+      step: 'first',
+    });
     const resolvedContent = JSON.parse(JSON.stringify(reading.props.content), (_, value) =>
       value?.key === slot.key ? child.frame.view : value,
     );

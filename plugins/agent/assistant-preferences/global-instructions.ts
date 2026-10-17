@@ -309,8 +309,8 @@ export function globalInstructionsView<N extends Node>(
   return ui.box(
     'global-instructions',
     [
-      ui.text('global-label', t('assistant-global'), 14, props.theme.muted),
-      ...(state.saved ? [ui.text('global-path', state.saved.path, 12, props.theme.muted)] : []),
+      ui.text('global-label', t('assistant-global'), props.theme.muted),
+      ...(state.saved ? [ui.text('global-path', state.saved.path, props.theme.muted)] : []),
       p.slot(
         'assistant-global',
         'editor',
@@ -329,7 +329,7 @@ export function globalInstructionsView<N extends Node>(
         } satisfies TextareaProps,
         { changed: 'changed' },
       ),
-      ...(state.notice ? [ui.text('global-notice', t(state.notice), 12, props.theme.muted)] : []),
+      ...(state.notice ? [ui.text('global-notice', t(state.notice), props.theme.muted)] : []),
       ui.box(
         'global-controls',
         [
@@ -340,7 +340,7 @@ export function globalInstructionsView<N extends Node>(
           ),
           ui.button('global-reload', t('assistant-global-reload'), busy(state, props)),
         ],
-        { row: p.target === 'desktop', gap: 1, wide: { min_width: 54, direction: 'row' } },
+        { row: false, gap: 1, wide: { min_width: 54, direction: 'row' } },
       ),
       ...(state.current
         ? [

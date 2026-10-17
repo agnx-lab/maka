@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const uuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const selection = {
@@ -178,7 +178,7 @@ function openPreview(c) {
   });
   c.raw('entry-0', 'submit').done({ kind: 'preview', preview: reviewed });
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target}: import source form uses original native snapshots and only reads its original unknown receipt`, async () => {
     const c = (await client(target)).loaded([]);
     c.raw('add').raw('format-open_code');
@@ -224,7 +224,7 @@ for (const target of ['tui', 'desktop']) {
     assert.equal(c.state.current, null);
     assert.equal(c.state.route, 'sources');
     assert.equal(c.state.sourcesRevision, 2);
-    if (target === 'tui') {
+    {
       const kinds = new Set([
         'text',
         'button',

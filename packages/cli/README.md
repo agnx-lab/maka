@@ -27,11 +27,13 @@
 npm install --global @maka-agent/cli@rust-preview
 ```
 
-The launcher selects the matching native executable and forwards arguments, standard I/O and exit status. Exact-version optional dependencies carry the CLI and desktop frontend. The preview targets macOS arm64, Linux x64 with glibc, and Windows x64. WSL uses the Linux executable with a matching Windows helper for Computer Use.
+The launcher selects the matching native executable and forwards arguments, standard I/O and exit status. Exact-version optional dependencies carry the CLI, `maka-desktop-shell` and its authored `app/` sidecar. The preview targets macOS arm64, Linux x64 with glibc, and Windows x64. WSL uses the Linux executable with a matching Windows helper for Computer Use.
 
 The `latest` tags remain empty placeholders, including the separate `maka-agent` package. They contain no CLI, runtime, dependencies or install scripts. The placeholder source lives in [placeholder](placeholder/README.md); preview artifacts must stay on `rust-preview`.
 
 Run `maka` to start the terminal product. First launch confirms the workspace; later launches reopen the saved installation. See [the product guide](../../products/maka/bundle/README.md) for configuration and explicit composition commands.
+
+Launch the desktop with `maka desktop --root HOST_ROOT`. This required path selects the business Host: a missing Root gets the standard read-only Host, and an existing Root reopens its saved deployment. The launcher keeps its verified Host client until the shell exits; other connected clients keep the Host alive. The packaged shell reads its adjacent app independently of the working directory. See [desktop-shell](../../products/maka/desktop-shell/README.md) for direct development commands.
 
 ## Build and publish
 

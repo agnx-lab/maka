@@ -62,7 +62,9 @@ struct Member {
 }
 
 fn allowed(target: Target, name: &str) -> bool {
-    required(target).any(|member| member == name) || matches!(name, "README.md" | "README.zh-CN.md")
+    required(target).any(|member| member == name)
+        || matches!(name, "README.md" | "README.zh-CN.md")
+        || (name.starts_with("bin/app/") && maka_packages::validate_path(name).is_ok())
 }
 
 fn required(target: Target) -> impl Iterator<Item = &'static str> {
@@ -73,6 +75,8 @@ fn required(target: Target) -> impl Iterator<Item = &'static str> {
         "THIRD_PARTY_NOTICES.txt",
         target.executable(),
         target.desktop_executable(),
+        "bin/app/gpui-shell.json",
+        "bin/app/main.js",
     ]
     .into_iter()
     .chain(target.service_executable())
@@ -93,8 +97,10 @@ pub(super) fn cached(
     }
     private_directory(directory)?;
     private_directory(&directory.join("bin"))?;
-    let receipt: Receipt =
-        serde_json::from_reader(regular_file(&directory.join("receipt.json"), 16 * 1024)?)?;
+    let receipt: Receipt = serde_json::from_reader(regular_file(
+        &directory.join("receipt.json"),
+        MAX_TEXT_BYTES,
+    )?)?;
     decode_integrity(&receipt.integrity)?;
     if receipt.target != target
         || receipt.version != version
@@ -106,13 +112,38 @@ pub(super) fn cached(
         if !allowed(target, name) {
             return Err("native package cache contains an unexpected member".into());
         }
-        let file = regular_file(&directory.join(name), MAX_FILE_BYTES)?;
+        let file = member_file(directory, name, MAX_FILE_BYTES)?;
         if digest(file)? != *expected {
             return Err("native package cache integrity mismatch".into());
         }
     }
+    verify_app_members(directory, "bin/app", &receipt.files)?;
     validate_package(directory, target, version)?;
     Ok(Some(receipt.integrity))
+}
+
+fn verify_app_members(
+    directory: &Path,
+    name: &str,
+    files: &BTreeMap<String, Member>,
+) -> Result<(), HostError> {
+    // Optional script imports can execute files absent from the original archive.
+    // Check the actual app tree as well as the receipt's required bytes.
+    for entry in fs::read_dir(directory.join(name))? {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let filename = filename
+            .to_str()
+            .ok_or("native package app contains a non-UTF-8 member")?;
+        let name = format!("{name}/{filename}");
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            verify_app_members(directory, &name, files)?;
+        } else if !kind.is_file() || !files.contains_key(&name) {
+            return Err("native package app contains an unrecorded or non-regular member".into());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn publish(
@@ -135,18 +166,21 @@ pub(super) fn publish(
     let mut files = BTreeMap::new();
     let mut unpacked = 0_u64;
     let decoder = GzDecoder::new(archive.reopen()?);
-    // Raw entries prevent unbounded GNU/PAX metadata allocation. Native npm
-    // packages need only short fixed paths, not general-purpose tar semantics.
+    // Raw entries prevent unbounded GNU/PAX metadata allocation. The executable
+    // and authored app use portable package paths, not general tar semantics.
     let mut tar = tar::Archive::new(decoder.take(MAX_EXPANDED_BYTES + 1));
-    for (index, entry) in tar.entries()?.raw(true).enumerate() {
-        if index >= required(target).count() + 4 {
-            return Err("native package contains too many archive entries".into());
-        }
+    for entry in tar.entries()?.raw(true) {
         let mut entry = entry?;
         let path = entry.path_bytes();
         let path = std::str::from_utf8(&path)?.to_owned();
         if entry.header().entry_type().is_dir()
-            && matches!(path.as_str(), "package/" | "package/bin/")
+            && (matches!(
+                path.as_str(),
+                "package/" | "package/bin/" | "package/bin/app/"
+            ) || path.strip_prefix("package/bin/app/").is_some_and(|name| {
+                name.strip_suffix('/')
+                    .is_some_and(|name| maka_packages::validate_path(name).is_ok())
+            }))
             && entry.size() == 0
         {
             continue;
@@ -163,7 +197,8 @@ pub(super) fn publish(
         if !allowed(target, name)
             || !entry.header().entry_type().is_file()
             || files.contains_key(name)
-            || entry.size() == 0
+            || (entry.size() == 0
+                && (!name.starts_with("bin/app/") || required(target).any(|member| member == name)))
             || entry.size() > limit
         {
             return Err(
@@ -179,6 +214,7 @@ pub(super) fn publish(
         // Never use a tar member as an unrestricted filesystem path, restore
         // ownership/mode bits, follow links, or run package lifecycle scripts.
         let path = package.join(name);
+        fs::create_dir_all(path.parent().ok_or("native package member has no parent")?)?;
         let mut file = File::create_new(&path)?;
         let size = std::io::copy(&mut entry, &mut file)?;
         if size != entry.size() {
@@ -218,8 +254,7 @@ pub(super) fn publish(
     drop(file);
     #[cfg(unix)]
     {
-        File::open(package.join("bin"))?.sync_all()?;
-        File::open(&package)?.sync_all()?;
+        sync_directories(&package, &receipt.files)?;
     }
     commit(&package, cache, destination, target, version, integrity)
 }
@@ -235,10 +270,11 @@ pub(super) fn import_directory(
     version: &str,
 ) -> Result<String, HostError> {
     let mut bytes = Vec::new();
-    regular_file(&source.join("receipt.json"), 16 * 1024)?
-        .take(16 * 1024 + 1)
+    regular_file(&source.join("receipt.json"), MAX_TEXT_BYTES)?
+        .take(MAX_TEXT_BYTES + 1)
         .read_to_end(&mut bytes)?;
-    if bytes.len() > 16 * 1024 || hex::encode(Sha256::digest(&bytes)) != receipt_sha256 {
+    if bytes.len() as u64 > MAX_TEXT_BYTES || hex::encode(Sha256::digest(&bytes)) != receipt_sha256
+    {
         return Err("transferred native package receipt digest mismatch".into());
     }
     let receipt: Receipt = serde_json::from_slice(&bytes)?;
@@ -252,8 +288,8 @@ pub(super) fn import_directory(
     }
     if let Some(existing) = cached(destination, target, version)? {
         let mut existing_bytes = Vec::new();
-        regular_file(&destination.join("receipt.json"), 16 * 1024)?
-            .take(16 * 1024 + 1)
+        regular_file(&destination.join("receipt.json"), MAX_TEXT_BYTES)?
+            .take(MAX_TEXT_BYTES + 1)
             .read_to_end(&mut existing_bytes)?;
         if existing != receipt.integrity || existing_bytes != bytes {
             return Err("cached package differs from the transferred native package".into());
@@ -274,15 +310,19 @@ pub(super) fn import_directory(
         } else {
             MAX_TEXT_BYTES
         };
-        if expected.size == 0 || expected.size > limit {
+        if (expected.size == 0
+            && (!name.starts_with("bin/app/") || required(target).any(|member| member == name)))
+            || expected.size > limit
+        {
             return Err("transferred native package member exceeds its size limit".into());
         }
         total += expected.size;
         if total > MAX_EXPANDED_BYTES {
             return Err("transferred native package exceeds its size limit".into());
         }
-        let mut input = regular_file(&source.join(name), limit)?.take(expected.size + 1);
+        let mut input = member_file(source, name, limit)?.take(expected.size + 1);
         let path = package.join(name);
+        fs::create_dir_all(path.parent().ok_or("native package member has no parent")?)?;
         let mut output = File::create_new(&path)?;
         std::io::copy(&mut input, &mut output)?;
         if digest(File::open(&path)?)? != *expected {
@@ -306,8 +346,7 @@ pub(super) fn import_directory(
     drop(file);
     #[cfg(unix)]
     {
-        File::open(package.join("bin"))?.sync_all()?;
-        File::open(&package)?.sync_all()?;
+        sync_directories(&package, &receipt.files)?;
     }
     commit(
         &package,
@@ -320,8 +359,8 @@ pub(super) fn import_directory(
     // Includes the simultaneous publisher path; compare the authenticated
     // receipt, not just an archive identifier copied from it.
     let mut published = Vec::new();
-    regular_file(&destination.join("receipt.json"), 16 * 1024)?
-        .take(16 * 1024 + 1)
+    regular_file(&destination.join("receipt.json"), MAX_TEXT_BYTES)?
+        .take(MAX_TEXT_BYTES + 1)
         .read_to_end(&mut published)?;
     if published != bytes {
         return Err("another native package was published at this version".into());
@@ -383,6 +422,33 @@ fn validate_package(directory: &Path, target: Target, version: &str) -> Result<(
             &mut regular_file(&directory.join(service), MAX_FILE_BYTES)?,
             true,
         )?;
+    }
+    Ok(())
+}
+
+fn member_file(directory: &Path, name: &str, limit: u64) -> Result<File, HostError> {
+    let mut parent = directory.to_owned();
+    if let Some(relative) = Path::new(name).parent() {
+        for component in relative.components() {
+            parent.push(component);
+            if !parent.symlink_metadata()?.is_dir() {
+                return Err("native package member parent is not a directory".into());
+            }
+        }
+    }
+    regular_file(&directory.join(name), limit)
+}
+
+#[cfg(unix)]
+fn sync_directories(directory: &Path, files: &BTreeMap<String, Member>) -> Result<(), HostError> {
+    let mut parents = std::collections::BTreeSet::new();
+    for name in files.keys() {
+        if let Some(parent) = Path::new(name).parent() {
+            parents.extend(parent.ancestors().map(|path| directory.join(path)));
+        }
+    }
+    for parent in parents.into_iter().rev() {
+        File::open(parent)?.sync_all()?;
     }
     Ok(())
 }

@@ -422,7 +422,7 @@ async fn local_peer_sessions_preserve_ui_journals_grants_and_independent_revisio
     tokio::time::timeout(Duration::from_secs(30), async {
         let fixture = PeerHost::start().await;
         let (ui, source, consumer) = fixture.ui("tui", PresentationTarget::Tui).await;
-        let (other_ui, other_source, other_consumer) = fixture.ui("desktop", PresentationTarget::Desktop).await;
+        let (other_ui, other_source, other_consumer) = fixture.ui("second_ui", PresentationTarget::Tui).await;
         let epoch = Some(fixture.host.epoch());
         let mut client = Client::connect_peer(&fixture.address, epoch, source.clone(), [consumer.clone()].into(), fixture.selections.clone()).await.unwrap();
         let mut readonly = fixture.selections.clone();
@@ -670,8 +670,8 @@ async fn discovered_connections_release_ui_roots_without_stopping_the_shared_hos
         connections.start().await.unwrap();
         let frozen = connections.registrations();
         assert_eq!(frozen.len(), 2);
-        let (desktop, desktop_source, _) = fixture.ui("desktop-connections", PresentationTarget::Desktop).await;
-        let mut other = Connections::prepare(desktop.clone(), desktop_source.deployment, PresentationTarget::Desktop, configuration(), fixture.namespaces.clone(), std::path::PathBuf::from("unused-local-startup-helper"), NativeRegistry::default(), Some(maka_host_js::factory(Default::default()))).await.unwrap();
+        let (second_ui, second_source, _) = fixture.ui("second_ui-connections", PresentationTarget::Tui).await;
+        let mut other = Connections::prepare(second_ui.clone(), second_source.deployment, PresentationTarget::Tui, configuration(), fixture.namespaces.clone(), std::path::PathBuf::from("unused-local-startup-helper"), NativeRegistry::default(), Some(maka_host_js::factory(Default::default()))).await.unwrap();
         other.start().await.unwrap();
         assert_eq!(fixture.host.status().sessions, 2);
         connections.close().await.unwrap();
@@ -684,16 +684,16 @@ async fn discovered_connections_release_ui_roots_without_stopping_the_shared_hos
         assert!(!fixture.host.status().closing);
         // Retained registrations carry no anchor lease after the owning UI closed.
         assert_eq!(frozen.len(), 2);
-        assert_eq!(other.approve_source(&desktop, desktop_source.clone(), Default::default()).await.unwrap().len(), 2);
+        assert_eq!(other.approve_source(&second_ui, second_source.clone(), Default::default()).await.unwrap().len(), 2);
         let mut observer = Client::connect(&fixture.address, Some(fixture.host.epoch())).await.unwrap();
         let mut read = observer.call("business", "read".into(), Value::Null, Default::default()).await.unwrap();
         read.start().await.unwrap();
         assert!(matches!(read.receive().await.unwrap(), Reply::Finished { result: Ok(ref value), cleanup: Ok(()) } if value["effects"] == 0));
         observer.close().await.unwrap();
         other.close().await.unwrap();
-        desktop.shutdown().await.unwrap();
-        drop(desktop);
-        drop(RootOwner::open(&fixture.directory.path().join("desktop-connections"), &fixture.namespaces).unwrap());
+        second_ui.shutdown().await.unwrap();
+        drop(second_ui);
+        drop(RootOwner::open(&fixture.directory.path().join("second_ui-connections"), &fixture.namespaces).unwrap());
         assert!(Client::retire(&fixture.address, fixture.host.epoch()).await.unwrap());
         fixture.serving.await.unwrap().unwrap();
         registration.remove().unwrap();

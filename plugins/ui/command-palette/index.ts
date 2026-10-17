@@ -34,14 +34,7 @@ import type {
 import { paletteContract, type PaletteCommand, type PaletteProps } from '../../shared/contracts.js';
 import { scrollBoundary } from '../../shared/scroll.js';
 import { copy } from './locale.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Presentation,
-  type Node,
-} from '../../shared/view.js';
+import { compactLabel, output, type Presentation, type Node } from '../../shared/view.js';
 
 type Choice =
   | { kind: 'command'; command: PaletteCommand }
@@ -237,7 +230,6 @@ function frame<N extends Node>(
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
-  const target = presentation.target;
   const ui = presentation.paint(props.theme),
     text = copy(props.locale);
   const all = rows(state, props);
@@ -249,21 +241,10 @@ function frame<N extends Node>(
         : `${text.paletteSession} · ${choice.session.title}`;
     const button = ui.button(
       key,
-      (target === 'tui' ? (active ? (props.theme.ascii ? '> ' : '› ') : '  ') : '') +
-        (target === 'tui' ? compactLabel(label, 68) : label),
+      (active ? (props.theme.ascii ? '> ' : '› ') : '  ') + compactLabel(label, 68),
       !enabled(state, props, choice),
       false,
-      {
-        width: fill,
-        minWidth: 0,
-        truncate: true,
-        justify: 'start',
-        ...(target === 'tui'
-          ? { background: active ? props.theme.selected : 0 }
-          : active
-            ? { background: props.theme.selected }
-            : {}),
-      },
+      { align: 'start', ...{ background: active ? props.theme.selected : 0 } },
       choice.kind === 'command' ? choice.command.copyText : undefined,
     );
 
@@ -285,9 +266,6 @@ function frame<N extends Node>(
   const view = ui.box(
     'palette-content',
     [
-      ...(target === 'desktop'
-        ? [ui.text('palette-title', text.paletteTitle, 17, props.theme.text, 550)]
-        : []),
       presentation.slot(
         'palette-query',
         'input',
@@ -308,27 +286,25 @@ function frame<N extends Node>(
             ui.text(
               'query-error',
               state.queryError === 'long' ? text.searchTooLong : text.paletteSearchFailed,
-              13,
               props.theme.muted,
             ),
           ]
         : []),
       ...(state.failed
-        ? [ui.text('directory-error', text.paletteSearchFailed, 13, props.theme.muted)]
+        ? [ui.text('directory-error', text.paletteSearchFailed, props.theme.muted)]
         : []),
       ...(state.pending?.kind === 'page'
-        ? [ui.text('directory-loading', text.paletteSearching, 13, props.theme.muted)]
+        ? [ui.text('directory-loading', text.paletteSearching, props.theme.muted)]
         : []),
       ...(!all.length && !state.pending && !state.queryError && !state.failed && !dirty(state)
-        ? [ui.text('palette-empty', text.paletteEmpty, 13, props.theme.muted)]
+        ? [ui.text('palette-empty', text.paletteEmpty, props.theme.muted)]
         : []),
       presentation.reading(
         'palette-rows',
         {
           content: ui.box('palette-viewport', buttons, {
             scroll: 'anchor',
-            gap: target === 'desktop' ? 2 : 0,
-            style: { width: fill, height: pixels(280), minWidth: 0, minHeight: 0 },
+            gap: 0,
             terminal: { grow: 1, basis: 0 },
           }),
           command: state.reveal,
@@ -342,35 +318,23 @@ function frame<N extends Node>(
             ? [
                 ui.button(
                   'refresh',
-                  target === 'tui' ? (props.theme.ascii ? 'r' : '↻') : text.paletteRefresh,
+                  props.theme.ascii ? 'r' : '↻',
                   !!state.pending || !interactive(state, props),
                   false,
-                  target === 'tui' ? { background: 0 } : {},
+                  { background: 0 },
                   undefined,
                   text.paletteRefresh,
                 ),
               ]
             : []),
-          ui.button(
-            'close',
-            text.paletteClose,
-            false,
-            false,
-            target === 'tui' ? { background: 0, align: 'start' } : {},
-          ),
+          ui.button('close', text.paletteClose, false, false, { background: 0, align: 'start' }),
         ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 8 : 1,
-          style: { wrap: true },
-          terminal: { wrap: true },
-        },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       visible: state.open && props.open,
-      gap: target === 'desktop' ? 8 : 0,
-      style: { width: fill, minWidth: 0 },
+      gap: 0,
       terminal: { grow: 1 },
       shortcuts: [
         { key: 'down', modifiers: [], input: 'down', enabled: available },
@@ -395,7 +359,6 @@ function close(state: State) {
 export function palette<N extends Node>(
   presentation: Presentation<N>,
 ): Component<State, PaletteProps, N> {
-  const target = presentation.target;
   return {
     mount(props) {
       const state: State = {

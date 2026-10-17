@@ -32,7 +32,7 @@ import type {
 import { formEditorContract, type QuestionEditorProps } from '../../shared/contracts.js';
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Request = Extract<InteractionRecord['request'], { kind: 'form' }>;
 type Field = Request['fields'][number];
@@ -208,16 +208,15 @@ export function formEditor<N extends Node>(
           ui.box(
             'controls',
             [ui.button('close', text.closeModels), ui.button('check', text.check, props.checking)],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
-          ...(props.status ? [ui.text('status', props.status, 13, props.theme.muted)] : []),
+          ...(props.status ? [ui.text('status', props.status, props.theme.muted)] : []),
           ...(state.notice
             ? [
                 ui.text(
                   'notice',
                   text[state.notice] +
                     (state.invalidField !== null ? ': ' + fields[state.invalidField].label : ''),
-                  13,
                   props.theme.muted,
                 ),
               ]
@@ -233,7 +232,6 @@ export function formEditor<N extends Node>(
                         ? text.formDecline
                         : text.formCancel
                     : text.questionClosed,
-                  13,
                   props.theme.muted,
                 ),
               ]
@@ -241,18 +239,11 @@ export function formEditor<N extends Node>(
           ui.box(
             'pages',
             [
-              ui.text('requester', state.request?.requester.name ?? '', 13, props.theme.muted),
+              ui.text('requester', state.request?.requester.name ?? '', props.theme.muted),
               ...(state.request?.requester.source
-                ? [
-                    ui.text(
-                      'requester-source',
-                      state.request.requester.source,
-                      12,
-                      props.theme.muted,
-                    ),
-                  ]
+                ? [ui.text('requester-source', state.request.requester.source, props.theme.muted)]
                 : []),
-              ui.text('message', state.request?.message ?? '', 14),
+              ui.text('message', state.request?.message ?? ''),
               ...fields.map((field, index) => {
                 const draft = state.drafts[index];
                 const editing = enabled && draft.included;
@@ -260,12 +251,11 @@ export function formEditor<N extends Node>(
                   ui.text(
                     `label-${index}`,
                     `${field.label}${field.required ? ` · ${text.formRequired}` : ''}`,
-                    15,
                   ),
                 ];
                 if (field.description)
                   children.push(
-                    ui.text(`description-${index}`, field.description, 13, props.theme.muted),
+                    ui.text(`description-${index}`, field.description, props.theme.muted),
                   );
                 const limits = textual(field)
                   ? [
@@ -286,8 +276,7 @@ export function formEditor<N extends Node>(
                   : field.kind === 'multi_select'
                     ? `${field.minItems ?? 0}–${field.maxItems ?? field.options.length}`
                     : '';
-                if (limits)
-                  children.push(ui.text(`limits-${index}`, limits, 12, props.theme.muted));
+                if (limits) children.push(ui.text(`limits-${index}`, limits, props.theme.muted));
                 if (!field.required)
                   children.push(
                     ui.button(
@@ -322,7 +311,7 @@ export function formEditor<N extends Node>(
                           { changed: 'changed', submitted: 'submit' },
                         ),
                       ],
-                      { terminal: { shrink: true }, style: { width: fill, height: pixels(100) } },
+                      { terminal: { shrink: true } },
                     ),
                   );
                 else if (field.kind === 'boolean')
@@ -366,21 +355,13 @@ export function formEditor<N extends Node>(
                     ui.text(
                       `recorded-${index}`,
                       JSON.stringify(outcome.values[field.name]),
-                      14,
                       props.theme.muted,
                     ),
                   );
-                return ui.box(`page-content-${index}`, children, {
-                  gap: 1,
-                  style: { width: fill },
-                });
+                return ui.box(`page-content-${index}`, children, { gap: 1 });
               }),
             ],
-            {
-              scroll: 'anchor',
-              terminal: { grow: 1, basis: 0 },
-              style: { width: fill, height: pixels(340) },
-            },
+            { scroll: 'anchor', terminal: { grow: 1, basis: 0 } },
           ),
           ui.box(
             'decisions',
@@ -389,15 +370,10 @@ export function formEditor<N extends Node>(
               ui.button('decline', text.formDecline, !enabled),
               ui.button('cancel', text.formCancel, !enabled),
             ],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
         ],
-        {
-          visible: props.open,
-          gap: 1,
-          terminal: { grow: 1 },
-          style: { width: fill, minHeight: 0 },
-        },
+        { visible: props.open, gap: 1, terminal: { grow: 1 } },
       ),
       events,
     );

@@ -94,7 +94,7 @@ impl NativeComponent<String> for Counter {
     }
 }
 fn registered(contract: Contract, calls: Rc<Cell<usize>>) -> NativeRegistry<String> {
-    let mut registry = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut registry = crate::support::scene::registry(PresentationTarget::Tui);
     registry
         .register("test.counter", move |_, _values| {
             Ok(BTreeMap::from([(
@@ -125,7 +125,7 @@ fn fixture() -> (
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     let contract = entry.exports["Counter"].contract.clone();
     entry.scene = None;
     entry.implementation = Implementation::Native {
@@ -244,7 +244,7 @@ fn waiting_for_native_work_does_not_expire_the_composed_update() {
     let (input, packages, contract) = fixture();
     let (release, waiting) = tokio::sync::oneshot::channel();
     let waiting = Rc::new(std::cell::RefCell::new(Some(waiting)));
-    let mut registry = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut registry = crate::support::scene::registry(PresentationTarget::Tui);
     registry
         .register("test.counter", move |_, _| {
             Ok(BTreeMap::from([(
@@ -294,7 +294,7 @@ fn native_availability_is_not_activation_and_actual_contract_or_value_mismatches
     let timer = timer();
     for failure in 0..4 {
         let (input, packages, mut contract) = fixture();
-        let mut registry = crate::support::scene::registry::<String>(PresentationTarget::Desktop);
+        let mut registry = crate::support::scene::registry::<String>(PresentationTarget::Tui);
         if failure != 0 {
             if failure == 1 {
                 contract.version += 1;
@@ -306,7 +306,7 @@ fn native_availability_is_not_activation_and_actual_contract_or_value_mismatches
                         NativeExport {
                             contract: contract.clone(),
                             value: if failure == 2 {
-                                NativeCapability::Surface(PresentationTarget::Desktop)
+                                NativeCapability::Surface(PresentationTarget::Tui)
                             } else {
                                 NativeCapability::Component(Rc::new(Counter {
                                     calls: Rc::new(Cell::new(0)),
@@ -350,7 +350,7 @@ fn native_availability_is_not_activation_and_actual_contract_or_value_mismatches
             packages,
             timer.handle().clone(),
             maka_ui_js::execution(Default::default()),
-            crate::support::scene::registry::<String>(PresentationTarget::Desktop),
+            crate::support::scene::registry::<String>(PresentationTarget::Tui),
             Default::default()
         )
         .is_err()
@@ -368,11 +368,8 @@ impl NativeComponent<String> for Root {
         Ok(Frame {
             revision: 0,
             state: json!({}),
-            surface: Some(Surface::Window {
+            surface: Some(Surface::Terminal {
                 binding: "surface".into(),
-                title: "Native root".into(),
-                width: 640,
-                height: 400,
             }),
             view: crate::support::scene::view(Node::Component(maka_ui_runtime::ComponentSlot {
                 key: "child".into(),
@@ -401,7 +398,7 @@ fn native_root_uses_explicit_surface_and_can_compose_an_imported_component() {
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.scene = None;
     entry.implementation = Implementation::Native {
         implementation: "test.root".into(),
@@ -435,11 +432,8 @@ fn native_root_uses_explicit_surface_and_can_compose_an_imported_component() {
     let child = app.child_mount(&root, "child").unwrap().clone();
     assert_eq!(
         app.frame(&root).unwrap().surface,
-        Some(Surface::Window {
-            binding: "surface".into(),
-            title: "Native root".into(),
-            width: 640,
-            height: 400
+        Some(Surface::Terminal {
+            binding: "surface".into()
         })
     );
     app.dispatch(&child, 0, "inc", json!({"delta":3})).unwrap();
@@ -547,11 +541,8 @@ impl NativeComponent<String> for SlotParent {
         Ok(Frame {
             revision: next["revision"].as_u64().unwrap(),
             state: next,
-            surface: Some(Surface::Window {
+            surface: Some(Surface::Terminal {
                 binding: "surface".into(),
-                title: "Slots".into(),
-                width: 640,
-                height: 400,
             }),
             view,
         }
@@ -580,7 +571,7 @@ fn native_parent_slots_share_js_child_events_rollback_identity_and_retirement() 
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.scene = None;
     entry.implementation = Implementation::Native {
         implementation: "test.slot-parent".into(),
@@ -589,7 +580,7 @@ fn native_parent_slots_share_js_child_events_rollback_identity_and_retirement() 
     let parent = support::package("native.slot-parent", declaration, None);
     input.instances.get_mut("app").unwrap().package = parent.application_ref().into();
     packages.push(parent);
-    let mut native = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut native = crate::support::scene::registry(PresentationTarget::Tui);
     native
         .register("test.slot-parent", move |_, _values| {
             Ok(BTreeMap::from([(

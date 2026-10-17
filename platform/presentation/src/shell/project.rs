@@ -33,10 +33,7 @@ const FIELD_MARKER: &str = "[runtime resource field truncated]";
 const RECOVERY: &str = "If the command is safe to re-run, redirect its output to a file (e.g. `cmd > out.txt 2>&1`) then Read or Grep that file for the omitted portion. If re-running could repeat side effects, do not. Otherwise work from the kept output above.";
 
 pub fn local_update(record: ShellRun) -> Result<ResourceUpdate, ProjectionError> {
-    let desktop_terminal = record.output.is_pty()
-        && record.source_turn_id.starts_with("desktop-terminal-")
-        && record.source_turn_id == record.source_tool_call_id;
-    project(record, !desktop_terminal)
+    project(record, true)
 }
 
 pub fn local_state(record: ShellRun) -> Result<ShellSnapshot, ProjectionError> {

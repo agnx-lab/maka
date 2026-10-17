@@ -201,7 +201,7 @@ async function client(target) {
     },
   };
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} sends from its native snapshot without a parent callback and freezes the original destination`, async () => {
     const c = await client(target);
     c.ready();
@@ -476,7 +476,7 @@ for (const target of ['tui', 'desktop']) {
   });
 }
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} pending submissions settle only on original admission`, async () => {
     const c = await client(target);
     c.ready();
@@ -702,7 +702,7 @@ test('pending approval keeps the entire composer border amber through focus and 
   }
 });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} /compact opens a local command and clears its captured draft`, async () => {
     const c = await client(target);
     c.ready('/compact');
@@ -725,7 +725,7 @@ for (const target of ['tui', 'desktop']) {
   });
 }
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   const has = (c, key) => JSON.stringify(c.out.frame.view).includes(`"key":"${key}"`);
   const resolvePrefix = (c, text, revision = 1) =>
     c.reply(
@@ -871,7 +871,7 @@ for (const target of ['tui', 'desktop']) {
     );
     const button = findNode(c.out.frame.view, 'slash:skill:workspace:review');
     assert.equal(button.label, `› /review  ${'审查'.repeat(100)}`);
-    if (target === 'tui') assert.equal(button.hint, '');
+    assert.equal(button.hint, '');
     c.emit('navigated', { key: 'tab', observation: observed('/rev') });
     assert.deepEqual(c.editor().command.edit, { kind: 'replace', text: '/skill:review-id ' });
   });
@@ -1079,7 +1079,7 @@ for (const target of ['tui', 'desktop']) {
   });
 }
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} command menu shows six rows and scrolls selection across the catalog`, async () => {
     const c = await client(target);
     c.props.commands = Array.from({ length: 10 }, (_, i) => ({

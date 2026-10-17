@@ -87,7 +87,6 @@ impl From<PackageRef> for PackageSelection {
 pub enum EntryTarget {
     Host,
     Tui,
-    Desktop,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -243,22 +242,6 @@ impl Declaration {
         }
         if let Some(template) = &self.composition {
             template.validate()?;
-        }
-        if let (Some(tui), Some(desktop)) = (
-            self.entries.get(&EntryTarget::Tui),
-            self.entries.get(&EntryTarget::Desktop),
-        ) {
-            for (name, export) in &tui.exports {
-                if let Some(other) = desktop.exports.get(name)
-                    && (matches!(export.contract.interface, Interface::Component { .. })
-                        || matches!(other.contract.interface, Interface::Component { .. }))
-                    && export != other
-                {
-                    return Err(Error::Contract(format!(
-                        "component variants disagree: {name}"
-                    )));
-                }
-            }
         }
         Ok(())
     }

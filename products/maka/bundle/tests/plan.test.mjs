@@ -53,8 +53,8 @@ async function client(target) {
       },
       thinkingLevel: null,
     },
-    inspector: target === 'tui' ? 'plan' : null,
-    dialog: target === 'desktop' ? 'plan' : null,
+    inspector: 'plan',
+    dialog: null,
     modelRefreshing: false,
     pending: {},
     restoring: false,
@@ -184,7 +184,7 @@ test('tui checkpoints confirmed live operations without blocking new mutations',
   );
 });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} recovery checkpoints preserve caller scope and advance only a settled prefix`, async () => {
     const caller = { stateDomain: 'ui-domain', deployment: 'ui-deployment' };
     const consumer = ['original-consumer'];
@@ -215,7 +215,7 @@ for (const target of ['tui', 'desktop']) {
           reference: { operation: 'first-operation' },
         };
         c.reply([original], 'initial');
-        if (target === 'tui' && sameScope) {
+        if (sameScope) {
           assert.deepEqual(c.out.actions[0].input, { after: 41, limit: 1 });
           assert.equal(c.state.restoreThrough, 41);
         } else {
@@ -252,8 +252,7 @@ for (const target of ['tui', 'desktop']) {
         if (known) {
           c.reply([]);
           assert.equal(c.state.restoreThrough, 42);
-          if (target === 'tui')
-            assert.deepEqual(c.state.recoveryCheckpoint.command.value, { through: 42, scope });
+          assert.deepEqual(c.state.recoveryCheckpoint.command.value, { through: 42, scope });
         } else {
           assert.ok(c.state.uncertain);
           assert.equal(

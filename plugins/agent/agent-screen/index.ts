@@ -28,7 +28,7 @@ import { newGoalState } from './goal.js';
 import { newPlanState } from './plan.js';
 import { newGraphState } from './graph.js';
 import { type State } from './state.js';
-import { intent, catalog } from './actions.js';
+import { catalog } from './actions.js';
 import { frame } from './frame.js';
 import { handleEvent } from './events.js';
 
@@ -44,7 +44,6 @@ export function agentScreen<N extends Node>(
   graphs = false,
   hostLogs = false,
 ): Component<State, AgentScreenProps, N> {
-  const target = presentation.target;
   const configuredLocale = locale;
   return {
     mount(props, values) {
@@ -55,7 +54,7 @@ export function agentScreen<N extends Node>(
         preferences: initialAppearance(),
         recoveryCheckpoint: bookmark({ through: 0, scope: null }),
         historyScope: null,
-        restoreStarted: target !== 'tui',
+        restoreStarted: false,
         restoreThrough: 0,
         recoveryDirty: false,
         settledOperations: [],
@@ -101,7 +100,7 @@ export function agentScreen<N extends Node>(
         insightsScope: null,
         searchOpen: false,
         browse: null,
-        sidebar: target === 'desktop' ? { open: true } : { command: null },
+        sidebar: { command: null },
         terminals,
         skills,
         dialog: null,
@@ -144,8 +143,7 @@ export function agentScreen<N extends Node>(
       };
       const actions: Action[] = [];
       catalog(state);
-      if (target !== 'tui')
-        intent(state, actions, { kind: 'restorePage' }, 'history', 'page', { after: 0, limit: 1 });
+
       return frame(presentation, configuredLocale, state, values, actions);
     },
     update(state, props, values) {

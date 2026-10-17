@@ -212,14 +212,14 @@ fn invalid_ui_candidate_does_not_retire_original_product() {
         .clone();
     declaration
         .entries
-        .get_mut(&maka_plugin_core::package::EntryTarget::Desktop)
+        .get_mut(&maka_plugin_core::package::EntryTarget::Tui)
         .unwrap()
         .implementation = maka_plugin_core::package::Implementation::Native {
         implementation: "unavailable.native".into(),
     };
     declaration
         .entries
-        .get_mut(&maka_plugin_core::package::EntryTarget::Desktop)
+        .get_mut(&maka_plugin_core::package::EntryTarget::Tui)
         .unwrap()
         .scene = None;
     let invalid = support::package("invalid.app", declaration, None);

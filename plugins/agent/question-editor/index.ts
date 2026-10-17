@@ -30,7 +30,7 @@ import {
   type QuestionDraft,
 } from '../../shared/contracts.js';
 import { copy } from './locale.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Draft = {
   selection: 'unset' | 'text' | 'skip' | number;
@@ -73,17 +73,14 @@ export function questionEditor<N extends Node>(
           ui.box(
             'question-controls',
             [ui.button('close', text.closeModels), ui.button('check', text.check, props.checking)],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
-          ...(props.status
-            ? [ui.text('question-status', props.status, 13, props.theme.muted)]
-            : []),
+          ...(props.status ? [ui.text('question-status', props.status, props.theme.muted)] : []),
           ...(outcome
             ? [
                 ui.text(
                   'question-outcome',
                   outcome.kind === 'question_answer' ? text.questionAnswered : text.questionClosed,
-                  13,
                   props.theme.muted,
                 ),
               ]
@@ -98,37 +95,19 @@ export function questionEditor<N extends Node>(
                 const content = ui.box(
                   `${key}-content`,
                   [
-                    ui.text(`${key}-label`, label, 14),
+                    ui.text(`${key}-label`, label),
                     ...(option.description
-                      ? [ui.text(`${key}-description`, option.description, 12, props.theme.muted)]
+                      ? [ui.text(`${key}-description`, option.description, props.theme.muted)]
                       : []),
                   ],
                   { gap: 0 },
                 );
-                return ui.item
-                  ? ui.item(key, content, draft.selection === at, !available)
-                  : ui.box(
-                      `${key}-row`,
-                      [
-                        ui.button(key, label, !available, draft.selection === at),
-                        ...(option.description
-                          ? [
-                              ui.text(
-                                `${key}-description`,
-                                option.description,
-                                12,
-                                props.theme.muted,
-                              ),
-                            ]
-                          : []),
-                      ],
-                      { gap: 0 },
-                    );
+                return ui.item(key, content, draft.selection === at, !available);
               });
               return ui.box(
                 `question-page-${index}`,
                 [
-                  ui.text(`question-text-${index}`, question.question, 15),
+                  ui.text(`question-text-${index}`, question.question),
                   ui.box(`question-options-${index}`, choices, { gap: 1, focusGroup: true }),
                   ui.box(
                     `question-modes-${index}`,
@@ -144,7 +123,7 @@ export function questionEditor<N extends Node>(
                         !available,
                       ),
                     ],
-                    { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+                    { row: true, gap: 1, terminal: { wrap: true } },
                   ),
                   ui.box(
                     `question-field-${index}`,
@@ -170,40 +149,26 @@ export function questionEditor<N extends Node>(
                         { changed: 'changed', submitted: 'submit' },
                       ),
                     ],
-                    { terminal: { shrink: true }, style: { width: fill, height: pixels(100) } },
+                    { terminal: { shrink: true } },
                   ),
                   ...(outcome?.kind === 'question_answer'
                     ? [
                         ui.text(
                           `recorded-${index}`,
                           outcome.answers[index] ?? text.questionSkip,
-                          14,
                           props.theme.muted,
                         ),
                       ]
                     : []),
                 ],
-                {
-                  gap: presentation.target === 'tui' ? 1 : 10,
-                  style: { width: fill },
-                },
+                { gap: 1 },
               );
             }),
-            {
-              scroll: 'anchor',
-              gap: 0,
-              terminal: { grow: 1, basis: 0 },
-              style: { width: fill, height: pixels(340) },
-            },
+            { scroll: 'anchor', gap: 0, terminal: { grow: 1, basis: 0 } },
           ),
           ui.button('submit', text.questionSubmit, !available || !done, true),
         ],
-        {
-          visible: props.open,
-          gap: presentation.target === 'tui' ? 0 : 10,
-          terminal: { grow: 1 },
-          style: { width: fill, minHeight: 0 },
-        },
+        { visible: props.open, gap: 0, terminal: { grow: 1 } },
       ),
       events,
     );

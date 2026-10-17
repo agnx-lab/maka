@@ -24,7 +24,7 @@ In the bundled skill, `references/sdk/` contains the SDK sources from the same b
 | Need | File within the SDK |
 | --- | --- |
 | `Component`, `HostService`, `RequestContext` | `index.ts` |
-| Native terminal and desktop scene helpers | `ui.ts` |
+| Native terminal scene helpers | `ui.ts` |
 | Package/composition types, wire values and native props | `generated/runtime.ts` |
 | Public service and component contracts | `contracts.ts` index, then `contracts/<name>.ts` in bundled resources |
 | Native configuration schemas | `configurations.ts` |

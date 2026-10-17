@@ -42,7 +42,7 @@ import { jevSettingsContract, type ProjectsProps } from '../../shared/contracts.
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 const settingsFields = ['url', 'model', 'timeoutMs'] as const;
 const names = [...settingsFields, 'headerName', 'secret'] as const;
@@ -292,7 +292,7 @@ export function jevSettings<N extends Node>(
       ui.box(
         'jev-field-' + name,
         [
-          ui.text('jev-label-' + name, t('jev-' + name), 13, props.theme.muted),
+          ui.text('jev-label-' + name, t('jev-' + name), props.theme.muted),
           presentation.slot(
             'jev-' + name,
             name === 'secret' ? 'secret' : 'input',
@@ -308,14 +308,11 @@ export function jevSettings<N extends Node>(
                 !!state.fields[name].command ||
                 (name !== 'secret' && !state.fields[name].ready),
               command: state.fields[name].command,
-              appearance:
-                presentation.target === 'tui'
-                  ? {
-                      ...props.theme.input,
-                      borderWidth: 0,
-                      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                    }
-                  : props.theme.input,
+              appearance: {
+                ...props.theme.input,
+                borderWidth: 0,
+                padding: { top: 0, right: 0, bottom: 0, left: 0 },
+              },
             } satisfies InputProps,
             { changed: 'changed' },
           ),
@@ -344,16 +341,14 @@ export function jevSettings<N extends Node>(
         ui.text(
           'jev-saved-endpoint',
           t('jev-saved-endpoint') + ': ' + (state.saved?.settings.url ?? '…'),
-          13,
           props.theme.muted,
         ),
         ui.text(
           'jev-key-status',
           t(state.saved?.apiKeyConfigured ? 'jev-key-present' : 'jev-key-absent'),
-          13,
           props.theme.muted,
         ),
-        ui.text('jev-credential-help', t('jev-credential-help'), 13, props.theme.muted),
+        ui.text('jev-credential-help', t('jev-credential-help'), props.theme.muted),
         editor('secret'),
         ui.button('save-key', t('jev-save-key'), disabled || !canSaveSecret),
         ui.button('remove-key', t('jev-remove-key'), disabled || !state.saved?.apiKeyConfigured),
@@ -371,7 +366,7 @@ export function jevSettings<N extends Node>(
           t('jev-test'),
           disabled || !state.saved?.settings.enabled || !state.saved.configured,
         ),
-        ui.text('jev-test-help', t('jev-test-help'), 13, props.theme.muted),
+        ui.text('jev-test-help', t('jev-test-help'), props.theme.muted),
         ...(state.current
           ? [
               ui.button(
@@ -386,12 +381,12 @@ export function jevSettings<N extends Node>(
           : []),
         ui.button('reload', t('jev-reload'), disabled),
       ],
-      { gap: 1, scroll: 'manual', terminal: { grow: 1 }, style: { width: fill, height: fill } },
+      { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
     );
     const confirmation = ui.box(
       'jev-confirmation',
       [
-        ui.text('jev-remove-question', t('jev-remove-question'), 14, props.theme.text),
+        ui.text('jev-remove-question', t('jev-remove-question'), props.theme.text),
         ui.button('confirm-remove', t('jev-remove'), busy(state, props)),
         ui.button('cancel', text.cancel),
       ],
@@ -414,26 +409,19 @@ export function jevSettings<N extends Node>(
                     (state.notice === 'jev-tested' && state.testResult
                       ? ': ' + state.testResult
                       : ''),
-                  13,
                   props.theme.muted,
                 ),
               ]
             : []),
-          ui.dialog(
-            'jev-removal',
-            t('jev-remove'),
-            content,
-            confirmation,
-            !!state.confirming,
-            undefined,
-            { width: 52, height: 10 },
-          ),
+          ui.dialog('jev-removal', t('jev-remove'), content, confirmation, !!state.confirming, {
+            width: 52,
+            height: 10,
+          }),
         ],
         {
           visible: props.open,
           gap: 0,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [
             {
               key: 'escape',

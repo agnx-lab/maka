@@ -33,7 +33,7 @@ const original = {
   permissions: { access: 'workspace_write', requestPermissions: true },
   workspace: { path: '/project', directoryIdentity: 'a'.repeat(64), identity: 'workspace-a' },
 };
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} pristine details follow current session revisions while edited drafts retain their target`, async () => {
     const { component } = await import(`../dist/packages/session-details/${target}.js`);
     let props = { theme, locale: 'en', open: true, busy: false, session: original };

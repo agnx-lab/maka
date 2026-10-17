@@ -39,14 +39,7 @@ import { scrollBoundary } from '../../shared/scroll.js';
 import { resolveLocale } from '../../shared/locale.js';
 import { copy, type Copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 type Route = 'coordinator' | 'tasks' | 'sessions';
 type Request =
@@ -254,10 +247,9 @@ export function workhubRoot<N extends Node>(
     const locale = resolveLocale(configuredLocale, values.locale?.[0]);
     const theme = values.appearance![0] as unknown as Theme;
     const text = copy(locale),
-      ui = presentation.paint(theme),
-      desktop = presentation.target === 'desktop';
+      ui = presentation.paint(theme);
     const busy = !!state.pending;
-    const gap = desktop ? 10 : 1;
+    const gap = 1;
     const selected = state.selected,
       work = progress(selected?.task ?? null);
     const answer = work?.kind === 'delivered' ? work.answer : null;
@@ -266,15 +258,13 @@ export function workhubRoot<N extends Node>(
           ui.text(
             'task-title',
             compactLabel((selected.task ?? selected.entry).title, 128) || text.workhubUntitled,
-            18,
             theme.text,
             600,
           ),
-          ui.text('task-worker', compactLabel(selected.entry.worker, 64), 13, theme.muted),
+          ui.text('task-worker', compactLabel(selected.entry.worker, 64), theme.muted),
           ui.text(
             'task-accepted',
             acceptanceTime((selected.task ?? selected.entry).acceptedAt, text),
-            13,
             theme.muted,
           ),
           ui.text(
@@ -284,15 +274,14 @@ export function workhubRoot<N extends Node>(
               : selected.failed
                 ? text.workhubUnavailable
                 : text.loading,
-            14,
           ),
           ...(selected.failed
-            ? [ui.text('task-refresh-failed', text.recoveryRefreshFailed, 13, theme.warning)]
+            ? [ui.text('task-refresh-failed', text.recoveryRefreshFailed, theme.warning)]
             : []),
           ...(work?.kind === 'delivered' && work.shared
-            ? [ui.text('task-shared', text.workhubShared, 13, theme.muted)]
+            ? [ui.text('task-shared', text.workhubShared, theme.muted)]
             : []),
-          ui.text('answer-title', text.workhubAnswer, 15, theme.text, 600),
+          ui.text('answer-title', text.workhubAnswer, theme.text, 600),
           ...(answer
             ? [
                 presentation.slot(
@@ -309,7 +298,7 @@ export function workhubRoot<N extends Node>(
                   {},
                 ),
               ]
-            : [ui.text('answer-empty', text.workhubNoAnswer, 14, theme.muted)]),
+            : [ui.text('answer-empty', text.workhubNoAnswer, theme.muted)]),
         ]
       : (state.entries?.entries.map((entry, at) =>
           ui.box(
@@ -320,18 +309,16 @@ export function workhubRoot<N extends Node>(
                 compactLabel(entry.title, 100) || text.workhubUntitled,
                 state.pending?.request.kind === 'tasks',
                 false,
-                { width: fill, justify: 'start' },
+                { align: 'start' },
               ),
               ui.text(
                 `task-accepted-${state.pageKey}-${at}`,
                 acceptanceTime(entry.acceptedAt, text),
-                13,
                 theme.muted,
               ),
               ui.text(
                 `task-summary-${state.pageKey}-${at}`,
                 `${compactLabel(entry.worker, 64)} · ${Object.hasOwn(state.cache, entry.taskId) ? status(state.cache[entry.taskId], text) : text.loading}`,
-                13,
                 theme.muted,
               ),
             ],
@@ -339,13 +326,12 @@ export function workhubRoot<N extends Node>(
           ),
         ) ?? []);
     if (!selected && !busy && state.entries?.entries.length === 0)
-      content.push(ui.text('tasks-empty', text.workhubEmpty, 14, theme.muted));
+      content.push(ui.text('tasks-empty', text.workhubEmpty, theme.muted));
     const page = (route: Route, children: N[]) =>
       ui.box(`workhub-${route}`, children, {
         visible: state.route === route,
         gap: 0,
         terminal: { grow: 1 },
-        style: { width: fill, height: pixels(0), grow: 1, shrink: 1, minHeight: 0 },
       });
     const out = output(
       state,
@@ -358,7 +344,7 @@ export function workhubRoot<N extends Node>(
           ui.box(
             'workhub-navigation',
             [
-              ui.text('workhub-title', 'WorkHub', 18, theme.text, 600),
+              ui.text('workhub-title', 'WorkHub', theme.text, 600),
               ...(['coordinator', 'tasks', 'sessions'] as Route[]).map((route, at) =>
                 ui.button(
                   `workhub-route-${route}`,
@@ -368,13 +354,7 @@ export function workhubRoot<N extends Node>(
                 ),
               ),
             ],
-            {
-              visible: state.route !== 'sessions',
-              row: true,
-              gap,
-              terminal: { wrap: true },
-              style: { width: fill, wrap: true, shrink: 0 },
-            },
+            { visible: state.route !== 'sessions', row: true, gap, terminal: { wrap: true } },
           ),
           ...(state.original
             ? [
@@ -384,12 +364,11 @@ export function workhubRoot<N extends Node>(
                     ui.text(
                       'workhub-original-state',
                       state.cleanup ? text.workhubOriginal : text.workhubCleanup,
-                      13,
                       theme.warning,
                     ),
                     ui.button('workhub-check-original', text.check, busy),
                   ],
-                  { row: true, gap, terminal: { wrap: true }, style: { wrap: true, shrink: 0 } },
+                  { row: true, gap, terminal: { wrap: true } },
                 ),
               ]
             : []),
@@ -398,7 +377,7 @@ export function workhubRoot<N extends Node>(
                 ui.box(
                   'workhub-failed',
                   [
-                    ui.text('workhub-failed-text', text.recoveryRefreshFailed, 13, theme.warning),
+                    ui.text('workhub-failed-text', text.recoveryRefreshFailed, theme.warning),
                     ui.button('workhub-retry-read', text.check, busy),
                   ],
                   { row: true, gap },
@@ -429,10 +408,9 @@ export function workhubRoot<N extends Node>(
                           : state.coordinator?.kind === 'pending'
                             ? text.workhubSetupPending
                             : text.workhubSetup,
-                        15,
                       ),
                       ...(state.rejected
-                        ? [ui.text('workhub-rejected', text.workhubRejected, 14, theme.warning)]
+                        ? [ui.text('workhub-rejected', text.workhubRejected, theme.warning)]
                         : []),
                       ui.button(
                         'workhub-setup-start',
@@ -444,7 +422,7 @@ export function workhubRoot<N extends Node>(
                       ),
                       ui.button('workhub-coordinator-refresh', text.check, busy),
                     ],
-                    { gap, padding: desktop ? 20 : 1 },
+                    { gap, padding: 1 },
                   ),
                 ]),
           ]),
@@ -469,7 +447,6 @@ export function workhubRoot<N extends Node>(
                   gap,
                   scroll: 'manual',
                   terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: fill, minHeight: 0 },
                 }),
               },
               { input: 'reading-input', observed: 'reading-observed' },
@@ -491,21 +468,11 @@ export function workhubRoot<N extends Node>(
                     ui.button('tasks-refresh', text.check, busy),
                     ui.button('tasks-first', text.workhubFirst, busy || state.pageAfter === null),
                   ],
-              {
-                row: true,
-                gap,
-                terminal: { wrap: true },
-                style: { width: fill, wrap: true, shrink: 0 },
-              },
+              { row: true, gap, terminal: { wrap: true } },
             ),
           ]),
         ],
-        {
-          gap: desktop ? 8 : 0,
-          background: theme.background,
-          terminal: { grow: 1 },
-          style: { width: fill, height: fill },
-        },
+        { gap: 0, background: theme.background, terminal: { grow: 1 } },
       ),
     );
     out.frame.view = ui.dialog(
@@ -520,9 +487,7 @@ export function workhubRoot<N extends Node>(
       ),
       state.directories,
     );
-    out.frame.surface = desktop
-      ? { kind: 'window', binding: 'surface', title: 'WorkHub', width: 1100, height: 760 }
-      : { kind: 'terminal', binding: 'surface' };
+    out.frame.surface = { kind: 'terminal', binding: 'surface' };
     out.actions = actions;
     out.subscriptions = watches(state);
     return out;

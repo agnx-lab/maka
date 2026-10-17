@@ -1801,7 +1801,7 @@ async fn ui_caller_source(
 ) -> maka_plugin_core::deployment::DeploymentRef {
     let declaration = Declaration {
         entries: BTreeMap::from([(
-            EntryTarget::Desktop,
+            EntryTarget::Tui,
             EntryDeclaration {
                 scene: None,
                 implementation: Implementation::Native {
@@ -1838,7 +1838,7 @@ async fn ui_caller_source(
     let input = Input {
         environment: Environment {
             location: ExecutionLocation::Ui,
-            presentation: Some(maka_plugin_core::composition::PresentationTarget::Desktop),
+            presentation: Some(maka_plugin_core::composition::PresentationTarget::Tui),
         },
         instances: BTreeMap::from([("caller".into(), node)]),
         recovery: None,

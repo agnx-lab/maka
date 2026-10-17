@@ -35,7 +35,7 @@ import type {
 import type { Theme } from '../../shared/contracts.js';
 import { copy, goalActions, goalStatuses } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import { intent, mutationPending } from './actions.js';
 import type { State } from './state.js';
 
@@ -366,10 +366,7 @@ export function goalView<N extends Node>(
     text = copy(locale),
     goal = state.goal,
     current = goal.page?.current;
-  const open =
-    presentation.target === 'tui'
-      ? state.inspector === 'goal' && state.dialog === null
-      : state.dialog === 'goal';
+  const open = state.inspector === 'goal' && state.dialog === null;
   const editable = available(state) && !goal.confirmation;
   const form = canCreate(state);
   const field = (name: Field, label: string): N => {
@@ -385,7 +382,7 @@ export function goalView<N extends Node>(
     return ui.box(
       'goal-input-' + name,
       [
-        ui.text('goal-label-' + name, label, 13, theme.muted),
+        ui.text('goal-label-' + name, label, theme.muted),
         name === 'objective'
           ? presentation.slot(
               'goal-field-' + name,
@@ -438,14 +435,14 @@ export function goalView<N extends Node>(
       ui.box(
         'goal-header',
         [
-          ui.text('goal-title', text.goalTitle, 17, theme.text, 550),
+          ui.text('goal-title', text.goalTitle, theme.text, 550),
           ui.button('goal-close', text.closeModels),
         ],
         { row: true, gap: 1 },
       ),
       ...(state.notice &&
       (state.notice.startsWith('goal') || state.uncertain?.reference.method === 'changeGoal')
-        ? [ui.text('goal-notice', text[state.notice], 13, theme.warning)]
+        ? [ui.text('goal-notice', text[state.notice], theme.warning)]
         : []),
       ...(goal.failed
         ? [
@@ -463,7 +460,6 @@ export function goalView<N extends Node>(
             ui.text(
               'goal-state',
               `${text[goalStatuses[current.status]]} · ${current.iterations}/${current.maxIterations}`,
-              13,
               theme.muted,
             ),
             ...(current.tokenBudget != null
@@ -477,9 +473,7 @@ export function goalView<N extends Node>(
             ...(current.report?.note || current.note
               ? [ui.text('goal-note', current.report?.note || current.note)]
               : []),
-            ...(current.pending
-              ? [ui.text('goal-pending', text.goalPending, 12, theme.muted)]
-              : []),
+            ...(current.pending ? [ui.text('goal-pending', text.goalPending, theme.muted)] : []),
             ui.box(
               'goal-controls',
               [
@@ -500,7 +494,7 @@ export function goalView<N extends Node>(
                     ? [ui.button('goal-cancel', text.goalCheckCancel, !editable)]
                     : []),
               ],
-              { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ]
         : []),
@@ -512,7 +506,7 @@ export function goalView<N extends Node>(
                 field('objective', text.goalObjective),
                 field('iterations', text.goalIterations),
                 field('budget', text.goalTokens),
-                ui.text('goal-budget-note', text.goalBudgetNote, 12, theme.muted),
+                ui.text('goal-budget-note', text.goalBudgetNote, theme.muted),
                 ...(!state.model || state.executor
                   ? [ui.text('goal-model', text.goalChooseModel)]
                   : []),
@@ -539,7 +533,7 @@ export function goalView<N extends Node>(
         : []),
       ...(confirmation
         ? [
-            ui.text('goal-confirm-title', title, 15, theme.text, 550),
+            ui.text('goal-confirm-title', title, theme.text, 550),
             ...(confirmation.kind === 'create'
               ? [
                   ui.text('goal-confirm-objective', confirmation.objective),
@@ -599,12 +593,6 @@ export function goalView<N extends Node>(
           ]
         : []),
     ],
-    {
-      visible: open,
-      gap: 1,
-      scroll: 'manual',
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    },
+    { visible: open, gap: 1, scroll: 'manual', terminal: { grow: 1 } },
   );
 }

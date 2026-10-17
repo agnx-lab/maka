@@ -30,7 +30,7 @@ import type {
 import type { State } from './state.js';
 import type { Theme } from '../../shared/contracts.js';
 import { copy, planProposals, planExecutions, planSteps, planActions } from './locale.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import { intent, mutationPending } from './actions.js';
 
 export type PlanRequest =
@@ -263,10 +263,7 @@ export function planView<N extends Node>(
   const ui = presentation.paint(theme),
     text = copy(locale),
     plan = state.plan;
-  const open =
-    presentation.target === 'tui'
-      ? state.inspector === 'plan' && state.dialog === null
-      : state.dialog === 'plan';
+  const open = state.inspector === 'plan' && state.dialog === null;
   const historical = plan.history?.page?.snapshots.find(
     (snapshot) => snapshot.revision === plan.history?.selected,
   );
@@ -290,14 +287,14 @@ export function planView<N extends Node>(
       ui.box(
         'plan-header',
         [
-          ui.text('plan-title', text.planTitle, 17, theme.text, 550),
+          ui.text('plan-title', text.planTitle, theme.text, 550),
           ui.button('plan-close', text.closeModels),
         ],
         { row: true, gap: 1 },
       ),
       ...(state.notice &&
       (state.notice.startsWith('plan') || state.uncertain?.reference.method === 'changePlan')
-        ? [ui.text('plan-notice', text[state.notice], 13, theme.warning)]
+        ? [ui.text('plan-notice', text[state.notice], theme.warning)]
         : []),
       ...(plan.failed
         ? [
@@ -314,10 +311,9 @@ export function planView<N extends Node>(
             ui.text(
               'plan-mode',
               state.selected?.collaborationMode === 'plan' ? text.planPlanning : text.planAgent,
-              13,
               theme.muted,
             ),
-            ui.text('plan-mode-note', text.planModeNote, 12, theme.muted),
+            ui.text('plan-mode-note', text.planModeNote, theme.muted),
             ui.button(
               state.selected?.collaborationMode === 'plan' ? 'plan-mode-agent' : 'plan-mode-plan',
               state.selected?.collaborationMode === 'plan'
@@ -344,7 +340,7 @@ export function planView<N extends Node>(
                   snapshot.revision === plan.history?.selected,
                 ),
               ),
-              { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
             ui.box(
               'plan-history-navigation',
@@ -367,29 +363,24 @@ export function planView<N extends Node>(
           ? [ui.button('plan-history', text.planHistory)]
           : []),
       ...(snapshot && snapshot.revision > 0
-        ? [ui.text('plan-revision', `${text.planRevision} ${snapshot.revision}`, 12, theme.muted)]
+        ? [ui.text('plan-revision', `${text.planRevision} ${snapshot.revision}`, theme.muted)]
         : []),
       ...(showProposal
-        ? [ui.text('plan-proposal-state', text[planProposals[proposal!.status]], 13, theme.muted)]
+        ? [ui.text('plan-proposal-state', text[planProposals[proposal!.status]], theme.muted)]
         : execution
           ? [
-              ui.text(
-                'plan-execution-state',
-                text[planExecutions[execution.phase]],
-                13,
-                theme.muted,
-              ),
+              ui.text('plan-execution-state', text[planExecutions[execution.phase]], theme.muted),
               ...(execution.reason
-                ? [ui.text('plan-reason', execution.reason, 13, theme.warning)]
+                ? [ui.text('plan-reason', execution.reason, theme.warning)]
                 : []),
               ...(execution.cancellation && active
-                ? [ui.text('plan-cancelling', text.planCancelling, 13, theme.warning)]
+                ? [ui.text('plan-cancelling', text.planCancelling, theme.warning)]
                 : []),
             ]
           : []),
       ...(artifact
         ? [
-            ui.text('plan-artifact-title', artifact.title, 15, theme.text, 550),
+            ui.text('plan-artifact-title', artifact.title, theme.text, 550),
             ...(artifact.overview ? [ui.text('plan-overview', artifact.overview)] : []),
             ...artifact.steps.map((step, index) =>
               ui.box(
@@ -398,7 +389,6 @@ export function planView<N extends Node>(
                   ui.text(
                     `plan-step-title-${step.id}`,
                     `${index + 1}. ${step.title}${!showProposal && execution ? ' · ' + text[planSteps[execution.steps.find((progress) => progress.id === step.id)?.status ?? 'pending']] : ''}`,
-                    14,
                     theme.text,
                     550,
                   ),
@@ -408,7 +398,6 @@ export function planView<N extends Node>(
                         ui.text(
                           `plan-step-files-${step.id}`,
                           (step.files ?? []).join(', '),
-                          12,
                           theme.muted,
                         ),
                       ]
@@ -419,7 +408,6 @@ export function planView<N extends Node>(
                         ui.text(
                           `plan-step-note-${step.id}`,
                           execution.steps.find((progress) => progress.id === step.id)!.note!,
-                          12,
                           theme.muted,
                         ),
                       ]
@@ -430,7 +418,7 @@ export function planView<N extends Node>(
             ),
             ...((artifact.risks ?? []).length
               ? [
-                  ui.text('plan-risks-title', text.planRisks, 14, theme.text, 550),
+                  ui.text('plan-risks-title', text.planRisks, theme.text, 550),
                   ...(artifact.risks ?? []).map((risk, index) =>
                     ui.text(`plan-risk-${index}`, risk),
                   ),
@@ -442,7 +430,7 @@ export function planView<N extends Node>(
           : []),
       ...(confirmation && action
         ? [
-            ui.text('plan-confirm-title', text[planActions[action.kind]], 15, theme.text, 550),
+            ui.text('plan-confirm-title', text[planActions[action.kind]], theme.text, 550),
             ...(grant
               ? [
                   ui.text('plan-approval', text.planApproval),
@@ -471,7 +459,7 @@ export function planView<N extends Node>(
         : !plan.history
           ? [
               ...(!state.model || state.executor
-                ? [ui.text('plan-model', text.planChooseModel, 12, theme.muted)]
+                ? [ui.text('plan-model', text.planChooseModel, theme.muted)]
                 : []),
               ui.box(
                 'plan-controls',
@@ -511,7 +499,7 @@ export function planView<N extends Node>(
                       ]
                     : []),
                 ],
-                { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+                { row: true, gap: 1, terminal: { wrap: true } },
               ),
             ]
           : []),
@@ -527,12 +515,6 @@ export function planView<N extends Node>(
           ]
         : []),
     ],
-    {
-      visible: open,
-      gap: 1,
-      scroll: 'manual',
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    },
+    { visible: open, gap: 1, scroll: 'manual', terminal: { grow: 1 } },
   );
 }

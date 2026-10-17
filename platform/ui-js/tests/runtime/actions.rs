@@ -104,7 +104,7 @@ fn fixture_with_continuation(
     };
     let calls = Rc::new(Cell::new(0));
     let observed = calls.clone();
-    let mut native = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut native = crate::support::scene::registry(PresentationTarget::Tui);
     native
         .register("maka.ui.textarea", move |_, _values| {
             Ok(BTreeMap::from([(
@@ -453,7 +453,7 @@ fn service_fixture(
             .clone();
         let entry = declaration
             .entries
-            .get_mut(&maka_plugin_core::package::EntryTarget::Desktop)
+            .get_mut(&maka_plugin_core::package::EntryTarget::Tui)
             .unwrap();
         let source = if name == "dynamic.app" {
             entry.imports.get_mut("reader").unwrap().contract = contract.clone();
@@ -584,11 +584,8 @@ impl NativeComponent<()> for ExactFeedback {
         let mut output = Frame {
             revision: state["revision"].as_u64().unwrap(),
             state,
-            surface: Some(maka_ui_runtime::Surface::Window {
+            surface: Some(maka_ui_runtime::Surface::Terminal {
                 binding: "surface".into(),
-                title: "Codec reader".into(),
-                width: 640,
-                height: 400,
             }),
             view: crate::support::scene::view(crate::support::scene::Node::Text {
                 key: "result".into(),
@@ -635,7 +632,7 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
             .unwrap()
             .declaration()
             .clone();
-        let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+        let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
         let component = entry.exports["App"].contract.clone();
         let contract = Contract {
             name: "test.ExactQuery".into(),
@@ -670,7 +667,7 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
         let source = format!(
             r#"
             const contract = {};
-            const frame = state => ({{frame:{{revision:state.revision,state,surface:{{kind:'window',binding:'surface',title:'Codec reader',width:640,height:400}},view:{{kind:'text',key:'result',text:'Result',color:0}}}},events:[],actions:[]}});
+            const frame = state => ({{frame:{{revision:state.revision,state,surface:{{kind:'terminal',binding:'surface'}},view:{{kind:'text',key:'result',text:'Result',color:0}}}},events:[],actions:[]}});
             export function activate() {{ return {{App:{{contract,kind:'component',component:['app']}}}}; }}
             export const app = {{
               mount() {{ const out=frame({{revision:0}});out.actions=[{{key:'read',binding:'reader',member:0,method:'read',input:null,resources:{{}}}}];return out; }},
@@ -694,7 +691,7 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
                 export: "Reader".into(),
             }],
         );
-        let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+        let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
         entry.scene = None;
         entry.implementation = Implementation::Native {
             implementation: "test.exact-query".into(),
@@ -712,7 +709,7 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
             .instances
             .insert("reader".into(), support::node(&reader, 3));
         packages.extend([root, reader]);
-        let mut native = crate::support::scene::registry(PresentationTarget::Desktop);
+        let mut native = crate::support::scene::registry(PresentationTarget::Tui);
         native
             .register("test.exact-feedback", move |_, _values| {
                 Ok(BTreeMap::from([(
@@ -845,7 +842,7 @@ fn remote_fixture(
         .clone();
     let import = declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .get_mut("reader")
@@ -1435,7 +1432,7 @@ fn live_remote_epoch_update_preserves_original_query_source_and_waits_for_accept
         .block_on(Application::start_from_store(
             store.clone(),
             original.clone(),
-            PresentationTarget::Desktop,
+            PresentationTarget::Tui,
             timer.handle().clone(),
             maka_ui_js::execution(Default::default()),
             native,

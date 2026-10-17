@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 import { agentImports } from '../../shared/agent-imports.js';
 export default {
   schemaVersion: 1,

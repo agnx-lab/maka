@@ -55,7 +55,7 @@ pub(super) fn fixture(
         .clone();
     let contract = &mut declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .exports
         .get_mut("Counter")
@@ -86,7 +86,7 @@ pub(super) fn fixture(
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .get_mut("counter")
@@ -112,7 +112,7 @@ fn application(
         packages,
         timer.handle().clone(),
         maka_ui_js::execution(Default::default()),
-        crate::support::scene::registry(PresentationTarget::Desktop),
+        crate::support::scene::registry(PresentationTarget::Tui),
         Default::default(),
     )
     .unwrap()
@@ -311,7 +311,7 @@ fn mount_emission_can_remove_a_whole_private_subtree_without_renderer_ack() {
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(
@@ -428,7 +428,7 @@ fn native_application(
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.scene = None;
     entry.implementation = Implementation::Native {
         implementation: "test.events".into(),
@@ -446,7 +446,7 @@ fn native_application(
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .get_mut("counter")
@@ -463,7 +463,7 @@ fn native_application(
     );
     input.instances.get_mut("app").unwrap().package = root.application_ref().into();
     packages.extend([root, native]);
-    let mut registry = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut registry = crate::support::scene::registry(PresentationTarget::Tui);
     registry
         .register("test.events", move |_, _values| {
             Ok(BTreeMap::from([(
@@ -608,12 +608,12 @@ fn presentation_change_updates_a_wide_retained_tree_atomically() {
         .declaration()
         .clone();
     let leaf = support::package("dynamic.leaf", declaration.clone(), Some(source.into()));
-    let contract = declaration.entries[&EntryTarget::Desktop].exports["Counter"]
+    let contract = declaration.entries[&EntryTarget::Tui].exports["Counter"]
         .contract
         .clone();
     declaration
         .entries
-        .get_mut(&EntryTarget::Desktop)
+        .get_mut(&EntryTarget::Tui)
         .unwrap()
         .imports
         .insert(

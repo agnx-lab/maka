@@ -48,7 +48,7 @@ import {
   type DraftStep,
 } from '../../shared/drafts.js';
 import { tuiText, copy } from './locale.js';
-import { output, fill, pixels, type Presentation, type Node } from '../../shared/view.js';
+import { output, type Presentation, type Node } from '../../shared/view.js';
 import { sameValue } from '../../shared/value.js';
 import { editorMenu } from '../../shared/editor-menu.js';
 
@@ -315,7 +315,6 @@ function admitted(
 export function composer<N extends Node>(
   presentation: Presentation<N>,
 ): Component<Draft, ComposerProps, N> {
-  const target = presentation.target;
   const composerFrame = (
     state: Draft,
     props: ComposerProps,
@@ -478,31 +477,24 @@ export function composer<N extends Node>(
       current.checkpoint.state.initialized &&
       props.enabled &&
       !props.busy &&
-      (target === 'tui' || !props.running) &&
+      true &&
       !pending &&
       !!observation &&
       !observation.snapshot.marked &&
-      (target === 'tui' || !!observation.snapshot.text.bytes || attached.length > 0);
+      true;
     const textarea: TextareaProps = {
-      appearance:
-        target === 'tui' ? { ...props.theme.textarea, borderWidth: 0 } : props.theme.textarea,
+      appearance: { ...props.theme.textarea, borderWidth: 0 },
       menu: editorMenu(props.theme, props.locale),
       accessibilityLabel: text.draft,
       readOnly: false,
       disabled: false,
       softWrap: true,
       terminalRows: { min: 1, max: 8, maxViewportFraction: 1 / 3 },
-      submit:
-        target === 'tui'
-          ? 'enter'
-          : props.enabled && !props.busy && !props.running && !pending
-            ? 'primary_enter'
-            : null,
+      submit: 'enter',
       tabIndex: 1,
       autoFocus: props.autoFocus,
       initialText: '',
-      placeholder:
-        target === 'tui' ? tuiText(props.locale, 'composer-placeholder') : text.placeholder,
+      placeholder: tuiText(props.locale, 'composer-placeholder'),
       command: null,
       inlineTokens: [],
       filePaste: null,
@@ -551,9 +543,7 @@ export function composer<N extends Node>(
                 filePaste:
                   entry === current
                     ? (props.filePaste ?? null)
-                    : target === 'tui'
-                      ? { context: entry.context, maxFiles: 0 }
-                      : null,
+                    : { context: entry.context, maxFiles: 0 },
                 fileCommand:
                   props.fileCommand?.selection.owner === entry.files?.selection.owner
                     ? props.fileCommand
@@ -568,22 +558,14 @@ export function composer<N extends Node>(
               },
             ),
           ],
-          {
-            visible: entry === current,
-            style: { width: fill, height: fill },
-            terminal: { grow: 1, shrink: true },
-          },
+          { visible: entry === current, terminal: { grow: 1, shrink: true } },
         ),
       ),
-      {
-        style: { width: fill, height: pixels(112), shrink: 0 },
-        terminal: { basis: 0, grow: 1, shrink: true },
-      },
+      { terminal: { basis: 0, grow: 1, shrink: true } },
     );
     const controls = ui.box(
       'composer-controls',
       [
-        ...(target === 'desktop' ? [ui.text('hint', text.enterHint, 12, props.theme.muted)] : []),
         ...(props.running
           ? [
               ui.button(
@@ -591,23 +573,19 @@ export function composer<N extends Node>(
                 text.stop,
                 props.busy,
                 false,
-                target === 'tui' ? { background: 0 } : {},
+                { background: 0 },
                 undefined,
                 text.stop,
               ),
-              ...(target === 'tui'
-                ? [
-                    ui.button(
-                      'send',
-                      props.sendLabel ?? text.send,
-                      !available,
-                      true,
-                      target === 'tui' ? { background: 0 } : {},
-                      undefined,
-                      text.send,
-                    ),
-                  ]
-                : []),
+              ui.button(
+                'send',
+                props.sendLabel ?? text.send,
+                !available,
+                true,
+                { background: 0 },
+                undefined,
+                text.send,
+              ),
             ]
           : [
               ui.button(
@@ -615,18 +593,13 @@ export function composer<N extends Node>(
                 props.sendLabel ?? text.send,
                 !available,
                 true,
-                target === 'tui' ? { background: 0 } : {},
+                { background: 0 },
                 undefined,
                 text.send,
               ),
             ]),
       ],
-      {
-        row: true,
-        gap: target === 'tui' ? 0 : undefined,
-        terminal: { shrink: false },
-        style: { justify: 'between', align: 'center', width: fill },
-      },
+      { row: true, gap: 0, terminal: { shrink: false } },
     );
     const recovering = state.records.find(
       (record) => record.observation.owner === current?.checkpoint?.owner,
@@ -652,38 +625,33 @@ export function composer<N extends Node>(
       'composer-main',
       [
         ...(props.context && !current
-          ? [ui.text('draft-capacity', text.draftCapacity, 13, props.theme.muted)]
+          ? [ui.text('draft-capacity', text.draftCapacity, props.theme.muted)]
           : []),
-        ...(target === 'tui'
-          ? [
-              ui.box(
-                'composer-add-cell',
-                [
-                  ui.button(
-                    'attach',
-                    '+',
-                    props.busy || !props.context || loading || failed || unknown,
-                    false,
-                    { background: 0 },
-                    undefined,
-                    text.attachmentTitle,
-                  ),
-                ],
-                { terminal: { basis: 4 } },
-              ),
-            ]
-          : []),
+        ui.box(
+          'composer-add-cell',
+          [
+            ui.button(
+              'attach',
+              '+',
+              props.busy || !props.context || loading || failed || unknown,
+              false,
+              { background: 0 },
+              undefined,
+              text.attachmentTitle,
+            ),
+          ],
+          { terminal: { basis: 4 } },
+        ),
         editor,
         controls,
       ],
       {
-        row: target === 'tui',
-        border: target === 'tui',
+        row: true,
+        border: true,
         borderColor: props.approvalPending ? props.theme.warning : undefined,
         busy: props.running && !props.approvalPending,
-        gap: target === 'tui' ? 0 : 12,
+        gap: 0,
         terminal: { shrink: true },
-        style: { width: fill },
       },
     );
     const out = output(
@@ -696,7 +664,7 @@ export function composer<N extends Node>(
                 ui.box(
                   'draft-status-row',
                   [
-                    ui.text('draft-status', status, 13, props.theme.muted),
+                    ui.text('draft-status', status, props.theme.muted),
                     ...(failed || unknown
                       ? [
                           ui.button(
@@ -708,7 +676,7 @@ export function composer<N extends Node>(
                         ]
                       : []),
                   ],
-                  { row: true, terminal: { wrap: true }, style: { width: fill, wrap: true } },
+                  { row: true, terminal: { wrap: true } },
                 ),
               ]
             : []),
@@ -725,21 +693,21 @@ export function composer<N extends Node>(
                           `${first + index === selected ? '› ' : '  '}/${item.command}  ${item.label}`,
                           false,
                           first + index === selected,
-                          { width: fill, align: 'start' },
+                          { align: 'start' },
                         ),
                       ),
                     ...(!choices.length
-                      ? [ui.text('slash-empty', text.unknownCommand, 13, props.theme.muted)]
+                      ? [ui.text('slash-empty', text.unknownCommand, props.theme.muted)]
                       : []),
-                    ui.text('slash-hint', text.commandHint, 12, props.theme.muted),
+                    ui.text('slash-hint', text.commandHint, props.theme.muted),
                   ],
-                  { gap: 0, style: { width: fill }, terminal: { shrink: false } },
+                  { gap: 0, terminal: { shrink: false } },
                 ),
               ]
             : []),
           body,
         ],
-        { style: { width: fill }, terminal: { shrink: true } },
+        { terminal: { shrink: true } },
       ),
       events,
     );
@@ -1135,7 +1103,7 @@ export function composer<N extends Node>(
         props.enabled &&
         !props.busy &&
         !current.delivery &&
-        (command !== undefined || target === 'tui' || !props.running) &&
+        true &&
         observation &&
         !observation.snapshot.marked
       ) {
@@ -1146,7 +1114,7 @@ export function composer<N extends Node>(
           )
           .map((file) => file.id);
         // Native text can paint before its changed observation reaches this component.
-        const captureCurrent = target === 'tui' && input.kind === 'raw' && input.key === 'send';
+        const captureCurrent = input.kind === 'raw' && input.key === 'send';
         if (!captureCurrent && !observation.snapshot.text.bytes && !attachments.length)
           return composerFrame(state, props);
         const key = `${captureCurrent ? 'capture' : 'read'}-${++state.serial}`;

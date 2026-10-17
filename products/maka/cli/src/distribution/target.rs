@@ -86,9 +86,9 @@ impl Target {
 
     pub fn desktop_executable(self) -> &'static str {
         if self == Self::Win32X64 {
-            "bin/maka-desktop.exe"
+            "bin/maka-desktop-shell.exe"
         } else {
-            "bin/maka-desktop"
+            "bin/maka-desktop-shell"
         }
     }
 

@@ -28,7 +28,7 @@ import { type ImportsProps } from '../../shared/contracts.js';
 import { visibleRows } from '../../shared/scroll.js';
 import { copy } from './locale.js';
 import { pageHeader } from '../../shared/page-shell.js';
-import { compactLabel, fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 import { locked } from './operations.js';
 import { formatName, type FieldName, type State } from './state.js';
 
@@ -47,7 +47,7 @@ export function frame<N extends Node>(
     ui.box(
       `field-${name}`,
       [
-        ui.text(`label-${name}`, label, 13, props.theme.muted),
+        ui.text(`label-${name}`, label, props.theme.muted),
         presentation.slot(
           `import-${name}`,
           'input',
@@ -71,24 +71,18 @@ export function frame<N extends Node>(
     const body = ui.box(
       'body-' + id,
       [
-        ui.text('title-' + id, title, 15, props.theme.text, 500, { truncate: true }),
-        ui.text('detail-' + id, detail, 13, props.theme.muted, 400, { truncate: true }),
+        ui.text('title-' + id, title, props.theme.text, 500, { truncate: true }),
+        ui.text('detail-' + id, detail, props.theme.muted, 400, { truncate: true }),
       ],
       { gap: 0 },
     );
-    if (ui.item) {
+    {
       const item = ui.item(id, body, state.selected === id, disabled, {
         followFocus: true,
         submit: true,
       });
-      return ui.contextMenu && menu.length
-        ? ui.contextMenu('menu-' + id, text.projectsActions, item, menu)
-        : item;
+      return menu.length ? ui.contextMenu('menu-' + id, text.projectsActions, item, menu) : item;
     }
-    return ui.box('row-' + id, [body, ui.button(id, text.importsOpen, disabled), ...menu], {
-      surface: true,
-      padding: 8,
-    });
   };
   const sourceActions = (source: AgentImportSource, prefix = '') => [
     ui.button(prefix + 'browse-' + source.id, text.importsOpen, disabled),
@@ -132,17 +126,15 @@ export function frame<N extends Node>(
                             } as const
                           )[item.kind]
                         ],
-                        13,
                         props.theme.muted,
                         500,
                       ),
-                      ui.text('text-' + item.index, item.text, 14, props.theme.text),
+                      ui.text('text-' + item.index, item.text, props.theme.text),
                       ...(item.truncated
                         ? [
                             ui.text(
                               'truncated-' + item.index,
                               text.importsTruncated,
-                              12,
                               props.theme.muted,
                             ),
                           ]
@@ -166,13 +158,13 @@ export function frame<N extends Node>(
   const form = ui.box(
     'source-form',
     [
-      ui.text('source-help', text.importsSourceHelp, 14, props.theme.muted),
+      ui.text('source-help', text.importsSourceHelp, props.theme.muted),
       ui.box(
         'source-formats',
         (['codex', 'claude_code', 'open_code'] as const).map((format) =>
           ui.button('format-' + format, formatName(format), editing, state.form?.format === format),
         ),
-        { row: true, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, terminal: { wrap: true } },
       ),
       fieldView('name', text.importsName, state.route === 'form'),
       fieldView(
@@ -181,29 +173,23 @@ export function frame<N extends Node>(
         state.route === 'form' && state.form?.format === 'open_code',
       ),
       ...(state.form?.directory
-        ? [ui.text('source-path', state.form.directory.path, 13, props.theme.muted)]
+        ? [ui.text('source-path', state.form.directory.path, props.theme.muted)]
         : []),
       ui.button('source-directory', text.importsChooseSource, editing),
     ],
-    {
-      visible: state.route === 'form',
-      gap: 1,
-      scroll: 'anchor',
-      terminal: { grow: 1, basis: 0 },
-      style: { width: fill, height: fill, minHeight: 0 },
-    },
+    { visible: state.route === 'form', gap: 1, scroll: 'anchor', terminal: { grow: 1, basis: 0 } },
   );
   const contents = ui.box(
     'imports-content',
     [
       ...(state.route === 'sources' && !rows.length && !state.pending
-        ? [ui.text('empty-sources', text.importsEmpty, 14)]
+        ? [ui.text('empty-sources', text.importsEmpty)]
         : []),
       ...(state.route === 'catalog' && !rows.length && !state.pending
-        ? [ui.text('empty-catalog', text.importsCatalogEmpty, 14)]
+        ? [ui.text('empty-catalog', text.importsCatalogEmpty)]
         : []),
       ...(state.route === 'copies' && !rows.length && !state.pending
-        ? [ui.text('empty-copies', text.importsHistoryEmpty, 14)]
+        ? [ui.text('empty-copies', text.importsHistoryEmpty)]
         : []),
       ...rows,
     ],
@@ -213,7 +199,6 @@ export function frame<N extends Node>(
         state.route === 'sources' || state.route === 'catalog' || state.route === 'copies',
       gap: 1,
       terminal: { grow: 1, basis: 0 },
-      style: { width: fill, height: fill, minHeight: 0 },
     },
   );
   const body = ui.box(
@@ -233,14 +218,11 @@ export function frame<N extends Node>(
             ui.text(
               'imports-loading',
               state.restoring ? text.projectsChecking : text.connecting,
-              13,
               props.theme.muted,
             ),
           ]
         : []),
-      ...(state.notice
-        ? [ui.text('imports-notice', text[state.notice], 13, props.theme.muted)]
-        : []),
+      ...(state.notice ? [ui.text('imports-notice', text[state.notice], props.theme.muted)] : []),
       ...(state.historyFailed
         ? [ui.button('history-retry', text.sourceRetry, !!state.pending)]
         : []),
@@ -260,7 +242,7 @@ export function frame<N extends Node>(
               ui.button('search', text.importsSearch, editing),
               ui.button('archived', text.importsArchived, editing, state.archived),
             ],
-            { row: true, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, terminal: { wrap: true } },
           ),
         ],
         { visible: state.route === 'catalog', gap: 0 },
@@ -274,16 +256,15 @@ export function frame<N extends Node>(
                 ui.text(
                   'preview-count',
                   `${text.importsRecords}: ${state.preview.records} · ${state.preview.bytes} B`,
-                  13,
                   props.theme.muted,
                 ),
               ]
             : []),
           ...(state.preview?.incompleteTail
-            ? [ui.text('preview-tail', text.importsIncomplete, 13, props.theme.warning)]
+            ? [ui.text('preview-tail', text.importsIncomplete, props.theme.warning)]
             : []),
           ...(state.destination
-            ? [ui.text('destination-path', state.destination.path, 13, props.theme.muted)]
+            ? [ui.text('destination-path', state.destination.path, props.theme.muted)]
             : []),
         ],
         { visible: state.route === 'preview', gap: 0 },
@@ -298,18 +279,13 @@ export function frame<N extends Node>(
             { input: 'list-input', observed: 'list-observed' },
           ),
         ],
-        {
-          visible: state.route !== 'form',
-          terminal: { grow: 1, basis: 0 },
-          style: { width: fill, height: fill, minHeight: 0 },
-        },
+        { visible: state.route !== 'form', terminal: { grow: 1, basis: 0 } },
       ),
       ...(state.route === 'sources' && chosenSource
         ? [
             ui.box('selected-source-actions', sourceActions(chosenSource, 'footer-'), {
               row: true,
               terminal: { wrap: true },
-              style: { wrap: true },
             }),
           ]
         : []),
@@ -351,7 +327,7 @@ export function frame<N extends Node>(
                     ui.button('preview-first', text.directoryRefresh, disabled),
                   ]
                 : [ui.button('refresh-copies', text.directoryRefresh, disabled)],
-        { row: true, terminal: { wrap: true }, style: { wrap: true }, gap: 1 },
+        { row: true, terminal: { wrap: true }, gap: 1 },
       ),
     ],
     {
@@ -360,7 +336,6 @@ export function frame<N extends Node>(
       shortcuts: [{ key: 'escape', modifiers: [], input: 'back', enabled: true }],
       gap: 1,
       terminal: { grow: 1 },
-      style: { width: fill, height: fill },
     },
   );
   let view = body;
@@ -384,7 +359,6 @@ export function frame<N extends Node>(
       view,
       picker,
       state.picker === purpose,
-      {},
       { width: 76, height: 24 },
     );
   }
@@ -393,19 +367,13 @@ export function frame<N extends Node>(
     [
       ...(state.confirm?.kind === 'copy'
         ? [
-            ui.text('confirm-title', state.confirm.title, 15, props.theme.text, 600),
-            ui.text('confirm-directory', compactLabel(state.destination?.path ?? '', 240), 14),
-            ui.text(
-              'confirm-records',
-              `${text.importsRecords}: ${state.preview?.records ?? ''}`,
-              13,
-            ),
-            ui.text('confirm-help', text.importsHelp, 13, props.theme.muted),
+            ui.text('confirm-title', state.confirm.title, props.theme.text, 600),
+            ui.text('confirm-directory', compactLabel(state.destination?.path ?? '', 240)),
+            ui.text('confirm-records', `${text.importsRecords}: ${state.preview?.records ?? ''}`),
+            ui.text('confirm-help', text.importsHelp, props.theme.muted),
           ]
-        : [ui.text('confirm-remove', text.importsRemoveHelp, 14)]),
-      ...(state.notice
-        ? [ui.text('confirm-notice', text[state.notice], 13, props.theme.muted)]
-        : []),
+        : [ui.text('confirm-remove', text.importsRemoveHelp)]),
+      ...(state.notice ? [ui.text('confirm-notice', text[state.notice], props.theme.muted)] : []),
       ...(state.current
         ? [
             ui.button(
@@ -447,16 +415,11 @@ export function frame<N extends Node>(
     view,
     confirmation,
     !!state.confirm,
-    {},
     { width: 68 },
   );
   const result = output(
     state,
-    ui.box('imports-root', [view], {
-      visible: props.open,
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    }),
+    ui.box('imports-root', [view], { visible: props.open, terminal: { grow: 1 } }),
     events,
   );
   result.actions = actions;

@@ -26,8 +26,7 @@ const entries = uiEntries({
   export: 'Timeline',
   imports: {},
 });
-for (const target of ['desktop', 'tui'] as const)
-  entries[target].imports.reading = one(sdk.contracts.readingArea);
+entries.tui.imports.reading = one(sdk.contracts.readingArea);
 Object.assign(entries.tui.imports, {
   formatter: one(sdk.contracts.markdownText),
   input: one(sdk.contracts.textInput),

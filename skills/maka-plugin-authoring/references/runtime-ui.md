@@ -19,7 +19,7 @@
 
 # Change the connected UI at runtime
 
-The default product exposes `UIRequest` (`ui.submit`) and `UIResult` (`ui.result`) to the Agent. Discover current tool metadata: customized installations may use different names or omit these tools. The foreground TUI or Desktop must be connected to process requests. This bridge edits that foreground's existing UI deployment through its deployment manager; it does not grant access to another Root or the business Host composition.
+The default product exposes `UIRequest` (`ui.submit`) and `UIResult` (`ui.result`) to the Agent. Discover current tool metadata: customized installations may use different names or omit these tools. The foreground TUI must be connected to process requests. This bridge edits that foreground's existing UI deployment through its deployment manager; it does not grant access to another Root or the business Host composition.
 
 Submit `{ "method": "instances", "input": { "kind": "start" } }`, then pass the returned `{ "id": "…" }` to `UIResult`. A result waits up to five seconds for completion. `queued` means the foreground has not claimed it; `claimed` means execution or recovery is still unconfirmed. Observe the same ID again; submitting another mutation is a new operation. `completed.outcome` is the original UI `ActionOutcome`, including failures and unknown receipts. A recorded, returned manager value can itself be `conflict` or `rejected`. Neither request acceptance nor a committed desired source proves successful UI activation.
 
@@ -60,7 +60,7 @@ export const footer = {
 };
 ```
 
-The example is a TUI entry; preserve or implement a separate Desktop entry when the package must also load there. Validate the built artifact with the actual CLI as described in [Testing and shipping](testing-and-shipping.md). After a mutation interrupts the UI, its authoring worker recovers the original manager receipt through caller history, rather than dispatching the edit again. Do not remove or replace the active authoring worker or its recovery bindings while relying on this channel to report completion.
+Validate the built artifact with the actual CLI as described in [Testing and shipping](testing-and-shipping.md). After a mutation interrupts the UI, its authoring worker recovers the original manager receipt through caller history, rather than dispatching the edit again. Do not remove or replace the active authoring worker or its recovery bindings while relying on this channel to report completion.
 
 ## Install a published bundle
 

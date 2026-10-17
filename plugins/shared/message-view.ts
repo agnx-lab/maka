@@ -21,7 +21,7 @@ import type { HistorySource } from '../../packages/plugin-sdk/src/index.js';
 import type { Message, Theme, ToolDisplayStatus } from './contracts.js';
 import { copy, type Copy } from './locale-catalogs/message-view.js';
 import { toolPresentation } from '../agent/tool-details/index.js';
-import { fill, compactLabel, type Node, type Presentation } from './view.js';
+import { compactLabel, type Node, type Presentation } from './view.js';
 
 export function messageOriginCaption(origin: Message['origin'], locale: string): string | null {
   if (!origin) return null;
@@ -150,7 +150,7 @@ export function toolLabel(
 
 export function messageView<N extends Node>(
   presentation: Presentation<N>,
-  target: 'tui' | 'desktop',
+
   theme: Theme,
   locale: string,
   message: {
@@ -206,7 +206,7 @@ export function messageView<N extends Node>(
     settlement = result?.settlement;
   const time =
     message.role === 'user' || message.role === 'assistant' ? timeLabel(message.timestamp) : null;
-  if (target === 'tui') {
+  {
     const user = message.role === 'user';
     const thinking = message.role === 'thinking';
     const failed =
@@ -276,7 +276,6 @@ export function messageView<N extends Node>(
                 ui.text(
                   'marker-' + message.id,
                   marker,
-                  14,
                   markerColor,
                   400,
                   {},
@@ -304,7 +303,7 @@ export function messageView<N extends Node>(
                 undefined,
                 expanded ? text.collapseTool : text.expandTool,
               )
-            : ui.text('role-' + message.id, name ?? caption, 14, theme.muted),
+            : ui.text('role-' + message.id, name ?? caption, theme.muted),
         ])
       : row(
           'message-body-' + message.id,
@@ -320,7 +319,7 @@ export function messageView<N extends Node>(
               'body-' + message.id,
               [
                 ...((user && message.origin) || modelCaption
-                  ? [ui.text('role-' + message.id, caption, 12, theme.muted)]
+                  ? [ui.text('role-' + message.id, caption, theme.muted)]
                   : []),
                 body,
               ],
@@ -334,7 +333,7 @@ export function messageView<N extends Node>(
               ? [
                   ui.box(
                     'time-' + message.id,
-                    [ui.text('timestamp-' + message.id, ' ' + time, 12, theme.subtle)],
+                    [ui.text('timestamp-' + message.id, ' ' + time, theme.subtle)],
                     { surface: user, terminal: { basis: 0 } },
                   ),
                 ]
@@ -359,7 +358,7 @@ export function messageView<N extends Node>(
             : []),
           ...message.sourceActions,
         ];
-    const hasMenu = !!ui.contextMenu && actions.length > 0;
+    const hasMenu = actions.length > 0;
     const card = ui.box(
       (hasMenu || message.separateBefore ? 'message-card-' : 'message-') + message.id,
       [
@@ -384,16 +383,12 @@ export function messageView<N extends Node>(
                       'tool-panel-' + message.id,
                       [
                         body,
-                        ui.box(
-                          'tool-actions-' + message.id,
-                          ui.contextMenu ? [] : message.actions,
-                          {
-                            visible: expanded,
-                            row: true,
-                            gap: 1,
-                            terminal: { wrap: true },
-                          },
-                        ),
+                        ui.box('tool-actions-' + message.id, [], {
+                          visible: expanded,
+                          row: true,
+                          gap: 1,
+                          terminal: { wrap: true },
+                        }),
                         ...(expanded && message.toggle
                           ? [
                               ui.button(
@@ -415,15 +410,7 @@ export function messageView<N extends Node>(
             ]
           : []),
         ...(message.continued
-          ? [ui.text('continued-' + message.id, '  ' + text.partial, 12, theme.subtle)]
-          : []),
-        ...(!tool && !ui.contextMenu
-          ? [
-              ui.box('message-actions-' + message.id, message.sourceActions, {
-                gap: 0,
-                visible: !!message.browse?.current || !message.text,
-              }),
-            ]
+          ? [ui.text('continued-' + message.id, '  ' + text.partial, theme.subtle)]
           : []),
         ...(user && !theme.terminal?.terminal
           ? [ui.box('band-bottom-' + message.id, [], { surface: true, terminal: { basis: 1 } })]
@@ -451,91 +438,4 @@ export function messageView<N extends Node>(
         )
       : content;
   }
-  const label = name
-    ? caption + ' · ' + compactLabel(name, target === 'desktop' ? 64 : 24)
-    : caption;
-  const role = ui.text(
-    'role-' + message.id,
-    time ? label + ' · ' + time : label,
-    13,
-    theme.muted,
-    550,
-  );
-  const heading = tool
-    ? ui.box(
-        'tool-heading-' + message.id,
-        [
-          role,
-          ...(message.toggle
-            ? [ui.button(message.toggle!, expanded ? text.collapseTool : text.expandTool)]
-            : []),
-        ],
-        {
-          row: true,
-          gap: target === 'desktop' ? 12 : 1,
-          surface: true,
-          terminal: { wrap: true },
-          style: { width: fill, wrap: true, align: 'center' },
-        },
-      )
-    : role;
-  return ui.box(
-    'message-' + message.id,
-    [
-      message.browse && ui.item
-        ? ui.item(message.browse.key, heading, message.browse.current, false, {
-            followFocus: true,
-            submit: true,
-            submitSpace: true,
-          })
-        : heading,
-      ...(status ? [ui.text('tool-status-' + message.id, status, 13, theme.muted)] : []),
-      ...(message.continued
-        ? [ui.text('continued-' + message.id, text.partial, 12, theme.muted)]
-        : []),
-      ...(tool
-        ? [
-            ...(!expanded && !message.structured
-              ? [
-                  ui.text(
-                    'summary-' + message.id,
-                    message.text
-                      ? compactLabel(message.text, target === 'desktop' ? 96 : 72)
-                      : text.toolNoText,
-                    14,
-                    theme.muted,
-                  ),
-                ]
-              : []),
-            ui.box(
-              'details-' + message.id,
-              [
-                body,
-                ui.box('tool-actions-' + message.id, message.actions, {
-                  visible: expanded,
-                  row: true,
-                  gap: target === 'desktop' ? 8 : 1,
-                  surface: true,
-                  terminal: { wrap: true },
-                  style: { width: fill, wrap: true },
-                }),
-              ],
-              {
-                visible: expanded || !!message.structured,
-                gap: target === 'desktop' ? 8 : 1,
-                surface: true,
-                style: { width: fill },
-              },
-            ),
-          ]
-        : [body]),
-      ...(!tool ? message.sourceActions : []),
-    ],
-    {
-      gap: target === 'desktop' ? 8 : 0,
-      style: { width: fill, maxWidth: 760, shrink: 0, radius: tool ? 8 : 0 },
-      surface: message.role === 'user' || tool,
-      padding: target === 'desktop' && (message.role === 'user' || tool) ? 16 : 0,
-    },
-  );
 }

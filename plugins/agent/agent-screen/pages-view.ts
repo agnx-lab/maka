@@ -22,7 +22,7 @@ import type { ComponentValues } from '../../../packages/plugin-sdk/src/index.js'
 import type { Theme } from '../../shared/contracts.js';
 import { bookmarkReady } from '../../shared/bookmark.js';
 import { copy } from './locale.js';
-import { fill, type Presentation, type Node } from '../../shared/view.js';
+import { type Presentation, type Node } from '../../shared/view.js';
 
 import { type Page, navigationBookmark, navigationKey, type State } from './state.js';
 import { catalogPending, mutationPending } from './actions.js';
@@ -35,13 +35,11 @@ export function pagesView<N extends Node>(
   values: ComponentValues,
   main: N,
 ): N {
-  const target = presentation.target;
   const currentPage = state.pages.at(-1);
   const ui = presentation.paint(theme),
     text = copy(locale),
     busy = mutationPending(state);
-  const pageShell = (page: Page) =>
-    target === 'tui' ? { shell: { back: state.pageBack[page] ?? 0 } } : {};
+  const pageShell = (page: Page) => ({ shell: { back: state.pageBack[page] ?? 0 } });
   const pageContent = ui.box(
     'page-content',
     [
@@ -64,11 +62,7 @@ export function pagesView<N extends Node>(
                   state.embedding.workhub === true,
                 ),
               ],
-              {
-                visible: currentPage === 'settings',
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'settings', terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -84,22 +78,13 @@ export function pagesView<N extends Node>(
                     theme,
                     locale,
                     ...pageShell('deployment'),
-                    ...(target === 'tui'
-                      ? {
-                          bookmarkKey: navigationKey(state) + '/deployment',
-                          navigationReady: bookmarkReady(state.bookmark, navigationBookmark(state)),
-                        }
-                      : {}),
+                    bookmarkKey: navigationKey(state) + '/deployment',
+                    navigationReady: bookmarkReady(state.bookmark, navigationBookmark(state)),
                   },
                   { chrome: 'page-chrome', closed: 'deployment-closed' },
                 ),
               ],
-              {
-                visible: currentPage === 'deployment',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'deployment', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -121,12 +106,7 @@ export function pagesView<N extends Node>(
                   { chrome: 'page-chrome', closed: 'apps-closed', manage: 'apps-manage' },
                 ),
               ],
-              {
-                visible: currentPage === 'apps',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'apps', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -155,12 +135,7 @@ export function pagesView<N extends Node>(
                   },
                 ),
               ],
-              {
-                visible: currentPage === 'scheduler',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'scheduler', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -182,12 +157,7 @@ export function pagesView<N extends Node>(
                   { chrome: 'page-chrome', closed: 'recall-closed', selected: 'recall-selected' },
                 ),
               ],
-              {
-                visible: currentPage === 'recall',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'recall', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -214,12 +184,7 @@ export function pagesView<N extends Node>(
                   },
                 ),
               ],
-              {
-                visible: currentPage === 'imports',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'imports', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -246,12 +211,7 @@ export function pagesView<N extends Node>(
                   },
                 ),
               ],
-              {
-                visible: currentPage === 'projects',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'projects', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
@@ -277,17 +237,12 @@ export function pagesView<N extends Node>(
                   },
                 ),
               ],
-              {
-                visible: currentPage === 'connections',
-                gap: 0,
-                terminal: { grow: 1 },
-                style: { width: fill, height: fill },
-              },
+              { visible: currentPage === 'connections', gap: 0, terminal: { grow: 1 } },
             ),
           ]
         : []),
     ],
-    { gap: 0, terminal: { grow: 1 }, style: { width: fill, height: fill, minWidth: 0 } },
+    { gap: 0, terminal: { grow: 1 } },
   );
 
   return pageContent;

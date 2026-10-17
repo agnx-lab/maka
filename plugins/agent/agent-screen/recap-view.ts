@@ -19,7 +19,7 @@
 
 import type { Theme } from '../../shared/contracts.js';
 import { copy } from './locale.js';
-import { fill, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 import type { State } from './state.js';
 import { canGenerateRecap } from './actions.js';
 
@@ -35,17 +35,14 @@ export function recapView<N extends Node>(
   const generating = Object.values(state.pending).some(
     (request) => request.kind === 'recapGenerate' && request.epoch === state.epoch,
   );
-  const open =
-    presentation.target === 'tui'
-      ? state.inspector === 'recap' && state.dialog === null
-      : state.dialog === 'recap';
+  const open = state.inspector === 'recap' && state.dialog === null;
   return ui.box(
     'recap-panel',
     [
       ui.box(
         'recap-header',
         [
-          ui.text('recap-title', text.recapTitle, 17, theme.text, 550),
+          ui.text('recap-title', text.recapTitle, theme.text, 550),
           ui.button('recap-close', text.closeModels),
         ],
         { row: true, gap: 1 },
@@ -57,12 +54,7 @@ export function recapView<N extends Node>(
         : []),
       ...(recap.receipt?.kind === 'ready'
         ? [
-            ui.text(
-              'recap-saved',
-              `${text.recapSaved} · ${recap.receipt.modelId}`,
-              12,
-              theme.muted,
-            ),
+            ui.text('recap-saved', `${text.recapSaved} · ${recap.receipt.modelId}`, theme.muted),
             presentation.reading(
               'recap-reading',
               {
@@ -71,7 +63,6 @@ export function recapView<N extends Node>(
                   gap: 1,
                   scroll: 'manual',
                   terminal: { grow: 1 },
-                  style: { width: fill, height: fill },
                 }),
               },
               {},
@@ -93,7 +84,7 @@ export function recapView<N extends Node>(
           ]
         : []),
       ...(!state.model || state.executor
-        ? [ui.text('recap-model', text.recapModel, 12, theme.muted)]
+        ? [ui.text('recap-model', text.recapModel, theme.muted)]
         : []),
       ...(recap.confirmation
         ? [
@@ -109,6 +100,6 @@ export function recapView<N extends Node>(
           ]
         : [ui.button('recap-generate', text.recapGenerate, !canGenerateRecap(state))]),
     ],
-    { visible: open, gap: 1, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { visible: open, gap: 1, terminal: { grow: 1 } },
   );
 }

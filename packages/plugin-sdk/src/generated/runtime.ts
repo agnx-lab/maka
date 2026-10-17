@@ -59,8 +59,6 @@ export type RuntimeProtocol =
   | ComponentOutput
   | ComponentSlot
   | TerminalScene
-  | DesktopScene
-  | DesktopCanvasInput
   | CapturePlan
   | ActionOutcome
   | CallerHistoryPage
@@ -74,8 +72,6 @@ export type RuntimeProtocol =
   | FilePickerProps
   | FileObservation
   | FileCapture
-  | ImageProps
-  | ImageObservation
   | SourceTextProps
   | TerminalViewProps
   | TerminalViewObservation
@@ -464,7 +460,7 @@ export type DeploymentInstances =
  */
 export type InstanceId = string[];
 export type ExecutionLocation = 'host' | 'ui';
-export type PresentationTarget = 'tui' | 'desktop';
+export type PresentationTarget = 'tui';
 /**
  * Templates can select an entry in their own immutable package without a
  * self-referential content hash. Deployment roots must select a pinned revision.
@@ -729,18 +725,10 @@ export type ComponentInput =
       event: unknown;
       kind: 'component';
     };
-export type Surface =
-  | {
-      binding: string;
-      title: string;
-      width: number;
-      height: number;
-      kind: 'window';
-    }
-  | {
-      binding: string;
-      kind: 'terminal';
-    };
+export type Surface = {
+  binding: string;
+  kind: 'terminal';
+};
 export type TerminalScene =
   | {
       key: string;
@@ -978,185 +966,6 @@ export type TerminalScrollPolicy = 'none' | 'manual' | 'anchor' | 'follow_end';
 export type TerminalBorderStyle = 'rounded' | 'square' | 'ascii';
 export type Modifier = 'control' | 'primary' | 'alt' | 'shift' | 'super';
 export type TerminalAlign = 'start' | 'center' | 'end';
-export type DesktopScene =
-  | {
-      key: string;
-      label: string;
-      background: DesktopScene;
-      content: DesktopScene;
-      open: boolean;
-      /**
-       * Styles the bounded foreground body; background layout remains original.
-       */
-      style?: DesktopStyle;
-      backdrop?: Color;
-      kind: 'dialog';
-    }
-  | {
-      key: string;
-      label: string;
-      trigger: DesktopScene;
-      content: DesktopScene;
-      open: boolean;
-      anchor?: DesktopAnchor & string;
-      offset?: number;
-      /**
-       * Styles the floating content; the trigger keeps its own layout.
-       */
-      style?: DesktopStyle;
-      kind: 'popup';
-    }
-  | {
-      key: string;
-      direction: DesktopDirection;
-      gap: number;
-      padding: number;
-      background: number;
-      children: DesktopScene[];
-      shortcuts?: Shortcut[];
-      visible?: boolean;
-      style?: DesktopStyle;
-      scroll?: DesktopScroll & string;
-      kind: 'stack';
-    }
-  | {
-      key: string;
-      text: string;
-      color: number;
-      style?: DesktopStyle;
-      kind: 'text';
-    }
-  | {
-      key: string;
-      label: string;
-      /**
-       * Physical native activation copies this frozen text after an accepted
-       * click whose default action was not prevented.
-       */
-      copy_text?: string | null;
-      /**
-       * Propagate physical activation beyond this committed button.
-       */
-      bubble_activation?: boolean;
-      style?: DesktopStyle;
-      hover?: DesktopStyle;
-      active?: DesktopStyle;
-      focus?: DesktopStyle;
-      disabled?: boolean;
-      tab_index?: number;
-      kind: 'button';
-    }
-  | {
-      key: string;
-      contents: DesktopCanvasContents;
-      style?: DesktopStyle;
-      kind: 'canvas';
-    }
-  | {
-      key: string;
-      binding: string;
-      member: number;
-      props: unknown;
-      on: {
-        [k: string]: string | undefined;
-      };
-      kind: 'component';
-    };
-export type DesktopDimension =
-  | {
-      unit: 'pixels';
-      value: number;
-    }
-  | {
-      unit: 'fraction';
-      value: number;
-    }
-  | {
-      unit: 'auto';
-    };
-export type DesktopAlign = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
-export type DesktopJustify = 'start' | 'center' | 'end' | 'between' | 'around' | 'evenly';
-export type FontFamily = string;
-/**
- * Packed RGBA, including explicit alpha zero.
- */
-export type Color = number;
-export type DesktopAnchor =
-  | 'top_left'
-  | 'top_center'
-  | 'top_right'
-  | 'bottom_left'
-  | 'bottom_center'
-  | 'bottom_right'
-  | 'left_center'
-  | 'right_center';
-export type DesktopDirection = 'row' | 'column';
-/**
- * A scroll policy belongs to native presentation, never a plugin pixel mirror.
- */
-export type DesktopScroll = 'none' | 'manual' | 'anchor' | 'follow_end';
-export type DesktopCanvasCommand =
-  | {
-      rect: DesktopCanvasRect;
-      color: number;
-      radius?: number;
-      kind: 'rect';
-    }
-  | {
-      from: DesktopCanvasPoint;
-      to: DesktopCanvasPoint;
-      color: number;
-      width: number;
-      kind: 'line';
-    }
-  | {
-      position: DesktopCanvasPoint;
-      text: string;
-      color: number;
-      size: number;
-      font?: string | null;
-      kind: 'text';
-    };
-export type DesktopCanvasEventKind =
-  | 'pointer_down'
-  | 'drag_move'
-  | 'drop'
-  | 'key_down'
-  | 'activate';
-export type DesktopCanvasInput =
-  | {
-      region: string;
-      position: DesktopCanvasPoint;
-      gesture?: number | null;
-      kind: 'pointer_down';
-    }
-  | {
-      region: string;
-      gesture: number;
-      start: DesktopCanvasPoint;
-      position: DesktopCanvasPoint;
-      delta: DesktopCanvasPoint;
-      kind: 'drag_move';
-    }
-  | {
-      region: string;
-      gesture: number;
-      start: DesktopCanvasPoint;
-      position: DesktopCanvasPoint;
-      delta: DesktopCanvasPoint;
-      target?: string | null;
-      kind: 'drop';
-    }
-  | {
-      region: string;
-      key: string;
-      modifiers: DesktopCanvasModifiers;
-      kind: 'key_down';
-    }
-  | {
-      region: string;
-      kind: 'activate';
-    };
 export type CapturePlan =
   | {
       source: CaptureSource;
@@ -1238,11 +1047,16 @@ export type OperationCleanup =
       diagnostic: string;
       kind: 'failed';
     };
+export type FontFamily = string;
+/**
+ * Packed RGBA, including explicit alpha zero.
+ */
+export type Color = number;
 export type ScrollbarMode = 'scrolling' | 'hover' | 'always';
 export type ScrollbarEntrance = 'fade' | 'slide_and_fade';
 /**
  * Product-selected native submit gesture. PrimaryEnter uses the platform
- * accelerator on Desktop and Control+Enter in a terminal.
+ * Control+Enter gesture in a terminal.
  */
 export type SubmitKey = 'enter' | 'primary_enter' | 'control_enter';
 export type EditorEdit =
@@ -1299,17 +1113,6 @@ export type DiffContent =
     };
 export type DiffKind = 'removed' | 'added' | 'context' | 'content';
 export type DiffPatch = 'create' | 'update';
-export type ImageFit = 'contain' | 'cover';
-export type ImagePhase = 'empty' | 'receiving' | 'decoding' | 'ready' | 'failed';
-export type ImageError =
-  | 'budget_exhausted'
-  | 'limit_exceeded'
-  | 'source_conflict'
-  | 'packet_rejected'
-  | 'digest_mismatch'
-  | 'unsupported_format'
-  | 'invalid_image'
-  | 'decode_failed';
 export type ShellOutput =
   | {
       stdout: string;
@@ -5958,7 +5761,6 @@ export interface DeploymentDocumentChunk {
 }
 export interface PackageDeclaration {
   entries?: {
-    desktop?: EntryDeclaration;
     host?: EntryDeclaration;
     tui?: EntryDeclaration;
   };
@@ -6195,117 +5997,6 @@ export interface TerminalAnimationFrame {
   text: string;
   millis: number;
 }
-/**
- * Desktop layout and appearance are a presenter ABI, never kernel policy.
- * Unspecified refinements inherit from the explicit surrounding scene scope.
- */
-export interface DesktopStyle {
-  width?: DesktopDimension | null;
-  height?: DesktopDimension | null;
-  minWidth?: number | null;
-  maxWidth?: number | null;
-  minHeight?: number | null;
-  maxHeight?: number | null;
-  grow?: number | null;
-  shrink?: number | null;
-  wrap?: boolean | null;
-  /**
-   * Draw one measured line with an ellipsis; retain the complete text in AX.
-   */
-  truncate?: boolean;
-  align?: DesktopAlign | null;
-  justify?: DesktopJustify | null;
-  text?: TextAppearance | null;
-  background?: Color | null;
-  border?: Color | null;
-  borderWidth?: number | null;
-  radius?: number | null;
-  padding?: Insets | null;
-}
-export interface TextAppearance {
-  font: FontAppearance;
-  foreground: Color;
-}
-export interface FontAppearance {
-  family: FontFamily;
-  /**
-   * @maxItems 8
-   */
-  fallbacks:
-    | []
-    | [FontFamily]
-    | [FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-      ];
-  size: number;
-  /**
-   * Line height relative to this font size.
-   */
-  lineHeight: number;
-  weight: number;
-}
-export interface Insets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-export interface DesktopCanvasContents {
-  commands: DesktopCanvasCommand[];
-  regions: DesktopCanvasRegion[];
-  focusColor?: number | null;
-  dragColor?: number | null;
-}
-export interface DesktopCanvasRect {
-  origin: DesktopCanvasPoint;
-  width: number;
-  height: number;
-}
-export interface DesktopCanvasPoint {
-  x: number;
-  y: number;
-}
-export interface DesktopCanvasRegion {
-  key: string;
-  rect: DesktopCanvasRect;
-  /**
-   * Corner radius of mechanical outlines; the hit area remains `rect`.
-   */
-  radius?: number;
-  label: string;
-  draggable?: boolean;
-  disabled?: boolean;
-  tabIndex?: number;
-  listen?: DesktopCanvasEventKind[];
-  /**
-   * These defaults are decided from the committed region before guest input.
-   */
-  focusOnPointer?: boolean;
-  dragPreview?: boolean;
-  tabNavigation?: boolean;
-  nativeCopy?: boolean;
-  bubbleInput?: boolean;
-}
-export interface DesktopCanvasModifiers {
-  control: boolean;
-  alt: boolean;
-  shift: boolean;
-  platform: boolean;
-  function: boolean;
-}
 export interface OperationReply {
   reference: RecoveryRef;
   receipt: Receipt;
@@ -6357,6 +6048,41 @@ export interface LabelProps {
   terminalForeground?: TerminalColor | null;
   elapsed?: Elapsed | null;
 }
+export interface TextAppearance {
+  font: FontAppearance;
+  foreground: Color;
+}
+export interface FontAppearance {
+  family: FontFamily;
+  /**
+   * @maxItems 8
+   */
+  fallbacks:
+    | []
+    | [FontFamily]
+    | [FontFamily, FontFamily]
+    | [FontFamily, FontFamily, FontFamily]
+    | [FontFamily, FontFamily, FontFamily, FontFamily]
+    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
+    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
+    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
+    | [
+        FontFamily,
+        FontFamily,
+        FontFamily,
+        FontFamily,
+        FontFamily,
+        FontFamily,
+        FontFamily,
+        FontFamily,
+      ];
+  size: number;
+  /**
+   * Line height relative to this font size.
+   */
+  lineHeight: number;
+  weight: number;
+}
 export interface Elapsed {
   from: number;
   to: number | null;
@@ -6376,7 +6102,7 @@ export interface TextareaProps {
   softWrap: boolean;
   /**
    * Preferred terminal text rows, excluding native padding. A constrained
-   * viewport may shrink further. Desktop does not use terminal row sizing.
+   * viewport may shrink further.
    */
   terminalRows?: TerminalTextareaRows;
   /**
@@ -6461,6 +6187,12 @@ export interface TerminalPalette {
     TerminalColor,
   ];
   terminal: boolean;
+}
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
 }
 export interface ScrollbarAppearance {
   mode: ScrollbarMode;
@@ -6704,47 +6436,6 @@ export interface InputAppearance {
   borderWidth: number;
   radius: number;
   padding: Insets;
-}
-export interface ImageProps {
-  source?: ImageDescriptor | null;
-  packet?: ImagePacket | null;
-  alt: string;
-  fit: ImageFit;
-  height: number;
-  background: Color;
-  border: Color;
-  radius: number;
-}
-export interface ImageDescriptor {
-  key: string;
-  digest: string;
-  mimeType: string;
-  totalBytes: number;
-}
-export interface ImagePacket {
-  owner: string;
-  source: string;
-  sequence: number;
-  offset: number;
-  data: string;
-}
-export interface ImageObservation {
-  owner: string;
-  revision: number;
-  source?: string | null;
-  received: number;
-  phase: ImagePhase;
-  width?: number | null;
-  height?: number | null;
-  error?: ImageError | null;
-  receipt?: ImageReceipt | null;
-}
-export interface ImageReceipt {
-  owner: string;
-  source: string;
-  sequence: number;
-  accepted: boolean;
-  error?: ImageError | null;
 }
 export interface SourceTextProps {
   animate?: boolean;

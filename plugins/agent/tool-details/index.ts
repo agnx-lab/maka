@@ -36,14 +36,7 @@ import {
 } from '../../shared/contracts.js';
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  pixels,
-  output,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 /** These keys explicitly name display contracts. Names and JSON shapes do not. */
 export function filePresentation(key: string | null | undefined) {
@@ -387,7 +380,6 @@ export function toolDetails<N extends Node>(
     const before = scalar(state, 'before'),
       after = scalar(state, 'after');
     const comparison =
-      presentation.target === 'tui' &&
       typeof before === 'string' &&
       typeof after === 'string' &&
       small(before) &&
@@ -437,7 +429,7 @@ export function toolDetails<N extends Node>(
                   }
                 : null;
         const body =
-          content && presentation.target === 'tui'
+          content && true
             ? presentation.slot(
                 comparison && id === 'before' ? 'changes-body' : id + '-body',
                 'diff',
@@ -463,15 +455,11 @@ export function toolDetails<N extends Node>(
                 'source',
                 {
                   source,
-                  appearance:
-                    presentation.target === 'tui'
-                      ? { ...props.theme.markdown.code, foreground: props.theme.muted }
-                      : props.theme.markdown.code,
+                  appearance: { ...props.theme.markdown.code, foreground: props.theme.muted },
                   selection: props.theme.markdown.selection,
-                  terminal:
-                    presentation.target === 'tui' && props.theme.terminal
-                      ? { ...props.theme.terminal, foreground: props.theme.terminal.muted }
-                      : props.theme.terminal,
+                  terminal: props.theme.terminal
+                    ? { ...props.theme.terminal, foreground: props.theme.terminal.muted }
+                    : props.theme.terminal,
                   disabled: false,
                   focusOnPointer: props.focusOnPointer,
                 },
@@ -483,7 +471,6 @@ export function toolDetails<N extends Node>(
             ui.text(
               id + '-label',
               comparison && id === 'before' ? `${labels.before} → ${labels.after}` : labels[id]!,
-              13,
               props.theme.muted,
               550,
             ),
@@ -497,7 +484,6 @@ export function toolDetails<N extends Node>(
                           content: ui.box(id + '-viewport', [body], {
                             scroll: 'manual',
                             terminal: { basis: 12 },
-                            style: { width: fill, height: pixels(240) },
                           }),
                         },
                         { input: 'part-input', observed: 'part-observed' },
@@ -505,9 +491,7 @@ export function toolDetails<N extends Node>(
                     : body,
                 ]
               : []),
-            ...(part.pending
-              ? [ui.text(id + '-loading', text.loading, 13, props.theme.muted)]
-              : []),
+            ...(part.pending ? [ui.text(id + '-loading', text.loading, props.theme.muted)] : []),
             ...(part.failed
               ? [
                   ui.text(
@@ -515,7 +499,6 @@ export function toolDetails<N extends Node>(
                     id === 'before' && kind === 'write'
                       ? text.toolOriginalUnavailable
                       : text.sourceFailed,
-                    13,
                     props.theme.muted,
                   ),
                 ]
@@ -525,7 +508,6 @@ export function toolDetails<N extends Node>(
                   ui.text(
                     id + '-range',
                     `${page.offset}–${end} / ${page.totalBytes} ${text.toolByteRange}`,
-                    12,
                     props.theme.muted,
                   ),
                 ]
@@ -540,7 +522,7 @@ export function toolDetails<N extends Node>(
                         text.toolCopyPath,
                         false,
                         false,
-                        presentation.target === 'tui' ? { background: 0, align: 'start' } : {},
+                        { background: 0, align: 'start' },
                         filePath,
                       ),
                     ]
@@ -555,10 +537,10 @@ export function toolDetails<N extends Node>(
                   ? [ui.button(id + '-last', text.sourceLast, !!part.pending)]
                   : []),
               ],
-              { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
           ],
-          { gap: 0, style: { width: fill } },
+          { gap: 0 },
         );
       });
     const offset = scalar(state, 'offset'),
@@ -569,7 +551,6 @@ export function toolDetails<N extends Node>(
         ui.text(
           'read-range',
           `${text.toolReadLines}: ${count ? offset + 1 : offset}–${offset + count} / ${total}`,
-          12,
           props.theme.muted,
         ),
       );
@@ -583,14 +564,13 @@ export function toolDetails<N extends Node>(
           ui.text(
             'search-summary',
             `${text.toolSearchPattern} · ${pattern.page.text}${complete(pattern) ? '' : '…'}`,
-            14,
             props.theme.muted,
             400,
             { truncate: true },
           ),
         );
       else if (pattern?.pending)
-        summary.push(ui.text('search-summary-loading', text.loading, 13, props.theme.muted));
+        summary.push(ui.text('search-summary-loading', text.loading, props.theme.muted));
       const notice =
         scalar(state, 'status') === 'failed'
           ? text.toolBusinessFailure
@@ -598,14 +578,14 @@ export function toolDetails<N extends Node>(
             ? text.toolSearchIncomplete
             : null;
       if (notice) {
-        summary.push(ui.text('search-summary-status', notice, 13, props.theme.muted));
-        sections.unshift(ui.text('search-status', notice, 13, props.theme.muted));
+        summary.push(ui.text('search-summary-status', notice, props.theme.muted));
+        sections.unshift(ui.text('search-status', notice, props.theme.muted));
       }
     }
     if (file) {
       const label =
         typeof path === 'string' && path.trim()
-          ? compactLabel(path, presentation.target === 'tui' ? 28 : 64)
+          ? compactLabel(path, 28)
           : state.parts.path?.failed
             ? text.sourceFailed
             : state.parts.path?.page
@@ -615,54 +595,43 @@ export function toolDetails<N extends Node>(
         filePath && typeof path === 'string' && !state.parts.path?.failed
           ? ui.button(
               'copy-file-summary',
-              presentation.target === 'tui'
-                ? `${props.theme.ascii ? '+' : '⧉'} ${label}`
-                : `${text.copy} · ${label}`,
+              `${props.theme.ascii ? '+' : '⧉'} ${label}`,
               false,
               false,
-              presentation.target === 'tui' ? { background: 0, align: 'start' } : {},
+              { background: 0, align: 'start' },
               filePath,
               text.toolCopyPath,
             )
-          : ui.text('file-summary', `${text.toolFilePath} · ${label}`, 14, props.theme.muted),
+          : ui.text('file-summary', `${text.toolFilePath} · ${label}`, props.theme.muted),
       );
       if (scalar(state, 'status') === 'failed')
-        summary.push(
-          ui.text('file-summary-failed', text.toolBusinessFailure, 13, props.theme.muted),
-        );
+        summary.push(ui.text('file-summary-failed', text.toolBusinessFailure, props.theme.muted));
       for (const id of ['path', 'status']) {
         const part = state.parts[id];
         if (part?.failed)
           summary.push(
             ...(id === 'status'
-              ? [ui.text(`summary-${id}-failed`, text.sourceFailed, 13, props.theme.muted)]
+              ? [ui.text(`summary-${id}-failed`, text.sourceFailed, props.theme.muted)]
               : []),
             ui.button(`summary-${id}-retry`, text.sourceRetry, !!part.pending),
           );
       }
     }
     if (process) {
-      const titled = presentation.target === 'tui' && !!props.tool.call?.title;
+      const titled = !!props.tool.call?.title;
       const commandPart = state.parts.command;
       const command =
         commandPart?.page?.offset === 0 && !commandPart.failed
           ? commandPart.page.text + (complete(commandPart) ? '' : '…')
           : scalar(state, 'reference');
       if (!titled && typeof command === 'string')
-        summary.push(
-          ui.text(
-            'process-summary',
-            compactLabel(command, presentation.target === 'tui' ? 72 : 96),
-            14,
-            props.theme.muted,
-          ),
-        );
+        summary.push(ui.text('process-summary', compactLabel(command, 72), props.theme.muted));
       if (
         !titled &&
         command == null &&
         (state.parts.command?.pending || state.parts.reference?.pending)
       )
-        summary.push(ui.text('process-summary-loading', text.loading, 13, props.theme.muted));
+        summary.push(ui.text('process-summary-loading', text.loading, props.theme.muted));
       const status = scalar(state, 'processStatus');
       const statusLabels: Record<string, string> = {
         starting: text.toolProcessStarting,
@@ -687,8 +656,8 @@ export function toolDetails<N extends Node>(
           scalar(state, 'status') === 'failed';
         const color = failed ? props.theme.error : props.theme.muted;
         if (!titled || status !== 'completed' || exit !== 0)
-          summary.push(ui.text('process-summary-status', statusText, 13, color));
-        sections.unshift(ui.text('process-status', statusText, 13, color));
+          summary.push(ui.text('process-summary-status', statusText, color));
+        sections.unshift(ui.text('process-status', statusText, color));
       }
       for (const id of ['stdoutTruncated', 'stderrTruncated', 'truncated', 'redacted']) {
         const part = state.parts[id];
@@ -697,7 +666,6 @@ export function toolDetails<N extends Node>(
             ui.text(
               id + '-notice',
               id === 'redacted' ? text.toolOutputRedacted : text.terminalTruncated,
-              13,
               props.theme.muted,
             ),
           );
@@ -710,7 +678,7 @@ export function toolDetails<N extends Node>(
           ui.box(
             prefix + id + '-unavailable',
             [
-              ui.text(prefix + id + '-error', text.sourceFailed, 13, props.theme.muted),
+              ui.text(prefix + id + '-error', text.sourceFailed, props.theme.muted),
               ui.button(prefix + id + '-retry', text.sourceRetry, !!part.pending),
             ],
             { row: true, gap: 1 },
@@ -724,18 +692,10 @@ export function toolDetails<N extends Node>(
       ui.box(
         'tool-details',
         [
-          ui.box('tool-summary', summary, {
-            visible: !props.expanded,
-            gap: 0,
-            style: { width: fill },
-          }),
-          ui.box('tool-expanded', sections, {
-            visible: props.expanded,
-            gap: 1,
-            style: { width: fill },
-          }),
+          ui.box('tool-summary', summary, { visible: !props.expanded, gap: 0 }),
+          ui.box('tool-expanded', sections, { visible: props.expanded, gap: 1 }),
         ],
-        { gap: 0, style: { width: fill } },
+        { gap: 0 },
       ),
     );
     out.actions = actions;

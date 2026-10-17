@@ -19,13 +19,12 @@
 
 use super::*;
 use maka_packages::Package;
-use maka_plugin_core::package::EntryTarget;
 use maka_ui_runtime::Surface;
 use std::{path::Path, process::Command};
 
 #[test]
 #[ignore = "opt-in packaged product build and actual native schema compiler"]
-fn packaged_product_component_schemas_compile_independently_for_both_presentations() {
+fn packaged_product_component_schemas_compile_independently_for_terminal_presentation() {
     use maka_plugin_core::{
         contract::Interface,
         package::{Declaration, Implementation},
@@ -175,91 +174,65 @@ fn packaged_product_component_schemas_compile_independently_for_both_presentatio
             }
         }
     }
-    assert_eq!(checked_palette, 2);
+    assert_eq!(checked_palette, 1);
 }
 
 #[test]
-fn sdk_typescript_bundles_execute_the_same_package_in_both_presentations() {
+fn sdk_typescript_bundle_executes_independent_terminal_mounts() {
     let timer = timer();
     let work = tempfile::tempdir().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let sdk = root.join("packages/plugin-sdk");
-    for (variant, output) in [("desktop", "index.mjs"), ("terminal", "terminal.mjs")] {
-        let status = Command::new("node")
-            .arg(sdk.join("scripts/bundle.mjs"))
-            .arg(sdk.join(format!("examples/counter/{variant}.ts")))
-            .arg(work.path().join(output))
-            .current_dir(&root)
-            .status()
-            .unwrap();
-        assert!(status.success(), "SDK bundle failed for {variant}");
-    }
-    let (mut input, mut packages) = support::dual_fixture("");
+    let status = Command::new("node")
+        .arg(sdk.join("scripts/bundle.mjs"))
+        .arg(sdk.join("examples/counter/terminal.ts"))
+        .arg(work.path().join("index.mjs"))
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(status.success(), "SDK terminal bundle failed");
+    let (mut input, mut packages) = support::fixture("");
     let old = packages.pop().unwrap();
-    let mut files = BTreeMap::from([(
-        maka_packages::MANIFEST_FILE.into(),
-        serde_json::to_vec(&json!({"schemaVersion":1,"id":old.manifest().id,
+    let files = BTreeMap::from([
+        (
+            maka_packages::MANIFEST_FILE.into(),
+            serde_json::to_vec(&json!({"schemaVersion":1,"id":old.manifest().id,
             "application":old.manifest().application}))
-        .unwrap(),
-    )]);
-    for name in ["index.mjs", "terminal.mjs"] {
-        files.insert(name.into(), std::fs::read(work.path().join(name)).unwrap());
-    }
+            .unwrap(),
+        ),
+        (
+            "index.mjs".into(),
+            std::fs::read(work.path().join("index.mjs")).unwrap(),
+        ),
+    ]);
     let package = Package::new(files).unwrap();
-    assert_eq!(
-        package
-            .manifest()
-            .application
-            .as_ref()
-            .unwrap()
-            .entries
-            .len(),
-        2
-    );
-    assert!(
-        package
-            .manifest()
-            .application
-            .as_ref()
-            .unwrap()
-            .entries
-            .contains_key(&EntryTarget::Tui)
-    );
     input.instances.get_mut("app").unwrap().package = package.application_ref().into();
     packages.push(package);
-    for target in [PresentationTarget::Desktop, PresentationTarget::Tui] {
-        input.environment.presentation = Some(target);
-        let mut app = Application::new(
-            &input,
-            packages.clone(),
-            timer.handle().clone(),
-            maka_ui_js::execution(maka_js_runtime::plugin::Limits {
-                synchronous_slice: Duration::from_millis(100),
-                ..Default::default()
-            }),
-            crate::support::scene::registry::<()>(target),
-            Default::default(),
-        )
-        .unwrap();
-        let first = app.mount_launch(json!({"count":10})).unwrap();
-        let second = app.mount_launch(json!({"count":20})).unwrap();
-        let surface = app.frame(&first).unwrap().surface.as_ref().unwrap();
-        match (target, surface) {
-            (PresentationTarget::Tui, Surface::Terminal { binding }) => {
-                assert_eq!(binding, "surface")
-            }
-            (PresentationTarget::Desktop, Surface::Window { title, width, .. }) => {
-                assert_eq!(title, "SDK counter");
-                assert_eq!(*width, 640);
-            }
-            _ => panic!("incorrect presentation variant"),
-        }
-        app.dispatch(&first, 0, "inc", json!({})).unwrap();
-        assert_eq!(app.frame(&first).unwrap().state["count"], 11);
-        assert_eq!(app.frame(&second).unwrap().state["count"], 20);
-        assert!(app.dispatch(&first, 0, "inc", json!({})).is_err());
-        app.close(&first, Ok(())).unwrap();
-        app.close(&second, Ok(())).unwrap();
-        app.shutdown().unwrap();
-    }
+    let mut app = Application::new(
+        &input,
+        packages,
+        timer.handle().clone(),
+        maka_ui_js::execution(maka_js_runtime::plugin::Limits {
+            synchronous_slice: Duration::from_millis(100),
+            ..Default::default()
+        }),
+        crate::support::scene::registry::<()>(PresentationTarget::Tui),
+        Default::default(),
+    )
+    .unwrap();
+    let first = app.mount_launch(json!({"count":10})).unwrap();
+    let second = app.mount_launch(json!({"count":20})).unwrap();
+    assert_eq!(
+        app.frame(&first).unwrap().surface,
+        Some(Surface::Terminal {
+            binding: "surface".into()
+        })
+    );
+    app.dispatch(&first, 0, "inc", json!({})).unwrap();
+    assert_eq!(app.frame(&first).unwrap().state["count"], 11);
+    assert_eq!(app.frame(&second).unwrap().state["count"], 20);
+    assert!(app.dispatch(&first, 0, "inc", json!({})).is_err());
+    app.close(&first, Ok(())).unwrap();
+    app.close(&second, Ok(())).unwrap();
+    app.shutdown().unwrap();
 }

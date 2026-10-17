@@ -54,8 +54,8 @@ async function client(target) {
       },
       thinkingLevel: null,
     },
-    inspector: target === 'tui' ? 'graph' : null,
-    dialog: target === 'desktop' ? 'graph' : null,
+    inspector: 'graph',
+    dialog: null,
     modelRefreshing: false,
     pending: {},
     restoring: false,
@@ -94,7 +94,7 @@ async function client(target) {
 }
 
 const epoch = { graphId: 'agent_graph_1', rootSessionId: 'session', epoch: 1, mode: 'swarm' };
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} Graph control keeps original receipt and stale conversation replies cannot redirect it`, async () => {
     const c = await client(target);
     c.raw('graph-start-swarm');

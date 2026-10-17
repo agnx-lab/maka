@@ -49,11 +49,11 @@ test('default Agent and WorkHub installations allow requests for additional proc
 });
 
 test('each bundled UI exports the exact contracts admitted by its original manifest', async () => {
-  let checked = 0;
+  const checked = new Set();
   for (const name of readdirSync(resolve(root, 'dist/packages'))) {
     const directory = resolve(root, 'dist/packages', name);
     const manifest = JSON.parse(readFileSync(resolve(directory, 'maka.extension.json'), 'utf8'));
-    for (const target of ['desktop', 'tui']) {
+    for (const target of ['tui']) {
       const entry = manifest.application.entries[target];
       if (entry?.implementation.kind !== 'javascript') continue;
       const guest = await import(pathToFileURL(resolve(directory, entry.implementation.module)));
@@ -65,28 +65,23 @@ test('each bundled UI exports the exact contracts admitted by its original manif
           entry.exports[key].contract,
           `${name}/${target}/${key}`,
         );
-        checked++;
+        checked.add(`${name}/${key}`);
       }
     }
   }
-  assert.ok(checked >= 50);
+  for (const name of [
+    'agent-screen/AgentScreen',
+    'workhub-root/WorkHub',
+    'connections/Connections',
+  ])
+    assert.equal(checked.has(name), true, `missing actual TUI declaration: ${name}`);
 });
 
 test('typed scene constructors serialize directly into the actual Rust scene schemas', async () => {
-  const desktopText = sdk.ui.desktop.text({ key: 'desktop-text', text: '界面', color: 0xffffff });
   const terminalText = sdk.ui.terminal.text({
     key: 'terminal-text',
     text: '界面',
     color: 0xffffff,
-  });
-  const desktop = sdk.ui.desktop.stack({
-    key: 'desktop',
-    direction: 'column',
-    gap: 8,
-    padding: 0,
-    background: 0,
-    children: [desktopText],
-    scroll: 'anchor',
   });
   const terminal = sdk.ui.terminal.stack({
     key: 'terminal',
@@ -97,40 +92,6 @@ test('typed scene constructors serialize directly into the actual Rust scene sch
     children: [terminalText],
     scroll: 'anchor',
   });
-  const desktopScenes = [
-    desktop,
-    desktopText,
-    sdk.ui.desktop.button({ key: 'button', label: 'Save' }),
-    sdk.ui.desktop.dialog({
-      key: 'dialog',
-      label: 'Dialog',
-      background: desktop,
-      content: desktopText,
-      open: true,
-    }),
-    sdk.ui.desktop.popup({
-      key: 'popup',
-      label: 'Menu',
-      trigger: desktopText,
-      content: desktop,
-      open: true,
-    }),
-    sdk.ui.desktop.canvas({
-      key: 'canvas',
-      contents: {
-        commands: [
-          { kind: 'line', from: { x: 0, y: 0 }, to: { x: 20, y: 20 }, color: 0xffffff, width: 1 },
-        ],
-        regions: [],
-      },
-    }),
-    sdk.ui.desktop.reading({
-      key: 'reading',
-      binding: 'reading',
-      props: { content: desktop },
-      on: { observed: 'viewport' },
-    }),
-  ];
   const terminalScenes = [
     terminal,
     terminalText,
@@ -153,20 +114,20 @@ test('typed scene constructors serialize directly into the actual Rust scene sch
       on: { observed: 'viewport' },
     }),
   ];
-  const encoded = JSON.stringify(desktop);
+  const encoded = JSON.stringify(terminal);
   assert.deepEqual(JSON.parse(encoded), {
-    key: 'desktop',
+    key: 'terminal',
     direction: 'column',
-    gap: 8,
+    gap: 1,
     padding: 0,
     background: 0,
-    children: [{ key: 'desktop-text', text: '界面', color: 0xffffff, kind: 'text' }],
+    children: [{ key: 'terminal-text', text: '界面', color: 0xffffff, kind: 'text' }],
     scroll: 'anchor',
     kind: 'stack',
   });
-  assert.equal(Object.getOwnPropertySymbols(desktop).length, 1);
+  assert.equal(Object.getOwnPropertySymbols(terminal).length, 1);
   assert.equal(encoded.includes('maka.scene.target'), false);
-  assert.equal(desktopScenes.at(-1).member, 0);
+  assert.equal(terminalScenes.at(-1).member, 0);
   if (process.env.MAKA_PRODUCT_CLI_CHECK) {
     const binary = resolve(
       root,
@@ -181,10 +142,7 @@ test('typed scene constructors serialize directly into the actual Rust scene sch
       }),
     );
     const { default: Ajv } = await import('ajv/dist/2020.js');
-    for (const [name, scenes] of [
-      ['DesktopScene', desktopScenes],
-      ['TerminalScene', terminalScenes],
-    ]) {
+    for (const [name, scenes] of [['TerminalScene', terminalScenes]]) {
       const validate = new Ajv({ strict: false }).compile({
         $ref: '#/$defs/' + name,
         $defs: catalog.schema.$defs,
@@ -210,7 +168,7 @@ test('WorkHub product authors two independent Agent graphs with explicit native 
       permissions: { access: 'workspace_write', requestPermissions: true },
       tools: [],
     };
-    for (const presentation of ['desktop', 'tui']) {
+    for (const presentation of ['tui']) {
       const configuration = {
         presentation,
         locale: 'en',
@@ -329,7 +287,7 @@ test('workspace and navigation mount only declared child capabilities with valid
       if (Array.isArray(value)) value.forEach((child) => check(child, imports));
       else check(value, imports);
   }
-  for (const target of ['tui', 'desktop']) {
+  for (const target of ['tui']) {
     for (const name of ['agent-screen', 'navigation']) {
       const module = await import(`../dist/packages/${name}/${target}.js`);
       module.activate({ locale: 'en' });

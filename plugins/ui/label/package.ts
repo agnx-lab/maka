@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.label',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '文本标签', description: '在界面中显示文本标签。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.label)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.label) },
   },
 };

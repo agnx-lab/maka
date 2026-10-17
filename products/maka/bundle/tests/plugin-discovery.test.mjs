@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const source = {
   stateDomain: 'a'.repeat(64),
@@ -136,11 +136,11 @@ test('bundled plugins describe their purpose in their own manifests', () => {
     assert.ok(manifest.localizations?.['zh-CN']?.description?.trim(), name);
   }
 });
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} plugin scrolling retains previous records and consumes only current physical boundaries`, async () => {
     const c = await client(target, 'zh-CN');
     c.page(0);
-    if (target === 'tui') c.checkpoint(0, { kind: 'ready', revision: null, value: null });
+    c.checkpoint(0, { kind: 'ready', revision: null, value: null });
     assert.ok(
       nodes(c.out.frame.view).some(
         (node) => typeof node.text === 'string' && node.text.includes('用途 0'),
@@ -182,7 +182,7 @@ for (const target of ['tui', 'desktop']) {
   test(`${target} plugin search scans later data and matches the author's translated purpose`, async () => {
     const c = await client(target, 'zh-CN');
     c.page(0);
-    if (target === 'tui') c.checkpoint(0, { kind: 'ready', revision: null, value: null });
+    c.checkpoint(0, { kind: 'ready', revision: null, value: null });
     c.query('土星');
     assert.equal(c.out.actions[0].binding, 'reader');
     c.done({ text: '土星', metadata: { owner: 'query', revision: 1, bytes: 6 } });
@@ -224,7 +224,7 @@ test('a failed preference read recovers automatically and repeated permanent fai
   assert.ok(view.some((node) => node.key === 'settings-checkpoint-retry'));
 });
 
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} directory search reads later entries and refresh replaces the accumulated list`, async () => {
     const { component } = await import(`../dist/packages/directory-picker/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false };
@@ -276,7 +276,7 @@ test('tool detail scrolling has no capability cycle through the outer reading ar
   const { composition, instanceNames, packageNames } = await import(
     '../dist/authoring/composition.mjs'
   );
-  for (const presentation of ['tui', 'desktop']) {
+  for (const presentation of ['tui']) {
     const { ui } = composition({
       presentation,
       locale: 'en',

@@ -25,7 +25,7 @@ import type {
 } from '../../../packages/plugin-sdk/src/index.js';
 import { queueEditorContract, type QueueEditorProps } from '../../shared/contracts.js';
 import { copy } from './locale.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type State = { revision: number; observation: EditorObservation | null };
 export function queueEditor<N extends Node>(
@@ -82,13 +82,10 @@ export function queueEditor<N extends Node>(
                 submitted: 'save',
               }),
             ],
-            {
-              terminal: { shrink: true },
-              style: { width: fill, height: pixels(200), minHeight: 0 },
-            },
+            { terminal: { shrink: true } },
           ),
-          ui.text('hint', text.queueEditHint, 12, props.theme.muted),
-          ...(props.status ? [ui.text('status', props.status, 12, props.theme.muted)] : []),
+          ui.text('hint', text.queueEditHint, props.theme.muted),
+          ...(props.status ? [ui.text('status', props.status, props.theme.muted)] : []),
           ui.box(
             'controls',
             [
@@ -97,13 +94,12 @@ export function queueEditor<N extends Node>(
               ...(props.uncertain ? [ui.button('check', text.check, props.checking)] : []),
               ui.button('save', text.queueSave, !available(state, props), true),
             ],
-            { row: true, terminal: { wrap: true }, style: { width: fill, wrap: true } },
+            { row: true, terminal: { wrap: true } },
           ),
         ],
         {
           visible: props.open,
           terminal: { grow: 1 },
-          style: { width: fill, minHeight: 0 },
           shortcuts: [
             { key: 's', modifiers: ['primary'], input: 'save', enabled: available(state, props) },
           ],

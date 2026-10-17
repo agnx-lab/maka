@@ -68,44 +68,22 @@ pub struct Frame<V = Value> {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Surface {
-    Window {
-        binding: String,
-        title: String,
-        width: u32,
-        height: u32,
-    },
-    Terminal {
-        binding: String,
-    },
+    Terminal { binding: String },
 }
 impl Surface {
     pub fn binding(&self) -> &str {
         match self {
-            Self::Window { binding, .. } | Self::Terminal { binding } => binding,
+            Self::Terminal { binding } => binding,
         }
     }
     pub fn target(&self) -> maka_plugin_core::composition::PresentationTarget {
         use maka_plugin_core::composition::PresentationTarget;
         match self {
-            Self::Window { .. } => PresentationTarget::Desktop,
             Self::Terminal { .. } => PresentationTarget::Tui,
         }
     }
     fn validate(&self) -> bool {
-        if self.binding().is_empty() || self.binding().len() > 128 {
-            return false;
-        }
-        match self {
-            Self::Terminal { .. } => true,
-            Self::Window {
-                title,
-                width,
-                height,
-                ..
-            } => {
-                title.len() <= 512 && (64..=16000).contains(width) && (64..=16000).contains(height)
-            }
-        }
+        !self.binding().is_empty() && self.binding().len() <= 128
     }
 }
 /// One child of a committed component, owned by a committed native presentation.

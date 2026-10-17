@@ -29,7 +29,6 @@ use maka_agent_ports::execution::Progress;
 use maka_agent_ports::execution::Receipt;
 use maka_agent_ports::execution::Submit;
 use maka_capabilities::storage::Namespace;
-use maka_plugin_core::scope::Scope;
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, SqliteConnection};
 
@@ -140,9 +139,6 @@ impl EventLog {
         request
             .validate()
             .map_err(|error| invalid(&error.to_string()))?;
-        if namespace.scope() == &Scope::DesktopUi {
-            return Err(invalid("desktop-ui cannot submit Host execution"));
-        }
         let digest = request
             .digest()
             .map_err(|error| invalid(&error.to_string()))?;

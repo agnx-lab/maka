@@ -47,14 +47,7 @@ import { scrollBoundary, scrollRows, visibleRows, resetScroll } from '../../shar
 import { copy, type Copy } from './locale.js';
 import { panelHeader } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 type Result<T> = { kind: 'completed'; value: T } | { kind: 'failed'; message: string };
 type Current = {
@@ -371,8 +364,7 @@ function frame<N extends Node>(
   events: Emission[] = [],
 ) {
   const ui = p.paint(props.theme),
-    text = copy(props.locale),
-    desktop = p.target === 'desktop';
+    text = copy(props.locale);
   const ready = writable(state, props),
     resource = state.resource,
     selected = target(state);
@@ -447,39 +439,34 @@ function frame<N extends Node>(
             ui.button('command', text.terminalCommand, !ready),
             ui.button(
               'refresh',
-              !desktop ? (props.theme.ascii ? 'r' : '↻') : text.refreshSessions,
+              props.theme.ascii ? 'r' : '↻',
               !active(state, props),
               false,
-              !desktop ? { background: 0 } : {},
+              { background: 0 },
               undefined,
               text.refreshSessions,
             ),
-            ui.button(
-              'history',
-              text.terminalHistory,
-              false,
-              false,
-              !desktop ? { background: 0, align: 'start' } : {},
-            ),
+            ui.button('history', text.terminalHistory, false, false, {
+              background: 0,
+              align: 'start',
+            }),
           ],
           {
             visible: !state.historyOpen && !state.confirmation,
             row: true,
-            gap: desktop ? 8 : 1,
+            gap: 1,
             terminal: { wrap: true },
-            style: { wrap: true },
           },
         ),
         ...(!props.enabled ? [ui.text('terminal-unavailable', text.terminalUnavailable)] : []),
         ...(state.notice
-          ? [ui.text('terminal-notice', text[state.notice], 12, props.theme.muted)]
+          ? [ui.text('terminal-notice', text[state.notice], props.theme.muted)]
           : []),
         ...(state.current && !Object.values(state.pending).some((r) => r.kind === 'mutate')
           ? [
               ui.text(
                 'terminal-original',
                 `${text.terminalOriginalSession} ${compactLabel(state.current.session, 48)}`,
-                12,
                 props.theme.muted,
               ),
               ui.box(
@@ -520,7 +507,7 @@ function frame<N extends Node>(
             command,
             ui.button('run', text.terminalRun, !ready || !state.draft?.snapshot.text.bytes),
           ],
-          { visible: state.commandOpen && !state.historyOpen, gap: 1, style: { width: fill } },
+          { visible: state.commandOpen && !state.historyOpen, gap: 1 },
         ),
         ui.box(
           'terminal-main',
@@ -535,10 +522,10 @@ function frame<N extends Node>(
                     ...(state.page?.resources.map((r) =>
                       ui.button(
                         state.rowKeys[r.result.ref],
-                        `${r.result.ref === state.selected ? '● ' : ''}${desktop ? r.result.cmd || r.result.ref : compactLabel(r.result.cmd || r.result.ref, 40)} · ${r.result.status}`,
+                        `${r.result.ref === state.selected ? '● ' : ''}${compactLabel(r.result.cmd || r.result.ref, 40)} · ${r.result.status}`,
                         !!state.confirmation,
                         false,
-                        { width: fill, minWidth: 0, truncate: true, justify: 'start' },
+                        { align: 'start' },
                       ),
                     ) ?? [ui.text('terminal-loading', text.terminalLoading)]),
                     ...(state.page?.total === 0
@@ -547,11 +534,10 @@ function frame<N extends Node>(
                   ],
                   {
                     scroll: 'manual',
-                    gap: desktop ? 2 : 1,
+                    gap: 1,
                     terminal: {
                       basis: Math.max(1, Math.min(3, state.page?.resources.length ?? 1)),
                     },
-                    style: { maxHeight: 120, width: fill, minWidth: 0 },
                   },
                 ),
               },
@@ -561,26 +547,21 @@ function frame<N extends Node>(
               ? [
                   ui.text(
                     'terminal-cwd',
-                    desktop ? resource.result.cwd : compactLabel(resource.result.cwd, 60),
-                    12,
+                    compactLabel(resource.result.cwd, 60),
                     props.theme.muted,
                     400,
-                    { width: fill, minWidth: 0, truncate: desktop },
+                    { truncate: false },
                   ),
                   ui.text(
                     'terminal-detail',
-                    desktop
-                      ? resource.result.cmd || resource.result.ref
-                      : compactLabel(resource.result.cmd || resource.result.ref, 60),
-                    12,
+                    compactLabel(resource.result.cmd || resource.result.ref, 60),
                     props.theme.text,
                     400,
-                    { width: fill, minWidth: 0, truncate: desktop },
+                    { truncate: false },
                   ),
                   ui.text(
                     'terminal-status',
                     `${resource.result.status}${resource.result.exitCode != null ? ` (${resource.result.exitCode})` : ''}`,
-                    12,
                   ),
                   ...(resource.ownership.kind !== 'local'
                     ? [ui.text('terminal-owner', text.terminalSourceOwned)]
@@ -608,13 +589,12 @@ function frame<N extends Node>(
                 ui.button('stop', text.stop, !ready || !live),
                 ui.button('copy', text.copy, !copyText, false, {}, copyText || undefined),
               ],
-              { row: true, gap: desktop ? 8 : 1, terminal: { wrap: true }, style: { wrap: true } },
+              { row: true, gap: 1, terminal: { wrap: true } },
             ),
             ui.box('terminal-pty', [screen], {
               visible: resource?.result.mode === 'pty',
               gap: 0,
               terminal: { grow: 1, basis: 0 },
-              style: { width: fill },
             }),
             p.reading(
               'terminal-pipes-reading',
@@ -631,7 +611,6 @@ function frame<N extends Node>(
                     visible: resource?.result.mode === 'pipes',
                     scroll: 'manual',
                     terminal: { basis: 8 },
-                    style: { height: pixels(180), width: fill },
                   },
                 ),
               },
@@ -640,14 +619,13 @@ function frame<N extends Node>(
             ui.text(
               'terminal-help',
               state.lease ? text.terminalControlled + ' · ' + text.terminalHelp : text.terminalHelp,
-              12,
               props.theme.muted,
             ),
             ...(resource?.result.output &&
             (resource.result.output.mode === 'pty'
               ? resource.result.output.truncated
               : resource.result.output.stdoutTruncated || resource.result.output.stderrTruncated)
-              ? [ui.text('terminal-truncated', text.terminalTruncated, 12, props.theme.muted)]
+              ? [ui.text('terminal-truncated', text.terminalTruncated, props.theme.muted)]
               : []),
             ...(state.observation?.error
               ? [
@@ -662,9 +640,8 @@ function frame<N extends Node>(
           ],
           {
             visible: props.enabled && !state.historyOpen && !state.confirmation,
-            gap: desktop ? 6 : 1,
+            gap: 1,
             terminal: { grow: 1 },
-            style: { width: fill },
           },
         ),
         ...(state.historyOpen
@@ -691,7 +668,6 @@ function frame<N extends Node>(
                                       : text.terminalRecorded
                                   : text.terminalUnknown
                               }`,
-                              12,
                             ),
                             ui.button(
                               `earlier:${entry.cursor}`,
@@ -704,20 +680,15 @@ function frame<N extends Node>(
                       ),
                       ui.button(
                         'history-refresh',
-                        !desktop ? (props.theme.ascii ? 'r' : '↻') : text.refreshDefaultOperations,
+                        props.theme.ascii ? 'r' : '↻',
                         false,
                         false,
-                        !desktop ? { background: 0 } : {},
+                        { background: 0 },
                         undefined,
                         text.refreshDefaultOperations,
                       ),
                     ],
-                    {
-                      gap: 1,
-                      scroll: 'anchor',
-                      terminal: { grow: 1 },
-                      style: { width: fill, height: fill },
-                    },
+                    { gap: 1, scroll: 'anchor', terminal: { grow: 1 } },
                   ),
                 },
                 { input: 'history-input', observed: 'history-observed' },
@@ -729,7 +700,6 @@ function frame<N extends Node>(
         visible: props.open,
         gap: 1,
         terminal: { grow: 1 },
-        style: { width: fill, minWidth: 0 },
         shortcuts: [
           {
             key: 'escape',

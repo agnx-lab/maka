@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const instance = ['00000000-0000-0000-0000-000000000001'];
 const source = {
@@ -32,7 +32,7 @@ const source = {
 const valid = new Ajv({ strict: false, formats: { uint64: true, uuid: true } }).compile(
   contracts.deploymentManager.interface.methods.configure.input,
 );
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`Session defaults ${target} recover the original deployment CAS and reread current permissions`, async () => {
     const module = await import(`../dist/packages/session-defaults/${target}.js`);
     module.activate({ instance });

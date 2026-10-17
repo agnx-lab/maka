@@ -19,7 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-const appearance = await import('../dist/packages/appearance/desktop.js');
+const appearance = await import('../dist/packages/appearance/tui.js');
 const theme = appearance.activate({ scheme: 'light' }).Appearance.value;
 const permissions = {
   filesystem: [{ access: 'write', scope: 'subtree', path: '/project' }],
@@ -145,7 +145,7 @@ async function client(target, kind) {
 const submitted = (requestId, decision, scope) => [
   { name: 'submit', value: { requestId, decision, ...(scope ? { scope } : {}) } },
 ];
-for (const target of ['desktop', 'tui']) {
+for (const target of ['tui']) {
   test(`${target} permission Allow directly submits its displayed scope`, async () => {
     for (const [scope, label] of [
       ['once', 'Once'],

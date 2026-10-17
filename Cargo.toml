@@ -43,7 +43,6 @@ members = [
     "platform/background-health",
     "products/maka/cli",
     "plugins/settings/store",
-    "products/maka/desktop",
     "products/maka/desktop-shell",
     "platform/computer-use",
     "platform/event-log",
@@ -75,7 +74,6 @@ members = [
     "platform/render-terminal",
     "platform/ui-runtime",
     "platform/ui-js",
-    "platform/render-gpui",
     "plugins/workspace/workspace-web/native",
     "plugins/workspace/workspace-computer/native",
     "plugins/workhub/core",
@@ -111,7 +109,6 @@ maka-workspace-api = { path = "plugins/workspace/api" }
 maka-agent-authority = { path = "plugins/agent/authority" }
 maka-web-api = { path = "plugins/workspace/workspace-web/api" }
 maka-agent-api = { path = "plugins/agent/api" }
-gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2", default-features = false, features = ["gpui-fast"] }
 gpui-shell = { path = "third-party/gpui-kit/crates/shell", default-features = false, features = ["gpui-fast", "quickjs"] }
 maka-transport = { path = "platform/transport" }
 cua-driver-sdk = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6" }
@@ -167,7 +164,6 @@ maka-tools = { path = "plugins/agent/tools" }
 maka-render-terminal = { path = "platform/render-terminal" }
 maka-ui-runtime = { path = "platform/ui-runtime" }
 maka-ui-js = { path = "platform/ui-js" }
-maka-render-gpui = { path = "platform/render-gpui" }
 maka-web = { path = "plugins/workspace/workspace-web/native" }
 maka-workhub = { path = "plugins/workhub/core" }
 pulldown-cmark = { version = "0.13.4", default-features = false }
@@ -207,6 +203,3 @@ gpui-fast-macos = { path = "third-party/gpui-fast/crates/gpui_macos" }
 gpui-fast-windows = { path = "third-party/gpui-fast/crates/gpui_windows" }
 gpui-fast-linux = { path = "third-party/gpui-fast/crates/gpui_linux" }
 gpui-pre-scheduler = { path = "third-party/gpui-fast/crates/scheduler" }
-
-[patch."https://github.com/longbridge/gpui-kit"]
-gpui-base = { path = "third-party/gpui-kit/crates/base" }

@@ -51,7 +51,7 @@ pub struct TextareaProps {
     pub disabled: bool,
     pub soft_wrap: bool,
     /// Preferred terminal text rows, excluding native padding. A constrained
-    /// viewport may shrink further. Desktop does not use terminal row sizing.
+    /// viewport may shrink further.
     #[serde(default)]
     pub terminal_rows: TerminalTextareaRows,
     /// None preserves native multiline editing without a submit shortcut.
@@ -231,7 +231,7 @@ pub struct TextareaMenuLabels {
     pub select_all: String,
 }
 /// Product-selected native submit gesture. PrimaryEnter uses the platform
-/// accelerator on Desktop and Control+Enter in a terminal.
+/// Control+Enter gesture in a terminal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubmitKey {

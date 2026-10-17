@@ -38,7 +38,7 @@ import { webSettingsContract, type ProjectsProps } from '../../shared/contracts.
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
-import { fill, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Mutation =
   | { method: 'save'; input: WebSet }
@@ -181,7 +181,7 @@ export function webSettings<N extends Node>(
           disabled || !snapshot,
           t('web-enabled-help'),
         ),
-        ui.text('web-source-label', t('web-source'), 14, props.theme.muted),
+        ui.text('web-source-label', t('web-source'), props.theme.muted),
         ...(['model', 'tavily'] as const).map((source) =>
           ui.button(
             'source-' + source,
@@ -194,13 +194,11 @@ export function webSettings<N extends Node>(
         ui.text(
           'web-source-help',
           t(snapshot?.settings.source === 'tavily' ? 'web-tavily-help' : 'web-model-help'),
-          13,
           props.theme.muted,
         ),
         ui.text(
           'web-key-status',
           t(snapshot?.credential.configured ? 'web-key-configured' : 'web-key-missing'),
-          13,
           props.theme.muted,
         ),
         presentation.slot(
@@ -208,14 +206,11 @@ export function webSettings<N extends Node>(
           'secret',
           {
             menu: editorMenu(props.theme, props.locale),
-            appearance:
-              presentation.target === 'tui'
-                ? {
-                    ...props.theme.input,
-                    borderWidth: 0,
-                    padding: { top: 0, right: 0, bottom: 0, left: 0 },
-                  }
-                : props.theme.input,
+            appearance: {
+              ...props.theme.input,
+              borderWidth: 0,
+              padding: { top: 0, right: 0, bottom: 0, left: 0 },
+            },
             accessibilityLabel: t('web-key'),
             placeholder: t('web-key'),
             autoFocus: false,
@@ -233,13 +228,12 @@ export function webSettings<N extends Node>(
               ui.text(
                 'web-check-result',
                 t('web-check-' + snapshot.credential.check.outcome),
-                13,
                 props.theme.muted,
               ),
             ]
           : []),
         ui.button('remove-key', t('web-remove-key'), disabled || !snapshot?.credential.configured),
-        ...(state.notice ? [ui.text('web-notice', t(state.notice), 13, props.theme.muted)] : []),
+        ...(state.notice ? [ui.text('web-notice', t(state.notice), props.theme.muted)] : []),
         ...(state.current
           ? [
               ui.button(
@@ -254,17 +248,12 @@ export function webSettings<N extends Node>(
           : []),
         ui.button('reload', t('web-reload'), disabled),
       ],
-      {
-        gap: 1,
-        scroll: 'manual',
-        terminal: { grow: 1 },
-        style: { width: fill, height: fill },
-      },
+      { gap: 1, scroll: 'manual', terminal: { grow: 1 } },
     );
     const confirmation = ui.box(
       'web-confirmation',
       [
-        ui.text('web-remove-question', t('web-remove-question'), 14, props.theme.text),
+        ui.text('web-remove-question', t('web-remove-question'), props.theme.text),
         ui.button('confirm-remove', t('web-remove-key'), busy(state, props)),
         ui.button('cancel', text.cancel),
       ],
@@ -279,21 +268,15 @@ export function webSettings<N extends Node>(
         'web-settings-root',
         [
           ...pageHeader(presentation, state, props, events, t('settings-web')),
-          ui.dialog(
-            'web-removal',
-            t('web-remove-key'),
-            content,
-            confirmation,
-            state.confirming,
-            undefined,
-            { width: 52, height: 10 },
-          ),
+          ui.dialog('web-removal', t('web-remove-key'), content, confirmation, state.confirming, {
+            width: 52,
+            height: 10,
+          }),
         ],
         {
           visible: props.open,
           gap: 1,
           terminal: { grow: 1 },
-          style: { width: fill, height: fill },
           shortcuts: [
             {
               key: 'escape',

@@ -120,7 +120,7 @@ void [historyPage, forgedHistoryPage, originalCallerIntent];
 const terminal = { kind: 'terminal', binding: 'surface' } satisfies Surface;
 // @ts-expect-error Terminal surfaces have no pixel width.
 const badTerminal = { kind: 'terminal', binding: 'surface', width: 400 } satisfies Surface;
-// @ts-expect-error Desktop surfaces must supply a complete window recipe.
+// @ts-expect-error The removed window presentation is not a terminal surface.
 const badWindow = { kind: 'window', binding: 'surface' } satisfies Surface;
 // @ts-expect-error Component notifications carry the exact child and event name.
 const incompleteEvent = { kind: 'component', key: 'changed', event: {} } satisfies ComponentInput;

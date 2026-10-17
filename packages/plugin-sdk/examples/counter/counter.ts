@@ -23,7 +23,6 @@ import type {
   Contract,
   Output,
   Surface,
-  DesktopNode,
   TerminalNode,
 } from '../../src/index.js';
 
@@ -47,7 +46,7 @@ export interface CounterState {
   count: number;
   revision: number;
 }
-export function createApp<N extends DesktopNode | TerminalNode>(
+export function createApp<N extends TerminalNode>(
   surface: Surface,
   scene: (state: CounterState) => N,
 ): Component<CounterState, unknown, N> {

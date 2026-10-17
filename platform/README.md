@@ -29,10 +29,10 @@ The platform loads packages, checks compositions, owns execution resources and p
 | Resource authority and persistence | [capabilities](capabilities/README.md), [event-log](event-log/README.md) |
 | Service and component owners | [host-runtime](host-runtime/README.md), [ui-runtime](ui-runtime/README.md) |
 | JavaScript execution | [js-runtime](js-runtime/README.md), [host-js](host-js/README.md), [ui-js](ui-js/README.md) |
-| Native presentation | [render-terminal](render-terminal/README.md), [render-gpui](render-gpui/README.md), [presentation](presentation/README.md) |
+| Native presentation | [render-terminal](render-terminal/README.md), [presentation](presentation/README.md) |
 | I/O and isolation | [network](network/README.md), [process](process/README.md), [sandbox](sandbox/README.md), [computer-use](computer-use/README.md) |
 | Connections and health | [transport](transport/README.md), [background-health](background-health/README.md) |
 
-Host and UI share the plugin lifecycle kernel. Optional execution adapters run JavaScript plugins. Renderers consume committed frames and own native resources; they do not choose product pages.
+Host and UI share the plugin lifecycle kernel. Optional execution adapters run JavaScript plugins. The terminal renderer consumes committed frames and owns native resources; it does not choose product pages. The desktop application lives in [desktop-shell](../products/maka/desktop-shell/README.md) and connects through public Host services.
 
-The dependency boundary is deliberate: Host, UI and the renderers can compile without V8 or the Agent engine. Some platform code still depends on shared Agent facts for storage and presentation. Those data dependencies are visible in the Cargo manifests.
+The dependency boundary is deliberate: Host, UI and the terminal renderer can compile without V8 or the Agent engine. Some platform code still depends on shared Agent facts for storage and presentation. Those data dependencies are visible in the Cargo manifests.

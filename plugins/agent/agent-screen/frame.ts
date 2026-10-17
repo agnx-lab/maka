@@ -41,14 +41,7 @@ import type {
 import { resolveLocale } from '../../shared/locale.js';
 import { copy, tuiText } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 import { hostLogsOpen, stopHostLogs } from './host-logs.js';
 import { diagnosticsView } from './diagnostics.js';
@@ -89,7 +82,7 @@ export function frame<N extends Node>(
     (state.diagnostics.host.watch || state.diagnostics.host.loading !== null)
   )
     stopHostLogs(state);
-  const target = presentation.target;
+
   const currentPage = state.pages.at(-1);
   if (currentPage && !state.openedPages.includes(currentPage)) state.openedPages.push(currentPage);
   const requested = state.embedding.session;
@@ -110,7 +103,6 @@ export function frame<N extends Node>(
     (request) => request.kind === 'restorePage' || request.kind === 'restoreReceipt',
   );
   if (
-    target === 'tui' &&
     state.restoring &&
     !state.restoreStarted &&
     !recovering &&
@@ -122,7 +114,6 @@ export function frame<N extends Node>(
     intent(state, actions, { kind: 'restorePage' }, 'history', 'page', { after: 0, limit: 1 });
   }
   if (
-    target === 'tui' &&
     state.recoveryCheckpoint.restored &&
     state.recoveryDirty &&
     !mutationPending(state) &&
@@ -140,7 +131,7 @@ export function frame<N extends Node>(
     state.browse = null;
   }
   const baseTheme = values.appearance?.[0] as Theme;
-  if (target === 'tui' && state.preferences.open && !state.preferences.draft)
+  if (state.preferences.open && !state.preferences.draft)
     appearanceEvent(
       state.preferences,
       { kind: 'raw', key: 'appearance-open', event: {} },
@@ -148,16 +139,13 @@ export function frame<N extends Node>(
       locale,
       actions,
     );
-  locale =
-    target === 'tui'
-      ? effectiveLocale(state.preferences, locale, values.locale?.[0])
-      : resolveLocale(locale, values.locale?.[0]);
-  const theme = target === 'tui' ? effectiveAppearance(state.preferences, baseTheme) : baseTheme;
+  locale = effectiveLocale(state.preferences, locale, values.locale?.[0]);
+  const theme = effectiveAppearance(state.preferences, baseTheme);
   const text = copy(locale),
     ui = presentation.paint(theme),
     busy = mutationPending(state);
   const catalogBusy = busy || catalogPending(state);
-  const commands = rootCommands(state, locale, target);
+  const commands = rootCommands(state, locale);
   const navigation = navigationView(presentation, state, theme, locale);
   const { main, header, attached } = conversationView(
     presentation,
@@ -168,8 +156,7 @@ export function frame<N extends Node>(
     actions,
   );
   const pageContent = pagesView(presentation, state, theme, locale, values, main);
-  const inlineInteraction =
-    target === 'tui' && (state.dialog === 'approval' || state.dialog === 'question');
+  const inlineInteraction = state.dialog === 'approval' || state.dialog === 'question';
   const interactionSlots = [
     ...(state.interaction?.record?.request.kind === 'service_approval' ||
     state.interaction?.record?.request.kind === 'permissions' ||
@@ -271,10 +258,7 @@ export function frame<N extends Node>(
       {
         theme,
         locale,
-        open:
-          target === 'tui'
-            ? inspectorOpen && !inlineInteraction && state.inspector === 'terminal'
-            : state.dialog === 'terminal',
+        open: inspectorOpen && !inlineInteraction && state.inspector === 'terminal',
         enabled: state.terminals,
         busy: mutationPending(state),
         session: state.selected,
@@ -287,91 +271,72 @@ export function frame<N extends Node>(
       {
         theme,
         locale,
-        open:
-          target === 'tui'
-            ? inspectorOpen && !inlineInteraction && state.inspector === 'details'
-            : state.dialog === 'details',
+        open: inspectorOpen && !inlineInteraction && state.inspector === 'details',
         session: state.selected,
         busy: mutationPending(state),
       },
       { changed: 'changed', closed: 'closed' },
     ),
   ];
-  const workspace =
-    target === 'tui'
-      ? ui.box(
-          'workspace',
-          [
-            ui.box('workspace-main', [pageContent], {
-              gap: 0,
-              terminal: inspectorOpen ? { basis: 0, shrink: true } : { grow: 1 },
-            }),
-            ui.box('workspace-inspector', [...inspectorSlots, ...interactionSlots], {
-              visible: inspectorOpen,
-              gap: 0,
-              padding: 1,
-              surface: true,
-              terminal: { grow: 1 },
-            }),
-          ],
-          {
-            gap: 0,
-            terminal: { grow: 1 },
-            wide: {
-              min_width: 100,
-              direction: 'row',
-              children: {
-                'workspace-main': { grow: 1, basis: 0 },
-                'workspace-inspector': { basis: 44, shrink: true },
-              },
-            },
-          },
-        )
-      : pageContent;
+  const workspace = ui.box(
+    'workspace',
+    [
+      ui.box('workspace-main', [pageContent], {
+        gap: 0,
+        terminal: inspectorOpen ? { basis: 0, shrink: true } : { grow: 1 },
+      }),
+      ui.box('workspace-inspector', [...inspectorSlots, ...interactionSlots], {
+        visible: inspectorOpen,
+        gap: 0,
+        padding: 1,
+        surface: true,
+        terminal: { grow: 1 },
+      }),
+    ],
+    {
+      gap: 0,
+      terminal: { grow: 1 },
+      wide: {
+        min_width: 100,
+        direction: 'row',
+        children: {
+          'workspace-main': { grow: 1, basis: 0 },
+          'workspace-inspector': { basis: 44, shrink: true },
+        },
+      },
+    },
+  );
   const conversation = ui.box(
     'agent-screen',
     state.embedding.fixed
       ? [workspace]
-      : target === 'desktop'
-        ? [
-            ui.box('sidebar', [navigation], {
-              visible: 'open' in state.sidebar && state.sidebar.open,
-              style: { width: pixels(240), height: fill, shrink: 0 },
-            }),
-            pageContent,
-          ]
-        : [
-            ui.adaptivePane!(
-              'navigation-pane',
-              text.conversations,
-              ui.box(
-                'page',
-                [
-                  ui.box('page-inset-start', [], { terminal: { basis: 1 } }),
-                  workspace,
-                  ui.box('page-inset-end', [], { terminal: { basis: 1 } }),
-                ],
-                { row: true, gap: 0, terminal: { grow: 1 } },
-              ),
-              ui.box('navigation-content', [navigation], {
-                gap: 0,
-                terminal: { grow: 1 },
-              }),
-              'command' in state.sidebar ? state.sidebar.command : null,
+      : [
+          ui.adaptivePane!(
+            'navigation-pane',
+            text.conversations,
+            ui.box(
+              'page',
+              [
+                ui.box('page-inset-start', [], { terminal: { basis: 1 } }),
+                workspace,
+                ui.box('page-inset-end', [], { terminal: { basis: 1 } }),
+              ],
+              { row: true, gap: 0, terminal: { grow: 1 } },
             ),
-          ],
-    {
-      row: target === 'desktop',
-      gap: 0,
-      terminal: { grow: 1 },
-      style: { width: fill, height: fill },
-    },
+            ui.box('navigation-content', [navigation], {
+              gap: 0,
+              terminal: { grow: 1 },
+            }),
+            'command' in state.sidebar ? state.sidebar.command : null,
+          ),
+        ],
+    { row: false, gap: 0, terminal: { grow: 1 } },
   );
   const background = ui.box(
     'product',
     [
-      ...(target === 'tui' ? [header] : []),
-      ...(target === 'tui' && state.bookmark.observed?.state.kind === 'failed'
+      header,
+      ...(state.bookmark.observed?.state.kind === 'failed'
         ? [
             ui.box(
               'navigation-save-error',
@@ -382,7 +347,6 @@ export function frame<N extends Node>(
                     state.bookmark.command.sequence > state.bookmark.observed.sequence
                     ? copy(locale).restoringView
                     : copy(locale).viewSaveFailed,
-                  13,
                   theme.warning,
                 ),
                 ...(state.bookmark.command &&
@@ -401,25 +365,21 @@ export function frame<N extends Node>(
               `${text.scheduleReminder}: ${compactLabel(state.scheduleAlerts.reminders[0]!.title, 100)}`,
               !!state.dialog,
               false,
-              { background: theme.surface, align: 'start', width: fill },
+              { background: theme.surface, align: 'start' },
             ),
           ]
         : []),
       conversation,
-      ...(target === 'tui'
-        ? [
-            bookmarkView(
-              presentation,
-              state.recoveryCheckpoint,
-              'recovery-checkpoint',
-              'operations/agent-screen',
-              state.restoring || recovering
-                ? (state.recoveryCheckpoint.saved ?? { through: 0, scope: null })
-                : { through: state.restoreThrough, scope: state.historyScope },
-            ),
-          ]
-        : []),
-      ...(target === 'tui' && (!state.embedding.fixed || state.embedding.session)
+      bookmarkView(
+        presentation,
+        state.recoveryCheckpoint,
+        'recovery-checkpoint',
+        'operations/agent-screen',
+        state.restoring || recovering
+          ? (state.recoveryCheckpoint.saved ?? { through: 0, scope: null })
+          : { through: state.restoreThrough, scope: state.historyScope },
+      ),
+      ...(!state.embedding.fixed || state.embedding.session
         ? [
             bookmarkView(
               presentation,
@@ -434,7 +394,6 @@ export function frame<N extends Node>(
     {
       gap: 0,
       background: theme.background,
-      style: { width: fill, height: fill, align: 'center' },
       terminal: { grow: 1 },
       shortcuts: [
         ...(inlineInteraction
@@ -499,7 +458,7 @@ export function frame<N extends Node>(
           : state.dialog === 'session-change'
             ? text.deleteSessionTitle
             : state.dialog === 'attachments'
-              ? target === 'tui' && state.attachments.selection?.browse
+              ? state.attachments.selection?.browse
                 ? tuiText(locale, 'attachments-local-files')
                 : text.attachmentTitle
               : state.dialog === 'skills'
@@ -545,10 +504,10 @@ export function frame<N extends Node>(
           ...(state.dialog === 'sandbox' ? [sandboxView(presentation, state, theme, locale)] : []),
           ...(state.dialog === 'session-change' && state.sessionChange
             ? [
-                ui.text('session-change-name', state.sessionChange.title, 17, theme.text, 600),
-                ui.text('session-change-help', text.deleteSessionHelp, 14, theme.muted),
+                ui.text('session-change-name', state.sessionChange.title, theme.text, 600),
+                ui.text('session-change-help', text.deleteSessionHelp, theme.muted),
                 ...(state.notice
-                  ? [ui.text('session-change-notice', text[state.notice], 14, theme.warning)]
+                  ? [ui.text('session-change-notice', text[state.notice], theme.warning)]
                   : []),
                 ui.box(
                   'session-change-buttons',
@@ -561,7 +520,7 @@ export function frame<N extends Node>(
                       false,
                     ),
                   ],
-                  { row: true, gap: target === 'tui' ? 2 : 12 },
+                  { row: true, gap: 2 },
                 ),
               ]
             : []),
@@ -586,7 +545,6 @@ export function frame<N extends Node>(
                 ),
               ]
             : []),
-          ...(target === 'desktop' ? interactionSlots : []),
           presentation.slot(
             'queue-editor',
             'queueEditor',
@@ -635,7 +593,6 @@ export function frame<N extends Node>(
             { theme, locale, open: state.dialog === 'help' },
             { closed: 'closed' },
           ),
-          ...(target === 'desktop' ? inspectorSlots : []),
           presentation.slot(
             'directory-picker',
             'directories',
@@ -662,14 +619,9 @@ export function frame<N extends Node>(
             { invoked: 'invoked', selected: 'selected', closed: 'closed' },
           ),
         ],
-        {
-          gap: 0,
-          terminal: { grow: state.dialog === 'queue' ? 0 : 1 },
-          style: { width: fill, minWidth: 0 },
-        },
+        { gap: 0, terminal: { grow: state.dialog === 'queue' ? 0 : 1 } },
       ),
       state.dialog !== null && !inlineInteraction,
-      state.dialog === 'terminal' ? { width: pixels(900) } : {},
       state.dialog === 'compact'
         ? { width: 88, height: 26 }
         : state.dialog === 'sandbox'
@@ -684,20 +636,15 @@ export function frame<N extends Node>(
             : {},
     ),
   );
-  if (target === 'tui')
-    out.frame.view = appearanceView(
-      presentation,
-      state.preferences,
-      theme,
-      locale,
-      out.frame.view,
-      resolveLocale('auto', values.locale?.[0]),
-    );
-  if (!state.embedding.embedded)
-    out.frame.surface =
-      target === 'desktop'
-        ? { kind: 'window', binding: 'surface', title: 'maka', width: 1100, height: 760 }
-        : { kind: 'terminal', binding: 'surface' };
+  out.frame.view = appearanceView(
+    presentation,
+    state.preferences,
+    theme,
+    locale,
+    out.frame.view,
+    resolveLocale('auto', values.locale?.[0]),
+  );
+  if (!state.embedding.embedded) out.frame.surface = { kind: 'terminal', binding: 'surface' };
   if (!state.embedding.embedded)
     out.frame.view = presentation.paint(theme).box(
       'agent-screen-with-authoring',
@@ -709,7 +656,7 @@ export function frame<N extends Node>(
             visible: false,
           }),
       ],
-      { terminal: { grow: 1 }, style: { width: fill, height: fill } },
+      { terminal: { grow: 1 } },
     );
   out.actions = actions;
   out.events = events;

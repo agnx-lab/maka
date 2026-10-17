@@ -25,7 +25,7 @@ import type {
 import type { SkillLibraryProps } from './contracts.js';
 import { copy } from './locale-catalogs/skill-import.js';
 import { sameValue } from './value.js';
-import { fill, type Node, type Presentation } from './view.js';
+import { type Node, type Presentation } from './view.js';
 
 export interface SourceImport {
   open: boolean;
@@ -67,14 +67,13 @@ export function importView<N extends Node>(
   cleanup: boolean,
 ): N {
   const ui = presentation.paint(props.theme),
-    text = copy(props.locale),
-    tui = presentation.target === 'tui';
+    text = copy(props.locale);
   const disabled = busy || current || !!value.confirmation;
   return ui.box(
     'skills-import-panel',
     [
-      ui.text('skills-import-heading', text.skillsImport, 17, props.theme.text, 550),
-      ui.text('skills-import-help', text.skillsImportHelp, 12, props.theme.muted),
+      ui.text('skills-import-heading', text.skillsImport, props.theme.text, 550),
+      ui.text('skills-import-help', text.skillsImportHelp, props.theme.muted),
       ui.text('skills-import-id-label', text.skillsSourceId),
       presentation.slot(
         'skills-import-id',
@@ -90,7 +89,7 @@ export function importView<N extends Node>(
         },
         { changed: 'source-id' },
       ),
-      ui.text('skills-import-id-help', text.skillsSourceIdHelp, 12, props.theme.muted),
+      ui.text('skills-import-id-help', text.skillsSourceIdHelp, props.theme.muted),
       presentation.slot(
         'skills-import-file',
         'file',
@@ -109,22 +108,14 @@ export function importView<N extends Node>(
         { changed: 'source-file' },
       ),
       ...(value.file?.phase === 'failed' || (value.file?.file?.bytes ?? 0) > 1024 * 1024
-        ? [ui.text('skills-import-file-error', text.skillsImportInvalid, 12, props.theme.error)]
+        ? [ui.text('skills-import-file-error', text.skillsImportInvalid, props.theme.error)]
         : []),
-      ...(notice ? [ui.text('skills-import-notice', notice, 12, props.theme.muted)] : []),
+      ...(notice ? [ui.text('skills-import-notice', notice, props.theme.muted)] : []),
       ...(cleanup
-        ? [ui.text('skills-import-cleanup', text.skillsCleanupUnknown, 12, props.theme.muted)]
+        ? [ui.text('skills-import-cleanup', text.skillsCleanupUnknown, props.theme.muted)]
         : []),
       ...(value.confirmation
-        ? [
-            ui.text(
-              'skills-import-confirmation',
-              text.skillsImportConfirm,
-              14,
-              props.theme.text,
-              550,
-            ),
-          ]
+        ? [ui.text('skills-import-confirmation', text.skillsImportConfirm, props.theme.text, 550)]
         : []),
       ui.box(
         'skills-import-controls',
@@ -145,14 +136,9 @@ export function importView<N extends Node>(
           ui.button('back-import', text.back, busy || current),
           ui.button('close-import', text.closeModels, false),
         ],
-        { row: true, gap: tui ? 1 : 8, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
-    {
-      visible: value.open,
-      gap: tui ? 0 : 8,
-      style: { width: fill, minHeight: 0 },
-      terminal: { grow: 1 },
-    },
+    { visible: value.open, gap: 0, terminal: { grow: 1 } },
   );
 }

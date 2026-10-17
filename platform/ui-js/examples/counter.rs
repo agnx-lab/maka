@@ -27,24 +27,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("output directory required")?,
     ))?;
     std::fs::create_dir(&output)?;
-    let (input, packages) = if std::env::args().nth(2).as_deref() == Some("dual") {
-        support::dual_fixture("return frame({count:state.count+1,revision:state.revision+1});")
-    } else if std::env::args().nth(2).as_deref() == Some("canvas") {
-        support::canvas_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("workspace") {
-        support::workspace_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("resource") {
-        support::resource_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("events") {
-        support::editor_events_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("editor") {
-        support::editor_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("native") {
-        support::native_fixture()
-    } else if std::env::args().nth(2).as_deref() == Some("composed") {
-        support::composed_fixture(support::CHILD_UPDATE, support::PARENT_EVENT)
-    } else {
-        support::fixture("return frame({count:state.count+1,revision:state.revision+1});")
+    let (input, packages) = match std::env::args().nth(2).as_deref() {
+        None => support::fixture("return frame({count:state.count+1,revision:state.revision+1});"),
+        Some("workspace") => support::workspace_fixture(),
+        Some("resource") => support::resource_fixture(),
+        Some("events") => support::editor_events_fixture(),
+        Some("editor") => support::editor_fixture(),
+        Some("native") => support::native_fixture(),
+        Some("composed") => support::composed_fixture(support::CHILD_UPDATE, support::PARENT_EVENT),
+        Some(_) => return Err("unknown counter fixture".into()),
     };
     for package in &packages {
         package.export_to(&output.join(format!("{}.maka-plugin", package.manifest().id)))?;
@@ -70,22 +61,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec![],
         packages.clone(),
     ))?;
-    if std::env::args().nth(2).as_deref() == Some("dual") {
-        let mut terminal = input.clone();
-        terminal.environment.presentation =
-            Some(maka_plugin_core::composition::PresentationTarget::Tui);
-        std::fs::write(
-            output.join("input.tui.json"),
-            serde_json::to_vec_pretty(&terminal)?,
-        )?;
-        runtime.block_on(store.commit_application(
-            uuid::Uuid::from_u128(2),
-            0,
-            terminal,
-            vec![],
-            packages,
-        ))?;
-    }
     runtime.block_on(store.close())?;
     println!("{}", output.display());
     Ok(())

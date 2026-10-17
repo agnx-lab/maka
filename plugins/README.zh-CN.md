@@ -35,9 +35,9 @@
 | `application/` | 部署管理、插件安装与 UI 编写 |
 | `shared/` | 共用 TypeScript 契约与开发辅助函数 |
 
-修改已有插件时，从声明入手，沿所选实现查找代码。JavaScript 入口指定本地模块，例如由 `tui.ts` 构建的 `tui.js`。原生入口选择可执行文件提供的实现。插件族目录和已链接 crate 都不会自动激活插件。
+修改已有插件时，从声明入手，沿所选实现查找代码。JavaScript 入口指定本地模块，例如由 `tui.ts` 构建的 `tui.js`。原生入口选择可执行文件提供的实现。插件族目录和已链接 crate 都不会自动激活插件。[桌面 shell](../products/maka/desktop-shell/README.zh-CN.md) 单独编写 app，并连接相同的公共 Host 服务。
 
-插件族表示业务归属，不是互斥的 UI/服务分类。以 `package.ts` 为准：`host`、`tui`、`desktop` 入口说明实现运行位置，导出契约区分组件、服务和值。例如 `application/authoring` 同时包含 Host 服务与前台 UI worker。`ui/` 存放通用展示能力，并不收纳所有带 UI 的插件。大型组件可以按职责拆成普通模块；[AgentScreen](agent/agent-screen/README.zh-CN.md) 保留一个组件状态和生命周期，将命令、结果、事件及视图区域分开组织。
+插件族表示业务归属，不是互斥的 UI/服务分类。以 `package.ts` 为准：`host`、`tui` 入口说明实现运行位置，导出契约区分组件、服务和值。例如 `application/authoring` 同时包含 Host 服务与前台 UI worker。`ui/` 存放通用展示能力，并不收纳所有带 UI 的插件。大型组件可以按职责拆成普通模块；[AgentScreen](agent/agent-screen/README.zh-CN.md) 保留一个组件状态和生命周期，将命令、结果、事件及视图区域分开组织。
 
 在仓库根目录构建单个包：
 

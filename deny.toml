@@ -51,8 +51,6 @@ exceptions = [
   # GPUI native/platform dependencies; no third-party source is vendored.
   { crate = "cbindgen@0.28.0", allow = ["MPL-2.0"] },
   { crate = "dwrote@0.11.5", allow = ["MPL-2.0"] },
-  # Permissive BSD-style terms, preserving the upstream license/attribution.
-  { crate = "libbz2-rs-sys@0.2.5", allow = ["bzip2-1.0.6"] },
   { crate = "cooked-waker@5.0.0", allow = ["MPL-2.0"] },
   { crate = "cssparser@0.36.0", allow = ["MPL-2.0"] },
   { crate = "cssparser@0.37.0", allow = ["MPL-2.0"] },

@@ -75,7 +75,6 @@ export function handleRaw<N extends Node>(
   events: Emission[],
   locale: string,
 ) {
-  const target = presentation.target;
   if (diagnosticEvent(state, actions, input.key))
     return frame(presentation, configuredLocale, state, values, actions);
   if (input.key === 'compact-confirm') compactConfirm(state, actions);
@@ -96,7 +95,7 @@ export function handleRaw<N extends Node>(
       sequence: ++state.serial,
       taskId: state.scheduleAlerts.reminders[0].taskId,
     };
-    rootCommand(state, actions, locale, 'scheduler-open', target);
+    rootCommand(state, actions, locale, 'scheduler-open');
   }
   if (input.key === 'session-change-cancel') closeDialog(state);
   if (
@@ -106,10 +105,9 @@ export function handleRaw<N extends Node>(
   )
     changeSession(state, actions, state.sessionChange, 'remove');
   if (input.key === 'catalog-search') input = { ...input, key: 'palette-open' };
-  if (input.key === 'home-projects') rootCommand(state, actions, locale, 'projects-open', target);
-  else if (input.key === 'home-imports')
-    rootCommand(state, actions, locale, 'imports-open', target);
-  else if (input.key === 'home-new') rootCommand(state, actions, locale, 'create', target);
+  if (input.key === 'home-projects') rootCommand(state, actions, locale, 'projects-open');
+  else if (input.key === 'home-imports') rootCommand(state, actions, locale, 'imports-open');
+  else if (input.key === 'home-new') rootCommand(state, actions, locale, 'create');
   if (
     input.key.startsWith('file-paste-') &&
     state.attachments.paste &&
@@ -294,7 +292,7 @@ export function handleRaw<N extends Node>(
     if (state.inspector === 'recap') state.inspector = null;
     state.recap.confirmation = null;
   } else if (input.key === 'recap-check' && state.uncertain?.reference.method === 'generateRecap') {
-    rootCommand(state, actions, locale, 'check', target);
+    rootCommand(state, actions, locale, 'check');
   } else if (input.key === 'recap-refresh') {
     readRecap(state, actions);
   } else if (input.key === 'recap-generate' && canGenerateRecap(state)) {
@@ -328,11 +326,10 @@ export function handleRaw<N extends Node>(
     state.copyRequest = ++state.serial;
     state.messageCopy = null;
   } else if (input.key === 'help-open') {
-    if (state.dialog === null) rootCommand(state, actions, locale, 'help-open', target);
+    if (state.dialog === null) rootCommand(state, actions, locale, 'help-open');
   } else if (input.key === 'agent-screen-dialog') {
     const selection = state.attachments.selection;
     if (
-      target === 'tui' &&
       state.dialog === 'attachments' &&
       selection?.browse &&
       attachmentFiles(state.attachments, selection.sessionId, selection.dataSource).length
@@ -353,12 +350,10 @@ export function handleRaw<N extends Node>(
     if ('open' in state.sidebar) state.sidebar.open = false;
     else controlSidebar(state, 'toggle');
   } else {
-    const command = rootCommands(state, locale, target).find(
-      (command) => command.kind === input.key,
-    );
+    const command = rootCommands(state, locale).find((command) => command.kind === input.key);
     if (
       command &&
-      rootCommand(state, actions, locale, command.kind, target) &&
+      rootCommand(state, actions, locale, command.kind) &&
       command.kind === 'workhub-open'
     )
       events.push({ name: 'workhub', value: {} });

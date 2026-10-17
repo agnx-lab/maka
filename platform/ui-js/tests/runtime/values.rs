@@ -55,7 +55,7 @@ fn fixture(
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     for name in if duplicate {
         vec!["brand", "second"]
     } else {
@@ -116,7 +116,7 @@ fn fixture(
         "value.brand",
         Declaration {
             entries: BTreeMap::from([(
-                EntryTarget::Desktop,
+                EntryTarget::Tui,
                 EntryDeclaration {
                     scene: None,
                     implementation,
@@ -133,7 +133,7 @@ fn fixture(
         .instances
         .insert("brand".into(), support::node(&provider, 99));
     packages.extend([provider, app]);
-    let mut native = crate::support::scene::registry(PresentationTarget::Desktop);
+    let mut native = crate::support::scene::registry(PresentationTarget::Tui);
     native
         .register("test.palette", move |_, _| {
             Ok(BTreeMap::from([(
@@ -208,11 +208,8 @@ impl maka_ui_runtime::NativeComponent<()> for Exact {
         Ok(maka_ui_runtime::Frame {
             revision: 0,
             state: json!({"exact":values.get("brand").unwrap()[0]}),
-            surface: Some(maka_ui_runtime::Surface::Window {
+            surface: Some(maka_ui_runtime::Surface::Terminal {
                 binding: "surface".into(),
-                title: "Native precision".into(),
-                width: 640,
-                height: 400,
             }),
             view: crate::support::scene::view(crate::support::scene::Node::Text {
                 key: "value".into(),
@@ -236,7 +233,7 @@ fn native_activation_and_callback_preserve_exact_integers_without_a_js_roundtrip
         .unwrap()
         .declaration()
         .clone();
-    let entry = declaration.entries.get_mut(&EntryTarget::Desktop).unwrap();
+    let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
     entry.scene = None;
     entry.implementation = Implementation::Native {
         implementation: "test.exact-value".into(),

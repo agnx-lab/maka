@@ -35,9 +35,9 @@ A plugin is declared by a leaf `package.ts`. It lists executable entries, config
 | `application/` | Deployment management, plugin installation and UI authoring |
 | `shared/` | Shared TypeScript contracts and authoring helpers |
 
-For an existing plugin, start with its declaration and follow its selected implementation. JavaScript entries name a local module such as `tui.js`, built from `tui.ts`. Native entries select an implementation supplied by the executable. Neither a family directory nor a linked crate activates a plugin.
+For an existing plugin, start with its declaration and follow its selected implementation. JavaScript entries name a local module such as `tui.js`, built from `tui.ts`. Native entries select an implementation supplied by the executable. Neither a family directory nor a linked crate activates a plugin. The [desktop shell](../products/maka/desktop-shell/README.md) authors its app separately and connects to the same public Host services.
 
-A family describes business ownership, not a mutually exclusive UI/service category. `package.ts` is authoritative: `host`, `tui` and `desktop` entries say where each implementation runs, and their exports distinguish components from services and values. For example, `application/authoring` has a Host service and a foreground UI worker. `ui/` contains reusable presentation capabilities; it is not a collection of every plugin with a UI. Large components can split plain modules by responsibility; [AgentScreen](agent/agent-screen/README.md) keeps one component state and lifecycle while separating commands, replies, events and view regions.
+A family describes business ownership, not a mutually exclusive UI/service category. `package.ts` is authoritative: `host` and `tui` entries say where each implementation runs, and their exports distinguish components from services and values. For example, `application/authoring` has a Host service and a foreground UI worker. `ui/` contains reusable presentation capabilities; it is not a collection of every plugin with a UI. Large components can split plain modules by responsibility; [AgentScreen](agent/agent-screen/README.md) keeps one component state and lifecycle while separating commands, replies, events and view regions.
 
 Build a single package from the repository root:
 

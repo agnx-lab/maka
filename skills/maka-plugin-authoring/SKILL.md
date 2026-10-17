@@ -1,6 +1,6 @@
 ---
 name: maka-plugin-authoring
-description: Create, extend or debug Maka plugins, including Host services, native terminal or desktop components, and product bindings.
+description: Create, extend or debug Maka plugins, including Host services, native terminal components, and product bindings.
 license: Apache-2.0
 ---
 <!--

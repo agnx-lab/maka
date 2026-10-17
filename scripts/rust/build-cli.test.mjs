@@ -21,13 +21,23 @@ import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { buildCli, rustTarget } from './build-cli.mjs';
+import { buildCli, rustTarget, stageDesktopApp } from './build-cli.mjs';
 
 test('CLI builds use the requested target and artifact path', async (t) => {
-  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const root = await mkdtemp(join(tmpdir(), 'maka-build-cli-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sourceRoot = join(root, 'extracted-source');
+  for (const repository of [root, sourceRoot]) {
+    const app = join(repository, 'products/maka/desktop-shell/app');
+    await mkdir(join(app, 'icons'), { recursive: true });
+    await writeFile(join(app, 'gpui-shell.json'), '{"entry":"main.js"}');
+    await writeFile(join(app, 'main.js'), 'authored application');
+    await writeFile(join(app, 'icons/logo.svg'), '<svg/>');
+  }
   const previous = process.env.CARGO_TARGET_DIR;
   process.env.CARGO_TARGET_DIR = 'target/isolated release';
   let invocation;
@@ -55,7 +65,16 @@ test('CLI builds use the requested target and artifact path', async (t) => {
     const triple = target ?? rustTarget();
     const linux = triple.includes('-linux-');
     const directory = join(root, process.env.CARGO_TARGET_DIR);
-    const output = await buildCli({ release: true, target });
+    const binaryDirectory = join(directory, ...(linux || target ? [triple] : []), 'release');
+    await mkdir(join(binaryDirectory, 'app'), { recursive: true });
+    await writeFile(join(binaryDirectory, 'app/obsolete.js'), 'removed module');
+    const output = await buildCli({ release: true, target, repositoryRoot: root });
+    await assert.rejects(lstat(join(dirname(output), 'app/obsolete.js')), { code: 'ENOENT' });
+    assert.equal(
+      await readFile(join(dirname(output), 'app/main.js'), 'utf8'),
+      'authored application',
+    );
+    assert.equal(await readFile(join(dirname(output), 'app/icons/logo.svg'), 'utf8'), '<svg/>');
     assert.equal(invocation.command, 'cargo');
     assert.equal(invocation.options.cwd, root);
     assert.deepEqual(invocation.args, [
@@ -64,7 +83,7 @@ test('CLI builds use the requested target and artifact path', async (t) => {
       '-p',
       'maka-cli',
       '-p',
-      'maka-desktop',
+      'maka-desktop-shell',
       '--target-dir',
       directory,
       '--release',
@@ -81,7 +100,7 @@ test('CLI builds use the requested target and artifact path', async (t) => {
     );
   }
   assert.equal(
-    await buildCli(),
+    await buildCli({ repositoryRoot: root }),
     join(root, 'target/debug', process.platform === 'win32' ? 'maka.exe' : 'maka'),
   );
   assert.deepEqual(invocation.args, [
@@ -90,11 +109,10 @@ test('CLI builds use the requested target and artifact path', async (t) => {
     '-p',
     'maka-cli',
     '-p',
-    'maka-desktop',
+    'maka-desktop-shell',
     '--target-dir',
     join(root, 'target'),
   ]);
-  const sourceRoot = join(root, 'extracted-source');
   const sourceEnv = { MAKA_JS_DEPS: sourceRoot };
   assert.equal(
     await buildCli({
@@ -108,5 +126,24 @@ test('CLI builds use the requested target and artifact path', async (t) => {
   assert.equal(invocation.options.cwd, sourceRoot);
   assert.equal(invocation.options.env, sourceEnv);
   exitCode = 1;
-  await assert.rejects(buildCli({ release: true }), /Maka build failed: 1/u);
+  await assert.rejects(buildCli({ release: true, repositoryRoot: root }), /Maka build failed: 1/u);
+});
+
+test('desktop app staging rejects symlinks without replacing the accepted sidecar', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'maka-app-staging-'));
+  try {
+    const source = join(root, 'products/maka/desktop-shell/app');
+    const destination = join(root, 'bin/app');
+    await mkdir(source, { recursive: true });
+    await writeFile(join(source, 'gpui-shell.json'), '{"entry":"main.js"}');
+    await writeFile(join(source, 'main.js'), 'original app');
+    await stageDesktopApp(root, destination);
+    await writeFile(join(root, 'outside.js'), 'not authored app content');
+    await symlink(root, join(source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(stageDesktopApp(root, destination), /non-regular file/);
+    assert.equal(await readFile(join(destination, 'main.js'), 'utf8'), 'original app');
+    await assert.rejects(lstat(join(destination, 'linked')), { code: 'ENOENT' });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

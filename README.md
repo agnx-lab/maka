@@ -23,7 +23,7 @@
 
 Apache Maka (Incubating) is a high-performance agent workspace that keeps a complete record of everything it did.
 
-Maka runs plugin-composed products through native Rust terminal and desktop presenters. A Runtime Host owns execution, permissions and durable state. Model providers, tools and business capabilities use public plugin interfaces.
+Maka provides a plugin-composed terminal product and a native desktop shell. A Runtime Host owns execution, permissions and durable state. Model providers, tools and business capabilities use public plugin interfaces.
 
 ## Run from source
 
@@ -36,7 +36,9 @@ just setup
 just run
 ```
 
-`just run` opens the terminal product. First launch confirms the current workspace and installs the bundled tools and skills; later launches reopen the saved application. Use `just run --help` for CLI commands. `just build --release` produces `target/release/maka` (`maka.exe` on Windows). Node.js bundles provider SDKs at build time; the resulting executable runs its embedded JavaScript in V8. To launch a checked terminal composition, use `just run application run --root PATH --deployment UUID --connections FILE`. Product authoring and installation are described in [the ordinary agent product](products/maka/bundle/README.md).
+`just run` opens the terminal product. First launch confirms the current workspace and installs the bundled tools and skills; later launches reopen the saved application. Use `just run --help` for CLI commands. `just build --release` produces `target/release/maka`, `maka-desktop-shell` and the adjacent `app/` directory (executables use `.exe` on Windows). The build entry supports `--release` and `--target`. Node.js bundles provider SDKs for the CLI, which runs its embedded JavaScript in V8. The desktop shell runs its authored app with QuickJS. To launch a checked terminal composition, use `just run application run --root PATH --deployment UUID --connections FILE`. Product authoring and installation are described in [the ordinary agent product](products/maka/bundle/README.md).
+
+Launch the desktop with `target/release/maka desktop --root HOST_ROOT`, selecting its actual business Host Root. The launcher initializes or reopens that Host and keeps its client alive while the shell runs. See [desktop-shell](products/maka/desktop-shell/README.md) for the packaged app and development commands.
 
 ## Repository
 

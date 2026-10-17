@@ -38,7 +38,7 @@ import { copy } from './locale-catalogs/conversation-search.js';
 import { toolCards } from './tool-cards.js';
 import { toolPresentation } from '../agent/tool-details/index.js';
 import { messageView, sourceFieldLabel } from './message-view.js';
-import { fill, compactLabel, type Node, type Presentation } from './view.js';
+import { compactLabel, type Node, type Presentation } from './view.js';
 
 export interface ConversationSearch {
   context: NonNullable<TimelineProps['search']>;
@@ -678,7 +678,6 @@ export function historyView<N extends Node>(
           ui.text(
             'find-field-' + section.field,
             sourceFieldLabel(props.locale, section.field),
-            13,
             props.theme.muted,
           ),
           ...(source
@@ -712,7 +711,6 @@ export function historyView<N extends Node>(
                 ui.text(
                   'find-loading-' + section.field,
                   section.failed ? text.sourceFailed : text.loading,
-                  13,
                   props.theme.muted,
                 ),
               ]),
@@ -736,7 +734,7 @@ export function historyView<N extends Node>(
   const rowBody = ui.box('find-row-fields', sections, { gap: 0 });
   const row =
     header && preview
-      ? messageView(presentation, 'tui', props.theme, props.locale, {
+      ? messageView(presentation, props.theme, props.locale, {
           id: 'find-preview-row',
           role: header.role,
           origin: header.origin,
@@ -762,9 +760,7 @@ export function historyView<N extends Node>(
   const rows = history.matches.map((hit, index) => {
     const label = `${index === history.selected ? '› ' : ''}${history.offset + index + 1}. ${compactLabel(hit.preview, 96)}`;
     return ui.button(`find-hit-${index}`, label, !searchReady(search), false, {
-      width: fill,
-      justify: 'start',
-      truncate: true,
+      align: 'start',
       ...(index === history.selected ? { background: props.theme.selected } : {}),
     });
   });
@@ -785,7 +781,6 @@ export function historyView<N extends Node>(
                       ui.text(
                         'find-empty',
                         history.scanning ? text.loading : text.findNoResults,
-                        13,
                         props.theme.muted,
                       ),
                     ],
@@ -794,7 +789,6 @@ export function historyView<N extends Node>(
                   wheel: { up: 'find-previous', down: 'find-next' },
                   gap: 0,
                   terminal: { grow: 1, basis: 0 },
-                  style: { width: fill, height: fill },
                 },
               ),
               command: history.reveal,
@@ -811,7 +805,6 @@ export function historyView<N extends Node>(
               max: Math.max(1, Math.min(6, rows.length)),
             },
           },
-          style: { width: fill, grow: 1, minHeight: 0 },
         },
       ),
       ui.box('find-divider', [], { background: props.theme.border, terminal: { basis: 1 } }),
@@ -824,13 +817,11 @@ export function historyView<N extends Node>(
                 ui.text(
                   'find-preview-label',
                   sourceFieldLabel(props.locale, preview.hit.field),
-                  13,
                   props.theme.muted,
                 ),
                 ui.text(
                   'find-preview-hit',
                   compactLabel(preview.hit.preview, 160),
-                  13,
                   props.theme.muted,
                 ),
                 ui.box(
@@ -843,22 +834,18 @@ export function historyView<N extends Node>(
                           scroll: 'anchor',
                           gap: 0,
                           terminal: { grow: 1, basis: 0 },
-                          style: { width: fill, height: fill },
                         }),
                         command: preview.command,
                       },
                       { input: 'find-preview-input', observed: 'find-preview-observed' },
                     ),
                   ],
-                  {
-                    terminal: { grow: 1, basis: 0 },
-                    style: { width: fill, grow: 1, minHeight: 0 },
-                  },
+                  { terminal: { grow: 1, basis: 0 } },
                 ),
               ]
             : []),
         ],
-        { gap: 0, terminal: { grow: 1, basis: 0 }, style: { width: fill, grow: 1, minHeight: 0 } },
+        { gap: 0, terminal: { grow: 1, basis: 0 } },
       ),
     ],
     {
@@ -869,7 +856,6 @@ export function historyView<N extends Node>(
         direction: 'row',
         children: { 'find-results': { basis_fraction: { numerator: 34, denominator: 100 } } },
       },
-      style: { width: fill, height: fill },
     },
   );
 }

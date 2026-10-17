@@ -46,15 +46,14 @@ export function uiEntries(spec: {
   imports: Record<string, Import>;
   configuration?: unknown;
   scene?: boolean;
-}): Record<'desktop' | 'tui', EntryDeclaration & { imports: Record<string, Import> }> {
-  const entry = (
-    target: 'desktop' | 'tui',
-  ): EntryDeclaration & { imports: Record<string, Import> } => ({
-    implementation: { kind: 'javascript', module: `${target}.js`, realm: 'dedicated' },
-    configuration: spec.configuration ?? empty,
-    imports: { ...spec.imports },
-    exports: { [spec.export]: required(spec.contract) },
-    ...(spec.scene === false ? {} : { scene: { name: `maka.${target}.scene`, version: 1 } }),
-  });
-  return { desktop: entry('desktop'), tui: entry('tui') };
+}): Record<'tui', EntryDeclaration & { imports: Record<string, Import> }> {
+  return {
+    tui: {
+      implementation: { kind: 'javascript', module: 'tui.js', realm: 'dedicated' },
+      configuration: spec.configuration ?? empty,
+      imports: { ...spec.imports },
+      exports: { [spec.export]: required(spec.contract) },
+      ...(spec.scene === false ? {} : { scene: { name: 'maka.tui.scene', version: 1 } }),
+    },
+  };
 }

@@ -22,7 +22,7 @@ import type { Theme, TimelineProps } from '../../shared/contracts.js';
 import { copy, tuiText } from './locale.js';
 import { sameValue } from '../../shared/value.js';
 import { messageOriginCaption } from '../../shared/message-view.js';
-import { fill, pixels, type Node, type Presentation } from '../../shared/view.js';
+import { type Node, type Presentation } from '../../shared/view.js';
 
 import { attachmentFiles, attachmentSummary, pasteView } from '../../shared/attachments.js';
 
@@ -45,12 +45,7 @@ import { messages, turnTimings, utf8Bytes, activeOutput } from './messages.js';
 import { promptAnchor } from './actions.js';
 import { readingKey, type State } from './state.js';
 
-function readingProps(
-  state: State,
-  theme: Theme,
-  locale: string,
-  target: 'tui' | 'desktop',
-): TimelineProps {
+function readingProps(state: State, theme: Theme, locale: string): TimelineProps {
   const timelineMessages = messages(state);
   const prompt = state.visits.find((entry) => entry.id === state.selected?.id)?.prompt;
   return {
@@ -61,7 +56,7 @@ function readingProps(
     leadingPrompt:
       state.window && prompt?.anchor === promptAnchor(state.window.page) ? prompt.value : null,
     timings: turnTimings(state, timelineMessages),
-    copyRequest: target === 'tui' && !state.image ? state.copyRequest : null,
+    copyRequest: !state.image ? state.copyRequest : null,
     browse: state.browse,
     markReadEnabled:
       !!state.selected?.hasUnread &&
@@ -73,7 +68,7 @@ function readingProps(
       !state.source &&
       !state.image,
     search:
-      target === 'tui' && state.searchOpen && state.selected
+      state.searchOpen && state.selected
         ? {
             sessionId: state.selected.id,
             epoch:
@@ -150,12 +145,11 @@ export function conversationView<N extends Node>(
   actions: Action[],
 ) {
   const currentPage = state.pages.at(-1);
-  const target = presentation.target,
-    text = copy(locale),
+  const text = copy(locale),
     ui = presentation.paint(theme),
     busy = mutationPending(state);
   const catalogBusy = busy || catalogPending(state);
-  const timelineProps = readingProps(state, theme, locale, target);
+  const timelineProps = readingProps(state, theme, locale);
   const visit = state.visits.find((entry) => entry.key === readingKey(state));
   // Keep bounded native readers, without serializing a second copy of every
   // message and theme in component state. Evict oldest background content first.
@@ -215,21 +209,20 @@ export function conversationView<N extends Node>(
                 },
                 theme,
                 locale,
-                target,
               );
         props.active = entry === visit;
         if (entry !== visit) props.markReadEnabled = false;
         return ui.box(
           'task-reader-' + entry.key,
           [presentation.slot(entry.key, 'timeline', props, timelineEvents)],
-          { visible: entry === visit, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+          { visible: entry === visit, terminal: { grow: 1 } },
         );
       }),
       ...(!visit
         ? [presentation.slot('timeline-empty', 'timeline', timelineProps, timelineEvents)]
         : []),
     ],
-    { terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { terminal: { grow: 1 } },
   );
   const imageViewer = presentation.slot(
     'image-viewer',
@@ -267,7 +260,7 @@ export function conversationView<N extends Node>(
         ['service_approval', 'permissions', 'client_capability'].includes(
           reviewTarget(state)?.kind ?? '',
         ),
-      commands: composerCommands(state, locale, target),
+      commands: composerCommands(state, locale),
       skillContext: JSON.stringify([
         state.selected?.workspace,
         state.selected?.tools,
@@ -282,7 +275,6 @@ export function conversationView<N extends Node>(
       locale,
       busy: !!state.attachments.paste,
       filePaste:
-        target === 'tui' &&
         state.selected &&
         !state.selected.archived &&
         conversationRoute(state) &&
@@ -417,16 +409,9 @@ export function conversationView<N extends Node>(
                     : state.pages.at(-1) === 'deployment'
                       ? text.deploymentTitle
                       : (state.selected?.title ?? tuiText(locale, 'route-agent-screen'))),
-    17,
     theme.text,
     650,
-    {
-      align: target === 'tui' ? 'start' : 'center',
-      width: pixels(0),
-      grow: 1,
-      minWidth: 0,
-      truncate: true,
-    },
+    { align: 'start', truncate: true },
   );
   const models = presentation.slot(
     'models',
@@ -448,11 +433,7 @@ export function conversationView<N extends Node>(
       executor: state.executor,
       catalogEpoch: state.catalogEpoch,
       openRequest: state.modelOpenRequest,
-      busy:
-        busy ||
-        !state.backendReady ||
-        executionPending(state) ||
-        (target === 'tui' && !!state.run && !state.queue),
+      busy: busy || !state.backendReady || executionPending(state) || (!!state.run && !state.queue),
     },
     {
       selected: 'model',
@@ -511,273 +492,193 @@ export function conversationView<N extends Node>(
   const main = ui.box(
     'main',
     [
-      ...(target === 'desktop' ? [header] : []),
-      ...(target === 'tui'
-        ? [
-            ui.box(
-              'home',
-              [
-                ui.box('home-top', [], { terminal: { grow: 1 } }),
-                ui.box(
-                  'home-center',
-                  [
-                    ui.box('home-left', [], { terminal: { grow: 1 } }),
-                    ui.box(
-                      'home-content',
-                      [
-                        ui.text('home-title', 'Maka', 24, theme.text, 650, {
+      ui.box(
+        'home',
+        [
+          ui.box('home-top', [], { terminal: { grow: 1 } }),
+          ui.box(
+            'home-center',
+            [
+              ui.box('home-left', [], { terminal: { grow: 1 } }),
+              ui.box(
+                'home-content',
+                [
+                  ui.text('home-title', 'Maka', theme.text, 650, { align: 'center' }),
+                  ...(state.place
+                    ? [
+                        ui.text('home-place', state.place, theme.subtle, 400, {
                           align: 'center',
+                          truncate: true,
                         }),
-                        ...(state.place
-                          ? [
-                              ui.text('home-place', state.place, 14, theme.subtle, 400, {
-                                align: 'center',
-                                truncate: true,
-                              }),
-                            ]
-                          : []),
-                        ui.box('home-gap', [], { terminal: { basis: 1 } }),
-                        ...(!canExecute(state)
-                          ? [
-                              ui.text(
-                                'home-setup',
-                                state.hasBackends
-                                  ? text.executionBackend
-                                  : tuiText(
-                                      locale,
-                                      state.modelSetup === 'loading'
-                                        ? 'connections-loading'
-                                        : state.modelSetup === 'unavailable'
-                                          ? 'home-setup-failed'
-                                          : state.modelSetup === 'connect'
-                                            ? 'home-needs-connection'
-                                            : 'home-needs-default',
-                                    ),
-                                14,
-                                state.modelSetup === 'unavailable' ? theme.warning : theme.subtle,
-                                400,
-                                { align: 'center' },
+                      ]
+                    : []),
+                  ui.box('home-gap', [], { terminal: { basis: 1 } }),
+                  ...(!canExecute(state)
+                    ? [
+                        ui.text(
+                          'home-setup',
+                          state.hasBackends
+                            ? text.executionBackend
+                            : tuiText(
+                                locale,
+                                state.modelSetup === 'loading'
+                                  ? 'connections-loading'
+                                  : state.modelSetup === 'unavailable'
+                                    ? 'home-setup-failed'
+                                    : state.modelSetup === 'connect'
+                                      ? 'home-needs-connection'
+                                      : 'home-needs-default',
                               ),
-                            ]
-                          : []),
-                        ui.button(
-                          'home-new',
-                          '+ ' + tuiText(locale, 'sidebar-new-session') + '   Ctrl+N',
-                          catalogBusy,
-                          true,
-                          { background: 0 },
+                          state.modelSetup === 'unavailable' ? theme.warning : theme.subtle,
+                          400,
+                          { align: 'center' },
                         ),
-                        ui.button('home-projects', text.projectsTitle, false, false, {
-                          background: 0,
-                        }),
-                        ui.button('home-imports', text.importsTitle, false, false, {
-                          background: 0,
-                        }),
-                      ],
-                      { gap: 0, terminal: { basis: 52, shrink: true } },
-                    ),
-                    ui.box('home-right', [], { terminal: { grow: 1 } }),
-                  ],
-                  { row: true, gap: 0 },
-                ),
-                ui.box('home-bottom', [], { terminal: { grow: 1 } }),
-              ],
-              {
-                gap: 0,
-                visible: !state.selected && !state.embedding.fixed,
-                viewport: true,
-                terminal: { grow: 1 },
-              },
-            ),
-          ]
-        : []),
+                      ]
+                    : []),
+                  ui.button(
+                    'home-new',
+                    '+ ' + tuiText(locale, 'sidebar-new-session') + '   Ctrl+N',
+                    catalogBusy,
+                    true,
+                    { background: 0 },
+                  ),
+                  ui.button('home-projects', text.projectsTitle, false, false, { background: 0 }),
+                  ui.button('home-imports', text.importsTitle, false, false, { background: 0 }),
+                ],
+                { gap: 0, terminal: { basis: 52, shrink: true } },
+              ),
+              ui.box('home-right', [], { terminal: { grow: 1 } }),
+            ],
+            { row: true, gap: 0 },
+          ),
+          ui.box('home-bottom', [], { terminal: { grow: 1 } }),
+        ],
+        {
+          gap: 0,
+          visible: !state.selected && !state.embedding.fixed,
+          viewport: true,
+          terminal: { grow: 1 },
+        },
+      ),
       ...(state.selected?.archived && attached.length && !state.source && !state.image
         ? [ui.box('archived-attachments', [attachmentsButton], { row: true })]
         : []),
-      ...(target === 'desktop' && state.attachments.paste
-        ? [pasteView(presentation, theme, locale, state.attachments.paste, busy)]
-        : []),
-      ...(target === 'desktop'
-        ? [
-            ui.box(
-              'conversation',
-              [
-                ui.box('retained-timeline', [timeline], {
-                  visible: !state.image,
-                  style: { width: fill, height: fill },
-                  terminal: { grow: 1 },
-                }),
-                imageViewer,
-              ],
-              {
-                style: {
-                  width: fill,
-                  height: pixels(0),
-                  grow: 1,
-                  shrink: 1,
-                  minHeight: 0,
-                },
-              },
-            ),
-            ui.box(
-              'input-area',
-              [
-                composerStatus(presentation, state, theme, locale),
-                ...(!state.selected?.archived ? [attachmentsButton] : []),
-                composer,
-                sandbox,
-                footer,
-              ],
-              {
-                visible: !state.image && !state.selected?.archived,
-                padding: 24,
-                style: { width: fill, maxWidth: 808, shrink: 0 },
-              },
-            ),
-          ]
-        : [
-            ui.box(
-              'session-body',
-              [
-                ui.box(
-                  'conversation',
-                  [
+      ui.box(
+        'session-body',
+        [
+          ui.box(
+            'conversation',
+            [
+              ui.box(
+                'task-introduction',
+                [
+                  ui.text('task-prompt', tuiText(locale, 'task-empty'), theme.text, 650),
+                  ui.text('task-prompt-help', tuiText(locale, 'task-empty-help'), theme.muted),
+                ],
+                { visible: welcome, gap: 1 },
+              ),
+              ui.box('retained-timeline', [timeline], {
+                visible: !state.image && !welcome,
+                terminal: { grow: 1 },
+              }),
+              imageViewer,
+            ],
+            { terminal: { basis: 1, grow: 1 } },
+          ),
+          ...(state.attachments.paste
+            ? [pasteView(presentation, theme, locale, state.attachments.paste, busy)]
+            : []),
+          ui.box(
+            'retained-composer',
+            [
+              presentation.slot('queue', 'rows', queueProps, {
+                activated: 'queue-action',
+              }),
+              ...(queueProps.rows.length && ui.focusButton
+                ? [
                     ui.box(
-                      'task-introduction',
+                      'queue-status',
                       [
-                        ui.text('task-prompt', tuiText(locale, 'task-empty'), 18, theme.text, 650),
-                        ui.text(
-                          'task-prompt-help',
-                          tuiText(locale, 'task-empty-help'),
-                          13,
-                          theme.muted,
+                        ui.box('queue-status-space', [], {
+                          terminal: { basis: 0, grow: 1 },
+                        }),
+                        ui.focusButton(
+                          'queue-focus',
+                          `${theme.ascii ? '=' : '≡'} ${queueProps.rows.length}`,
+                          'queue',
                         ),
                       ],
-                      { visible: welcome, gap: 1 },
+                      { row: true, gap: 0 },
                     ),
-                    ui.box('retained-timeline', [timeline], {
-                      visible: !state.image && !welcome,
-                      style: { width: fill, height: fill },
-                      terminal: { grow: 1 },
-                    }),
-                    imageViewer,
-                  ],
-                  { terminal: { basis: 1, grow: 1 } },
-                ),
-                ...(state.attachments.paste
-                  ? [pasteView(presentation, theme, locale, state.attachments.paste, busy)]
-                  : []),
-                ui.box(
-                  'retained-composer',
-                  [
-                    presentation.slot('queue', 'rows', queueProps, {
-                      activated: 'queue-action',
-                    }),
-                    ...(queueProps.rows.length && ui.focusButton
-                      ? [
-                          ui.box(
-                            'queue-status',
-                            [
-                              ui.box('queue-status-space', [], {
-                                terminal: { basis: 0, grow: 1 },
-                              }),
-                              ui.focusButton(
-                                'queue-focus',
-                                `${theme.ascii ? '=' : '≡'} ${queueProps.rows.length}`,
-                                'queue',
-                              ),
-                            ],
-                            { row: true, gap: 0 },
-                          ),
-                        ]
-                      : []),
-                    ...(attached.length
-                      ? [
-                          attachmentSummary(
-                            presentation,
-                            theme,
-                            locale,
-                            attached,
-                            attachmentsDisabled,
-                          ),
-                        ]
-                      : []),
-                    composerStatus(presentation, state, theme, locale),
-                    ui.box('composer-navigation', [composer], {
-                      gap: 0,
-                      terminal: { shrink: true },
-                      focusShortcuts: [
-                        {
-                          key: 'up',
-                          modifiers: [],
-                          child: 'queue',
-                          enabled: queueProps.rows.length > 0,
-                        },
-                      ],
-                    }),
-                  ],
+                  ]
+                : []),
+              ...(attached.length
+                ? [attachmentSummary(presentation, theme, locale, attached, attachmentsDisabled)]
+                : []),
+              composerStatus(presentation, state, theme, locale),
+              ui.box('composer-navigation', [composer], {
+                gap: 0,
+                terminal: { shrink: true },
+                focusShortcuts: [
                   {
-                    gap: 0,
-                    visible: !state.source && !state.image && !state.selected?.archived,
-                    terminal: { shrink: true },
+                    key: 'up',
+                    modifiers: [],
+                    child: 'queue',
+                    enabled: queueProps.rows.length > 0,
                   },
-                ),
-              ],
-              {
-                gap: 0,
-                visible: !!state.selected,
-                viewport: true,
-                terminal: { grow: 1 },
+                ],
+              }),
+            ],
+            {
+              gap: 0,
+              visible: !state.source && !state.image && !state.selected?.archived,
+              terminal: { shrink: true },
+            },
+          ),
+        ],
+        {
+          gap: 0,
+          visible: !!state.selected,
+          viewport: true,
+          terminal: { grow: 1 },
+        },
+      ),
+      ui.box(
+        'session-metadata',
+        [
+          ui.box(
+            'session-controls',
+            [ui.box('model-metadata', [models], { terminal: { shrink: true } }), sandbox],
+            { row: true, gap: 0, terminal: { wrap: true, shrink: true } },
+          ),
+          ui.box('session-metrics', [footer], { terminal: { grow: 1, shrink: true } }),
+        ],
+        {
+          gap: 0,
+          wide: {
+            min_width: 76,
+            direction: 'row',
+            children: {
+              'session-controls': {
+                grow: 0,
+                basis: null,
+                basis_fraction: null,
+                shrink: true,
+                wrap: false,
               },
-            ),
-            ui.box(
-              'session-metadata',
-              [
-                ui.box(
-                  'session-controls',
-                  [ui.box('model-metadata', [models], { terminal: { shrink: true } }), sandbox],
-                  { row: true, gap: 0, terminal: { wrap: true, shrink: true } },
-                ),
-                ui.box('session-metrics', [footer], { terminal: { grow: 1, shrink: true } }),
-              ],
-              {
-                gap: 0,
-                wide: {
-                  min_width: 76,
-                  direction: 'row',
-                  children: {
-                    'session-controls': {
-                      grow: 0,
-                      basis: null,
-                      basis_fraction: null,
-                      shrink: true,
-                      wrap: false,
-                    },
-                    'session-metrics': {
-                      grow: 1,
-                      basis: null,
-                      basis_fraction: null,
-                      shrink: true,
-                      wrap: false,
-                    },
-                  },
-                },
+              'session-metrics': {
+                grow: 1,
+                basis: null,
+                basis_fraction: null,
+                shrink: true,
+                wrap: false,
               },
-            ),
-          ]),
+            },
+          },
+        },
+      ),
     ],
-    {
-      visible: conversationRoute(state),
-      gap: target === 'tui' ? 0 : undefined,
-      terminal: { grow: 1 },
-      style: {
-        width: target === 'desktop' ? pixels(0) : fill,
-        grow: 1,
-        height: fill,
-        align: 'center',
-        minWidth: 0,
-      },
-    },
+    { visible: conversationRoute(state), gap: 0, terminal: { grow: 1 } },
   );
   return { main, header, attached };
 }

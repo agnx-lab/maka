@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const uuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const source = { stateDomain: uuid(50), deployment: uuid(51), revision: 2 };
@@ -151,7 +151,7 @@ function edit(c, name, value) {
 function read(c, value) {
   return c.done({ text: value, metadata: c.state.pending.request.observation.snapshot.text });
 }
-for (const presentation of ['tui', 'desktop']) {
+for (const presentation of ['tui']) {
   test(
     presentation +
       ' Apps freezes explicit settings and bindings, then observes an unknown original operation',

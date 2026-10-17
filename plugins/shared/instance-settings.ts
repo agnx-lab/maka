@@ -31,7 +31,7 @@ import type {
 import type { ConnectionsProps } from './contracts.js';
 import { copy, type Copy } from './locale-catalogs/instance-settings.js';
 import { sameValue } from './value.js';
-import { compactLabel, fill, pixels, type Node, type Presentation } from './view.js';
+import { compactLabel, type Node, type Presentation } from './view.js';
 
 export interface InstanceSettings {
   source: DeploymentRef;
@@ -265,7 +265,6 @@ export function instanceSettingsView<N extends Node>(
                 ui.text(
                   'instance-setting-description-' + index,
                   field.description,
-                  12,
                   props.theme.muted,
                 ),
               ]
@@ -275,7 +274,6 @@ export function instanceSettingsView<N extends Node>(
                 ui.text(
                   'instance-setting-unsupported-' + index,
                   text.settingUnsupported,
-                  12,
                   props.theme.muted,
                 ),
               ]
@@ -318,7 +316,6 @@ export function instanceSettingsView<N extends Node>(
                 ui.text(
                   'instance-settings-title',
                   text.instanceConfiguration,
-                  20,
                   props.theme.text,
                   600,
                 ),
@@ -327,7 +324,6 @@ export function instanceSettingsView<N extends Node>(
           ui.text(
             'instance-settings-path',
             [...state.instance.path, ...state.path].join(' / '),
-            13,
             props.theme.muted,
           ),
         ],
@@ -347,32 +343,24 @@ export function instanceSettingsView<N extends Node>(
                     ui.text(
                       'instance-settings-empty',
                       busy ? text.connecting : text.settingsEmpty,
-                      14,
                       props.theme.muted,
                     ),
                   ]
                 : []),
             ],
-            {
-              gap: 1,
-              scroll: 'anchor',
-              terminal: { grow: 1 },
-              style: { width: fill, height: pixels(0), grow: 1 },
-            },
+            { gap: 1, scroll: 'anchor', terminal: { grow: 1 } },
           ),
         },
         { input: 'settings-input', observed: 'settings-observed' },
       ),
       ...(!navigationReady
-        ? [ui.text('instance-settings-preparing', text.settingsPreparing, 13, props.theme.muted)]
+        ? [ui.text('instance-settings-preparing', text.settingsPreparing, props.theme.muted)]
         : []),
       ...(state.notice
-        ? [ui.text('instance-settings-notice', text[state.notice], 13, props.theme.warning)]
+        ? [ui.text('instance-settings-notice', text[state.notice], props.theme.warning)]
         : []),
-      ...(notice ? [ui.text('instance-settings-status', notice, 13, props.theme.muted)] : []),
-      ...(diagnostic
-        ? [ui.text('instance-settings-error', diagnostic, 13, props.theme.warning)]
-        : []),
+      ...(notice ? [ui.text('instance-settings-status', notice, props.theme.muted)] : []),
+      ...(diagnostic ? [ui.text('instance-settings-error', diagnostic, props.theme.warning)] : []),
       ui.box(
         'instance-settings-controls',
         [
@@ -385,13 +373,12 @@ export function instanceSettingsView<N extends Node>(
           ui.button('instance-settings-reload', text.settingsReload, busy),
           ...(recoverable ? [ui.button('deployment-check', text.check, false)] : []),
         ],
-        { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+        { row: true, gap: 1, terminal: { wrap: true } },
       ),
     ],
     {
       terminal: { grow: 1 },
       gap: 1,
-      style: { height: fill, width: fill },
       shortcuts: [
         {
           key: 'escape',
@@ -417,7 +404,7 @@ export function instanceSettingsView<N extends Node>(
           'instance-setting-dialog-body',
           [
             ...(state.discard
-              ? [ui.text('instance-settings-discard-question', text.settingsDiscardQuestion, 15)]
+              ? [ui.text('instance-settings-discard-question', text.settingsDiscardQuestion)]
               : []),
             // Keep the original native buffer mounted across field navigation.
             ui.box(
@@ -443,14 +430,10 @@ export function instanceSettingsView<N extends Node>(
                   { changed: 'setting-changed' },
                 ),
               ],
-              {
-                visible: !state.discard && !!state.field,
-                terminal: { grow: 1 },
-                style: { height: pixels(160), width: fill },
-              },
+              { visible: !state.discard && !!state.field, terminal: { grow: 1 } },
             ),
             ...(state.notice
-              ? [ui.text('instance-setting-error', text[state.notice], 13, props.theme.warning)]
+              ? [ui.text('instance-setting-error', text[state.notice], props.theme.warning)]
               : []),
             ui.box(
               'instance-setting-dialog-controls',
@@ -474,10 +457,9 @@ export function instanceSettingsView<N extends Node>(
           { gap: 1, terminal: { grow: 1 } },
         ),
         !!state.field || !!state.discard,
-        { width: pixels(560) },
         { width: 60, height: 12 },
       ),
     ],
-    { visible: state.open, gap: 0, terminal: { grow: 1 }, style: { width: fill, height: fill } },
+    { visible: state.open, gap: 0, terminal: { grow: 1 } },
   );
 }

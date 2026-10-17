@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.input',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '文本输入', description: '提供单行文本输入。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.input)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.input) },
   },
 };

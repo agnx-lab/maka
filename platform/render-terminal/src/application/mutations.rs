@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Presenter close successors; actual Host effects are tested in Desktop.
+//! Presenter close successors; actual Host effects are tested at the Host boundary.
 use super::*;
 use maka_event_log::{
     EventLog,

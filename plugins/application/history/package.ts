@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.history',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '变更记录', description: '读取已记录的配置更改及其结果。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.callerHistory)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.callerHistory) },
   },
 };

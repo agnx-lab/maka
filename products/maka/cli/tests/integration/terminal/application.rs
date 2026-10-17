@@ -23,14 +23,14 @@ use maka_plugin_core::composition::PresentationTarget;
 use std::time::{Duration, Instant};
 fn packages(directory: &std::path::Path, poisoned: bool) -> Vec<String> {
     let (mut input, mut packages) =
-        fixture::dual_fixture("return frame({count:state.count+1,revision:state.revision+1});");
+        fixture::fixture("return frame({count:state.count+1,revision:state.revision+1});");
     input.environment.presentation = Some(PresentationTarget::Tui);
     if poisoned {
         use maka_packages::MANIFEST_FILE;
         use maka_packages::Package;
         use std::collections::BTreeMap;
         let original = packages.pop().unwrap();
-        let source = std::str::from_utf8(original.file("terminal.mjs").unwrap())
+        let source = std::str::from_utf8(original.file("index.mjs").unwrap())
             .unwrap()
             .replace(
                 "return {App:{contract,kind:'component',component:['app']}};",
@@ -41,11 +41,7 @@ fn packages(directory: &std::path::Path, poisoned: bool) -> Vec<String> {
                 MANIFEST_FILE.into(),
                 original.file(MANIFEST_FILE).unwrap().to_vec(),
             ),
-            (
-                "index.mjs".into(),
-                original.file("index.mjs").unwrap().to_vec(),
-            ),
-            ("terminal.mjs".into(), source.into_bytes()),
+            ("index.mjs".into(), source.into_bytes()),
         ]))
         .unwrap();
         input.instances.get_mut("app").unwrap().package = package.application_ref().into();
@@ -227,7 +223,9 @@ fn plugin_application_setup_rejection_is_clean_and_diagnostics_cannot_emit_escap
         serde_json::from_slice(&std::fs::read(directory.path().join("input.json")).unwrap())
             .unwrap();
     // Application target validation fails before any terminal mutation.
-    input["environment"]["presentation"] = serde_json::json!("desktop");
+    input["environment"] = serde_json::json!({"location":"host","presentation":null});
+    input["instances"] = serde_json::json!({});
+    input["launch"] = serde_json::Value::Null;
     let path = directory.path().join("input.json");
     std::fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
     let mut update = Command::new(env!("CARGO_BIN_EXE_maka"));
@@ -652,7 +650,7 @@ fn bundled_authoring_starter_generates_checked_presenters_and_runs_native_counte
     let directory = tempfile::tempdir().unwrap();
     let starter = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../skills/maka-plugin-authoring/assets/starter/create.mjs");
-    for target in ["host", "tui", "desktop"] {
+    for target in ["host", "tui"] {
         let output = Command::new("node")
             .arg(&starter)
             .arg("--output")

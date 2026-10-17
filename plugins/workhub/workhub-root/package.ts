@@ -46,10 +46,7 @@ const entries = uiEntries({
     ['locale', 'worker'],
   ),
 });
-for (const target of ['desktop', 'tui'] as const)
-  entries[target].imports.surface = one(
-    target === 'desktop' ? sdk.contracts.desktopSurface : sdk.contracts.terminalSurface,
-  );
+entries.tui.imports.surface = one(sdk.contracts.terminalSurface);
 export default {
   schemaVersion: 1,
   id: 'maka.workhub.root',

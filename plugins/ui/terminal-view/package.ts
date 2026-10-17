@@ -18,7 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { one, required, native } from '../../shared/package.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.agent.terminal-view',
@@ -28,8 +28,6 @@ export default {
     'zh-CN': { displayName: '终端显示', description: '显示终端输出并传递键盘输入。' },
   },
   application: {
-    entries: Object.fromEntries(
-      ['desktop', 'tui'].map((target) => [target, native(sdk.nativeImplementations.terminalView)]),
-    ),
+    entries: { tui: native(sdk.nativeImplementations.terminalView) },
   },
 };

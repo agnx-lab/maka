@@ -230,7 +230,7 @@ async fn cancelled_cohost_start_keeps_original_initializer_native_file_and_sql_u
         .commit_application(host, 0, input, vec![], packages)
         .await
         .unwrap();
-    let (input, packages, observations) = support::ui(PresentationTarget::Desktop);
+    let (input, packages, observations) = support::ui(PresentationTarget::Tui);
     let ui = store
         .commit_application(uuid::Uuid::new_v4(), 0, input, observations, packages)
         .await
@@ -287,7 +287,7 @@ async fn cancelled_cohost_start_keeps_original_initializer_native_file_and_sql_u
     let mut connections = Connections::prepare(
         store.clone(),
         ui.deployment,
-        PresentationTarget::Desktop,
+        PresentationTarget::Tui,
         configuration,
         namespaces.clone(),
         std::path::PathBuf::from("unused-cohost-startup-helper"),

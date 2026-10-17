@@ -114,7 +114,7 @@ async function client(target) {
     },
   };
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} Enter waits for the submitted query and invokes its matching command`, async () => {
     const c = await client(target);
     c.query('', 0).query('Settings', 8);

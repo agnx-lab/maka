@@ -46,6 +46,7 @@ async function inputs(root) {
     'products/maka/cli/build.rs',
     'products/maka/cli/build/product.rs',
     'scripts/rust/notices-sources.json',
+    'products/maka/desktop-shell/app/.gitignore',
     'platform/computer-use/THIRD_PARTY_NOTICES',
     'scripts/rust/v8-source.json',
     'scripts/rust/build-v8.mjs',
@@ -65,6 +66,7 @@ async function inputs(root) {
       'platform/js-runtime/trusted/*.js',
       'platform/js-runtime/third-party/**/*',
       'products/maka/bundle/src/**/*.ts',
+      'products/maka/desktop-shell/app/**/*',
       'products/maka/bundle/package-inputs.json',
       'plugins/**/*.ts',
       'plugins/**/*.mjs',
@@ -73,7 +75,14 @@ async function inputs(root) {
       'patches/*.patch',
       'third-party/**/*',
     ],
-    { cwd: root, withFileTypes: true },
+    {
+      cwd: root,
+      withFileTypes: true,
+      exclude: [
+        'products/maka/desktop-shell/app/gpui-kit.d.ts',
+        'products/maka/desktop-shell/app/dev.js',
+      ],
+    },
   )) {
     if (entry.isFile())
       names.push(relative(root, join(entry.parentPath, entry.name)).replaceAll('\\', '/'));
@@ -148,8 +157,12 @@ export async function generateNotices(root = repository) {
     return downloaded.get(url);
   }
   const upstream = new Map();
-  async function upstreamFiles(pkg, directory) {
-    const git = pkg.source?.startsWith('git+') ? new URL(pkg.source.slice(4)) : undefined;
+  async function upstreamFiles(pkg, directory, provenance) {
+    const git = provenance
+      ? new URL(provenance.repository + '#' + provenance.revision)
+      : pkg.source?.startsWith('git+')
+        ? new URL(pkg.source.slice(4))
+        : undefined;
     const vcs = git
       ? undefined
       : JSON.parse(await readFile(join(directory, '.cargo_vcs_info.json'), 'utf8'));
@@ -206,7 +219,7 @@ export async function generateNotices(root = repository) {
     );
     const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
     const catalog = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-    const pending = ['maka-cli', 'maka-desktop'].map(
+    const pending = ['maka-cli', 'maka-desktop-shell'].map(
       (name) => metadata.packages.find((pkg) => pkg.name === name).id,
     );
     const seen = new Set();
@@ -235,15 +248,14 @@ export async function generateNotices(root = repository) {
         (pkg.authors.length ? `; authors declared by package: ${pkg.authors.join(', ')}` : '');
       const directory = dirname(pkg.manifest_path);
       let source = pkg.source;
+      let provenance;
       if (!source) {
         const vendored = relative(root, directory)
           .replaceAll('\\', '/')
           .split('/')
           .slice(0, 2)
           .join('/');
-        const provenance = JSON.parse(
-          await readFile(join(root, vendored, 'upstream.json'), 'utf8'),
-        );
+        provenance = JSON.parse(await readFile(join(root, vendored, 'upstream.json'), 'utf8'));
         source = `${provenance.repository}#${provenance.revision} (adapted; ${relative(root, directory).replaceAll('\\', '/')})`;
       } else if (source.startsWith('registry+')) {
         source = `https://crates.io/api/v1/crates/${pkg.name}/${pkg.version}/download`;
@@ -278,7 +290,7 @@ export async function generateNotices(root = repository) {
           else add(component, entry.source, await readFile(join(root, entry.file), 'utf8'));
         }
       } else if (!local.length || references) {
-        for (const [url, content] of await upstreamFiles(pkg, directory))
+        for (const [url, content] of await upstreamFiles(pkg, directory, provenance))
           add(component, url, content);
       }
       for (const file of local)

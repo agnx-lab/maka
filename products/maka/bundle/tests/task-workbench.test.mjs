@@ -23,7 +23,6 @@ import Ajv from 'ajv/dist/2020.js';
 const appearance = await import('../dist/packages/appearance/tui.js');
 const theme = appearance.activate({ scheme: 'dark' }).Appearance.value;
 const module = await import('../dist/packages/agent-screen/tui.js');
-const desktopScreen = await import('../dist/packages/agent-screen/desktop.js');
 module.activate({ locale: 'en' });
 const values = { appearance: [theme] };
 const dataSource = {
@@ -75,7 +74,7 @@ function nodes(node) {
     : [];
 }
 function client(locale = 'en', options = {}) {
-  const screen = options.target === 'desktop' ? desktopScreen : module;
+  const screen = module;
   screen.activate({ locale, ...options.configuration });
   let out = screen.component.mount({}, values);
   const c = {
@@ -118,11 +117,10 @@ function client(locale = 'en', options = {}) {
       return c.state.visits.find((visit) => visit.id === c.state.selected?.id).key;
     },
   };
-  if (options.target !== 'desktop')
-    c.child('recovery-checkpoint', 'changed', {
-      sequence: 0,
-      state: { kind: 'ready', revision: null, value: null },
-    });
+  c.child('recovery-checkpoint', 'changed', {
+    sequence: 0,
+    state: { kind: 'ready', revision: null, value: null },
+  });
   c.reply(c.action('page'), []);
   c.event({
     kind: 'action',
@@ -1421,7 +1419,7 @@ test('background readers, inspectors, dialogs and other pages disable read ackno
 
 test('structured WorkHub history reaches localized captions and pending queue labels', async () => {
   const targets = await Promise.all(
-    ['tui', 'desktop'].map((target) => import(`../dist/packages/timeline/${target}.js`)),
+    ['tui'].map((target) => import(`../dist/packages/timeline/${target}.js`)),
   );
   for (const [locale, taskCaption, graphCaption, ordinaryCaption, nextCaption] of [
     ['en', 'WorkHub task', 'WorkHub graph', 'You', 'Next turn'],
@@ -1521,7 +1519,7 @@ test('structured WorkHub history reaches localized captions and pending queue la
 test('WorkHub browses with opaque cursors and uses task detail metadata instead of list placeholders', async () => {
   for (const [target, locale, accepted] of [
     ['tui', 'en', 'Accepted'],
-    ['desktop', 'zh-CN', '受理时间'],
+    ['tui', 'zh-CN', '受理时间'],
   ]) {
     const hub = await import(`../dist/packages/workhub-root/${target}.js`);
     hub.activate({ locale, worker: 'worker' });
@@ -1618,7 +1616,7 @@ test('historical captions use recorded response models and keep requested and im
   const requested = { kind: 'native', requestedModelId: 'unreported-alias', reportedModelId: null };
   const imported = { kind: 'imported', modelId: 'source-recorded-model' };
   const targets = await Promise.all(
-    ['tui', 'desktop'].map(async (target) => ({
+    ['tui'].map(async (target) => ({
       target,
       timeline: await import(`../dist/packages/timeline/${target}.js`),
     })),
@@ -1665,12 +1663,7 @@ test('historical captions use recorded response models and keep requested and im
         const caption = tree.find((node) => node.key === 'role-' + id).text;
         assert.equal(caption.split(' · ').slice(0, 2).join(' · '), expected);
       }
-      if (target === 'desktop')
-        assert.equal(
-          tree.find((node) => node.key === 'role-message-5').text.split(' · ')[0],
-          'Maka',
-        );
-      else assert.equal(tree.find((node) => node.key === 'message-message-5').label, 'Maka');
+      assert.equal(tree.find((node) => node.key === 'message-message-5').label, 'Maka');
     }
   }
 });
@@ -1839,7 +1832,7 @@ function hostUpdate(c, watch, value) {
   c.event({ kind: 'action', key: watch.key, event: { status: 'updated', value } });
 }
 test('Host logs render literal split UTF-8 in both presentations and stop their independent follow', () => {
-  for (const target of ['tui', 'desktop']) {
+  for (const target of ['tui']) {
     const c = openDiagnostics(
       client('en', {
         target,

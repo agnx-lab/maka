@@ -21,7 +21,7 @@ import type { Component, Emission, Permissions } from '../../../packages/plugin-
 import { permissionApprovalContract, type ServiceApprovalProps } from '../../shared/contracts.js';
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import { fill, pixels, output, type Node, type Presentation } from '../../shared/view.js';
+import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type State = {
   revision: number;
@@ -46,9 +46,7 @@ export function permissionApproval<N extends Node>(
     const available =
       props.open && !props.busy && !props.record.outcome && request.kind === 'permissions';
     const choose = (key: string, label: string, selected: boolean) =>
-      ui.item
-        ? ui.item(key, ui.text(key + '-label', label), selected, !available)
-        : ui.button(key, label, !available, selected);
+      ui.item(key, ui.text(key + '-label', label), selected, !available);
     const outcome = props.record.outcome;
     const settled = outcome?.kind === 'permissions_decision' ? outcome.decision : null;
     const scope = settled?.decision === 'allow' ? settled.scope : state.scope;
@@ -72,10 +70,9 @@ export function permissionApproval<N extends Node>(
                   : text.permissionDeny) +
                 ' · ' +
                 (rule.scope === 'exact' ? text.permissionExact : text.permissionSubtree),
-              13,
               props.theme.muted,
             ),
-            ui.text(prefix + '-path-' + index, rule.path, 13),
+            ui.text(prefix + '-path-' + index, rule.path),
           ],
           { gap: 0 },
         ),
@@ -83,7 +80,6 @@ export function permissionApproval<N extends Node>(
       ui.text(
         prefix + '-network',
         text.permissionNetwork + ': ' + JSON.stringify(permissions.network),
-        13,
       ),
     ];
     return output(
@@ -94,11 +90,9 @@ export function permissionApproval<N extends Node>(
           ui.box(
             'permission-controls',
             [ui.button('close', text.closeModels), ui.button('check', text.check, props.checking)],
-            { row: true, gap: 1, terminal: { wrap: true }, style: { wrap: true } },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
-          ...(props.status
-            ? [ui.text('permission-status', props.status, 13, props.theme.muted)]
-            : []),
+          ...(props.status ? [ui.text('permission-status', props.status, props.theme.muted)] : []),
           ...(outcome
             ? [
                 ui.text(
@@ -108,7 +102,6 @@ export function permissionApproval<N extends Node>(
                       ? text.permissionGranted + ' · ' + scopeLabel
                       : text.permissionDenied
                     : text.questionClosed,
-                  13,
                   props.theme.muted,
                 ),
               ]
@@ -120,13 +113,7 @@ export function permissionApproval<N extends Node>(
               choose('turn', text.permissionTurn, scope === 'turn'),
               choose('session', text.permissionSession, scope === 'session'),
             ],
-            {
-              row: true,
-              gap: 1,
-              focusGroup: true,
-              terminal: { wrap: true },
-              style: { wrap: true },
-            },
+            { row: true, gap: 1, focusGroup: true, terminal: { wrap: true } },
           ),
           ui.box(
             'permission-choice',
@@ -134,13 +121,7 @@ export function permissionApproval<N extends Node>(
               ui.button('allow', text.permissionAllow + ' · ' + scopeLabel, !available),
               ui.button('deny', text.approvalDeny, !available),
             ],
-            {
-              row: true,
-              gap: 1,
-              focusGroup: true,
-              terminal: { wrap: true },
-              style: { wrap: true },
-            },
+            { row: true, gap: 1, focusGroup: true, terminal: { wrap: true } },
           ),
           ...(request.kind === 'permissions'
             ? [
@@ -150,17 +131,16 @@ export function permissionApproval<N extends Node>(
                     content: ui.box(
                       'permission-document',
                       [
-                        ui.text('permission-reason', request.request.reason, 15),
+                        ui.text('permission-reason', request.request.reason),
                         ...(request.request.command
                           ? [
-                              ui.text('permission-command', request.request.command.command, 13),
-                              ui.text('permission-cwd', request.request.command.cwd, 13),
+                              ui.text('permission-command', request.request.command.command),
+                              ui.text('permission-cwd', request.request.command.cwd),
                             ]
                           : []),
                         ui.text(
                           'permission-requested',
                           text.permissionRequested,
-                          13,
                           props.theme.muted,
                         ),
                         ...permissionLines('permission-requested', request.request.permissions),
@@ -170,19 +150,13 @@ export function permissionApproval<N extends Node>(
                               ui.text(
                                 'permission-granted',
                                 text.permissionGranted,
-                                13,
                                 props.theme.muted,
                               ),
                               ...permissionLines('permission-granted', settled.permissions),
                             ]
                           : []),
                       ],
-                      {
-                        gap: 0,
-                        scroll: 'manual',
-                        terminal: { grow: 1, basis: 0 },
-                        style: { width: fill, height: fill },
-                      },
+                      { gap: 0, scroll: 'manual', terminal: { grow: 1, basis: 0 } },
                     ),
                   },
                   {},
@@ -190,12 +164,7 @@ export function permissionApproval<N extends Node>(
               ]
             : []),
         ],
-        {
-          visible: props.open,
-          gap: presentation.target === 'tui' ? 1 : 12,
-          terminal: { grow: 1 },
-          style: { width: fill, height: pixels(0), grow: 1, minHeight: 0 },
-        },
+        { visible: props.open, gap: 1, terminal: { grow: 1 } },
       ),
       events,
     );

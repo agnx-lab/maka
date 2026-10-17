@@ -235,7 +235,7 @@ export function focus<N extends Node>(
   id: string | null,
 ) {
   state.selected = id;
-  if (presentation.target === 'tui' && id)
+  if (id)
     state.focus = {
       sequence: (state.focus?.sequence ?? 0) + 1,
       target: { kind: 'focus_item', key: id },

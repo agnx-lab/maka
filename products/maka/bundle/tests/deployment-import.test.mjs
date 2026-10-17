@@ -19,7 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const source = {
   stateDomain: 'a'.repeat(64),
@@ -33,7 +33,7 @@ function observed(revision = 1) {
     snapshot: { text: { owner: 'url-editor', revision, bytes: url.length }, marked: null },
   };
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} URL install captures the reviewed link and retains the original receipt`, async () => {
     const { component } = await import(`../dist/packages/deployment/${target}.js`);
     const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
@@ -45,13 +45,12 @@ for (const target of ['tui', 'desktop']) {
     const done = (value) =>
       event({ kind: 'action', key: out.actions[0].key, event: { status: 'succeeded', value } });
     done({ source, instances: [], next: null });
-    if (target === 'tui')
-      event({
-        kind: 'component',
-        child: 'settings-checkpoint',
-        name: 'bookmark',
-        event: { sequence: 0, state: { kind: 'ready', revision: 0, value: null } },
-      });
+    event({
+      kind: 'component',
+      child: 'settings-checkpoint',
+      name: 'bookmark',
+      event: { sequence: 0, state: { kind: 'ready', revision: 0, value: null } },
+    });
     raw('deployment-import');
     raw('deployment-import-remote');
     child(observed());

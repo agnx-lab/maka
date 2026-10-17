@@ -103,7 +103,7 @@ async function client(target) {
   };
   return c;
 }
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target} compact confirms the edited one-shot prompt without saving preferences`, async () => {
     const c = await client(target);
     c.event({
@@ -181,7 +181,7 @@ for (const target of ['tui', 'desktop']) {
   });
 }
 
-for (const target of ['tui', 'desktop'])
+for (const target of ['tui'])
   test(`${target} compact rejects a prompt edited during capture and checks an uncertain receipt`, async () => {
     const c = await client(target);
     c.event({

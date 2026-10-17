@@ -29,7 +29,7 @@ import type {
 import { sameValue } from './value.js';
 import type { Theme } from './contracts.js';
 import { copy, tuiText } from './locale-catalogs/attachments.js';
-import { fill, type Node, type Presentation } from './view.js';
+import { type Node, type Presentation } from './view.js';
 export type DraftFilePaste = FilePasteObservation & { dataSource: AgentDataSource };
 
 export interface AttachmentDrafts {
@@ -105,7 +105,6 @@ export function pasteView<N extends Node>(
       ui.text(
         'file-paste-status',
         `${status} (${paste.observed.remaining})${file.file ? ` · ${file.file.name}` : ''}`,
-        13,
         theme.muted,
         400,
         { truncate: true },
@@ -118,7 +117,7 @@ export function pasteView<N extends Node>(
         : []),
       ui.button('file-paste-cancel', text.cancel, busy || !!paste.command),
     ],
-    { row: true, terminal: { wrap: true }, style: { width: fill, wrap: true } },
+    { row: true, terminal: { wrap: true } },
   );
 }
 export const attachmentFiles = (
@@ -173,14 +172,13 @@ export function attachmentView<N extends Node>(
       { changed: 'attachment-file-changed' },
     ),
     ...(observed?.phase === 'choosing'
-      ? [ui.text('attachment-reading', text.deploymentFileLoading, 13, theme.muted)]
+      ? [ui.text('attachment-reading', text.deploymentFileLoading, theme.muted)]
       : []),
     ...(observed?.phase === 'ready' && observed.file
       ? [
           ui.text(
             'attachment-selected',
             `${observed.file.name} · ${observed.file.bytes} B`,
-            13,
             theme.text,
           ),
         ]
@@ -190,14 +188,13 @@ export function attachmentView<N extends Node>(
           ui.text(
             'attachment-file-error',
             observed.error === 'limit_exceeded' ? text.attachmentTooLarge : text.attachmentFailed,
-            13,
             theme.muted,
           ),
         ]
       : []),
-    ...(notice ? [ui.text('attachment-notice', notice, 13, theme.muted)] : []),
+    ...(notice ? [ui.text('attachment-notice', notice, theme.muted)] : []),
   ];
-  if (presentation.target === 'tui') {
+  {
     const selected = files.find((file) => file.id === selection.selected);
     const rows = files.map((file, index) =>
       ui.item!(
@@ -208,7 +205,6 @@ export function attachmentView<N extends Node>(
             ui.text(
               'attachment-name-' + index,
               `${file.id === selection.selected ? (theme.ascii ? '>' : '›') : ' '} ${file.name}`,
-              14,
               theme.text,
               400,
               { truncate: true },
@@ -216,7 +212,6 @@ export function attachmentView<N extends Node>(
             ui.text(
               'attachment-status-' + index,
               `  ${tuiText(locale, 'attachments-ready')} · ${attachmentSize(file.bytes)}`,
-              13,
               theme.muted,
               400,
               { truncate: true },
@@ -235,7 +230,6 @@ export function attachmentView<N extends Node>(
         ui.text(
           'attachment-browse-label',
           '+ ' + tuiText(locale, 'attachments-add'),
-          14,
           theme.accent,
           400,
           { truncate: true },
@@ -264,10 +258,8 @@ export function attachmentView<N extends Node>(
               },
               { input: 'attachment-input' },
             ),
-            ...(!capacity
-              ? [ui.text('attachment-limit', text.attachmentLimit, 13, theme.muted)]
-              : []),
-            ...(notice ? [ui.text('attachment-list-notice', notice, 13, theme.muted)] : []),
+            ...(!capacity ? [ui.text('attachment-limit', text.attachmentLimit, theme.muted)] : []),
+            ...(notice ? [ui.text('attachment-list-notice', notice, theme.muted)] : []),
             ui.box(
               'attachment-list-controls',
               [
@@ -318,58 +310,6 @@ export function attachmentView<N extends Node>(
       { gap: 0, terminal: { grow: 1 } },
     );
   }
-  return ui.box(
-    'attachment-panel',
-    [
-      ui.box(
-        'attachment-body',
-        [
-          ui.text('attachment-help', text.attachmentHelp, 13, theme.muted),
-          ...files.map((file) =>
-            ui.box(
-              'attachment-row-' + file.id,
-              [
-                ui.text(
-                  'attachment-name-' + file.id,
-                  `${file.name} · ${file.bytes} B`,
-                  13,
-                  theme.text,
-                  400,
-                  { truncate: true },
-                ),
-                ui.button('attachment-remove-' + file.id, text.attachmentRemove, busy),
-              ],
-              { row: true, terminal: { wrap: true }, style: { width: fill, wrap: true } },
-            ),
-          ),
-          ...(!capacity
-            ? [ui.text('attachment-limit', text.attachmentLimit, 13, theme.muted)]
-            : []),
-          ...fileContent,
-        ],
-        {
-          scroll: 'manual',
-          terminal: { grow: 1 },
-          style: { width: fill, minHeight: 0, grow: 1, shrink: 1 },
-        },
-      ),
-      ui.box(
-        'attachment-controls',
-        [
-          ui.button('attachment-close', text.closeModels),
-          ...(recoverable ? [ui.button('attachment-check', text.check, checking)] : []),
-          ui.button(
-            'attachment-upload',
-            text.attachmentAdd,
-            busy || !enabled || !capacity || observed?.phase !== 'ready' || !observed.file,
-            true,
-          ),
-        ],
-        { row: true, terminal: { wrap: true }, style: { wrap: true, shrink: 0 } },
-      ),
-    ],
-    { terminal: { grow: 1 }, style: { width: fill, height: fill } },
-  );
 }
 
 function attachmentSize(bytes: number) {
@@ -393,11 +333,11 @@ export function attachmentSummary<N extends Node>(
     ui.box(
       'attachment-summary',
       [
-        ui.text('attachment-summary-icon', `${theme.ascii ? '+' : '✓'} `, 13, theme.accent),
+        ui.text('attachment-summary-icon', `${theme.ascii ? '+' : '✓'} `, theme.accent),
         ui.box(
           'attachment-summary-name-region',
           [
-            ui.text('attachment-summary-name', files[0]!.name, 13, theme.muted, 400, {
+            ui.text('attachment-summary-name', files[0]!.name, theme.muted, 400, {
               truncate: true,
             }),
           ],
@@ -406,7 +346,6 @@ export function attachmentSummary<N extends Node>(
         ui.text(
           'attachment-summary-status',
           `${files.length > 1 ? '  +' + (files.length - 1) : ''} · ${tuiText(locale, 'attachments-ready')}`,
-          13,
           theme.muted,
           400,
           { truncate: true },

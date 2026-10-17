@@ -298,11 +298,7 @@ export function handleEvent<N extends Node>(
           for (const source of state.sources) {
             if (key === 'source-' + source.id) {
               state.selected = key;
-              if (
-                presentation.target === 'tui' &&
-                (input.event as { kind?: string }).kind !== 'submit'
-              )
-                continue;
+              if ((input.event as { kind?: string }).kind !== 'submit') continue;
             }
             if (key === 'browse-' + source.id || key === 'source-' + source.id) {
               state.source = { id: source.id, revision: state.sourcesRevision };
@@ -350,10 +346,7 @@ export function handleEvent<N extends Node>(
           const entry = state.entries[Number(key.slice(6))];
           if (entry) {
             state.selected = key;
-            if (
-              presentation.target !== 'tui' ||
-              (input.event as { kind?: string }).kind === 'submit'
-            ) {
+            if ((input.event as { kind?: string }).kind === 'submit') {
               state.preview = null;
               state.notice = null;
               read(
@@ -400,10 +393,7 @@ export function handleEvent<N extends Node>(
           const session = state.copies.find((session) => key === 'copy-' + session.id);
           if (session) {
             state.selected = key;
-            if (
-              presentation.target !== 'tui' ||
-              (input.event as { kind?: string }).kind === 'submit'
-            )
+            if ((input.event as { kind?: string }).kind === 'submit')
               events.push({ name: 'selected', value: { session } });
           }
         }

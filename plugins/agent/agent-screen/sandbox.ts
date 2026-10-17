@@ -85,8 +85,8 @@ export function sandboxView<N extends Node>(
           busy || state.selected?.permissions.access === access,
         ),
       ),
-      ui.text('sandbox-help', text.sandboxHelp, 12, theme.muted),
-      ...(state.notice ? [ui.text('sandbox-notice', text[state.notice], 12, theme.warning)] : []),
+      ui.text('sandbox-help', text.sandboxHelp, theme.muted),
+      ...(state.notice ? [ui.text('sandbox-notice', text[state.notice], theme.warning)] : []),
       ...(state.uncertain?.request.kind === 'sandboxChange'
         ? [
             ui.button(
@@ -98,6 +98,6 @@ export function sandboxView<N extends Node>(
         : []),
       ui.button('sandbox-close', text.cancel),
     ],
-    { gap: presentation.target === 'tui' ? 1 : 8 },
+    { gap: 1 },
   );
 }

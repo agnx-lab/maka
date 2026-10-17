@@ -135,7 +135,7 @@ export function settingsView<N extends Node>(
   const icon = (key: string) =>
     ui.box(
       key + '-icon',
-      [ui.text(key + '-glyph', icons[key]![appearance.ascii ? 1 : 0], 14, theme.subtle)],
+      [ui.text(key + '-glyph', icons[key]![appearance.ascii ? 1 : 0], theme.subtle)],
       { terminal: { basis: 4 } },
     );
   const choice = (key: string, options: [string, string][], current: string) =>
@@ -166,10 +166,10 @@ export function settingsView<N extends Node>(
         key + '-row',
         [
           icon(key),
-          ui.box(key + '-label', [ui.text(key + '-text', label, 14, theme.text)], {
+          ui.box(key + '-label', [ui.text(key + '-text', label, theme.text)], {
             terminal: { grow: 1 },
           }),
-          ui.text(key + '-arrow', appearance.ascii ? '>' : '›', 14, theme.subtle),
+          ui.text(key + '-arrow', appearance.ascii ? '>' : '›', theme.subtle),
         ],
         { row: true, gap: 0 },
       ),
@@ -327,20 +327,20 @@ export function settingsView<N extends Node>(
   };
   sections.appearance!.push(...sections.interface!);
   sections.advanced = [
-    ui.text('network-heading', t('settings-host'), 14, theme.text, 500),
+    ui.text('network-heading', t('settings-host'), theme.text, 500),
     ...sections.host!,
     ...(jev
-      ? [ui.text('tools-heading', t('settings-jev'), 14, theme.text, 500), ...sections.jev!]
+      ? [ui.text('tools-heading', t('settings-jev'), theme.text, 500), ...sections.jev!]
       : []),
     ...sections.plugins!,
   ];
   const page = ui.box(
     'settings-page',
     [
-      ...(state.error ? [ui.text('settings-error', t(state.error), 13, theme.warning)] : []),
+      ...(state.error ? [ui.text('settings-error', t(state.error), theme.warning)] : []),
       ...(state.checkpoint?.state.kind === 'failed'
         ? [
-            ui.text('settings-save-failed', t('state-save-failed'), 13, theme.warning),
+            ui.text('settings-save-failed', t('state-save-failed'), theme.warning),
             ui.button('settings-retry', t('home-retry')),
           ]
         : []),
@@ -352,7 +352,7 @@ export function settingsView<N extends Node>(
             categories.map((key) =>
               ui.item!(
                 'settings-category-' + key,
-                ui.text('settings-category-label-' + key, title(key), 14, theme.text),
+                ui.text('settings-category-label-' + key, title(key), theme.text),
                 category === key,
                 false,
                 { followFocus: true },
@@ -370,7 +370,7 @@ export function settingsView<N extends Node>(
           ...categories.flatMap((key) => [
             ui.box(
               'settings-heading-' + key,
-              [ui.text('settings-heading-label-' + key, title(key), 14, theme.text, 650)],
+              [ui.text('settings-heading-label-' + key, title(key), theme.text, 650)],
               { terminal: { basis: 1 } },
             ),
             ui.box(

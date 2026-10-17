@@ -35,14 +35,7 @@ import { recoveryContract, type Theme } from '../../shared/contracts.js';
 import { resolveLocale } from '../../shared/locale.js';
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
-import {
-  compactLabel,
-  fill,
-  output,
-  pixels,
-  type Node,
-  type Presentation,
-} from '../../shared/view.js';
+import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
 
 type Request =
   | { kind: 'history'; after: number }
@@ -107,8 +100,7 @@ export function recovery<N extends Node>(
     const theme = values.appearance![0] as unknown as Theme;
     const text = copy(locale),
       ui = presentation.paint(theme);
-    const desktop = presentation.target === 'desktop',
-      busy = !!state.pending;
+    const busy = !!state.pending;
     const recorded = state.reply?.receipt.kind === 'recorded' ? state.reply.receipt : null;
     const source = receiptSource(state);
     const start = boundary(source, state.page),
@@ -118,26 +110,21 @@ export function recovery<N extends Node>(
       ui.box(
         'recovery-root',
         [
-          ui.text('recovery-title', text.recoveryTitle, 24, theme.text, 600),
-          ui.text('recovery-help', text.recoveryHelp, 14, theme.muted),
+          ui.text('recovery-title', text.recoveryTitle, theme.text, 600),
+          ui.text('recovery-help', text.recoveryHelp, theme.muted),
           ui.box(
             'recovery-navigation',
             [
               ui.button('operations', text.recoveryOperations, false, state.route === 'operations'),
               ui.button('deployment', text.deploymentTitle, false, state.route === 'deployment'),
             ],
-            {
-              row: true,
-              gap: desktop ? 12 : 1,
-              terminal: { wrap: true },
-              style: { wrap: true, shrink: 0 },
-            },
+            { row: true, gap: 1, terminal: { wrap: true } },
           ),
           ui.box(
             'recovery-operations',
             [
               ...(state.failed
-                ? [ui.text('recovery-refresh-failed', text.recoveryRefreshFailed, 14, theme.muted)]
+                ? [ui.text('recovery-refresh-failed', text.recoveryRefreshFailed, theme.muted)]
                 : []),
               presentation.reading(
                 'recovery-reading',
@@ -153,7 +140,6 @@ export function recovery<N extends Node>(
                               state.selected.contract.name + ' / ' + state.selected.method,
                               120,
                             ),
-                            15,
                           ),
                           ui.text(
                             'recovery-observation',
@@ -162,10 +148,9 @@ export function recovery<N extends Node>(
                               : recorded
                                 ? text.deploymentRecorded
                                 : text.recoveryUnknown,
-                            14,
                           ),
                           ...(state.published
-                            ? [ui.text('recovery-skill-result', text.skillsResultConfirmed, 14)]
+                            ? [ui.text('recovery-skill-result', text.skillsResultConfirmed)]
                             : []),
                           ...(recorded
                             ? [
@@ -202,7 +187,6 @@ export function recovery<N extends Node>(
                                             entry.reference.method,
                                           120,
                                         ),
-                                        14,
                                       ),
                                       ui.button('check-' + index, text.check, busy),
                                     ],
@@ -217,17 +201,11 @@ export function recovery<N extends Node>(
                                     : state.failed
                                       ? text.historyUnavailable
                                       : text.recoveryEmpty,
-                                  14,
                                   theme.muted,
                                 ),
                               ]),
                         ],
-                    {
-                      gap: desktop ? 12 : 1,
-                      scroll: 'anchor',
-                      terminal: { grow: 1, basis: 0 },
-                      style: { width: fill, height: pixels(360), minHeight: 0 },
-                    },
+                    { gap: 1, scroll: 'anchor', terminal: { grow: 1, basis: 0 } },
                   ),
                 },
                 { input: 'reading-input', observed: 'reading-observed' },
@@ -235,31 +213,15 @@ export function recovery<N extends Node>(
               ui.box(
                 'recovery-history-controls',
                 [ui.button('refresh', text.refreshDefaultOperations, busy)],
-                {
-                  visible: !state.selected,
-                  row: true,
-                  gap: desktop ? 12 : 1,
-                  terminal: { wrap: true },
-                  style: { wrap: true, shrink: 0 },
-                },
+                { visible: !state.selected, row: true, gap: 1, terminal: { wrap: true } },
               ),
               ui.box(
                 'recovery-result-controls',
                 [ui.button('back', text.back, busy), ui.button('check-again', text.check, busy)],
-                {
-                  visible: !!state.selected,
-                  row: true,
-                  gap: desktop ? 12 : 1,
-                  terminal: { wrap: true },
-                  style: { wrap: true, shrink: 0 },
-                },
+                { visible: !!state.selected, row: true, gap: 1, terminal: { wrap: true } },
               ),
             ],
-            {
-              visible: state.route === 'operations',
-              terminal: { grow: 1 },
-              style: { width: fill, grow: 1, minHeight: 0 },
-            },
+            { visible: state.route === 'operations', terminal: { grow: 1 } },
           ),
           ui.box(
             'recovery-deployment',
@@ -271,25 +233,14 @@ export function recovery<N extends Node>(
                 { closed: 'closed' },
               ),
             ],
-            {
-              visible: state.route === 'deployment',
-              terminal: { grow: 1 },
-              style: { width: fill, grow: 1, minHeight: 0 },
-            },
+            { visible: state.route === 'deployment', terminal: { grow: 1 } },
           ),
         ],
-        {
-          padding: desktop ? 24 : 1,
-          gap: desktop ? 12 : 1,
-          terminal: { grow: 1 },
-          style: { width: fill, height: fill, minWidth: 0 },
-        },
+        { padding: 1, gap: 1, terminal: { grow: 1 } },
       ),
     );
     out.actions = actions;
-    out.frame.surface = desktop
-      ? { kind: 'window', binding: 'surface', title: text.recoveryTitle, width: 900, height: 720 }
-      : { kind: 'terminal', binding: 'surface' };
+    out.frame.surface = { kind: 'terminal', binding: 'surface' };
     return out;
   }
   return {

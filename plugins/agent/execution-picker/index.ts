@@ -252,7 +252,7 @@ function frame<N extends Node>(
           ]
         : []),
     ],
-    { row: true, gap: presentation.target === 'tui' ? 1 : 8 },
+    { row: true, gap: 1 },
   );
   const options = [
     { key: 'default', label: text.executionDefault },
@@ -271,7 +271,7 @@ function frame<N extends Node>(
         ),
       ),
       ...(state.failed
-        ? [ui.text('backend-error', text.executionUnavailable, 13, props.theme.error)]
+        ? [ui.text('backend-error', text.executionUnavailable, props.theme.error)]
         : []),
       ...(state.draft
         ? [
@@ -306,7 +306,6 @@ function frame<N extends Node>(
                                           ui.text(
                                             `setup-description-${index}`,
                                             method.description,
-                                            13,
                                             props.theme.muted,
                                           ),
                                         ]
@@ -316,7 +315,6 @@ function frame<N extends Node>(
                                           ui.text(
                                             `setup-unsupported-${index}`,
                                             text.executionUnsupported,
-                                            13,
                                             props.theme.muted,
                                           ),
                                         ]
@@ -359,7 +357,6 @@ function frame<N extends Node>(
                               ui.text(
                                 'setup-unresolved',
                                 text.executionUnresolved,
-                                13,
                                 props.theme.error,
                               ),
                             ]
@@ -369,7 +366,6 @@ function frame<N extends Node>(
                               ui.text(
                                 'setup-diagnostic',
                                 state.setup.result.diagnostic,
-                                13,
                                 props.theme.error,
                               ),
                             ]
@@ -387,7 +383,7 @@ function frame<N extends Node>(
                     : []),
                 ]
               : []),
-            ui.text('backend-model-label', text.executionModelName, 13, props.theme.text),
+            ui.text('backend-model-label', text.executionModelName, props.theme.text),
             presentation.slot<InputProps>(
               state.editor,
               'input',
@@ -405,19 +401,8 @@ function frame<N extends Node>(
               },
               { changed: 'model', submitted: 'apply' },
             ),
-            ui.text('backend-model-hint', text.executionModelHint, 13, props.theme.muted),
-            ui.choice?.('thinking', text.thinking, options, current, disabled) ??
-              ui.box(
-                'thinking-options',
-                options.map((option) =>
-                  ui.button(
-                    `thinking-${option.key}`,
-                    `${current === option.key ? '✓ ' : ''}${option.label}`,
-                    disabled,
-                  ),
-                ),
-                { row: true, style: { wrap: true }, terminal: { wrap: true } },
-              ),
+            ui.text('backend-model-hint', text.executionModelHint, props.theme.muted),
+            ui.choice?.('thinking', text.thinking, options, current, disabled),
             ui.button(
               'apply',
               text.modelApply,
@@ -430,16 +415,10 @@ function frame<N extends Node>(
           ]
         : []),
       ...(state.error
-        ? [ui.text('settings-error', text.executionSettingsFailed, 13, props.theme.error)]
+        ? [ui.text('settings-error', text.executionSettingsFailed, props.theme.error)]
         : []),
     ],
-    {
-      gap: presentation.target === 'tui' ? 0 : 8,
-      scroll: 'manual',
-      autoFocus: true,
-      terminal: { grow: 1, basis: 0 },
-      style: { maxHeight: 480, minHeight: 0, shrink: 1 },
-    },
+    { gap: 0, scroll: 'manual', autoFocus: true, terminal: { grow: 1, basis: 0 } },
   );
   const content = ui.box(
     'backend-content',
@@ -454,17 +433,12 @@ function frame<N extends Node>(
         { row: true, gap: 1 },
       ),
     ],
-    { gap: presentation.target === 'tui' ? 0 : 8, terminal: { grow: 1 } },
+    { gap: 0, terminal: { grow: 1 } },
   );
-  const view = ui.dialog(
-    'backend-popup',
-    text.executionBackend,
-    background,
-    content,
-    state.open,
-    undefined,
-    { width: 64, anchorToBackground: true },
-  );
+  const view = ui.dialog('backend-popup', text.executionBackend, background, content, state.open, {
+    width: 64,
+    anchorToBackground: true,
+  });
   const out = output(state, view, events);
   out.actions = actions;
   return out;

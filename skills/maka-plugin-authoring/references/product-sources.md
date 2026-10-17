@@ -23,7 +23,7 @@ The bundled skill includes selected TypeScript source from the same build as its
 
 | Task | Start here |
 | --- | --- |
-| Implement a small component or composer footer | `plugins/agent/composer-footer/package.ts`, `tui.ts`, `desktop.ts` |
+| Implement a small component or composer footer | `plugins/agent/composer-footer/package.ts`, `tui.ts` |
 | Native input, editor snapshots and callbacks | `plugins/agent/composer/index.ts` |
 | Read and mutate a deployment with original receipts | `plugins/application/deployment/index.ts` and its local modules |
 | Process Agent UI requests and recover an interrupted mutation | `plugins/application/authoring/index.ts` |

@@ -22,7 +22,7 @@ import { test } from 'node:test';
 import { contracts } from '../../../../packages/plugin-sdk/src/contracts.ts';
 import Ajv from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-const { activate } = await import('../dist/packages/appearance/desktop.js');
+const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'light' }).Appearance.value;
 const uuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 
@@ -230,7 +230,7 @@ const row = {
   reminder: false,
   lastError: null,
 };
-for (const target of ['tui', 'desktop']) {
+for (const target of ['tui']) {
   test(`${target}: scheduler captures retained native fields and recovers the original business receipt without resubmission`, async () => {
     const c = (await client(target)).loaded().raw('new');
     for (const name of names) edit(c, name, values[name]);
