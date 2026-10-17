@@ -170,13 +170,32 @@ async fn bundled_authoring_resources_reach_the_actual_model_without_added_author
         assert_eq!(catalog["totalEligible"], 1, "{catalog}");
         assert_eq!(catalog["matches"][0]["ref"], "bundled:maka-plugin-authoring");
         tool(&mut socket, "Skill", json!({"name":"maka-plugin-authoring","revision":catalog["revision"],"resource":{"path":"references/sdk/ui.ts"}})).await;
-        let (mut socket, resource) = next(&listener).await;
-        assert_eq!(resource["kind"], "resource", "{resource}");
-        assert!(!resource["next"].is_null());
-        tool(&mut socket, "Skill", resource["next"].clone()).await;
-        let (mut socket, continued) = next(&listener).await;
-        assert_eq!(continued["kind"], "resource", "{continued}");
-        assert_eq!(continued["revision"], catalog["revision"]);
+        let (mut socket, mut resource) = next(&listener).await;
+        let mut complete = String::new();
+        loop {
+            assert_eq!(resource["kind"], "resource", "{resource}");
+            assert_eq!(resource["revision"], catalog["revision"]);
+            assert_eq!(resource["reference"], "bundled:maka-plugin-authoring");
+            assert_eq!(resource["path"], "references/sdk/ui.ts");
+            assert_eq!(resource["receipt"]["success"], true);
+            assert_eq!(resource["receipt"]["ref"], "bundled:maka-plugin-authoring");
+            complete.push_str(resource["content"].as_str().unwrap());
+            let continuation = resource["next"].clone();
+            if continuation.is_null() { break; }
+            let read: maka_agent_facts::read::ReadInput = serde_json::from_value(continuation["resource"].clone()).unwrap();
+            let position: usize = read.path.split("?at=").nth(1).unwrap().split('&').next().unwrap().parse().unwrap();
+            let current = complete.encode_utf16().count();
+            // Read continuations account for the newline omitted at a line boundary.
+            if position > current {
+                assert_eq!(position, current + 1);
+                complete.push('\n');
+            } else { assert_eq!(position, current); }
+            tool(&mut socket, "Skill", continuation).await;
+            let (next_socket, page) = next(&listener).await;
+            socket = next_socket;
+            resource = page;
+        }
+        assert_eq!(complete, include_str!("../../../../../../packages/plugin-sdk/src/ui.ts"));
         tool(&mut socket, "Skill", json!({"name":"maka-cua","revision":catalog["revision"]})).await;
         let (mut socket, unavailable) = next(&listener).await;
         assert_eq!(unavailable["reason"], "host_incompatible");

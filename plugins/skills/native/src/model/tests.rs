@@ -554,17 +554,11 @@ async fn bundled_skills_share_model_eligibility_preparation_and_exact_resource_p
         .await
         .unwrap();
     assert_eq!(with_cua["totalEligible"], 2);
-    let mut page = load(
-        &library,
-        &call,
-        tools.clone(),
-        revision,
-        "maka-plugin-authoring",
-        json!({"path":"references/sdk/ui.ts"}),
-    )
-    .await;
-    let next = page["next"].clone();
-    assert!(!next.is_null());
+    let original_load = json!({"name":"maka-plugin-authoring","revision":revision,"resource":{"path":"references/sdk/ui.ts"}});
+    let mut page = library
+        .model("load", json!({"tools":tools,"input":original_load}), &call)
+        .await
+        .unwrap();
     let mut all = String::new();
     loop {
         schema("load", &page);
@@ -635,7 +629,7 @@ async fn bundled_skills_share_model_eligibility_preparation_and_exact_resource_p
     ));
     assert_eq!(
         library
-            .model("load", json!({"tools":tools,"input":next}), &call)
+            .model("load", json!({"tools":tools,"input":original_load}), &call)
             .await
             .unwrap()["kind"],
         "changed"
