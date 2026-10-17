@@ -436,3 +436,6 @@ async fn real_host_agent_scale() {
 
 #[path = "scale/flowing.rs"]
 mod flowing;
+
+#[path = "scale/compaction.rs"]
+mod compaction;

@@ -97,3 +97,19 @@ admission 后的定时触发不保证引擎仍处于准备阶段，需核对模�
 `--kind executor --sizes 128,512` 用同一 transcript 可执行文件测量外部执行器
 的连续工具调用，并将全部持久化消息与 canonical replay 对比，覆盖工具进度、
 结果和最终 invocation 状态。
+
+要测量同一活跃 Host 会话中的多轮压缩，保留 release 构建的
+`maka-agent-native --lib` 测试可执行文件，再运行：
+
+```sh
+MAKA_COMPACTION_CYCLES=10 MAKA_COMPACTION_PROMPT_BYTES=65536 \
+  "$NATIVE" owner::tests::scale::compaction::real_host_same_session_compaction \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+每轮新增输入并通过真实 Host 回执执行手动压缩。最后一次请求验证最新 checkpoint
+已被采用，分页历史核对原始消息。`MAKA_AGENT_COMPACTION` JSON 输出实际请求与
+checkpoint 数量、已验证字节数及各操作的延迟／CPU 时间。操作计时排除初始化、
+证据读取和关闭，但包含同进程内的受控 HTTP 模型。请求 JSON 大小是规范化后的
+序列化长度；峰值 RSS 覆盖整个进程。该探针使用四个 Tokio worker，不测量 IPC、
+渲染、自动压缩、模型推理或能耗。

@@ -113,3 +113,21 @@ fresh copy; this workload complements many-turn Engine fixtures.
 `--kind executor --sizes 128,512` uses the same transcript executable for
 sequential external tools. It compares every persisted message with canonical
 replay, including progress, results, and final invocation state.
+
+For repeated compression in one live Host session, retain the release
+`maka-agent-native --lib` test executable and run:
+
+```sh
+MAKA_COMPACTION_CYCLES=10 MAKA_COMPACTION_PROMPT_BYTES=65536 \
+  "$NATIVE" owner::tests::scale::compaction::real_host_same_session_compaction \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+Each cycle sends new input and performs a real manual compaction through Host
+receipts. A final request verifies adoption of the latest checkpoint; paginated
+history verifies the original messages. The `MAKA_AGENT_COMPACTION` JSON reports
+actual requests/checkpoints, verified bytes and per-operation latency/CPU.
+Operation timings exclude setup, evidence reads and shutdown, but include the
+in-process controlled HTTP model. Request JSON sizes are normalized serialization
+sizes; peak RSS covers the whole process. This probe uses four Tokio workers and
+does not measure IPC, rendering, automatic compaction, inference or energy.
