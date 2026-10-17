@@ -115,3 +115,20 @@ checkpoint 数量、已验证字节数及各操作的延迟／CPU 时间。操�
 证据读取和关闭，但包含同进程内的受控 HTTP 模型。请求 JSON 大小是规范化后的
 序列化长度；峰值 RSS 覆盖整个进程。该探针使用四个 Tokio worker，不测量 IPC、
 渲染、自动压缩、模型推理或能耗。
+
+要在 Unix 上测量真实服务工具执行，使用同一个 release native 测试可执行文件，每个进程
+只运行一个 case：
+
+```sh
+MAKA_TOOL_STORM_CALLS=64 MAKA_TOOL_STORM_PAYLOAD_BYTES=128 \
+  MAKA_TOOL_STORM_BACKEND=native \
+  "$NATIVE" owner::tests::service_tools::storm::real_service_tool_storm \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+该 case 连续执行 mutation。改用同模块的 `real_service_query_fanout` 可测量
+同一模型 step 中的只读调用；backend `javascript` 使用真实 JavaScript 服务。
+fanout 数量不代表同时执行的 handler 数量。`MAKA_AGENT_TOOL_STORM` JSON 记录
+实际调用、精确结果校验、请求、延迟／CPU、进程峰值 RSS 和清理结果。计时包含
+受控 HTTP responder，不包含外部推理、IPC 或渲染。大 payload 可能触发上下文
+维护；只有完整执行且全部校验通过的工作才计为成功 case。

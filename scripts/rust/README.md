@@ -133,3 +133,22 @@ Operation timings exclude setup, evidence reads and shutdown, but include the
 in-process controlled HTTP model. Request JSON sizes are normalized serialization
 sizes; peak RSS covers the whole process. This probe uses four Tokio workers and
 does not measure IPC, rendering, automatic compaction, inference or energy.
+
+For actual service-tool execution on Unix, use the same release native test executable,
+with one case per process:
+
+```sh
+MAKA_TOOL_STORM_CALLS=64 MAKA_TOOL_STORM_PAYLOAD_BYTES=128 \
+  MAKA_TOOL_STORM_BACKEND=native \
+  "$NATIVE" owner::tests::service_tools::storm::real_service_tool_storm \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+This case executes sequential mutations. Use `real_service_query_fanout` in the
+same module for read-only calls in one model step, or backend `javascript` for
+the actual JavaScript service. Fanout count does not imply simultaneous handlers.
+The `MAKA_AGENT_TOOL_STORM` JSON records actual calls, exact result checks,
+requests, latency/CPU, process peak RSS and cleanup. Timings include the controlled
+HTTP responder; they exclude external inference, IPC and rendering. Large
+payloads may reach context maintenance; only completed, fully verified work
+counts as a successful case.

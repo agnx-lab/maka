@@ -29,6 +29,10 @@ use maka_plugin_core::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(unix)]
+#[path = "service_tools/storm.rs"]
+mod storm;
+
 fn counter_contract() -> Contract {
     let write = Method {
         progress: None,
@@ -54,6 +58,8 @@ fn counter_contract() -> Contract {
 #[derive(Clone, Copy)]
 enum Behavior {
     Returned,
+    #[cfg(unix)]
+    Echo,
     Unknown,
     CleanupFailed,
     LargeCleanupFailed,
@@ -65,6 +71,8 @@ struct Counter {
     entered: Arc<Semaphore>,
     cancelled: Arc<Semaphore>,
     release: Arc<Semaphore>,
+    #[cfg(unix)]
+    first_effect: std::sync::OnceLock<std::time::Instant>,
 }
 impl Counter {
     fn new(behavior: Behavior) -> Arc<Self> {
@@ -74,6 +82,8 @@ impl Counter {
             entered: Arc::new(Semaphore::new(0)),
             cancelled: Arc::new(Semaphore::new(0)),
             release: Arc::new(Semaphore::new(0)),
+            #[cfg(unix)]
+            first_effect: std::sync::OnceLock::new(),
         })
     }
 }
@@ -94,6 +104,10 @@ impl Handler for Counter {
                 + 1
         };
         let behavior = self.behavior;
+        #[cfg(unix)]
+        if matches!(behavior, Behavior::Echo) && method != "read" {
+            let _ = self.first_effect.set(std::time::Instant::now());
+        }
         let entered = self.entered.clone();
         let cancelled = self.cancelled.clone();
         let release = self.release.clone();
@@ -101,6 +115,10 @@ impl Handler for Counter {
             entered.add_permits(1);
             match behavior {
                 Behavior::Returned => Ok(json!({"effects":count})),
+                #[cfg(unix)]
+                Behavior::Echo => {
+                    Ok(json!({"effects":count,"payload":input["note"].as_str().unwrap_or("")}))
+                }
                 Behavior::Unknown => Err("lost reply after original effect".into()),
                 Behavior::CleanupFailed | Behavior::LargeCleanupFailed => {
                     let mut ticket = context.scope().resources.reserve().unwrap();
@@ -133,6 +151,7 @@ pub(super) struct Setup {
     tool_name: Option<&'static str>,
     title: Option<maka_agent_facts::display::Text>,
     counter: Option<Arc<Counter>>,
+    echo: bool,
     granted: bool,
     nestable: bool,
     query: bool,
@@ -170,6 +189,7 @@ impl Setup {
             tool_name: None,
             title: None,
             counter: None,
+            echo: false,
             granted: true,
             query: false,
             questions: false,
@@ -199,6 +219,7 @@ impl Setup {
             tool_name: None,
             title: None,
             counter: Some(counter),
+            echo: false,
             granted,
             query: false,
             questions: false,
@@ -234,6 +255,7 @@ impl Setup {
             tool_name: None,
             title: None,
             counter: None,
+            echo: false,
             granted: true,
             query: false,
             questions: true,
@@ -649,7 +671,12 @@ impl Setup {
             && !self.protocol
             && self.skills.is_none()
         {
-            files.insert("counter.mjs".into(), format!(r#"let effects=0; export function activate(){{return {{Counter:{{contract:{},service:['counter']}}}};}} export const counter={{write({{amount}}){{return {{effects:effects+=amount}};}},read(){{return {{effects}};}}}};"#, serde_json::to_string(&counter_contract()).unwrap()).into_bytes());
+            let methods = if self.echo {
+                "write({amount,note=''}){return {effects:effects+=amount,payload:note};},read({note=''}){return {effects,payload:note};}"
+            } else {
+                "write({amount}){return {effects:effects+=amount};},read(){return {effects};}"
+            };
+            files.insert("counter.mjs".into(), format!(r#"let effects=0; export function activate(){{return {{Counter:{{contract:{},service:['counter']}}}};}} export const counter={{{methods}}};"#, serde_json::to_string(&counter_contract()).unwrap()).into_bytes());
         }
         let package = Package::new(files).unwrap();
         input.instances.insert(
