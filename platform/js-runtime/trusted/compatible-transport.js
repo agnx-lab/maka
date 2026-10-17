@@ -22,18 +22,19 @@ const EMPTY_REASONING = '\0MAKA_OPENAI_CHAT_EMPTY_REASONING\0';
 // Only normalize ingress bytes here. Provenance is read from ordered SDK raw
 // events below, never from fetch read-ahead state.
 export function compatibleFetch(fetchImpl, requestId) {
-  return async (input, init) => {
-    const request = new Request(input, init);
-    const body = request.body === null ? undefined : await request.clone().json();
-    const hasOptions = body && Object.hasOwn(body, 'stream_options');
+  const fetch = async (input, init) => fetchImpl(input, init);
+  fetch.json = async (input, init) => {
+    const { body, ...metadata } = init;
+    const hasOptions =
+      body && Object.hasOwn(body, 'stream_options') && body.stream_options !== undefined;
     const withoutOptions = () => {
       const { stream_options, ...rest } = body;
-      const headers = new Headers(request.headers);
+      const headers = new Headers(metadata.headers);
       headers.delete('content-length');
-      return new Request(request, { headers, body: JSON.stringify(rest) });
+      return { ...metadata, headers, body: rest };
     };
     const remembered = Deno.core.ops.op_model_without_stream_usage(requestId);
-    let response = await fetchImpl(remembered && hasOptions ? withoutOptions() : request.clone());
+    let response = await fetchImpl.json(input, remembered && hasOptions ? withoutOptions() : init);
     if (!remembered && hasOptions && response.status === 400) {
       let text = '';
       try {
@@ -44,7 +45,7 @@ export function compatibleFetch(fetchImpl, requestId) {
       if (/stream_options|include_usage/i.test(text)) {
         Deno.core.ops.op_model_reject_stream_usage(requestId);
         await response.body?.cancel();
-        response = await fetchImpl(withoutOptions());
+        response = await fetchImpl.json(input, withoutOptions());
       }
     }
     if (
@@ -124,6 +125,7 @@ export function compatibleFetch(fetchImpl, requestId) {
       headers,
     });
   };
+  return fetch;
 }
 
 export function compatibleEvents() {

@@ -114,7 +114,7 @@ deno_core::extension!(
         op_model_emit,
         op_model_without_stream_usage,
         op_model_reject_stream_usage,
-        super::http::op_http_start,
+        super::http::op_http_json_start,
         super::http::op_http_chunk,
         super::http::op_http_close
     ]

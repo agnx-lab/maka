@@ -20,6 +20,12 @@
 import assert from 'node:assert/strict';
 import { forwardProviderStream } from '../../../../../platform/js-runtime/trusted/provider-errors.js';
 import { networkFetch } from '../../../../../platform/js-runtime/trusted/network-fetch.js';
+import {
+  postJsonToApi,
+  postFormDataToApi,
+  createStatusCodeErrorResponseHandler,
+} from '@ai-sdk/provider-utils';
+import { compatibleFetch } from '../../../../../platform/js-runtime/trusted/compatible-transport.js';
 
 const unavailable = () =>
   Object.assign(new Error('provider unavailable'), {
@@ -144,14 +150,18 @@ const native = Object.assign(new Error('native transport'), { code: 'MAKA_HTTP_T
 globalThis.Deno = {
   core: {
     ops: {
-      op_http_start: async () => {
+      op_http_json_start: async () => {
         throw native;
       },
       op_http_close: async () => {},
     },
   },
 };
-await assert.rejects(networkFetch(1)('http://fixture.invalid'), (error) => error === native);
+await assert.rejects(
+  networkFetch(1).json('http://fixture.invalid', { body: {} }),
+  (error) => error === native,
+);
+await assert.rejects(networkFetch(1)('http://fixture.invalid'), /requires a typed JSON request/);
 const privateFailure = 'PRIVATE_PROVIDER_HTTP_FAILURE_SENTINEL';
 for (const [statusCode, responseHeaders, reason, code] of [
   [200, {}, 'network'],
@@ -213,3 +223,154 @@ for (const [parts, replaySafe] of cases) {
   assert.equal(emitted.at(-1).error.reason, 'network');
   assert.equal(emitted.at(-1).error.replaySafe, replaySafe);
 }
+
+// The installed SDK's shared entry point retains the original shaped values,
+// user-agent and handlers while the typed hook receives the actual body.
+const shapedBody = { image: 'original-base64', optional: undefined };
+let typedCalls = 0;
+const typedFetch = Object.assign(
+  async () => {
+    throw new Error('typed request must not become an encoded fetch');
+  },
+  {
+    json: async (url, init) => {
+      typedCalls++;
+      assert.equal(url, 'http://fixture.invalid/json');
+      assert.equal(init.body, shapedBody);
+      assert.equal(init.method, 'POST');
+      assert.equal(new Headers(init.headers).get('content-type'), 'application/json');
+      assert.match(new Headers(init.headers).get('user-agent'), /ai-sdk-provider-utils\/5\.0\.51/);
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    },
+  },
+);
+const handlers = {
+  failedResponseHandler: async () => {
+    throw new Error('unexpected failure response');
+  },
+  successfulResponseHandler: async ({ requestBodyValues }) => {
+    assert.equal(requestBodyValues, shapedBody);
+    return { value: 'typed' };
+  },
+};
+assert.equal(
+  (
+    await postJsonToApi({
+      url: 'http://fixture.invalid/json',
+      body: shapedBody,
+      fetch: typedFetch,
+      ...handlers,
+    })
+  ).value,
+  'typed',
+);
+assert.equal(typedCalls, 1);
+const failedHandler = createStatusCodeErrorResponseHandler();
+const failedEmitted = [];
+await forwardProviderStream(
+  () =>
+    postJsonToApi({
+      url: 'http://fixture.invalid/json',
+      body: shapedBody,
+      fetch: Object.assign(
+        async () => {
+          throw new Error('encoded fetch');
+        },
+        {
+          json: async (_url, init) => {
+            assert.equal(init.body, shapedBody);
+            return new Response(privateFailure, { status: 400 });
+          },
+        },
+      ),
+      successfulResponseHandler: async () => {
+        throw new Error('unexpected success');
+      },
+      failedResponseHandler: async (input) => {
+        assert.equal(input.requestBodyValues, shapedBody);
+        const failed = await failedHandler(input);
+        assert.equal(failed.value.requestBodyValues, shapedBody);
+        assert.equal(failed.value.responseBody, privateFailure);
+        return failed;
+      },
+    }),
+  (part) => part,
+  async (part) => failedEmitted.push(part),
+  'openai_chat',
+);
+assert.deepEqual(failedEmitted, [{ type: 'error', error: { kind: 'http', status: 400 } }]);
+assert.equal(JSON.stringify(failedEmitted).includes(privateFailure), false);
+assert.equal(JSON.stringify(failedEmitted).includes(shapedBody.image), false);
+// An external ordinary SDK fetch still receives its real encoded JSON/FormData.
+await postJsonToApi({
+  url: 'http://fixture.invalid/json',
+  body: shapedBody,
+  ...handlers,
+  fetch: async (_url, init) => {
+    assert.equal(init.body, '{"image":"original-base64"}');
+    return new Response('{}');
+  },
+});
+const formData = new FormData();
+formData.set('text', 'original');
+await postFormDataToApi({
+  url: 'http://fixture.invalid/form',
+  formData,
+  failedResponseHandler: handlers.failedResponseHandler,
+  successfulResponseHandler: async () => ({ value: null }),
+  fetch: async (_url, init) => {
+    assert.equal(init.body, formData);
+    return new Response('{}');
+  },
+});
+// Compatible usage negotiation operates on the typed body, cancels the first
+// rejection and reuses every original payload without mutating SDK metadata.
+let remembered = false;
+let firstClosed = false;
+let requests = 0;
+Deno.core.ops.op_model_without_stream_usage = () => remembered;
+Deno.core.ops.op_model_reject_stream_usage = () => {
+  remembered = true;
+};
+const compatibleBody = {
+  messages: [{ image: 'original-base64' }],
+  stream_options: { include_usage: true },
+};
+const compatible = compatibleFetch(
+  Object.assign(
+    async () => {
+      throw new Error('encoded fetch');
+    },
+    {
+      json: async (_url, init) => {
+        requests++;
+        assert.equal(init.body.messages, compatibleBody.messages);
+        if (requests === 1) {
+          assert.equal(init.body, compatibleBody);
+          const response = new Response('unsupported stream_options', { status: 400 });
+          const clone = response.clone.bind(response);
+          response.clone = () => {
+            const copy = clone();
+            const cancel = response.body.cancel.bind(response.body);
+            response.body.cancel = async () => {
+              firstClosed = true;
+              await cancel();
+            };
+            return copy;
+          };
+          return response;
+        }
+        assert.equal(Object.hasOwn(init.body, 'stream_options'), false);
+        return new Response(null, { status: 204 });
+      },
+    },
+  ),
+  1,
+);
+await compatible.json('http://fixture.invalid/chat', { method: 'POST', body: compatibleBody });
+assert.equal(firstClosed, true);
+assert.equal(requests, 2);
+assert.equal(remembered, true);
+assert.deepEqual(compatibleBody.stream_options, { include_usage: true });
+await compatible.json('http://fixture.invalid/chat', { method: 'POST', body: compatibleBody });
+assert.equal(requests, 3);

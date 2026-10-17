@@ -27,8 +27,12 @@ function nativeFailure(error) {
 
 export function networkFetch(id) {
   const ops = Deno.core.ops;
-  return async (input, init) => {
-    const request = new Request(input, init);
+  const fetch = async () => {
+    throw new Error('Model transport requires a typed JSON request');
+  };
+  fetch.json = async (input, init) => {
+    const { body, ...metadata } = init;
+    const request = new Request(input, metadata);
     request.signal.throwIfAborted();
     const abort = () => {
       void ops.op_http_close(id);
@@ -36,10 +40,14 @@ export function networkFetch(id) {
     request.signal.addEventListener('abort', abort, { once: true });
     const cleanup = () => request.signal.removeEventListener('abort', abort);
     try {
-      const body = new Uint8Array(await request.arrayBuffer());
-      request.signal.throwIfAborted();
       const response = await ops
-        .op_http_start(id, request.method, request.url, Object.fromEntries(request.headers), body)
+        .op_http_json_start(
+          id,
+          request.method,
+          request.url,
+          Object.fromEntries(request.headers),
+          body,
+        )
         .catch(nativeFailure);
       if (!response.hasBody) {
         cleanup();
@@ -77,4 +85,5 @@ export function networkFetch(id) {
       throw error;
     }
   };
+  return fetch;
 }

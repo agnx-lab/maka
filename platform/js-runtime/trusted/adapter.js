@@ -22,7 +22,7 @@ import { createAnthropic, anthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { compatibleFetch, compatibleEvents } from './compatible-transport.js';
 import { forwardProviderStream } from './provider-errors.js';
-import { boundedFetch, ProviderResponseLimitError } from './provider-fetch.js';
+import { boundedResponse, ProviderResponseLimitError } from './provider-fetch.js';
 import { networkFetch } from './network-fetch.js';
 
 // SDK metadata distinguishes server execution from provider-defined local tools.
@@ -43,7 +43,9 @@ export async function stream(request, emit, signal, requestId) {
   }
   const { kind, model, baseUrl, apiKey, requestHeaders, headers, bodyOverlay } = request.provider;
   const fetch = networkFetch(requestId);
-  const scopedFetch = (input, init) => boundedFetch(input, init, fetch);
+  const scopedFetch = Object.assign((input, init) => fetch(input, init), {
+    json: async (input, init) => boundedResponse(await fetch.json(input, init)),
+  });
   const settings = {
     baseURL: baseUrl,
     apiKey: apiKey ?? '',
@@ -59,59 +61,55 @@ export async function stream(request, emit, signal, requestId) {
     Object.keys(headers ?? {}).length > 0 ||
     overlayKeys.length > 0
   ) {
-    settings.fetch = async (input, init) => {
-      const generated = new Request(input, init);
-      if (requestHeaders !== undefined) {
-        generated.headers.delete('authorization');
-        generated.headers.delete('x-api-key');
-        for (const [name, value] of Object.entries(requestHeaders)) {
+    settings.fetch = Object.assign((input, init) => scopedFetch(input, init), {
+      json: async (input, init) => {
+        const { body, ...metadata } = init;
+        const generated = new Request(input, metadata);
+        if (requestHeaders !== undefined) {
+          generated.headers.delete('authorization');
+          generated.headers.delete('x-api-key');
+          for (const [name, value] of Object.entries(requestHeaders)) {
+            const current = generated.headers.get(name);
+            if (current !== null && current !== value) {
+              throw new Error(`Authentication header conflicts with a protocol header: ${name}`);
+            }
+            generated.headers.set(name, value);
+          }
+        }
+        for (const [name, value] of Object.entries(headers ?? {})) {
           const current = generated.headers.get(name);
           if (current !== null && current !== value) {
-            throw new Error(`Authentication header conflicts with a protocol header: ${name}`);
+            throw new Error(`Custom request header conflicts with a generated header: ${name}`);
           }
           generated.headers.set(name, value);
         }
-      }
-      for (const [name, value] of Object.entries(headers ?? {})) {
-        const current = generated.headers.get(name);
-        if (current !== null && current !== value) {
-          throw new Error(`Custom request header conflicts with a generated header: ${name}`);
-        }
-        generated.headers.set(name, value);
-      }
-      const contentType = generated.headers.get('content-type');
-      if (
-        overlayKeys.length > 0 &&
-        generated.body !== null &&
-        generated.method !== 'GET' &&
-        generated.method !== 'HEAD' &&
-        (contentType === null ||
-          /(^|\s|;)application\/(?:[\w.+-]+\+)?json(?:\s*;|$)/i.test(contentType))
-      ) {
-        const invalidBody = 'Extra request body can only be applied to a JSON object request';
-        const body = await generated
-          .clone()
-          .json()
-          .catch(() => {
+        const contentType = generated.headers.get('content-type');
+        if (
+          overlayKeys.length > 0 &&
+          generated.method !== 'GET' &&
+          generated.method !== 'HEAD' &&
+          (contentType === null ||
+            /(^|\s|;)application\/(?:[\w.+-]+\+)?json(?:\s*;|$)/i.test(contentType))
+        ) {
+          const invalidBody = 'Extra request body can only be applied to a JSON object request';
+          if (body === null || typeof body !== 'object' || Array.isArray(body)) {
             throw new Error(invalidBody);
-          });
-        if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-          throw new Error(invalidBody);
-        }
-        for (const key of overlayKeys) {
-          if (Object.hasOwn(body, key)) {
-            throw new Error(`Extra request body conflicts with a generated field: ${key}`);
           }
+          for (const key of overlayKeys) {
+            if (Object.hasOwn(body, key) && body[key] !== undefined) {
+              throw new Error(`Extra request body conflicts with a generated field: ${key}`);
+            }
+          }
+          generated.headers.delete('content-length');
+          return scopedFetch.json(generated.url, {
+            ...metadata,
+            headers: generated.headers,
+            body: { ...body, ...bodyOverlay },
+          });
         }
-        generated.headers.delete('content-length');
-        return scopedFetch(
-          new Request(generated, {
-            body: JSON.stringify({ ...body, ...bodyOverlay }),
-          }),
-        );
-      }
-      return scopedFetch(generated);
-    };
+        return scopedFetch.json(generated.url, { ...metadata, headers: generated.headers, body });
+      },
+    });
   }
   if (compatible) settings.fetch = compatibleFetch(settings.fetch, requestId);
   const instance = compatible

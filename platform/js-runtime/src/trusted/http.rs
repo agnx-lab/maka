@@ -18,14 +18,16 @@
  */
 
 use super::ops::Models;
-use deno_core::{JsBuffer, OpState, op2};
+use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use maka_agent_ports::model::Transport;
 use maka_capabilities::http;
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::{Value, json, ser::Formatter};
 use std::{
     cell::RefCell,
     collections::BTreeMap,
+    io::{self, Write},
     rc::Rc,
     sync::{Arc, Mutex},
 };
@@ -132,16 +134,18 @@ struct TransportFailure;
 
 #[op2]
 #[serde]
-pub(super) async fn op_http_start(
+pub(super) async fn op_http_json_start(
     state: Rc<RefCell<OpState>>,
     id: u32,
     #[string] method: String,
     #[string] url: String,
     #[serde] headers: BTreeMap<String, String>,
-    #[buffer] body: JsBuffer,
+    #[serde] body: serde_json::Value,
 ) -> Result<serde_json::Value, JsErrorBox> {
     let exchange = exchange(&state.borrow(), id)?;
-    exchange.start(method, url, headers, body.to_vec()).await
+    let encoded = encode_json(&body, &exchange.cancellation)?;
+    drop(body);
+    exchange.start(method, url, headers, encoded).await
 }
 
 #[op2]
@@ -160,3 +164,55 @@ pub(super) async fn op_http_close(state: Rc<RefCell<OpState>>, id: u32) -> Resul
     exchange.close().await;
     Ok(())
 }
+
+struct JsonWriter<'a> {
+    bytes: Vec<u8>,
+    cancellation: &'a CancellationToken,
+}
+impl Write for JsonWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.cancellation.is_cancelled() {
+            return Err(io::Error::other("HTTP request cancelled"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct JsonFormatter;
+impl Formatter for JsonFormatter {
+    fn write_f64<W>(&mut self, writer: &mut W, value: f64) -> io::Result<()>
+    where
+        W: Write + ?Sized,
+    {
+        let mut buffer = ryu_js::Buffer::new();
+        writer.write_all(buffer.format_finite(value).as_bytes())
+    }
+}
+
+fn encode_json(body: &Value, cancellation: &CancellationToken) -> Result<Vec<u8>, JsErrorBox> {
+    if cancellation.is_cancelled() {
+        return Err(failed("HTTP request cancelled"));
+    }
+    let mut writer = JsonWriter {
+        bytes: Vec::new(),
+        cancellation,
+    };
+    let result = body.serialize(&mut serde_json::Serializer::with_formatter(
+        &mut writer,
+        JsonFormatter,
+    ));
+    // Use the model token, not the previous HTTP child's token: close() cancels
+    // that child even when a normal provider-policy retry is about to start.
+    if cancellation.is_cancelled() {
+        return Err(failed("HTTP request cancelled"));
+    }
+    result.map_err(|_| failed("HTTP JSON encoding failed"))?;
+    Ok(writer.bytes)
+}
+
+#[cfg(test)]
+mod tests;

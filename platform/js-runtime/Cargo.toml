@@ -40,6 +40,7 @@ deno_permissions = "=0.117.0"
 sys_traits = { version = "0.1.28", features = ["real", "libc", "winapi"] }
 serde.workspace = true
 serde_json.workspace = true
+ryu-js = "1"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

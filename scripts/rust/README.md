@@ -165,6 +165,11 @@ MAKA_IMAGE_COUNT=2 MAKA_IMAGE_SIDE=512 \
   --ignored --exact --nocapture --test-threads=1
 ```
 
+Choose `MAKA_IMAGE_PROTOCOL=openai-compatible` (default), `openai-chat`,
+`anthropic`, or `responses` to exercise the actual protocol. Compatible requests
+with `MAKA_IMAGE_RETRY=true` receive one explicit `stream_options` rejection;
+both HTTP attempts must contain every original image.
+
 Each process generates distinct valid RGBA PNGs, fully decodes them for validation,
 then uploads sequential file snapshots through the Host. The probe checks durable
 upload receipts, original artifact bytes and canonical references, exact ordered

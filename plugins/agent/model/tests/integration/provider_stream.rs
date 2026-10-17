@@ -96,7 +96,7 @@ fn sse(values: &[Value]) -> String {
 
 fn fixtures(kind: ProviderKind, text: &str) -> (String, String) {
     match kind {
-        ProviderKind::OpenaiChat => (
+        ProviderKind::OpenaiChat | ProviderKind::OpenaiCompatible { .. } => (
             sse(&[
                 json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":text},"finish_reason":null}]}),
             ]),
@@ -120,9 +120,7 @@ fn fixtures(kind: ProviderKind, text: &str) -> (String, String) {
                 json!({"type":"message_stop"}),
             ]),
         ),
-        ProviderKind::OpenaiResponses
-        | ProviderKind::OpenResponses(_)
-        | ProviderKind::OpenaiCompatible { .. } => {
+        ProviderKind::OpenaiResponses | ProviderKind::OpenResponses(_) => {
             unreachable!("separate fixtures required")
         }
     }
@@ -165,7 +163,7 @@ async fn large_sdk_requests_reserve_the_queue_without_a_body_size_cap() {
 async fn sdk_text_and_tool_streams_cross_real_http_before_response_finishes() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let executor = ModelExecutor::new(Duration::from_secs(15)).unwrap();
-        for kind in [ProviderKind::OpenaiChat, ProviderKind::Anthropic] {
+        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiCompatible { name: "fixture".into() }, ProviderKind::Anthropic] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}/v1", listener.local_addr().unwrap());
             let gate = Arc::new(Notify::new());
@@ -200,7 +198,9 @@ async fn sdk_text_and_tool_streams_cross_real_http_before_response_finishes() {
             let mut customized = request(kind.clone(), base);
             customized.max_output_tokens = Some(10_000_000_000);
             customized.provider.body_overlay = Some(serde_json::Map::from_iter([
-                ("fixture_context".into(), json!({"route":"customized"})),
+                ("fixture_context".into(), json!({"route":"customized","text":"中文😀\0\"\\\n","values":[null,true,-1,0.25]})),
+                // SDK optional undefined fields were absent on the JSON wire.
+                ("temperature".into(), json!(0.25)),
             ]));
             customized.provider.headers.insert("X-Custom-Route".into(), "local-route".into());
             customized.provider.headers.insert("X-Latin-1".into(), "ÿ".into());
@@ -243,7 +243,8 @@ assert_eq!(step.finish_reason, maka_agent_facts::model::ModelFinishReason::ToolC
             assert_eq!(body["model"], "test-model");
             assert_eq!(body["stream"], true);
             assert_eq!(body["max_tokens"], 10_000_000_000u64);
-            assert_eq!(body["fixture_context"], json!({"route":"customized"}));
+            assert_eq!(body["fixture_context"], json!({"route":"customized","text":"中文😀\0\"\\\n","values":[null,true,-1,0.25]}));
+            assert_eq!(body["temperature"], 0.25);
             if matches!(kind, ProviderKind::Anthropic) {
                 assert!(body["messages"].to_string().contains("not supported by this model adapter"));
                 assert!(!body["messages"].to_string().contains("YXVkaW8="));
@@ -563,6 +564,7 @@ async fn customization_cannot_replace_generated_headers_or_body_fields() {
             (ProviderKind::Anthropic, Some("Anthropic-Version")),
             (ProviderKind::Anthropic, Some("Anthropic-Beta")),
             (ProviderKind::Anthropic, None), (ProviderKind::OpenaiChat, None),
+            (ProviderKind::OpenaiCompatible { name: "fixture".into() }, None),
             (ProviderKind::OpenaiResponses, None),
         ] {
             let mut customized = request(kind, base.clone());

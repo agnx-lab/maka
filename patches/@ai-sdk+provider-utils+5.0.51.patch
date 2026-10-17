@@ -1,0 +1,212 @@
+diff --git a/node_modules/@ai-sdk/provider-utils/src/fetch-function.ts b/node_modules/@ai-sdk/provider-utils/src/fetch-function.ts
+--- a/node_modules/@ai-sdk/provider-utils/src/fetch-function.ts
++++ b/node_modules/@ai-sdk/provider-utils/src/fetch-function.ts
+@@ -1,4 +1,9 @@
+ /**
+  * Fetch function type (standardizes the version of fetch used).
+  */
+-export type FetchFunction = typeof globalThis.fetch;
++export type FetchFunction = typeof globalThis.fetch & {
++  json?: (
++    url: string,
++    init: Omit<RequestInit, 'body'> & { body: unknown },
++  ) => Promise<Response>;
++};
+diff --git a/node_modules/@ai-sdk/provider-utils/src/post-to-api.ts b/node_modules/@ai-sdk/provider-utils/src/post-to-api.ts
+--- a/node_modules/@ai-sdk/provider-utils/src/post-to-api.ts
++++ b/node_modules/@ai-sdk/provider-utils/src/post-to-api.ts
+@@ -34,10 +34,7 @@
+       'Content-Type': 'application/json',
+       ...headers,
+     },
+-    body: {
+-      content: JSON.stringify(body),
+-      values: body,
+-    },
++    body: { json: body },
+     failedResponseHandler,
+     successfulResponseHandler,
+     abortSignal,
+@@ -85,26 +82,30 @@
+ }: {
+   url: string;
+   headers?: Record<string, string | undefined>;
+-  body: {
+-    content: string | FormData | Uint8Array | Blob;
+-    values: unknown;
+-  };
++  body:
++    | { json: unknown }
++    | { content: string | FormData | Uint8Array | Blob; values: unknown };
+   failedResponseHandler: ResponseHandler<Error>;
+   successfulResponseHandler: ResponseHandler<T>;
+   abortSignal?: AbortSignal;
+   fetch?: FetchFunction;
+ }) => {
++  const requestBodyValues = 'json' in body ? body.json : body.values;
+   try {
+-    const response = await fetch(url, {
++    const init = {
+       method: 'POST',
+       headers: withUserAgentSuffix(
+         headers,
+         `ai-sdk-provider-utils/${VERSION}`,
+         getRuntimeEnvironmentUserAgent(),
+       ),
+-      body: body.content,
+       signal: abortSignal,
+-    });
++    };
++    const response = 'json' in body
++      ? fetch.json
++        ? await fetch.json(url, { ...init, body: body.json })
++        : await fetch(url, { ...init, body: JSON.stringify(body.json) })
++      : await fetch(url, { ...init, body: body.content });
+ 
+     const responseHeaders = extractResponseHeaders(response);
+ 
+@@ -118,7 +119,7 @@
+         errorInformation = await failedResponseHandler({
+           response,
+           url,
+-          requestBodyValues: body.values,
++          requestBodyValues,
+         });
+       } catch (error) {
+         if (isAbortError(error) || APICallError.isInstance(error)) {
+@@ -131,7 +132,7 @@
+           statusCode: response.status,
+           url,
+           responseHeaders,
+-          requestBodyValues: body.values,
++          requestBodyValues,
+         });
+       }
+ 
+@@ -142,7 +143,7 @@
+       return await successfulResponseHandler({
+         response,
+         url,
+-        requestBodyValues: body.values,
++        requestBodyValues,
+       });
+     } catch (error) {
+       if (error instanceof Error) {
+@@ -157,10 +158,10 @@
+         statusCode: response.status,
+         url,
+         responseHeaders,
+-        requestBodyValues: body.values,
++        requestBodyValues,
+       });
+     }
+   } catch (error) {
+-    throw handleFetchError({ error, url, requestBodyValues: body.values });
++    throw handleFetchError({ error, url, requestBodyValues });
+   }
+ };
+diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
+--- a/node_modules/@ai-sdk/provider-utils/dist/index.js
++++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
+@@ -3572,10 +3572,7 @@
+     "Content-Type": "application/json",
+     ...headers
+   },
+-  body: {
+-    content: JSON.stringify(body),
+-    values: body
+-  },
++  body: { json: body },
+   failedResponseHandler,
+   successfulResponseHandler,
+   abortSignal,
+@@ -3610,17 +3607,22 @@
+   abortSignal,
+   fetch = getOriginalFetch4()
+ }) => {
++  const requestBodyValues = "json" in body ? body.json : body.values;
+   try {
+-    const response = await fetch(url, {
++    const init = {
+       method: "POST",
+       headers: withUserAgentSuffix(
+         headers,
+         `ai-sdk-provider-utils/${VERSION}`,
+         getRuntimeEnvironmentUserAgent()
+       ),
+-      body: body.content,
+       signal: abortSignal
+-    });
++    };
++    const response = "json" in body
++      ? fetch.json
++        ? await fetch.json(url, { ...init, body: body.json })
++        : await fetch(url, { ...init, body: JSON.stringify(body.json) })
++      : await fetch(url, { ...init, body: body.content });
+     const responseHeaders = extractResponseHeaders(response);
+     if (!response.ok) {
+       let errorInformation;
+@@ -3628,7 +3630,7 @@
+         errorInformation = await failedResponseHandler({
+           response,
+           url,
+-          requestBodyValues: body.values
++          requestBodyValues
+         });
+       } catch (error) {
+         if (isAbortError(error) || APICallError5.isInstance(error)) {
+@@ -3640,7 +3642,7 @@
+           statusCode: response.status,
+           url,
+           responseHeaders,
+-          requestBodyValues: body.values
++          requestBodyValues
+         });
+       }
+       throw errorInformation.value;
+@@ -3649,7 +3651,7 @@
+       return await successfulResponseHandler({
+         response,
+         url,
+-        requestBodyValues: body.values
++        requestBodyValues
+       });
+     } catch (error) {
+       if (error instanceof Error) {
+@@ -3663,11 +3665,11 @@
+         statusCode: response.status,
+         url,
+         responseHeaders,
+-        requestBodyValues: body.values
++        requestBodyValues
+       });
+     }
+   } catch (error) {
+-    throw handleFetchError({ error, url, requestBodyValues: body.values });
++    throw handleFetchError({ error, url, requestBodyValues });
+   }
+ };
+ 
+diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.d.ts b/node_modules/@ai-sdk/provider-utils/dist/index.d.ts
+--- a/node_modules/@ai-sdk/provider-utils/dist/index.d.ts
++++ b/node_modules/@ai-sdk/provider-utils/dist/index.d.ts
+@@ -790,7 +790,9 @@
+ /**
+  * Fetch function type (standardizes the version of fetch used).
+  */
+-type FetchFunction = typeof globalThis.fetch;
++type FetchFunction = typeof globalThis.fetch & {
++    json?: (url: string, init: Omit<RequestInit, 'body'> & { body: unknown }) => Promise<Response>;
++};
+ 
+ /**
+  * Used to mark schemas so we can support both Zod and custom schemas.
+@@ -1552,7 +1554,7 @@
+ declare const postToApi: <T>({ url, headers, body, successfulResponseHandler, failedResponseHandler, abortSignal, fetch, }: {
+     url: string;
+     headers?: Record<string, string | undefined>;
+-    body: {
++    body: { json: unknown } | {
+         content: string | FormData | Uint8Array | Blob;
+         values: unknown;
+     };

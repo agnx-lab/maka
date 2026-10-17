@@ -144,6 +144,11 @@ MAKA_IMAGE_COUNT=2 MAKA_IMAGE_SIDE=512 \
   --ignored --exact --nocapture --test-threads=1
 ```
 
+通过 `MAKA_IMAGE_PROTOCOL` 选择实际协议：默认 `openai-compatible`，或
+`openai-chat`、`anthropic`、`responses`。Compatible 设置
+`MAKA_IMAGE_RETRY=true` 时会收到一次明确的 `stream_options` 拒绝；
+两次 HTTP 请求都必须包含全部原图。
+
 每个进程生成不同的有效 RGBA PNG，完整解码核验后，逐张捕获文件快照并通过 Host
 上传。探针核对持久上传回执、原始 artifact 字节和 canonical 引用、真实 provider
 HTTP 请求中有序且精确的图像、完整公开历史和清理结果。只有原图精确送达才通过；

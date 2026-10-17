@@ -23,7 +23,11 @@ fn main() {
     let dependencies = std::env::var_os("MAKA_JS_DEPS")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| "../..".into());
-    for source in ["package-lock.json", "node_modules/.package-lock.json"] {
+    for source in [
+        "package-lock.json",
+        "node_modules/.package-lock.json",
+        "node_modules/@ai-sdk/provider-utils/dist/index.js",
+    ] {
         println!(
             "cargo:rerun-if-changed={}",
             dependencies.join(source).display()
@@ -39,6 +43,7 @@ fn bundle_providers() {
     println!("cargo:rerun-if-changed=trusted/compatible-transport.js");
     println!("cargo:rerun-if-changed=trusted/network-fetch.js");
     println!("cargo:rerun-if-changed=../../scripts/rust/bundle-providers.mjs");
+    println!("cargo:rerun-if-changed=../../patches/@ai-sdk+provider-utils+5.0.51.patch");
     println!("cargo:rerun-if-changed=third-party/deno-telemetry/telemetry.ts");
     println!("cargo:rerun-if-changed=third-party/deno-telemetry/util.ts");
     let status = std::process::Command::new("node")

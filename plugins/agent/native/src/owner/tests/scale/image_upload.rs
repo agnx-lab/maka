@@ -34,6 +34,10 @@ use std::{cell::Cell, io::Read, panic::AssertUnwindSafe};
 const INPUT: &str = "K45 inspect these exact uploaded images";
 const ANSWER: &str = "K45_EXACT_IMAGES_CONFIRMED";
 
+#[path = "image_upload/protocol.rs"]
+mod protocol;
+use protocol::Options;
+
 #[derive(Clone)]
 struct Picture {
     name: String,
@@ -323,13 +327,21 @@ async fn verify(f: &Fixture, session: &str, invocation: &str, pictures: &[Pictur
 }
 
 async fn run(count: usize, side: u32) {
+    run_protocol(count, side, Options::DEFAULT).await;
+}
+
+async fn run_protocol(count: usize, side: u32, options: Options) {
     assert!(count > 0 && side > 0);
     let whole = Instant::now();
     let whole_cpu = usage().0;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let f = Fixture::new(
+    let f = Fixture::configured_provider(
         &format!("http://{}/v1", listener.local_addr().unwrap()),
         None,
+        None,
+        None,
+        |_| {},
+        options.provider(),
     )
     .await;
     let stage = Cell::new("setup");
@@ -340,7 +352,7 @@ async fn run(count: usize, side: u32) {
     let mut server = None;
     let mut metrics = json!({});
     let checked = tokio::time::timeout(Duration::from_secs(600), AssertUnwindSafe(async {
-        images::enable_vision(&f).await;
+        options.configure(&f).await;
         session = Some(f.create("K45 real image upload").await);
         let session = session.as_deref().unwrap();
         let mut generation_ms = 0.0;
@@ -387,49 +399,63 @@ async fn run(count: usize, side: u32) {
         let cpu = usage().0;
         server = Some(tokio::spawn(async move {
             let result = AssertUnwindSafe(async {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let sent = request(&mut socket).await;
-                let mut report = json!({"http_requests":1,"arrival_ms":turn.elapsed().as_secs_f64()*1000.0,
-                    "normalized_request_json_bytes":serde_json::to_vec(&sent).unwrap().len(),"actual_images":0,
-                    "exact_images":false,"substitution_text":[]});
-                let through = *store.subscribe_commits().borrow();
-                let mut after = 0;
-                let mut purpose = None;
-                loop {
-                    let page = store.session_events(&server_session, after, through, 512, usize::MAX).await.unwrap();
-                    for fact in page.events {
-                        if let Fact::ModelRequested { purpose: value, .. } = fact.event.fact { purpose = Some(value); }
+                let mut attempts = Vec::new();
+                let mut exact_all = true;
+                let mut normalized_bytes = 0;
+                for attempt in 0..=usize::from(options.retry) {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let sent = options.request(&mut socket).await;
+                    normalized_bytes += serde_json::to_vec(&sent).unwrap().len();
+                    let mut report = json!({"http_requests":attempt+1,"arrival_ms":turn.elapsed().as_secs_f64()*1000.0,
+                        "normalized_request_json_bytes":normalized_bytes,"actual_images":0,
+                        "exact_images":false,"substitution_text":[]});
+                    let through = *store.subscribe_commits().borrow();
+                    let mut after = 0;
+                    let mut purpose = None;
+                    loop {
+                        let page = store.session_events(&server_session, after, through, 512, usize::MAX).await.unwrap();
+                        for fact in page.events {
+                            if let Fact::ModelRequested { purpose: value, .. } = fact.event.fact { purpose = Some(value); }
+                        }
+                        match page.next_after { Some(next) => after = next, None => break }
                     }
-                    match page.next_after { Some(next) => after = next, None => break }
-                }
-                report["purpose"] = json!(purpose);
-                *server_progress.lock().unwrap() = report.clone();
-                assert_eq!(purpose, Some(ModelPurpose::Main), "unexpected maintenance request");
-                let parts: Vec<_> = sent["messages"].as_array().unwrap().iter()
-                    .filter(|message| message["role"] == "user")
-                    .filter_map(|message| message["content"].as_array()).flatten().collect();
-                let image_parts: Vec<_> = parts.iter().filter(|part| part["type"] == "image_url").collect();
-                report["actual_images"] = json!(image_parts.len());
-                let texts: Vec<_> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
-                report["substitution_text"] = json!(texts.iter().filter(|text| text.contains("could not be loaded")).collect::<Vec<_>>());
-                *server_progress.lock().unwrap() = report.clone();
-                assert!(texts.iter().any(|text| text.contains(INPUT)), "original user marker");
-                let mut exact = image_parts.len() == expected.len();
-                for (part, picture) in image_parts.iter().zip(&expected) {
-                    let url = part["image_url"]["url"].as_str().unwrap();
-                    let encoded = url.strip_prefix("data:image/png;base64,").expect("structured PNG image");
-                    let bytes = STANDARD.decode(encoded).unwrap();
-                    exact &= bytes.len() == picture.bytes && content_digest(&bytes) == picture.digest;
-                    let mut file = std::fs::File::open(directory.join(&picture.name)).unwrap();
-                    for chunk in bytes.chunks(65_536) {
-                        let mut original = vec![0; chunk.len()];
-                        file.read_exact(&mut original).unwrap();
-                        exact &= original == chunk;
+                    report["purpose"] = json!(purpose);
+                    *server_progress.lock().unwrap() = report.clone();
+                    assert_eq!(purpose, Some(ModelPurpose::Main), "unexpected maintenance request");
+                    let parts = options.parts(&sent);
+                    let image_parts: Vec<_> = parts.iter().filter_map(|part| options.image(part)).collect();
+                    report["actual_images"] = json!(image_parts.len());
+                    let texts: Vec<_> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
+                    report["substitution_text"] = json!(texts.iter().filter(|text| text.contains("could not be loaded")).collect::<Vec<_>>());
+                    *server_progress.lock().unwrap() = report.clone();
+                    assert!(texts.iter().any(|text| text.contains(INPUT)), "original user marker");
+                    let mut exact = image_parts.len() == expected.len();
+                    for (encoded, picture) in image_parts.iter().zip(&expected) {
+                        let bytes = STANDARD.decode(*encoded).unwrap();
+                        exact &= bytes.len() == picture.bytes && content_digest(&bytes) == picture.digest;
+                        let mut file = std::fs::File::open(directory.join(&picture.name)).unwrap();
+                        for chunk in bytes.chunks(65_536) {
+                            let mut original = vec![0; chunk.len()];
+                            file.read_exact(&mut original).unwrap();
+                            exact &= original == chunk;
+                        }
                     }
+                    exact_all &= exact;
+                    attempts.push(json!({"attempt":attempt+1,"actual_images":image_parts.len(),"exact_images":exact,
+                        "stream_options_present":sent.get("stream_options").is_some()}));
+                    report["attempts"] = json!(&attempts);
+                    report["exact_images"] = json!(exact_all);
+                    *server_progress.lock().unwrap() = report;
+                    if options.retry {
+                        assert_eq!(sent.get("stream_options").is_some(), attempt == 0);
+                        if attempt == 0 {
+                            options.reject_stream_options(&mut socket).await;
+                            continue;
+                        }
+                    }
+                    options.response(&mut socket).await;
                 }
-                report["exact_images"] = json!(exact);
-                *server_progress.lock().unwrap() = report;
-                response_with_text(&mut socket, ANSWER).await;
+
             }).catch_unwind().await;
             let _ = send.send(result);
         }));
@@ -576,7 +602,7 @@ async fn run(count: usize, side: u32) {
     println!(
         "MAKA_AGENT_IMAGE_SCALE {}",
         json!({"status":status,"stage":stage.get(),"error":error,
-        "count_requested":count,"side":side,"rgba_bytes_per_image":u64::from(side).checked_mul(u64::from(side)).and_then(|n| n.checked_mul(4)),
+        "count_requested":count,"side":side,"protocol":options.name(),"retry_requested":options.retry,"customization_enabled":options.customized(),"rgba_bytes_per_image":u64::from(side).checked_mul(u64::from(side)).and_then(|n| n.checked_mul(4)),
         "session":session,"invocation":invocation,"confirmed_uploads":pictures.iter().filter(|picture| !picture.descriptor.is_null()).count(),
         "images":pictures.iter().map(|picture| json!({"name":picture.name,"encoded_bytes":picture.bytes,
             "digest":picture.digest,"rgba_digest":picture.rgba_digest,"attachment":picture.descriptor,"upload_reference":picture.reference,"upload_operation":picture.operation})).collect::<Vec<_>>(),
@@ -614,5 +640,5 @@ async fn uploaded_large_png_reaches_vision_http_and_complete_history() {
 async fn real_image_upload_vision_scale() {
     let count = std::env::var("MAKA_IMAGE_COUNT").map_or(1, |value| value.parse().unwrap());
     let side = std::env::var("MAKA_IMAGE_SIDE").map_or(512, |value| value.parse().unwrap());
-    run(count, side).await;
+    run_protocol(count, side, Options::environment()).await;
 }

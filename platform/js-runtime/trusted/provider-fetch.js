@@ -26,8 +26,7 @@ export class ProviderResponseLimitError extends Error {
 // Count decoded transport bytes before TextDecoder/JSON/SSE parsers can retain
 // an unbounded line or response body. This is a per-response parsing boundary,
 // not an OS memory limit or a total-output cap on a long-running model stream.
-export async function boundedFetch(input, init, fetch = globalThis.fetch) {
-  const response = await fetch(input, init);
+export async function boundedResponse(response) {
   if (!response.body) return response;
   const sse =
     response.ok &&
