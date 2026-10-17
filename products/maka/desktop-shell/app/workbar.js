@@ -121,7 +121,7 @@ export class Workbar {
       if (transcript !== null) {
         log(`workbar: following ${transcript.id} (${transcript.endpoint})`);
         this.changes = new Changes(transcript, this.hooks, this.cx);
-        this.files = new FileTree(transcript, this.hooks);
+        this.files = new FileTree(transcript, this.hooks, this.cx);
         this.runsEnded = transcript.runsEnded;
         this.rows = transcript.rows;
         this.changes.refresh();

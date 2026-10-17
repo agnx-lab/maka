@@ -34,11 +34,13 @@
 //! registered file when a mutation names its handle as an attachment (the
 //! `file` of `agent.uploadAttachment`), and `release` forgets it.
 //!
-//! `open` and `reveal` hand a path in a task's folder to the system: open it
-//! with its default application, or show it in the file manager, as the
-//! Files tool's menu offers. They read nothing and answer nothing about the
-//! file; the path must be absolute and exist as an entry, which is checked
-//! off the main thread.
+//! `open` and `reveal` hand a path in a task's folder to the system: open a
+//! file with its default application, or show a file or folder in the file
+//! manager, as the Files tool's menu offers. They read nothing and answer
+//! nothing about the file. Off the main thread they check that the path,
+//! with the links in its folders followed, is inside the task's folder;
+//! `open` also refuses a link, a folder, and, unless the user agreed, a file
+//! that runs a program when it is opened.
 use gpui_shell::{
     HostArguments, HostError, HostModule, HostObject, HostResult, HostValue,
     gpui::{App, PathPromptOptions, SharedString},
@@ -107,15 +109,26 @@ export function chooseFiles(): Promise<ChosenFile[]>;
 export function release(handles: string[]): void;
 
 /**
- * Opens the file or folder at `path` with the system's default application.
- * Rejects when `path` is not absolute, has a `..` component, or does not
- * exist as an entry (a link counts, even one whose target is gone). Whether
- * the application then opened it is not reported.
+ * Opens the file at `path`, in the task's folder `root`, with the system's
+ * default application. Both are absolute, without a `..` component. Rejects
+ * when `path` does not exist, is a link, a folder or not a regular file, or
+ * is outside `root` once the links in its folders are followed. A file that
+ * can run a program when it is opened (one with an execute bit, or an
+ * application, script, installer or location file by its extension) is
+ * refused with a message that starts, after the function's name, with
+ * `launchable:`, unless `options.launch` is true: the script passes that only
+ * after the user agreed. Whether the application then opened it is not
+ * reported.
  */
-export function open(path: string): Promise<void>;
+export function open(path: string, root: string, options?: { launch?: boolean }): Promise<void>;
 
-/** Shows the file or folder at `path` in the file manager. Rejects as `open` does. */
-export function reveal(path: string): Promise<void>;
+/**
+ * Shows the file or folder at `path`, in the task's folder `root`, in the
+ * file manager. A link there is shown as itself, even one whose target is
+ * gone; the links in its folders are followed, and it is refused when that
+ * leads outside `root`.
+ */
+export function reveal(path: string, root: string): Promise<void>;
 "#;
 
 pub fn module() -> HostModule {
@@ -209,32 +222,43 @@ pub fn module() -> HostModule {
             Ok(HostValue::Null)
         })
         .async_function("open", |arguments| {
-            hand_over(arguments, "open", |cx, path| cx.open_with_system(path))
+            let path = absolute_argument(arguments, 0, "open", "path")?;
+            let root = absolute_argument(arguments, 1, "open", "root")?;
+            let launch = launch_option(arguments)?;
+            hand_over(
+                "open",
+                move || openable(&path, &root, launch),
+                |cx, path| cx.open_with_system(path),
+            )
         })
         .async_function("reveal", |arguments| {
-            hand_over(arguments, "reveal", |cx, path| cx.reveal_path(path))
+            let path = absolute_argument(arguments, 0, "reveal", "path")?;
+            let root = absolute_argument(arguments, 1, "reveal", "root")?;
+            hand_over(
+                "reveal",
+                move || revealable(&path, &root),
+                |cx, path| cx.reveal_path(path),
+            )
         })
 }
 
-/// `open` and `reveal` (`function`): checks the path's shape here, then, in
-/// a task on the application, that it exists (on a background thread, so a
-/// slow disk does not hold up the window) and hands it to `hand`. The
-/// returned future answers when that is done.
-fn hand_over(
-    arguments: &HostArguments,
+/// `open` and `reveal` (`function`): in a task on the application, runs
+/// `check` on a background thread (it reads the disk, which may be slow) and
+/// hands the path it answers to `hand`. The returned future answers when
+/// that is done.
+fn hand_over<F>(
     function: &'static str,
+    check: F,
     hand: fn(&App, &Path),
-) -> Result<impl Future<Output = HostResult> + Send + use<>, HostError> {
-    let path = absolute_path(arguments, function)?;
+) -> Result<impl Future<Output = HostResult> + Send, HostError>
+where
+    F: FnOnce() -> Result<PathBuf, HostError> + Send + 'static,
+{
     let (answer, answered) = tokio::sync::oneshot::channel();
     gpui_shell::with_current_app(|cx| {
         cx.spawn(async move |cx| {
-            let probe = path.clone();
-            let found = cx
-                .background_executor()
-                .spawn(async move { exists(&probe) })
-                .await;
-            let result = found.map(|()| {
+            let checked = cx.background_executor().spawn(async move { check() }).await;
+            let result = checked.map(|path| {
                 cx.update(|cx| hand(cx, &path));
                 HostValue::Null
             });
@@ -250,15 +274,19 @@ fn hand_over(
     })
 }
 
-/// The path `open` or `reveal` (`function`) was given: absolute and without
-/// a `..` component. The system opens whatever a path resolves to, so one
-/// that climbs out of a folder is refused rather than resolved here.
-fn absolute_path(arguments: &HostArguments, function: &str) -> Result<PathBuf, HostError> {
+/// Argument `index` of `open` or `reveal` (`function`), called `name` in
+/// messages: an absolute path without a `..` component.
+fn absolute_argument(
+    arguments: &HostArguments,
+    index: usize,
+    function: &str,
+    name: &str,
+) -> Result<PathBuf, HostError> {
     let path = arguments
-        .get(0)
+        .get(index)
         .and_then(HostValue::as_str)
         .map(PathBuf::from)
-        .ok_or_else(|| HostError::new(format!("{function}(path) needs a path")))?;
+        .ok_or_else(|| HostError::new(format!("{function}(path, root) needs a {name}")))?;
     if !path.is_absolute() {
         return Err(HostError::new(format!(
             "{function}: {} is not an absolute path",
@@ -277,12 +305,171 @@ fn absolute_path(arguments: &HostArguments, function: &str) -> Result<PathBuf, H
     Ok(path)
 }
 
-/// Whether `path` exists as an entry. A link counts as itself, even one
-/// whose target is gone: it is not followed.
-fn exists(path: &Path) -> Result<(), HostError> {
+/// `open`'s options: whether the user agreed to open a file that can run a
+/// program (`launch`).
+fn launch_option(arguments: &HostArguments) -> Result<bool, HostError> {
+    let Some(options) = arguments.get(2).filter(|value| !value.is_null()) else {
+        return Ok(false);
+    };
+    if options.as_object().is_none() {
+        return Err(HostError::new("open options must be an object"));
+    }
+    match options.get("launch") {
+        None => Ok(false),
+        Some(value) if value.is_null() => Ok(false),
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| HostError::new("`launch` must be true or false")),
+    }
+}
+
+/// The start of `open`'s message for a file that can run a program, which
+/// the script asks the user about.
+const LAUNCHABLE: &str = "launchable:";
+
+/// Extensions of files that run code when the system opens them, on macOS:
+/// applications and installers, which run their own scripts (app, pkg,
+/// mpkg); shell scripts, which Terminal runs (command, tool, sh, bash, zsh,
+/// csh, ksh, fish); Terminal settings, which can run a command (terminal);
+/// Automator workflows and actions (workflow, action); AppleScript, which
+/// runs when saved run-only or opened by another handler than Script Editor
+/// (scpt, scptd, applescript); Java archives (jar); scripts an installed
+/// launcher runs (py, rb, pl); and location files, which open a URL or
+/// another file, an application among them (webloc, inetloc, fileloc). The
+/// bundles among them are folders, which `open` refuses anyway.
+const LAUNCHABLE_EXTENSIONS: &[&str] = &[
+    "app",
+    "pkg",
+    "mpkg",
+    "command",
+    "tool",
+    "sh",
+    "bash",
+    "zsh",
+    "csh",
+    "ksh",
+    "fish",
+    "terminal",
+    "workflow",
+    "action",
+    "scpt",
+    "scptd",
+    "applescript",
+    "jar",
+    "py",
+    "rb",
+    "pl",
+    "webloc",
+    "inetloc",
+    "fileloc",
+];
+
+/// What `open` hands to the system for `path` in the folder `root`: the
+/// path with every link resolved, for a regular file inside `root`. A link
+/// as the last component is refused rather than followed, and so is a file
+/// that can run a program unless `launch` says the user agreed. The system
+/// opens by path, so a change after these checks is not seen; they refuse
+/// what is there when the user asks.
+fn openable(path: &Path, root: &Path, launch: bool) -> Result<PathBuf, HostError> {
+    let metadata = entry(path)?;
+    let kind = metadata.file_type();
+    if kind.is_symlink() {
+        return Err(HostError::new(format!(
+            "open: {} is a link",
+            path.display()
+        )));
+    }
+    if kind.is_dir() {
+        return Err(HostError::new(format!(
+            "open: {} is a folder",
+            path.display()
+        )));
+    }
+    if !kind.is_file() {
+        return Err(HostError::new(format!(
+            "open: {} is not a regular file",
+            path.display()
+        )));
+    }
+    let resolved = inside("open", path, canonical(path)?, root)?;
+    if !launch && launchable(&resolved, &metadata) {
+        return Err(HostError::new(format!(
+            "{LAUNCHABLE} {} can run a program",
+            path.display()
+        )));
+    }
+    Ok(resolved)
+}
+
+/// What `reveal` hands to the system for `path` in the folder `root`: the
+/// path with the links in its folders resolved, inside `root`. A link as the
+/// last component is kept, so the file manager shows the link itself.
+fn revealable(path: &Path, root: &Path) -> Result<PathBuf, HostError> {
+    entry(path)?;
+    let resolved = match (path.parent(), path.file_name()) {
+        (Some(folder), Some(name)) => canonical(folder)?.join(name),
+        _ => canonical(path)?,
+    };
+    inside("reveal", path, resolved, root)
+}
+
+/// `resolved` (`path` with its links followed) when it is inside `root`, also
+/// with its links followed.
+fn inside(
+    function: &str,
+    path: &Path,
+    resolved: PathBuf,
+    root: &Path,
+) -> Result<PathBuf, HostError> {
+    if resolved.starts_with(canonical(root)?) {
+        Ok(resolved)
+    } else {
+        Err(HostError::new(format!(
+            "{function}: {} is outside {}",
+            path.display(),
+            root.display()
+        )))
+    }
+}
+
+/// `path` as an entry, not followed: a link is itself, even one whose
+/// target is gone.
+fn entry(path: &Path) -> Result<std::fs::Metadata, HostError> {
     std::fs::symlink_metadata(path)
-        .map(|_| ())
         .map_err(|error| HostError::new(format!("{}: {error}", path.display())))
+}
+
+/// `path` with every link in it followed.
+fn canonical(path: &Path) -> Result<PathBuf, HostError> {
+    std::fs::canonicalize(path)
+        .map_err(|error| HostError::new(format!("{}: {error}", path.display())))
+}
+
+/// Whether the regular file at `path` (`metadata`) can run a program when it
+/// is opened: it has an execute bit, or an extension in
+/// LAUNCHABLE_EXTENSIONS, in any case.
+fn launchable(path: &Path, metadata: &std::fs::Metadata) -> bool {
+    executable(metadata)
+        || path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                LAUNCHABLE_EXTENSIONS
+                    .iter()
+                    .any(|listed| listed.eq_ignore_ascii_case(extension))
+            })
+}
+
+#[cfg(unix)]
+fn executable(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+/// Without execute bits, only the extension tells.
+#[cfg(not(unix))]
+fn executable(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// A file the user chose to attach: where it is, and its size and digest
@@ -571,43 +758,124 @@ mod tests {
     }
 
     #[test]
-    fn open_and_reveal_take_an_absolute_existing_path_only() {
+    fn open_and_reveal_check_their_arguments_before_the_application() {
         let directory = std::env::temp_dir().join(format!("maka-files-open-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let file = directory.join("a.txt");
         std::fs::write(&file, "a").unwrap();
-        let begin = |function: &str, path: &str| match module()
-            .begin(function, &arguments(vec![HostValue::from(path)]))
+        let root = directory.to_string_lossy().into_owned();
+        let begin = |function: &str, values: Vec<HostValue>| match module()
+            .begin(function, &arguments(values))
         {
-            Ok(_) => panic!("{function}({path}) began"),
+            Ok(_) => panic!("{function} began"),
             Err(error) => error.message().to_owned(),
         };
+        let paths = |path: &str, root: &str| vec![HostValue::from(path), HostValue::from(root)];
         for function in ["open", "reveal"] {
-            assert!(begin(function, "a.txt").contains("not an absolute path"));
+            assert!(begin(function, paths("a.txt", &root)).contains("not an absolute path"));
             let up = format!("{}/../a.txt", directory.join("sub").display());
-            assert!(begin(function, &up).contains(".. component"));
-            // A path that passes is handed to the application, which a test
-            // does not have.
+            assert!(begin(function, paths(&up, &root)).contains(".. component"));
             assert!(
-                begin(function, &file.to_string_lossy())
+                begin(function, paths(&file.to_string_lossy(), "repo"))
+                    .contains("not an absolute path")
+            );
+            assert!(
+                begin(function, vec![HostValue::from(&*file.to_string_lossy())])
+                    .contains("needs a root")
+            );
+            assert!(begin(function, vec![]).contains("needs a path"));
+            // Arguments that pass are handed to the application, which a test
+            // does not have; what is on disk is checked in its task.
+            assert!(
+                begin(function, paths(&file.to_string_lossy(), &root))
                     .contains("must be called from the application")
             );
-            assert!(module().begin(function, &arguments(vec![])).is_err());
         }
-        // Whether it exists is checked in the application's task.
-        assert!(exists(&file).is_ok());
+        let mut with = paths(&file.to_string_lossy(), &root);
+        with.push(HostObject::new().field("launch", "yes").into());
+        assert!(begin("open", with).contains("`launch` must be true or false"));
+        let mut with = paths(&file.to_string_lossy(), &root);
+        with.push(HostObject::new().field("launch", true).into());
+        assert!(begin("open", with).contains("must be called from the application"));
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn open_takes_a_regular_file_inside_the_folder_only() {
+        let directory = std::env::temp_dir().join(format!("maka-files-inside-{}", Uuid::new_v4()));
+        let root = directory.join("repo");
+        let outside = directory.join("outside");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let file = root.join("src/a.txt");
+        std::fs::write(&file, "a").unwrap();
+        std::fs::write(outside.join("b.txt"), "b").unwrap();
+        let refusal = |result: Result<PathBuf, HostError>| result.unwrap_err().message().to_owned();
+
+        let opened = openable(&file, &root, false).unwrap();
+        assert_eq!(opened, std::fs::canonicalize(&file).unwrap());
+        assert_eq!(revealable(&file, &root).unwrap(), opened);
+        assert!(refusal(openable(&root.join("src"), &root, false)).contains("is a folder"));
+        assert!(refusal(openable(&root.join("missing"), &root, false)).contains("missing"));
+        assert!(refusal(revealable(&root.join("missing"), &root)).contains("missing"));
+        assert!(refusal(openable(&outside.join("b.txt"), &root, false)).contains("is outside"));
         #[cfg(unix)]
         {
-            let link = directory.join("gone");
-            std::os::unix::fs::symlink(directory.join("missing"), &link).unwrap();
-            assert!(exists(&link).is_ok(), "a dangling link exists as an entry");
+            use std::os::unix::fs::symlink;
+            // A link as the last component: not opened, though its target is
+            // in the folder; shown as itself, even when its target is gone.
+            let link = root.join("src/link.txt");
+            symlink(&file, &link).unwrap();
+            assert!(refusal(openable(&link, &root, false)).contains("is a link"));
+            assert!(refusal(openable(&link, &root, true)).contains("is a link"));
+            let gone = root.join("src/gone.txt");
+            symlink(root.join("src/missing"), &gone).unwrap();
+            assert_eq!(
+                revealable(&gone, &root).unwrap(),
+                std::fs::canonicalize(root.join("src"))
+                    .unwrap()
+                    .join("gone.txt")
+            );
+            // A folder in the path that links out of the folder: refused by
+            // both, though the path names a file under the folder.
+            symlink(&outside, root.join("escape")).unwrap();
+            let escaped = root.join("escape/b.txt");
+            assert!(refusal(openable(&escaped, &root, false)).contains("is outside"));
+            assert!(refusal(revealable(&escaped, &root)).contains("is outside"));
+            // A folder link that stays inside is followed.
+            symlink(root.join("src"), root.join("source")).unwrap();
+            assert_eq!(
+                openable(&root.join("source/a.txt"), &root, false).unwrap(),
+                opened
+            );
         }
-        assert!(
-            exists(&directory.join("missing"))
-                .unwrap_err()
-                .message()
-                .contains("missing")
-        );
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn open_asks_before_a_file_that_can_run_a_program() {
+        let directory = std::env::temp_dir().join(format!("maka-files-launch-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let refusal = |result: Result<PathBuf, HostError>| result.unwrap_err().message().to_owned();
+        for name in ["run.command", "Setup.PKG", "tool.sh", "page.webloc"] {
+            let file = directory.join(name);
+            std::fs::write(&file, "").unwrap();
+            assert!(
+                refusal(openable(&file, &directory, false)).starts_with(LAUNCHABLE),
+                "{name}"
+            );
+            assert!(openable(&file, &directory, true).is_ok(), "{name}");
+        }
+        let plain = directory.join("notes.txt");
+        std::fs::write(&plain, "").unwrap();
+        assert!(openable(&plain, &directory, false).is_ok());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o744)).unwrap();
+            assert!(refusal(openable(&plain, &directory, false)).starts_with(LAUNCHABLE));
+            assert!(openable(&plain, &directory, true).is_ok());
+        }
         std::fs::remove_dir_all(&directory).unwrap();
     }
 

@@ -739,7 +739,35 @@ function diffView(changes, cx) {
           .child(text(t('diffGone'), 'small', m.inkMuted).truncate()),
       ),
     )
+    .when(diff.error !== null && diff.result !== undefined, (el) =>
+      el.child(staleNote(changes, diff, cx)),
+    )
     .child(diffBody(changes, diff, cx));
+}
+
+/**
+ * Above a diff whose last read failed: why, and Retry. The rows below are
+ * from the read before; the next read that succeeds takes the note away.
+ */
+function staleNote(changes, diff, cx) {
+  const m = palette(cx);
+  const message = t('diffStale', { value: diff.error });
+  return h_flex()
+    .flex_none()
+    .h(36)
+    .pl(16)
+    .pr(8)
+    .gap(8)
+    .items_center()
+    .bg(m.wash)
+    .child(text(message, 'small', m.destructive).flex_1().min_w_0().truncate().tooltip(message))
+    .child(
+      controlButton('diff-stale-retry', t('retry'), 'outline', diff.reading, cx)
+        .h(26)
+        .px(10)
+        .rounded(8)
+        .on_click(() => changes.readDiff(diff)),
+    );
 }
 
 /** The diff's rows in a measured list, or a line saying why there are none. */

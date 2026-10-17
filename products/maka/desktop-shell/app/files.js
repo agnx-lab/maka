@@ -30,8 +30,10 @@
 //
 // A file opens with the system's application, or shows in the file manager
 // (`maka-files` open and reveal), at the folder's path and the file's
-// relative one joined. Paths come as exact bytes in base64; the decoded text
-// is shown, and the Host is always sent the object it gave.
+// relative one joined; both refuse a path that leads out of the folder. A
+// file that can run a program opens only after the user agrees in a dialog.
+// Paths come as exact bytes in base64; the decoded text is shown, and the
+// Host is always sent the object it gave.
 
 import { div, uniform_list } from 'gpui-kit';
 import { v_flex, h_flex, Scrollbar, Popover } from 'gpui-base';
@@ -39,7 +41,16 @@ import { Buffer } from 'buffer';
 import { open as openWithSystem, reveal as revealInFinder } from 'maka-files';
 import { query, subscribe, next, close, log } from './host.js';
 import { decodePath } from './changes.js';
-import { palette, typeset, text, icon, menuSurface, menuRow, menuSeparator } from './theme.js';
+import {
+  palette,
+  typeset,
+  text,
+  icon,
+  menuSurface,
+  menuRow,
+  menuSeparator,
+  controlButton,
+} from './theme.js';
 import { t } from './locale.js';
 
 /**
@@ -84,13 +95,20 @@ const CHANGE_COLORS = {
 };
 
 /**
- * Whether `entry` opens with the system's application: a file or a folder.
- * A link would open whatever it points to, and a special file has nothing
- * to open, so those are only revealed or copied.
+ * Whether `entry` opens with the system's application: a regular file. A
+ * folder can be an application (a bundle), a link would open whatever it
+ * points to, and a special file has nothing to open, so those are only
+ * revealed or copied.
  */
 function opens(entry) {
-  return entry.kind === 'file' || entry.kind === 'directory';
+  return entry.kind === 'file';
 }
+
+/**
+ * How `maka-files.open` refuses a file that can run a program until the user
+ * agrees: its message after the function's name (see its declarations).
+ */
+const LAUNCHABLE = '`maka-files.open`: launchable:';
 
 /** A folder's problem as its row shows it: one of ours by message key, or the Host's text. */
 function problemText(problem) {
@@ -130,12 +148,15 @@ export class FileTree {
    * @param {import('./transcript.js').Transcript} transcript the conversation;
    *   its `endpoint` answers the reads, and its session names the folder
    * @param {{ changed: () => void, report: (message: string) => void }} hooks
+   * @param cx the Workbar's view context, which draws the dialog before
+   *   opening a file that can run a program
    */
-  constructor(transcript, hooks) {
+  constructor(transcript, hooks, cx) {
     this.transcript = transcript;
     this.sessionId = transcript.id;
     this.endpoint = transcript.endpoint;
     this.hooks = hooks;
+    this.cx = cx;
     /**
      * Folders by key: `{ key, path, entries, error, watch }`. `entries` is
      * null until first listed; `error` null, or `{ key }` (a message key) or
@@ -553,9 +574,9 @@ export class FileTree {
   }
 
   /**
-   * What the menu of `item` offers: Open for files and folders, Reveal and
-   * the two Copy items for every entry, and Show changes for a file the
-   * last status lists.
+   * What the menu of `item` offers: Open for regular files, Reveal and the
+   * two Copy items for every entry, and Show changes for a file the last
+   * status lists.
    * @param {import('./changes.js').Changes | null} changes
    */
   menuActions(item, changes) {
@@ -591,18 +612,43 @@ export class FileTree {
     return `${folder.replace(/\/+$/, '')}/${relative}`;
   }
 
-  /** Opens `entry` (a file or folder) with the system's application for it; a failure is reported. */
-  async open(entry) {
+  /**
+   * Opens `entry` (a regular file) with the system's application for it. One
+   * that can run a program is refused until the user agrees in a dialog,
+   * which calls this again with `launch`. A failure is reported.
+   */
+  async open(entry, launch = false) {
     this.menu = null;
     this.hooks.changed();
     try {
       if (!opens(entry)) throw new Error(t('filesPathRefused', { path: entry.text }));
       const path = this.absolute(entry);
-      log(`files: opening ${entry.text}`);
-      await openWithSystem(path);
+      log(`files: opening ${entry.text}${launch ? ', which the user agreed to run' : ''}`);
+      await openWithSystem(path, this.folder(), launch ? { launch: true } : undefined);
     } catch (error) {
+      if (!launch && String(error?.message).startsWith(LAUNCHABLE)) {
+        log(`files: ${entry.text} can run a program; asking first`);
+        this.askLaunch(entry);
+        return;
+      }
       this.hooks.report(t('filesOpenFailed', { name: entry.name, value: error.message }));
     }
+  }
+
+  /** Asks whether to open `entry`, which can run a program: a dialog with Cancel and Open. */
+  askLaunch(entry) {
+    window.open_dialog(() => launchDialog(this, entry, this.cx), { backdrop_dismissable: false });
+  }
+
+  /** The dialog's Open: opens `entry` after all, unless the tree closed meanwhile. */
+  launch(entry) {
+    window.close_dialog();
+    if (!this.closed) this.open(entry, true);
+  }
+
+  /** The dialog's Cancel (Escape does the same). */
+  cancelLaunch() {
+    window.close_dialog();
   }
 
   /** Shows `entry` in the file manager; a failure is reported. */
@@ -610,7 +656,7 @@ export class FileTree {
     this.menu = null;
     this.hooks.changed();
     try {
-      await revealInFinder(this.absolute(entry));
+      await revealInFinder(this.absolute(entry), this.folder());
     } catch (error) {
       this.hooks.report(t('filesRevealFailed', { name: entry.name, value: error.message }));
     }
@@ -696,6 +742,43 @@ export function filesBody(tree, changes, actions, cx) {
         el.child(fileMenu(tree, changes, actions, cx)),
       )
   );
+}
+
+/**
+ * The dialog before opening `entry`, a file that can run a program: what it
+ * is, then Cancel and Open, which opens it after all.
+ */
+function launchDialog(tree, entry, cx) {
+  const m = palette(cx);
+  return v_flex()
+    .w(360)
+    .gap(16)
+    .child(
+      v_flex()
+        .gap(6)
+        .child(
+          typeset(div(), 'heading')
+            .text_color(m.ink)
+            .child(t('filesLaunchTitle', { name: entry.name })),
+        )
+        .child(text(t('filesLaunchBody'), 'body', m.inkMuted)),
+    )
+    .child(
+      h_flex()
+        .gap(8)
+        .justify_end()
+        .child(
+          controlButton('files-launch-cancel', t('cancel'), 'outline', false, cx).on_click(() =>
+            tree.cancelLaunch(),
+          ),
+        )
+        .child(
+          controlButton('files-launch-open', t('filesOpen'), 'primary', false, cx)
+            .bg(m.destructive)
+            .hover((style) => style.bg(m.destructive).opacity(0.84))
+            .on_click(() => tree.launch(entry)),
+        ),
+    );
 }
 
 /** One row of the tree, 28 high, indented 16 a level (up to INDENT_LEVELS). */

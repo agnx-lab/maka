@@ -1216,6 +1216,12 @@ export const MESSAGES = {
   diffNext: ['Next file (])', '下一个文件（]）', '下一個檔案（]）'],
   diffReading: ['Reading the diff…', '正在读取差异…', '正在讀取差異…'],
   diffFailed: ["Couldn't read the diff: {value}", '读取差异失败：{value}', '讀取差異失敗：{value}'],
+  // The error last: the note is one line, and a long error is cut off.
+  diffStale: [
+    "Couldn't read this diff again. It may be out of date: {value}",
+    '再次读取差异失败，下方内容可能已过时：{value}',
+    '再次讀取差異失敗，下方內容可能已過時：{value}',
+  ],
   diffBinary: ['Binary file', '二进制文件', '二進位檔案'],
   diffTooLarge: [
     'This diff is too large to show',
@@ -1256,6 +1262,12 @@ export const MESSAGES = {
     '讀取時資料夾一直在變化',
   ],
   filesOpen: ['Open', '打开', '開啟'],
+  filesLaunchTitle: ['Open “{name}”?', '打开“{name}”？', '開啟「{name}」？'],
+  filesLaunchBody: [
+    'This file can run a program. Open it only if you know what it does.',
+    '这个文件可以运行程序。只在清楚它会做什么时打开。',
+    '這個檔案可以執行程式。只在清楚它會做什麼時開啟。',
+  ],
   filesReveal: ['Reveal in Finder', '在访达中显示', '在 Finder 中顯示'],
   filesCopyPath: ['Copy path', '复制路径', '複製路徑'],
   filesCopyRelativePath: ['Copy relative path', '复制相对路径', '複製相對路徑'],
