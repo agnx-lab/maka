@@ -30,7 +30,6 @@ pub(super) struct Pending {
     pub(super) input: ToolInput,
     pub(super) metadata: ToolMetadata,
     pub(super) state: CallState,
-    pub(super) bytes: usize,
 }
 #[derive(PartialEq)]
 pub(super) enum CallState {
@@ -40,14 +39,12 @@ pub(super) enum CallState {
 }
 pub(crate) struct Tools {
     pub(super) pending: HashMap<String, Pending>,
-    pub(super) bytes: usize,
     pub(super) limit: usize,
 }
 impl Tools {
     pub fn new(limit: usize) -> Self {
         Self {
             pending: HashMap::new(),
-            bytes: 0,
             limit,
         }
     }
@@ -87,10 +84,9 @@ impl Tools {
         let bytes = serde_json::to_vec(&(operation, &identity, name, &input))
             .map_err(|_| ProjectionError::TooLarge)?
             .len();
-        if bytes > self.limit.saturating_sub(self.bytes) {
+        if bytes > self.limit {
             return Err(ProjectionError::TooLarge);
         }
-        self.bytes += bytes;
         self.pending.insert(
             operation.into(),
             Pending {
@@ -99,7 +95,6 @@ impl Tools {
                 input,
                 metadata: metadata.clone(),
                 state,
-                bytes,
             },
         );
         Ok(metadata)

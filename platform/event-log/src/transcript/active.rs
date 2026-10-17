@@ -31,10 +31,12 @@ pub(crate) async fn interrupted_messages(
     through: u64,
 ) -> Result<Vec<String>, StoreError> {
     let through_sql = i64::try_from(through).map_err(|_| ProjectionError::OutOfRange)?;
-    let facts = super::evidence::selected(connection, invocation, step, through_sql, true).await?;
+    let selected =
+        super::evidence::selected(connection, invocation, step, through_sql, true).await?;
     let mut view = InvocationView::new(super::MAX_TEXT_BYTES)?;
     let mut ids = Vec::new();
-    for fact in facts {
+    for sequence in selected {
+        let fact = evidence::fact(connection, sequence).await?;
         let rows = view.push(&fact)?;
         if fact.sequence == through {
             ids.extend(rows.into_iter().filter_map(|row| {
@@ -94,9 +96,10 @@ impl EventLog {
                     }
                     let step = evidence::pending_step(&mut tx, id, fence).await?;
                     let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
-                    for fact in
-                        evidence::selected(&mut tx, id, step.as_deref(), fence, false).await?
-                    {
+                    let selected =
+                        evidence::selected(&mut tx, id, step.as_deref(), fence, false).await?;
+                    for sequence in selected {
+                        let fact = evidence::fact(&mut tx, sequence).await?;
                         if fact.event.invocation != invocation {
                             return Err(ProjectionError::Invalid(
                                 "active transcript invocation mismatch",

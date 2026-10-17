@@ -80,7 +80,7 @@ impl EventLog {
                     }
                     let progress = progress.unwrap_or(0);
                     // Read only small boundary headers here. Canonical payloads are selected
-                    // and budget-checked separately, one boundary at a time.
+                    // and replayed separately, one fact at a time.
                     let boundaries = {
                         // The shared history view requires a whole-remainder sort here.
                         // Merge the two ordered ownership paths before applying the limit.
@@ -140,7 +140,7 @@ impl EventLog {
                             processed = *sequence;
                             continue;
                         }
-                        let facts = evidence::selected(
+                        let ids = evidence::selected(
                             &mut tx,
                             invocation,
                             step.as_deref(),
@@ -149,7 +149,8 @@ impl EventLog {
                         )
                         .await?;
                         let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
-                        for fact in facts {
+                        for sequence in ids {
+                            let fact = evidence::fact(&mut tx, sequence).await?;
                             let resolved = if let Fact::ToolSettled {
                                 outcome: ToolOutcome::Succeeded { raw, .. },
                                 ..

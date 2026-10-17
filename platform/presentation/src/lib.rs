@@ -85,6 +85,8 @@ pub struct InvocationView {
 }
 
 impl InvocationView {
+    /// Limits retained text state and each individual content record, not the
+    /// combined tool payloads of an already accepted model step.
     pub fn new(max_text_bytes: usize) -> Result<Self, ProjectionError> {
         if max_text_bytes == 0 {
             return Err(ProjectionError::TooLarge);

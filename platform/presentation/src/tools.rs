@@ -358,7 +358,6 @@ impl Tools {
             .pending
             .remove(operation)
             .ok_or(ProjectionError::Invalid("result without call"))?;
-        self.bytes -= pending.bytes;
         let row = message(
             event,
             ts,

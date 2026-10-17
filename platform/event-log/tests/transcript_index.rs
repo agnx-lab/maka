@@ -41,6 +41,10 @@ mod fixtures;
 mod history;
 #[path = "transcript_index/image.rs"]
 mod image;
+#[path = "transcript_index/large_siblings.rs"]
+mod large_siblings;
+#[path = "transcript_index/observation_count.rs"]
+mod observation_count;
 #[path = "transcript_index/performance.rs"]
 mod performance;
 #[path = "transcript_index/performance_executor.rs"]
@@ -359,7 +363,7 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
 }
 
 #[tokio::test]
-async fn oversized_evidence_and_tool_content_fail_without_committing_progress() {
+async fn oversized_text_and_invalid_tool_fail_without_committing_progress() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -368,7 +372,9 @@ async fn oversized_evidence_and_tool_content_fail_without_committing_progress() 
     let db = Connection::open(&path).unwrap();
     assert!(matches!(
         log.prepare_transcript("a", through, 32).await,
-        Err(StoreError::PrefixTooLarge)
+        Err(StoreError::Projection(
+            maka_presentation::ProjectionError::TooLarge
+        ))
     ));
     assert_eq!(progress(&db, "a"), 0);
     assert!(rows(&db, "a").is_empty());

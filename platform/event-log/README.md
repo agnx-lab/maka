@@ -29,4 +29,6 @@ Checkpoint reads validate every raw source commitment, including predecessors hi
 
 An open store can reuse a verified checkpoint chain and extend its authenticated prefix within the same selection. Fresh writer confirmations bind that evidence to the reader's pinned snapshot or the writer's locked transaction; protected history mutations, external commits, schema changes and failed writes revoke stale evidence. Selection, admission, settlement and archive validation remain fresh. Opening-only reads use full validation without warming a certificate. These disposable certificates are never persisted or used as authority.
 
+Transcript preparation selects ordered canonical fact identities and reads each fact within the same transaction. It has no aggregate evidence count or byte cutoff; projection still checks individual content and history pages keep their delivery budgets. Derived rows and progress commit together. Replay memory can grow with the selected step, and accepted preparation work drains under the original store owner.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

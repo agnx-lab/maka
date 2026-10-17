@@ -188,10 +188,9 @@ impl Step {
         let bytes = serde_json::to_vec(&part)
             .map_err(|_| ProjectionError::TooLarge)?
             .len();
-        if bytes > self.limit.saturating_sub(self.retained_bytes) {
+        if bytes > self.limit {
             return Err(ProjectionError::TooLarge);
         }
-        self.retained_bytes += bytes;
         self.order.push(Observed::Tool(part));
         Ok(())
     }

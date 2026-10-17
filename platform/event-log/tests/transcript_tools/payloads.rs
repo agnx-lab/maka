@@ -164,7 +164,9 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
     let through = log.append(&write).await.unwrap();
     assert!(matches!(
         log.prepare_transcript("session", through, 32).await,
-        Err(maka_event_log::StoreError::PrefixTooLarge)
+        Err(maka_event_log::StoreError::Projection(
+            maka_presentation::ProjectionError::TooLarge
+        ))
     ));
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
@@ -176,9 +178,9 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
         raw
     );
     assert!(log.prefix(100, 32 * 1024 * 1024).await.is_ok());
-    // The preserved projection exceeds the transcript evidence budget before
-    // raw payload hydration. Missing raw bytes still fail the raw resolver;
-    // the transcript capacity refusal does not certify payload integrity.
+    // The raw size commitment already exceeds the individual row capacity, so
+    // preparation rejects before hydration. Missing raw bytes still fail the
+    // raw resolver; capacity refusal does not certify payload integrity.
     let db = Connection::open(&path).unwrap();
     db.execute(
         "DELETE FROM tool_result_payloads WHERE event_id = ?",
@@ -187,7 +189,9 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
     .unwrap();
     assert!(matches!(
         log.prepare_transcript("session", through, 32).await,
-        Err(maka_event_log::StoreError::PrefixTooLarge)
+        Err(maka_event_log::StoreError::Projection(
+            maka_presentation::ProjectionError::TooLarge
+        ))
     ));
     assert!(
         log.resolve_tool_result("session", &write.event().id)

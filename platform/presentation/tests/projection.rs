@@ -549,6 +549,7 @@ fn project_tool_fanout(
     count: usize,
     item_acceptance: bool,
     with_usage: bool,
+    limit: usize,
 ) -> Vec<maka_presentation::Row> {
     use maka_agent_facts::model::{ModelFinishReason, ModelToolCall, ToolInput};
     use maka_agent_facts::tool_call::ToolCallIdentity;
@@ -564,7 +565,7 @@ fn project_tool_fanout(
     };
     *enabled = item_acceptance;
     let invocation = opening.event.invocation.clone();
-    let mut view = InvocationView::new(1024 * 1024).unwrap();
+    let mut view = InvocationView::new(limit).unwrap();
     view.push(&opening).unwrap();
     view.push(&request).unwrap();
     let mut sequence = request.sequence;
@@ -649,7 +650,7 @@ fn project_tool_fanout(
 
 #[test]
 fn completion_accepted_fanout_projects_129_original_calls_and_results() {
-    let rows = project_tool_fanout(129, false, false);
+    let rows = project_tool_fanout(129, false, false, 1024 * 1024);
     let calls: Vec<_> = rows
         .iter()
         .filter_map(|row| match &row.message.content {
@@ -676,7 +677,7 @@ fn completion_accepted_fanout_projects_129_original_calls_and_results() {
 
 #[test]
 fn item_accepted_fanout_projects_257_calls_with_distinct_original_positions() {
-    let rows = project_tool_fanout(257, true, false);
+    let rows = project_tool_fanout(257, true, false, 1024 * 1024);
     let calls: Vec<_> = rows
         .iter()
         .filter(|row| matches!(row.message.content, Content::ToolCall { .. }))
@@ -815,7 +816,7 @@ fn retained_text_metadata_is_bounded_after_start_delta_and_finish() {
 
 #[test]
 fn completion_usage_after_256_calls_has_a_distinct_original_position() {
-    let rows = project_tool_fanout(256, false, true);
+    let rows = project_tool_fanout(256, false, true, 1024 * 1024);
     let calls: Vec<_> = rows
         .iter()
         .filter(|row| matches!(row.message.content, Content::ToolCall { .. }))
@@ -866,4 +867,101 @@ fn completion_usage_after_256_calls_has_a_distinct_original_position() {
         }
     );
     assert!(usage.position < next.position);
+}
+
+#[test]
+fn individually_fitting_calls_do_not_share_a_tool_payload_budget() {
+    for item_acceptance in [false, true] {
+        let rows = project_tool_fanout(16, item_acceptance, false, 1024);
+        let calls: Vec<_> = rows
+            .iter()
+            .filter(|row| matches!(row.message.content, Content::ToolCall { .. }))
+            .collect();
+        let results: Vec<_> = rows
+            .iter()
+            .filter(|row| matches!(row.message.content, Content::ToolResult { .. }))
+            .collect();
+        assert_eq!(calls.len(), 16);
+        assert_eq!(results.len(), 16);
+        for (index, (call, result)) in calls.iter().zip(&results).enumerate() {
+            assert!(
+                matches!(&call.message.content, Content::ToolCall { tool_name, args, .. }
+                if tool_name == "echo" && args == &json!({"note":format!("input-{index}")}))
+            );
+            assert!(
+                matches!(&result.message.content, Content::ToolResult { tool_use_id, content: maka_presentation::ToolContent::Text { text }, .. }
+                if tool_use_id == &call.message.id && text == &format!("fixture result call-{index}"))
+            );
+            assert_eq!(
+                call.position,
+                if item_acceptance {
+                    RowPosition {
+                        source_sequence: 13 + index as u64,
+                        item_index: 0,
+                    }
+                } else {
+                    RowPosition {
+                        source_sequence: 30,
+                        item_index: index as u64,
+                    }
+                }
+            );
+            assert_eq!(
+                result.position,
+                RowPosition {
+                    source_sequence: 32 + 2 * index as u64,
+                    item_index: 0
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn one_oversized_tool_part_or_pending_record_still_poisons_the_view() {
+    use maka_agent_facts::model::{ModelToolCall, ToolInput};
+    use maka_agent_facts::tool_call::{ToolCallIdentity, ToolOrigin};
+    for host_sdk in [false, true] {
+        let mut source = events(InvocationOutcome::Completed);
+        let mut view = InvocationView::new(1024).unwrap();
+        for event in source.iter().take(if host_sdk { 1 } else { 2 }) {
+            view.push(event).unwrap();
+        }
+        let input = json!({"note":"x".repeat(1025)});
+        source[2].event.fact = if host_sdk {
+            Fact::ToolDispatched {
+                presentation: None,
+                title: None,
+                operation_id: "oversized".into(),
+                call: ToolCallIdentity {
+                    tool_call_id: "oversized".into(),
+                    origin: ToolOrigin::HostSdk {
+                        package_id: "fixture".into(),
+                        entry_id: "echo".into(),
+                        activation: "test".into(),
+                        parent_operation_id: None,
+                    },
+                },
+                name: "echo".into(),
+                input,
+            }
+        } else {
+            Fact::ModelObserved {
+                step_id: "step".into(),
+                event: ModelEvent::ToolCall(ModelToolCall {
+                    id: "oversized".into(),
+                    name: "echo".into(),
+                    input: ToolInput::Json(input),
+                    provider_options: None,
+                    provider_executed: false,
+                }),
+            }
+        };
+        assert!(matches!(
+            view.push(&source[2]),
+            Err(ProjectionError::TooLarge)
+        ));
+        assert!(view.overlay().is_empty());
+        assert!(view.push(source.last().unwrap()).is_err());
+    }
 }

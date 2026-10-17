@@ -19,7 +19,6 @@
 
 use super::evidence;
 use crate::StoreError;
-use maka_agent_facts::event::StoredEvent;
 use maka_agent_facts::tool_call::ToolOrigin;
 use maka_presentation::ProjectionError;
 use sqlx::SqliteConnection;
@@ -31,7 +30,7 @@ pub(super) async fn selected(
     tx: &mut SqliteConnection,
     invocation: &str,
     through: i64,
-) -> Result<Vec<StoredEvent>, StoreError> {
+) -> Result<Vec<i64>, StoreError> {
     let (operation, kind): (String, String) = sqlx::query_as(
         "SELECT operation_id, kind FROM runtime_events WHERE sequence = ? AND invocation_id = ?",
     )
