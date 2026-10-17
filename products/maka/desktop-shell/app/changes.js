@@ -32,6 +32,7 @@ import { Buffer } from 'buffer';
 import { query, log } from './host.js';
 import { palette, typeset, text, icon, iconButton, pill, controlButton } from './theme.js';
 import { t, tn } from './locale.js';
+import { parsePatch } from './patch.js';
 
 /** The areas in the order the list shows them, with each group's heading and the diff's pill. */
 const AREAS = [
@@ -72,96 +73,6 @@ const DIFF_INSET = 8;
 /** A path as text, for showing only. */
 export function decodePath(path) {
   return Buffer.from(path.bytesBase64, 'base64').toString('utf8');
-}
-
-/** `text` with each tab replaced by the spaces to the next multiple of 4 columns. */
-function expandTabs(value) {
-  if (!value.includes('\t')) return value;
-  let out = '';
-  let column = 0;
-  for (const point of value) {
-    if (point === '\t') {
-      const spaces = 4 - (column % 4);
-      out += ' '.repeat(spaces);
-      column += spaces;
-    } else {
-      out += point;
-      column += 1;
-    }
-  }
-  return out;
-}
-
-const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
-const DROPPED = /^(?:diff --git |index |--- |\+\+\+ )/;
-
-/**
- * The rows a unified diff shows, in order. Each is `{ kind, text }` with
- * `kind` one of 'meta' (the file's mode lines, as one row, and "\ No newline
- * at end of file"), 'hunk' (its header line as written), 'context', 'added'
- * or 'removed'; the last three also carry `old` and `new`, the line numbers
- * on each side (null on the side the line is not on), counted from the hunk
- * header. `diff --git`, `index`, `---` and `+++` lines are left out. Inside a
- * hunk the header's counts decide what a line is, not its first characters:
- * a removed line `-- a` arrives as `--- a`. Tabs are expanded to 4 columns.
- * Pure: the driver calls it on sample patches.
- * @param {string} patch
- */
-export function parsePatch(patch) {
-  const rows = [];
-  const meta = [];
-  const flush = () => {
-    if (meta.length > 0) rows.push({ kind: 'meta', text: meta.join(' · ') });
-    meta.length = 0;
-  };
-  let oldLeft = 0;
-  let newLeft = 0;
-  let oldLine = 0;
-  let newLine = 0;
-  const lines = patch.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  for (const raw of lines) {
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    if (oldLeft + newLeft > 0) {
-      const first = line[0];
-      if (first === '\\') {
-        rows.push({ kind: 'meta', text: line });
-      } else if (first === '-') {
-        rows.push({ kind: 'removed', old: oldLine, new: null, text: expandTabs(line.slice(1)) });
-        oldLine += 1;
-        oldLeft = Math.max(0, oldLeft - 1);
-      } else if (first === '+') {
-        rows.push({ kind: 'added', old: null, new: newLine, text: expandTabs(line.slice(1)) });
-        newLine += 1;
-        newLeft = Math.max(0, newLeft - 1);
-      } else {
-        // A context line; some generators write an empty one bare.
-        rows.push({ kind: 'context', old: oldLine, new: newLine, text: expandTabs(line.slice(1)) });
-        oldLine += 1;
-        newLine += 1;
-        oldLeft = Math.max(0, oldLeft - 1);
-        newLeft = Math.max(0, newLeft - 1);
-      }
-      continue;
-    }
-    const hunk = HUNK.exec(line);
-    if (hunk !== null) {
-      flush();
-      oldLine = Number(hunk[1]);
-      oldLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
-      newLine = Number(hunk[3]);
-      newLeft = hunk[4] === undefined ? 1 : Number(hunk[4]);
-      rows.push({ kind: 'hunk', text: line });
-    } else if (line.startsWith('\\')) {
-      flush();
-      rows.push({ kind: 'meta', text: line });
-    } else if (line !== '' && !DROPPED.test(line)) {
-      // `new file mode`, `deleted file mode`, `old mode` and `new mode`.
-      meta.push(line);
-    }
-  }
-  flush();
-  return rows;
 }
 
 /**
