@@ -156,3 +156,24 @@ while history checks retain every original tool result. Summary requests and
 checkpoints are reported separately from tool work. This proves the controlled
 protocol and lifecycle, not a real model's context capacity or summary quality.
 Only completed, fully verified work counts as a successful case.
+
+For real image uploads on Unix, use the same release native test executable:
+
+```sh
+MAKA_IMAGE_COUNT=2 MAKA_IMAGE_SIDE=512 \
+  "$NATIVE" owner::tests::scale::image_upload::real_image_upload_vision_scale \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+Each process generates distinct valid RGBA PNGs, fully decodes them for validation,
+then uploads sequential file snapshots through the Host. The probe checks durable
+upload receipts, original artifact bytes and canonical references, exact ordered
+images in the actual provider HTTP request, complete public history and cleanup.
+Only exact image delivery passes: an accepted upload or completed answer with a
+text replacement does not. `MAKA_AGENT_IMAGE_SCALE` records actual encoded sizes,
+pixel dimensions, stage timings, process peak RSS and failure evidence. Generation
+and validation are reported separately from upload and turn timing; their memory
+still contributes to process peak RSS. The HTTP responder and checks run in the
+same process. This does not measure product pixel decoding, IPC, rendering, real
+model inference or energy. Expand image count and dimensions independently, and
+preserve failing cases when an existing boundary prevents exact delivery.

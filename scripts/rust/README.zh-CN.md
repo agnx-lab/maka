@@ -135,3 +135,20 @@ fanout 数量不代表同时执行的 handler 数量。`MAKA_AGENT_TOOL_STORM` J
 采用，同时通过历史逐一核对原始工具结果。Summary 请求和 checkpoint 与工具工作量
 分别记录。这验证受控协议和生命周期，不证明真实模型的上下文容量或摘要质量。
 只有完整执行且全部校验通过的工作才计为成功 case。
+
+要在 Unix 上验证真实图像上传，使用同一个 release native 测试可执行文件：
+
+```sh
+MAKA_IMAGE_COUNT=2 MAKA_IMAGE_SIDE=512 \
+  "$NATIVE" owner::tests::scale::image_upload::real_image_upload_vision_scale \
+  --ignored --exact --nocapture --test-threads=1
+```
+
+每个进程生成不同的有效 RGBA PNG，完整解码核验后，逐张捕获文件快照并通过 Host
+上传。探针核对持久上传回执、原始 artifact 字节和 canonical 引用、真实 provider
+HTTP 请求中有序且精确的图像、完整公开历史和清理结果。只有原图精确送达才通过；
+上传已受理或以替代文字完成回答均不算成功。`MAKA_AGENT_IMAGE_SCALE` 记录实际编码
+大小、像素尺寸、分阶段计时、进程峰值 RSS 和失败证据。生成和校验与上传、turn
+分别计时，但其内存仍计入进程峰值 RSS。HTTP responder 和校验在同一进程运行。
+该探针不测量产品像素解码、IPC、渲染、真实模型推理或能耗。分别扩张图像数量与尺寸；
+若现有边界阻止原图送达，保留失败 case。

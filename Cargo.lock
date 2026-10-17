@@ -8588,6 +8588,7 @@ dependencies = [
  "crossterm",
  "futures-util",
  "hex",
+ "image",
  "jsonschema 0.56.0",
  "libc",
  "maka-acp-native",

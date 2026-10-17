@@ -439,3 +439,6 @@ mod flowing;
 
 #[path = "scale/compaction.rs"]
 mod compaction;
+
+#[path = "scale/image_upload.rs"]
+mod image_upload;

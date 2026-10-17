@@ -73,6 +73,7 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 uuid.workspace = true
 
 [dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 maka-computer-native.workspace = true
 maka-external-agent.workspace = true

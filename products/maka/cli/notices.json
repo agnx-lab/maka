@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "812c6b26f81f98e9b1cacca52957dd2c9e35d110350887feb6590d4f0b57d872",
+    "Cargo.lock": "04bc8f1a12439fb9bc16e97bf39b799b0f8f2ab24df1af3d9f5bb26978eaa838",
     "Cargo.toml": "84dad9aaa98e01f9d194633a830d2c886c1e81de823436efc8057ad10a44f894",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
@@ -122,7 +122,7 @@
     "plugins/agent/insights/Cargo.toml": "e11b391c1304bb27d552322e9f31b9e1858340f81f49ebbb3d484b02c9238def",
     "plugins/agent/model/Cargo.toml": "0fbd5b92911a7d3af54f10069d16b1b1b4b2d453b79aeb6ea63e66fd78d6ad85",
     "plugins/agent/model/tests/fixtures/provider-errors.mjs": "295a7dec85006792450b8675d21b5628dfba215ef6f51ccd44ad427159a4f4bf",
-    "plugins/agent/native/Cargo.toml": "f732629932213eeb1dc0ec20db8a125d3e37ddf363651e850d7e1444e9961f5e",
+    "plugins/agent/native/Cargo.toml": "cd5bd4a7fa7897ab8c0a45bebd27b9afcdb3ef960195d6ed25cb653c5d002ccd",
     "plugins/agent/navigation/package.ts": "eac5fb178bf93bc3d40cb1e9e184707cf3095b026da8c28c5682e636d0242bed",
     "plugins/agent/navigation/tui.ts": "fbfefb89c7265f5e0e740ca81d05b300fd3d98eb26474e6ae6114245972ad75d",
     "plugins/agent/permission-approval/index.ts": "25f24c0affb340f1245a3a4ed4eaf2df1dd27de8a05dc16e9564a95eaf44bfd3",
