@@ -1166,13 +1166,17 @@ fn bundled_language_switch_updates_and_remains_responsive() {
     tui.wait_for("ChatGPT Subscription");
     tui.send(b"\x1b");
     tui.wait_for("Add connection");
-    click(&mut tui, "Appearance");
+    click(&mut tui, "Assistant preferences");
     click(&mut tui, "Language");
+    tui.wait_for("繁體中文");
+    settings_evidence(&tui, "language-options");
     click(&mut tui, "简体中文");
     tui.wait_until_with_timeout(|s| s.contains("语言"), Duration::from_secs(3));
+    settings_evidence(&tui, "language-zh-CN");
     click(&mut tui, "语言");
     click(&mut tui, "繁體中文");
     tui.wait_until_with_timeout(|s| s.contains("語言"), Duration::from_secs(3));
+    settings_evidence(&tui, "language-zh-TW");
     click(&mut tui, "語言");
     click(&mut tui, "English");
     tui.wait_for("Language");
@@ -1184,6 +1188,7 @@ fn bundled_language_switch_updates_and_remains_responsive() {
     assert!(!String::from_utf8_lossy(&tui.output).contains("invalid UI action"));
     let mut reopened = Pty::spawn(&["application", "launch", "--root", ui.to_str().unwrap()]);
     reopened.wait_until_with_timeout(|s| s.contains("设置"), Duration::from_secs(30));
+    settings_evidence(&reopened, "language-reopened");
     reopened.send(b"\x11");
     reopened.finish();
     assert!(!String::from_utf8_lossy(&reopened.output).contains("invalid UI action"));

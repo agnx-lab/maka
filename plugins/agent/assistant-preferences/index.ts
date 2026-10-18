@@ -260,7 +260,9 @@ export function assistantPreferences<N extends Node>(
       [
         ui.choice!(
           'language',
-          settingsText(props.locale, 'settings-language'),
+          state.restoring || state.pending?.request.kind === 'preferences'
+            ? t('assistant-language-loading')
+            : settingsText(props.locale, 'settings-language'),
           [
             { key: 'auto', label: text.languageAuto },
             { key: 'en', label: 'English' },

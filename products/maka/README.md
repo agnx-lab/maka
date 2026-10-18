@@ -35,7 +35,7 @@ Run `just run` from the repository root. It builds the TypeScript product first,
 
 Build the CLI and desktop shell with `just build` (`--release` and `--target` are supported). The build stages the authored app beside the shell executable. Run `target/debug/maka desktop --root HOST_ROOT` to initialize or reopen a business Host and launch the desktop from any working directory. The launcher verifies its endpoint and epoch and retains its own client until the child exits.
 
-In the terminal interface, choose the shared language under **Settings → Assistant**. It is saved in the business Root, separately from each terminal interface’s theme and custom colors. Other open terminal interfaces refresh their language when revisiting settings or using an explicit refresh; saving does not broadcast continuous updates. Previous per-interface language choices must be selected once again; appearance data is retained.
+In the terminal interface, choose the shared language under **Settings → Assistant preferences → Language**. It saves automatically in the business Root, separately from each terminal interface’s theme and custom colors. Other open terminal interfaces refresh their language when revisiting settings or using an explicit refresh; saving does not broadcast continuous updates. Previous per-interface language choices must be selected once again; appearance data is retained.
 
 This preference also selects builtin Agent instructions for new work in existing conversations and WorkHub. Already accepted work retains its language; user content and custom instructions remain unchanged.
 

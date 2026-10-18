@@ -542,12 +542,24 @@ test('language choice has no selection until preferences load', async () => {
   };
   assert.equal(selection().current, null);
   assert.equal(selection().disabled, true);
+  assert.equal(selection().label, 'Loading language…');
   finish([]);
   assert.equal(selection().current, null);
   assert.equal(selection().disabled, true);
+  assert.equal(selection().label, 'Loading language…');
   finish(languageSaved);
   assert.equal(selection().current, 'en');
   assert.equal(selection().disabled, false);
+  assert.equal(selection().label, 'Language');
+  out = component.update(out.frame.state, { ...props, open: false }, {});
+  out = component.update(out.frame.state, props, {});
+  assert.equal(selection().current, 'en');
+  assert.equal(selection().disabled, true);
+  assert.equal(selection().label, 'Loading language…');
+  finish({ ...languageSaved, language: 'zh-CN', resolvedLanguage: 'zh-CN' });
+  assert.equal(selection().current, 'zh-CN');
+  assert.equal(selection().disabled, false);
+  assert.equal(selection().label, 'Language');
 });
 async function languageEditor() {
   const { component } = await import('../dist/packages/assistant-preferences/tui.js');
