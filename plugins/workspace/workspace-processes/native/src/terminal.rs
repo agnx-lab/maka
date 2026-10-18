@@ -150,11 +150,20 @@ impl Processes {
     async fn terminal_record(&self, target: &Target) -> Result<ShellRun, ToolError> {
         self.terminal_session(&target.session_id, false).await?;
         let id = self.terminal_id(target)?;
-        self.store
+        let record = self
+            .store
             .read_shell_run(&target.session_id, id)
             .await
             .map_err(persistence)?
-            .ok_or_else(|| failed("Terminal resource not found in this Session and provider"))
+            .ok_or_else(|| failed("Terminal resource not found in this Session and provider"))?;
+        if let Some(update) = self
+            .resources
+            .get(&target.session_id, id)
+            .and_then(|handle| handle.latest())
+        {
+            return super::control::prefer_live(record, update);
+        }
+        Ok(record)
     }
     fn terminal_id<'a>(&self, target: &'a Target) -> Result<&'a str, ToolError> {
         parse_ref(&target.reference)
@@ -214,23 +223,41 @@ impl Processes {
         context: &Context,
     ) -> Result<Value, ToolError> {
         let mut changes = self.store.subscribe_shell_changes();
+        let id = self.terminal_id(&target)?.to_owned();
+        // Subscribe before reading either durable state or the original live cut.
+        let mut handle = self.resources.get(&target.session_id, &id);
         let mut previous = None;
         loop {
             let record = self.terminal_record(&target).await?;
-            let revision = record.revision;
-            let id = record.id.clone();
+            if watch && handle.is_none() && record.state.active() {
+                handle = self.resources.get(&target.session_id, &id);
+                if handle.is_some() {
+                    continue;
+                }
+            }
             let value = completed(snapshot(record)?)?;
             if !watch {
                 return Ok(value);
             }
-            if previous != Some(revision) {
+            if previous.as_ref() != Some(&value) {
                 context.emit(value.clone()).await.map_err(failed)?;
-                previous = Some(revision);
+                previous = Some(value.clone());
             }
             loop {
                 tokio::select! { biased;
                     _ = context.scope().cancellation.cancelled() => return Ok(value),
                     _ = self.drain.cancelled() => return Ok(value),
+                    update = async { handle.as_mut().expect("live handle").changed().await }, if handle.is_some() => {
+                        if let Err(error) = update {
+                            // A committed final cut followed by normal sender closure is
+                            // not a worker failure. Stop polling that closed receiver.
+                            let settled = handle.as_ref().and_then(|handle| handle.latest())
+                                .is_some_and(|update| update.is_ok_and(|record| !record.state.active()));
+                            if !settled { return Err(worker_error(error)); }
+                            handle = None;
+                        }
+                        break;
+                    }
                     change = changes.recv() => match change {
                         Ok(change) if change.session_id == target.session_id && change.id == id => break,
                         Ok(_) => {},

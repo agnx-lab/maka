@@ -244,7 +244,7 @@ async fn terminal_watch_uses_canonical_snapshots_and_user_base_sandbox() {
         assert_eq!(list.recv().await.unwrap()["value"]["total"],0);
         std::fs::write(f.root.join("terminal-private.txt"),"terminal-private-secret").unwrap();
         let started=mutation(&f,&owner,"start",json!({"sessionId":session,
-            "command":"printf ready; while [ ! -f watch-release ]; do sleep 0.02; done; printf done; cat ../root/terminal-private.txt"}),Uuid::new_v4()).await;
+            "command":"printf ready; while [ ! -f watch-output ]; do sleep 0.02; done; printf live-pipe; while [ ! -f watch-release ]; do sleep 0.02; done; printf done; cat ../root/terminal-private.txt"}),Uuid::new_v4()).await;
         assert_eq!(started["kind"],"completed","{started}");
         let target=json!({"sessionId":session,"ref":started["value"]["result"]["ref"]});
         let listed=list.recv().await.unwrap();
@@ -256,16 +256,41 @@ async fn terminal_watch_uses_canonical_snapshots_and_user_base_sandbox() {
             assert_eq!(value["kind"],"completed","{value}");
             if value["value"]["result"]["output"]["stdout"].as_str().is_some_and(|s|s.contains("ready")) { break; }
         }
+        let id=maka_host_runtime::shell::request::parse_ref(target["ref"].as_str().unwrap()).unwrap();
+        let durable=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        let catalog=query(&f,"list",json!({"sessionId":session})).await;
+        let mut changes=f.store.subscribe_shell_changes();
+        std::fs::write(f.workspace.join("watch-output"),"emit").unwrap();
+        loop {
+            let value=watch.recv().await.unwrap();
+            assert_eq!(value["kind"],"completed","{value}");
+            if value["value"]["result"]["output"]["stdout"].as_str().is_some_and(|s|s.contains("readylive-pipe")) {
+                assert_eq!(value["value"]["result"]["revision"],durable.revision);
+                assert_eq!(value["value"]["result"]["updatedAt"],durable.updated_at);
+                break;
+            }
+        }
+        assert_eq!(query(&f,"read",target.clone()).await["value"]["result"]["output"]["stdout"],"readylive-pipe");
+        assert_eq!(f.store.read_shell_run(&session,id).await.unwrap().unwrap(),durable);
+        assert_eq!(query(&f,"list",json!({"sessionId":session})).await,catalog);
+        assert!(matches!(changes.try_recv(),Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
         std::fs::write(f.workspace.join("watch-release"),"finish").unwrap();
         loop {
             let value=watch.recv().await.unwrap();
             if value["value"]["result"]["status"]=="failed" {
-                assert!(value["value"]["result"]["output"]["stdout"].as_str().unwrap().contains("readydone"));
+                assert!(value["value"]["result"]["output"]["stdout"].as_str().unwrap().contains("readylive-pipedone"));
                 assert!(!value.to_string().contains("terminal-private-secret"));
                 break;
             }
         }
-        watch.cancel(); watch.completion().await.cleanup.unwrap();
+        let final_record=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        assert!(!final_record.state.active());
+        let maka_agent_facts::shell_run::ShellOutput::Pipes { stdout, .. }=&final_record.output else {panic!("pipes")};
+        assert!(stdout.contains("readylive-pipedone"));
+        watch.cancel();
+        let completion=watch.completion().await;
+        assert_eq!(completion.result.unwrap()["kind"],"completed");
+        completion.cleanup.unwrap();
         list.cancel(); list.completion().await.cleanup.unwrap();
         assert_eq!(query(&f,"read",target).await["kind"],"completed");
         processes::close(&f).await;
@@ -484,6 +509,115 @@ printf '\342\202'
         assert_eq!(historical["kind"], "completed");
         assert_eq!(historical["value"]["result"]["status"], "completed");
         assert!(historical["value"]["result"]["output"]["screen"].as_str().unwrap().contains("40 100"));
+        processes::close(&f).await;
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn terminal_live_pty_output_leaves_catalog_stable_but_resize_and_final_are_durable() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let (_, f, session)=processes::fixture().await;
+        let owner=caller();
+        let target=start(&f,&owner,&session).await;
+        let (lease,controller)=acquire(&f,&owner,&target).await;
+        let mut detail=subscribe(&f,&owner,"watch",target.clone()).await;
+        let mut raw=subscribe(&f,&owner,"watchOutput",output_request(&target,0)).await;
+        mutation(&f,&owner,"control",command(&controller,1,r#"exec /bin/sh -c 'stty -echo; printf "\113\066\061\055\122\105\101\104\131\n"; printf ready > k61-ready; IFS= read -r gate; printf "\113\066\061\055\114\111\126\105\n"; printf live > k61-live; IFS= read -r gate'"#),Uuid::new_v4()).await;
+        wait_file(&f,"k61-ready","ready").await;
+        loop {
+            let frame=detail.recv().await.unwrap();
+            assert_eq!(frame["kind"],"completed","{frame}");
+            if frame["value"]["result"]["output"]["screen"].as_str().is_some_and(|s|s.contains("K61-READY")) {break;}
+        }
+        let id=maka_host_runtime::shell::request::parse_ref(target["ref"].as_str().unwrap()).unwrap();
+        let durable=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        let catalog=query(&f,"list",json!({"sessionId":session})).await;
+        let mut changes=f.store.subscribe_shell_changes();
+        mutation(&f,&owner,"control",command(&controller,2,"next"),Uuid::new_v4()).await;
+        wait_file(&f,"k61-live","live").await;
+        loop {
+            let frame=detail.recv().await.unwrap();
+            assert_eq!(frame["kind"],"completed","{frame}");
+            if frame["value"]["result"]["output"]["screen"].as_str().is_some_and(|s|s.contains("K61-LIVE")) {
+                assert_eq!(frame["value"]["result"]["revision"],durable.revision);
+                assert_eq!(frame["value"]["result"]["updatedAt"],durable.updated_at);
+                break;
+            }
+        }
+        let mut after=0;let mut bytes=Vec::new();
+        output_through(&mut raw,&mut after,&mut bytes,b"K61-LIVE",&json!({"cols":80,"rows":24})).await;
+        assert_eq!(f.store.read_shell_run(&session,id).await.unwrap().unwrap(),durable);
+        assert_eq!(query(&f,"list",json!({"sessionId":session})).await,catalog);
+        assert!(matches!(changes.try_recv(),Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        let resized=mutation(&f,&owner,"control",json!({"controller":controller,"sequence":3,"actions":[],"size":{"cols":100,"rows":30}}),Uuid::new_v4()).await;
+        assert_eq!(resized["kind"],"completed","{resized}");
+        assert_eq!(resized["value"]["resizeChanged"],true);
+        let sized=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        assert!(sized.revision>durable.revision);
+        let maka_agent_facts::shell_run::ShellOutput::Pty { screen }=&sized.output else {panic!("pty")};
+        assert_eq!((screen.size.cols(),screen.size.rows()),(100,30));
+        assert!(screen.screen.contains("K61-LIVE"));
+        assert_ne!(query(&f,"list",json!({"sessionId":session})).await["value"]["revision"],catalog["value"]["revision"]);
+        let stopped=mutation(&f,&owner,"stop",target.clone(),Uuid::new_v4()).await;
+        assert_eq!(stopped["kind"],"completed","{stopped}");
+        let final_record=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        assert!(!final_record.state.active());
+        let maka_agent_facts::shell_run::ShellOutput::Pty { screen }=&final_record.output else {panic!("pty")};
+        assert!(screen.screen.contains("K61-LIVE"), "final snapshot: {screen:?}");
+        assert_eq!(query(&f,"read",target).await["value"]["result"]["revision"],final_record.revision);
+        lease.completion().await.cleanup.unwrap();
+        raw.cancel();raw.completion().await.cleanup.unwrap();
+        detail.cancel();
+        let completion=detail.completion().await;
+        assert_eq!(completion.result.unwrap()["kind"],"completed");
+        completion.cleanup.unwrap();
+        processes::close(&f).await;
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn model_read_and_health_see_live_pipe_logs_without_persisting_output() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let model=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let f=Fixture::with_services(&format!("http://{}/v1",model.local_addr().unwrap()),None,None,Some(service_tools::Setup::health())).await;
+        let session=f.create("Live process logs").await;
+        let started=processes::roundtrip(&model,&f,&session,"Execute",json!({"command":"printf ready; while [ ! -f model-output ]; do sleep 0.02; done; printf live-model; while [ ! -f model-release ]; do sleep 0.02; done; printf final-model","login":false,"run_in_background":true,"timeout_ms":30000})).await;
+        assert_eq!(started["kind"],"completed","{started}");
+        let reference=started["value"]["ref"].clone();
+        let target=json!({"sessionId":session,"ref":reference});
+        let owner=caller();
+        let mut detail=subscribe(&f,&owner,"watch",target.clone()).await;
+        loop {
+            let frame=detail.recv().await.unwrap();
+            if frame["value"]["result"]["output"]["stdout"].as_str().is_some_and(|s|s.contains("ready")) {break;}
+        }
+        let id=maka_host_runtime::shell::request::parse_ref(reference.as_str().unwrap()).unwrap();
+        let durable=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
+        let catalog=query(&f,"list",json!({"sessionId":session})).await;
+        std::fs::write(f.workspace.join("model-output"),"emit").unwrap();
+        loop {
+            let frame=detail.recv().await.unwrap();
+            if frame["value"]["result"]["output"]["stdout"].as_str().is_some_and(|s|s.contains("readylive-model")) {break;}
+        }
+        let read=processes::roundtrip(&model,&f,&session,"ReadProcess",json!({"ref":reference})).await;
+        assert_eq!(read["value"]["output"]["stdout"],"readylive-model");
+        let health=processes::roundtrip(&model,&f,&session,"BackgroundTaskHealth",json!({"ref":reference,"include_logs":true})).await;
+        assert_eq!(health["value"]["process"]["logs"]["stdout"],"readylive-model");
+        assert_eq!(health["value"]["process"]["updatedAt"],durable.updated_at);
+        assert_eq!(f.store.read_shell_run(&session,id).await.unwrap().unwrap(),durable);
+        assert_eq!(query(&f,"list",json!({"sessionId":session})).await,catalog);
+        std::fs::write(f.workspace.join("model-release"),"finish").unwrap();
+        loop {
+            let frame=detail.recv().await.unwrap();
+            if frame["value"]["result"]["status"]=="completed" {
+                assert_eq!(frame["value"]["result"]["output"]["stdout"],"readylive-modelfinal-model");break;
+            }
+        }
+        // Model observation writes a newer durable revision after worker final publication.
+        let observed=processes::roundtrip(&model,&f,&session,"ReadProcess",json!({"ref":reference})).await;
+        let again=query(&f,"read",target).await;
+        assert_eq!(again["value"]["result"]["revision"],observed["value"]["revision"]);
+        detail.cancel();detail.completion().await.cleanup.unwrap();
         processes::close(&f).await;
     }).await.unwrap();
 }

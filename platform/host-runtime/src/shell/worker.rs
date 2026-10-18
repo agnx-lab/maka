@@ -225,7 +225,7 @@ impl Worker {
                     }
                     // Complete the parser cut before persisting or handling controls.
                     terminal.output(&buffer[..count], eof)?;
-                    self.persist(terminal, None).await?;
+                    self.publish(terminal);
                     if let Some(error) = failure { return Err(error.into()); }
                 }
                 written = async { io.write(terminal.writes.front().unwrap().remaining()).await }, if !terminal.writes.is_empty() => {
@@ -242,6 +242,17 @@ impl Worker {
                     }
                 }
             }
+        }
+    }
+
+    fn publish(&mut self, terminal: &Terminal) {
+        let output = ShellOutput::Pty {
+            screen: terminal.snapshot.clone(),
+        };
+        if output != self.record.output {
+            self.record.output = output;
+            self.updates
+                .send_replace(Some(Ok(Arc::new(self.record.clone()))));
         }
     }
 
@@ -381,6 +392,16 @@ mod tests {
             persistence_failed: false,
             output,
         };
+        terminal
+            .output(b"live output before cleanup failure", false)
+            .unwrap();
+        worker.publish(&terminal);
+        let live = worker.updates.borrow().clone().unwrap().unwrap();
+        let ShellOutput::Pty { screen } = &live.output else {
+            unreachable!()
+        };
+        assert!(screen.screen.contains("live output before cleanup failure"));
+        assert_eq!((live.revision, live.updated_at), (1, 1));
         let error = worker
             .settle(
                 &mut terminal,
@@ -404,7 +425,26 @@ mod tests {
             "failed cleanup must not manufacture a clean T2"
         );
         assert_eq!(durable.revision, 1);
+        let ShellOutput::Pty { screen } = &durable.output else {
+            unreachable!()
+        };
+        assert!(!screen.screen.contains("live output before cleanup failure"));
         drop(worker);
+        assert_eq!(log.recover_shell_runs(50).await.unwrap(), 1);
+        let recovered = log
+            .read_shell_run("session", "cleanup-failure")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.output, durable.output);
+        assert_eq!(recovered.revision, 2);
+        assert!(matches!(
+            recovered.state,
+            ShellState::Terminal {
+                outcome: ShellOutcome::Orphaned { .. },
+                ..
+            }
+        ));
         log.shutdown().await.unwrap();
     }
 }

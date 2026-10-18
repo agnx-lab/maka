@@ -78,11 +78,14 @@ pub(super) async fn run(
                     let Ok(event) = process.events.try_recv() else { break; };
                     observe(event, &mut record, &mut stdout, &mut stderr, &mut running);
                 }
-                let state = running.then_some(ShellState::Running);
-                if let Err(error) = persist(&log, &mut record, state, updates).await {
-                    drain.cancel();
-                    cancellation.cancel();
-                    persistence_error = Some(error);
+                if running {
+                    if let Err(error) = persist(&log, &mut record, Some(ShellState::Running), updates).await {
+                        drain.cancel();
+                        cancellation.cancel();
+                        persistence_error = Some(error);
+                    }
+                } else {
+                    updates.send_replace(Some(Ok(Arc::new(record.clone()))));
                 }
             }
             result = &mut process.completion => break result,

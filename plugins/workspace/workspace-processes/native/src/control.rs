@@ -27,14 +27,23 @@ use serde_json::json;
 
 impl Processes {
     pub(super) async fn read_model(&self, session: &str, id: &str) -> Result<ShellRun, ToolError> {
-        self.store
+        let record = self
+            .store
             .read_shell_run(session, id)
             .await
             .map_err(persistence)?
             .filter(|record| {
                 record.visibility == ShellVisibility::Model && record.id.starts_with(&self.prefix)
             })
-            .ok_or_else(|| failed("Process resource not found in this Session and provider"))
+            .ok_or_else(|| failed("Process resource not found in this Session and provider"))?;
+        if let Some(update) = self
+            .resources
+            .get(session, id)
+            .and_then(|handle| handle.latest())
+        {
+            return prefer_live(record, update);
+        }
+        Ok(record)
     }
     pub(super) async fn project(
         &self,
@@ -190,5 +199,109 @@ impl Processes {
         value["operation"] = json!({"kind":"pty_control", "acceptedBytes":accepted_bytes,
             "requestedBytes":input.bytes,"resized":resized,"resizeChanged":resize_changed,"failure":failure});
         Ok(value)
+    }
+}
+
+// SQL remains the durable authority; an equal revision may carry newer live output.
+pub(super) fn prefer_live(
+    durable: ShellRun,
+    update: Result<Arc<ShellRun>, Arc<ShellError>>,
+) -> Result<ShellRun, ToolError> {
+    let live = update.map_err(worker_error)?;
+    Ok(if live.revision >= durable.revision {
+        (*live).clone()
+    } else {
+        durable
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_agent_facts::shell_run::{ShellOutcome, ShellOutput, ShellPermissions};
+
+    fn running() -> ShellRun {
+        ShellRun {
+            id: "resource".into(),
+            session_id: "session".into(),
+            source_run_id: None,
+            source_turn_id: "turn".into(),
+            source_tool_call_id: "tool".into(),
+            visibility: ShellVisibility::Model,
+            permissions: ShellPermissions {
+                boundary_revision: 0,
+                sandbox: Sandbox::Disabled,
+            },
+            cwd: "/".into(),
+            command: "fixture".into(),
+            started_at: 1,
+            updated_at: 1,
+            timeout_ms: None,
+            revision: 1,
+            state: ShellState::Starting,
+            output: ShellOutput::Pipes {
+                stdout: String::new(),
+                stderr: String::new(),
+                latest_stream: None,
+                stdout_truncated: false,
+                stderr_truncated: false,
+            },
+        }
+        .patched(ShellPatch {
+            state: Some(ShellState::Running),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn live_output_preserves_durable_revision_and_observed_sql_wins_over_old_final_arc() {
+        let durable = running();
+        let mut live = durable.clone();
+        let ShellOutput::Pipes { stdout, .. } = &mut live.output else {
+            unreachable!()
+        };
+        *stdout = "literal live output".into();
+        let selected = prefer_live(durable.clone(), Ok(Arc::new(live.clone()))).unwrap();
+        assert_eq!(selected.revision, 2);
+        assert_eq!(selected.updated_at, 1);
+        let ShellOutput::Pipes { stdout, .. } = selected.output else {
+            unreachable!()
+        };
+        assert_eq!(stdout, "literal live output");
+        let final_cut = live
+            .patched(ShellPatch {
+                state: Some(ShellState::Terminal {
+                    completed_at: 10,
+                    outcome: ShellOutcome::Completed,
+                    observed_at: None,
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+        let old_arc = Arc::new(final_cut.clone());
+        let observed = final_cut
+            .patched(ShellPatch {
+                observed_at: Some(20),
+                ..Default::default()
+            })
+            .unwrap();
+        let selected = prefer_live(observed, Ok(old_arc)).unwrap();
+        assert_eq!(selected.revision, 4);
+        assert!(matches!(
+            selected.state,
+            ShellState::Terminal {
+                observed_at: Some(20),
+                ..
+            }
+        ));
+        let ShellOutput::Pipes { stdout, .. } = selected.output else {
+            unreachable!()
+        };
+        assert_eq!(stdout, "literal live output");
+        assert!(
+            matches!(prefer_live(durable, Err(Arc::new(ShellError::Rejected("native cleanup failed")))),
+            Err(ToolError::CleanupUnconfirmed(message)) if message == "native cleanup failed")
+        );
     }
 }

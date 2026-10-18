@@ -174,6 +174,19 @@ async function client(target) {
   return c;
 }
 for (const target of ['tui']) {
+  test(`${target} live output advances without changing the durable revision or catalog`, async () => {
+    const c = (await client(target)).loaded();
+    const catalog = structuredClone(c.state.page);
+    for (const screen of ['first live output', 'second live output']) {
+      const update = resource();
+      update.result.output.screen = screen;
+      c.sub('watch', update);
+      assert.equal(c.screen.output.screen, screen);
+      assert.equal(c.state.resource.result.revision, 1);
+      assert.equal(c.state.resource.result.updatedAt, 1);
+      assert.deepEqual(c.state.page, catalog);
+    }
+  });
   test(`${target} full service pages remain traversable within the native input budget`, async () => {
     const c = await client(target);
     const resources = Array.from({ length: 64 }, (_, i) => resource(`shell:${i}`));

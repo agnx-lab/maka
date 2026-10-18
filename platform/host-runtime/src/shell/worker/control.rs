@@ -81,7 +81,10 @@ impl Worker {
                 } else {
                     resized = true;
                 }
-                self.persist(terminal, None).await
+                if resize_changed {
+                    self.persist(terminal, None).await?;
+                }
+                Ok(())
             }
             .await;
             if let Err(error) = result {
@@ -110,7 +113,7 @@ impl Worker {
     }
 
     pub(super) fn current_cut(&self) -> Arc<ShellRun> {
-        // This sole worker awaits every parser/SQL cut before servicing input.
+        // This sole worker publishes each parser cut before servicing input.
         // Cloning the published Arc does not create another snapshot authority.
         self.updates
             .borrow()
