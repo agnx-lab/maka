@@ -54,6 +54,8 @@ pub(super) async fn read(
     session: &str,
     id: &str,
 ) -> Result<Option<Target>, StoreError> {
+    // Filter before SQLite materializes the compound acceptance query, so only
+    // matching calls carry their full inputs into its temporary rows.
     let row = sqlx::query(concat!("WITH ", crate::model_items::accepted_calls!(),
         " SELECT t.sequence, t.event_id, t.operation_id, json_extract(t.event_json, '$.invocation') AS ti,
          json_extract(d.event_json, '$.invocation') AS di, json_extract(d.event_json, '$.fact.call') AS call,
@@ -79,6 +81,10 @@ pub(super) async fn read(
            SELECT * FROM accepted_calls
            WHERE invocation_id=(SELECT invocation_id FROM runtime_events WHERE event_id=?1)
              AND step_id=(SELECT json_extract(d.event_json,'$.fact.call.origin.step_id')
+               FROM runtime_events t JOIN runtime_events d ON d.operation_id=t.operation_id
+                 AND d.invocation_id=t.invocation_id AND d.kind='tool_dispatched'
+               WHERE t.event_id=?1)
+             AND json_extract(call,'$.id')=(SELECT json_extract(d.event_json,'$.fact.call.tool_call_id')
                FROM runtime_events t JOIN runtime_events d ON d.operation_id=t.operation_id
                  AND d.invocation_id=t.invocation_id AND d.kind='tool_dispatched'
                WHERE t.event_id=?1)
