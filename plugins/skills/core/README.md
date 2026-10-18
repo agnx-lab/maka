@@ -23,6 +23,8 @@
 
 Parses SKILL.md documents, discovers skill sources and prepares selected instructions and resources. `Catalog` exposes discovery; `PreparedInvocation` represents a prepared use. Bundled resources are assembled by `build.rs`, including the plugin-authoring skill and its matching SDK sources. Skill text is data: tool names and references do not grant execution authority.
 
+Bundled skill and SDK files are enumerated in `build.rs`; adding one requires updating that inventory. Local caches are excluded. Source examples come from top-level TypeScript files in fixed directories.
+
 Immutable bundled documents and resource contents are prepared once and shared across discoveries. Each discovery still applies its own remaining entry and byte budgets. Filesystem sources are captured afresh under the current request capabilities.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

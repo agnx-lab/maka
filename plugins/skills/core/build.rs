@@ -23,39 +23,66 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn collect(root: &Path, directory: &Path, prefix: &str, files: &mut BTreeMap<String, PathBuf>) {
-    println!("cargo:rerun-if-changed={}", directory.display());
-    let mut entries = fs::read_dir(directory)
-        .expect("bundled skill directory")
-        .map(|entry| entry.expect("bundled skill entry"))
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let path = entry.path();
-        let kind = entry.file_type().expect("bundled skill file type");
+const AUTHORING_RESOURCES: &[&str] = &[
+    "agents/openai.yaml",
+    "assets/starter/create.mjs",
+    "assets/starter/host.mjs",
+    "assets/starter/tui.mjs",
+    "assets/starter/verify-host.py",
+    "references/api-map.md",
+    "references/models-and-execution.md",
+    "references/native-rust.md",
+    "references/product-sources.md",
+    "references/quickstart.md",
+    "references/runtime-ui.md",
+    "references/state-and-authority.md",
+    "references/terminal-apps.md",
+    "references/testing-and-shipping.md",
+    "references/tools-and-input.md",
+];
+const SDK_RESOURCES: &[&str] = &[
+    "configurations.ts",
+    "contracts.ts",
+    "generated/runtime.ts",
+    "index.ts",
+    "native.ts",
+    "ui.ts",
+];
+
+fn declared_file(root: &Path, relative: &str) -> PathBuf {
+    let mut path = root.to_owned();
+    let mut components = Path::new(relative).components().peekable();
+    while let Some(component) = components.next() {
+        path.push(component);
+        let kind = fs::symlink_metadata(&path)
+            .expect("declared bundled skill input")
+            .file_type();
         assert!(
-            !kind.is_symlink(),
-            "bundled skills contain only regular files/directories"
+            if components.peek().is_some() {
+                kind.is_dir()
+            } else {
+                kind.is_file()
+            },
+            "declared bundled skills contain only regular files/directories, not symlinks: {}",
+            path.display()
         );
-        if kind.is_dir() {
-            collect(root, &path, prefix, files);
-        } else {
-            assert!(kind.is_file());
-            let relative = path
-                .strip_prefix(root)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .replace('\\', "/");
-            if relative == "SKILL.md" {
-                continue;
-            }
-            let name = format!("{prefix}{relative}");
-            assert!(
-                files.insert(name, path).is_none(),
-                "duplicate bundled resource"
-            );
-        }
+    }
+    println!("cargo:rerun-if-changed={}", path.display());
+    path
+}
+
+fn collect_declared(
+    root: &Path,
+    resources: &[&str],
+    prefix: &str,
+    files: &mut BTreeMap<String, PathBuf>,
+) {
+    for relative in resources {
+        let path = declared_file(root, relative);
+        assert!(
+            files.insert(format!("{prefix}{relative}"), path).is_none(),
+            "duplicate bundled resource"
+        );
     }
 }
 
@@ -161,16 +188,20 @@ fn main() {
         .parent()
         .unwrap();
     let mut source = String::from("const BUNDLED: &[Bundled] = &[\n");
-    for (id, relative) in [
-        ("maka-cua", "platform/computer-use/skills/maka-cua"),
-        ("maka-plugin-authoring", "skills/maka-plugin-authoring"),
+    for (id, relative, resources) in [
+        ("maka-cua", "platform/computer-use/skills/maka-cua", &[][..]),
+        (
+            "maka-plugin-authoring",
+            "skills/maka-plugin-authoring",
+            AUTHORING_RESOURCES,
+        ),
     ] {
         let root = repo.join(relative);
         let mut files = BTreeMap::new();
-        collect(&root, &root, "", &mut files);
+        collect_declared(&root, resources, "", &mut files);
         if id == "maka-plugin-authoring" {
             let sdk = repo.join("packages/plugin-sdk/src");
-            collect(&sdk, &sdk, "references/sdk/", &mut files);
+            collect_declared(&sdk, SDK_RESOURCES, "references/sdk/", &mut files);
             split_contracts(&mut files);
             for relative in [
                 "plugins/shared",
@@ -217,8 +248,7 @@ fn main() {
                 "authoring resources exceed byte budget"
             );
         }
-        let document = root.join("SKILL.md");
-        println!("cargo:rerun-if-changed={}", document.display());
+        let document = declared_file(&root, "SKILL.md");
         source.push_str(&format!(
             "Bundled {{ id: {id:?}, content: include_str!({:?}), files: &[\n",
             document.to_str().unwrap()
