@@ -104,7 +104,7 @@ impl Owner {
             personalization: snapshot.policy.personalization.clone(),
             workspace_instructions: snapshot.policy.workspace_instructions.enabled,
         };
-        let instructions = if preferences.workspace_instructions {
+        let (global_instruction, instructions) = if preferences.workspace_instructions {
             let workspace = workspace.clone();
             let home = self.instruction_home.clone();
             tokio::task::spawn_blocking(move || {
@@ -113,33 +113,41 @@ impl Owner {
                     &workspace.identity,
                 )
                 .map_err(|_| "agent_workspace_unavailable")?;
+                let mut global_instruction = String::new();
                 let mut global = Vec::new();
                 if let Some(home) = home {
                     if let Ok(source) = global_instructions::selected(&home)
                         && let Ok(Some(text)) =
                             global_instructions::read_selected(&home, source, 1024 * 1024)
                     {
-                        global.extend(parse_instruction_files([(
+                        global_instruction = parse_instruction_files([(
                             InstructionFile::Agents,
                             String::from_utf8_lossy(&text).into_owned(),
-                        )]));
+                        )])
+                        .pop()
+                        .map(|instruction| instruction.text)
+                        .unwrap_or_default();
                     }
                     if let Ok(directory) = home.open_dir(".maka") {
                         global.extend(read(&directory, false));
                     }
                 }
-                Ok::<_, String>(maka_assistant::prompt::workspace::render(
-                    global,
-                    read(&project, true),
-                    language,
+                Ok::<_, String>((
+                    global_instruction,
+                    maka_assistant::prompt::workspace::render(
+                        global,
+                        read(&project, true),
+                        language,
+                    ),
                 ))
             })
             .await
             .map_err(|_| "agent_instructions_unavailable")??
         } else {
-            String::new()
+            (String::new(), String::new())
         };
-        let mut prompt = maka_assistant::prompt::compose(preferences, language);
+        let mut prompt =
+            maka_assistant::prompt::compose(preferences, language, &global_instruction);
         let mut source = self.revision.clone();
         source.kind = SourceKind::PromptSection;
         prompt.sources.push(source);

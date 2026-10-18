@@ -233,7 +233,7 @@ async fn resume_keeps_current_session_workspace_and_accepted_assistant_instructi
         assert_frozen_context(&original_request, &original_composition);
         assert_frozen_context(&resumed_request, &resumed_composition);
         let accepted = original_composition.system_prompt.as_deref().unwrap();
-        assert!(accepted.contains("alpha-context-703"));
+        assert!(accepted.starts_with("You are [Maka](https://github.com/apache/maka), an AI agent.\n\n<global_instruction>\nRetain the accepted instruction alpha-context-703.\n</global_instruction>"));
         assert!(system_texts(&resumed_request).any(|text| text.contains("alpha-context-703")));
         assert_eq!(resumed_composition.system_prompt, original_composition.system_prompt);
         assert!(!resumed_request["messages"].to_string().contains("beta-context-704"));

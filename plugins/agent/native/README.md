@@ -25,6 +25,8 @@ Exposes Agent execution as native application services. `provide` registers fact
 
 The service owns its activation and delegates runs to `maka-agent-engine`. Session history, controls and tool calls use admitted scopes and original operation receipts. Files, processes, skills and other services are explicit dependencies selected by composition.
 
+When workspace instructions are enabled, the selected global `AGENTS.md` body appears immediately after the builtin identity, wrapped only in `<global_instruction>` and `</global_instruction>`. `~/.maka/AGENTS.md` takes precedence; only its absence permits `~/.agents/AGENTS.md`. Other global and project instruction files follow later. Instructions are captured at admission and retained on resume.
+
 New instruction captures select English, Simplified Chinese or Traditional Chinese from the saved Root language preference, then the configured locale, then the native environment. Explicit Auto uses the native environment. One policy snapshot supplies the language for builtin instructions, skills, default summaries and runtime guidance; tool schemas stay English and user, custom and external content stays unchanged.
 
 Queued work, retries, resumed invocations and approved Goal/schedule chains retain their accepted language. New messages, notifications and independently admitted title/recap requests capture the current preference. Titles and recaps still request output in the user's language. Compaction preserves a reused Main prefix and localizes only newly rendered framing. Persisted language defaults to English and omits that field for English records; Chinese records use the full `zh-CN` or `zh-TW` tag.

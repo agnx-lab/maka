@@ -472,7 +472,8 @@ async fn assistant_preferences_and_capability_guidance_freeze_at_message_accepta
             .filter(|message| message["role"] == "system")
             .map(|message| message["content"].as_str().unwrap()).collect::<Vec<_>>().join("\n");
         let original = system(&request(&mut first).await);
-        for value in ["You are Maka", "M4n5ter", "GLOBAL FIRST", "PROJECT FIRST"] {
+        assert!(original.starts_with("You are [Maka](https://github.com/apache/maka), an AI agent.\n\n<global_instruction>\nGLOBAL FIRST\n</global_instruction>"));
+        for value in ["M4n5ter", "GLOBAL FIRST", "PROJECT FIRST"] {
             assert!(original.contains(value), "missing {value}: {original}");
         }
         assert!(!original.contains("OUTSIDE SECRET"));
@@ -741,6 +742,7 @@ async fn global_instruction_editor_and_admission_share_one_selected_file() {
         std::fs::create_dir(home.join(".maka")).unwrap();
         std::fs::write(home.join(".agents/AGENTS.md"), "FALLBACK UNIQUE").unwrap();
         std::fs::write(home.join(".maka/CLAUDE.md"), "OTHER GLOBAL GUIDANCE").unwrap();
+        std::fs::write(f.workspace.join("AGENTS.md"), "PROJECT GUIDANCE").unwrap();
         let session = f.create("Global instructions").await;
         let workspace = f.owner.session(&session).await.unwrap().configuration.workspace;
         let policy = f.owner.configuration.runtime_policy().await.unwrap();
@@ -750,12 +752,23 @@ async fn global_instruction_editor_and_admission_share_one_selected_file() {
         assert_eq!(fallback["content"],"FALLBACK UNIQUE");
         assert_eq!(fallback["path"], home.join(".agents/AGENTS.md").to_str().unwrap());
         let prompt = f.owner.capture_behavior(&workspace, &policy, language).await.unwrap().unwrap().text;
-        assert!(prompt.contains("FALLBACK UNIQUE") && prompt.contains("OTHER GLOBAL GUIDANCE"));
+        assert!(prompt.starts_with("You are [Maka](https://github.com/apache/maka), an AI agent.\n\n<global_instruction>\nFALLBACK UNIQUE\n</global_instruction>\n\n"));
+        assert_eq!(prompt.matches("FALLBACK UNIQUE").count(), 1);
+        assert!(prompt.contains("<workspace-instructions file=\"CLAUDE.md\" scope=\"global\">\nOTHER GLOBAL GUIDANCE"));
+        assert!(prompt.contains("<workspace-instructions file=\"AGENTS.md\" scope=\"project\">\nPROJECT GUIDANCE"));
+        assert!(!prompt.contains("<workspace-instructions file=\"AGENTS.md\" scope=\"global\">"));
+        let mut disabled = policy.clone();
+        disabled.policy.workspace_instructions.enabled = false;
+        let without_instructions = f.owner.capture_behavior(&workspace, &disabled, language).await.unwrap().unwrap().text;
+        assert!(!without_instructions.contains("<global_instruction>"));
+        assert!(!without_instructions.contains("GUIDANCE"));
         std::fs::write(home.join(".maka/AGENTS.md"), "").unwrap();
         let empty = f.query("globalInstructions",json!({})).await.unwrap();
         assert_eq!(empty["source"],"maka");
         assert_eq!(empty["content"],"");
-        assert!(!f.owner.capture_behavior(&workspace, &policy, language).await.unwrap().unwrap().text.contains("FALLBACK UNIQUE"));
+        let prompt = f.owner.capture_behavior(&workspace, &policy, language).await.unwrap().unwrap().text;
+        assert!(!prompt.contains("FALLBACK UNIQUE"));
+        assert!(!prompt.contains("<global_instruction>"));
         let stale = f.mutation(2,"updateGlobalInstructions",json!({"source":fallback["source"],"revision":fallback["revision"],"content":"STALE"}),Uuid::new_v4()).await.unwrap();
         assert_eq!(stale["kind"],"changed");
         assert_eq!(std::fs::read_to_string(home.join(".agents/AGENTS.md")).unwrap(),"FALLBACK UNIQUE");
@@ -768,7 +781,10 @@ async fn global_instruction_editor_and_admission_share_one_selected_file() {
         let sent = request(&mut socket).await;
         let system = sent["messages"].as_array().unwrap().iter().filter(|m|m["role"]=="system")
             .map(|m|m["content"].as_str().unwrap()).collect::<Vec<_>>().join("\n");
-        assert!(system.contains("SAVED GLOBAL UNIQUE") && system.contains("OTHER GLOBAL GUIDANCE"));
+        assert!(system.starts_with("You are [Maka](https://github.com/apache/maka), an AI agent.\n\n<global_instruction>\nSAVED GLOBAL UNIQUE\n</global_instruction>\n\n"));
+        assert_eq!(system.matches("SAVED GLOBAL UNIQUE").count(), 1);
+        assert!(system.contains("OTHER GLOBAL GUIDANCE") && system.contains("PROJECT GUIDANCE"));
+        assert!(!system.contains("<workspace-instructions file=\"AGENTS.md\" scope=\"global\">"));
         assert!(!system.contains("FALLBACK UNIQUE"));
         response(&mut socket).await;
         f.drained().await;
