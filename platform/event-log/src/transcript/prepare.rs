@@ -96,15 +96,28 @@ pub(super) fn batch(
         .collect::<Result<Vec<_>, _>>()?;
     let ready = boundaries.len() <= max_boundaries;
     let mut processed = progress;
+    let mut retained: Option<(&str, Vec<i64>, InvocationView)> = None;
     for (sequence, invocation, step, kind) in boundaries.iter().take(max_boundaries) {
         if kind == "context_checkpoint_recorded" {
+            drop(retained.take());
             persist(db, session, super::compaction::project(db, *sequence)?)?;
             processed = *sequence;
             continue;
         }
         let ids = evidence::selected_on_handle(db, invocation, step.as_deref(), *sequence, true)?;
-        let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
-        for sequence in ids {
+        let (mut view, prefix) = match retained.take() {
+            Some((prior, previous, view))
+                if prior == invocation.as_str() && ids.starts_with(&previous) =>
+            {
+                (view, previous.len())
+            }
+            old => {
+                // A changed selection must not inherit evidence absent from this boundary.
+                drop(old);
+                (InvocationView::new(MAX_TEXT_BYTES)?, 0)
+            }
+        };
+        for &sequence in ids.iter().skip(prefix) {
             let fact = evidence::fact_on_handle(db, sequence)?;
             let resolved = if let Fact::ToolSettled {
                 outcome: ToolOutcome::Succeeded { raw, .. },
@@ -130,6 +143,7 @@ pub(super) fn batch(
                 persist(db, session, row)?;
             }
         }
+        retained = Some((invocation.as_str(), ids, view));
         processed = *sequence;
     }
     db.prepare_cached(PROGRESS_WRITE)?

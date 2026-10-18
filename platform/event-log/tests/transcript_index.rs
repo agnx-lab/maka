@@ -51,6 +51,8 @@ mod observation_count;
 mod performance;
 #[path = "transcript_index/performance_executor.rs"]
 mod performance_executor;
+#[path = "transcript_index/prefix_replay.rs"]
+mod prefix_replay;
 #[path = "transcript_index/source.rs"]
 mod source;
 use fixtures::*;
