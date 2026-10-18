@@ -290,8 +290,8 @@ async fn new_capture_in_existing_session_uses_shared_chinese_language() {
             .map(|message| message["content"].as_str().unwrap()).collect();
         assert_eq!(users, vec![original], "original user data must reach the actual provider unchanged: {outgoing}");
         assert!(messages.iter().filter(|message| message["role"] == "system")
-            .any(|message| message["content"].as_str().unwrap().contains("权限")),
-            "Chinese builtin permission guidance must reach the provider after selecting zh-CN; payload: {outgoing}; captured configuration: {configuration}");
+            .any(|message| message["content"].as_str().unwrap().contains("你是 [Maka](https://github.com/apache/maka)，一个 AI Agent。")),
+            "Chinese builtin identity must reach the provider after selecting zh-CN; payload: {outgoing}; captured configuration: {configuration}");
         assert_eq!(configuration["language"], "zh-CN",
             "new work must retain its selected language; payload: {outgoing}; captured configuration: {configuration}");
     }).await.unwrap();
@@ -348,22 +348,18 @@ fn assert_delivered_language(request: &Value, configuration: &Value, language: &
         user,
         "original user bytes must reach the provider: {request}"
     );
-    let permission = match language {
-        "en" => "permission",
-        "zh-CN" => "权限",
-        "zh-TW" => "權限",
+    let identity = match language {
+        "en" => "You are [Maka](https://github.com/apache/maka), an AI agent.",
+        "zh-CN" => "你是 [Maka](https://github.com/apache/maka)，一个 AI Agent。",
+        "zh-TW" => "你是 [Maka](https://github.com/apache/maka)，一個 AI Agent。",
         _ => unreachable!(),
     };
     assert!(
         messages
             .iter()
             .filter(|message| message["role"] == "system")
-            .any(|message| message["content"]
-                .as_str()
-                .unwrap()
-                .to_lowercase()
-                .contains(permission)),
-        "selected {language} permission semantics must reach the provider: {request}; configuration: {configuration}"
+            .any(|message| message["content"].as_str().unwrap().contains(identity)),
+        "selected {language} identity must reach the provider: {request}; configuration: {configuration}"
     );
     if language == "en" {
         assert!(
