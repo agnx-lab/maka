@@ -23,7 +23,7 @@ use maka_agent_facts::attachment::AttachmentRef;
 use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_capabilities::call::ResourceEncoding;
-use maka_event_log::EventLog;
+use maka_event_log::{EventLog, artifacts::ArtifactReadScope};
 use maka_host_runtime::application::{
     CallResources, NativeRequest, RESOURCE_CHUNK_LIMIT, ResourceDescriptor,
 };
@@ -87,7 +87,7 @@ pub(super) async fn capture(
         sources.push((
             start,
             relative_path.clone(),
-            metadata.bytes,
+            attachment,
             metadata.digest.clone(),
         ));
         manifest.push(metadata);
@@ -110,36 +110,58 @@ pub(super) async fn capture(
     ticket.start();
     tokio::spawn(async move {
         let result = async {
-            for (start, id, bytes, digest) in sources {
+            for (start, id, attachment, digest) in sources {
                 if scope.cancellation.is_cancelled() {
                     return Err("executor_attachment_cancelled".into());
                 }
-                let mut hash = Sha256::new();
-                for offset in (0..bytes).step_by(RESOURCE_CHUNK_LIMIT) {
-                    if scope.cancellation.is_cancelled() {
-                        return Err("executor_attachment_cancelled".into());
-                    }
-                    let length = (bytes - offset).min(RESOURCE_CHUNK_LIMIT as u64) as usize;
-                    let chunk = store
-                        .read_artifact_chunk(&session, &id, offset, length)
-                        .await
-                        .map_err(|_| "executor_attachment_unavailable")?
-                        .ok_or("executor_attachment_unavailable")?;
-                    if chunk.total_bytes != bytes || chunk.bytes.len() != length {
-                        return Err("executor_attachment_invalid".into());
-                    }
-                    hash.update(&chunk.bytes);
-                    capture.write(
-                        "attachments",
-                        start
-                            .checked_add(offset)
-                            .ok_or("executor_attachment_invalid")?,
-                        &chunk.bytes,
-                    )?;
-                }
-                if format!("sha256:{}", hex::encode(hash.finalize())) != digest {
-                    return Err("executor_attachment_invalid".into());
-                }
+                let cancellation = scope.cancellation.clone();
+                capture = store
+                    .with_artifact(
+                        ArtifactReadScope::Session(&session),
+                        &id,
+                        move |record, reader| -> Result<_, String> {
+                            if cancellation.is_cancelled() {
+                                return Err("executor_attachment_cancelled".into());
+                            }
+                            record
+                                .validate_attachment(&attachment)
+                                .map_err(|_| "executor_attachment_invalid")?;
+                            if record.source != ArtifactSource::UserUpload
+                                || record.summary.as_deref() != Some(digest.as_str())
+                            {
+                                return Err("executor_attachment_invalid".into());
+                            }
+                            let mut hash = Sha256::new();
+                            let mut buffer = [0u8; RESOURCE_CHUNK_LIMIT];
+                            for offset in (0..attachment.bytes).step_by(RESOURCE_CHUNK_LIMIT) {
+                                if cancellation.is_cancelled() {
+                                    return Err("executor_attachment_cancelled".into());
+                                }
+                                let length = (attachment.bytes - offset)
+                                    .min(RESOURCE_CHUNK_LIMIT as u64)
+                                    as usize;
+                                let chunk = &mut buffer[..length];
+                                reader
+                                    .read_exact(chunk)
+                                    .map_err(|_| "executor_attachment_unavailable")?;
+                                hash.update(&*chunk);
+                                capture.write(
+                                    "attachments",
+                                    start
+                                        .checked_add(offset)
+                                        .ok_or("executor_attachment_invalid")?,
+                                    chunk,
+                                )?;
+                            }
+                            if format!("sha256:{}", hex::encode(hash.finalize())) != digest {
+                                return Err("executor_attachment_invalid".into());
+                            }
+                            Ok(capture)
+                        },
+                    )
+                    .await
+                    .map_err(|_| "executor_attachment_unavailable")?
+                    .ok_or("executor_attachment_unavailable")??;
             }
             capture.finish()
         }

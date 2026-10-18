@@ -1030,6 +1030,43 @@ mod acp;
 
 #[tokio::test]
 async fn executor_attachments_use_only_owned_immutable_uploads_and_original_receipts() {
+    // Same process-wide counters as the existing scale probes. Unsupported
+    // platforms report null rather than inventing CPU or peak-memory values.
+    fn usage() -> (Option<f64>, Option<u64>) {
+        #[cfg(unix)]
+        {
+            let mut value = std::mem::MaybeUninit::<libc::rusage>::uninit();
+            assert_eq!(
+                unsafe { libc::getrusage(libc::RUSAGE_SELF, value.as_mut_ptr()) },
+                0
+            );
+            let value = unsafe { value.assume_init() };
+            let seconds = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1_000_000.0;
+            let peak = value.ru_maxrss as u64;
+            #[cfg(not(target_os = "macos"))]
+            let peak = peak * 1024;
+            (
+                Some(seconds(value.ru_utime) + seconds(value.ru_stime)),
+                Some(peak),
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            (None, None)
+        }
+    }
+    let probe_bytes = std::env::var("MAKA_ARTIFACT_PROBE_BYTES")
+        .ok()
+        .map(|value| {
+            let bytes: usize = value
+                .parse()
+                .expect("MAKA_ARTIFACT_PROBE_BYTES must be an integer");
+            assert!(
+                bytes as u64 <= maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES,
+                "artifact probe must fit the actual attachment byte limit"
+            );
+            bytes
+        });
     tokio::time::timeout(Duration::from_secs(45), async {
         let mut f = Fixture::new("http://127.0.0.1:9/v1", None).await;
         let probe = Probe::new(Behavior::Attachments);
@@ -1040,6 +1077,14 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
             "notes.md".to_owned(),
             "original immutable content\n".repeat(6000),
         )];
+        if let Some(bytes) = probe_bytes {
+            // ASCII permits an exact byte length and the existing UTF-8 preview
+            // assertions; NUL/newline still exercise the binary resource route.
+            let pattern = "original immutable content\n\0";
+            let mut content = pattern.repeat(bytes / pattern.len() + 1);
+            content.truncate(bytes);
+            files[0].1 = content;
+        }
         files.extend((1..17).map(|index| {
             (
                 format!("note-{index}.txt"),
@@ -1071,14 +1116,23 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
         let mut input = input_for(&session, "");
         input["attachments"] = json!(ids);
         let operation = Uuid::new_v4();
+        let started = std::time::Instant::now();
+        let (started_cpu, _) = usage();
         let accepted = f
             .mutation(2, "execute", input.clone(), operation)
             .await
             .unwrap();
         assert_eq!(accepted["kind"], "started");
+        // Observing backend entry includes admission and the complete production
+        // capture; it is not an exact isolated SQLite/encoding measurement.
+        probe.entered.acquire().await.unwrap().forget();
+        let entered_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let (entered_cpu, _) = usage();
         f.drained().await;
         let observed = work(&f, &session, &accepted).await;
         assert_eq!(observed["execution"]["state"], "completed", "{observed}");
+        let completed_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let (completed_cpu, _) = usage();
         let mut page = observed;
         let mut answer = String::new();
         loop {
@@ -1110,8 +1164,39 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
             accepted
         );
         assert_eq!(probe.calls.load(Ordering::SeqCst), 1);
+        let verified_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let (verified_cpu, _) = usage();
+        let shutdown = std::time::Instant::now();
+        let controls_empty = f.owner.runs.lock().await.controls.is_empty();
         f.app.shutdown().await.unwrap();
         f.config.shutdown().await.unwrap();
+        assert!(controls_empty);
+        if probe_bytes.is_some() {
+            let (shutdown_cpu, peak_rss) = usage();
+            let cpu_since = |now: Option<f64>| now.zip(started_cpu).map(|(now, start)| now - start);
+            println!("MAKA_ARTIFACT_PROBE {}", json!({
+                "status":"completed", "errors":0, "caller":"executor",
+                "sqlite_version":rusqlite::version(),
+                "sqlite_version_number":rusqlite::version_number(),
+                "first_file_bytes":files[0].1.len(),
+                "work_bytes":files.iter().map(|(_, bytes)| bytes.len() as u64).sum::<u64>(),
+                "files":received.iter().map(|value| value["metadata"].clone()).collect::<Vec<_>>(),
+                "actual_service_calls":probe.calls.load(Ordering::SeqCst),
+                "invocation":accepted["invocationId"], "operation":operation,
+                "execute_to_service_entry_observed_wall_ms":entered_ms,
+                "execute_to_service_entry_observed_cpu_seconds":cpu_since(entered_cpu),
+                "execute_to_completed_observed_wall_ms":completed_ms,
+                "execute_to_completed_observed_cpu_seconds":cpu_since(completed_cpu),
+                "execute_to_verified_work_wall_ms":verified_ms,
+                "execute_to_verified_work_cpu_seconds":cpu_since(verified_cpu),
+                "shutdown_wall_ms":shutdown.elapsed().as_secs_f64()*1000.0,
+                "shutdown_cpu_seconds":shutdown_cpu.zip(verified_cpu).map(|(end,start)|end-start),
+                "process_peak_rss_bytes":peak_rss,
+                "cleanup":{"app_shutdown":true,"config_shutdown":true,"controls_empty":controls_empty},
+                "upload_included":false, "driver_included":true,
+                "service_entry_is_observation":true
+            }));
+        }
     })
     .await
     .unwrap();

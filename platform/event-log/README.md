@@ -31,4 +31,6 @@ An open store can reuse a verified checkpoint chain and extend its authenticated
 
 Transcript preparation selects ordered canonical fact identities and reads each fact within the same transaction. It has no aggregate evidence count or byte cutoff; projection still checks individual content and history pages keep their delivery budgets. Derived rows and progress commit together. Replay memory can grow with the selected step, and accepted preparation work drains under the original store owner.
 
+Whole-artifact reads use `with_artifact` with Session or execution-turn scope. Metadata and one local read-only BLOB reader share the original writer's snapshot; the synchronous callback owns its destination, and the reader closes after it returns, before the snapshot is released. This avoids reopening and rereading the payload for each chunk. Other writer jobs wait for that artifact copy, and accepted work retains the original owner even if its waiter disappears. Callers retain their resource budgets, digest checks and cancellation policy. `read_artifact_chunk` serves independent windows; repeated windows do not retain a sequential cursor.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

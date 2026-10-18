@@ -52,6 +52,12 @@ pub struct ArtifactEntry {
     pub record: Option<Artifact>,
 }
 
+/// Trusted read scope; execution preserves the original Session + Turn predicate.
+pub enum ArtifactReadScope<'a> {
+    Session(&'a str),
+    Execution(&'a maka_agent_facts::event::Invocation),
+}
+
 #[derive(Debug)]
 pub struct ArtifactChunk {
     pub total_bytes: u64,

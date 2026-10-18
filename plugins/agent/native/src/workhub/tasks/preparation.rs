@@ -185,40 +185,44 @@ impl Hub {
         ticket.start();
         tokio::spawn(async move {
             let result = async {
-                let record = store
-                    .get_artifact(&session, &id)
+                capture = store
+                    .with_artifact(
+                        maka_event_log::artifacts::ArtifactReadScope::Session(&session),
+                        &id,
+                        move |record, reader| -> Result<_, String> {
+                            record
+                                .validate_attachment(&source)
+                                .map_err(|_| "workhub_attachment_invalid")?;
+                            if record.source != ArtifactSource::UserUpload
+                                || record.summary.as_deref() != Some(digest.as_str())
+                            {
+                                return Err("workhub_attachment_invalid".into());
+                            }
+                            let mut hash = Sha256::new();
+                            let mut buffer = [0u8; RESOURCE_CHUNK_LIMIT];
+                            for offset in (0..source.bytes).step_by(RESOURCE_CHUNK_LIMIT) {
+                                if scope.cancellation.is_cancelled() {
+                                    return Err("workhub_cancelled".into());
+                                }
+                                let length = (source.bytes - offset)
+                                    .min(RESOURCE_CHUNK_LIMIT as u64)
+                                    as usize;
+                                let chunk = &mut buffer[..length];
+                                reader
+                                    .read_exact(chunk)
+                                    .map_err(|_| "workhub_attachment_unavailable")?;
+                                hash.update(&*chunk);
+                                capture.write("file", offset, chunk)?;
+                            }
+                            if format!("sha256:{}", hex::encode(hash.finalize())) != digest {
+                                return Err("workhub_attachment_invalid".into());
+                            }
+                            Ok(capture)
+                        },
+                    )
                     .await
                     .map_err(|_| "workhub_attachment_unavailable")?
-                    .record
-                    .ok_or("workhub_attachment_unavailable")?;
-                record
-                    .validate_attachment(&source)
-                    .map_err(|_| "workhub_attachment_invalid")?;
-                if record.source != ArtifactSource::UserUpload
-                    || record.summary.as_deref() != Some(digest.as_str())
-                {
-                    return Err("workhub_attachment_invalid".into());
-                }
-                let mut hash = Sha256::new();
-                for offset in (0..source.bytes).step_by(RESOURCE_CHUNK_LIMIT) {
-                    if scope.cancellation.is_cancelled() {
-                        return Err("workhub_cancelled".into());
-                    }
-                    let length = (source.bytes - offset).min(RESOURCE_CHUNK_LIMIT as u64) as usize;
-                    let chunk = store
-                        .read_artifact_chunk(&session, &id, offset, length)
-                        .await
-                        .map_err(|_| "workhub_attachment_unavailable")?
-                        .ok_or("workhub_attachment_unavailable")?;
-                    if chunk.total_bytes != source.bytes || chunk.bytes.len() != length {
-                        return Err("workhub_attachment_invalid".into());
-                    }
-                    hash.update(&chunk.bytes);
-                    capture.write("file", offset, &chunk.bytes)?;
-                }
-                if format!("sha256:{}", hex::encode(hash.finalize())) != digest {
-                    return Err("workhub_attachment_invalid".into());
-                }
+                    .ok_or("workhub_attachment_unavailable")??;
                 capture.finish()
             }
             .await;

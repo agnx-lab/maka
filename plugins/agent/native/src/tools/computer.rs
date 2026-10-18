@@ -157,35 +157,37 @@ async fn parts(
             serde_json::to_string(&state).expect("state")
         ))],
         ResultValue::Completed { artifact, state } => {
-            let record = store
-                .get_artifact(&invocation.session_id, &artifact)
+            let bytes = store
+                .with_artifact(
+                    maka_event_log::artifacts::ArtifactReadScope::Execution(invocation),
+                    &artifact,
+                    |record, reader| {
+                        if record.source != ArtifactSource::SessionEffect
+                            || record.kind != ArtifactKind::File
+                            || record.mime_type.as_deref() != Some("application/json")
+                            || record.size_bytes > 50 * 1024 * 1024
+                        {
+                            return Err(ToolError::Failed(
+                                "Computer output does not belong to the original invocation".into(),
+                            ));
+                        }
+                        let mut bytes = Vec::with_capacity(record.size_bytes as usize);
+                        reader
+                            .read_to_end(&mut bytes)
+                            .map_err(|_| ToolError::Failed("Computer output unavailable".into()))?;
+                        if bytes.len() as u64 != record.size_bytes {
+                            return Err(ToolError::Failed("Computer output unavailable".into()));
+                        }
+                        Ok(bytes)
+                    },
+                )
                 .await
                 .map_err(|error| ToolError::Persistence(error.to_string()))?
-                .record
-                .filter(|record| {
-                    record.turn_id == invocation.turn_id
-                        && record.source == ArtifactSource::SessionEffect
-                        && record.kind == ArtifactKind::File
-                        && record.mime_type.as_deref() == Some("application/json")
-                        && record.size_bytes <= 50 * 1024 * 1024
-                })
                 .ok_or_else(|| {
                     ToolError::Failed(
                         "Computer output does not belong to the original invocation".into(),
                     )
-                })?;
-            let mut bytes = Vec::with_capacity(record.size_bytes as usize);
-            while (bytes.len() as u64) < record.size_bytes {
-                let chunk = store
-                    .execution_artifact(invocation, &artifact, bytes.len() as u64, 64 * 1024)
-                    .await
-                    .map_err(|error| ToolError::Persistence(error.to_string()))?
-                    .filter(|chunk| {
-                        chunk.total_bytes == record.size_bytes && !chunk.bytes.is_empty()
-                    })
-                    .ok_or_else(|| ToolError::Failed("Computer output unavailable".into()))?;
-                bytes.extend(chunk.bytes);
-            }
+                })??;
             let outputs: Vec<CellOutput> = serde_json::from_slice(&bytes)
                 .map_err(|_| ToolError::Failed("Computer output invalid".into()))?;
             if outputs

@@ -1560,7 +1560,15 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
         let directories=control_turn(&fixture,&listener,&coordinator,json!({"operation":"directories","worker":"worker","location":{"kind":"roots"}})).await;
         let directory=directories["roots"][0]["selection"].clone();
         assert!(directory.is_object());
-        let files: Vec<_> = (0..9).map(|index| (format!("transfer-{index}.txt"), if index == 0 { "original user attachment\n中\0".repeat(6000).into_bytes() } else { format!("original user attachment {index}\n中\0tail-{index}").into_bytes() })).collect();
+        let mut files: Vec<_> = (0..9).map(|index| (format!("transfer-{index}.txt"), if index == 0 { "original user attachment\n中\0".repeat(6000).into_bytes() } else { format!("original user attachment {index}\n中\0tail-{index}").into_bytes() })).collect();
+        if let Ok(size) = std::env::var("MAKA_WORKHUB_ARTIFACT_PROBE_BYTES") {
+            let size: usize = size.parse().expect("MAKA_WORKHUB_ARTIFACT_PROBE_BYTES must be an integer");
+            assert!(size as u64 <= maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES);
+            let pattern = b"original user attachment\n\0";
+            let mut bytes = pattern.repeat(size / pattern.len() + 1);
+            bytes.truncate(size);
+            files[0].1 = bytes;
+        }
         let mut sources=Vec::new();
         for (name,bytes) in &files {
             let uploaded=attachments::upload(&fixture,&coordinator,name,bytes,Uuid::new_v4()).await.unwrap();

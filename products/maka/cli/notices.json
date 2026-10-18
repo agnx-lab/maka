@@ -16,7 +16,7 @@
     "platform/capabilities/Cargo.toml": "b6a0d3d90f3289fcc2f263fcad661df3d76ac2f5c953c07940f2b5c9c8afa5c8",
     "platform/computer-use/Cargo.toml": "fc8a60fbb29acf1c9391a95dbca312203bf893fa28e873264ccf26226c22241f",
     "platform/computer-use/THIRD_PARTY_NOTICES": "709951ed2ee5c4b9ed933f375a37c5b15ec0efa2dea340dc0f289906d72a7bde",
-    "platform/event-log/Cargo.toml": "e78dc980b90d9eb1934736ba856dd77e28e5c102c832c8e6793d8a5f1688be76",
+    "platform/event-log/Cargo.toml": "ee5cf4bf860e3a6584101bf7421742ac490e30bd8e61ff5ddcab72b5efeabfd3",
     "platform/host-js/Cargo.toml": "ad83d0133b55b69298aeb65db408c6de4170bf1d55afb47f93b121992335a3b5",
     "platform/host-runtime/Cargo.toml": "6ac21566be141265f87876bd25bf30de562db4f5407b8cb77080b38984de967f",
     "platform/js-runtime/Cargo.toml": "39b0eeaaef3d16784789f4d7fe6a54781d1c79e56998a0a8d3d1d60772750801",

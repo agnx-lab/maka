@@ -116,6 +116,21 @@ checkpoint 数量、已验证字节数及各操作的延迟／CPU 时间。操�
 序列化长度；峰值 RSS 覆盖整个进程。该探针使用四个 Tokio worker，不测量 IPC、
 渲染、自动压缩、模型推理或能耗。
 
+要测量真实 Executor 附件捕获，使用同一个 release native 测试可执行文件：
+
+```sh
+MAKA_ARTIFACT_PROBE_BYTES=51847623 \
+  "$NATIVE" owner::tests::executor::executor_attachments_use_only_owned_immutable_uploads_and_original_receipts \
+  --exact --nocapture --test-threads=1
+```
+
+该设置只改变第一个上传文件，另十六个小文件保留顺序、字节／摘要、权限和原操作
+重放校验。`MAKA_ARTIFACT_PROBE` 输出实际工作量、SQLite 版本、观察到的完成延迟／CPU
+及清理结果。阶段计时排除上传，但包含 Host 准备、同步服务读取／摘要和观察开销；
+服务入口的观察时间可能已包含整个服务调用。峰值 RSS 包含驱动程序。比较时保持
+测试源码和特性一致，每个大小至少交替运行五次，另行采集 profile；这些指标不是
+独立 SQLite、IPC、渲染、模型推理或能耗测量。
+
 要在 Unix 上测量真实服务工具执行，使用同一个 release native 测试可执行文件，每个进程
 只运行一个 case：
 

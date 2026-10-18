@@ -151,41 +151,48 @@ async fn upload(f: &Fixture, session: &str, picture: &mut Picture) -> Value {
 
 async fn artifact(f: &Fixture, session: &str, picture: &Picture) {
     let id = picture.descriptor["id"].as_str().unwrap();
-    let record = f
-        .store
-        .get_artifact(session, id)
+    let path = f._dir.path().join(&picture.name);
+    let picture = picture.clone();
+    let session_owned = session.to_owned();
+    f.store
+        .with_artifact(
+            maka_event_log::artifacts::ArtifactReadScope::Session(session),
+            id,
+            move |record, reader| {
+                assert_eq!(record.session_id, session_owned);
+                assert_eq!(record.kind, ArtifactKind::Image);
+                assert_eq!(record.source, ArtifactSource::UserUpload);
+                assert_eq!(record.name, picture.name);
+                assert_eq!(record.size_bytes, picture.bytes as u64);
+                assert_eq!(record.mime_type.as_deref(), Some("image/png"));
+                assert_eq!(record.summary.as_deref(), Some(picture.digest.as_str()));
+                let mut file = std::fs::File::open(path).unwrap();
+                let mut offset = 0;
+                let mut actual = [0u8; 65_536];
+                let mut expected = [0u8; 65_536];
+                while offset < picture.bytes {
+                    let length = (picture.bytes - offset).min(actual.len());
+                    reader.read_exact(&mut actual[..length]).unwrap();
+                    file.read_exact(&mut expected[..length]).unwrap();
+                    assert_eq!(
+                        actual[..length],
+                        expected[..length],
+                        "artifact bytes differ: {} at {offset}",
+                        picture.name
+                    );
+                    offset += length;
+                }
+                assert_eq!(offset, picture.bytes);
+                assert_eq!(
+                    file.read(&mut expected[..1]).unwrap(),
+                    0,
+                    "original file gained bytes"
+                );
+            },
+        )
         .await
         .unwrap()
-        .record
-        .unwrap();
-    assert_eq!(record.session_id, session);
-    assert_eq!(record.kind, ArtifactKind::Image);
-    assert_eq!(record.source, ArtifactSource::UserUpload);
-    assert_eq!(record.name, picture.name);
-    assert_eq!(record.size_bytes, picture.bytes as u64);
-    assert_eq!(record.mime_type.as_deref(), Some("image/png"));
-    assert_eq!(record.summary.as_deref(), Some(picture.digest.as_str()));
-    let mut file = std::fs::File::open(f._dir.path().join(&picture.name)).unwrap();
-    let mut offset = 0;
-    while offset < picture.bytes {
-        let chunk = f
-            .store
-            .read_artifact_chunk(session, id, offset as u64, 65_536)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(chunk.total_bytes, picture.bytes as u64);
-        assert!(!chunk.bytes.is_empty());
-        let mut expected = vec![0; chunk.bytes.len()];
-        file.read_exact(&mut expected).unwrap();
-        assert!(
-            chunk.bytes == expected,
-            "artifact bytes differ: {} at {offset}",
-            picture.name
-        );
-        offset += expected.len();
-    }
-    assert_eq!(offset, picture.bytes);
+        .expect("original artifact exists");
 }
 
 async fn canonical(

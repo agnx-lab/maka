@@ -134,6 +134,23 @@ in-process controlled HTTP model. Request JSON sizes are normalized serializatio
 sizes; peak RSS covers the whole process. This probe uses four Tokio workers and
 does not measure IPC, rendering, automatic compaction, inference or energy.
 
+For actual Executor attachment capture, use the same release native test executable:
+
+```sh
+MAKA_ARTIFACT_PROBE_BYTES=51847623 \
+  "$NATIVE" owner::tests::executor::executor_attachments_use_only_owned_immutable_uploads_and_original_receipts \
+  --exact --nocapture --test-threads=1
+```
+
+The setting changes the first uploaded file; sixteen smaller files retain order,
+byte/digest, authority and original-operation replay checks. `MAKA_ARTIFACT_PROBE`
+reports actual work, SQLite version, observed completion latency/CPU and cleanup.
+Stage timings exclude upload but include Host preparation, synchronous service
+reads/hash and observation; the service-entry observation can include the entire
+service call. Peak RSS includes the driver. Compare identical fixtures/features
+with at least five alternating runs per size and profile separately; this is not
+an isolated SQLite, IPC, rendering, inference or energy measurement.
+
 For actual service-tool execution on Unix, use the same release native test executable,
 with one case per process:
 

@@ -21,50 +21,48 @@ use super::*;
 use records::{ids, revision};
 
 impl EventLog {
-    /// The turn constraint and payload slice are checked in the same read. A
-    /// known artifact ID never grants access to a different execution's output.
-    pub async fn execution_artifact(
+    /// Read metadata and payload in one original writer snapshot. The owned
+    /// callback runs synchronously; neither the reader nor its metadata can escape.
+    pub async fn with_artifact<T: Send + 'static>(
         &self,
-        invocation: &maka_agent_facts::event::Invocation,
+        scope: ArtifactReadScope<'_>,
         artifact_id: &str,
-        offset: u64,
-        limit: usize,
-    ) -> Result<Option<ArtifactChunk>, StoreError> {
+        read: impl FnOnce(&Artifact, &mut dyn std::io::Read) -> T + Send + 'static,
+    ) -> Result<Option<T>, StoreError> {
         self.validate_root()?;
-        ids(&invocation.session_id, Some(artifact_id))?;
-        crate::sessions::validate_id(&invocation.turn_id)?;
-        if limit == 0 || limit > 64 * 1024 || offset >= (1 << 53) {
-            return Err(invalid("Invalid execution artifact window"));
-        }
-        let (session, turn, artifact) = (
-            invocation.session_id.clone(),
-            invocation.turn_id.clone(),
-            artifact_id.to_owned(),
-        );
+        let (session, turn) = match scope {
+            ArtifactReadScope::Session(session) => (session.to_owned(), None),
+            ArtifactReadScope::Execution(invocation) => {
+                crate::sessions::validate_id(&invocation.turn_id)?;
+                (
+                    invocation.session_id.clone(),
+                    Some(invocation.turn_id.clone()),
+                )
+            }
+        };
+        ids(&session, Some(artifact_id))?;
+        let artifact = artifact_id.to_owned();
         self.connection
             .run(move |connection| {
                 Box::pin(async move {
-                    let row: Option<(i64, Vec<u8>)> = sqlx::query_as(
-                        "SELECT length(payload), substr(payload, ?1, ?2) FROM artifacts
-                 WHERE session_id = ?3 AND id = ?4 AND json_extract(record_json, '$.turnId') = ?5",
-                    )
-                    .bind(offset as i64 + 1)
-                    .bind(limit as i64)
-                    .bind(session)
-                    .bind(artifact)
-                    .bind(turn)
-                    .fetch_optional(connection)
-                    .await?;
-                    row.map(|(total, bytes)| {
-                        if offset > total as u64 {
-                            return Err(StoreError::ArtifactOffset);
+                    let mut tx = connection.begin().await?;
+                    let result = async {
+                        if turn.is_none() {
+                            require_session(&mut tx, &session).await?;
                         }
-                        Ok(ArtifactChunk {
-                            total_bytes: total as u64,
-                            bytes,
-                        })
-                    })
-                    .transpose()
+                        match lookup(&mut tx, &session, &artifact, turn.as_deref()).await? {
+                            Some(row) => {
+                                with_blob(&mut tx, row, |record, blob| Ok(read(record, blob)))
+                                    .await
+                                    .map(Some)
+                            }
+                            None => Ok(None),
+                        }
+                    }
+                    .await;
+                    // Cleanup failure takes precedence over a callback's business result.
+                    tx.rollback().await?;
+                    result
                 })
             })
             .await
@@ -140,8 +138,8 @@ impl EventLog {
             .await
     }
 
-    /// SQLite slices the BLOB before returning it, including for small previews
-    /// of a large upload. A missing item is distinct from an invalid offset.
+    /// Read one bounded window without materializing the entire SQLite BLOB.
+    /// Reopening per window is not a replacement for a whole-artifact callback.
     pub async fn read_artifact_chunk(
         &self,
         session_id: &str,
@@ -154,18 +152,93 @@ impl EventLog {
         if limit == 0 || limit as u64 > MAX_ATTACHMENT_BYTES || offset > 9_007_199_254_740_991 {
             return Err(invalid("Invalid artifact read bounds"));
         }
-        let (session_id, artifact_id) = (session_id.to_owned(), artifact_id.to_owned());
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            require_session(&mut tx, &session_id).await?;
-            let row: Option<(i64, Vec<u8>)> = sqlx::query_as(
-                "SELECT length(payload), substr(payload, ?, ?) FROM artifacts WHERE session_id = ? AND id = ?"
-            ).bind(offset as i64 + 1).bind(limit as i64).bind(&session_id).bind(&artifact_id)
-                .fetch_optional(&mut *tx).await?;
-            row.map(|(total, bytes)| {
-                if offset > total as u64 { return Err(StoreError::ArtifactOffset); }
-                Ok(ArtifactChunk { total_bytes: total as u64, bytes })
-            }).transpose()
-        })).await
+        let (session, artifact) = (session_id.to_owned(), artifact_id.to_owned());
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let result = async {
+                        require_session(&mut tx, &session).await?;
+                        let Some(row) = lookup(&mut tx, &session, &artifact, None).await? else {
+                            return Ok(None);
+                        };
+                        if offset > row.record.size_bytes {
+                            return Err(StoreError::ArtifactOffset);
+                        }
+                        with_blob(&mut tx, row, |record, blob| {
+                            let length = (record.size_bytes - offset).min(limit as u64) as usize;
+                            let mut bytes = vec![0; length];
+                            blob.read_at_exact(&mut bytes, offset as usize)?;
+                            Ok(ArtifactChunk {
+                                total_bytes: record.size_bytes,
+                                bytes,
+                            })
+                        })
+                        .await
+                        .map(Some)
+                    }
+                    .await;
+                    tx.rollback().await?;
+                    result
+                })
+            })
+            .await
     }
+}
+
+struct Row {
+    rowid: i64,
+    record: Artifact,
+}
+
+async fn lookup(
+    connection: &mut sqlx::SqliteConnection,
+    session: &str,
+    artifact: &str,
+    turn: Option<&str>,
+) -> Result<Option<Row>, StoreError> {
+    let row: Option<(i64, i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT rowid, length(payload),
+         CASE WHEN length(CAST(record_json AS BLOB)) <= 16384 THEN record_json END,
+         CASE WHEN length(CAST(content_sha256 AS BLOB)) = 71 THEN content_sha256 END
+         FROM artifacts WHERE session_id = ?1 AND id = ?2
+         AND (?3 IS NULL OR json_extract(record_json, '$.turnId') = ?3)",
+    )
+    .bind(session)
+    .bind(artifact)
+    .bind(turn)
+    .fetch_optional(connection)
+    .await?;
+    row.map(|(rowid, total, raw, digest)| {
+        let raw = raw.ok_or_else(|| invalid("Stored artifact metadata exceeds limit"))?;
+        digest.ok_or_else(|| invalid("Stored artifact digest exceeds limit"))?;
+        let record = decode(&raw, session, artifact)?;
+        if u64::try_from(total).ok() != Some(record.size_bytes) {
+            return Err(invalid("Stored artifact payload size mismatch"));
+        }
+        Ok(Row { rowid, record })
+    })
+    .transpose()
+}
+
+async fn with_blob<T>(
+    connection: &mut sqlx::SqliteConnection,
+    row: Row,
+    read: impl FnOnce(&Artifact, &mut rusqlite::blob::Blob<'_>) -> Result<T, StoreError>,
+) -> Result<T, StoreError> {
+    let mut locked = connection.lock_handle().await?;
+    // SAFETY: this original SQLx guard excludes worker FFI. The non-owning
+    // wrapper and read-only Blob remain in this no-await scope; neither escapes.
+    let borrowed = unsafe { rusqlite::Connection::from_handle(locked.as_raw_handle().as_ptr()) }?;
+    let mut blob = borrowed.blob_open("main", "artifacts", "payload", row.rowid, true)?;
+    let result = if blob.len() as u64 == row.record.size_bytes {
+        read(&row.record, &mut blob)
+    } else {
+        Err(invalid("Stored artifact payload size mismatch"))
+    };
+    let closed = blob.close();
+    drop(borrowed);
+    drop(locked);
+    closed?;
+    result
 }

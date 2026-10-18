@@ -21,7 +21,10 @@ use maka_agent_facts::artifact::Artifact;
 use maka_agent_facts::artifact::ArtifactKind;
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::artifact::content_digest;
-use maka_event_log::{EventLog, StoreError, artifacts::ArtifactDeletion};
+use maka_event_log::{
+    EventLog, StoreError,
+    artifacts::{ArtifactDeletion, ArtifactReadScope},
+};
 use serde_json::json;
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 
@@ -157,31 +160,42 @@ async fn immutable_uploads_are_scoped_bounded_and_reopen_with_atomic_catalog_cha
         invocation_id: "invocation".into(),
     };
     let scoped = log
-        .execution_artifact(&invocation, "first", 123, 32_768)
+        .with_artifact(
+            ArtifactReadScope::Execution(&invocation),
+            "first",
+            |record, reader| {
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes).unwrap();
+                (record.clone(), bytes)
+            },
+        )
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(scoped.bytes, read.bytes);
-    assert_eq!(scoped.total_bytes, read.total_bytes);
+    assert_eq!(scoped.0, first);
+    assert_eq!(scoped.1, bytes);
     invocation.turn_id = "different-turn".into();
     assert!(
-        log.execution_artifact(&invocation, "first", 0, 4096)
-            .await
-            .unwrap()
-            .is_none()
+        log.with_artifact(
+            ArtifactReadScope::Execution(&invocation),
+            "first",
+            |_, _| panic!("foreign Turn read")
+        )
+        .await
+        .unwrap()
+        .is_none()
     );
     invocation.turn_id = "upload".into();
     invocation.session_id = "other".into();
     assert!(
-        log.execution_artifact(&invocation, "first", 0, 4096)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        log.execution_artifact(&invocation, "first", 0, 65_537)
-            .await
-            .is_err()
+        log.with_artifact(
+            ArtifactReadScope::Execution(&invocation),
+            "first",
+            |_, _| panic!("foreign Session read")
+        )
+        .await
+        .unwrap()
+        .is_none()
     );
     assert!(
         log.read_artifact_chunk("session", "first", bytes.len() as u64, 1)
@@ -447,3 +461,6 @@ async fn read_prefixes_are_literal_session_scoped_and_follow_artifact_visibility
     );
     log.close().await.unwrap();
 }
+
+#[path = "artifacts/reads.rs"]
+mod reads;
