@@ -1166,7 +1166,7 @@ fn bundled_language_switch_updates_and_remains_responsive() {
     tui.wait_for("ChatGPT Subscription");
     tui.send(b"\x1b");
     tui.wait_for("Add connection");
-    click(&mut tui, "Assistant preferences");
+    click(&mut tui, "Appearance");
     click(&mut tui, "Language");
     tui.wait_for("繁體中文");
     settings_evidence(&tui, "language-options");

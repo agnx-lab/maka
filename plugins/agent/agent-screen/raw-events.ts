@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { readLanguage } from '../../shared/language-preference.js';
 import { diagnosticEvent } from './diagnostics.js';
 import { compactConfirm } from './compact.js';
 import type {
@@ -53,6 +54,7 @@ import {
   intent,
   history,
   mutationPending,
+  recovering,
   openInteraction,
   rootCommand,
   rootCommands,
@@ -69,6 +71,43 @@ export function handleRaw<N extends Node>(
   events: Emission[],
   locale: string,
 ) {
+  if (state.pages.at(-1) === 'settings' && input.key === 'settings-language') {
+    const preference = (input.event as { key?: string }).key;
+    if (
+      state.settingsCategory === 'appearance' &&
+      !mutationPending(state) &&
+      !recovering(state) &&
+      !state.language.pending &&
+      state.language.observed &&
+      (preference === 'auto' ||
+        preference === 'en' ||
+        preference === 'zh-CN' ||
+        preference === 'zh-TW')
+    ) {
+      state.notice = null;
+      intent(state, actions, { kind: 'languageChange' }, 'settings', 'updateAssistantPreferences', {
+        expectedRevision: state.language.observed.revision,
+        mutation: { kind: 'language', preference },
+      });
+    }
+    return frame(presentation, state, values, actions);
+  }
+  if (input.key === 'settings-language-check') {
+    if (!recovering(state)) {
+      if (state.uncertain)
+        intent(state, actions, { kind: 'receipt' }, 'receipts', 'read', state.uncertain.reference);
+      else if (state.restoring)
+        intent(state, actions, { kind: 'restorePage' }, 'history', 'page', {
+          after: state.restoreAfter,
+          limit: 1,
+        });
+      else {
+        state.notice = null;
+        readLanguage(state.language, actions);
+      }
+    }
+    return frame(presentation, state, values, actions);
+  }
   if (diagnosticEvent(state, actions, input.key))
     return frame(presentation, state, values, actions);
   if (input.key === 'compact-confirm') compactConfirm(state, actions);

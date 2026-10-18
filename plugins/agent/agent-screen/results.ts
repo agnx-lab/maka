@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { readLanguage } from '../../shared/language-preference.js';
 import { comparePosition, type RowPosition } from '../../shared/history-position.js';
 import { compactQuery, compactSettled } from './compact.js';
 import { hostLogResult } from './host-logs.js';
@@ -77,7 +78,13 @@ import {
 
 function settled(state: State, actions: Action[], request: Mutation, value: unknown) {
   state.uncertain = null;
-  if (request.kind === 'restored') {
+  if (request.kind === 'languageChange') {
+    const result =
+      value as import('../../../packages/plugin-sdk/src/index.js').SettingsPreferencesUpdated;
+    state.notice = result.kind === 'committed' ? null : 'unavailable';
+    readLanguage(state.language, actions);
+  } else if (request.kind === 'restored') {
+    readLanguage(state.language, actions);
     state.restoring = true;
     intent(state, actions, { kind: 'restorePage' }, 'history', 'page', {
       after: state.restoreAfter,
@@ -929,6 +936,10 @@ export function querySucceeded(state: State, actions: Action[], request: Request
         // Persist only a completely checked prefix. Unknown receipts never
         // advance this checkpoint; a lost checkpoint only repeats safe reads.
         state.restoreThrough = state.restoreAfter;
+        if (state.restoring) {
+          readLanguage(state.language, actions);
+          if (state.notice === 'unknown') state.notice = null;
+        }
         state.restoring = false;
         break;
       }

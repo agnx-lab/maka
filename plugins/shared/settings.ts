@@ -103,6 +103,13 @@ export function settingsEvent(state: SettingsState, input: ComponentInput, base:
 export function settingsView<N extends Node>(
   presentation: Presentation<N>,
   state: AppearanceEditor,
+  language: {
+    current: string | null;
+    loading: boolean;
+    disabled: boolean;
+    notice: string | null;
+    checking: boolean;
+  },
   theme: Theme,
   locale: string,
   category: SettingsCategory,
@@ -120,6 +127,7 @@ export function settingsView<N extends Node>(
   const appearance = state.saved?.appearance ?? theme.configuration;
   const busy = state.command !== null || state.checkpoint?.state.kind !== 'ready';
   const icons: Record<string, [string, string]> = {
+    'settings-language': ['◎', 'L'],
     'settings-palette': ['◐', 'T'],
     'appearance-open': ['◒', 'C'],
     'settings-symbols': ['◇', 'A'],
@@ -133,7 +141,13 @@ export function settingsView<N extends Node>(
       [ui.text(key + '-glyph', icons[key]![appearance.ascii ? 1 : 0], theme.subtle)],
       { terminal: { basis: 4 } },
     );
-  const choice = (key: string, options: [string, string][], current: string) =>
+  const choice = (
+    key: string,
+    options: [string, string][],
+    current: string | null,
+    disabled = busy,
+    label = t(key),
+  ) =>
     ui.box(
       key + '-row',
       [
@@ -143,10 +157,10 @@ export function settingsView<N extends Node>(
           [
             ui.choice!(
               key,
-              t(key),
+              label,
               options.map(([key, label]) => ({ key, label })),
               current,
-              busy,
+              disabled,
             ),
           ],
           { terminal: { grow: 1 } },
@@ -267,6 +281,24 @@ export function settingsView<N extends Node>(
       ),
     ],
     appearance: [
+      choice(
+        'settings-language',
+        [
+          ['auto', t('settings-language-auto')],
+          ['en', 'English'],
+          ['zh-CN', '简体中文'],
+          ['zh-TW', '繁體中文'],
+        ],
+        language.current,
+        language.disabled,
+        t(language.loading ? 'settings-language-loading' : 'settings-language'),
+      ),
+      ...(language.notice
+        ? [
+            ui.text('settings-language-notice', language.notice, theme.muted),
+            ui.button('settings-language-check', t('home-retry'), language.checking),
+          ]
+        : []),
       choice(
         'settings-palette',
         [

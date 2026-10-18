@@ -43,7 +43,6 @@ import {
 // This feature owns this explicit message catalog; shared messages remain tree-shakeable.
 
 const messages = {
-  languageAuto: ['Auto (system language)', '自动（系统语言）', '自動（系統語言）'],
   back: msg_back,
   executionReceipt: msg_executionReceipt,
   refreshDefaultOperations: msg_refreshDefaultOperations,
@@ -55,7 +54,6 @@ export const copy = /* @__PURE__ */ createCopy(messages);
 export type Copy = ReturnType<typeof copy>;
 
 const terminalMessages = {
-  'assistant-language-loading': ['Loading language…', '正在读取语言…', '正在讀取語言…'],
   'assistant-compaction': ['Compression prompt', '压缩提示词', '壓縮提示詞'],
   'assistant-compaction-save': ['Save compression prompt', '保存压缩提示词', '儲存壓縮提示詞'],
   'assistant-compaction-reset': ['Restore default prompt', '恢复默认提示词', '還原預設提示詞'],

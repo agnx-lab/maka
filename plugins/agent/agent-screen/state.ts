@@ -122,6 +122,7 @@ export type Request =
   | { kind: 'openSession'; selection: NonNullable<AgentScreenProps['session']> }
   | { kind: 'changeSession'; sessionId: string; action: 'archive' | 'restore' | 'remove' }
   | { kind: 'selectBackend'; sessionId: string; backend: BackendPreference }
+  | { kind: 'languageChange' }
   | { kind: 'create' }
   | { kind: 'createDirectory'; title: string }
   | {
@@ -145,6 +146,7 @@ export type Mutation =
       Request,
       {
         kind:
+          | 'languageChange'
           | 'changeSession'
           | 'selectBackend'
           | 'sandboxChange'

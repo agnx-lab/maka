@@ -549,12 +549,22 @@ export function readHistorySource(state: State, actions: Action[], position: Sou
   );
 }
 
+export function recovering(state: State) {
+  return Object.values(state.pending).some(
+    (request) =>
+      request.kind === 'restorePage' ||
+      request.kind === 'restoreReceipt' ||
+      request.kind === 'receipt',
+  );
+}
+
 export function mutationPending(state: State) {
   return (
     state.restoring ||
     state.uncertain !== null ||
     Object.values(state.pending).some((request) =>
       [
+        'languageChange',
         'compact',
         'compactField',
         'queueRead',

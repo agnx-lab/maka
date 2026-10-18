@@ -46,7 +46,7 @@ import { graphUpdate } from './graph.js';
 import type { WorkHubGraphView } from '../../../packages/plugin-sdk/src/index.js';
 import { messages } from './messages.js';
 import { toolCards } from '../../shared/tool-cards.js';
-import { follow, select } from './actions.js';
+import { follow, select, intent } from './actions.js';
 import { handleComponent } from './component-events.js';
 import { frame } from './frame.js';
 import { handleRaw } from './raw-events.js';
@@ -184,22 +184,28 @@ export function handleEvent<N extends Node>(
   state.revision++;
   const actions: Action[] = [];
   const events: Emission[] = [];
-  if (observeLanguage(state.language, input, actions))
-    return frame(presentation, state, values, actions);
+  const previousLanguage = state.language.observed;
+  if (observeLanguage(state.language, input, actions)) {
+    if ((input.event as ActionOutcome).status !== 'succeeded') {
+      state.language.observed = null;
+      state.notice = 'unavailable';
+    } else if (
+      previousLanguage?.language !== state.language.observed?.language ||
+      previousLanguage?.resolvedLanguage !== state.language.observed?.resolvedLanguage
+    )
+      events.push({ name: 'languageChanged', value: {} });
+    return frame(presentation, state, values, actions, events);
+  }
   if (
     (input.kind === 'raw' &&
-      ['settings', 'settings-retry', 'check', 'settings-category-assistant'].includes(input.key)) ||
+      ['settings', 'settings-retry', 'check', 'settings-category-appearance'].includes(
+        input.key,
+      )) ||
     (input.kind === 'component' &&
       input.child === 'assistant-preferences' &&
       input.name === 'changed')
   )
     readLanguage(state.language, actions);
-  if (
-    input.kind === 'component' &&
-    input.child === 'assistant-preferences' &&
-    input.name === 'changed'
-  )
-    events.push({ name: 'languageChanged', value: {} });
   const locale = state.language.observed?.resolvedLanguage ?? 'en';
   if (appearanceEvent(state.preferences, input, values.appearance?.[0] as Theme, locale, actions))
     return frame(presentation, state, values, actions);
@@ -286,7 +292,8 @@ export function handleEvent<N extends Node>(
         delete state.pending[input.key];
         if (
           outcome.status === 'operation' &&
-          (request.kind === 'changeSession' ||
+          (request.kind === 'languageChange' ||
+            request.kind === 'changeSession' ||
             request.kind === 'selectBackend' ||
             request.kind === 'sandboxChange' ||
             request.kind === 'create' ||
@@ -303,7 +310,17 @@ export function handleEvent<N extends Node>(
             request.kind === 'planMode')
         )
           receipt(state, actions, request, outcome.reply);
-        else if (outcome.status === 'succeeded')
+        else if (request.kind === 'languageChange') {
+          state.notice = outcome.status === 'not_accepted' ? 'unavailable' : 'unknown';
+          if (outcome.status !== 'not_accepted') {
+            state.restoring = true;
+            state.restoreAfter = state.restoreThrough;
+            intent(state, actions, { kind: 'restorePage' }, 'history', 'page', {
+              after: state.restoreAfter,
+              limit: 1,
+            });
+          }
+        } else if (outcome.status === 'succeeded')
           querySucceeded(state, actions, request, outcome.value);
         else queryFailed(state, request);
         // A newer original paint/intent may have arrived while this read

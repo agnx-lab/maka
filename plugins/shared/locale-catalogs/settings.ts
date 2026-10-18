@@ -22,7 +22,6 @@ import { msg_assistant, msg_failed, msg_models, msg_settings } from '../locale-m
 import { translate } from '../tui-locale.js';
 import {
   tui_home_retry,
-  tui_language_auto,
   tui_route_plugins,
   tui_settings_host,
   tui_settings_jev,
@@ -70,6 +69,7 @@ export const copy = /* @__PURE__ */ createCopy(messages);
 export type Copy = ReturnType<typeof copy>;
 
 const terminalMessages = {
+  'settings-language-loading': ['Loading…', '正在读取…', '正在讀取…'] as const,
   'settings-host-failed': tui_settings_host_failed,
   'settings-host-disconnected': tui_settings_host_disconnected,
   'settings-host-connecting': tui_settings_host_connecting,
@@ -86,7 +86,11 @@ const terminalMessages = {
   'settings-web': tui_settings_web,
   'settings-subagents': tui_settings_subagents,
   'home-retry': tui_home_retry,
-  'language-auto': tui_language_auto,
+  'settings-language-auto': [
+    'Auto (system language)',
+    '自动（系统语言）',
+    '自動（系統語言）',
+  ] as const,
   'route-plugins': tui_route_plugins,
   'settings-host': tui_settings_host,
   'settings-jev': tui_settings_jev,

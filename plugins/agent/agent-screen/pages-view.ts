@@ -25,7 +25,7 @@ import { copy } from './locale.js';
 import { type Presentation, type Node } from '../../shared/view.js';
 
 import { type Page, navigationBookmark, navigationKey, type State } from './state.js';
-import { catalogPending, mutationPending } from './actions.js';
+import { catalogPending, mutationPending, recovering } from './actions.js';
 
 export function pagesView<N extends Node>(
   presentation: Presentation<N>,
@@ -52,6 +52,17 @@ export function pagesView<N extends Node>(
                 settingsView(
                   presentation,
                   state.preferences,
+                  {
+                    current: state.language.observed?.language ?? null,
+                    loading: !!state.language.pending || state.restoring || recovering(state),
+                    disabled:
+                      busy ||
+                      recovering(state) ||
+                      !!state.language.pending ||
+                      !state.language.observed,
+                    notice: state.notice ? text[state.notice] : null,
+                    checking: !!state.language.pending || recovering(state),
+                  },
                   theme,
                   locale,
                   state.settingsCategory,
