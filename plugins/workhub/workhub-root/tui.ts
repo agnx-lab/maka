@@ -21,15 +21,9 @@ import { presentations } from '../../shared/view.js';
 import { workhubRoot, activate as exports } from './index.js';
 export let component: ReturnType<typeof workhubRoot>;
 export function activate(configuration: {
-  locale: string;
   worker: string;
   initialRoute?: 'coordinator' | 'sessions';
 }) {
-  component = workhubRoot(
-    presentations.tui,
-    configuration.locale,
-    configuration.worker,
-    configuration.initialRoute,
-  );
+  component = workhubRoot(presentations.tui, configuration.worker, configuration.initialRoute);
   return exports();
 }

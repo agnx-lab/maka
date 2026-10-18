@@ -136,7 +136,7 @@ for (const target of ['tui']) {
 test('TUI AgentScreen mounts metrics with session context and keeps one authoring worker', async () => {
   const agentScreen = await import('../dist/packages/agent-screen/tui.js');
   const appearance = await import('../dist/packages/appearance/tui.js');
-  agentScreen.activate({ locale: 'en' });
+  agentScreen.activate({});
   const values = { appearance: [appearance.activate({ scheme: 'dark' }).Appearance.value] };
   const nodes = (node) =>
     node && typeof node === 'object'

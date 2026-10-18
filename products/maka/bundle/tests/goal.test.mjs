@@ -28,7 +28,7 @@ const observed = (name, revision, text, receipt) => ({
 });
 async function client(target) {
   const module = await import(`../dist/packages/agent-screen/${target}.js`);
-  module.activate({ locale: 'en' });
+  module.activate({});
   const values = { appearance: [theme] };
   let out = module.component.mount({}, values);
   Object.assign(out.frame.state, {

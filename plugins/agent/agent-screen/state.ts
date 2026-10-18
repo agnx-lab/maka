@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { LanguageObservation } from '../../shared/language-preference.js';
 import type { RowPosition } from '../../shared/history-position.js';
 import { type AppearanceEditor } from '../../shared/appearance-editor.js';
 import { type SettingsCategory } from '../../shared/settings.js';
@@ -253,6 +254,7 @@ export interface State {
   embedding: AgentScreenProps;
   externalSelection: AgentScreenProps['session'] | null;
   preferences: AppearanceEditor;
+  language: LanguageObservation;
   drafts: ComposerReadiness[];
   attachments: AttachmentDrafts;
   revision: number;

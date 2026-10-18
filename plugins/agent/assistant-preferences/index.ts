@@ -45,6 +45,7 @@ import { assistantPreferencesContract, type ProjectsProps } from '../../shared/c
 import { withPageShell, pageHeader, type PageState } from '../../shared/page-shell.js';
 import { sameValue } from '../../shared/value.js';
 import { copy, tuiText } from './locale.js';
+import { tuiText as settingsText } from '../../shared/locale-catalogs/settings.js';
 import { output, type Node, type Presentation } from '../../shared/view.js';
 
 type Name = 'name' | 'compaction';
@@ -56,13 +57,18 @@ interface Field {
   ready: boolean;
 }
 type Request =
-  | { kind: 'preferences'; reset: boolean | 'compaction' | 'personalization' }
+  | {
+      kind: 'preferences';
+      reset: boolean | 'compaction' | 'personalization';
+      languageCommitted: boolean;
+    }
   | { kind: 'mutate' | 'receipt' }
   | { kind: 'history'; after: number }
   | { kind: 'field'; name: Name; captured: EditorObservation };
 interface State extends PageState {
   global: GlobalInstructionsState;
   revision: number;
+  opened: boolean;
   serial: number;
   saved: SettingsAssistantPreferences | null;
   fields: Record<Name, Field>;
@@ -107,8 +113,16 @@ function read(
   state: State,
   actions: Action[],
   reset: boolean | 'compaction' | 'personalization' = true,
+  languageCommitted = false,
 ) {
-  request(state, actions, { kind: 'preferences', reset }, 'settings', 'assistantPreferences', {});
+  request(
+    state,
+    actions,
+    { kind: 'preferences', reset, languageCommitted },
+    'settings',
+    'assistantPreferences',
+    {},
+  );
 }
 function history(state: State, actions: Action[], after = 0) {
   state.restoring = true;
@@ -144,6 +158,7 @@ function settle(state: State, reply: OperationReply, actions: Action[]) {
     return;
   }
   const result = reply.receipt.outcome.value as SettingsPreferencesUpdated;
+  const languageCommitted = state.current.input.mutation.kind === 'language';
   const reset =
     state.current.input.mutation.kind === 'compaction_prompt'
       ? 'compaction'
@@ -157,7 +172,13 @@ function settle(state: State, reply: OperationReply, actions: Action[]) {
       : result.kind === 'revision_conflict'
         ? 'assistant-conflict'
         : 'assistant-invalid';
-  if (result.kind === 'committed' || !state.saved) read(state, actions, reset);
+  if (result.kind === 'committed' || !state.saved)
+    read(
+      state,
+      actions,
+      languageCommitted ? false : reset,
+      result.kind === 'committed' && languageCommitted,
+    );
 }
 function capture(state: State, actions: Action[], name: Name) {
   const captured = name === 'compaction' ? state.compactionCapture! : state.capture![name];
@@ -237,6 +258,18 @@ export function assistantPreferences<N extends Node>(
     const content = ui.box(
       'assistant-preferences-content',
       [
+        ui.choice!(
+          'language',
+          settingsText(props.locale, 'settings-language'),
+          [
+            { key: 'auto', label: text.languageAuto },
+            { key: 'en', label: 'English' },
+            { key: 'zh-CN', label: '简体中文' },
+            { key: 'zh-TW', label: '繁體中文' },
+          ],
+          state.saved?.language ?? '',
+          busy || !state.saved,
+        ),
         fields[0]!,
         ...(state.notice && !state.pending
           ? [ui.text('assistant-notice', t(state.notice), props.theme.muted)]
@@ -320,6 +353,7 @@ export function assistantPreferences<N extends Node>(
       mount(props) {
         const state: State = {
           revision: 0,
+          opened: props.open,
           serial: 0,
           saved: null,
           fields: { name: field(), compaction: field() },
@@ -338,7 +372,10 @@ export function assistantPreferences<N extends Node>(
       },
       update(state, props) {
         state.revision++;
-        return frame(state, props);
+        const actions: Action[] = [];
+        if (props.open && !state.opened && !disabled(state, props)) read(state, actions, false);
+        state.opened = props.open;
+        return frame(state, props, actions);
       },
       event(state, input, props) {
         state.revision++;
@@ -417,7 +454,15 @@ export function assistantPreferences<N extends Node>(
           } else if (r.kind === 'preferences') {
             if (result.status !== 'succeeded') state.notice = 'assistant-unavailable';
             else {
-              state.saved = result.value as SettingsAssistantPreferences;
+              const observed = result.value as SettingsAssistantPreferences;
+              if (
+                r.languageCommitted ||
+                (state.saved &&
+                  (state.saved.language !== observed.language ||
+                    state.saved.resolvedLanguage !== observed.resolvedLanguage))
+              )
+                events.push({ name: 'changed', value: {} });
+              state.saved = observed;
               if (r.reset)
                 for (const name of (r.reset === 'compaction'
                   ? ['compaction']
@@ -500,7 +545,19 @@ export function assistantPreferences<N extends Node>(
             );
           else if (!disabled(state, props)) {
             if (input.key === 'reload') read(state, actions);
-            else if (
+            else if (input.key === 'language' && state.saved) {
+              const preference = (input.event as { key?: string }).key;
+              if (
+                preference === 'auto' ||
+                preference === 'en' ||
+                preference === 'zh-CN' ||
+                preference === 'zh-TW'
+              )
+                mutate(state, actions, {
+                  expectedRevision: state.saved.revision,
+                  mutation: { kind: 'language', preference },
+                });
+            } else if (
               input.key === 'reset-compaction' &&
               state.saved &&
               state.fields.compaction.ready &&

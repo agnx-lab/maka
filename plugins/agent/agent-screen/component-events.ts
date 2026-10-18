@@ -92,7 +92,6 @@ import { readingKey } from './state.js';
 
 export function handleComponent<N extends Node>(
   presentation: Presentation<N>,
-  configuredLocale: string,
   state: State,
   input: Extract<ComponentInput, { kind: 'component' }>,
   values: ComponentValues,
@@ -111,20 +110,18 @@ export function handleComponent<N extends Node>(
       );
       if (available) rootCommand(state, actions, locale, available.kind);
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
-  if (compactComponent(state, input))
-    return frame(presentation, configuredLocale, state, values, actions);
-  if (goalComponent(state, input))
-    return frame(presentation, configuredLocale, state, values, actions);
+  if (compactComponent(state, input)) return frame(presentation, state, values, actions);
+  if (goalComponent(state, input)) return frame(presentation, state, values, actions);
   if (input.name === 'chrome' && state.openedPages.includes(input.child as Page)) {
     state.pageChrome[input.child as Page] = input.event as PageChrome;
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
 
   if (input.child === 'composer' && input.name === 'readiness') {
     state.drafts = input.event as ComposerReadiness[];
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'composer' && input.name === 'restored') {
     const files = (input.event as { files: State['attachments']['files'] }).files;
@@ -139,16 +136,16 @@ export function handleComponent<N extends Node>(
       )
         state.attachments.files.push(file);
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'composer' && input.name === 'files' && true) {
     pastedFiles(state.attachments, input.event as DraftFilePaste);
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === attachmentChild(state.attachments) && input.name === 'changed') {
     if (state.dialog === 'attachments' && state.attachments.selection && !mutationPending(state))
       state.attachments.selection.file = input.event as FileObservation;
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === `permission-approval-${state.interaction?.attempt}`) {
     if (state.dialog === 'approval') {
@@ -175,7 +172,7 @@ export function handleComponent<N extends Node>(
           });
       }
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === `service-approval-${state.interaction?.attempt}`) {
     if (state.dialog === 'approval') {
@@ -193,7 +190,7 @@ export function handleComponent<N extends Node>(
           });
       }
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === questionChild(state)) {
     if (state.dialog === 'question') {
@@ -210,7 +207,7 @@ export function handleComponent<N extends Node>(
           input.event as { requestId: string; answers: QuestionDraft[] },
         );
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'queue-editor') {
     const edit = state.queueEdit;
@@ -272,22 +269,22 @@ export function handleComponent<N extends Node>(
         }
       }
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'skill-library') {
     if (input.name === 'closed' && state.dialog === 'skills') state.dialog = null;
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'help') {
     if (input.name === 'closed' && state.dialog === 'help') state.dialog = null;
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'terminal-panel') {
     if (input.name === 'closed') {
       if (state.dialog === 'terminal') state.dialog = null;
       if (state.inspector === 'terminal') state.inspector = null;
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'session-details') {
     if (input.name === 'closed') {
@@ -297,7 +294,7 @@ export function handleComponent<N extends Node>(
       if (state.selected?.id === (input.event as { sessionId: string }).sessionId)
         observe(state, actions);
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (
     [
@@ -332,7 +329,7 @@ export function handleComponent<N extends Node>(
       state.pages = [];
       catalog(state);
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'recall') {
     if (input.name === 'closed' && state.pages.at(-1) === 'recall') state.pages.pop();
@@ -348,7 +345,7 @@ export function handleComponent<N extends Node>(
       state.recallAnchor = selected.anchor;
       state.pages = [];
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'imports') {
     if (input.name === 'closed' && state.pages.at(-1) === 'imports') state.pages.pop();
@@ -364,7 +361,7 @@ export function handleComponent<N extends Node>(
       state.pages = [];
       catalog(state);
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'projects') {
     if (input.name === 'closed' && state.pages.at(-1) === 'projects') state.pages.pop();
@@ -392,7 +389,7 @@ export function handleComponent<N extends Node>(
       });
       state.pages = [];
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'directory-picker') {
     if (state.dialog === 'directories' && conversationRoute(state)) {
@@ -412,7 +409,7 @@ export function handleComponent<N extends Node>(
         state.dialog = null;
       }
     }
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   }
   if (input.child === 'command-palette') {
     if (state.dialog === 'palette') {
@@ -440,7 +437,7 @@ export function handleComponent<N extends Node>(
         state.dialog = null;
       }
     }
-    return frame(presentation, configuredLocale, state, values, actions, events);
+    return frame(presentation, state, values, actions, events);
   }
 
   if (input.child === 'queue' && input.name === 'activated') {
@@ -887,5 +884,5 @@ export function handleComponent<N extends Node>(
       history(state, actions, { kind: 'tail' }, state.latestKnown, true);
   }
 
-  return frame(presentation, configuredLocale, state, values, actions, events);
+  return frame(presentation, state, values, actions, events);
 }

@@ -478,6 +478,7 @@ const component = (
   interface: { kind: 'component', props: withDefs(props), events, captures },
 });
 export interface AgentScreenProps {
+  languageRevision?: number;
   workhub?: boolean;
   embedded?: boolean;
   fixed?: boolean;
@@ -488,6 +489,7 @@ export const agentScreenContract = component(
   'maka.agent.AgentScreen',
   object(
     {
+      languageRevision: { type: 'integer', minimum: 0 },
       workhub: { type: 'boolean' },
       embedded: { type: 'boolean' },
       fixed: { type: 'boolean' },
@@ -495,7 +497,7 @@ export const agentScreenContract = component(
     },
     [],
   ),
-  { workhub: object({}) },
+  { workhub: object({}), languageChanged: object({}) },
 );
 export const paletteContract = component(
   'maka.agent.CommandPalette',
@@ -690,7 +692,7 @@ export const assistantPreferencesContract = component(
     open: { type: 'boolean' },
     busy: { type: 'boolean' },
   }),
-  { chrome: pageChrome, closed: object({}) },
+  { chrome: pageChrome, closed: object({}), changed: object({}) },
 );
 export const webSettingsContract = component(
   'maka.agent.WebSettings',

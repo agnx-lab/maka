@@ -26,6 +26,8 @@ use std::sync::Arc;
 pub(crate) struct Settings {
     pub configuration: Arc<maka_config::ConfigurationStore>,
     pub log: Arc<maka_event_log::EventLog>,
+    pub configured_locale: maka_agent_facts::language::LanguagePreference,
+    pub native_language: maka_agent_facts::language::Language,
 }
 
 fn rejected(reason: ConfigurationRejection) -> Result<Value, String> {
@@ -173,6 +175,8 @@ impl Handler for Settings {
     ) -> BoxFuture<'static, Result<Value, String>> {
         let store = self.configuration.clone();
         let log = self.log.clone();
+        let configured_locale = self.configured_locale;
+        let native_language = self.native_language;
         Box::pin(async move {
             match method.as_str() {
                 "network" => super::network::read(&store, &log, input).await,
@@ -184,7 +188,10 @@ impl Handler for Settings {
                     context.operation().ok_or("settings_mutation_required")?;
                     super::usage::update_price(&store, input).await
                 }
-                "assistantPreferences" => super::preferences::read(&store, input).await,
+                "assistantPreferences" => {
+                    super::preferences::read(&store, configured_locale, native_language, input)
+                        .await
+                }
                 "updateAssistantPreferences" => {
                     context.operation().ok_or("settings_mutation_required")?;
                     super::preferences::update(&store, input).await

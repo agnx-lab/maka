@@ -22,7 +22,6 @@ import { agentScreen } from './index.js';
 import { agentScreenContract } from '../../shared/contracts.js';
 export let component: ReturnType<typeof agentScreen>;
 export function activate(configuration: {
-  locale: string;
   terminals?: boolean;
   place?: string;
   skills?: boolean;
@@ -34,7 +33,6 @@ export function activate(configuration: {
 }) {
   component = agentScreen(
     presentations.tui,
-    configuration.locale,
     configuration.terminals === true,
     configuration.place ?? '',
     configuration.skills === true,

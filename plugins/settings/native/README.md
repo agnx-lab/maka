@@ -23,4 +23,6 @@
 
 Exposes Root settings through a native application service. `provide` registers the factory; `contract` defines its interface; `network`, `preferences` and `usage` implement settings operations. Activation receives the existing Root owner and uses the settings store. Reading settings does not expose credential values.
 
+Language is a single Root preference, updated with the existing policy revision. `assistantPreferences` returns both the saved selection and the resolved `en`, `zh-CN` or `zh-TW` language. An unset selection follows the configured product locale; explicit `auto` follows the native startup locale, and an explicit language overrides both. Activation accepts locale tags such as `zh-Hant-HK` and normalizes them before use.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

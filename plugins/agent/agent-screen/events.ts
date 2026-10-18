@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { observeLanguage, readLanguage } from '../../shared/language-preference.js';
 import type {
   Action,
   ActionOutcome,
@@ -30,7 +31,7 @@ import type {
   ComponentValues,
   Emission,
 } from '../../../packages/plugin-sdk/src/index.js';
-import { appearanceEvent, effectiveLocale } from '../../shared/appearance-editor.js';
+import { appearanceEvent } from '../../shared/appearance-editor.js';
 import { hostLogUpdate } from './host-logs.js';
 import { diagnosticChange } from './diagnostics.js';
 import { observeBookmark, retryBookmark } from '../../shared/bookmark.js';
@@ -60,7 +61,6 @@ import {
 
 export function handleEvent<N extends Node>(
   presentation: Presentation<N>,
-  configuredLocale: string,
   previous: State,
   input: ComponentInput,
   props: AgentScreenProps,
@@ -184,17 +184,25 @@ export function handleEvent<N extends Node>(
   state.revision++;
   const actions: Action[] = [];
   const events: Emission[] = [];
-  const locale = effectiveLocale(state.preferences, configuredLocale, values.locale?.[0]);
+  if (observeLanguage(state.language, input, actions))
+    return frame(presentation, state, values, actions);
   if (
-    appearanceEvent(
-      state.preferences,
-      input,
-      values.appearance?.[0] as Theme,
-      configuredLocale,
-      actions,
-    )
+    (input.kind === 'raw' &&
+      ['settings', 'settings-retry', 'check', 'settings-category-assistant'].includes(input.key)) ||
+    (input.kind === 'component' &&
+      input.child === 'assistant-preferences' &&
+      input.name === 'changed')
   )
-    return frame(presentation, configuredLocale, state, values, actions);
+    readLanguage(state.language, actions);
+  if (
+    input.kind === 'component' &&
+    input.child === 'assistant-preferences' &&
+    input.name === 'changed'
+  )
+    events.push({ name: 'languageChanged', value: {} });
+  const locale = state.language.observed?.resolvedLanguage ?? 'en';
+  if (appearanceEvent(state.preferences, input, values.appearance?.[0] as Theme, locale, actions))
+    return frame(presentation, state, values, actions);
   if (input.kind === 'action') {
     const outcome = input.event as ActionOutcome;
     if (state.diagnostics.host.watch?.key === input.key) {
@@ -304,18 +312,9 @@ export function handleEvent<N extends Node>(
       }
     }
   } else if (input.kind === 'component') {
-    return handleComponent(
-      presentation,
-      configuredLocale,
-      state,
-      input,
-      values,
-      actions,
-      events,
-      locale,
-    );
+    return handleComponent(presentation, state, input, values, actions, events, locale);
   } else if (input.kind === 'raw') {
-    return handleRaw(presentation, configuredLocale, state, input, values, actions, events, locale);
+    return handleRaw(presentation, state, input, values, actions, events, locale);
   }
-  return frame(presentation, configuredLocale, state, values, actions, events);
+  return frame(presentation, state, values, actions, events);
 }

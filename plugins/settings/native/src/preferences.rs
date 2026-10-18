@@ -21,6 +21,7 @@ use maka_agent_facts::configuration::policy::EnabledPolicy;
 use maka_agent_facts::configuration::policy::Personalization;
 use maka_agent_facts::configuration::policy::PrivacyPolicy;
 use maka_agent_facts::configuration::policy::RuntimePolicyMutationResult;
+use maka_agent_facts::language::{Language, LanguagePreference};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,6 +35,8 @@ pub struct Read {}
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SettingsAssistantPreferences")]
 pub struct Preferences {
+    pub language: Option<LanguagePreference>,
+    pub resolved_language: Language,
     pub compaction_prompt: String,
     pub default_compaction_prompt: String,
     pub revision: u64,
@@ -62,6 +65,9 @@ pub struct Update {
 )]
 #[schemars(rename = "SettingsPreferencesMutation")]
 pub enum Mutation {
+    Language {
+        preference: LanguagePreference,
+    },
     CompactionPrompt {
         prompt: Option<String>,
     },
@@ -102,6 +108,8 @@ pub enum Updated {
 
 pub(crate) async fn read(
     store: &maka_config::ConfigurationStore,
+    configured_locale: LanguagePreference,
+    native_language: Language,
     input: Value,
 ) -> Result<Value, String> {
     let _: Read = serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
@@ -110,6 +118,12 @@ pub(crate) async fn read(
         .await
         .map_err(|_| "settings_store_unavailable")?;
     super::connections::encode(Preferences {
+        language: snapshot.policy.language,
+        resolved_language: snapshot
+            .policy
+            .language
+            .unwrap_or(configured_locale)
+            .resolve(native_language),
         compaction_prompt: snapshot
             .policy
             .compaction_prompt
@@ -131,6 +145,11 @@ pub(crate) async fn update(
         return super::connections::encode(Updated::Rejected);
     };
     let result = match input.mutation {
+        Mutation::Language { preference } => {
+            store
+                .set_language(input.expected_revision, preference)
+                .await
+        }
         Mutation::CompactionPrompt { prompt } => {
             store
                 .set_compaction_prompt(input.expected_revision, prompt)
@@ -179,4 +198,88 @@ pub(crate) async fn update(
         Err(_) => return Err("settings_effect_unknown".into()),
     };
     super::connections::encode(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_event_log::root::{RootNamespaces, RootOwner};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn preference_update_observes_cas_and_preserves_unsaved_auto_and_english() {
+        let temp = tempfile::tempdir().unwrap();
+        let owner = Arc::new(
+            RootOwner::create(
+                &temp.path().join("root"),
+                &RootNamespaces {
+                    ownership: temp.path().join("owners"),
+                    control: temp.path().join("control"),
+                },
+            )
+            .unwrap(),
+        );
+        let store = maka_config::ConfigurationStore::for_root(owner.clone())
+            .await
+            .unwrap();
+        let preferences = read(&store, LanguagePreference::ZhCn, Language::ZhTw, json!({}))
+            .await
+            .unwrap();
+        assert_eq!(preferences["language"], Value::Null);
+        assert_eq!(preferences["resolvedLanguage"], "zh-CN");
+        assert_eq!(
+            update(
+                &store,
+                json!({"expectedRevision":0,"mutation":{"kind":"language","preference":"auto"}})
+            )
+            .await
+            .unwrap(),
+            json!({"kind":"committed","revision":1})
+        );
+        let preferences = read(&store, LanguagePreference::ZhCn, Language::ZhTw, json!({}))
+            .await
+            .unwrap();
+        assert_eq!(preferences["language"], "auto");
+        assert_eq!(preferences["resolvedLanguage"], "zh-TW");
+        assert_eq!(
+            update(
+                &store,
+                json!({"expectedRevision":0,"mutation":{"kind":"language","preference":"en"}})
+            )
+            .await
+            .unwrap(),
+            json!({"kind":"revision_conflict","expectedRevision":0,"actualRevision":1})
+        );
+        assert_eq!(
+            update(
+                &store,
+                json!({"expectedRevision":1,"mutation":{"kind":"language","preference":"en"}})
+            )
+            .await
+            .unwrap(),
+            json!({"kind":"committed","revision":2})
+        );
+        store.close().await.unwrap();
+        let store = maka_config::ConfigurationStore::for_root(owner)
+            .await
+            .unwrap();
+        let preferences = read(&store, LanguagePreference::ZhCn, Language::ZhTw, json!({}))
+            .await
+            .unwrap();
+        assert_eq!(preferences["revision"], 2);
+        assert_eq!(preferences["language"], "en");
+        assert_eq!(preferences["resolvedLanguage"], "en");
+        assert_eq!(
+            update(
+                &store,
+                json!({"expectedRevision":2,"mutation":{"kind":"language","preference":"zh"}})
+            )
+            .await
+            .unwrap(),
+            json!({"kind":"rejected"})
+        );
+        assert_eq!(store.runtime_policy().await.unwrap().revision, 2);
+        store.close().await.unwrap();
+    }
 }

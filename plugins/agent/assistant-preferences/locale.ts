@@ -43,13 +43,14 @@ import {
 // This feature owns this explicit message catalog; shared messages remain tree-shakeable.
 
 const messages = {
+  languageAuto: ['Auto (system language)', '自动（系统语言）', '自動（系統語言）'],
   back: msg_back,
   executionReceipt: msg_executionReceipt,
   refreshDefaultOperations: msg_refreshDefaultOperations,
   settingOff: msg_settingOff,
   settingOn: msg_settingOn,
   settings: msg_settings,
-};
+} satisfies Catalog;
 export const copy = /* @__PURE__ */ createCopy(messages);
 export type Copy = ReturnType<typeof copy>;
 

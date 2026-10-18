@@ -23,7 +23,7 @@ import Ajv from 'ajv/dist/2020.js';
 const appearance = await import('../dist/packages/appearance/tui.js');
 const theme = appearance.activate({ scheme: 'dark' }).Appearance.value;
 const module = await import('../dist/packages/agent-screen/tui.js');
-module.activate({ locale: 'en' });
+module.activate({});
 const values = { appearance: [theme] };
 const dataSource = {
   stateDomain: 'a'.repeat(64),
@@ -73,9 +73,21 @@ function nodes(node) {
       ]
     : [];
 }
+const nativeLanguage = (locale) => ({
+  revision: 1,
+  language: locale,
+  resolvedLanguage: locale,
+  displayName: '',
+  assistantTone: '',
+  compactionPrompt: 'Default',
+  defaultCompactionPrompt: 'Default',
+  workspaceInstructions: true,
+  incognitoActive: false,
+  shellTitles: true,
+});
 function client(locale = 'en', options = {}) {
   const screen = module;
-  screen.activate({ locale, ...options.configuration });
+  screen.activate({ ...options.configuration });
   let out = screen.component.mount({}, values);
   const c = {
     get out() {
@@ -117,6 +129,7 @@ function client(locale = 'en', options = {}) {
       return c.state.visits.find((visit) => visit.id === c.state.selected?.id).key;
     },
   };
+  c.reply(c.action('assistantPreferences'), nativeLanguage(locale));
   c.child('recovery-checkpoint', 'changed', {
     sequence: 0,
     state: { kind: 'ready', revision: null, value: null },
@@ -1864,7 +1877,7 @@ test('WorkHub browses with opaque cursors and uses task detail metadata instead 
     ['tui', 'zh-CN', '受理时间'],
   ]) {
     const hub = await import(`../dist/packages/workhub-root/${target}.js`);
-    hub.activate({ locale, worker: 'worker' });
+    hub.activate({ worker: 'worker' });
     const component = hub.component;
     let out = component.mount({}, values);
     const event = (input) => {
@@ -1889,7 +1902,14 @@ test('WorkHub browses with opaque cursors and uses task detail metadata instead 
           pendingCommand: null,
         },
       });
-    reply('page', []);
+    reply('assistantPreferences', nativeLanguage(locale));
+    // The independent history request survives the initial language read.
+    const historyKey = out.frame.state.pending.key;
+    event({
+      kind: 'action',
+      key: historyKey,
+      event: { status: 'succeeded', value: [] },
+    });
     reply('coordinator', { kind: 'missing' });
     raw('workhub-route-tasks');
     const taskId = 'wt_' + 'a'.repeat(64);

@@ -317,7 +317,7 @@ test('inline approval Escape returns to the retained task and composer', async (
   const appearance = await import('../dist/packages/appearance/tui.js');
   const theme = appearance.activate({ scheme: 'dark' }).Appearance.value;
   const module = await import('../dist/packages/agent-screen/tui.js');
-  module.activate({ locale: 'en' });
+  module.activate({});
   const values = { appearance: [theme] };
   let out = module.component.mount({}, values);
   out.frame.state.selected = {

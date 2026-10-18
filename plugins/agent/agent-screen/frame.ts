@@ -29,7 +29,6 @@ import {
   appearanceEvent,
   appearanceView,
   effectiveAppearance,
-  effectiveLocale,
 } from '../../shared/appearance-editor.js';
 import { bookmarkView } from '../../shared/bookmark.js';
 import type {
@@ -38,7 +37,6 @@ import type {
   ServiceApprovalProps,
   Theme,
 } from '../../shared/contracts.js';
-import { resolveLocale } from '../../shared/locale.js';
 import { copy, tuiText } from './locale.js';
 import { sameValue } from '../../shared/value.js';
 import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
@@ -71,12 +69,12 @@ import { navigationBookmark, navigationKey, type State } from './state.js';
 
 export function frame<N extends Node>(
   presentation: Presentation<N>,
-  locale: string,
   state: State,
   values: ComponentValues,
   actions: Action[] = [],
   events: Emission[] = [],
 ) {
+  const locale = state.language.observed?.resolvedLanguage ?? 'en';
   if (
     !hostLogsOpen(state) &&
     (state.diagnostics.host.watch || state.diagnostics.host.loading !== null)
@@ -139,7 +137,6 @@ export function frame<N extends Node>(
       locale,
       actions,
     );
-  locale = effectiveLocale(state.preferences, locale, values.locale?.[0]);
   const theme = effectiveAppearance(state.preferences, baseTheme);
   const text = copy(locale),
     ui = presentation.paint(theme),
@@ -636,14 +633,7 @@ export function frame<N extends Node>(
             : {},
     ),
   );
-  out.frame.view = appearanceView(
-    presentation,
-    state.preferences,
-    theme,
-    locale,
-    out.frame.view,
-    resolveLocale('auto', values.locale?.[0]),
-  );
+  out.frame.view = appearanceView(presentation, state.preferences, theme, locale, out.frame.view);
   if (!state.embedding.embedded) out.frame.surface = { kind: 'terminal', binding: 'surface' };
   if (!state.embedding.embedded)
     out.frame.view = presentation.paint(theme).box(

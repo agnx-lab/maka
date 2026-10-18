@@ -39,7 +39,7 @@ const core = await source('../../../../plugins/shared/locale.ts');
 const terminal = await source('../../../../plugins/shared/tui-locale.ts');
 const help = await source('../../../../plugins/agent/help/locale.ts');
 const screen = await source('../../../../plugins/agent/agent-screen/locale.ts');
-const preferences = await source('../../../../plugins/shared/locale-catalogs/appearance-editor.ts');
+const preferences = await source('../../../../plugins/shared/locale-catalogs/settings.ts');
 
 test('feature catalogs preserve three languages and their locale fallback contracts', () => {
   for (const [locale, expected] of [
@@ -176,4 +176,78 @@ test('built Help payload carries only the feature messages', async () => {
       );
     }
   }
+});
+
+test('appearance checkpoint ignores its former locale while preserving and saving custom themes', async () => {
+  const appearanceEditor = await source('../../../../plugins/shared/appearance-editor.ts');
+  const settings = await source('../../../../plugins/shared/settings.ts');
+  const { appearance } = await source('../../../../plugins/settings/appearance/index.ts');
+  const { presentations } = await source('../../../../plugins/shared/view.ts');
+  const base = appearance('dark', true, { scheme: 'dark', theme: 'maka' });
+  const state = appearanceEditor.initialAppearance();
+  const customTheme = {
+    version: 1,
+    name: 'My retained palette',
+    base: 'dusk',
+    colors: { accent: '#123456' },
+    syntax: { comment: '#778899' },
+  };
+  const savedAppearance = {
+    scheme: 'dark',
+    theme: 'custom',
+    customTheme,
+    ascii: false,
+  };
+  appearanceEditor.appearanceEvent(
+    state,
+    {
+      kind: 'component',
+      child: 'appearance-checkpoint',
+      name: 'changed',
+      event: {
+        sequence: 0,
+        state: {
+          kind: 'ready',
+          revision: 8,
+          value: { version: 1, appearance: savedAppearance, locale: 'zh-TW' },
+        },
+      },
+    },
+    base,
+    'en',
+    [],
+  );
+  assert.deepEqual(state.saved, { version: 1, appearance: savedAppearance });
+  assert.equal(
+    appearanceEditor.effectiveAppearance(state, base).configuration.customTheme.name,
+    'My retained palette',
+  );
+  const settingsState = {
+    preferences: state,
+    settingsCategory: 'appearance',
+    pages: [],
+  };
+  settings.settingsEvent(
+    settingsState,
+    { kind: 'raw', key: 'settings-motion', event: { key: 'off' } },
+    base,
+  );
+  assert.deepEqual(state.command, {
+    kind: 'write',
+    sequence: 1,
+    expectedRevision: 8,
+    value: { version: 1, appearance: { ...savedAppearance, motion: false } },
+  });
+  const view = appearanceEditor.appearanceView(presentations.tui, state, base, 'en', {});
+  const all = (node) =>
+    node && typeof node === 'object' ? [node, ...Object.values(node).flatMap(all)] : [];
+  const checkpoint = all(view).find((node) => node.key === 'appearance-checkpoint');
+  assert.deepEqual(checkpoint.props.command.value, {
+    version: 1,
+    appearance: { ...savedAppearance, motion: false },
+  });
+  assert.equal(
+    all(view).some((node) => node.key === 'appearance-language'),
+    false,
+  );
 });

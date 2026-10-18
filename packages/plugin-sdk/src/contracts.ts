@@ -40838,6 +40838,19 @@ export const contracts = {
             title: 'SettingsAssistantPreferences',
             type: 'object',
             properties: {
+              language: {
+                anyOf: [
+                  {
+                    $ref: '#/$defs/LanguagePreference',
+                  },
+                  {
+                    type: 'null',
+                  },
+                ],
+              },
+              resolvedLanguage: {
+                $ref: '#/$defs/Language',
+              },
               compactionPrompt: {
                 type: 'string',
               },
@@ -40869,6 +40882,8 @@ export const contracts = {
             },
             additionalProperties: false,
             required: [
+              'language',
+              'resolvedLanguage',
               'compactionPrompt',
               'defaultCompactionPrompt',
               'revision',
@@ -40878,6 +40893,16 @@ export const contracts = {
               'incognitoActive',
               'shellTitles',
             ],
+            $defs: {
+              LanguagePreference: {
+                type: 'string',
+                enum: ['auto', 'en', 'zh-CN', 'zh-TW'],
+              },
+              Language: {
+                type: 'string',
+                enum: ['en', 'zh-CN', 'zh-TW'],
+              },
+            },
           },
           resources: {},
         },
@@ -44137,6 +44162,20 @@ export const contracts = {
                   {
                     type: 'object',
                     properties: {
+                      preference: {
+                        $ref: '#/$defs/LanguagePreference',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'language',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'preference'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
                       prompt: {
                         type: ['string', 'null'],
                       },
@@ -44210,6 +44249,10 @@ export const contracts = {
                     required: ['kind', 'enabled'],
                   },
                 ],
+              },
+              LanguagePreference: {
+                type: 'string',
+                enum: ['auto', 'en', 'zh-CN', 'zh-TW'],
               },
             },
           },

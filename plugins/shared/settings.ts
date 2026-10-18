@@ -89,10 +89,6 @@ export function settingsEvent(state: SettingsState, input: ComponentInput, base:
     saveAppearanceSetting(state.preferences, base, (next) => {
       next.appearance.theme = key as ThemeName;
     });
-  else if (input.key === 'settings-language' && ['auto', 'en', 'zh-CN', 'zh-TW'].includes(key))
-    saveAppearanceSetting(state.preferences, base, (next) => {
-      next.locale = key;
-    });
   else if (input.key === 'settings-symbols' && ['ascii', 'unicode'].includes(key))
     saveAppearanceSetting(state.preferences, base, (next) => {
       next.appearance.ascii = key === 'ascii';
@@ -126,7 +122,6 @@ export function settingsView<N extends Node>(
   const icons: Record<string, [string, string]> = {
     'settings-palette': ['◐', 'T'],
     'appearance-open': ['◒', 'C'],
-    'settings-language': ['文', 'L'],
     'settings-symbols': ['◇', 'A'],
     'settings-motion': ['≈', 'M'],
     'settings-connections': ['⇄', 'C'],
@@ -249,11 +244,11 @@ export function settingsView<N extends Node>(
         {
           theme,
           locale,
-          open,
+          open: open && category === 'assistant',
           busy: false,
           shell: { back: 0 },
         },
-        { closed: 'assistant-preferences-closed' },
+        { closed: 'assistant-preferences-closed', changed: 'assistant-preferences-changed' },
       ),
     ],
     insights: [
@@ -288,16 +283,6 @@ export function settingsView<N extends Node>(
       link('appearance-open', t('theme-customize'), busy),
     ],
     interface: [
-      choice(
-        'settings-language',
-        [
-          ['auto', tuiText(locale, 'language-auto', { language: locale })],
-          ['en', 'English'],
-          ['zh-CN', '简体中文'],
-          ['zh-TW', '繁體中文'],
-        ],
-        state.saved?.locale ?? 'auto',
-      ),
       choice(
         'settings-symbols',
         [

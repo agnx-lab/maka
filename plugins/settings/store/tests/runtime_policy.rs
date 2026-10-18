@@ -387,3 +387,102 @@ async fn real_commit_failure_is_unknown_and_cancelled_accepted_write_still_commi
     assert_eq!(reopened.runtime_policy().await.unwrap().revision, 1);
     reopened.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn language_preference_cas_and_restart_preserve_explicit_auto_and_english() {
+    use maka_agent_facts::language::LanguagePreference;
+    let temp = tempfile::tempdir().unwrap();
+    let owner = root(temp.path());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let db = database(&owner);
+    assert_eq!(store.runtime_policy().await.unwrap().policy.language, None);
+    assert_eq!(count(&db), 0);
+    let (a, b) = tokio::join!(
+        store.set_language(0, LanguagePreference::ZhCn),
+        store.set_language(0, LanguagePreference::ZhTw)
+    );
+    let results = [a.unwrap(), b.unwrap()];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| **result == RuntimePolicyMutationResult::Committed { revision: 1 })
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| **result
+                == RuntimePolicyMutationResult::RevisionConflict {
+                    expected_revision: 0,
+                    actual_revision: 1
+                })
+            .count(),
+        1
+    );
+    assert_eq!(
+        store
+            .set_language(1, LanguagePreference::Auto)
+            .await
+            .unwrap(),
+        RuntimePolicyMutationResult::Committed { revision: 2 }
+    );
+    store.close().await.unwrap();
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    assert_eq!(
+        store.runtime_policy().await.unwrap().policy.language,
+        Some(LanguagePreference::Auto)
+    );
+    let saved: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&saved).unwrap()["policy"]["language"],
+        "auto"
+    );
+    assert_eq!(
+        store.set_language(2, LanguagePreference::En).await.unwrap(),
+        RuntimePolicyMutationResult::Committed { revision: 3 }
+    );
+    store.close().await.unwrap();
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    let snapshot = store.runtime_policy().await.unwrap();
+    assert_eq!(snapshot.revision, 3);
+    assert_eq!(snapshot.policy.language, Some(LanguagePreference::En));
+    let saved: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&saved).unwrap()["policy"]["language"],
+        "en"
+    );
+    store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn reading_pre_language_policy_preserves_canonical_document_without_write() {
+    // Literal existing format: the expectation is independent of today's serializer.
+    const DOCUMENT: &str = r#"{"revision":8,"policy":{"networkProxy":{"enabled":false,"protocol":"http","host":"127.0.0.1","port":7890,"authEnabled":false,"username":"","bypassList":["metaso.cn","baidu.com"],"autoBypassDomains":["localhost","127.0.0.1","::1","192.168.*","10.*","*.local"]},"personalization":{"displayName":"原名","assistantTone":""},"memory":{"enabled":true,"agentReadEnabled":false},"workspaceInstructions":{"enabled":true},"privacy":{"incognitoActive":false},"chatDefaults":{"sandboxMode":"workspace-write"},"shell":{"preference":"auto","executable":"","titles":true},"externalAgents":{"antigravity":{"executable":""}}}}"#;
+    let temp = tempfile::tempdir().unwrap();
+    let owner = root(temp.path());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    store.close().await.unwrap();
+    let db = database(&owner);
+    db.execute(
+        "INSERT INTO runtime_policy(singleton, document) VALUES(1, ?)",
+        [DOCUMENT],
+    )
+    .unwrap();
+    db.execute_batch("CREATE TRIGGER reject_policy_read_write BEFORE UPDATE ON runtime_policy BEGIN SELECT RAISE(ABORT, 'read must not write'); END;").unwrap();
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    let snapshot = store.runtime_policy().await.unwrap();
+    assert_eq!(snapshot.revision, 8);
+    assert_eq!(snapshot.policy.language, None);
+    assert_eq!(snapshot.policy.personalization.display_name, "原名");
+    assert_eq!(serde_json::to_string(&snapshot).unwrap(), DOCUMENT);
+    let stored: String = db
+        .query_row("SELECT document FROM runtime_policy", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(stored, DOCUMENT);
+    store.close().await.unwrap();
+}

@@ -74,11 +74,10 @@ const entries = uiEntries({
     timeline: one(own.timelineContract),
     imageViewer: one(own.imageViewerContract),
     appearance: one(own.themeContract),
-    locale: one(sdk.contracts.locale),
+    settings: one(sdk.contracts.settings),
   },
   configuration: own.object(
     {
-      locale: own.locale,
       terminals: { type: 'boolean' },
       skills: { type: 'boolean' },
       scheduledTasks: { type: 'boolean' },
@@ -88,7 +87,7 @@ const entries = uiEntries({
       hostLogs: { type: 'boolean' },
       place: { type: 'string', maxLength: 4096 },
     },
-    ['locale'],
+    [],
   ),
 });
 Object.assign(entries.tui.imports, {

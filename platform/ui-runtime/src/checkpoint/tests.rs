@@ -182,15 +182,22 @@ async fn final_coalesced_snapshot_flushes_before_cleanup_and_restores_after_root
     drop(blocker);
     resources.finish().await.unwrap();
     assert_eq!(budget.usage(), (0, 0, 0));
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while retained.upgrade().is_some() {
-            tokio::task::yield_now().await;
+    // EventLog drop starts asynchronous SQL shutdown. Reacquire the actual lease
+    // to prove that its independent connection owner has finished releasing it.
+    let root = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match RootOwner::open(&dir.path().join("root"), &namespaces(dir.path())) {
+                Ok(root) => break Arc::new(root),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => panic!("reopen original Root after checkpoint cleanup: {error}"),
+            }
         }
     })
     .await
     .unwrap();
-    let root =
-        Arc::new(RootOwner::open(&dir.path().join("root"), &namespaces(dir.path())).unwrap());
+    assert!(retained.upgrade().is_none());
     let store = Arc::new(EventLog::for_root(root).await.unwrap());
     assert!(
         recipe_scope.open(&store).is_err(),

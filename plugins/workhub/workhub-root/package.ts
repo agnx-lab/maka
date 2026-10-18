@@ -35,15 +35,14 @@ const entries = uiEntries({
     receipts: one(sdk.contracts.receiptReader),
     history: one(sdk.contracts.callerHistory),
     appearance: one(own.themeContract),
-    locale: one(sdk.contracts.locale),
+    settings: one(sdk.contracts.settings),
   },
   configuration: own.object(
     {
-      locale: own.locale,
       worker: { type: 'string', const: 'worker' },
       initialRoute: { type: 'string', enum: ['coordinator', 'sessions'] },
     },
-    ['locale', 'worker'],
+    ['worker'],
   ),
 });
 entries.tui.imports.surface = one(sdk.contracts.terminalSurface);

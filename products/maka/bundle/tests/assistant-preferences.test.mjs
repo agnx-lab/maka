@@ -65,6 +65,8 @@ for (const target of ['tui'])
       workspaceInstructions: true,
       incognitoActive: false,
       shellTitles: true,
+      language: 'en',
+      resolvedLanguage: 'en',
     };
     finish([]);
     finish(saved);
@@ -134,6 +136,8 @@ for (const target of ['tui'])
       workspaceInstructions: true,
       incognitoActive: false,
       shellTitles: true,
+      language: 'en',
+      resolvedLanguage: 'en',
     };
     finish(saved);
     const toggle = () => {
@@ -213,6 +217,8 @@ for (const target of ['tui'])
       workspaceInstructions: true,
       incognitoActive: false,
       shellTitles: true,
+      language: 'en',
+      resolvedLanguage: 'en',
       compactionPrompt: 'Built-in instructions',
       defaultCompactionPrompt: 'Built-in instructions',
     };
@@ -477,6 +483,8 @@ for (const target of ['tui']) {
       workspaceInstructions: true,
       incognitoActive: false,
       shellTitles: true,
+      language: 'en',
+      resolvedLanguage: 'en',
     });
     const observed = (text, revision, receipt = null) => ({
       revision,
@@ -504,3 +512,190 @@ for (const target of ['tui']) {
     });
   });
 }
+
+const languageSaved = {
+  revision: 12,
+  language: 'en',
+  resolvedLanguage: 'en',
+  displayName: 'Saved name',
+  assistantTone: '',
+  compactionPrompt: 'Original custom prompt 中文',
+  defaultCompactionPrompt: 'Default prompt',
+  workspaceInstructions: true,
+  incognitoActive: false,
+  shellTitles: true,
+};
+const preferenceNodes = (node) =>
+  node && typeof node === 'object' ? [node, ...Object.values(node).flatMap(preferenceNodes)] : [];
+async function languageEditor() {
+  const { component } = await import('../dist/packages/assistant-preferences/tui.js');
+  let props = {
+    theme,
+    locale: 'en',
+    open: true,
+    busy: false,
+    shell: { back: 0 },
+  };
+  let out = component.mount(props, {});
+  const fixture = {
+    get out() {
+      return out;
+    },
+    event(input) {
+      out = component.event(out.frame.state, input, props, {});
+      return out;
+    },
+    finish(value) {
+      return fixture.event({
+        kind: 'action',
+        key: out.frame.state.pending.key,
+        event: { status: 'succeeded', value },
+      });
+    },
+    update(open) {
+      props = { ...props, open };
+      out = component.update(out.frame.state, props, {});
+      return out;
+    },
+    select(preference) {
+      return fixture.event({
+        kind: 'raw',
+        key: 'language',
+        event: { key: preference },
+      });
+    },
+    selection() {
+      return preferenceNodes(out.frame.view).find((node) => node.key === 'language');
+    },
+  };
+  fixture.finish([]);
+  fixture.finish(languageSaved);
+  return fixture;
+}
+const languageReference = {
+  contract: { name: 'maka.settings.Settings', version: 1 },
+  method: 'updateAssistantPreferences',
+  operation: 'language-save-original',
+};
+function languageReply(value) {
+  return {
+    reference: languageReference,
+    receipt: {
+      kind: 'recorded',
+      cleanup: { kind: 'confirmed' },
+      outcome: { kind: 'returned', value },
+    },
+  };
+}
+
+test('language save uses the observed revision and publishes only a confirmed native read without resetting drafts', async () => {
+  const f = await languageEditor();
+  f.event({
+    kind: 'component',
+    child: 'assistant-name',
+    name: 'changed',
+    event: {
+      revision: 9,
+      snapshot: {
+        text: { owner: 'draft-name', revision: 9, bytes: 11 },
+        marked: null,
+      },
+      receipt: null,
+    },
+  });
+  const fields = structuredClone(f.out.frame.state.fields);
+  f.select('zh-TW');
+  const action = f.out.actions.find((action) => action.method === 'updateAssistantPreferences');
+  assert.deepEqual(action.input, {
+    expectedRevision: 12,
+    mutation: { kind: 'language', preference: 'zh-TW' },
+  });
+  assert.ok(valid(action.input), JSON.stringify(valid.errors));
+  assert.equal(f.selection().current, 'en');
+  assert.deepEqual(f.out.events, []);
+  f.event({
+    kind: 'action',
+    key: action.key,
+    event: {
+      status: 'operation',
+      reply: languageReply({ kind: 'committed', revision: 13 }),
+    },
+  });
+  assert.deepEqual(
+    f.out.actions.map(({ binding, method, input }) => ({
+      binding,
+      method,
+      input,
+    })),
+    [{ binding: 'settings', method: 'assistantPreferences', input: {} }],
+  );
+  assert.equal(f.out.frame.state.saved.language, 'en');
+  assert.deepEqual(f.out.events, []);
+  f.finish({
+    ...languageSaved,
+    revision: 13,
+    language: 'zh-TW',
+    resolvedLanguage: 'zh-TW',
+  });
+  assert.equal(f.selection().current, 'zh-TW');
+  assert.deepEqual(f.out.events, [{ name: 'changed', value: {} }]);
+  assert.deepEqual(f.out.frame.state.fields, fields);
+  f.update(false);
+  f.update(true);
+  assert.equal(f.out.actions[0].method, 'assistantPreferences');
+  f.finish({
+    ...languageSaved,
+    revision: 14,
+    language: 'auto',
+    resolvedLanguage: 'zh-CN',
+  });
+  assert.equal(f.out.frame.state.saved.language, 'auto');
+  assert.equal(f.out.frame.state.saved.resolvedLanguage, 'zh-CN');
+  assert.deepEqual(f.out.events, [{ name: 'changed', value: {} }]);
+  assert.deepEqual(f.out.frame.state.fields, fields);
+});
+
+test('unknown language save recovers the original receipt; rejected saves leave the native selection intact', async () => {
+  const f = await languageEditor();
+  f.select('zh-CN');
+  const action = f.out.actions[0];
+  f.event({
+    kind: 'action',
+    key: action.key,
+    event: { status: 'failed', diagnostic: 'lost reply' },
+  });
+  assert.equal(f.out.frame.state.saved.language, 'en');
+  assert.deepEqual(f.out.events, []);
+  f.select('zh-TW');
+  assert.equal(f.out.actions.length, 0);
+  f.event({ kind: 'raw', key: 'history', event: {} });
+  f.finish([{ cursor: 3, reference: languageReference, recovery: action.recovery }]);
+  f.finish([]);
+  assert.deepEqual(
+    f.out.actions.map(({ method, input }) => ({ method, input })),
+    [{ method: 'read', input: languageReference }],
+  );
+  f.finish(languageReply({ kind: 'committed', revision: 13 }));
+  assert.equal(f.out.actions[0].method, 'assistantPreferences');
+  assert.equal(f.out.frame.state.saved.language, 'en');
+  f.finish({
+    ...languageSaved,
+    revision: 13,
+    language: 'zh-CN',
+    resolvedLanguage: 'zh-CN',
+  });
+  assert.equal(f.out.frame.state.saved.language, 'zh-CN');
+  assert.deepEqual(f.out.events, [{ name: 'changed', value: {} }]);
+  f.select('en');
+  f.event({
+    kind: 'action',
+    key: f.out.actions[0].key,
+    event: {
+      status: 'operation',
+      reply: languageReply({ kind: 'revision_conflict', actualRevision: 14 }),
+    },
+  });
+  assert.equal(f.out.frame.state.saved.language, 'zh-CN');
+  assert.deepEqual(f.out.events, []);
+  assert.equal(f.out.frame.state.notice, 'assistant-conflict');
+});

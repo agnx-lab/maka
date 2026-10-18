@@ -36,7 +36,12 @@ import type {
 } from '../../../packages/plugin-sdk/src/index.js';
 import { workhubRootContract, type Theme, type AgentScreenProps } from '../../shared/contracts.js';
 import { scrollBoundary } from '../../shared/scroll.js';
-import { resolveLocale } from '../../shared/locale.js';
+import {
+  initialLanguageObservation,
+  readLanguage,
+  observeLanguage,
+  type LanguageObservation,
+} from '../../shared/language-preference.js';
 import { copy, type Copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
 import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
@@ -57,6 +62,7 @@ interface Selection {
   failed: boolean;
 }
 interface State {
+  language: LanguageObservation;
   revision: number;
   serial: number;
   route: Route;
@@ -229,11 +235,11 @@ function target(task: WorkHubTask | null, worker: string): string | null {
 }
 export function workhubRoot<N extends Node>(
   presentation: Presentation<N>,
-  configuredLocale: string,
   worker: string,
   initialRoute: 'coordinator' | 'sessions' = 'coordinator',
 ): Component<State, Record<string, never>, N> {
   function frame(state: State, values: ComponentValues, actions: Action[] = []) {
+    if (state.language.sequence === 0) readLanguage(state.language, actions);
     if (!state.pending && !state.failed) {
       if (state.restoring) ask(state, actions, { kind: 'history' });
       else if (state.coordinator === null) ask(state, actions, { kind: 'coordinator' });
@@ -244,7 +250,7 @@ export function workhubRoot<N extends Node>(
         }
       }
     }
-    const locale = resolveLocale(configuredLocale, values.locale?.[0]);
+    const locale = state.language.observed?.resolvedLanguage ?? 'en';
     const theme = values.appearance![0] as unknown as Theme;
     const text = copy(locale),
       ui = presentation.paint(theme);
@@ -392,9 +398,12 @@ export function workhubRoot<N extends Node>(
                     'coordinator',
                     {
                       embedded: true,
+                      ...(state.language.observed
+                        ? { languageRevision: state.language.observed.revision }
+                        : {}),
                       session: state.coordinatorSelection,
                     } satisfies AgentScreenProps,
-                    {},
+                    { languageChanged: 'language-changed' },
                   ),
                 ]
               : [
@@ -432,10 +441,13 @@ export function workhubRoot<N extends Node>(
               'worker',
               {
                 embedded: true,
+                ...(state.language.observed
+                  ? { languageRevision: state.language.observed.revision }
+                  : {}),
                 workhub: true,
                 ...(state.workerSelection ? { session: state.workerSelection } : {}),
               } satisfies AgentScreenProps,
-              { workhub: 'workhub' },
+              { workhub: 'workhub', languageChanged: 'language-changed' },
             ),
           ]),
           page('tasks', [
@@ -496,6 +508,7 @@ export function workhubRoot<N extends Node>(
     mount(_props, values) {
       return frame(
         {
+          language: initialLanguageObservation(),
           revision: 0,
           serial: 0,
           route: initialRoute,
@@ -532,6 +545,25 @@ export function workhubRoot<N extends Node>(
     event(state, event, _props, values) {
       state.revision++;
       const actions: Action[] = [];
+      if (observeLanguage(state.language, event, actions)) return frame(state, values, actions);
+      if (
+        event.kind === 'component' &&
+        ['coordinator-agent-screen', 'worker-agent-screen'].includes(event.child) &&
+        event.name === 'languageChanged'
+      )
+        readLanguage(state.language, actions);
+      if (
+        event.kind === 'raw' &&
+        (event.key.startsWith('workhub-route-') ||
+          [
+            'workhub-coordinator-refresh',
+            'workhub-retry-read',
+            'workhub-check-original',
+            'tasks-refresh',
+            'task-check',
+          ].includes(event.key))
+      )
+        readLanguage(state.language, actions);
       if (event.kind === 'component' && event.child === 'workhub-reading' && event.name === 'input')
         event = event.event as ComponentInput;
       const direction = scrollBoundary(state, event, 'workhub-reading');

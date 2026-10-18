@@ -23,6 +23,7 @@ pub mod network_test;
 pub mod network_update;
 mod settings;
 use crate::execution::SandboxMode;
+use crate::language::LanguagePreference;
 pub use codec::{decode_canonical_snapshot, normalize_mutation};
 use serde::{Deserialize, Serialize};
 pub use settings::*;
@@ -56,6 +57,8 @@ pub struct RuntimePolicy {
     pub chat_defaults: ChatDefaults,
     pub shell: ShellPolicy,
     pub external_agents: ExternalAgents,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<LanguagePreference>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +96,7 @@ impl Default for RuntimePolicy {
                 .to_vec(),
             },
             compaction_prompt: None,
+            language: None,
             personalization: Personalization {
                 display_name: String::new(),
                 assistant_tone: String::new(),

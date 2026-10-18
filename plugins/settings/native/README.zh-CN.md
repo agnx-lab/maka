@@ -23,4 +23,6 @@
 
 通过原生应用服务提供 Root 设置。`provide` 注册工厂，`contract` 定义接口，`network`、`preferences` 和 `usage` 实现设置操作。激活时接收已有 Root 所有者并使用设置存储。读取设置不会暴露凭据值。
 
+语言是 Root 共享的单一偏好，使用现有策略 revision 更新。`assistantPreferences` 同时返回保存的选择和解析后的 `en`、`zh-CN` 或 `zh-TW`。未设置时遵循产品配置的 locale；显式 `auto` 遵循原生启动语言，显式语言则覆盖两者。激活配置接受 `zh-Hant-HK` 等 locale 标签，在使用前统一解析。
+
 [源码](src/lib.rs) · [Cargo 配置](Cargo.toml)

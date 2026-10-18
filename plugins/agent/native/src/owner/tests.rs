@@ -85,6 +85,8 @@ mod execution;
 #[path = "tests/executor.rs"]
 mod executor;
 
+#[path = "tests/prompt_language.rs"]
+mod prompt_language;
 #[path = "tests/session_context.rs"]
 mod session_context;
 #[path = "tests/tool_schemas.rs"]

@@ -62,7 +62,6 @@ import { type State } from './state.js';
 
 export function handleRaw<N extends Node>(
   presentation: Presentation<N>,
-  configuredLocale: string,
   state: State,
   input: Extract<ComponentInput, { kind: 'raw' }>,
   values: ComponentValues,
@@ -71,7 +70,7 @@ export function handleRaw<N extends Node>(
   locale: string,
 ) {
   if (diagnosticEvent(state, actions, input.key))
-    return frame(presentation, configuredLocale, state, values, actions);
+    return frame(presentation, state, values, actions);
   if (input.key === 'compact-confirm') compactConfirm(state, actions);
   if (
     input.key === 'compact-check' &&
@@ -349,5 +348,5 @@ export function handleRaw<N extends Node>(
     )
       events.push({ name: 'workhub', value: {} });
   }
-  return frame(presentation, configuredLocale, state, values, actions, events);
+  return frame(presentation, state, values, actions, events);
 }

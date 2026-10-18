@@ -32,6 +32,17 @@ use maka_agent_facts::configuration::validation::revision;
 use sqlx::SqliteConnection;
 
 impl ConfigurationStore {
+    pub async fn set_language(
+        &self,
+        expected_revision: u64,
+        preference: maka_agent_facts::language::LanguagePreference,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| {
+            policy.language = Some(preference)
+        })
+        .await
+    }
+
     pub async fn set_compaction_prompt(
         &self,
         expected_revision: u64,

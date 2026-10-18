@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { initialLanguageObservation, readLanguage } from '../../shared/language-preference.js';
 import { initialAppearance } from '../../shared/appearance-editor.js';
 import type { Action, Component } from '../../../packages/plugin-sdk/src/index.js';
 import type { AgentScreenProps } from '../../shared/contracts.js';
@@ -34,7 +35,6 @@ import { handleEvent } from './events.js';
 
 export function agentScreen<N extends Node>(
   presentation: Presentation<N>,
-  locale: string,
   terminals = false,
   place = '',
   skills = false,
@@ -44,7 +44,6 @@ export function agentScreen<N extends Node>(
   graphs = false,
   hostLogs = false,
 ): Component<State, AgentScreenProps, N> {
-  const configuredLocale = locale;
   return {
     mount(props, values) {
       const state: State = {
@@ -52,6 +51,7 @@ export function agentScreen<N extends Node>(
         externalSelection: null,
         place,
         preferences: initialAppearance(),
+        language: initialLanguageObservation(),
         recoveryCheckpoint: bookmark({ through: 0, scope: null }),
         historyScope: null,
         restoreStarted: false,
@@ -143,10 +143,14 @@ export function agentScreen<N extends Node>(
       };
       const actions: Action[] = [];
       catalog(state);
+      readLanguage(state.language, actions);
 
-      return frame(presentation, configuredLocale, state, values, actions);
+      return frame(presentation, state, values, actions);
     },
     update(state, props, values) {
+      const actions: Action[] = [];
+      if (props.languageRevision !== state.embedding.languageRevision)
+        readLanguage(state.language, actions);
       if (state.embedding.fixed && state.embedding.session?.id !== props.session?.id) {
         state.bookmark = bookmark({ pages: [], category: 'appearance' });
         state.pages = [];
@@ -154,13 +158,13 @@ export function agentScreen<N extends Node>(
       }
       return frame(
         presentation,
-        configuredLocale,
         { ...state, embedding: props, revision: state.revision + 1 },
         values,
+        actions,
       );
     },
     event(previous, input, props, values) {
-      return handleEvent(presentation, configuredLocale, previous, input, props, values);
+      return handleEvent(presentation, previous, input, props, values);
     },
   };
 }

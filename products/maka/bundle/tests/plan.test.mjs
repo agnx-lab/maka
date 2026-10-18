@@ -24,7 +24,7 @@ const { activate } = await import('../dist/packages/appearance/tui.js');
 const theme = activate({ scheme: 'dark' }).Appearance.value;
 async function client(target) {
   const module = await import(`../dist/packages/agent-screen/${target}.js`);
-  module.activate({ locale: 'en' });
+  module.activate({});
   const values = { appearance: [theme] };
   let out = module.component.mount({}, values);
   Object.assign(out.frame.state, {

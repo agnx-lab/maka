@@ -384,12 +384,24 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
   };
   settings: {
     implementation: string;
-    configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema';
+      title: 'Configuration';
+      type: 'object';
+      properties: { locale: { type: 'string'; default: '' } };
+      additionalProperties: false;
+    };
     exports: { Settings: typeof contracts.settings };
   };
   settingsAuthentication: {
     implementation: string;
-    configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema';
+      title: 'Configuration';
+      type: 'object';
+      properties: { locale: { type: 'string'; default: '' } };
+      additionalProperties: false;
+    };
     exports: { Authentication: typeof contracts.settingsAuthentication };
   };
   hostLogs: {
@@ -399,7 +411,13 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
   };
   settingsSetup: {
     implementation: string;
-    configuration: { type: 'object'; properties: {}; required: []; additionalProperties: false };
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema';
+      title: 'Configuration';
+      type: 'object';
+      properties: { locale: { type: 'string'; default: '' } };
+      additionalProperties: false;
+    };
     exports: { Setup: typeof contracts.settingsSetup };
   };
 } => ({
@@ -764,12 +782,24 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
   },
   settings: {
     implementation: 'maka.settings',
-    configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: 'Configuration',
+      type: 'object',
+      properties: { locale: { type: 'string', default: '' } },
+      additionalProperties: false,
+    },
     exports: { Settings: contracts.settings },
   },
   settingsAuthentication: {
     implementation: 'maka.settings.authentication',
-    configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: 'Configuration',
+      type: 'object',
+      properties: { locale: { type: 'string', default: '' } },
+      additionalProperties: false,
+    },
     exports: { Authentication: contracts.settingsAuthentication },
   },
   hostLogs: {
@@ -779,7 +809,13 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
   },
   settingsSetup: {
     implementation: 'maka.settings.setup',
-    configuration: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    configuration: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      title: 'Configuration',
+      type: 'object',
+      properties: { locale: { type: 'string', default: '' } },
+      additionalProperties: false,
+    },
     exports: { Setup: contracts.settingsSetup },
   },
 }))();

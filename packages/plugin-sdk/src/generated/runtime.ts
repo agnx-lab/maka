@@ -2211,6 +2211,8 @@ export type PricingMutation =
       modelKey: string;
       kind: 'delete';
     };
+export type LanguagePreference = 'auto' | 'en' | 'zh-CN' | 'zh-TW';
+export type Language = 'en' | 'zh-CN' | 'zh-TW';
 export type ProxyProtocol = 'http' | 'https' | 'socks5';
 export type CredentialLocator =
   | {
@@ -2255,6 +2257,10 @@ export type NetworkProxyUpdateResult =
       kind: 'credential_stale';
     };
 export type SettingsPreferencesMutation =
+  | {
+      preference: LanguagePreference;
+      kind: 'language';
+    }
   | {
       prompt?: string | null;
       kind: 'compaction_prompt';
@@ -8246,6 +8252,8 @@ export interface PricingUpdate {
   mutation: PricingMutation;
 }
 export interface SettingsAssistantPreferences {
+  language?: LanguagePreference | null;
+  resolvedLanguage: Language;
   compactionPrompt: string;
   defaultCompactionPrompt: string;
   revision: number;

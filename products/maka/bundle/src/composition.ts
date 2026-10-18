@@ -245,7 +245,7 @@ function settingsComposition(
         },
         'host-deployment-gateway',
       ),
-      settings: node('settings'),
+      settings: node('settings', { locale: configuration.locale }),
       'settings-authentication': node('settings-authentication'),
       'settings-setup': node('settings-setup'),
       'skill-outcomes': node('skill-outcomes'),
@@ -923,7 +923,6 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
     'agent-screen': node(
       'agent-screen',
       {
-        locale: configuration.locale,
         terminals: !!configuration.processes,
         hostLogs: true,
         skills: !!configuration.skills,
@@ -977,7 +976,7 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
         timeline: [local('timeline', 'Timeline')],
         imageViewer: [local('image-viewer', 'ImageViewer')],
         appearance: [local('appearance', 'Appearance')],
-        locale: [local('locale', 'Locale')],
+        settings: [remote('settings', 'Settings')],
         surface: [local('surface', 'Surface')],
       },
     ),
@@ -1589,7 +1588,7 @@ export function workhubComposition(
     key: keys['workhub-root'],
     package: { source: 'pinned', package: packages['workhub-root'] },
     usePackage: 'entry',
-    configuration: { values: { locale: configuration.locale, worker: 'worker', initialRoute } },
+    configuration: { values: { worker: 'worker', initialRoute } },
     bindings: {
       workhub: [
         { kind: 'remote', deployment: 'local', instance: [keys.workhub], export: 'workhub' },
@@ -1605,7 +1604,7 @@ export function workhubComposition(
       ],
       history: [local('history', 'History')],
       appearance: [local('appearance', 'Appearance')],
-      locale: [local('locale', 'Locale')],
+      settings: worker.ui.instances['agent-screen']!.bindings!.settings,
       surface: [local('surface', 'Surface')],
     },
   };

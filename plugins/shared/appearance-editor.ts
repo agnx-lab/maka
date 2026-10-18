@@ -41,7 +41,6 @@ import {
   type CustomTheme,
 } from './terminal-theme.js';
 import { tuiText } from './locale-catalogs/appearance-editor.js';
-import { resolveLocale } from './locale.js';
 
 import { sameValue } from './value.js';
 import type { Node, Presentation } from './view.js';
@@ -49,7 +48,6 @@ import type { Node, Presentation } from './view.js';
 interface Preferences {
   version: 1;
   appearance: AppearanceConfiguration;
-  locale: string;
 }
 interface Field {
   observed: EditorObservation | null;
@@ -103,28 +101,15 @@ export function effectiveAppearance(state: AppearanceEditor, base: Theme): Theme
       : base;
   }
 }
-export function effectiveLocale(
-  state: AppearanceEditor,
-  fallback: string,
-  native: unknown,
-): string {
-  const value = (state.open ? state.draft : state.saved)?.locale;
-  return resolveLocale(value ?? fallback, native);
-}
 
 function valid(value: unknown): Preferences | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Preferences;
-  if (
-    item.version !== 1 ||
-    !['auto', 'en', 'zh-CN', 'zh-TW'].includes(item.locale) ||
-    !item.appearance ||
-    !['light', 'dark'].includes(item.appearance.scheme)
-  )
+  if (item.version !== 1 || !item.appearance || !['light', 'dark'].includes(item.appearance.scheme))
     return null;
   try {
     terminalPalette(item.appearance);
-    return JSON.parse(JSON.stringify(item));
+    return JSON.parse(JSON.stringify({ version: 1, appearance: item.appearance }));
   } catch {
     return null;
   }
@@ -135,7 +120,7 @@ export function saveAppearanceSetting(
   change: (next: Preferences) => void,
 ) {
   if (state.open || state.command || state.checkpoint?.state.kind !== 'ready') return;
-  const next = valid(state.saved ?? { version: 1, appearance: base.configuration, locale: 'auto' });
+  const next = valid(state.saved ?? { version: 1, appearance: base.configuration });
   if (!next) return;
   change(next);
   if (!valid(next)) return;
@@ -374,7 +359,7 @@ export function appearanceEvent(
     state.open = true;
     state.error = null;
     state.draft = JSON.parse(
-      JSON.stringify(state.saved ?? { version: 1, appearance: base.configuration, locale: 'auto' }),
+      JSON.stringify(state.saved ?? { version: 1, appearance: base.configuration }),
     );
     custom(state);
     reset(state, 'name', custom(state).name);
@@ -429,11 +414,6 @@ export function appearanceEvent(
     ['maka', 'dusk', 'paper', 'terminal', 'custom'].includes(choice.key ?? '')
   )
     state.draft.appearance.theme = choice.key as ThemeName;
-  else if (
-    input.key === 'appearance-language' &&
-    ['auto', 'en', 'zh-CN', 'zh-TW'].includes(choice.key ?? '')
-  )
-    state.draft.locale = choice.key!;
   else if (input.key === 'appearance-motion') state.draft.appearance.motion = choice.key === 'on';
   else if (input.key === 'appearance-symbols')
     state.draft.appearance.ascii = choice.key === 'ascii';
@@ -499,7 +479,6 @@ export function appearanceView<N extends Node>(
   theme: Theme,
   locale: string,
   background: N,
-  nativeLocale: string,
 ): N {
   const ui = presentation.paint(theme);
   const t = (key: string) => tuiText(locale, key);
@@ -549,17 +528,6 @@ export function appearanceView<N extends Node>(
                 ['custom', custom(state).name],
               ],
               draft.appearance.theme ?? (draft.appearance.scheme === 'light' ? 'paper' : 'maka'),
-            ),
-            select(
-              'appearance-language',
-              t('settings-language'),
-              [
-                ['auto', tuiText(locale, 'language-auto', { language: nativeLocale })],
-                ['en', 'English'],
-                ['zh-CN', '简体中文'],
-                ['zh-TW', '繁體中文'],
-              ],
-              draft.locale,
             ),
             select(
               'appearance-symbols',

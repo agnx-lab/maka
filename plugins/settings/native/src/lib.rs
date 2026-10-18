@@ -27,8 +27,23 @@ mod service;
 mod setup;
 pub mod usage;
 use futures_util::future::BoxFuture;
+use maka_agent_facts::language::LanguagePreference;
 use maka_host_runtime::application::{NativeActivation, NativeOwner, NativeRegistry};
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::sync::Arc;
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Configuration {
+    #[serde(default)]
+    locale: String,
+}
+
+fn configuration_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(Configuration))
+        .expect("settings configuration schema is serializable")
+}
+
 pub const IMPLEMENTATION: &str = "maka.settings";
 pub const EXPORT: &str = "Settings";
 pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
@@ -47,9 +62,9 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
                 let contract = contract.clone();
                 Box::pin(async move {
                     let opened = async {
-                        if input != serde_json::json!({}) {
-                            return Err("settings_configuration_invalid".to_owned());
-                        }
+                        let configuration: Configuration = serde_json::from_value(input)
+                            .map_err(|_| "settings_configuration_invalid".to_owned())?;
+                        let native_language = maka_config::language::native_language();
                         let persistence = context
                             .persistence()
                             .ok_or("settings_requires_persistence")?;
@@ -63,6 +78,10 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
                         Ok::<_, String>(Arc::new(service::Settings {
                             configuration: Arc::new(store),
                             log: persistence.store().clone(),
+                            configured_locale: LanguagePreference::from_locale(
+                                &configuration.locale,
+                            ),
+                            native_language,
                         }))
                     }
                     .await;
@@ -104,7 +123,7 @@ impl NativeOwner for Uninitialized {
 pub fn native() -> maka_plugin_core::package::NativeDefinition {
     maka_plugin_core::package::NativeDefinition::new(
         IMPLEMENTATION,
-        serde_json::json!({"type":"object","properties":{},"required":[],"additionalProperties":false}),
+        configuration_schema(),
         [(EXPORT, contract::contract())],
     )
 }
@@ -112,7 +131,7 @@ pub fn native() -> maka_plugin_core::package::NativeDefinition {
 pub fn native_authentication() -> maka_plugin_core::package::NativeDefinition {
     maka_plugin_core::package::NativeDefinition::new(
         "maka.settings.authentication",
-        serde_json::json!({"type":"object","properties":{},"required":[],"additionalProperties":false}),
+        configuration_schema(),
         [("Authentication", contract::authentication_contract())],
     )
 }
@@ -120,7 +139,7 @@ pub fn native_authentication() -> maka_plugin_core::package::NativeDefinition {
 pub fn native_setup() -> maka_plugin_core::package::NativeDefinition {
     maka_plugin_core::package::NativeDefinition::new(
         "maka.settings.setup",
-        serde_json::json!({"type":"object","properties":{},"required":[],"additionalProperties":false}),
+        configuration_schema(),
         [("Setup", contract::setup_contract())],
     )
 }
