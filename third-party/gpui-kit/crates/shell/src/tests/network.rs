@@ -547,6 +547,19 @@ fn websocket_sends_ordinary_and_custom_protocol_headers(cx: &mut TestAppContext)
         .set_nonblocking(true)
         .expect("nonblocking listener");
     let address = listener.local_addr().expect("listener address");
+    // Bind first so an early connection can queue, but prepare the script
+    // runtime before starting the server's bounded connection wait.
+    let source = WEBSOCKET_HEADERS_PROBE
+        .replace("__URL__", &format!("ws://{address}/headers"))
+        .replace(
+            "__HEADERS__",
+            r#"{
+              "Accept-Language": "zh-CN",
+              "User-Agent": "protocol-client/1",
+              "X-Protocol-Region": "us"
+            }"#,
+        );
+    let (_runtime, view, mut context) = probe(cx, &source);
     let server = thread::spawn(move || {
         let mut stream = (0..50)
             .find_map(|_| match listener.accept() {
@@ -572,17 +585,6 @@ fn websocket_sends_ordinary_and_custom_protocol_headers(cx: &mut TestAppContext)
             .expect("handshake rejection");
     });
 
-    let source = WEBSOCKET_HEADERS_PROBE
-        .replace("__URL__", &format!("ws://{address}/headers"))
-        .replace(
-            "__HEADERS__",
-            r#"{
-              "Accept-Language": "zh-CN",
-              "User-Agent": "protocol-client/1",
-              "X-Protocol-Region": "us"
-            }"#,
-        );
-    let (_runtime, view, mut context) = probe(cx, &source);
     context.run_until_parked();
     draw(&mut context, &view);
     assert!(snapshot(&mut context, &view).contains("rejected:"));

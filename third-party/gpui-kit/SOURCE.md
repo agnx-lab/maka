@@ -228,3 +228,9 @@ One fix to Base's HTML minifier, submitted upstream as longbridge/gpui-kit#3570:
 - `TextView::html` minifies the HTML and parses the result again. The text of a `<pre>` or `<textarea>` skips whitespace collapsing, and the minifier wrote it as it was decoded, so escaped markup such as `&lt;b&gt;` came back as an element and an `&amp;` as a bare `&`. That text is now escaped with the function the collapsing path uses. The parser also drops a line feed right after `<pre>` or `<textarea>`, so text that starts the element with a line feed (comments before it, which the minifier leaves out, do not count) is written with one more in front of it, and a leading blank line survives the second parse.
 
 为 Base 的 HTML minifier 修了一处，已提交上游 longbridge/gpui-kit#3570：`TextView::html` 先压缩 HTML 再重新解析。`<pre>` 与 `<textarea>` 中的文本不折叠空白，minifier 原样写出解码后的文本，因此 `&lt;b&gt;` 这类转义标记会变回元素，`&amp;` 变回单独的 `&`。现在这段文本用折叠路径的同一函数转义。解析器还会丢掉紧跟 `<pre>` 或 `<textarea>` 的换行，因此以换行开头的首段文本（其前被 minifier 略去的注释不计）会在前面多写一个换行，开头的空行在第二次解析后得以保留。
+
+## Explicit measured-list end requests (2026-10-18)
+
+The shell exposes `list.scroll_to_end(requestKey)` for an explicit local action such as an accepted message. A new non-null string scrolls once after applying the current item count; a stable key does not undo a later user scroll. Tail mode resumes following, while Normal mode only scrolls once. The request reuses the retained native list state and clears pending native scrolling before moving to the end. Native tests check row identity and in-row pixel offsets, including a final row taller than the viewport. The imported WebSocket header test prepares its script runtime before starting its existing bounded server wait, retaining all actual request-header assertions.
+
+shell 通过 `list.scroll_to_end(requestKey)` 表达消息受理等本地动作的滚动意图。新的非空字符串在应用当前条目数后滚动一次；相同键不会撤销用户之后的上滚。Tail 模式恢复跟随，Normal 模式只滚动一次。请求复用原生列表状态，先清除待执行的原生滚动。原生测试检查行身份和行内像素位置，包含末行高于视口的情况。导入的 WebSocket 请求头测试先准备脚本运行时，再开始原有的有界服务端等待，保留全部真实请求头断言。

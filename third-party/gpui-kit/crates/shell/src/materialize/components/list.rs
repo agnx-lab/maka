@@ -95,6 +95,7 @@ struct MeasuredItems {
     item_count: usize,
     top: Option<TopItem>,
     follows_tail: bool,
+    consumed_end_request: Option<String>,
     reported: Option<(Range<usize>, usize)>,
 }
 
@@ -173,6 +174,12 @@ pub(in crate::materialize) fn list(
                      follow mode. It is list that follows its tail"
                 );
             }
+            if behavior.scroll_to_end.is_some() {
+                tracing::warn!(
+                    "scroll_to_end is ignored on a uniform_list: it is list that supports \
+                     explicit measured-list end requests"
+                );
+            }
             if behavior.on_visible_range_change.is_some() {
                 tracing::warn!(
                     "on_visible_range_change is ignored on a uniform_list: it is list that \
@@ -196,6 +203,7 @@ pub(in crate::materialize) fn list(
                     item_count,
                     top: None,
                     follows_tail: false,
+                    consumed_end_request: None,
                     reported: None,
                 }
             });
@@ -240,6 +248,7 @@ pub(in crate::materialize) fn list(
                 item_count,
                 get_key,
                 on_visible_range_change: behavior.on_visible_range_change,
+                end_request: behavior.scroll_to_end,
                 runtime,
             }
             .into_any_element()
@@ -265,6 +274,7 @@ struct KeyedList {
     item_count: usize,
     get_key: CallbackId,
     on_visible_range_change: Option<CallbackId>,
+    end_request: Option<String>,
     runtime: Weak<ShellRuntime>,
 }
 
@@ -471,6 +481,19 @@ impl Element for KeyedList {
         cx: &mut App,
     ) -> (LayoutId, ()) {
         self.splice_item_count(window, cx);
+        if let Some(request) = self.end_request.as_ref() {
+            self.retained.update(cx, |retained, _| {
+                if retained.consumed_end_request.as_ref() != Some(request) {
+                    // Clear a pending native scroll (including splice's reading
+                    // restoration) before resuming Tail at the new exact end.
+                    retained.state.scroll_to_end();
+                    if retained.follows_tail {
+                        retained.state.set_follow_mode(FollowMode::Tail);
+                    }
+                    retained.consumed_end_request = Some(request.clone());
+                }
+            });
+        }
         (self.list.request_layout(window, cx), ())
     }
 

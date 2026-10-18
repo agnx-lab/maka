@@ -7286,6 +7286,7 @@ impl ShellRuntime {
                 "overlay_closable",
                 "with_item_to_measure_index",
                 "with_follow_mode",
+                "scroll_to_end",
             ]
             .into_iter()
             .enumerate()
@@ -8298,6 +8299,7 @@ impl ShellRuntime {
             | "track_scroll"
             | "with_item_to_measure_index"
             | "with_follow_mode"
+            | "scroll_to_end"
             | "content_focus_handle"
             | "key_context"
             | "aria_level"
@@ -8355,6 +8357,7 @@ impl ShellRuntime {
                     "track_scroll" => "track_scroll",
                     "with_item_to_measure_index" => "with_item_to_measure_index",
                     "with_follow_mode" => "with_follow_mode",
+                    "scroll_to_end" => "scroll_to_end",
                     "content_focus_handle" => "content_focus_handle",
                     "key_context" => "key_context",
                     "aria_level" => "aria_level",
@@ -8436,6 +8439,14 @@ impl ShellRuntime {
                     return Err(Exception::throw_type(
                         ctx,
                         r#"with_follow_mode(mode) expects "normal" or "tail""#,
+                    ));
+                }
+                if name == "scroll_to_end"
+                    && !matches!(bridged.first(), None | Some(Bridged::Nil | Bridged::Str(_)))
+                {
+                    return Err(Exception::throw_type(
+                        ctx,
+                        "scroll_to_end(requestKey) expects a string or null",
                     ));
                 }
                 // A bar that silently sits at zero because the percentage

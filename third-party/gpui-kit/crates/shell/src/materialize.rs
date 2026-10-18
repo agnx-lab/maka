@@ -472,6 +472,8 @@ struct Behavior {
     /// Whether a `list` follows its tail. `None` is GPUI's own default,
     /// `FollowMode::Normal`.
     follow_mode: Option<gpui::FollowMode>,
+    /// An explicit measured-list end request, consumed once per distinct key.
+    scroll_to_end: Option<String>,
     /// The dock commands a chrome element carries — what base is asked to do
     /// when it is clicked or dragged.
     ///
@@ -3209,6 +3211,12 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                         "tail" => Some(gpui::FollowMode::Tail),
                         _ => None,
                     });
+        }
+        "scroll_to_end" => {
+            behavior.scroll_to_end = args
+                .first()
+                .and_then(|value| value.as_str().ok())
+                .map(str::to_owned);
         }
         "track_focus" => {
             behavior.focus_handle = match args.first() {

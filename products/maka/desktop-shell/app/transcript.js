@@ -200,6 +200,8 @@ export class Transcript {
      * are, instead of following the newest row (see showing).
      */
     this.anchored = this.anchor !== null;
+    /** Accepted local message whose arrival asks the list to resume at its end. */
+    this.scrollToEnd = null;
     /** The items the list last showed, `{ start, end, count }`, or null before it drew. */
     this.visible = null;
     this.rows = [];
@@ -886,6 +888,7 @@ export class Transcript {
    */
   addPending(messageId, text, attachments = []) {
     this.anchored = false;
+    this.scrollToEnd = messageId;
     const covered = `${messageId}/body`;
     if (this.covered.has(covered)) return;
     this.pending = [
@@ -1067,6 +1070,7 @@ export function transcriptPane(transcript, loadOlder, cx, empty = null) {
             // row in place as pages are put above and added below, until the
             // reader reaches the newest row or sends (Transcript.showing).
             .with_follow_mode(transcript.anchored ? 'normal' : 'tail')
+            .scroll_to_end(transcript.scrollToEnd)
             // Reported after the frame, however the range changed: a
             // wheel, a scrollbar drag, or rows that do not fill the view.
             .on_visible_range_change((range, shown) => {

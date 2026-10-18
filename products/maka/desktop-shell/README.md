@@ -23,6 +23,8 @@
 
 `maka-desktop-shell` runs the authored [app](app/) with the retained GPUI shell and QuickJS runtime. Its native modules expose the public Host client, selected files and system locale; the app owns its views and commands.
 
+The transcript follows new output while at the end. Scrolling up pauses following; returning to the end or sending a message accepted by the Host resumes it. Rejected sends leave the reading position alone.
+
 Build from the repository root:
 
 ```sh

@@ -11191,6 +11191,188 @@ fn a_list_following_its_tail_stays_at_the_end_until_the_reader_scrolls_up(cx: &m
     assert_eq!(transcript_key_at(&mut context, &view, 195.), "m1102");
 }
 
+/// A retained measured list with independent incoming updates and explicit
+/// local requests. The secondary press exposes the real offset in a tall row.
+fn end_request_list_source(mode: &str) -> String {
+    format!(
+        r#"
+import {{ div, View, list }} from "gpui-kit";
+import {{ v_flex }} from "gpui-base";
+
+export default class Transcript extends View {{
+  init() {{
+    this.items = [];
+    for (let i = 0; i < 100; i++) this.items.push(`m${{i}}`);
+    this.next = 100;
+    this.sequence = 0;
+    this.request = null;
+    this.lastRequest = null;
+    this.tall = "";
+    this.clicked = "none";
+    this.pressed = "none";
+    this.reported = "none";
+  }}
+  requestEnd() {{
+    this.lastRequest = `local-${{++this.sequence}}`;
+    this.request = this.lastRequest;
+  }}
+  control(label, change) {{
+    return div().h(40).flex_none().on_click((_event, cx) => {{ change(); cx.notify(); }}).child(label);
+  }}
+  render(cx) {{
+    return v_flex().w(300).h(480)
+      .child(v_flex().h(200).flex_none().child(
+        list("rows", this.items.length, i => this.items[i], i =>
+          div().h(this.items[i] === this.tall ? 400 : 20).child(this.items[i]))
+          .with_follow_mode("{mode}")
+          .scroll_to_end(this.request)
+          .on_item_click((key, cx) => {{ this.clicked = key; cx.notify(); }})
+          .on_item_secondary_click((key, event, cx) => {{
+            this.pressed = `${{key}}:${{Math.round(event.local_position.y)}}:${{Math.round(event.bounds.height)}}`;
+            cx.notify();
+          }})
+          .on_visible_range_change((range, count, cx) => {{
+            this.reported = `${{range.start}}..${{range.end}} of ${{count}}`;
+            cx.notify();
+          }})))
+      .child(this.control("local append and request", () => {{
+        this.items = this.items.concat([`m${{this.next++}}`]); this.requestEnd();
+      }}))
+      .child(this.control("incoming append", () => {{
+        this.items = this.items.concat([`m${{this.next++}}`]);
+      }}))
+      .child(this.control("prepend and request", () => {{
+        this.items = ["p0", "p1", "p2"].concat(this.items); this.requestEnd();
+      }}))
+      .child(this.control("grow last", () => {{ this.tall = this.items[this.items.length - 1]; }}))
+      .child(this.control("request only", () => {{ this.requestEnd(); }}))
+      .child(this.control("toggle null", () => {{
+        this.request = this.request === null ? this.lastRequest : null;
+      }}))
+      .child(`clicked ${{this.clicked}} pressed ${{this.pressed}} reported ${{this.reported}}`);
+  }}
+}}
+"#
+    )
+}
+
+fn pressed_row_at(
+    context: &mut VisualTestContext,
+    view: &gpui::Entity<ScriptView>,
+    y: f32,
+) -> String {
+    let position = point(px(150.), px(y));
+    context.simulate_mouse_move(position, gpui::MouseButton::Right, Modifiers::default());
+    context.simulate_mouse_down(position, gpui::MouseButton::Right, Modifiers::default());
+    context.simulate_mouse_up(position, gpui::MouseButton::Right, Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    tree.split("pressed ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_else(|| panic!("no pressed row in: {tree}"))
+        .trim_end_matches('"')
+        .to_owned()
+}
+
+#[gpui::test]
+fn a_new_end_request_resumes_tail_once_after_the_reader_pauses(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) =
+        mount_list_source(cx, &end_request_list_source("tail"));
+    scroll_by(&mut context, 150.);
+    let reading = pressed_row_at(&mut context, &view, 5.);
+    assert_eq!(
+        reading, "m82:15:20",
+        "the paused row and its offset must be exact"
+    );
+    click_at(&mut context, 260.);
+    assert_eq!(pressed_row_at(&mut context, &view, 5.), reading);
+
+    click_at(&mut context, 220.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m101");
+    scroll_by(&mut context, 60.);
+    let paused = pressed_row_at(&mut context, &view, 5.);
+    click_at(&mut context, 260.);
+    assert_eq!(pressed_row_at(&mut context, &view, 5.), paused);
+    // Null is absence, rather than a reset that makes the old token new again.
+    click_at(&mut context, 420.);
+    click_at(&mut context, 420.);
+    assert_eq!(pressed_row_at(&mut context, &view, 5.), paused);
+
+    click_at(&mut context, 220.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m103");
+    scroll_by(&mut context, 80.);
+    click_at(&mut context, 300.);
+    assert_eq!(pressed_row_at(&mut context, &view, 195.), "m103:15:20");
+
+    // Tail remains active after the command, including growth beyond a viewport.
+    click_at(&mut context, 340.);
+    assert_eq!(pressed_row_at(&mut context, &view, 195.), "m103:395:400");
+    assert_eq!(reported_visible_range(&mut context, &view), (106, 107, 107));
+    scroll_by(&mut context, 80.);
+    assert_eq!(pressed_row_at(&mut context, &view, 195.), "m103:315:400");
+    assert_eq!(reported_visible_range(&mut context, &view), (106, 107, 107));
+    // Identical visible ranges cannot substitute for an explicit end request.
+    click_at(&mut context, 380.);
+    assert_eq!(pressed_row_at(&mut context, &view, 195.), "m103:395:400");
+    assert_eq!(reported_visible_range(&mut context, &view), (106, 107, 107));
+}
+
+#[gpui::test]
+fn a_normal_list_end_request_does_not_enable_ongoing_follow(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) =
+        mount_list_source(cx, &end_request_list_source("normal"));
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m0");
+    click_at(&mut context, 220.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m100");
+    let reading = pressed_row_at(&mut context, &view, 5.);
+    click_at(&mut context, 260.);
+    assert_eq!(pressed_row_at(&mut context, &view, 5.), reading);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m100");
+    click_at(&mut context, 300.);
+    assert_eq!(pressed_row_at(&mut context, &view, 195.), "m101:15:20");
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m101");
+}
+
+#[gpui::test]
+fn an_omitted_end_request_keeps_the_reading_position(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) =
+        mount_list_source(cx, &transcript_source(".scroll_to_end()"));
+    scroll_by(&mut context, -150.);
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m7");
+    assert_eq!(transcript_key_at(&mut context, &view, 15.), "m8");
+}
+
+#[gpui::test]
+fn an_end_request_other_than_a_string_or_null_is_refused(cx: &mut TestAppContext) {
+    for invalid in ["42", "true"] {
+        let message = render_error(
+            cx,
+            "end-request.js",
+            &format!(
+                r#"
+import {{ div, View, list }} from "gpui-kit";
+export default class Rows extends View {{
+  render() {{ return list("rows", 1, () => "only", () => div()).scroll_to_end({invalid}); }}
+}}
+"#
+            ),
+        );
+        assert!(
+            message.contains("scroll_to_end(requestKey) expects a string or null"),
+            "the invalid request must be diagnosed at its call site: {message}"
+        );
+    }
+}
+
 /// A follow mode GPUI does not have is refused where it was written, rather
 /// than leaving the list in whichever mode it was in.
 #[gpui::test]

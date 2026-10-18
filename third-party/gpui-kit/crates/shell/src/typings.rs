@@ -1747,6 +1747,16 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     with_follow_mode<Self extends Element>(this: Self, mode: "normal" | "tail"): Self;
     /**
+     * Requests the exact end of a measured `list` after applying this render’s
+     * item count.
+     * A new non-null key runs once for this list identity. Keeping the key on
+     * later renders never pulls a reader back after they scroll up. Null or
+     * omission makes no request and does not clear the last consumed key.
+     * With `"tail"` this resumes following; with `"normal"` it only scrolls
+     * once. Other list kinds ignore it.
+     */
+    scroll_to_end<Self extends Element>(this: Self, requestKey?: string | null): Self;
+    /**
      * The handle a `Select` or `Combobox` moves the keyboard to when it opens,
      * and away from when Escape closes it.
      *
@@ -4134,6 +4144,7 @@ mod tests {
         "track_scroll",
         "with_item_to_measure_index",
         "with_follow_mode",
+        "scroll_to_end",
         "content_focus_handle",
         "tab_index",
         "tab_stop",

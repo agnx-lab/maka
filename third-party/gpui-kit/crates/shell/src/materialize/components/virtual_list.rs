@@ -147,6 +147,12 @@ pub(in crate::materialize) fn virtual_list(
              is how a script keeps it at the end"
         );
     }
+    if behavior.scroll_to_end.is_some() {
+        tracing::warn!(
+            "scroll_to_end is ignored on a {name}: use scroll_to_bottom on its \
+             VirtualListScrollHandle; it is list that accepts measured-list end requests"
+        );
+    }
     if behavior.on_visible_range_change.is_some() {
         tracing::warn!(
             "on_visible_range_change is ignored on a {name}: it is list that reports its \
