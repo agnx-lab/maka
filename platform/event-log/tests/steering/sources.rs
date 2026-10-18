@@ -106,8 +106,8 @@ fn delivery(invocation: &Invocation, source: RootSourceMessage) -> RuntimeEvent 
     )
 }
 
-#[test]
-fn steering_source_validates_identity_session_legacy_absence_and_full_encoded_budget() {
+#[tokio::test]
+async fn steering_source_validates_identity_provenance_and_preserves_large_receipts() {
     let owner = queue::invocation("turn");
     let pending = resource(&owner, "message", MessageDisposition::Steering);
     EventWrite::plain(delivery(&owner, pending.source.clone())).unwrap();
@@ -127,22 +127,73 @@ fn steering_source_validates_identity_session_legacy_absence_and_full_encoded_bu
 
     let mut wire = serde_json::to_value(delivery(&owner, pending.source.clone())).unwrap();
     wire["fact"].as_object_mut().unwrap().remove("source");
-    let legacy: RuntimeEvent = serde_json::from_value(wire).unwrap();
+    let without_source: RuntimeEvent = serde_json::from_value(wire).unwrap();
     assert!(matches!(
-        legacy.fact,
+        without_source.fact,
         Fact::MessageSteered { source: None, .. }
     ));
-    EventWrite::plain(legacy).unwrap();
+    EventWrite::plain(without_source).unwrap();
 
-    let mut large = pending.source;
+    let mut large = pending.source.clone();
     large.message.content.preparation[0].receipt = json!("x".repeat(540_000));
     large.validate().unwrap();
     large.message.validate().unwrap();
     assert!(serde_json::to_vec(&large).unwrap().len() < 1024 * 1024);
-    assert!(
-        EventWrite::plain(delivery(&owner, large)).is_err(),
-        "duplicated delivered content plus source must fit the whole event budget"
-    );
+    let event = delivery(&owner, large.clone());
+    assert!(serde_json::to_vec(&event).unwrap().len() > 1024 * 1024);
+    let receipt_bytes = serde_json::to_vec(&large.message.content.preparation).unwrap();
+    let write = EventWrite::plain(event.clone()).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large-source.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    queue::append(&log, &owner, queue::opening()).await;
+    log.admit_message(PendingMessageAdmission {
+        source: large.clone(),
+        ..pending
+    })
+    .await
+    .unwrap();
+    let sequence = log.append(&write).await.unwrap();
+    assert_eq!(log.append(&write).await.unwrap(), sequence);
+    let proof = log
+        .steering_message("session", "message")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(proof.sequence, sequence);
+    assert_eq!(proof.event, event);
+    let Fact::MessageSteered {
+        message,
+        source: Some(source),
+    } = &proof.event.fact
+    else {
+        unreachable!()
+    };
+    assert_eq!(source.as_ref(), &large);
+    assert!(serde_json::to_vec(&message.content.preparation).unwrap() == receipt_bytes);
+    assert!(log.pending_messages("session").await.unwrap().is_empty());
+    queue::append(
+        &log,
+        &owner,
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    )
+    .await;
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(log.append(&write).await.unwrap(), sequence);
+    let reopened = log
+        .steering_message("session", "message")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reopened.sequence, proof.sequence);
+    assert_eq!(reopened.event, proof.event);
+    log.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -345,8 +396,6 @@ async fn edited_and_promoted_resource_sources_are_atomic_and_survive_restart_and
         &expected
     );
     for target in ["branch", "revision"] {
-        let messages = log.editable_turn(target, "turn").await.unwrap();
-        assert_eq!(messages.len(), 2);
         let first = log
             .editable_message(target, "turn", "first")
             .await

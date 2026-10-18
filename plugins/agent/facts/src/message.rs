@@ -185,13 +185,6 @@ pub fn validate_sources(
             return Err("conflicting root message sources");
         }
     }
-    if serde_json::to_vec(sources)
-        .map_err(|_| "invalid root sources")?
-        .len()
-        > 1024 * 1024
-    {
-        return Err("root sources exceed durable capacity");
-    }
     if aggregate(sources.iter().map(|s| &s.message.content)) != *content {
         return Err("root content differs from its source messages");
     }

@@ -75,31 +75,52 @@ impl EventLog {
         }
         let session = session.to_owned();
         let answer_invocation = answer_invocation.map(str::to_owned);
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            let execution = match origin {
-                WorkOrigin::Message(message) => crate::message_resolution::owner::execution(&mut tx, &session, &message).await?,
-                WorkOrigin::Invocation(invocation) => {
-                    let opening: Option<Option<String>> = sqlx::query_scalar(
-                        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-                         FROM runtime_events WHERE invocation_id = ?1 AND kind = 'invocation_opened'
-                         AND json_extract(event_json, '$.invocation.session_id') = ?2"
-                    ).bind(invocation).bind(&session).fetch_optional(&mut *tx).await?;
-                    match opening {
-                        None => MessageExecution::Missing,
-                        Some(opening) => {
-                            let opening: maka_agent_facts::event::RuntimeEvent = serde_json::from_str(
-                                &opening.ok_or(StoreError::PrefixTooLarge)?
-                            )?;
-                            MessageExecution::Owned(Box::new(crate::message_resolution::owner::lineage(
-                                &mut tx, &opening.invocation
-                            ).await?))
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let execution = match origin {
+                        WorkOrigin::Message(message) => {
+                            crate::message_resolution::owner::execution(&mut tx, &session, &message)
+                                .await?
                         }
-                    }
-                }
-            };
-            observe(&mut tx, &session, execution, offset, answer_invocation.as_deref()).await
-        })).await
+                        WorkOrigin::Invocation(invocation) => {
+                            let opening: Option<String> = sqlx::query_scalar(
+                                "SELECT event_json
+                         FROM runtime_events WHERE invocation_id = ?1 AND kind = 'invocation_opened'
+                         AND json_extract(event_json, '$.invocation.session_id') = ?2",
+                            )
+                            .bind(invocation)
+                            .bind(&session)
+                            .fetch_optional(&mut *tx)
+                            .await?;
+                            match opening {
+                                None => MessageExecution::Missing,
+                                Some(opening) => {
+                                    let opening: maka_agent_facts::event::RuntimeEvent =
+                                        serde_json::from_str(&opening)?;
+                                    MessageExecution::Owned(Box::new(
+                                        crate::message_resolution::owner::lineage(
+                                            &mut tx,
+                                            &opening.invocation,
+                                        )
+                                        .await?,
+                                    ))
+                                }
+                            }
+                        }
+                    };
+                    observe(
+                        &mut tx,
+                        &session,
+                        execution,
+                        offset,
+                        answer_invocation.as_deref(),
+                    )
+                    .await
+                })
+            })
+            .await
     }
 }
 

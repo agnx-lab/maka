@@ -99,8 +99,8 @@ async fn read(
     session: &str,
     message: &str,
 ) -> Result<Option<DeliveryOwner>, StoreError> {
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
+    let json: Option<String> = sqlx::query_scalar(
+        "SELECT e.event_json
          FROM message_sources s JOIN runtime_events e ON e.event_id = s.event_id
          WHERE s.session_id = ? AND s.message_id = ?",
     )
@@ -111,7 +111,7 @@ async fn read(
     let Some(json) = json else {
         return Ok(None);
     };
-    let event: RuntimeEvent = serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
+    let event: RuntimeEvent = serde_json::from_str(&json)?;
     if event.invocation.session_id != session {
         return Err(invalid("Message owner belongs to another Session"));
     }
@@ -159,23 +159,20 @@ pub(crate) async fn lineage(
         if !seen.insert(current.run_id.clone()) {
             return Err(invalid("Message owner continuation cycle"));
         }
-        let opening: Option<Option<String>> = sqlx::query_scalar(
-            "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
+        let opening: Option<String> = sqlx::query_scalar(
+            "SELECT event_json
              FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_opened'",
         )
         .bind(&current.invocation_id)
         .fetch_optional(&mut *tx)
         .await?;
-        let opening: RuntimeEvent = serde_json::from_str(
-            &opening
-                .ok_or_else(|| invalid("Message owner has no opening"))?
-                .ok_or(StoreError::PrefixTooLarge)?,
-        )?;
+        let opening: RuntimeEvent =
+            serde_json::from_str(&opening.ok_or_else(|| invalid("Message owner has no opening"))?)?;
         if opening.invocation != current {
             return Err(invalid("Message owner identity changed"));
         }
-        let successors: Vec<Option<String>> = sqlx::query_scalar(
-            "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
+        let successors: Vec<String> = sqlx::query_scalar(
+            "SELECT event_json
              FROM runtime_events WHERE kind = 'invocation_opened'
              AND json_extract(event_json, '$.fact.input.kind') IN ('continuation', 'handoff')
              AND json_extract(event_json, '$.invocation.session_id') = ?
@@ -192,8 +189,7 @@ pub(crate) async fn lineage(
         let Some(successor) = successors.into_iter().next() else {
             return crate::turns::project(tx, opening).await;
         };
-        let successor: RuntimeEvent =
-            serde_json::from_str(&successor.ok_or(StoreError::PrefixTooLarge)?)?;
+        let successor: RuntimeEvent = serde_json::from_str(&successor)?;
         let Fact::InvocationOpened { input, .. } = &successor.fact else {
             return Err(invalid("Message owner continuation index changed"));
         };

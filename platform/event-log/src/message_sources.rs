@@ -114,8 +114,8 @@ impl EventLog {
         crate::sessions::validate_id(session_id)?;
         let session = session_id.to_owned();
         self.connection.read(move |connection| Box::pin(async move {
-            let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
+            let row: Option<(i64, String)> = sqlx::query_as(
+                "SELECT e.sequence, e.event_json
                  FROM runtime_events e WHERE e.kind='invocation_opened'
                  AND json_extract(e.event_json,'$.fact.input.kind')='message'
                  AND (json_extract(e.event_json,'$.invocation.session_id')=?1
@@ -142,52 +142,6 @@ impl EventLog {
             .await
     }
 
-    /// Ordered canonical messages of a logical Turn, before any preparation.
-    /// Presentation aggregation never supplies an editable message identity.
-    pub async fn editable_turn(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-    ) -> Result<Vec<maka_agent_facts::message::EditableMessage>, StoreError> {
-        self.validate_root()?;
-        crate::sessions::validate_id(session_id)?;
-        crate::sessions::validate_id(turn_id)?;
-        let (session, turn) = (session_id.to_owned(), turn_id.to_owned());
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin().await?;
-            let mut messages = Vec::new();
-            let mut after = 0_i64;
-            let mut bytes = 2;
-            loop {
-                let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                    "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
-                     FROM runtime_events e WHERE (
-                         (e.kind='invocation_opened' AND json_extract(e.event_json,'$.fact.input.kind')='message')
-                         OR (e.kind='message_steered' AND json_type(e.event_json,'$.fact.source')='object'))
-                       AND CAST(json_extract(e.event_json,'$.invocation.turn_id') AS TEXT)=?2
-                       AND e.sequence>?3
-                       AND (json_extract(e.event_json,'$.invocation.session_id')=?1
-                         OR EXISTS(SELECT 1 FROM session_history_members h WHERE h.session_id=?1 AND h.sequence=e.sequence)
-                         OR EXISTS(SELECT 1 FROM session_revision_sources r WHERE r.session_id=?1 AND r.sequence=e.sequence))
-                     ORDER BY e.sequence LIMIT 1"
-                ).bind(&session).bind(&turn).bind(after).fetch_optional(&mut *tx).await?;
-                let Some((sequence, json)) = row else { break };
-                let opening = decode_delivery(sequence, json)?;
-                for source in roots(&opening.event) {
-                    let message = editable(&mut tx, &session, &opening, source).await?;
-                    bytes += serde_json::to_vec(&message)?.len() + 1;
-                    if messages.len() == 64 || bytes > 1024 * 1024 {
-                        return Err(StoreError::PrefixTooLarge);
-                    }
-                    messages.push(message);
-                }
-                after = sequence;
-            }
-            tx.commit().await?;
-            Ok(messages)
-        })).await
-    }
-
     /// Resolve one exact root source from owned history. A Turn can contain
     /// several queued messages; neither its aggregate nor a UI row is the input.
     pub async fn editable_message(
@@ -207,8 +161,8 @@ impl EventLog {
         );
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin().await?;
-            let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
+            let row: Option<(i64, String)> = sqlx::query_as(
+                "SELECT e.sequence, e.event_json
                  FROM session_message_sources s JOIN runtime_events e ON e.event_id=s.event_id
                  WHERE s.owner_session_id=?1 AND s.message_id=?2
                    AND (e.kind='invocation_opened' OR (e.kind='message_steered' AND json_type(e.event_json,'$.fact.source')='object'))
@@ -237,8 +191,8 @@ impl EventLog {
         let session = session_id.to_owned();
         let message = message_id.to_owned();
         self.connection.run(move |connection| Box::pin(async move {
-            let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
+            let row: Option<(i64, String)> = sqlx::query_as(
+                "SELECT e.sequence, e.event_json
                  FROM message_sources s JOIN runtime_events e ON e.event_id = s.event_id
                  WHERE s.session_id = ? AND s.message_id = ?
                    AND (e.kind='invocation_opened' OR (e.kind='message_steered' AND json_type(e.event_json,'$.fact.source')='object'))"
@@ -251,11 +205,7 @@ impl EventLog {
     }
 }
 
-fn decode_root(
-    sequence: i64,
-    json: Option<String>,
-    message: &str,
-) -> Result<RootMessageProof, StoreError> {
+fn decode_root(sequence: i64, json: String, message: &str) -> Result<RootMessageProof, StoreError> {
     let opening = decode_delivery(sequence, json)?;
     let index = roots(&opening.event)
         .iter()
@@ -264,8 +214,8 @@ fn decode_root(
     Ok(RootMessageProof { opening, index })
 }
 
-fn decode_delivery(sequence: i64, json: Option<String>) -> Result<StoredEvent, StoreError> {
-    let event: RuntimeEvent = serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
+fn decode_delivery(sequence: i64, json: String) -> Result<StoredEvent, StoreError> {
+    let event: RuntimeEvent = serde_json::from_str(&json)?;
     match &event.fact {
         Fact::InvocationOpened {
             input:
@@ -346,8 +296,8 @@ pub(crate) async fn first_message_opening(
     connection: &mut SqliteConnection,
     session: &str,
 ) -> Result<Option<StoredEvent>, StoreError> {
-    let row: Option<(i64, Option<String>, String)> = sqlx::query_as(
-        "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END, e.kind
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT e.sequence, e.event_json, e.kind
          FROM runtime_events e WHERE ((e.kind='invocation_opened'
              AND json_extract(e.event_json,'$.fact.input.kind')='message')
              OR (e.kind='message_imported' AND json_extract(e.event_json,'$.fact.record.content.kind')='user'))

@@ -219,16 +219,15 @@ pub(crate) async fn read(
     session: &str,
     message: &str,
 ) -> Result<Option<PendingMessageAdmission>, StoreError> {
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(record_json AS BLOB)) <= 1048576 THEN record_json END
+    let json: Option<String> = sqlx::query_scalar(
+        "SELECT record_json
          FROM message_admissions WHERE session_id = ? AND message_id = ?",
     )
     .bind(session)
     .bind(message)
     .fetch_optional(connection)
     .await?;
-    json.map(|json| decode(&json.ok_or(StoreError::PrefixTooLarge)?, session, message))
-        .transpose()
+    json.map(|json| decode(&json, session, message)).transpose()
 }
 fn decode(json: &str, session: &str, message: &str) -> Result<PendingMessageAdmission, StoreError> {
     let record: PendingMessageAdmission = serde_json::from_str(json)?;

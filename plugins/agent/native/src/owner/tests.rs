@@ -97,6 +97,9 @@ mod scale;
 #[path = "tests/queue.rs"]
 mod queue;
 
+#[path = "tests/large_messages.rs"]
+mod large_messages;
+
 #[path = "tests/selection.rs"]
 mod selection;
 

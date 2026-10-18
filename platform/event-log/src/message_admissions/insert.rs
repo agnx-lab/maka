@@ -39,9 +39,6 @@ pub(crate) async fn insert(
         return Err(invalid("new admission cannot override steering ownership"));
     }
     let encoded = serde_json::to_string(&admission)?;
-    if encoded.len() > 1024 * 1024 {
-        return Err(StoreError::PrefixTooLarge);
-    }
     let session = &admission.invocation.session_id;
     let message = &admission.source.message.message_id;
     if let Some(previous) = read(&mut *tx, session, message).await? {

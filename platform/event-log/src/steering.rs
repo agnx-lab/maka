@@ -81,9 +81,8 @@ impl EventLog {
         self.connection
             .run(move |tx| {
                 Box::pin(async move {
-                    let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                        "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1050624
-                    THEN e.event_json END FROM message_sources s JOIN runtime_events e ON e.event_id = s.event_id
+                    let row: Option<(i64, String)> = sqlx::query_as(
+                        "SELECT e.sequence, e.event_json FROM message_sources s JOIN runtime_events e ON e.event_id = s.event_id
                  WHERE e.kind = 'message_steered' AND s.session_id = ? AND s.message_id = ?",
                     )
                     .bind(&session_id)
@@ -91,7 +90,6 @@ impl EventLog {
                     .fetch_optional(tx)
                     .await?;
                     row.map(|(sequence, json)| {
-                        let json = json.ok_or(StoreError::PrefixTooLarge)?;
                         let event: RuntimeEvent = serde_json::from_str(&json)?;
                         let Fact::MessageSteered { message, source } = &event.fact else {
                             return Err(StoreError::InvalidTransition(

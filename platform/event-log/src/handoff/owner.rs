@@ -17,7 +17,7 @@
  * under the License.
  */
 use crate::{
-    EventLog, StoreError,
+    StoreError,
     turns::{InvocationState, TurnBoundary},
 };
 use maka_agent_facts::continuation::MAX_ANCESTRY;
@@ -26,38 +26,18 @@ use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::RuntimeEvent;
-use sqlx::{Connection, SqliteConnection};
-
-impl EventLog {
-    /// Resolve one frozen owner through cooperative handoffs, never manual resume.
-    pub async fn handoff_owner(&self, source: &Invocation) -> Result<TurnBoundary, StoreError> {
-        self.validate_root()?;
-        let source = source.clone();
-        self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin().await?;
-                    read(&mut tx, &source).await
-                })
-            })
-            .await
-    }
-}
+use sqlx::SqliteConnection;
 
 async fn opening(tx: &mut SqliteConnection, id: &str) -> Result<Option<RuntimeEvent>, StoreError> {
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
+    let json: Option<String> = sqlx::query_scalar(
+        "SELECT event_json
          FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened'",
     )
     .bind(id)
     .fetch_optional(tx)
     .await?;
-    json.map(|json| {
-        Ok(serde_json::from_str(
-            &json.ok_or(StoreError::PrefixTooLarge)?,
-        )?)
-    })
-    .transpose()
+    json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
+        .transpose()
 }
 
 /// Canonical append authenticates each immutable prefix. Control reads only

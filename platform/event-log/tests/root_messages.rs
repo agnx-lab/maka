@@ -279,44 +279,60 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     let rows = support::transcript(&log, "a").await;
     let row = rows.iter().find(|row| row["id"] == combined.id).unwrap();
     assert_eq!(row["text"], "left\n\nright");
-    let editable = log.editable_turn("a", "successor").await.unwrap();
-    assert_eq!(
-        editable
-            .iter()
-            .map(|source| (source.message_id.as_str(), source.content.text.as_str()))
-            .collect::<Vec<_>>(),
-        [
-            ("batch-z-left", "first original"),
-            ("batch-a-right", "second original")
-        ]
-    );
-    assert!(
-        log.editable_turn("b", "successor")
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    for source in &batch {
+    let mut editable = Vec::new();
+    for (index, source) in batch.iter().enumerate() {
         let proof = log
             .root_message("a", &source.message.message_id)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(proof.opening().event, combined);
+        if index == 0 {
+            let Fact::InvocationOpened {
+                input:
+                    InvocationInput::Message {
+                        source_messages, ..
+                    },
+                ..
+            } = &proof.opening().event.fact
+            else {
+                unreachable!()
+            };
+            assert_eq!(
+                source_messages
+                    .iter()
+                    .map(|source| (
+                        source.message.message_id.as_str(),
+                        source.unprepared_content.text.as_str()
+                    ))
+                    .collect::<Vec<_>>(),
+                [
+                    ("batch-z-left", "first original"),
+                    ("batch-a-right", "second original")
+                ]
+            );
+        }
         assert_eq!(proof.source(), source);
-        assert_eq!(
-            log.editable_message(
+        let message = log
+            .editable_message(
                 "a",
                 &combined.invocation.turn_id,
-                &source.message.message_id
+                &source.message.message_id,
             )
             .await
             .unwrap()
-            .unwrap()
-            .content,
-            source.unprepared_content,
+            .unwrap();
+        assert_eq!(
+            message.content, source.unprepared_content,
             "editing selects the exact source, not the batch aggregate"
         );
+        assert!(
+            log.editable_message("b", "successor", &source.message.message_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        editable.push(message);
         assert!(
             matches!(log.message_execution("a", &source.message.message_id).await.unwrap(), MessageExecution::Shared(owner) if owner.invocation == combined.invocation)
         );
@@ -345,7 +361,15 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         canonical
     );
     assert_eq!(support::transcript(&log, "a").await, rows);
-    assert_eq!(log.editable_turn("a", "successor").await.unwrap(), editable);
+    for message in editable {
+        assert_eq!(
+            log.editable_message("a", "successor", &message.message_id)
+                .await
+                .unwrap()
+                .unwrap(),
+            message
+        );
+    }
     assert!(
         matches!(log.message_execution("a", "client-source").await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == event.invocation),
         "a later independent root cannot acquire an earlier Message"

@@ -28,10 +28,37 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("events.sqlite");
         let log = EventLog::open(&path).await.unwrap();
-        let source = opening("source", None);
+        let mut source = opening("source", None);
+        let Fact::InvocationOpened {
+            input:
+                InvocationInput::Message {
+                    content,
+                    source_messages,
+                    ..
+                },
+            ..
+        } = &mut source.fact
+        else {
+            unreachable!()
+        };
+        *content = "x".repeat(600 * 1024).into();
+        source_messages.push(maka_agent_facts::message::RootSourceMessage {
+            unprepared_content: content.clone(),
+            message: maka_agent_facts::input::DeliveredMessage {
+                origin: None,
+                message_id: "large-original-message".into(),
+                submitted_content_digest: content.content_digest().unwrap(),
+                content: content.clone(),
+            },
+            submitted_placement: maka_agent_facts::message::Placement::CurrentTurn,
+            disposition: maka_agent_facts::message::MessageDisposition::TurnStarted,
+            submitted_intent: None,
+        });
+        let opening_bytes = serde_json::to_vec(&source).unwrap().len();
+        assert!(opening_bytes > 1024 * 1024 && opening_bytes < 8 * 1024 * 1024);
         append(&log, &source).await;
         let before = log
-            .context_before_run(&source.invocation, 100, 65536)
+            .context_before_run(&source.invocation, 100, 8 * 1024 * 1024)
             .await
             .unwrap();
         let pause = HandoffPause {
@@ -68,10 +95,18 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                 .is_empty()
         );
         let frozen = log
-            .run_prefix("session", "source", None, 100, 65536)
+            .run_prefix("session", "source", None, 100, 8 * 1024 * 1024)
             .await
             .unwrap()
             .unwrap();
+        assert!(
+            frozen
+                .events
+                .iter()
+                .map(|event| serde_json::to_vec(&event.event).unwrap().len())
+                .sum::<usize>()
+                < 8 * 1024 * 1024
+        );
         if already_claimed {
             let mut target = opening("unused", None);
             target.invocation = pause.intent.successor(&source.invocation);
@@ -79,29 +114,38 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                 unreachable!()
             };
             *input = InvocationInput::Handoff {
-                claim: Box::new(
-                    claim(
-                        &log,
-                        "claim",
-                        &source,
-                        SessionBase {
-                            high_water: before.source_evidence.high_water,
-                            digest: before.source_evidence.digest,
-                        },
-                    )
-                    .await,
-                ),
+                claim: Box::new(ContinuationClaim {
+                    id: "claim".into(),
+                    source: RunBoundary {
+                        invocation: frozen.invocation.clone(),
+                        high_water: frozen.high_water,
+                        digest: frozen.digest.clone(),
+                    },
+                    base: SessionBase {
+                        high_water: before.source_evidence.high_water,
+                        digest: before.source_evidence.digest,
+                    },
+                    // Same fixture projection evidence; the store authenticates raw ancestry.
+                    replay: ReplayEvidence {
+                        version: REPLAY_VERSION,
+                        digest: digest('a'),
+                        route_identity: digest('b'),
+                    },
+                }),
                 pause: Box::new(pause.clone()),
             };
             append(&log, &target).await;
-            let before = log.prefix(100, 65536).await.unwrap();
+            let before = log.prefix(100, 8 * 1024 * 1024).await.unwrap();
             let result = log.cancel_handoff(&source.invocation).await.unwrap();
             assert_eq!(result.invocation, target.invocation);
             assert!(
                 !matches!(result.state, InvocationState::Ended { .. }),
                 "the existing worker still owns cancellation"
             );
-            assert_eq!(log.prefix(100, 65536).await.unwrap().digest, before.digest);
+            assert_eq!(
+                log.prefix(100, 8 * 1024 * 1024).await.unwrap().digest,
+                before.digest
+            );
             close(&log, &target).await;
         } else {
             let database = rusqlite::Connection::open(&path).unwrap();
@@ -110,10 +154,10 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                  WHEN NEW.kind='invocation_ended' AND json_extract(NEW.event_json,'$.fact.outcome.kind')='cancelled'
                  BEGIN SELECT RAISE(ABORT, 'cancel fault'); END;"
             ).unwrap();
-            let before = log.prefix(100, 65536).await.unwrap();
+            let before = log.prefix(100, 8 * 1024 * 1024).await.unwrap();
             assert!(log.cancel_handoff(&source.invocation).await.is_err());
             assert_eq!(
-                log.prefix(100, 65536).await.unwrap().digest,
+                log.prefix(100, 8 * 1024 * 1024).await.unwrap().digest,
                 before.digest,
                 "failed terminal must roll back its opening and claim"
             );
@@ -146,7 +190,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             );
             assert!(matches!(outcome, InvocationOutcome::Cancelled { .. }));
             let prefix = log
-                .run_prefix("session", "next-run", None, 100, 65536)
+                .run_prefix("session", "next-run", None, 100, 8 * 1024 * 1024)
                 .await
                 .unwrap()
                 .unwrap();
@@ -161,7 +205,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             "the successor opening is the only handoff claim authority"
         );
         assert_eq!(
-            log.run_prefix("session", "source", None, 100, 65536)
+            log.run_prefix("session", "source", None, 100, 8 * 1024 * 1024)
                 .await
                 .unwrap()
                 .unwrap()
@@ -171,7 +215,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
         let later = opening("later-turn", None);
         append(&log, &later).await;
         close(&log, &later).await;
-        let before = log.prefix(100, 65536).await.unwrap().digest;
+        let before = log.prefix(100, 8 * 1024 * 1024).await.unwrap().digest;
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
         let replay = log.cancel_handoff(&source.invocation).await.unwrap();
@@ -179,7 +223,10 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             replay.invocation.turn_id, source.invocation.turn_id,
             "a later Session Turn is not the claim owner"
         );
-        assert_eq!(log.prefix(100, 65536).await.unwrap().digest, before);
+        assert_eq!(
+            log.prefix(100, 8 * 1024 * 1024).await.unwrap().digest,
+            before
+        );
         log.close().await.unwrap();
     }
 }

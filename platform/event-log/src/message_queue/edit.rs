@@ -154,10 +154,7 @@ pub(crate) async fn apply(
     if changed {
         let bytes = queue.entries.iter().try_fold(0usize, |sum, entry| {
             let bytes = serde_json::to_vec(entry)?.len();
-            if bytes > 1024 * 1024 {
-                return Err(StoreError::PrefixTooLarge);
-            }
-            Ok(sum.saturating_add(bytes))
+            Ok::<_, StoreError>(sum.saturating_add(bytes))
         })?;
         if bytes > 8 * 1024 * 1024 {
             return Err(StoreError::PrefixTooLarge);
