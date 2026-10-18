@@ -73,7 +73,7 @@
     "plugins/agent/agent/package.ts": "736f68d84cd75b9551024778315eb090937038226011852e81a73f834ddcb69d",
     "plugins/agent/api/Cargo.toml": "7f33b8ad23980598820684a18fbde28a078a8624e951147564da3d121736fecc",
     "plugins/agent/assistant-preferences/global-instructions.ts": "aeeffa86c94b37f70be2f007e0c0a35b304fc9ed0828a5ed372b30c1fd161f85",
-    "plugins/agent/assistant-preferences/index.ts": "74920ca1e3c76b2de47fb76878d73f76f887b86eb90a12f0859da7b6146c8cb8",
+    "plugins/agent/assistant-preferences/index.ts": "dcc028ac6fe8f2e7e738ea0c174c01a29752a0318b4cce562b0dd0d7ff6accc2",
     "plugins/agent/assistant-preferences/locale.ts": "fab74e99f0cf0b4cf64445546a297673a2c7547ba06a7ccdd419bbb5a19613a5",
     "plugins/agent/assistant-preferences/package.ts": "1d0644444b050b9a8d685be352606fd886072aef78297c06059dd4eb13d65cf1",
     "plugins/agent/assistant-preferences/tui.ts": "1a5f4670eddd3ea99ba791125830bb56b653ac8e56aeb31edd5b60f71bd7a62a",

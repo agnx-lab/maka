@@ -267,7 +267,7 @@ export function assistantPreferences<N extends Node>(
             { key: 'zh-CN', label: '简体中文' },
             { key: 'zh-TW', label: '繁體中文' },
           ],
-          state.saved?.language ?? '',
+          state.saved?.language ?? null,
           busy || !state.saved,
         ),
         fields[0]!,

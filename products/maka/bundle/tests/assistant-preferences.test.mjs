@@ -527,6 +527,28 @@ const languageSaved = {
 };
 const preferenceNodes = (node) =>
   node && typeof node === 'object' ? [node, ...Object.values(node).flatMap(preferenceNodes)] : [];
+test('language choice has no selection until preferences load', async () => {
+  const { component } = await import('../dist/packages/assistant-preferences/tui.js');
+  const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+  let out = component.mount(props, {});
+  const selection = () => preferenceNodes(out.frame.view).find((node) => node.key === 'language');
+  const finish = (value) => {
+    out = component.event(
+      out.frame.state,
+      { kind: 'action', key: out.actions[0].key, event: { status: 'succeeded', value } },
+      props,
+      {},
+    );
+  };
+  assert.equal(selection().current, null);
+  assert.equal(selection().disabled, true);
+  finish([]);
+  assert.equal(selection().current, null);
+  assert.equal(selection().disabled, true);
+  finish(languageSaved);
+  assert.equal(selection().current, 'en');
+  assert.equal(selection().disabled, false);
+});
 async function languageEditor() {
   const { component } = await import('../dist/packages/assistant-preferences/tui.js');
   let props = {
