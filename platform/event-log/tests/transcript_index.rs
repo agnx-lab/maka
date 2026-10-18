@@ -41,6 +41,8 @@ mod fixtures;
 mod history;
 #[path = "transcript_index/image.rs"]
 mod image;
+#[path = "transcript_index/interrupted_ancestry.rs"]
+mod interrupted_ancestry;
 #[path = "transcript_index/large_siblings.rs"]
 mod large_siblings;
 #[path = "transcript_index/observation_count.rs"]

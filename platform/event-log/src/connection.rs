@@ -30,6 +30,8 @@ use std::{
 mod authority;
 #[cfg(test)]
 mod cancellation;
+#[cfg(test)]
+mod worker_callback;
 pub use authority::ConnectionAuthority;
 
 use futures_util::{FutureExt, future::Shared};

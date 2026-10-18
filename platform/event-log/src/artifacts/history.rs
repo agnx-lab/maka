@@ -24,6 +24,10 @@ use maka_agent_facts::attachment::StorageRef;
 use maka_agent_facts::event::RuntimeEvent;
 use sqlx::SqliteConnection;
 
+pub(crate) const RESOLVE_SQL: &str = r#"SELECT h.artifact_id FROM session_history_artifacts h
+         JOIN artifacts a ON a.session_id=h.session_id AND a.id=h.artifact_id
+         WHERE h.session_id=? AND h.source_session_id=? AND h.source_artifact_id=?"#;
+
 impl crate::EventLog {
     /// Resolve original provenance only through this Session's immutable copy
     /// ownership. Knowing a source Session or Artifact ID grants no access.
@@ -58,16 +62,12 @@ pub(crate) async fn resolve(
     source_session: &str,
     source_artifact: &str,
 ) -> Result<Option<StorageRef>, StoreError> {
-    let id: Option<String> = sqlx::query_scalar(
-        "SELECT h.artifact_id FROM session_history_artifacts h
-         JOIN artifacts a ON a.session_id=h.session_id AND a.id=h.artifact_id
-         WHERE h.session_id=? AND h.source_session_id=? AND h.source_artifact_id=?",
-    )
-    .bind(session)
-    .bind(source_session)
-    .bind(source_artifact)
-    .fetch_optional(connection)
-    .await?;
+    let id: Option<String> = sqlx::query_scalar(RESOLVE_SQL)
+        .bind(session)
+        .bind(source_session)
+        .bind(source_artifact)
+        .fetch_optional(connection)
+        .await?;
     Ok(id.map(|relative_path| StorageRef::SessionFile {
         session_id: session.into(),
         relative_path,

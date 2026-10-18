@@ -197,6 +197,33 @@ impl SqliteConnection {
         })
     }
 
+    /// Run one synchronous operation on this connection's existing SQLite worker.
+    ///
+    /// The worker retains exclusive access to the borrowed handle throughout the
+    /// callback. The callback must not retain/return the handle or handle-backed
+    /// objects, use it from another thread, close it, control transactions, or
+    /// invalidate driver-owned statements/hooks. Any temporary statements, blobs
+    /// and non-owning wrappers must be destroyed before the callback exits.
+    /// Direct FFI access has the same unsafe caller obligations and semver-exempt
+    /// `libsqlite3-sys` type contract as [`LockedSqliteHandle::as_raw_handle`].
+    ///
+    /// The callback must not wait for work on this same connection or for the
+    /// submitting task to advance. Captures/results must be owned; `Send + 'static`
+    /// does not make returning an unsafe handle-backed wrapper valid.
+    ///
+    /// Once enqueued, the operation runs even if its waiting future is dropped.
+    /// Abandonment provides no result or rollback guarantee: drop/roll back the
+    /// enclosing transaction before reuse when its outcome is unknown. A Rust
+    /// callback panic is resumed on the awaiting task; it is not a close receipt.
+    /// Callback result errors may be represented directly by the return value.
+    pub async fn run_on_worker<F, R>(&mut self, operation: F) -> Result<R, Error>
+    where
+        F: FnOnce(NonNull<sqlite3>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.worker.run_on_worker(operation).await
+    }
+
     /// Lock the SQLite database handle out from the worker thread so direct SQLite API calls can
     /// be made safely.
     ///

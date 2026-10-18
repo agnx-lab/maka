@@ -21,23 +21,35 @@ use super::evidence;
 use crate::StoreError;
 use maka_agent_facts::tool_call::ToolOrigin;
 use maka_presentation::ProjectionError;
-use sqlx::SqliteConnection;
+use rusqlite::{Connection as RawConnection, OptionalExtension, params};
 use std::collections::BTreeSet;
 
-/// Reconstruct one tool boundary, its T1 ancestry and its accepted provider step.
-/// Other steps, sibling outcomes and large unrelated tool payloads are excluded.
-pub(super) async fn selected(
-    tx: &mut SqliteConnection,
+const TOOL_KIND: &str =
+    r#"SELECT operation_id, kind FROM runtime_events WHERE sequence = ? AND invocation_id = ?"#;
+const TOOL_HEADER: &str = r#"SELECT sequence, json_extract(event_json, '$.fact.call.origin')
+             FROM runtime_events
+             WHERE invocation_id = ?1 AND operation_id = ?2 AND operation_id IS NOT NULL
+               AND kind = ?3 AND sequence <= ?4 LIMIT 1"#;
+const TOOL_MAIN: &str = r#"SELECT EXISTS(SELECT 1 FROM runtime_events request
+             JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
+             AND opening.kind = 'invocation_opened'
+             WHERE request.invocation_id = ?1 AND request.operation_id = ?2
+             AND request.kind = 'model_requested'
+             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
+             AND json_extract(request.event_json, '$.fact.purpose') = 'main')"#;
+
+/// Reconstruct one tool boundary, its actual dispatch ancestry and accepted
+/// provider step. Exclude sibling outcomes and unrelated raw payloads.
+pub(super) fn selected(
+    db: &RawConnection,
     invocation: &str,
     through: i64,
 ) -> Result<Vec<i64>, StoreError> {
-    let (operation, kind): (String, String) = sqlx::query_as(
-        "SELECT operation_id, kind FROM runtime_events WHERE sequence = ? AND invocation_id = ?",
-    )
-    .bind(through)
-    .bind(invocation)
-    .fetch_one(&mut *tx)
-    .await?;
+    let (operation, kind): (String, String) = db
+        .prepare_cached(TOOL_KIND)?
+        .query_row(params![through, invocation], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
     let mut ids = BTreeSet::from([through]);
     let mut current = operation;
     let mut before = through;
@@ -46,22 +58,22 @@ pub(super) async fn selected(
         if ids.len() > 33 {
             return Err(StoreError::PrefixTooLarge);
         }
-        let header: Option<(i64, String)> = sqlx::query_as(
-            "SELECT sequence, json_extract(event_json, '$.fact.call.origin')
-             FROM runtime_events
-             WHERE invocation_id = ?1 AND operation_id = ?2 AND operation_id IS NOT NULL
-               AND kind = ?3 AND sequence <= ?4 LIMIT 1",
-        )
-        .bind(invocation)
-        .bind(&current)
-        .bind(if rejected {
-            "tool_rejected"
-        } else {
-            "tool_dispatched"
-        })
-        .bind(before)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let header: Option<(i64, String)> = db
+            .prepare_cached(TOOL_HEADER)?
+            .query_row(
+                params![
+                    invocation,
+                    &current,
+                    if rejected {
+                        "tool_rejected"
+                    } else {
+                        "tool_dispatched"
+                    },
+                    before
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
         let Some((sequence, origin)) = header else {
             return Err(
                 ProjectionError::Invalid("tool presentation has no dispatch provenance").into(),
@@ -97,23 +109,19 @@ pub(super) async fn selected(
         }
     };
     if let Some(step) = &step {
-        let main: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events request
-             JOIN runtime_events opening ON opening.invocation_id = request.invocation_id
-             AND opening.kind = 'invocation_opened'
-             WHERE request.invocation_id = ?1 AND request.operation_id = ?2
-             AND request.kind = 'model_requested'
-             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
-             AND json_extract(request.event_json, '$.fact.purpose') = 'main')",
-        )
-        .bind(invocation)
-        .bind(step)
-        .fetch_one(&mut *tx)
-        .await?;
+        let main: bool = db
+            .prepare_cached(TOOL_MAIN)?
+            .query_row(params![invocation, step], |row| row.get(0))?;
         if !main {
             return Err(ProjectionError::Invalid("tool belongs to a non-main step").into());
         }
     }
-    let ids = serde_json::to_string(&ids)?;
-    evidence::read_step(tx, invocation, step.as_deref(), through, &ids, true).await
+    evidence::read_step(
+        db,
+        invocation,
+        step.as_deref(),
+        through,
+        &serde_json::to_string(&ids)?,
+        true,
+    )
 }

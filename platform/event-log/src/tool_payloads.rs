@@ -25,6 +25,7 @@ use maka_agent_facts::event::ToolOutcome;
 use maka_agent_facts::tool_output::MAX_RAW_TOOL_RESULT_BYTES;
 use maka_agent_facts::tool_output::ToolOutput;
 use maka_agent_facts::tool_output::decode_raw_tool_result;
+use rusqlite::{Connection as RawConnection, OptionalExtension, params};
 use sqlx::{Connection, SqliteConnection};
 
 use crate::{EventLog, StoreError};
@@ -157,9 +158,14 @@ pub(crate) async fn verify_replay(
     Ok(())
 }
 
-/// Selected T2 only. Rejoin canonical identity before accepting its raw evidence.
-pub(crate) async fn resolve_in_transaction(
-    connection: &mut SqliteConnection,
+const RAW_META: &str = r#"SELECT e.event_json, length(p.payload) FROM runtime_events e
+         LEFT JOIN tool_result_payloads p ON p.event_id = e.event_id WHERE e.event_id = ?"#;
+const RAW_BYTES: &str =
+    r#"SELECT payload FROM tool_result_payloads WHERE event_id = ? AND length(payload) = ?"#;
+
+/// Selected T2 only; proof and original payload reads share the caller snapshot.
+pub(crate) fn resolve_in_transaction(
+    db: &RawConnection,
     event: &RuntimeEvent,
 ) -> Result<ToolOutput, StoreError> {
     let Fact::ToolSettled {
@@ -169,13 +175,10 @@ pub(crate) async fn resolve_in_transaction(
     else {
         return Err(invalid());
     };
-    let row: Option<(String, Option<i64>)> = sqlx::query_as(
-        "SELECT e.event_json, length(p.payload) FROM runtime_events e
-         LEFT JOIN tool_result_payloads p ON p.event_id = e.event_id WHERE e.event_id = ?",
-    )
-    .bind(&event.id)
-    .fetch_optional(&mut *connection)
-    .await?;
+    let row: Option<(String, Option<i64>)> = db
+        .prepare_cached(RAW_META)?
+        .query_row([&event.id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
     let Some((canonical, bytes)) = row else {
         return Err(invalid());
     };
@@ -183,13 +186,9 @@ pub(crate) async fn resolve_in_transaction(
         return Err(invalid());
     }
     verify_binding(event, bytes)?;
-    let payload: Vec<u8> = sqlx::query_scalar(
-        "SELECT payload FROM tool_result_payloads WHERE event_id = ? AND length(payload) = ?",
-    )
-    .bind(&event.id)
-    .bind(raw.bytes as i64)
-    .fetch_one(connection)
-    .await?;
+    let payload: Vec<u8> = db
+        .prepare_cached(RAW_BYTES)?
+        .query_row(params![&event.id, raw.bytes as i64], |row| row.get(0))?;
     decode_raw_tool_result(&payload, raw).map_err(|_| invalid())
 }
 
@@ -213,7 +212,15 @@ impl EventLog {
             ).bind(event_id).bind(session_id).fetch_optional(&mut *tx).await?;
                     let event =
                         serde_json::from_str::<RuntimeEvent>(&canonical.ok_or_else(invalid)?)?;
-                    let output = resolve_in_transaction(&mut tx, &event).await?;
+                    let output = tx
+                        .run_on_worker(move |handle| {
+                            // SAFETY: exclusive callback-local non-owning connection;
+                            // raw payload and result are owned, no SQLite object escapes.
+                            let borrowed = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                            borrowed.set_prepared_statement_cache_capacity(100);
+                            resolve_in_transaction(&borrowed, &event)
+                        })
+                        .await??;
                     tx.commit().await?;
                     Ok(output)
                 })

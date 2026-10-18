@@ -17,10 +17,14 @@
   under the License.
 -->
 
-# SQLx SQLite owned startup
+# SQLx SQLite owner integration
 
 Sources and dual Apache-2.0/MIT licenses come from the published `sqlx-sqlite` 0.9.0 crate, [revision 003b698e99e024f3621b8043a2426fde5b741171](https://github.com/launchbadge/sqlx/tree/003b698e99e024f3621b8043a2426fde5b741171/sqlx-sqlite). `upstream.json` records each original file hash. Published license files are relative references; their full texts are included here from the same pinned repository revision, with URLs and hashes in `license_sources`. The normalized published manifest and production dependencies are unchanged. Three upstream documentation lines in `connection/deserialize.rs` have trailing whitespace removed for the source hooks; behavior is unchanged.
 
 The existing `SqliteConnection::establish` is public, and existing PRAGMA/collation configuration is moved into `configure(&mut self, options)`. Ordinary `ConnectOptions::connect` still delegates to the same steps. Maka's independent SQL owner retains the actual connection between establishment and configuration, waits for real close on startup failure, and keeps its original authority on unconfirmed cleanup. No second SQL worker, connection registry or error-string classification is added. `WorkerCrashed` during establishment is explicitly unconfirmed.
 
 中文：公开原有 establish，将 PRAGMA/collation 配置移为借用实际连接的 configure。普通 connect 保持原语义；Maka 原 SQL owner 先持有真实连接，再进行配置，启动错误须等真实关闭，无法确认时保留原 authority。没有新增 SQL owner 或执行注册表。
+
+`run_on_worker` submits one synchronous callback to the existing worker under its exclusive handle guard. The callback borrows the handle and returns owned data; its Rust panic resumes on the awaiting task. SQLx still owns transaction bookkeeping and physical close. Accepted callbacks continue if their observer disappears; abandoning a callback future alone does not guarantee rollback.
+
+中文：`run_on_worker` 将同步回调交给原工作线程，在原独占 guard 内借用句柄并返回自有数据；回调的 Rust panic 在等待方继续展开。事务记账和实际关闭仍由 SQLx 管理。等待方消失不取消已受理回调，单独丢弃回调 future 不保证回滚。

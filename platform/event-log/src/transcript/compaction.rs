@@ -18,14 +18,10 @@
  */
 
 use crate::{StoreError, sequence_number};
-use maka_agent_facts::history::RowPosition;
 use maka_presentation::{Content, Message, Row};
-use sqlx::{Row as SqlRow, SqliteConnection};
+use rusqlite::Connection as RawConnection;
 
-/// Project only adoption metadata, without hydrating the private summary body.
-pub(super) async fn project(tx: &mut SqliteConnection, sequence: i64) -> Result<Row, StoreError> {
-    let row = sqlx::query(
-        "SELECT c.event_id, json_extract(c.event_json, '$.invocation.turn_id') AS turn_id,
+const COMPACTION: &str = r#"SELECT c.event_id, json_extract(c.event_json, '$.invocation.turn_id') AS turn_id,
            catalog_time(json_extract(c.event_json, '$.recorded_at')) AS adopted_at,
            (SELECT catalog_time(json_extract(r.event_json, '$.recorded_at'))
             FROM runtime_events r
@@ -41,18 +37,31 @@ pub(super) async fn project(tx: &mut SqliteConnection, sequence: i64) -> Result<
          FROM runtime_events c JOIN runtime_events adopted
            ON adopted.invocation_id = c.invocation_id AND adopted.kind = 'model_requested'
            AND adopted.operation_id = json_extract(c.event_json, '$.fact.checkpoint.summary_step_id')
-         WHERE c.sequence = ? AND c.kind = 'context_checkpoint_recorded'"
-    ).bind(sequence).fetch_one(tx).await?;
-    let ts = sequence_number(row.try_get("adopted_at")?)?;
-    let started = sequence_number(row.try_get("started_at")?)?;
+         WHERE c.sequence = ? AND c.kind = 'context_checkpoint_recorded'"#;
+
+/// Project adoption metadata without hydrating the private summary body.
+pub(super) fn project(db: &RawConnection, sequence: i64) -> Result<Row, StoreError> {
+    use maka_agent_facts::history::RowPosition;
+    let (id, turn, adopted, started): (String, String, i64, i64) =
+        db.prepare_cached(COMPACTION)?
+            .query_row([sequence], |row| {
+                Ok((
+                    row.get("event_id")?,
+                    row.get("turn_id")?,
+                    row.get("adopted_at")?,
+                    row.get("started_at")?,
+                ))
+            })?;
+    let ts = sequence_number(adopted)?;
+    let started = sequence_number(started)?;
     Ok(Row {
         position: RowPosition {
             source_sequence: sequence_number(sequence)?,
             item_index: 0,
         },
         message: Message {
-            id: row.try_get("event_id")?,
-            turn_id: row.try_get("turn_id")?,
+            id,
+            turn_id: turn,
             ts,
             content: Content::ContextCompacted {
                 duration_ms: ts.saturating_sub(started),
@@ -65,7 +74,7 @@ pub(super) async fn project(tx: &mut SqliteConnection, sequence: i64) -> Result<
 mod tests {
     use super::*;
     use serde_json::json;
-    use sqlx::Connection;
+    use sqlx::{Connection, SqliteConnection};
     use std::time::{Duration, UNIX_EPOCH};
 
     #[tokio::test]
@@ -115,7 +124,15 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let row = project(&mut db, 4).await.unwrap();
+            let row = db
+                .run_on_worker(|handle| {
+                    // SAFETY: callback-local non-owning wrapper, no handle-backed result.
+                    let borrowed = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
+                    project(&borrowed, 4)
+                })
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(row.message.id, "event-4");
             assert_eq!(row.message.ts, 5500);
             assert_eq!(

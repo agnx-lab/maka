@@ -1,10 +1,12 @@
 use std::future::Future;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use futures_channel::oneshot;
 use futures_intrusive::sync::{Mutex, MutexGuard};
+use libsqlite3_sys::sqlite3;
 use sqlx_core::sql_str::SqlStr;
 use tracing::span::Span;
 
@@ -51,6 +53,9 @@ impl WorkerSharedState {
 }
 
 enum Command {
+    Call {
+        operation: Box<dyn FnOnce(NonNull<sqlite3>) + Send + 'static>,
+    },
     Prepare {
         query: SqlStr,
         tx: oneshot::Sender<Result<SqliteStatement, Error>>,
@@ -146,6 +151,9 @@ impl ConnectionWorker {
                 for (cmd, span) in command_rx {
                     let _guard = span.enter();
                     match cmd {
+                        Command::Call { operation } => {
+                            operation(conn.handle.as_non_null_ptr());
+                        }
                         Command::Prepare { query, tx } => {
                             tx.send(prepare(&mut conn, query)).ok();
 
@@ -345,6 +353,30 @@ impl ConnectionWorker {
             })?;
 
         establish_rx.await.map_err(|_| Error::WorkerCrashed)?
+    }
+
+    pub(crate) async fn run_on_worker<F, R>(&mut self, operation: F) -> Result<R, Error>
+    where
+        F: FnOnce(NonNull<sqlite3>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let outcome: std::thread::Result<R> = self
+            .oneshot_cmd(move |reply| Command::Call {
+                operation: Box::new(move |handle| {
+                    let outcome =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                            operation(handle)
+                        }));
+                    // Accepted callbacks run even after their observer disappears.
+                    // Failed delivery drops the owned outcome on this worker.
+                    let _ = reply.send(outcome);
+                }),
+            })
+            .await?;
+        match outcome {
+            Ok(value) => Ok(value),
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     pub(crate) async fn prepare(&mut self, query: SqlStr) -> Result<SqliteStatement, Error> {
