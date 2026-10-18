@@ -52,6 +52,8 @@ pub enum ShellError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("PTY replay failed: {0}")]
+    Replay(#[source] Arc<std::io::Error>),
     #[error(transparent)]
     Screen(#[from] maka_process::terminal::ScreenError),
     #[error(transparent)]
@@ -102,6 +104,8 @@ impl ShellResources {
         {
             return Err(ShellError::Rejected("invalid PTY launch"));
         }
+        // File creation never holds the shared active-map lock.
+        let output = output::Output::new(size, self.output_changes.clone())?;
         let mut active = self.active.lock().unwrap();
         if self.shutdown.is_cancelled() {
             return Err(ShellError::Rejected("shell resources are draining"));
@@ -121,7 +125,6 @@ impl ShellResources {
         let (commands, receiver) = mpsc::channel(8);
         let (updates, snapshot) = watch::channel(None);
         let cancellation = self.shutdown.child_token();
-        let output = output::Output::new(size, self.output_changes.clone());
         let stop = Arc::default();
         let handle = ShellHandle {
             control_gate: Arc::default(),
@@ -192,7 +195,7 @@ impl ShellResources {
             .cloned()
     }
 
-    /// Coalesced wakeups only; bytes and cursors remain in each shared PTY ring.
+    /// Coalesced wakeups only; bytes and cursors remain in each shared PTY replay.
     pub fn subscribe_output(&self) -> watch::Receiver<()> {
         self.output_changes.subscribe()
     }

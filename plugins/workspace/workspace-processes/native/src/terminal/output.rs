@@ -40,7 +40,7 @@ impl Processes {
             None => None,
         };
         let mut event = match &mut stream {
-            Some(stream) => project(stream.read()),
+            Some(stream) => project(stream.read().await.map_err(failed)?),
             None => OutputEvent::Unavailable {
                 reason: OutputUnavailable::NotRetained,
             },
@@ -49,13 +49,17 @@ impl Processes {
         loop {
             let terminal = matches!(
                 event,
-                OutputEvent::Gap { .. }
-                    | OutputEvent::Closed { .. }
-                    | OutputEvent::Unavailable { .. }
+                OutputEvent::Closed { .. } | OutputEvent::Unavailable { .. }
             );
             let value = completed(event)?;
             maka_plugin_core::json::check_delivery(&value, 48 * 1024).map_err(failed)?;
             if !watch {
+                if context.scope().cancellation.is_cancelled() {
+                    return Err(failed("Process operation cancelled"));
+                }
+                if self.drain.is_cancelled() {
+                    return Err(failed("Process owner is draining"));
+                }
                 return Ok(value);
             }
             // The retained output Arc conveys no Session authority of its own.
@@ -72,11 +76,14 @@ impl Processes {
             last = Some(value);
             // A nonterminal event necessarily came from this original stream.
             let stream = stream.as_mut().expect("active terminal output stream");
-            event = tokio::select! { biased;
+            tokio::select! { biased;
                 _ = context.scope().cancellation.cancelled() => return last.ok_or_else(|| failed("Process operation cancelled")),
                 _ = self.drain.cancelled() => return last.ok_or_else(|| failed("Process owner is draining")),
-                event = stream.next() => project(event),
-            };
+                () = stream.ready() => {},
+            }
+            // Once filesystem work starts, settle it before cancellation can
+            // complete this original Host call. Only the wait above is raced.
+            event = project(stream.read().await.map_err(failed)?);
         }
     }
 }
@@ -85,22 +92,41 @@ fn project(event: PtyStreamEvent) -> OutputEvent {
     match event {
         PtyStreamEvent::Data {
             sequence,
+            initial_size,
             size,
             bytes,
         } => OutputEvent::Data {
             sequence,
+            initial_size,
             size,
             data_base64: STANDARD.encode(bytes.as_ref()),
         },
-        PtyStreamEvent::Resize { sequence, size } => OutputEvent::Resize { sequence, size },
-        PtyStreamEvent::Gap {
-            after,
-            first_available,
-        } => OutputEvent::Gap {
-            after,
-            first_available,
+        PtyStreamEvent::Resize {
+            sequence,
+            initial_size,
+            size,
+        } => OutputEvent::Resize {
+            sequence,
+            initial_size,
+            size,
         },
-        PtyStreamEvent::Pending { after, size } => OutputEvent::Pending { after, size },
-        PtyStreamEvent::Closed { after, size } => OutputEvent::Closed { after, size },
+        PtyStreamEvent::Pending {
+            after,
+            initial_size,
+            size,
+        } => OutputEvent::Pending {
+            after,
+            initial_size,
+            size,
+        },
+        PtyStreamEvent::Closed {
+            after,
+            initial_size,
+            size,
+        } => OutputEvent::Closed {
+            after,
+            initial_size,
+            size,
+        },
     }
 }

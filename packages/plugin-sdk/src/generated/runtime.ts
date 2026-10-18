@@ -4283,27 +4283,26 @@ export type TerminalOutputEvent =
   | {
       sequence: number;
       size: TerminalSize;
+      initialSize: TerminalSize;
       dataBase64: string;
       kind: 'data';
     }
   | {
       sequence: number;
       size: TerminalSize;
+      initialSize: TerminalSize;
       kind: 'resize';
     }
   | {
       after: number;
-      firstAvailable: number;
-      kind: 'gap';
-    }
-  | {
-      after: number;
       size: TerminalSize;
+      initialSize: TerminalSize;
       kind: 'pending';
     }
   | {
       after: number;
       size: TerminalSize;
+      initialSize: TerminalSize;
       kind: 'closed';
     }
   | {

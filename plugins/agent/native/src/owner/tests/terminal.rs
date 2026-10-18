@@ -343,7 +343,7 @@ async fn output_through(
 }
 
 #[tokio::test]
-async fn terminal_raw_bytes_resize_resume_gap_and_observer_cancellation_preserve_native_owner() {
+async fn terminal_raw_bytes_full_resize_replay_and_observer_cancellation_preserve_native_owner() {
     tokio::time::timeout(Duration::from_secs(90), async {
         let (_, f, session) = processes::fixture().await;
         files::change(&f, &session, "danger_full_access", false, true).await;
@@ -358,13 +358,11 @@ async fn terminal_raw_bytes_resize_resume_gap_and_observer_cancellation_preserve
         let resized = json!({"cols":100,"rows":40});
 
         // Only the pre-script interactive prompt is intentionally discarded.
-        // A startup Gap is explicitly resumed before any promised payload exists.
         let mut after = 0;
         loop {
             let event = output_read(&f, &target, after).await;
             match event["kind"].as_str().unwrap() {
                 "data" | "resize" => after = event["sequence"].as_u64().unwrap(),
-                "gap" => after = event["firstAvailable"].as_u64().unwrap() - 1,
                 "pending" => break,
                 _ => panic!("interactive PTY unexpectedly unavailable: {event}"),
             }
@@ -422,34 +420,28 @@ printf '\342\202'
 
         // Resize receipts, not timed writes, force nine distinct ordered events
         // while the real script remains gated on its second ACK.
-        let before_gap = after;
+        let before_resizes = after;
         for index in 0..9u64 {
             let receipt = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":4+index,"size":{"cols":101+index,"rows":40}}), Uuid::new_v4()).await;
             assert_eq!(receipt["kind"], "completed", "observer cancellation must leave its independent controller usable: {receipt}");
             assert_eq!(receipt["value"]["resizeChanged"], true);
         }
-        let gap = output_read(&f, &target, before_gap).await;
-        assert_eq!(gap["kind"], "gap", "{gap}");
-        assert_eq!(gap["after"], before_gap);
-        assert!(gap["firstAvailable"].as_u64().unwrap() > before_gap + 1);
-        let mut lost = subscribe(&f, &owner, "watchOutput", output_request(&target, before_gap)).await;
-        assert_eq!(output_event(lost.recv().await.unwrap()), gap);
-        assert!(lost.recv().await.is_none(), "a Gap must finish this watch");
-        let completed = lost.completion().await;
-        completed.cleanup.unwrap();
-        assert_eq!(output_event(completed.result.unwrap()), gap);
-        after = gap["firstAvailable"].as_u64().unwrap() - 1;
-        for col in 102..=109 {
-            let event = output_read(&f, &target, after).await;
+        let mut replay = subscribe(&f, &owner, "watchOutput", output_request(&target, before_resizes)).await;
+        for col in 101..=109 {
+            let event = output_event(replay.recv().await.unwrap());
             assert_eq!(event["kind"], "resize", "{event}");
             assert_eq!(event["sequence"], after + 1);
             assert_eq!(event["size"], json!({"cols":col,"rows":40}));
+            assert_eq!(event["initialSize"], original_size);
+            assert_eq!(output_read(&f, &target, after).await, event);
             after += 1;
         }
+        replay.cancel();
+        replay.completion().await.cleanup.unwrap();
         let final_size = json!({"cols":109,"rows":40});
-        assert_eq!(output_read(&f, &target, after).await, json!({"kind":"pending","after":after,"size":final_size}));
+        assert_eq!(output_read(&f, &target, after).await, json!({"kind":"pending","after":after,"size":final_size,"initialSize":original_size}));
         let mut resumed = subscribe(&f, &owner, "watchOutput", output_request(&target, after)).await;
-        assert_eq!(output_event(resumed.recv().await.unwrap()), json!({"kind":"pending","after":after,"size":final_size}), "the final observer must be attached before releasing the child");
+        assert_eq!(output_event(resumed.recv().await.unwrap()), json!({"kind":"pending","after":after,"size":final_size,"initialSize":original_size}), "the final observer must be attached before releasing the child");
         let ack = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":13,"actions":[{"type":"text","text":"y"}]}), Uuid::new_v4()).await;
         assert_eq!(ack["kind"], "completed", "{ack}");
         loop {

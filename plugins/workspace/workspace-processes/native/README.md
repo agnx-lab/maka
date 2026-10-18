@@ -25,6 +25,6 @@ Provides workspace command, terminal and protocol-process services. `protocol` h
 
 `health` (the default `BackgroundTaskHealth` model tool) reads the original session-owned process record. Logs require `include_logs: true`. An optional HTTP(S) URL is probed by the bound Web service under separate network permission; the process result and endpoint observation are independent. A responding endpoint proves neither listener ownership nor browser readiness. Health calls and their nested probes retain original operation receipts.
 
-The Terminal [raw output contract](../../api/README.md) uses the original PTY owner and its bounded in-memory ring. Closing an output observer leaves the process and controller unchanged; existing sequenced control and mutation receipts retain their original authority.
+The Terminal [raw output contract](../../api/README.md) uses the original PTY owner and complete replay in two resource-owned anonymous temporary files. Temporary storage grows with output and is released when the original resource and all existing readers are dropped. Closing an output observer leaves the process and controller unchanged; existing sequenced control and mutation receipts retain their original authority.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

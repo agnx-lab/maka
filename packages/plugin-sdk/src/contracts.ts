@@ -38972,6 +38972,9 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       dataBase64: {
                         type: 'string',
                         minLength: 1,
@@ -38982,7 +38985,7 @@ export const contracts = {
                         const: 'data',
                       },
                     },
-                    required: ['kind', 'sequence', 'size', 'dataBase64'],
+                    required: ['kind', 'sequence', 'size', 'initialSize', 'dataBase64'],
                   },
                   {
                     type: 'object',
@@ -38997,35 +39000,15 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       kind: {
                         type: 'string',
                         const: 'resize',
                       },
                     },
-                    required: ['kind', 'sequence', 'size'],
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      after: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                        maximum: 9007199254740991,
-                      },
-                      firstAvailable: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 1,
-                        maximum: 9007199254740991,
-                      },
-                      kind: {
-                        type: 'string',
-                        const: 'gap',
-                      },
-                    },
-                    required: ['kind', 'after', 'firstAvailable'],
+                    required: ['kind', 'sequence', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',
@@ -39038,6 +39021,9 @@ export const contracts = {
                         maximum: 9007199254740991,
                       },
                       size: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
+                      initialSize: {
                         $ref: '#/$defs/TerminalSize',
                       },
                       kind: {
@@ -39045,7 +39031,7 @@ export const contracts = {
                         const: 'pending',
                       },
                     },
-                    required: ['kind', 'after', 'size'],
+                    required: ['kind', 'after', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',
@@ -39060,12 +39046,15 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       kind: {
                         type: 'string',
                         const: 'closed',
                       },
                     },
-                    required: ['kind', 'after', 'size'],
+                    required: ['kind', 'after', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',
@@ -40695,6 +40684,9 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       dataBase64: {
                         type: 'string',
                         minLength: 1,
@@ -40705,7 +40697,7 @@ export const contracts = {
                         const: 'data',
                       },
                     },
-                    required: ['kind', 'sequence', 'size', 'dataBase64'],
+                    required: ['kind', 'sequence', 'size', 'initialSize', 'dataBase64'],
                   },
                   {
                     type: 'object',
@@ -40720,35 +40712,15 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       kind: {
                         type: 'string',
                         const: 'resize',
                       },
                     },
-                    required: ['kind', 'sequence', 'size'],
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      after: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                        maximum: 9007199254740991,
-                      },
-                      firstAvailable: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 1,
-                        maximum: 9007199254740991,
-                      },
-                      kind: {
-                        type: 'string',
-                        const: 'gap',
-                      },
-                    },
-                    required: ['kind', 'after', 'firstAvailable'],
+                    required: ['kind', 'sequence', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',
@@ -40761,6 +40733,9 @@ export const contracts = {
                         maximum: 9007199254740991,
                       },
                       size: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
+                      initialSize: {
                         $ref: '#/$defs/TerminalSize',
                       },
                       kind: {
@@ -40768,7 +40743,7 @@ export const contracts = {
                         const: 'pending',
                       },
                     },
-                    required: ['kind', 'after', 'size'],
+                    required: ['kind', 'after', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',
@@ -40783,12 +40758,15 @@ export const contracts = {
                       size: {
                         $ref: '#/$defs/TerminalSize',
                       },
+                      initialSize: {
+                        $ref: '#/$defs/TerminalSize',
+                      },
                       kind: {
                         type: 'string',
                         const: 'closed',
                       },
                     },
-                    required: ['kind', 'after', 'size'],
+                    required: ['kind', 'after', 'size', 'initialSize'],
                   },
                   {
                     type: 'object',

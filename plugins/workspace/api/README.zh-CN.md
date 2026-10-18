@@ -23,6 +23,6 @@
 
 定义工作区文件、进程、终端、协议进程和 Jev 的共用契约。原生提供方与开发工具使用相同声明。请求路径和工作区标识用于描述选择；提供方仍需检查实际绑定目录和调用权限。
 
-Terminal 契约还提供 `readOutput` 和 `watchOutput`，按顺序读取原始 PTY 字节（Base64）及尺寸变化事件。每次读取返回一个事件；缓冲最多保留八个事件，每个数据事件最多包含 16 KiB 字节。`after` 游标必须与原始目标一起保留。`Gap` 会结束订阅并报告最早保留的事件；如需继续，应显式从 `firstAvailable - 1` 恢复。保留的尾段不能还原完整终端状态。原始输出是临时数据：退出或重启后新接入会报告 `Unavailable`，屏幕及历史读取仍可使用。`Closed` 表示输出结束，不代表进程清理已确认。输出观察需要显式方法权限，不需要控制器。
+Terminal 契约提供 `readOutput` 和 `watchOutput`，完整保留原 live resource 的有序 PTY 字节（Base64）及原生尺寸变化。每个数据事件最多 16 KiB，资源持有期间保留全部事件。`after` 必须与原始目标一起保留。新 parser 直接订阅 `watchOutput(after: 0)`，按首个保留事件的 `initialSize` 初始化一次，再依序处理全部 Data/Resize；状态完整的 parser 可从已知序号继续。已取得的 reader 可在 worker 退休后排完数据，但退休或 Host 重启后的新接入返回 `Unavailable`；先前的 `readOutput` 不为后续请求保活。真实 replay I/O 错误使调用失败。纯文本屏幕不是完整 parser checkpoint。`Closed` 只表示字节源关闭，不代表进程清理已确认。输出观察需要显式方法权限，不需要控制器。
 
 [源码](src/lib.rs) · [Cargo 配置](Cargo.toml)

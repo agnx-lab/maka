@@ -25,6 +25,6 @@
 
 `health`（默认模型工具 `BackgroundTaskHealth`）读取当前会话原有的进程记录，只有 `include_logs: true` 才返回日志。可选 HTTP(S) 地址由绑定的 Web 服务在独立网络授权下探测；进程状态与端点观测互相独立，端点响应不能证明监听进程归属或浏览器就绪。健康检查及嵌套探测均保留原始操作回执。
 
-Terminal [原始输出契约](../../api/README.zh-CN.md)复用原有 PTY owner 及其有界内存缓冲。关闭输出观察不会改变进程或控制器，现有顺序控制和 mutation 回执仍保留原有权威。
+Terminal [原始输出契约](../../api/README.zh-CN.md)复用原有 PTY owner 及由该资源拥有的两个匿名临时文件，保留完整 replay。临时存储随输出增长，原资源和全部现有 reader 释放后回收。关闭输出观察不会改变进程或控制器，现有顺序控制和 mutation 回执仍保留原有权威。
 
 [源码](src/lib.rs) · [Cargo 配置](Cargo.toml)

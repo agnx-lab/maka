@@ -76,6 +76,7 @@ pub enum OutputEvent {
         #[schemars(range(min = 1, max = 9007199254740991u64))]
         sequence: u64,
         size: TerminalSize,
+        initial_size: TerminalSize,
         #[schemars(length(min = 1, max = 21848))]
         data_base64: String,
     },
@@ -83,22 +84,19 @@ pub enum OutputEvent {
         #[schemars(range(min = 1, max = 9007199254740991u64))]
         sequence: u64,
         size: TerminalSize,
-    },
-    Gap {
-        #[schemars(range(max = 9007199254740991u64))]
-        after: u64,
-        #[schemars(range(min = 1, max = 9007199254740991u64))]
-        first_available: u64,
+        initial_size: TerminalSize,
     },
     Pending {
         #[schemars(range(max = 9007199254740991u64))]
         after: u64,
         size: TerminalSize,
+        initial_size: TerminalSize,
     },
     Closed {
         #[schemars(range(max = 9007199254740991u64))]
         after: u64,
         size: TerminalSize,
+        initial_size: TerminalSize,
     },
     Unavailable {
         reason: OutputUnavailable,

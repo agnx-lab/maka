@@ -232,22 +232,24 @@ pub(super) async fn drain(
 mod tests {
     use super::Decoder;
 
-    #[test]
-    fn raw_output_preserves_native_bytes_before_screen_decoding() {
+    #[tokio::test]
+    async fn raw_output_preserves_native_bytes_before_screen_decoding() {
         use super::{Output, Terminal};
         use maka_agent_facts::terminal::TerminalSize;
 
         let size = TerminalSize::new(80, 24).unwrap();
-        let output = Output::new(size, tokio::sync::watch::channel(()).0);
+        let output = Output::new(size, tokio::sync::watch::channel(()).0).unwrap();
         let mut terminal = Terminal::new(size, output.clone());
-        // Exercise the actual Host decoder/parser/ring path. These supplied
+        // Exercise the actual Host decoder/parser/replay path. These supplied
         // native-byte cuts are not a claim of OS PTY transport verification.
         terminal.output(b"\xff\0\x1b[31m\xe4", false).unwrap();
         terminal.output(b"\xb8\xad\x1b[0m", false).unwrap();
         terminal.output(b"\xe2\x82", true).unwrap();
         let mut stream = output.stream(0).unwrap();
         let mut raw = Vec::new();
-        while let super::super::output::PtyStreamEvent::Data { bytes, .. } = stream.read() {
+        while let super::super::output::PtyStreamEvent::Data { bytes, .. } =
+            stream.read().await.unwrap()
+        {
             raw.extend_from_slice(&bytes);
         }
         assert_eq!(
@@ -257,14 +259,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parser_failure_and_later_drain_preserve_original_raw_bytes() {
+    #[tokio::test]
+    async fn parser_failure_and_later_drain_preserve_original_raw_bytes() {
         use super::super::output::PtyStreamEvent;
         use super::{Output, Terminal};
         use maka_agent_facts::terminal::TerminalSize;
 
         let size = TerminalSize::new(80, 24).unwrap();
-        let output = Output::new(size, tokio::sync::watch::channel(()).0);
+        let output = Output::new(size, tokio::sync::watch::channel(()).0).unwrap();
         let mut terminal = Terminal::new(size, output.clone());
         terminal.output(b"\x1b]0;", false).unwrap();
         let chunk = vec![b'x'; 16 * 1024];
@@ -279,7 +281,7 @@ mod tests {
         expected.extend_from_slice(b"final-drain\xff");
         let mut stream = output.stream(0).unwrap();
         let mut raw = Vec::new();
-        while let PtyStreamEvent::Data { bytes, .. } = stream.read() {
+        while let PtyStreamEvent::Data { bytes, .. } = stream.read().await.unwrap() {
             raw.extend_from_slice(&bytes);
         }
         assert_eq!(raw, expected);
