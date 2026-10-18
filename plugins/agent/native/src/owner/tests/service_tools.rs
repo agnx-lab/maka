@@ -153,7 +153,7 @@ pub(super) struct Setup {
     counter: Option<Arc<Counter>>,
     echo: bool,
     granted: bool,
-    nestable: bool,
+    pub(super) nestable: bool,
     query: bool,
     questions: bool,
     forms: bool,

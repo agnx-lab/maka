@@ -81,8 +81,11 @@ pub(super) async fn reopen(f: &mut Fixture) {
 #[tokio::test]
 async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool() {
     tokio::time::timeout(Duration::from_secs(90), async {
+        for reader in ["Read", "WorkspaceFile"] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let setup = service_tools::Setup::files("readText").named("Read");
+        let mut setup = service_tools::Setup::files("readText").named(reader);
+        setup.nestable = true;
+        let original_description = setup.selection().description;
         let policy = setup.policy();
         let mut f = Fixture::configured(
             &format!("http://{}/v1", listener.local_addr().unwrap()),
@@ -113,7 +116,10 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         f.send(&session).await.unwrap();
         let (mut socket, _) = listener.accept().await.unwrap();
         let sent = request(&mut socket).await;
-        let selected_read = sent["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "Read");
+        let selected_reader = sent["tools"].as_array().unwrap().iter()
+            .find(|tool| tool["function"]["name"] == reader).cloned();
+        let advertises_read = sent["tools"].as_array().unwrap().iter()
+            .any(|tool| tool["function"]["name"] == "Read");
         service_tools::named_tool_response(&mut socket, "todo_write", json!({"todos":items})).await;
 
         let (mut socket, _) = listener.accept().await.unwrap();
@@ -126,7 +132,7 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         while next.is_object() {
             // Every page is requested through the actual model with exactly the
             // prior tool's next object, never a manufactured cursor/store read.
-            service_tools::named_tool_response(&mut socket, "Read", next).await;
+            service_tools::named_tool_response(&mut socket, reader, next).await;
             let (mut received, _) = listener.accept().await.unwrap();
             let sent = request(&mut received).await;
             let result: Value = serde_json::from_str(last_tool(&sent)).unwrap();
@@ -143,12 +149,41 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         f.send(&other).await.unwrap();
         let (mut socket, _) = listener.accept().await.unwrap();
         request(&mut socket).await;
-        service_tools::named_tool_response(&mut socket, "Read", first_next.clone()).await;
+        service_tools::named_tool_response(&mut socket, reader, first_next.clone()).await;
         let (mut socket, _) = listener.accept().await.unwrap();
         let sent = request(&mut socket).await;
         let foreign: Value = serde_json::from_str(last_tool(&sent)).unwrap();
         response(&mut socket).await;
         f.drained().await;
+
+        let code_result = if reader == "WorkspaceFile" {
+            selection::edit(&f, |changes| {
+                changes.model_overrides = Patch::Set(BTreeMap::from([("fixture-model".into(), ModelOverride {
+                    code_mode: Some(true), context_window: Some(1_000_000), input_limit: Some(900_000), ..Default::default()
+                })]));
+            }).await;
+            f.send(&session).await.unwrap();
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let code_request = request(&mut socket).await;
+            let code = format!(
+                "const reader = ALL_TOOLS.find(tool => tool.name === 'WorkspaceFile'); if (!reader || !reader.description.includes({description}) || !reader.description.includes('archived tool-result') || !reader.description.includes('page.next')) throw Error('archive reader metadata missing'); const actual = await tools.WorkspaceFile({next}); const expected = {expected}; if (JSON.stringify(actual) !== JSON.stringify(expected)) throw Error('archive page differs from Direct'); text('k68-alias-archive-recovered');",
+                description = serde_json::to_string(&original_description).unwrap(),
+                next = first_next,
+                expected = recovery_results[0],
+            );
+            service_tools::named_tool_response(&mut socket, "exec", json!({"code":code})).await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let code_response = request(&mut socket).await;
+            let output = last_tool(&code_response).to_owned();
+            response(&mut socket).await;
+            f.drained().await;
+            selection::edit(&f, |changes| {
+                changes.model_overrides = Patch::Set(BTreeMap::from([("fixture-model".into(), ModelOverride {
+                    code_mode: Some(false), context_window: Some(1_000_000), input_limit: Some(900_000), ..Default::default()
+                })]));
+            }).await;
+            Some((code_request, output))
+        } else { None };
 
         let deployment = f.app.source().unwrap().deployment;
         f.app.shutdown().await.unwrap();
@@ -169,7 +204,7 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         f.send(&session).await.unwrap();
         let (mut socket, _) = listener.accept().await.unwrap();
         request(&mut socket).await;
-        service_tools::named_tool_response(&mut socket, "Read", first_next.clone()).await;
+        service_tools::named_tool_response(&mut socket, reader, first_next.clone()).await;
         let (mut socket, _) = listener.accept().await.unwrap();
         let sent = request(&mut socket).await;
         let restarted_raw = last_tool(&sent).to_owned();
@@ -198,8 +233,20 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         // failure paths, so no failing recovery assertion abandons the Host.
         let restarted: Value = serde_json::from_str(&restarted_raw)
             .unwrap_or_else(|error| panic!("restarted Read returned non-JSON after cleanup: {error}; raw={restarted_raw:?}"));
-        assert!(selected_read, "the original model request must select the genuine Read binding");
+        let selected_reader = selected_reader.expect("the original model request must select the genuine reader binding");
+        let description = selected_reader["function"]["description"].as_str().unwrap();
+        assert!(description.contains(&original_description), "{selected_reader}");
+        assert!(description.contains("archived tool-result") && description.contains("page.next"), "{selected_reader}");
+        if let Some((code_request, output)) = code_result {
+            assert!(!advertises_read, "an aliased reader must not invent a Read tool");
+            assert!(code_request["tools"].as_array().unwrap().iter()
+                .any(|tool| tool["function"]["name"] == "exec"));
+            assert_eq!(output.matches("k68-alias-archive-recovered").count(), 1, "{output}");
+            assert!(!output.contains("\"ok\":false"), "{output}");
+        }
         assert_eq!(archived["kind"], "maka.archived_tool_result");
+        assert!(archived.to_string().encode_utf16().count()
+            <= maka_agent_facts::read::MAX_PAGE_CHARS);
         assert_eq!(archived["toolName"], "todo_write");
         assert!(first_next.is_object(), "the oversized original must advertise next");
         let maka_agent_facts::tool_output::ToolOutput::Json(document) = source_output else {
@@ -242,6 +289,7 @@ async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool(
         let archives = original.events.iter().filter(|event| matches!(&event.event.fact, Fact::ToolResultArchived { .. })).count();
         assert_eq!(archives, source_archives, "bounded recovery pages must not acquire their own archive replacements");
         assert_eq!(source_archives, 1);
+        }
     }).await.unwrap();
 }
 
@@ -251,6 +299,7 @@ async fn todo_real_model_direct_and_code_mode_keep_full_list_isolation_and_resta
         for code in [false, true] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let mut f = fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+            let no_service_bindings = f.owner.tool_basis.is_empty();
             selection::edit(&f, |changes| {
                 changes.model_overrides = Patch::Set(BTreeMap::from([("fixture-model".into(), ModelOverride { code_mode: Some(code), context_window: Some(1_000_000), input_limit: Some(900_000), ..Default::default() })]));
             }).await;
@@ -266,15 +315,17 @@ async fn todo_real_model_direct_and_code_mode_keep_full_list_isolation_and_resta
             service_tools::named_tool_response(&mut socket, tool, input).await;
             let (mut socket, _) = listener.accept().await.unwrap();
             let written = request(&mut socket).await;
-            if code {
+            let direct_archive = if code {
                 assert!(last_tool(&written).contains("239"), "Code Mode must read the complete list");
+                None
             } else {
                 // Ordinary large tool results use the existing bounded archive projection.
                 let archived: Value = serde_json::from_str(last_tool(&written)).unwrap();
                 assert_eq!(archived["kind"], "maka.archived_tool_result");
                 assert_eq!(archived["toolName"], "todo_write");
                 assert!(archived["page"]["next"].is_object());
-            }
+                Some(archived)
+            };
             if !code {
                 service_tools::named_tool_response(&mut socket,"todo_read",json!({})).await;
                 let (mut next, _) = listener.accept().await.unwrap();
@@ -316,6 +367,15 @@ async fn todo_real_model_direct_and_code_mode_keep_full_list_isolation_and_resta
             assert_eq!(page(&f,&other,0).await["total"],0);
             f.app.shutdown().await.unwrap();
             f.config.shutdown().await.unwrap();
+            if let Some(archived) = direct_archive {
+                // This fixture selected no service bindings, including Files under any alias.
+                assert!(no_service_bindings);
+                assert!(sent["tools"].as_array().unwrap().iter()
+                    .all(|tool| tool["function"]["name"] != "Read"), "{sent}");
+                assert!(archived["page"]["next"].is_object());
+                assert_eq!(archived["readInstructions"],
+                    "Use page.next only with a selected Session tool-result reader; without one, the remainder is unavailable.");
+            }
         }
     }).await.unwrap();
 }

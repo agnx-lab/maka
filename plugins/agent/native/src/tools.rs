@@ -278,11 +278,15 @@ pub(crate) fn catalog(
                     }),
                 ));
             }
+            let mut description = selection.description.clone();
+            if binding.contract() == &file_contract && selection.method == "readText" {
+                description.push_str("\n\nReads Session attachment and archived tool-result resources. Pass page.next unchanged to this tool to continue.");
+            }
             Ok(ToolRegistration {
                 definition: ToolDefinition {
                     provider: None,
                     name: selection.name.clone(),
-                    description: selection.description.clone(),
+                    description,
                     input_schema,
                     output_schema: match selection.result {
                         ToolResult::Json => Some(method.output.clone()),

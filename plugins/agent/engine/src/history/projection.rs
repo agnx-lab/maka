@@ -221,10 +221,14 @@ pub(super) fn build<'a>(
                         "archive replacement is not a JSON page".into(),
                     ));
                 };
+                // Store verification retains the canonical codec; only current
+                // presentation describes the capability needed for continuation.
+                let mut value = value.clone();
+                value["readInstructions"] = "Use page.next only with a selected Session tool-result reader; without one, the remainder is unavailable.".into();
                 let output = if archived.is_error {
-                    ToolOutput::ErrorJson(value.clone())
+                    ToolOutput::ErrorJson(value)
                 } else {
-                    ToolOutput::Json(value.clone())
+                    ToolOutput::Json(value)
                 };
                 messages.push(tool_message(
                     id,

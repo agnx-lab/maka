@@ -53,12 +53,7 @@ export function installation(
       confirmation: 'preapproved',
       nestable: ['files', 'processes', 'web', 'skills'].includes(service),
     });
-  add(
-    'files',
-    'readText',
-    'Read',
-    'Read text from a file in the selected workspace or a Session attachment/archive resource. Pass a returned page.next object unchanged to continue reading.',
-  );
+  add('files', 'readText', 'Read', 'Read text from a file in the selected workspace.');
   add('files', 'readImage', 'ReadImage', 'Read an image in the selected workspace.', 'image');
   add('files', 'glob', 'Glob', 'Find files in the selected workspace.');
   add('files', 'grep', 'Grep', 'Search file contents in the selected workspace.');

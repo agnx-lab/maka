@@ -122,6 +122,7 @@ pub struct ArchivedToolResult {
     pub event_id: String,
     pub invocation: maka_agent_facts::event::Invocation,
     pub operation_id: String,
+    /// Canonical archive evidence; current model guidance is projected after verification.
     pub replacement: maka_agent_facts::tool_output::DurableToolProjection,
     pub is_error: bool,
 }

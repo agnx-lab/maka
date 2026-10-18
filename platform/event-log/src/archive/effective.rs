@@ -127,7 +127,7 @@ async fn fold_selected(
             .await?
             .ok_or(ArchiveError::Corrupt)?;
             let replacement = placeholder
-                .to_model_projection()
+                .to_canonical_projection()
                 .map_err(|_| ArchiveError::Corrupt)?;
             let replacement_digest =
                 projection_digest(&replacement).map_err(|_| ArchiveError::Corrupt)?;

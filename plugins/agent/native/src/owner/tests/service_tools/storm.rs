@@ -270,11 +270,12 @@ async fn serve(
                         summary.checkpoint_id = Some(stored.event.id);
                     }
                     Fact::ToolResultArchived { placeholder } => {
-                        let DurableToolProjection::Json { value } =
-                            placeholder.to_model_projection().unwrap()
+                        let DurableToolProjection::Json { mut value } =
+                            placeholder.to_canonical_projection().unwrap()
                         else {
                             panic!("archive projection")
                         };
+                        value["readInstructions"] = "Use page.next only with a selected Session tool-result reader; without one, the remainder is unavailable.".into();
                         archives
                             .insert(placeholder.identity.tool_call_id, (stored.sequence, value));
                     }

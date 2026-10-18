@@ -391,7 +391,7 @@
     "products/maka/bundle/package.json": "dd17e0a82ab68c03cdfd8adb3e243d4c5e881530db66ff311cb642b3bdc1f7c0",
     "products/maka/bundle/scripts/build.mjs": "db11d8cd6f29ef7ead087261848568da1ad3889a870a89f23fa969449d769d47",
     "products/maka/bundle/src/composition.ts": "1615a7c723ec37679108d7e2da5d718068ed919b39b57dfde14fb8a5c3f7345c",
-    "products/maka/bundle/src/installation.ts": "df8f08d67cf6f8cb2367b1a5c1bdc61db694696a89f928a97d0f6895ed8ab95d",
+    "products/maka/bundle/src/installation.ts": "614e9ed4ee41c26f9a398da21b1c5a4b41d91a22080a472d64207c5826e491fc",
     "products/maka/cli/Cargo.toml": "2a41d9dd434d08bb62cfe784e32b9e9facd41c58bbe9eb1b809b3fde3a2ed446",
     "products/maka/cli/build.rs": "852960c81f7f6ee03e882eabfa07603bcb8727b98f22a3e6e2552e6e375668cd",
     "products/maka/cli/build/product.rs": "6302eefa7c818dbd73e75f7796d331542315b79032a62727fa43f53413c25766",

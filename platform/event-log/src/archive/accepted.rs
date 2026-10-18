@@ -229,7 +229,7 @@ pub(crate) async fn archived(
         invocation: serde_json::from_str(&invocation)?,
         operation_id,
         replacement: placeholder
-            .to_model_projection()
+            .to_canonical_projection()
             .map_err(|_| ArchiveError::Corrupt)?,
         is_error,
     }))

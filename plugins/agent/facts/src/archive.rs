@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_ARCHIVE_REF_CHARS: usize = 16_384;
-pub const ARCHIVE_READ_INSTRUCTIONS: &str = "Read the page below; pass page.next to Read to continue. The address is a Session resource, not a workspace file.";
+const ARCHIVE_READ_INSTRUCTIONS: &str = "Read the page below; pass page.next to Read to continue. The address is a Session resource, not a workspace file.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -60,7 +60,7 @@ pub struct ArchivedPlaceholder {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ModelHeader<'a> {
+struct CanonicalHeader<'a> {
     kind: &'static str,
     resource_ref: String,
     tool_name: &'a str,
@@ -70,9 +70,9 @@ struct ModelHeader<'a> {
 }
 
 #[derive(Serialize)]
-struct ModelPlaceholder<'a> {
+struct CanonicalPlaceholder<'a> {
     #[serde(flatten)]
-    header: ModelHeader<'a>,
+    header: CanonicalHeader<'a>,
     page: &'a ReadPage,
 }
 
@@ -119,7 +119,7 @@ impl ArchivedPlaceholder {
             original_bytes: bytes.len() as u64,
         };
         identity.validate()?;
-        let header = model_header(&identity)?;
+        let header = canonical_header(&identity)?;
         // Inserting ,"page": into the header adds eight characters.
         let overhead = serde_json::to_string(&header)
             .map_err(|_| "invalid archive header")?
@@ -155,32 +155,33 @@ impl ArchivedPlaceholder {
         if self.original_estimated_tokens > 9_007_199_254_740_991 {
             return Err("archive exceeds token limit");
         }
-        let model = self.model_value()?;
+        let model = self.canonical_value()?;
         if model.to_string().encode_utf16().count() > MAX_PAGE_CHARS {
             return Err("archive exceeds model page limit");
         }
         Ok(())
     }
 
-    /// Publish the frozen page, never a freshly re-rendered approximation of it.
-    pub fn to_model_projection(&self) -> Result<DurableToolProjection, &'static str> {
+    /// Canonical evidence codec; Engine projects current guidance separately.
+    /// Preserve the frozen page and header for source verification.
+    pub fn to_canonical_projection(&self) -> Result<DurableToolProjection, &'static str> {
         self.validate()?;
         Ok(DurableToolProjection::Json {
-            value: self.model_value()?,
+            value: self.canonical_value()?,
         })
     }
 
-    fn model_value(&self) -> Result<serde_json::Value, &'static str> {
-        serde_json::to_value(ModelPlaceholder {
-            header: model_header(&self.identity)?,
+    fn canonical_value(&self) -> Result<serde_json::Value, &'static str> {
+        serde_json::to_value(CanonicalPlaceholder {
+            header: canonical_header(&self.identity)?,
             page: &self.page,
         })
         .map_err(|_| "invalid archive projection")
     }
 }
 
-fn model_header(identity: &ArchiveIdentity) -> Result<ModelHeader<'_>, &'static str> {
-    Ok(ModelHeader {
+fn canonical_header(identity: &ArchiveIdentity) -> Result<CanonicalHeader<'_>, &'static str> {
+    Ok(CanonicalHeader {
         kind: "maka.archived_tool_result",
         resource_ref: identity.short_ref()?,
         tool_name: &identity.tool_name,
@@ -206,7 +207,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert_eq!(placeholder.identity.original_bytes, 5 * 1024 * 1024 + 2);
-        let model = placeholder.to_model_projection().unwrap();
+        let model = placeholder.to_canonical_projection().unwrap();
         let DurableToolProjection::Json { value } = model else {
             panic!()
         };
