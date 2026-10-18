@@ -23,4 +23,6 @@
 
 Exposes file operations for an explicitly selected workspace. `provide` registers the service and `attachments` handles captured file resources. The wrapper supplies the original call scope and directory authority to the file engine. File tools and commands share the session sandbox preset: reads may reach outside the workspace; workspace-write permits writes in the workspace and system temporary directories. Other writes require permission approval. The selected directory remains captured, and approvals cannot override workspace metadata or Host-private protections.
 
+`readText` also pages uploaded attachments and original tool-result resources visible to the calling Session. A selected Read tool uses its current live Invocation; resource addresses and continuations do not grant access to another Session. Archived results reuse the original model projection without executing the source tool again. Each archive page currently loads the complete original projection before paging, and cancellation waits for that storage operation to settle.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

@@ -272,31 +272,65 @@ async fn execute(
         if let Some(mut address) =
             maka_agent_facts::read::ResourceAddress::parse(request.path()).map_err(failed)?
         {
-            if !matches!(
-                address,
-                maka_agent_facts::read::ResourceAddress::Attachment(_)
-            ) {
-                return Err(failed(
-                    "This Files service supports only attachment resources",
-                ));
+            use maka_agent_facts::read::ResourceAddress;
+            match &address {
+                ResourceAddress::Task(_) => {
+                    return Err(failed("This Files service does not support task resources"));
+                }
+                ResourceAddress::ToolResult(_) if image => {
+                    return Err(failed("Use readText for archived tool results"));
+                }
+                _ => {}
             }
+            let missing = match &address {
+                ResourceAddress::Attachment(_) => "Attachment was not found in this Session",
+                _ => "Tool result was not found in this Session",
+            };
+            cancelled(cancellation)?;
             if !request.is_continuation() {
                 address = store
                     .resolve_read_resource(&tool_context.invocation.session_id, address)
                     .await
                     .map_err(failed)?
-                    .ok_or_else(|| failed("Attachment was not found in this Session"))?;
+                    .ok_or_else(|| failed(missing))?;
+                cancelled(cancellation)?;
                 request.bind_resource(&address).map_err(failed)?;
             }
-            return attachments::read(
-                store,
-                &tool_context.invocation.session_id,
-                address.id(),
-                &request,
-                image,
-                cancellation,
-            )
-            .await;
+            match address {
+                ResourceAddress::Attachment(id) => {
+                    return attachments::read(
+                        store,
+                        &tool_context.invocation.session_id,
+                        &id,
+                        &request,
+                        image,
+                        cancellation,
+                    )
+                    .await;
+                }
+                ResourceAddress::ToolResult(id) => {
+                    cancelled(cancellation)?;
+                    // Await the original store job: dropping its reply cannot
+                    // cancel the physical read or settle this call's ticket.
+                    let result = store
+                        .read_tool_result(&tool_context.invocation.session_id, &id)
+                        .await
+                        .map_err(failed)?;
+                    cancelled(cancellation)?;
+                    let result = result
+                        .ok_or_else(|| failed("Tool result was not found in this Session"))?;
+                    let page = request
+                        .tool_result_page(
+                            &result.tool_name,
+                            &result.serialized_result,
+                            read_page_budget(),
+                        )
+                        .map_err(failed)?;
+                    cancelled(cancellation)?;
+                    return serde_json::to_value(page).map(Output::Json).map_err(failed);
+                }
+                ResourceAddress::Task(_) => unreachable!("task resource rejected above"),
+            }
         }
     }
 

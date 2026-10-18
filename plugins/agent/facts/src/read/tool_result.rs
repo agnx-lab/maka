@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{MAX_PAGE_CHARS, ReadError, ReadPage, ReadRequest, shell::read_archived_shell};
+use super::{ReadError, ReadPage, ReadRequest, shell::read_archived_shell};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -36,14 +36,6 @@ enum TextEnvelope {
 /// arbitrary JSON (including a ReadPage's continuation and metadata) stays intact.
 impl ReadRequest {
     pub fn tool_result_page(
-        &self,
-        tool_name: &str,
-        serialized: &str,
-    ) -> Result<ReadPage, ReadError> {
-        self.tool_result_page_with_budget(tool_name, serialized, MAX_PAGE_CHARS)
-    }
-
-    pub(crate) fn tool_result_page_with_budget(
         &self,
         tool_name: &str,
         serialized: &str,

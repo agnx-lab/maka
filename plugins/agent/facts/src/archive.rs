@@ -134,7 +134,7 @@ impl ArchivedPlaceholder {
         .resolve()
         .map_err(|_| "invalid archive address")?;
         let page = request
-            .tool_result_page_with_budget(
+            .tool_result_page(
                 &identity.tool_name,
                 body,
                 MAX_PAGE_CHARS.saturating_sub(overhead),

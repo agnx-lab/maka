@@ -79,6 +79,173 @@ pub(super) async fn reopen(f: &mut Fixture) {
     f.app.ready().await.unwrap();
 }
 #[tokio::test]
+async fn todo_archived_result_next_is_readable_by_the_selected_native_read_tool() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let setup = service_tools::Setup::files("readText").named("Read");
+        let policy = setup.policy();
+        let mut f = Fixture::configured(
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+            None,
+            None,
+            Some(setup),
+            |settings| {
+                settings.todo = true;
+                settings.permissions.access = WorkspaceAccess::ReadOnly;
+            },
+        )
+        .await;
+        // Declare the controlled provider's capacity, keeping this recovery
+        // proof independent of an unrelated automatic compaction conversation.
+        selection::edit(&f, |changes| {
+            changes.model_overrides = Patch::Set(BTreeMap::from([("fixture-model".into(), ModelOverride {
+                context_window: Some(1_000_000), input_limit: Some(900_000), ..Default::default()
+            })]));
+        }).await;
+        let session = f.create("Recover original checklist result").await;
+        let other = f.create("Cannot read another checklist archive").await;
+        let items: Vec<Value> = (0..32)
+            .map(|index| json!({"content":format!("{index:02} {}", "中文😀".repeat(if index == 0 { 2048 } else { 128 })),"status":"pending"}))
+            .collect();
+        // Independent literal rendering oracle: no Document::render or pager.
+        let expected = (0..32).map(|index| format!("{}. [pending] \"{index:02} {}\"", index + 1,
+            "中文😀".repeat(if index == 0 { 2048 } else { 128 }))).collect::<Vec<_>>().join("\n");
+        f.send(&session).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let sent = request(&mut socket).await;
+        let selected_read = sent["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "Read");
+        service_tools::named_tool_response(&mut socket, "todo_write", json!({"todos":items})).await;
+
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let sent = request(&mut socket).await;
+        let archived: Value = serde_json::from_str(last_tool(&sent)).unwrap();
+        let first_next = archived["page"]["next"].clone();
+        let mut pages = vec![archived["page"].clone()];
+        let mut recovery_results = Vec::new();
+        let mut next = first_next.clone();
+        while next.is_object() {
+            // Every page is requested through the actual model with exactly the
+            // prior tool's next object, never a manufactured cursor/store read.
+            service_tools::named_tool_response(&mut socket, "Read", next).await;
+            let (mut received, _) = listener.accept().await.unwrap();
+            let sent = request(&mut received).await;
+            let result: Value = serde_json::from_str(last_tool(&sent)).unwrap();
+            next = result["value"]["next"].clone();
+            if result["kind"] == "completed" {
+                pages.push(result["value"].clone());
+            }
+            recovery_results.push(result);
+            socket = received;
+        }
+        response(&mut socket).await;
+        f.drained().await;
+
+        f.send(&other).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        service_tools::named_tool_response(&mut socket, "Read", first_next.clone()).await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let sent = request(&mut socket).await;
+        let foreign: Value = serde_json::from_str(last_tool(&sent)).unwrap();
+        response(&mut socket).await;
+        f.drained().await;
+
+        let deployment = f.app.source().unwrap().deployment;
+        f.app.shutdown().await.unwrap();
+        let mut native = NativeRegistry::default();
+        maka_settings_native::provide(&mut native).unwrap();
+        provide_all(&mut native).unwrap();
+        f.app = Application::start_from_store(
+            f.store.clone(),
+            deployment,
+            native,
+            f.issuer.clone(),
+            Arc::new(Grant(f.issuer.clone(), Some(policy))),
+            Some(maka_host_js::factory(Default::default())),
+        ).await.unwrap();
+        f.app.ready().await.unwrap();
+        // send uses the current Application's public service. The old fixture
+        // owner is retired; final Application shutdown drains the new owner.
+        f.send(&session).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        service_tools::named_tool_response(&mut socket, "Read", first_next.clone()).await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let sent = request(&mut socket).await;
+        let restarted_raw = last_tool(&sent).to_owned();
+        response(&mut socket).await;
+        while !f.query("observe", json!({"sessionId":session})).await.unwrap()["run"].is_null() {
+            tokio::task::yield_now().await;
+        }
+        f.app.shutdown().await.unwrap();
+
+        let original = f.store.scoped_prefix(
+            maka_agent_facts::event::LogScope::Session { id: session.clone() },
+            256,
+            4 * 1024 * 1024,
+        ).await.unwrap();
+        let source_operation = original.events.iter().find_map(|event| match &event.event.fact {
+            Fact::ToolDispatched { operation_id, name, .. } if name == "todo_write" => Some(operation_id),
+            _ => None,
+        }).unwrap();
+        let source = original.events.iter().find(|event| matches!(&event.event.fact,
+            Fact::ToolSettled { operation_id, outcome: ToolOutcome::Succeeded { .. } }
+            if operation_id == source_operation)).unwrap();
+        let source_output = f.store.resolve_tool_result(&session, &source.event.id).await.unwrap();
+        f.config.shutdown().await.unwrap();
+
+        // All behavior assertions follow actual cleanup, including expected
+        // failure paths, so no failing recovery assertion abandons the Host.
+        let restarted: Value = serde_json::from_str(&restarted_raw)
+            .unwrap_or_else(|error| panic!("restarted Read returned non-JSON after cleanup: {error}; raw={restarted_raw:?}"));
+        assert!(selected_read, "the original model request must select the genuine Read binding");
+        assert_eq!(archived["kind"], "maka.archived_tool_result");
+        assert_eq!(archived["toolName"], "todo_write");
+        assert!(first_next.is_object(), "the oversized original must advertise next");
+        let maka_agent_facts::tool_output::ToolOutput::Json(document) = source_output else {
+            panic!("the original checklist output must remain JSON");
+        };
+        assert_eq!(document["items"], json!(items));
+        let Fact::ToolSettled { outcome: ToolOutcome::Succeeded { model_projection, .. }, .. } = &source.event.fact else { unreachable!() };
+        assert_eq!(model_projection, &maka_agent_facts::tool_output::DurableToolProjection::Text { text: expected.clone() });
+        assert_eq!(original.events.iter().filter(|event| matches!(&event.event.fact,
+            Fact::ToolDispatched { name, .. } if name == "todo_write")).count(), 1);
+        for result in &recovery_results {
+            assert_eq!(result["kind"], "completed", "the selected Read must recover the actual archive continuation: {result}");
+            assert!(serde_json::to_string(result).unwrap().encode_utf16().count()
+                <= maka_agent_facts::read::MAX_PAGE_CHARS, "recovery pages must not be archived again");
+        }
+        let mut recovered = String::new();
+        let mut omitted_newline = false;
+        for (index, page) in pages.iter().enumerate() {
+            let content = page["content"].as_str().unwrap();
+            recovered.push_str(content);
+            assert_eq!(page["totalLines"], 32);
+            if let Some(next) = pages.get(index + 1) {
+                let end_line = page["offset"].as_u64().unwrap() + content.bytes().filter(|byte| *byte == b'\n').count() as u64;
+                let next_line = next["offset"].as_u64().unwrap();
+                if next_line == end_line + 1 {
+                    recovered.push('\n');
+                    omitted_newline = true;
+                } else {
+                    assert_eq!(next_line, end_line, "a page may skip only its boundary newline");
+                }
+            }
+        }
+        assert!(pages.iter().any(|page| page["partialLine"] == true), "the long first line must span actual pages");
+        assert!(omitted_newline, "complete-line pagination must exercise its delimiter convention");
+        assert_eq!(recovered.as_bytes(), expected.as_bytes(), "every original UTF-8 byte must be recoverable");
+        assert_eq!(foreign, json!({"kind":"failed","message":"Tool result was not found in this Session"}));
+        assert_eq!(restarted, recovery_results[0], "a new authorized Invocation after restart must read the same immutable page");
+        let source_archives = original.events.iter().filter(|event| matches!(&event.event.fact,
+            Fact::ToolResultArchived { placeholder } if placeholder.identity.runtime_event_id == source.event.id)).count();
+        let archives = original.events.iter().filter(|event| matches!(&event.event.fact, Fact::ToolResultArchived { .. })).count();
+        assert_eq!(archives, source_archives, "bounded recovery pages must not acquire their own archive replacements");
+        assert_eq!(source_archives, 1);
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn todo_real_model_direct_and_code_mode_keep_full_list_isolation_and_restart() {
     tokio::time::timeout(Duration::from_secs(90), async {
         for code in [false, true] {
