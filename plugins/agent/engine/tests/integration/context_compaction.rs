@@ -113,7 +113,14 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
         requests[1]["messages"].as_array().unwrap().last().unwrap()["content"]
             .as_str()
             .unwrap()
-            .contains("Now write the structured summary")
+            .contains(
+                maka_agent_facts::context::default_compaction_prompt(
+                    maka_agent_facts::language::Language::En
+                )
+                .lines()
+                .next()
+                .unwrap()
+            )
     );
     assert!(requests[1]["tools"].as_array().is_none_or(Vec::is_empty));
     assert_eq!(requests[1]["max_tokens"], 8000);
@@ -130,9 +137,14 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
                 .contains("old-answer-private")
         );
         assert!(
-            !request["messages"]
-                .to_string()
-                .contains("Now write the structured summary")
+            !request["messages"].to_string().contains(
+                maka_agent_facts::context::default_compaction_prompt(
+                    maka_agent_facts::language::Language::En
+                )
+                .lines()
+                .next()
+                .unwrap()
+            )
         );
     }
     assert!(requests[3]["messages"].to_string().contains("tail-answer"));
@@ -709,15 +721,23 @@ async fn overflow_preserves_system_and_first_goal_or_continuation_summary() {
                 .to_string()
                 .contains("Conversation excerpts")
         );
-        let excerpt = fitted["messages"][1]["content"].as_str().unwrap();
+        let content = &fitted["messages"][1]["content"];
+        let excerpt = if let Some(text) = content.as_str() {
+            text.to_owned()
+        } else {
+            content
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|part| part["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert!(excerpt.contains("Earlier task or summary:"));
         assert!(
             excerpt.contains(GOAL),
             "first conversational anchor must survive: {excerpt}"
         );
-        if baseline {
-            assert!(excerpt.contains("Continuation summary:"));
-        }
         assert!(excerpt.contains("large turn 2"));
         assert!(fitted.to_string().len() < full.to_string().len());
     }
@@ -752,9 +772,14 @@ async fn small_window_caps_summary_output_and_compacts_only_for_input_pressure()
             for _ in 0..if summarized && !manual { 2 } else { 1 } {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = read_request(&mut socket).await;
-                let is_summary = request["messages"]
-                    .to_string()
-                    .contains("Now write the structured summary");
+                let is_summary = request["messages"].to_string().contains(
+                    maka_agent_facts::context::default_compaction_prompt(
+                        maka_agent_facts::language::Language::En,
+                    )
+                    .lines()
+                    .next()
+                    .unwrap(),
+                );
                 respond(
                     &mut socket,
                     if is_summary {
@@ -788,9 +813,14 @@ async fn small_window_caps_summary_output_and_compacts_only_for_input_pressure()
         let summaries: Vec<_> = requests
             .iter()
             .filter(|request| {
-                request["messages"]
-                    .to_string()
-                    .contains("Now write the structured summary")
+                request["messages"].to_string().contains(
+                    maka_agent_facts::context::default_compaction_prompt(
+                        maka_agent_facts::language::Language::En,
+                    )
+                    .lines()
+                    .next()
+                    .unwrap(),
+                )
             })
             .collect();
         assert_eq!(summaries.len(), usize::from(summarized));
@@ -820,8 +850,16 @@ async fn small_window_caps_summary_output_and_compacts_only_for_input_pressure()
 async fn new_summary_uses_captured_language_without_retranslating_the_prior_main_prefix() {
     use maka_agent_facts::language::Language;
     for (language, summary_instruction, context_label) in [
-        (Language::ZhCn, "只输出简洁的结构化总结", "会话上下文"),
-        (Language::ZhTw, "只輸出簡潔的結構化總結", "工作階段上下文"),
+        (
+            Language::ZhCn,
+            maka_agent_facts::context::default_compaction_prompt(Language::ZhCn),
+            "会话上下文",
+        ),
+        (
+            Language::ZhTw,
+            maka_agent_facts::context::default_compaction_prompt(Language::ZhTw),
+            "工作階段上下文",
+        ),
     ] {
         let directory = tempfile::tempdir().unwrap();
         let log = Arc::new(

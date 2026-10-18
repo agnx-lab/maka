@@ -366,3 +366,231 @@ async fn missing_image_guidance_uses_the_admitted_language_and_preserves_attachm
         log.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn summary_overflow_keeps_media_multipart_and_checkpoint_corrections_as_evidence() {
+    use crate::support::context;
+    use maka_agent_facts::context::ModelRequestContext;
+    use tokio::io::AsyncWriteExt;
+
+    // These are reported historical facts. The fixture proves their delivery,
+    // rather than claiming a mock response demonstrates model summary quality.
+    const CHECKPOINT: &str = "Goal: recover launch checklist. Failed attempt: deploy returned E42. Remote write outcome_unknown. Background task bg-17 is running; read results at tasks/bg-17.";
+    const CORRECTION: &str = "User correction: stage only; retain the rollback checklist. Screenshot evidence is attached.";
+    let directory = tempfile::tempdir().unwrap();
+    let log = Arc::new(
+        EventLog::open(&directory.path().join("events.sqlite"))
+            .await
+            .unwrap(),
+    );
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    artifact(&log, "summary-evidence", 128, true).await;
+    artifact(&log, "summary-tool-evidence", 256, true).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        context::respond(&mut socket, "initial work", "stop").await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let baseline = request(&mut socket).await;
+        assert!(baseline["messages"].to_string().contains(CHECKPOINT));
+        context::respond(&mut socket, CHECKPOINT, "stop").await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let recent = request(&mut socket).await;
+        assert!(recent["messages"].to_string().contains(CORRECTION));
+        context::respond(&mut socket, "recent answer", "stop").await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let full = request(&mut socket).await;
+        let body = json!({"error":{"message":"context exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}).to_string();
+        socket.write_all(format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let fitted = request(&mut socket).await;
+        context::respond(&mut socket, "continued checkpoint", "stop").await;
+        (recent, full, fitted)
+    });
+    let worker = context::engine(log.clone());
+    let mut first = context::input(&base, "first", false);
+    if let maka_agent_engine::RunWork::Message { message, .. } = &mut first.work {
+        *message = CHECKPOINT.into();
+    }
+    worker.run(first, CancellationToken::new()).await.unwrap();
+    worker
+        .run(
+            context::input(&base, "baseline", true),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let mut recent = context::input(&base, "recent", false);
+    recent.supports_vision = true;
+    if let maka_agent_engine::RunWork::Message { message, .. } = &mut recent.work {
+        *message = CORRECTION.into();
+    }
+    worker.run(recent, CancellationToken::new()).await.unwrap();
+    let historical = identity("summary-media");
+    let message = serde_json::from_value(
+        json!({"text":CORRECTION,"attachments":[attachment("summary-evidence")]}),
+    )
+    .unwrap();
+    // The synthetic historical request follows its InvocationOpened event.
+    let source_high_water = log
+        .prefix(200, 512 * 1024)
+        .await
+        .unwrap()
+        .events
+        .last()
+        .unwrap()
+        .sequence
+        + 1;
+    let facts = [
+        Fact::InvocationOpened { input: InvocationInput::Message { source_messages: Vec::new(), content: message, request_fingerprint: None }, configuration: None },
+        Fact::ModelRequested { item_acceptance: false, effective_source_digest: None, purpose: maka_agent_facts::context::ModelPurpose::Main, context: None, context_breakdown: None, checkpoint_event_id: None, step_id: "media-step".into(), model_id: "test".into(), source_scope: maka_agent_facts::event::LogScope::Session { id: "session".into() }, source_high_water, source_digest: "fixture".into(), input_digest: "fixture".into(), route_identity: "fixture".into() },
+        Fact::ModelCompleted { step_id: "media-step".into(), output: serde_json::from_value(json!({"parts":[{"kind":"text","text_kind":"text","text":"large historical log ".repeat(4000)},{"kind":"tool_call","call":{"id":"screenshot","name":"Read","input":{"kind":"json","data":{}},"provider_executed":false}}],"finish_reason":"tool-calls","usage":{}})).unwrap() },
+        Fact::ToolDispatched { presentation: None, title: None, operation_id: "media-step:screenshot".into(), call: ToolCallIdentity::provider("media-step".into(), "screenshot".into()), name: "Read".into(), input: json!({}) },
+    ];
+    for fact in facts {
+        log.append(&EventWrite::plain(RuntimeEvent::new(historical.clone(), fact)).unwrap())
+            .await
+            .unwrap();
+    }
+    let result = EventWrite::tool_success(
+        "summary-tool-result".into(),
+        std::time::SystemTime::now(),
+        historical.clone(),
+        "media-step:screenshot".into(),
+        ToolOutput::Image(ImageOutput {
+            detail: Some(maka_agent_facts::tool_output::ImageDetail::High),
+            mime_type: "image/png".into(),
+            reference: serde_json::from_value(attachment("summary-tool-evidence")["ref"].clone())
+                .unwrap(),
+        })
+        .into(),
+    )
+    .unwrap()
+    .0;
+    log.append(&result).await.unwrap();
+    log.append(
+        &EventWrite::plain(RuntimeEvent::new(
+            historical,
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Completed,
+            },
+        ))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let canonical_result = log
+        .read_tool_result("session", "summary-tool-result")
+        .await
+        .unwrap()
+        .unwrap()
+        .serialized_result;
+    let mut compact = context::input(&base, "final", true);
+    compact.supports_vision = true;
+    compact.context = Some(ModelRequestContext {
+        provider_id: "fixture".into(),
+        context_window: Some(10_000),
+        model_context_window: Some(10_000),
+        declared_window: None,
+    });
+    worker.run(compact, CancellationToken::new()).await.unwrap();
+    worker.drain().await;
+    let (recent, full, fitted) = server.await.unwrap();
+    let original_prefix = recent["messages"].as_array().unwrap();
+    assert_eq!(
+        &full["messages"].as_array().unwrap()[..original_prefix.len()],
+        original_prefix,
+        "the first summary attempt retains the entire captured Main prefix for caching"
+    );
+    assert_eq!(full["tools"], recent["tools"]);
+    assert_eq!(full["messages"][0], fitted["messages"][0]);
+    assert_eq!(full["tools"], fitted["tools"]);
+    assert!(fitted.to_string().len() < full.to_string().len());
+    fn image_parts(value: &Value, parts: &mut Vec<Value>) {
+        match value {
+            Value::Array(values) => {
+                for value in values {
+                    image_parts(value, parts);
+                }
+            }
+            Value::Object(fields) => {
+                if fields.get("type").and_then(Value::as_str) == Some("image_url") {
+                    parts.push(value.clone());
+                } else {
+                    for value in fields.values() {
+                        image_parts(value, parts);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut original_parts = Vec::new();
+    let mut fitted_parts = Vec::new();
+    image_parts(&full["messages"], &mut original_parts);
+    image_parts(&fitted["messages"], &mut fitted_parts);
+    assert_eq!(
+        fitted_parts, original_parts,
+        "media detail metadata survives fitting with its payload"
+    );
+    let mut original_images = Vec::new();
+    let mut fitted_images = Vec::new();
+    collect_images(&full["messages"], &mut original_images);
+    collect_images(&fitted["messages"], &mut fitted_images);
+    assert_eq!(original_images.len(), 2);
+    assert_eq!(
+        fitted_images, original_images,
+        "selected small screenshot remains an actual image part with identical payload"
+    );
+    let encoded_image = original_images[0]
+        .strip_prefix("data:image/png;base64,")
+        .unwrap();
+    let mut text_parts = Vec::new();
+    for message in fitted["messages"].as_array().unwrap() {
+        if let Some(text) = message["content"].as_str() {
+            text_parts.push(text);
+        } else if let Some(parts) = message["content"].as_array() {
+            text_parts.extend(parts.iter().filter_map(|part| part["text"].as_str()));
+        }
+    }
+    let text = text_parts.join("\n");
+    assert!(
+        text.contains(CHECKPOINT),
+        "previous checkpoint must remain available with failed, unknown and running work"
+    );
+    assert!(
+        text.contains(CORRECTION),
+        "later user correction must accompany the previous checkpoint"
+    );
+    assert!(
+        !text.contains(encoded_image),
+        "media bytes must never become historical text during fitting"
+    );
+    for image in original_images {
+        assert!(!text.contains(image.strip_prefix("data:image/png;base64,").unwrap()));
+    }
+    assert_eq!(
+        log.read_tool_result("session", "summary-tool-result")
+            .await
+            .unwrap()
+            .unwrap()
+            .serialized_result,
+        canonical_result,
+        "summary fitting leaves canonical media evidence untouched"
+    );
+    assert_eq!(
+        log.read_model_context("session", None)
+            .await
+            .unwrap()
+            .baseline
+            .unwrap()
+            .checkpoint
+            .summary
+            .text,
+        "continued checkpoint"
+    );
+}

@@ -5,8 +5,8 @@ follow the current Computer Use state supplied with the model request.
 `cua.computer.target` identifies the selected desktop platform (`mac`, `linux`, `windows`).
 In WSL it defaults to the Windows host; shell commands may still run in Linux.
 
-For a fresh REPL, execute exactly one entry point first, then read its documentation
-and initial state before choosing further calls. Browser IDs come only from
+A fresh REPL has no bound targets. The entry points below emit API documentation
+and inventory or initial target state. Browser IDs come only from
 configured providers; when none are configured, use native browser windows through
 getApp. The API does not expose driver administration such as start_session.
 
@@ -75,9 +75,7 @@ Windows/Linux native adapters currently refuse pixel-unit input. macOS/Windows
 indexed scrolling preserves the selected accessibility target. Native indexed clicks support one semantic
 click; use screenshot coordinates for multiple clicks when needed.
 
-After deterministic actions, fetch `getAXState()` in the same call before deciding
-what to do next. Do not guess delays before observing. A successful input dispatch
-is not proof of the user's requested outcome: verify the resulting state.
+A successful input dispatch does not establish the resulting application state.
 Coordinates belong to the latest screenshot. Moving/resizing, navigation, scrolling
 or any action consumes/invalidates the mapping; capture again before another point.
 Native semantic actions use retained accessibility elements. Application menus
@@ -87,8 +85,8 @@ bound window and keeps it active while the menu is open.
 macOS/Windows coordinate and keyboard input use the exact window's foreground
 route; macOS restores the prior application after delivery where supported.
 Linux keeps background delivery. Coordinate input can move the system pointer.
-Unverified input effects are reported in the call output; observe before deciding
-on another action. There is no public `delivery_mode` option or automatic replay.
+Unverified input effects are reported in the call output. There is no public
+`delivery_mode` option or automatic replay.
 
 `nodeRepl.write(value)` emits text/JSON. `await nodeRepl.emitImage(bytes | dataUrl |
 {bytes, mimeType})` emits an image. File/HTTP image URLs, Node, arbitrary filesystem
@@ -108,5 +106,5 @@ Configure again to retry a failed renderer. Idle cursors remain until disabled o
 Cursors share no input authority and do not move the system pointer. Multiple cursors
 do not isolate the physical keyboard, application focus or input method.
 Cancelled, timed-out or heap-exhausted REPLs require `cua_reset`, then target rebinding. Admitted
-native work settles before returning. Never automatically replay an uncertain action.
+native work settles before returning; reset does not undo dispatched input.
 Reset clears only this Session's REPL and bindings, leaving user apps and tabs open.

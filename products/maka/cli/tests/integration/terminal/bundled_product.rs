@@ -902,7 +902,10 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
                 .repeat(80)
                 .as_bytes(),
         );
-        tui.wait_for("You are a context summarization assistant.");
+        let default_prompt = maka_agent_facts::context::default_compaction_prompt(
+            maka_agent_facts::language::Language::En,
+        );
+        tui.wait_for(&default_prompt.chars().take(32).collect::<String>());
         assert_eq!(
             tui.screen
                 .snapshot()
@@ -920,7 +923,9 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
                 .repeat(80)
                 .as_bytes(),
         );
-        tui.wait_for("details are needed.");
+        let ending: String = default_prompt.chars().rev().take(12).collect();
+        let prompt_tail: String = ending.chars().rev().collect();
+        tui.wait_for(&prompt_tail);
         let bottom_thumb =
             editor_thumb(&tui.screen.snapshot().unwrap().screen, "Compression prompt");
         assert!(!bottom_thumb.is_empty());
@@ -941,7 +946,7 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         let screen = tui.screen.snapshot().unwrap().screen;
         let tail = screen
             .lines()
-            .position(|line| line.contains("details are needed."))
+            .position(|line| line.contains(&prompt_tail))
             .unwrap();
         assert!(
             tail >= row + 20,
@@ -954,7 +959,10 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
             "subagents have their own settings category"
         );
         // Mouse-select a visible line, then copy the entire native prompt.
-        let line = "## Critical Context";
+        let line = default_prompt
+            .lines()
+            .rfind(|line| line.starts_with("## "))
+            .unwrap();
         tui.wait_for(line);
         select_text(&mut tui, line);
         copy_selection(&mut tui, line);
@@ -965,9 +973,9 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
                 maka_agent_facts::language::Language::En,
             ),
         );
-        edit_menu(&mut tui, "details are needed.");
+        edit_menu(&mut tui, &prompt_tail);
         click(&mut tui, "Select all");
-        edit_menu(&mut tui, "details are needed.");
+        edit_menu(&mut tui, &prompt_tail);
         let start = tui.output.len();
         click(&mut tui, "Copy");
         clipboard_output(

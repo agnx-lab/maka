@@ -424,7 +424,12 @@ async fn run(cycles: usize, prompt_bytes: usize, timeout: Duration) -> Value {
                 expected.cycle
             );
             if let Some(previous) = &expected.previous_summary {
-                assert!(has("user", &format!("Continuation summary:\n{previous}")));
+                assert!(messages.iter().any(|message| {
+                    message["role"] == "user"
+                        && message["content"]
+                            .as_str()
+                            .is_some_and(|text| text.ends_with(&format!("\n\n{previous}")))
+                }));
             }
             match expected.purpose {
                 ModelPurpose::Main => {

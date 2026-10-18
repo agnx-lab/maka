@@ -23,7 +23,7 @@ use maka_assistant::plan::{Artifact, Progress};
 use maka_tools::request::{BindingFuture, BindingRequest, BoundTool, RequestBinding};
 
 const SUBMIT: &str = "Submit the finished Plan for user approval and end this planning Turn. This does not approve or start execution.";
-const UPDATE: &str = "Report progress for this exact approved Plan execution. Include every step with at most one in_progress. Completion is recorded only after execution succeeds.";
+const UPDATE: &str = "Report progress for this exact approved Plan execution. Include every step using its exact ID, with at most one in_progress. Completion is recorded only after execution succeeds.";
 const CANCEL: &str = "Request cancellation of this Plan when the user explicitly asks to abandon it. Ends this Turn; only the original Plan execution is stopped.";
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

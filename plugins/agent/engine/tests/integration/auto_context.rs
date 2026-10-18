@@ -69,10 +69,14 @@ async fn resolved_threshold_and_matching_latest_main_route_are_required_for_pret
             for _ in 0..if expected { 2 } else { 1 } {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = fixture::read_request(&mut socket).await;
-                if request["messages"]
-                    .to_string()
-                    .contains("Now write the structured summary")
-                {
+                if request["messages"].to_string().contains(
+                    maka_agent_facts::context::default_compaction_prompt(
+                        maka_agent_facts::language::Language::En,
+                    )
+                    .lines()
+                    .next()
+                    .unwrap(),
+                ) {
                     fixture::respond(&mut socket, fixture::SUMMARY, "stop").await;
                 } else {
                     main = Some(socket);
@@ -96,9 +100,14 @@ async fn resolved_threshold_and_matching_latest_main_route_are_required_for_pret
         worker.drain().await;
         let requests = server.await.unwrap();
         let (summaries, mains): (Vec<_>, Vec<_>) = requests.iter().partition(|request| {
-            request["messages"]
-                .to_string()
-                .contains("Now write the structured summary")
+            request["messages"].to_string().contains(
+                maka_agent_facts::context::default_compaction_prompt(
+                    maka_agent_facts::language::Language::En,
+                )
+                .lines()
+                .next()
+                .unwrap(),
+            )
         });
         assert_eq!(summaries.len(), usize::from(expected));
         assert_eq!(mains.len(), 1);

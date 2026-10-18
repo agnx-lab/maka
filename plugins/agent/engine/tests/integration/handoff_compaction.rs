@@ -68,7 +68,7 @@ async fn handoff_preserves_conversation_replay_and_compacts_before_its_physical_
             for _ in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = read_request(&mut socket).await;
-                if request["messages"].to_string().contains("Now write the structured summary") {
+                if request["messages"].to_string().contains(maka_agent_facts::context::default_compaction_prompt(maka_agent_facts::language::Language::En).lines().next().unwrap()) {
                     fixture::respond(&mut socket, fixture::SUMMARY, "stop").await;
                     summary = Some(request);
                 } else {

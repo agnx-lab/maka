@@ -31,6 +31,15 @@ fn engine(log: Arc<EventLog>) -> Engine {
     )
 }
 
+async fn respond_tail_call(socket: &mut tokio::net::TcpStream, id: &str, value: u64) {
+    let delta = json!({"id":"tail","object":"chat.completion.chunk","created":1,"model":"test",
+        "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":id,"type":"function","function":{"name":"echo","arguments":json!({"value":value}).to_string()}}]},"finish_reason":null}]});
+    let end = json!({"id":"tail","object":"chat.completion.chunk","created":1,"model":"test",
+        "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}});
+    let body = format!("data: {delta}\n\ndata: {end}\n\ndata: [DONE]\n\n");
+    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_summary_preserves_steering_tool_tail_and_frozen_physical_retry() {
     tokio::time::timeout(Duration::from_secs(20), async {
@@ -59,8 +68,10 @@ async fn background_summary_preserves_steering_tool_tail_and_frozen_physical_ret
             for _ in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = fixture::read_request(&mut socket).await;
-                if request["messages"].to_string().contains("Now write the structured summary") {
+                if request["messages"].to_string().contains(maka_agent_facts::context::default_compaction_prompt(maka_agent_facts::language::Language::En).lines().next().unwrap()) {
                     assert!(!request["messages"].to_string().contains("question next"));
+                    assert!(!request["messages"].to_string().contains("A queued correction"));
+                    assert!(!request["messages"].to_string().contains("during-summary-call"));
                     summary = Some(socket);
                 } else {
                     assert!(request["messages"].to_string().contains("old-answer"));
@@ -70,11 +81,27 @@ async fn background_summary_preserves_steering_tool_tail_and_frozen_physical_ret
             let mut summary = summary.unwrap();
             let mut main = main.unwrap();
             agent_loop::enqueue(&observed, invocation).await;
-            agent_loop::respond(&mut main, true).await;
+            respond_tail_call(&mut main, "during-summary-call", 41).await;
             let (mut main, _) = listener.accept().await.unwrap();
             let frozen = fixture::read_request(&mut main).await;
             assert!(frozen["messages"].to_string().contains("A queued correction"));
             assert!(!frozen["messages"].to_string().contains("summary-marker"));
+            // The first operation has settled and steering has been projected
+            // while the summarizer still holds its original captured request.
+            let during = observed.prefix(200, 512 * 1024).await.unwrap();
+            let captured_cut = during.events.iter().find_map(|event| match event.event.fact {
+                Fact::ModelRequested { purpose: ModelPurpose::Summary, source_high_water, .. } => Some(source_high_water),
+                _ => None,
+            }).unwrap();
+            for event in during.events.iter().filter(|event| matches!(&event.event.fact,
+                Fact::MessageSteered { .. } | Fact::ToolDispatched { .. } | Fact::ToolSettled { .. })) {
+                assert!(event.sequence > captured_cut, "steering and operation transitions belong after the summary cutoff");
+            }
+            let frozen_messages = frozen["messages"].as_array().unwrap();
+            let tail_start = frozen_messages.iter().position(|message| message["content"].as_str().is_some_and(|text| text.contains("question next"))).unwrap();
+            let frozen_tail = &frozen_messages[tail_start..];
+            assert_eq!(frozen_tail.iter().filter(|message| message["role"] == "tool").count(), 1);
+            assert!(frozen_tail.iter().any(|message| message["role"] == "tool" && message["content"].as_str().is_some_and(|text| text.contains("41"))));
             let mut commits = observed.subscribe_commits();
             fixture::respond(&mut summary, fixture::SUMMARY, "stop").await;
             loop {
@@ -87,14 +114,30 @@ async fn background_summary_preserves_steering_tool_tail_and_frozen_physical_ret
             main.write_all(format!("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0.01\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{failure}", failure.len()).as_bytes()).await.unwrap();
             let (mut retry, _) = listener.accept().await.unwrap();
             assert_eq!(fixture::read_request(&mut retry).await, frozen);
-            agent_loop::respond(&mut retry, true).await;
+            respond_tail_call(&mut retry, "after-summary-call", 42).await;
             let (mut last, _) = listener.accept().await.unwrap();
             let adopted = fixture::read_request(&mut last).await;
             let messages = adopted["messages"].to_string();
             assert!(messages.contains("summary-marker"));
             assert!(!messages.contains("old-answer"));
             assert_eq!(messages.matches("A queued correction").count(), 1);
-            assert_eq!(adopted["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "tool").count(), 2);
+            let adopted_messages = adopted["messages"].as_array().unwrap();
+            let adopted_tail_start = adopted_messages.iter().position(|message| message["content"].as_str().is_some_and(|text| text.contains("question next"))).unwrap();
+            assert!(adopted_messages[..adopted_tail_start].iter().any(|message| message["content"].as_str().is_some_and(|text| text.contains("summary-marker"))));
+            assert_eq!(&adopted_messages[adopted_tail_start..adopted_tail_start + frozen_tail.len()], frozen_tail, "all history captured during compaction follows the checkpoint once and in its original order");
+            let new_tail = &adopted_messages[adopted_tail_start + frozen_tail.len()..];
+            assert_eq!(new_tail.len(), 2, "the later accepted operation adds exactly its call and result");
+            assert_eq!(new_tail[0]["tool_calls"][0]["id"], "after-summary-call");
+            assert_eq!(new_tail[1]["role"], "tool");
+            assert_eq!(new_tail[1]["tool_call_id"], "after-summary-call");
+            assert!(new_tail[1]["content"].as_str().unwrap().contains("42"));
+            assert_eq!(adopted_messages.iter().filter(|message| message["tool_call_id"] == "during-summary-call").count(), 1);
+            assert_eq!(adopted_messages.iter().filter(|message| message["tool_call_id"] == "after-summary-call").count(), 1);
+            let completed = observed.prefix(200, 512 * 1024).await.unwrap();
+            let checkpoint = completed.events.iter().find_map(|event| match &event.event.fact {
+                Fact::ContextCheckpointRecorded { checkpoint } => Some(checkpoint), _ => None,
+            }).unwrap();
+            assert_eq!(checkpoint.covered_through, captured_cut, "checkpoint coverage stays at capture time rather than swallowing newer history");
             fixture::respond(&mut last, "done", "stop").await;
         });
         let worker = engine(log.clone());
@@ -142,7 +185,7 @@ async fn background_summary_drains_before_terminal_handoff_and_retirement() {
                 for _ in 0..2 {
                     let (mut socket, _) = listener.accept().await.unwrap();
                     let request = fixture::read_request(&mut socket).await;
-                    if request["messages"].to_string().contains("Now write the structured summary") {
+                    if request["messages"].to_string().contains(maka_agent_facts::context::default_compaction_prompt(maka_agent_facts::language::Language::En).lines().next().unwrap()) {
                         if ending != "summary-tool" {
                         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").await.unwrap();
                         let delta = json!({"id":"summary","object":"chat.completion.chunk","created":1,"model":"test",

@@ -1,7 +1,7 @@
 Computer Use 是独立且持久的 JavaScript REPL，直接调用 cua_repl；无需 Code Mode。变量与绑定对象在当前 Host 进程内跨调用和 Turn 保留。重启后 REPL 没有历史变量；请遵循模型请求提供的当前 Computer Use 状态。
 `cua.computer.target` 标识选定的桌面平台（`mac`、`linux`、`windows`）。WSL 默认选择 Windows 主机；Shell 命令仍可能在 Linux 中运行。
 
-全新 REPL 首次只执行一个入口调用，先阅读返回的文档和初始状态，再选择后续调用。浏览器 ID 只来自已配置的提供方；未配置时，通过 getApp 操作原生浏览器窗口。API 不提供 start_session 等驱动管理操作。
+全新 REPL 没有绑定目标。以下入口会输出 API 文档及清单或目标初始状态。浏览器 ID 只来自已配置的提供方；未配置时，通过 getApp 操作原生浏览器窗口。API 不提供 start_session 等驱动管理操作。
 
 入口（选择目标时自动输出初始状态）：
 - `await cua.getState({emit?})`：应用和已配置浏览器清单，包括清单错误。
@@ -36,12 +36,12 @@ Tab 输入：`typeText(index|null, text)`、`paste(index|null, text, {format?})`
 Tab 导航：`goto(url)`、`back()`、`forward()`、`reload()`、`close()`。导航支持 HTTP(S) 和 about:blank，并等待可观察的文档。覆盖主要 CDP 目标；跨进程 iframe 无障碍支持尚不完整。
 原生滚动接受页数。macOS 和 CDP 也接受 `{pixels:500}` 输入增量；应用可能限制、动画化或转换增量。Windows/Linux 原生适配器目前拒绝像素单位输入。macOS/Windows 索引滚动保留选定的无障碍目标。原生索引点击支持一次语义点击；需要多次点击时使用截图坐标。
 
-确定性操作后，在同一次调用内获取 `getAXState()` 再决定下一步。观察前不要猜测等待时长。输入派发成功不证明用户目标已达成，请验证结果状态。
+输入派发成功不代表已经确定应用的结果状态。
 坐标属于最新截图。移动/缩放、导航、滚动或任何操作都会消耗或使映射失效；再次按坐标操作前重新截图。原生语义操作使用保留的无障碍元素。应用菜单仅限所属进程和确切绑定窗口，关闭菜单的内容不会显示。菜单交互可能激活绑定窗口，并在菜单打开时保持激活。
-macOS/Windows 坐标和键盘输入通过确切窗口的前台路径交付；macOS 在支持时恢复先前应用。Linux 保持后台交付。坐标输入可能移动系统指针。未验证的输入效果会在调用输出中报告，请先观察再决定下一步。没有公开的 `delivery_mode` 选项，也不会自动重放。
+macOS/Windows 坐标和键盘输入通过确切窗口的前台路径交付；macOS 在支持时恢复先前应用。Linux 保持后台交付。坐标输入可能移动系统指针。未验证的输入效果会在调用输出中报告。没有公开的 `delivery_mode` 选项，也不会自动重放。
 
 `nodeRepl.write(value)` 输出文本/JSON。`await nodeRepl.emitImage(bytes | dataUrl | {bytes, mimeType})` 输出图像。不提供文件/HTTP 图像 URL、Node、任意文件系统和网络 API。`cua.rewriteDocumentation()` 重新输出此参考文档。
 
 每次操作都使用当前 Host 权限；JS 对象不保留授权。Ask 模式下，Computer Use 批准在 REPL 执行超时计时开始前完成。macOS 原生操作在屏幕锁定时报告 `desktop_locked`；已连接 CDP 提供方和纯 REPL 计算仍可独立使用。
 每个 Session 有独立的 Maka 光标。输入操作自动显示光标；仅指示而不操作时才调用 `moveCursor`。`cua.cursor.configure({label?, color?, enabled?, reducedMotion?})` 修改此 Session 的显示。颜色为 `blue`、`mint`、`violet`、`amber`、`rose`、`cyan`；标签最多 48 个字符。`cua.cursor.getState()` 报告设置及原生/浏览器可见性。处于 `idle` 的原生渲染器在首次原生指示时启动；`unavailable` 表示显示主机缺失或失败。重新配置可重试失败的渲染器。空闲光标保留至禁用或清理。光标不共享输入权限，也不移动系统指针。多个光标不能隔离物理键盘、应用焦点或输入法。
-REPL 被取消、超时或耗尽堆内存后，需要 `cua_reset` 并重新绑定目标。已接纳的原生工作会在返回前结算。绝不自动重放不确定的操作。重置仅清除此 Session 的 REPL 和绑定，用户应用和标签页保持打开。
+REPL 被取消、超时或耗尽堆内存后，需要 `cua_reset` 并重新绑定目标。已接纳的原生工作会在返回前结算；重置不会撤销已派发的输入。重置仅清除此 Session 的 REPL 和绑定，用户应用和标签页保持打开。

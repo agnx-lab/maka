@@ -127,7 +127,7 @@ async fn discovery_defers_direct_admission_but_only_defers_descriptions_in_code_
                     while summaries < 1 || main.is_none() {
                         let (mut socket, _) = listener.accept().await.unwrap();
                         let request = fixture::read_request(&mut socket).await;
-                        if request["messages"].to_string().contains("Now write the structured summary") {
+                        if request["messages"].to_string().contains(maka_agent_facts::context::default_compaction_prompt(maka_agent_facts::language::Language::En).lines().next().unwrap()) {
                             summaries += 1;
                             assert_eq!(request["max_tokens"], 8000);
                             assert_eq!(request["tools"], second["tools"]);

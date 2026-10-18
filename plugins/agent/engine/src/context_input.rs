@@ -203,23 +203,33 @@ pub(super) fn fit_summary(prompt: &[Message], tokens: u64, language: Language) -
     let bytes = usize::try_from(tokens.saturating_mul(3)).unwrap_or(usize::MAX);
     let notice = match language {
         Language::En => {
-            "Conversation excerpts for summarization: some older text is omitted to fit this model. The complete original history remains stored locally. Preserve known goals and recent progress; do not infer facts from omitted text.\n\n"
+            "Conversation excerpts for summarization: some text is omitted to fit this model. The complete original history remains stored locally.\n\n"
         }
         Language::ZhCn => {
-            "用于总结的对话节选：为适应模型，已省略部分较早文本，完整历史仍保存在本地。保留已知目标和近期进展，不得从省略内容推测事实。\n\n"
+            "用于总结的对话节选：为适应模型，已省略部分文本，完整原始历史仍保存在本地。\n\n"
         }
         Language::ZhTw => {
-            "用於總結的對話節錄：為符合模型容量，已省略部分較早文字，完整歷史仍保存在本機。保留已知目標和近期進展，不得從省略內容推測事實。\n\n"
+            "用於總結的對話節錄：為符合模型容量，已省略部分文字，完整原始歷史仍儲存在本機。\n\n"
         }
     };
     let available = bytes.saturating_sub(notice.len() + 100);
     // Preserve the original task or previous checkpoint as well as the recent tail.
-    let head = prompt
-        .first()
-        .map(|message| serde_json::to_string(message).expect("model prompt"))
-        .unwrap_or_default();
-    let head = excerpt(&head, available / 4, language);
-    let remaining = available.saturating_sub(head.len() + 32);
+    let head_budget = available / 4;
+    let mut head = media_excerpt(
+        &prompt[..prompt.len().min(1)],
+        system_end,
+        head_budget,
+        language,
+        true,
+    );
+    let head_size: usize = head
+        .iter()
+        .map(|part| match part {
+            ContentPart::Text { text, .. } => text.len(),
+            ContentPart::File { .. } => 1024 * 3,
+        })
+        .sum();
+    let mut remaining = available.saturating_sub(head_size + 32);
     let mut starts = vec![0];
     for (index, message) in prompt.iter().enumerate().skip(1) {
         if matches!(message, Message::User { .. }) {
@@ -240,7 +250,25 @@ pub(super) fn fit_summary(prompt: &[Message], tokens: u64, language: Language) -
     if first == prompt.len() {
         first = *starts.iter().rev().nth(1).unwrap_or(&0);
     }
-    let tail = serde_json::to_string(&prompt[first..]).expect("model prompt");
+    if first == 0 {
+        // The tail owns all media accounting when it covers the anchor too.
+        // A text-only anchor avoids duplicate payloads or false omission notices.
+        head = media_excerpt(
+            &prompt[..prompt.len().min(1)],
+            system_end,
+            head_budget,
+            language,
+            false,
+        );
+        let head_size: usize = head
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text, .. } => text.len(),
+                ContentPart::File { .. } => unreachable!("text-only anchor"),
+            })
+            .sum();
+        remaining = available.saturating_sub(head_size + 32);
+    }
     let earlier = match language {
         Language::En => "Earlier task or summary:",
         Language::ZhCn => "早期任务或摘要：",
@@ -251,13 +279,169 @@ pub(super) fn fit_summary(prompt: &[Message], tokens: u64, language: Language) -
         Language::ZhCn => "近期对话：",
         Language::ZhTw => "近期對話：",
     };
-    let text = format!(
-        "{notice}{earlier}\n{head}\n\n{recent}\n{}",
-        excerpt(&tail, remaining, language)
-    );
+    let mut content = vec![ContentPart::text(format!("{notice}{earlier}\n"))];
+    content.extend(head);
+    content.push(ContentPart::text(format!("\n\n{recent}\n")));
+    content.extend(media_excerpt(
+        &prompt[first..],
+        system_end + first,
+        remaining,
+        language,
+        true,
+    ));
+    // Keep the original text-only wire shape when no native media was selected.
+    let mut merged = Vec::new();
+    for part in content {
+        match (merged.last_mut(), part) {
+            (Some(ContentPart::Text { text, .. }), ContentPart::Text { text: next, .. }) => {
+                text.push_str(&next);
+            }
+            (_, part) => merged.push(part),
+        }
+    }
     let mut fitted = system.to_vec();
-    fitted.push(Message::user(text));
+    fitted.push(Message::User {
+        content: merged,
+        provider_options: None,
+    });
     fitted
+}
+
+/// Render historical protocol facts as text, but keep file encodings out of that
+/// text even when only a head/tail excerpt survives. Original media parts retain
+/// their payload, media type and provider metadata when selected.
+fn media_excerpt(
+    messages: &[Message],
+    first: usize,
+    bytes: usize,
+    language: Language,
+    include_media: bool,
+) -> Vec<ContentPart> {
+    let mut files = Vec::new();
+    let mut rendered = String::new();
+    for (offset, message) in messages.iter().enumerate() {
+        let mut message = message.clone();
+        let source = format!("request-source message position {}", first + offset);
+        match &mut message {
+            Message::System { .. } => {}
+            Message::User { content, .. } => extract_media(content, &source, &mut files, language),
+            Message::Assistant { content, .. } => {
+                for (index, part) in content.iter_mut().enumerate() {
+                    if let AssistantPart::ToolResult {
+                        output: ToolOutput::Content(parts),
+                        ..
+                    } = part
+                    {
+                        extract_media(
+                            parts,
+                            &format!("{source}, assistant part {index}"),
+                            &mut files,
+                            language,
+                        );
+                    }
+                }
+            }
+            Message::Tool { content, .. } => {
+                for result in content {
+                    if let ToolOutput::Content(parts) = &mut result.output {
+                        extract_media(
+                            parts,
+                            &format!(
+                                "{source}, tool {} ({})",
+                                result.tool_name, result.tool_call_id
+                            ),
+                            &mut files,
+                            language,
+                        );
+                    }
+                }
+            }
+        }
+        // Every File has been replaced before serialization; raw tool inputs,
+        // result kinds and historical role/provenance remain available as text.
+        rendered.push_str(&serde_json::to_string(&message).expect("model prompt"));
+        rendered.push('\n');
+    }
+    if !include_media {
+        return vec![ContentPart::text(excerpt(&rendered, bytes, language))];
+    }
+    // Share the excerpt budget between textual evidence and native media. Media
+    // uses the same 1024-token estimate as add_content, never encoded byte length.
+    let media_budget = bytes.saturating_sub(rendered.len().min(bytes / 4));
+    let mut remaining_media = media_budget;
+    let mut omitted_labels = Vec::new();
+    let mut selected = Vec::new();
+    for (label, file) in files.iter().rev() {
+        let size = 1024 * 3 + label.len();
+        if size <= remaining_media {
+            remaining_media -= size;
+            selected.push((label.clone(), file.clone()));
+        } else {
+            omitted_labels.push(label.as_str());
+        }
+    }
+    selected.reverse();
+    omitted_labels.reverse();
+    let media_bytes = media_budget - remaining_media;
+    let omitted = files.len() - selected.len();
+    let mut omission = if omitted == 0 {
+        String::new()
+    } else {
+        let last = first + messages.len().saturating_sub(1);
+        match language {
+            Language::En => format!(
+                "\n[{omitted} media parts omitted from summary input; request-source message positions {first}–{last}. The complete original history remains stored locally.]\n"
+            ),
+            Language::ZhCn => format!(
+                "\n[总结输入省略了 {omitted} 个媒体部分；请求来源消息位置 {first}–{last}。完整原始历史仍保存在本地。]\n"
+            ),
+            Language::ZhTw => format!(
+                "\n[總結輸入省略了 {omitted} 個媒體部分；請求來源訊息位置 {first}–{last}。完整原始歷史仍儲存在本機。]\n"
+            ),
+        }
+    };
+    if omitted != 0 {
+        let labels_budget = (bytes / 4).min(bytes.saturating_sub(media_bytes + omission.len()));
+        omission.push_str(&excerpt(&omitted_labels.concat(), labels_budget, language));
+    }
+    let mut content = vec![ContentPart::text(excerpt(
+        &rendered,
+        bytes.saturating_sub(media_bytes + omission.len()),
+        language,
+    ))];
+    if !omission.is_empty() {
+        content.push(ContentPart::text(omission));
+    }
+    for (label, file) in selected {
+        content.push(ContentPart::text(label));
+        content.push(file);
+    }
+    content
+}
+
+fn extract_media(
+    parts: &mut [ContentPart],
+    source: &str,
+    files: &mut Vec<(String, ContentPart)>,
+    language: Language,
+) {
+    for (index, part) in parts.iter_mut().enumerate() {
+        if let ContentPart::File { media_type, .. } = part {
+            let label = match language {
+                Language::En => format!(
+                    "[Media: {source}, content part {index}, {media_type}; original in locally stored history]\n"
+                ),
+                Language::ZhCn => format!(
+                    "[媒体：{source}，内容部分 {index}，{media_type}；原件保存在本地历史中]\n"
+                ),
+                Language::ZhTw => format!(
+                    "[媒體：{source}，內容部分 {index}，{media_type}；原件儲存在本機歷史中]\n"
+                ),
+            };
+            let file = std::mem::replace(part, ContentPart::text(&label));
+            files.push((label, file));
+        }
+    }
 }
 
 fn excerpt(text: &str, bytes: usize, language: Language) -> String {
@@ -297,4 +481,69 @@ pub(super) fn output_limit<W>(
         .map_or(requested, |window| {
             requested.min(window.saturating_sub(estimated_input_tokens).max(minimum))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_model::prompt::FileData;
+
+    #[test]
+    fn overlapping_anchor_and_tail_account_for_media_once() {
+        let file = ContentPart::File {
+            data: FileData::Data("distinctive-media-payload".into()),
+            media_type: "image/png".into(),
+            provider_options: Some(serde_json::json!({"detail":"high"})),
+        };
+        let system = Message::System {
+            content: "Summary instructions".into(),
+            provider_options: None,
+        };
+        let prompt = vec![
+            system.clone(),
+            Message::User {
+                content: vec![ContentPart::text("Original task and image"), file.clone()],
+                provider_options: None,
+            },
+            Message::Assistant {
+                content: vec![AssistantPart::Text {
+                    text: format!(
+                        "{}Recent progress; effect remains unknown",
+                        "older log ".repeat(5000)
+                    ),
+                    provider_options: None,
+                }],
+                provider_options: None,
+            },
+        ];
+        for (tokens, expected_files) in [(2000, 1), (500, 0)] {
+            let fitted = fit_summary(&prompt, tokens, Language::En);
+            assert!(estimate(&fitted) <= tokens);
+            assert_eq!(fitted[0], system);
+            let Message::User { content, .. } = &fitted[1] else {
+                panic!("historical excerpt");
+            };
+            let files: Vec<_> = content
+                .iter()
+                .filter(|part| matches!(part, ContentPart::File { .. }))
+                .collect();
+            assert_eq!(files.len(), expected_files);
+            let text: String = content
+                .iter()
+                .filter_map(|part| match part {
+                    ContentPart::Text { text, .. } => Some(text.as_str()),
+                    ContentPart::File { .. } => None,
+                })
+                .collect();
+            assert!(!text.contains("distinctive-media-payload"));
+            if expected_files == 1 {
+                assert_eq!(files[0], &file);
+                assert!(!text.contains("media parts omitted"));
+            } else {
+                assert!(text.contains("1 media parts omitted"));
+                assert!(text.contains("request-source message position"));
+                assert!(text.contains("image/png"));
+            }
+        }
+    }
 }

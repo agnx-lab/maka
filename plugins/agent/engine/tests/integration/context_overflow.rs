@@ -71,9 +71,14 @@ async fn overflow_recovers_once_only_without_observed_output() {
                 let (mut summary, _) = listener.accept().await.unwrap();
                 let request = fixture::read_request(&mut summary).await;
                 assert!(
-                    request["messages"]
-                        .to_string()
-                        .contains("Now write the structured summary")
+                    request["messages"].to_string().contains(
+                        maka_agent_facts::context::default_compaction_prompt(
+                            maka_agent_facts::language::Language::En
+                        )
+                        .lines()
+                        .next()
+                        .unwrap()
+                    )
                 );
                 fixture::respond(&mut summary, fixture::SUMMARY, "stop").await;
                 let (mut next, _) = listener.accept().await.unwrap();
@@ -164,10 +169,14 @@ async fn proactive_failure_spends_the_same_budget_as_overflow_recovery() {
         while summaries < 1 || main.is_none() {
             let (mut socket, _) = listener.accept().await.unwrap();
             let request = fixture::read_request(&mut socket).await;
-            if request["messages"]
-                .to_string()
-                .contains("Now write the structured summary")
-            {
+            if request["messages"].to_string().contains(
+                maka_agent_facts::context::default_compaction_prompt(
+                    maka_agent_facts::language::Language::En,
+                )
+                .lines()
+                .next()
+                .unwrap(),
+            ) {
                 summaries += 1;
                 fixture::respond(&mut socket, "incomplete", "length").await;
             } else {

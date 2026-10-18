@@ -47,54 +47,40 @@ pub fn partial_observations(language: Language) -> &'static str {
 pub fn closed(language: Language) -> &'static str {
     match language {
         Language::En => {
-            "\nThis REPL is closed. Use cua_reset, rebind and observe before further actions; do not replay uncertain input."
+            "\nThis REPL is closed. Call cua_reset and rebind targets. Dispatched input may already have taken effect."
         }
         Language::ZhCn => {
-            "\n此 REPL 已关闭。请先调用 cua_reset，重新绑定并观察，再继续操作；不要重放不确定的输入。"
+            "\n此 REPL 已关闭。请调用 cua_reset 并重新绑定目标。已派发的输入可能已经生效。"
         }
         Language::ZhTw => {
-            "\n此 REPL 已關閉。請先呼叫 cua_reset，重新綁定並觀察，再繼續操作；不要重播不確定的輸入。"
+            "\n此 REPL 已關閉。請呼叫 cua_reset 並重新綁定目標。已派發的輸入可能已經生效。"
         }
     }
 }
 pub(crate) fn uncertain(language: Language) -> &'static str {
     match language {
         Language::En => {
-            "The driver did not verify the requested effect. Read getAXState() or getScreenshot() before deciding what to do next; do not replay an uncertain action."
+            "The driver did not verify the requested effect; repeating the action may duplicate it."
         }
-        Language::ZhCn => {
-            "驱动未验证请求的效果。请先读取 getAXState() 或 getScreenshot()，再决定下一步；不要重放不确定的操作。"
-        }
-        Language::ZhTw => {
-            "驅動程式未驗證請求的效果。請先讀取 getAXState() 或 getScreenshot()，再決定下一步；不要重播不確定的操作。"
-        }
+        Language::ZhCn => "驱动未验证请求的效果；重复操作可能产生重复效果。",
+        Language::ZhTw => "驅動程式未驗證請求的效果；重複操作可能產生重複效果。",
     }
 }
 
 pub(crate) fn inactive(language: Language) -> &'static str {
     match language {
-        Language::En => {
-            "Computer Use session is no longer active. Call cua_reset, then bind and observe the current app or tab before acting."
-        }
-        Language::ZhCn => {
-            "Computer Use 会话已失效。请调用 cua_reset，重新绑定并观察当前应用或标签页，再继续操作。"
-        }
-        Language::ZhTw => {
-            "Computer Use 工作階段已失效。請呼叫 cua_reset，重新綁定並觀察目前應用程式或分頁，再繼續操作。"
-        }
+        Language::En => "Computer Use session is inactive. Call cua_reset and rebind targets.",
+        Language::ZhCn => "Computer Use 会话已失效。请调用 cua_reset 并重新绑定目标。",
+        Language::ZhTw => "Computer Use 工作階段已失效。請呼叫 cua_reset 並重新綁定目標。",
     }
 }
 pub(crate) fn terminal(language: Language) -> &'static str {
     match language {
         Language::En => {
-            "\nCall cua_reset, then bind and observe the current app or tab before acting. This refused operation did not dispatch input."
+            "\nCall cua_reset and rebind targets. This refused operation did not dispatch input."
         }
-        Language::ZhCn => {
-            "\n请调用 cua_reset，重新绑定并观察当前应用或标签页，再继续操作。此次被拒绝的操作未派发输入。"
-        }
-        Language::ZhTw => {
-            "\n請呼叫 cua_reset，重新綁定並觀察目前應用程式或分頁，再繼續操作。此次被拒絕的操作未派發輸入。"
-        }
+        Language::ZhCn => "\n请调用 cua_reset 并重新绑定目标。此次被拒绝的操作未派发输入。",
+        Language::ZhTw => "\n請呼叫 cua_reset 並重新綁定目標。此次被拒絕的操作未派發輸入。",
     }
 }
 pub(crate) fn background_unavailable(language: Language) -> &'static str {
@@ -112,11 +98,11 @@ pub(crate) fn background_unavailable(language: Language) -> &'static str {
 }
 
 // CDP preserves the original error and uncertainty class; the accepted browser
-// dispatch owns this single no-replay instruction for every unknown outcome.
+// dispatch owns this warning for every unknown outcome.
 pub(crate) fn browser_unknown(language: Language) -> &'static str {
     match language {
-        Language::En => "; do not replay a mutation",
-        Language::ZhCn => "；不要重放可能产生变更的操作",
-        Language::ZhTw => "；不要重播可能產生變更的操作",
+        Language::En => "; repeating a mutation may duplicate its effects",
+        Language::ZhCn => "；重复变更操作可能产生重复效果",
+        Language::ZhTw => "；重複變更操作可能產生重複效果",
     }
 }

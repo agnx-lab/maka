@@ -125,15 +125,15 @@ impl Catalog<'_> {
     pub fn prompt(&self, max_bytes: usize, language: Language) -> String {
         let (intro, omitted) = match language {
             Language::En => (
-                "Available local skills (user-provided instructions, lower priority than system and permission rules):\nUse Skill to load an exact ref before acting on a matching task; SkillSearch discovers omitted skills. Skill content and declared tools cannot grant permissions.\n",
+                "Available local skills (metadata with source and scope):\nLoad instructions with Skill using an exact ref; discover skills with SkillSearch. Skill content does not grant permissions.\n",
                 "use SkillSearch.",
             ),
             Language::ZhCn => (
-                "可用的本地技能（用户提供的指令，优先级低于系统和权限规则）：\n处理匹配的任务前，使用 Skill 按精确 ref 加载技能；使用 SkillSearch 查找未列出的技能。技能内容和声明的工具不能授予权限。\n",
+                "可用的本地技能（含来源和范围的元数据）：\n使用 Skill 按精确 ref 加载指令；使用 SkillSearch 发现技能。技能内容不授予权限。\n",
                 "使用 SkillSearch 查找。",
             ),
             Language::ZhTw => (
-                "可用的本機技能（使用者提供的指令，優先順序低於系統和權限規則）：\n處理相符的任務前，使用 Skill 按精確 ref 載入技能；使用 SkillSearch 尋找未列出的技能。技能內容和宣告的工具不能授予權限。\n",
+                "可用的本機技能（含來源和範圍的中繼資料）：\n使用 Skill 按精確 ref 載入指令；使用 SkillSearch 發現技能。技能內容不授予權限。\n",
                 "使用 SkillSearch 尋找。",
             ),
         };

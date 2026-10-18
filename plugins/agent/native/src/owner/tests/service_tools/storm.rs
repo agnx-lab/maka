@@ -352,8 +352,12 @@ async fn serve(
             assert!(summary.completion_seen);
             assert!(summary.checkpoint_id.is_some());
             assert_eq!(requested.checkpoint_id, summary.checkpoint_id);
-            assert!(messages.iter().any(|message| message["role"] == "user"
-                && message["content"] == format!("Continuation summary:\n{}", summary.text)));
+            assert!(messages.iter().any(|message| {
+                message["role"] == "user"
+                    && message["content"]
+                        .as_str()
+                        .is_some_and(|text| text.ends_with(&format!("\n\n{}", summary.text)))
+            }));
             // Both Main and later Summary inherit covered work only through the checkpoint.
             for message in messages {
                 if message["role"] == "tool" {

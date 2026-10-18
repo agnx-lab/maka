@@ -427,25 +427,25 @@ impl Owner {
         let instructions = if planning {
             match basis.language {
                 Language::En => {
-                    "You are planning a change for user approval. Inspect and discuss only. Workspace mutation, Shell, subagents and autonomous workflows are unavailable. Ask focused questions when needed. When ready, call SubmitPlan once with concrete ordered steps and material risks. Submission ends this planning Turn; it does not start implementation."
+                    "You are planning a change for user approval. Inspect and discuss only. Workspace mutation, Shell, subagents and autonomous workflows are unavailable. SubmitPlan proposes concrete ordered steps and material risks for approval; submission ends this planning Turn without starting implementation."
                 }
                 Language::ZhCn => {
-                    "你正在规划变更，供用户批准。仅检查和讨论；不能修改工作区、使用 Shell、子代理或自主工作流。需要时提出聚焦的问题。准备好后调用一次 SubmitPlan，列出具体有序步骤及重大风险。提交会结束此规划轮次，不会开始实现。"
+                    "你正在规划变更，供用户批准。仅检查和讨论；不能修改工作区、使用 Shell、子代理或自主工作流。通过 SubmitPlan 提交具体有序步骤及重大风险，供用户批准；提交会结束此规划轮次，不会开始实现。"
                 }
                 Language::ZhTw => {
-                    "你正在規劃變更，供使用者批准。僅檢查和討論；不能修改工作區、使用 Shell、子代理或自主工作流程。需要時提出聚焦的問題。準備好後呼叫一次 SubmitPlan，列出具體有序步驟及重大風險。提交會結束此規劃回合，不會開始實作。"
+                    "你正在規劃變更，供使用者批准。僅檢查和討論；不能修改工作區、使用 Shell、子代理或自主工作流程。透過 SubmitPlan 提交具體有序步驟及重大風險，供使用者批准；提交會結束此規劃回合，不會開始實作。"
                 }
             }
         } else {
             match basis.language {
                 Language::En => {
-                    "Execute the frozen user-approved Plan in the opening message. Use update_plan to report every step with the exact IDs, at most one in progress. Mark completed only with evidence. Report interruptions truthfully. Use cancel_plan only when the user asks to abandon execution. Model-reported completion takes effect only after this execution ends successfully."
+                    "Execute the frozen user-approved Plan in the opening message. Record step status through update_plan; completion requires evidence and takes effect only after execution succeeds. cancel_plan is for user-requested abandonment."
                 }
                 Language::ZhCn => {
-                    "执行开头消息中已冻结且经用户批准的计划。使用 update_plan 按精确 ID 报告每一步，最多一步处于进行中。只有证据充分才能标记完成；如实报告中断。仅在用户要求放弃执行时使用 cancel_plan。模型报告的完成仅在此次执行成功结束后生效。"
+                    "执行开头消息中已冻结且经用户批准的计划。通过 update_plan 记录步骤状态；完成需要证据，且仅在执行成功结束后生效。cancel_plan 用于用户要求放弃执行时。"
                 }
                 Language::ZhTw => {
-                    "執行開頭訊息中已凍結且經使用者批准的計劃。使用 update_plan 按精確 ID 回報每一步，最多一步處於進行中。只有證據充分才能標記完成；如實回報中斷。僅在使用者要求放棄執行時使用 cancel_plan。模型回報的完成僅在此次執行成功結束後生效。"
+                    "執行開頭訊息中已凍結且經使用者批准的計劃。透過 update_plan 記錄步驟狀態；完成需要證據，且僅在執行成功結束後生效。cancel_plan 用於使用者要求放棄執行時。"
                 }
             }
         };

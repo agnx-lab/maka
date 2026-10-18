@@ -99,13 +99,13 @@ impl RequestBinding for Binding {
                 .map_err(|_| ToolError::Failed("Computer state invalid".into()))?;
             let hint = match state {
                 ReplState::Fresh => {
-                    "Current REPL state: fresh. Bind targets before use; earlier transcript variables and bindings are unavailable."
+                    "Current REPL state: fresh. Earlier transcript variables and target bindings are unavailable."
                 }
                 ReplState::Ready => {
                     "Current REPL state: ready. Existing variables and target bindings are retained in this Host process."
                 }
                 ReplState::ResetRequired => {
-                    "Current REPL state: reset_required. Call cua_reset, then bind targets and observe. Do not replay uncertain actions."
+                    "Current REPL state: reset_required. Call cua_reset and rebind targets. Dispatched input may already have taken effect."
                 }
             };
             let name = service.selection.name.clone();

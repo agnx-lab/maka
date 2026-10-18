@@ -301,15 +301,15 @@ impl<A> Goal<A> {
         self.report = None;
         let content = match self.arm.language {
             Language::En => format!(
-                "Continue this explicitly authorized goal (iteration {} of {}):\n{}\n\nBefore ending, use GoalStatus: progress; achieved only with evidence; waiting when user input is needed; or impossible with a reason. An answer alone does not mark achievement. Do not repeat completed work. A configured token budget is a retrospective scheduling threshold, not a hard request limit. Previous checkpoint: {}",
+                "Continue this explicitly authorized goal (iteration {} of {}):\n{}\n\nGoalStatus records iteration progress or changes goal status; an answer alone does not mark achievement. A configured token budget is a retrospective scheduling threshold, not a hard request limit. Previous checkpoint: {}",
                 self.iterations, self.arm.max_iterations, self.arm.objective, self.note
             ),
             Language::ZhCn => format!(
-                "继续此已明确授权的目标（第 {} 次，共 {} 次迭代）：\n{}\n\n结束前使用 GoalStatus 报告 progress；仅有证据时报告 achieved，需要用户输入时报告 waiting，无法完成时报告 impossible 并说明原因。普通回答不会将目标标记为完成。不要重复已完成的工作。配置的 token 预算是事后调度阈值，不是单次请求的硬限制。上次检查点：{}",
+                "继续此已明确授权的目标（第 {} 次，共 {} 次迭代）：\n{}\n\nGoalStatus 记录迭代进度或改变目标状态；普通回答不会将目标标记为完成。配置的 token 预算是事后调度阈值，不是单次请求的硬限制。上次检查点：{}",
                 self.iterations, self.arm.max_iterations, self.arm.objective, self.note
             ),
             Language::ZhTw => format!(
-                "繼續此已明確授權的目標（第 {} 次，共 {} 次迭代）：\n{}\n\n結束前使用 GoalStatus 回報 progress；僅有證據時回報 achieved，需要使用者輸入時回報 waiting，無法完成時回報 impossible 並說明原因。一般回答不會將目標標記為完成。不要重複已完成的工作。設定的 token 預算是事後排程門檻，不是單次請求的硬限制。上次檢查點：{}",
+                "繼續此已明確授權的目標（第 {} 次，共 {} 次迭代）：\n{}\n\nGoalStatus 記錄迭代進度或改變目標狀態；一般回答不會將目標標記為完成。設定的 token 預算是事後排程門檻，不是單次請求的硬限制。上次檢查點：{}",
                 self.iterations, self.arm.max_iterations, self.arm.objective, self.note
             ),
         };

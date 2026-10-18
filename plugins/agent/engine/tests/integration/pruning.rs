@@ -109,10 +109,14 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
             while summaries < expected_summaries || main.is_none() {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = fixture::read_request(&mut socket).await;
-                if !request["messages"]
-                    .to_string()
-                    .contains("Now write the structured summary")
-                {
+                if !request["messages"].to_string().contains(
+                    maka_agent_facts::context::default_compaction_prompt(
+                        maka_agent_facts::language::Language::En,
+                    )
+                    .lines()
+                    .next()
+                    .unwrap(),
+                ) {
                     assert!(main.is_none());
                     main = Some((socket, request));
                     continue;

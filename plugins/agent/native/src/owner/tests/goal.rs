@@ -499,17 +499,17 @@ async fn goal_language_stays_approved_until_an_idle_resume_renews_both_captures(
         assert_eq!(user(&followup), user(&first), "the accepted iteration retains exact input after the setting changes");
         assert!(system(&followup).contains(accepted.system_prompt.as_deref().unwrap()));
         for request in [&first, &followup, &original_chain] {
-            assert!(system(request).to_lowercase().contains("permission"));
+            assert!(system(request).contains(accepted.system_prompt.as_deref().unwrap()));
             assert!(user(request).contains(objective));
             assert!(user(request).contains("iteration"), "the approved English Arm keeps rendering English iterations: {request}");
         }
         assert_eq!(serde_json::to_value(first_configuration.language).unwrap(), "en");
         assert_eq!(serde_json::to_value(chain_configuration.language).unwrap(), "en");
-        for (request, configuration, tag, permission) in [
-            (&cn_request, &cn_configuration, "zh-CN", "权限"),
-            (&tw_request, &tw_configuration, "zh-TW", "權限"),
+        for (request, configuration, tag) in [
+            (&cn_request, &cn_configuration, "zh-CN"),
+            (&tw_request, &tw_configuration, "zh-TW"),
         ] {
-            assert!(system(request).contains(permission), "renewed grant language reaches actual builtin guidance: {request}");
+            assert!(system(request).contains(&configuration.system_prompt.as_ref().unwrap().text), "renewed captured guidance reaches the actual request: {request}");
             assert!(user(request).contains("迭代"), "renewed Arm language reaches actual iteration input: {request}");
             assert!(user(request).contains(objective));
             assert_eq!(serde_json::to_value(configuration.language).unwrap(), tag);

@@ -284,12 +284,12 @@ async fn interrupted_progress_renews_compaction_before_and_after_a_checkpoint() 
                 // Summary is a separate request lifetime and uses ordinary SSE.
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let summary = read_request(&mut socket).await;
-                assert!(summary["input"].to_string().contains("Now write the structured summary"));
+                assert!(summary["input"].to_string().contains(maka_agent_facts::context::default_compaction_prompt(maka_agent_facts::language::Language::En).lines().next().unwrap()));
                 assert!(summary["input"].as_array().unwrap().iter().any(|item|
                     item["type"] == "function_call_output" && item["call_id"] == call),
                     "compaction must cover the settled effect before continuing");
                 if round == 2 {
-                    assert!(summary["input"].to_string().contains("Continuation summary"));
+                    assert!(summary["input"].to_string().contains("summary-marker"));
                 }
                 let event = json!({"type":"response.completed", "response":{"id":format!("summary-{round}"), "output":[{"type":"message", "id":format!("summary-text-{round}"), "content":[{"type":"output_text", "text":SUMMARY}]}]}});
                 let body = format!("data: {event}\n\n");
