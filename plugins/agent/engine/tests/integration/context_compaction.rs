@@ -192,7 +192,12 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
             assert_eq!(checkpoint_event_id.as_ref(), Some(&checkpoint));
         }
     }
-    let legacy = maka_agent_engine::project_model_history(&prefix, "session").unwrap();
+    let legacy = maka_agent_engine::project_model_history(
+        &prefix,
+        "session",
+        maka_agent_facts::language::Language::En,
+    )
+    .unwrap();
     assert!(
         !serde_json::to_string(&legacy)
             .unwrap()
@@ -808,5 +813,99 @@ async fn small_window_caps_summary_output_and_compacts_only_for_input_pressure()
         } else if manual {
             assert!(summaries[0]["max_tokens"].as_u64().unwrap() > 164);
         }
+    }
+}
+
+#[tokio::test]
+async fn new_summary_uses_captured_language_without_retranslating_the_prior_main_prefix() {
+    use maka_agent_facts::language::Language;
+    for (language, summary_instruction, context_label) in [
+        (Language::ZhCn, "只输出简洁的结构化总结", "会话上下文"),
+        (Language::ZhTw, "只輸出簡潔的結構化總結", "工作階段上下文"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = Arc::new(
+            EventLog::open(&directory.path().join("events.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let main = read_request(&mut socket).await;
+            respond(&mut socket, "opaque prior answer 原文", "stop").await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let summary = read_request(&mut socket).await;
+            respond(&mut socket, SUMMARY, "stop").await;
+            (main, summary)
+        });
+        let worker = engine(log.clone());
+        let mut original = input(&base, "original", false);
+        original.configuration.system_prompt = Some(maka_agent_facts::execution::SystemPrompt {
+            text: "Original custom prefix 原文".into(),
+            policy_revision: 0,
+            sources: vec![],
+        });
+        worker
+            .run(original, CancellationToken::new())
+            .await
+            .unwrap();
+        let mut compact = input(&base, "translated-summary", true);
+        compact.configuration.language = language;
+        compact.configuration.system_prompt = Some(maka_agent_facts::execution::SystemPrompt {
+            text: "This current prefix must not replace the prior Main surface".into(),
+            policy_revision: 0,
+            sources: vec![],
+        });
+        worker.run(compact, CancellationToken::new()).await.unwrap();
+        worker.drain().await;
+        let (main, summary) = server.await.unwrap();
+        assert!(
+            main["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Original custom prefix 原文")
+        );
+        let system = summary["messages"][0]["content"].as_str().unwrap();
+        assert!(system.starts_with("Original custom prefix 原文"));
+        assert!(system.contains(context_label));
+        assert!(!system.contains("This current prefix"));
+        let messages = summary["messages"].as_array().unwrap();
+        assert!(
+            messages.last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains(summary_instruction)
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message["content"] == "opaque prior answer 原文")
+        );
+        let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+        let summary_request = prefix
+            .events
+            .iter()
+            .find(|event| {
+                matches!(
+                    event.event.fact,
+                    Fact::ModelRequested {
+                        purpose: maka_agent_facts::context::ModelPurpose::Summary,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let frozen = log
+            .request_composition("session", &summary_request.event.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            frozen.system_prompt.as_deref(),
+            Some("Original custom prefix 原文")
+        );
+        log.shutdown().await.unwrap();
     }
 }

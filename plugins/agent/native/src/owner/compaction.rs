@@ -22,22 +22,34 @@ use maka_agent_engine::{RunError, RunInput, RunWork};
 use maka_agent_facts::input::InvocationInput;
 
 impl Owner {
-    pub(super) async fn effective_compaction_prompt(&self) -> Result<String, String> {
-        Ok(self
-            .configuration
-            .runtime_policy()
-            .await
-            .map_err(|_| "agent_configuration_unavailable")?
+    pub(super) fn effective_compaction_prompt(
+        &self,
+        snapshot: &RuntimePolicySnapshot,
+        language: Language,
+    ) -> String {
+        snapshot
             .policy
             .compaction_prompt
-            .unwrap_or_else(|| maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT.into()))
+            .clone()
+            .unwrap_or_else(|| {
+                maka_agent_facts::context::default_compaction_prompt(language).into()
+            })
     }
 
     pub async fn compaction_prompt(&self, input: SessionRead) -> Result<CompactionPrompt, String> {
         self.session(&input.session_id).await?;
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(|_| "agent_configuration_unavailable")?;
+        let language = self.resolve_language(&snapshot);
         Ok(CompactionPrompt {
-            compaction_prompt: self.effective_compaction_prompt().await?,
-            default_compaction_prompt: maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT.into(),
+            compaction_prompt: self.effective_compaction_prompt(&snapshot, language),
+            default_compaction_prompt: maka_agent_facts::context::default_compaction_prompt(
+                language,
+            )
+            .into(),
         })
     }
 
@@ -114,12 +126,19 @@ impl Owner {
         )
         .await
         .map_err(public_error)?;
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(|_| "agent_configuration_unavailable")?;
+        let language = self.resolve_language(&snapshot);
         let prompt = match input.prompt {
             Some(prompt) => prompt,
-            None => self.effective_compaction_prompt().await?,
+            None => self.effective_compaction_prompt(&snapshot, language),
         };
         let permissions = &session.configuration.permissions;
         let configuration = InvocationConfiguration {
+            language,
             compaction_prompt: Some(prompt.clone()),
             editing_tools: source.accepted.editing_tools,
             tool_discovery: false,
@@ -146,6 +165,7 @@ impl Owner {
             tool_composition: None,
         };
         let basis = MessageBasis {
+            language,
             compaction_prompt: Some(prompt),
             graph: None,
             collaboration_mode: session.configuration.collaboration_mode,

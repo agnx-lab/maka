@@ -213,6 +213,7 @@ impl Handler for Service {
                 .provider
                 .execute(
                     executor::Request {
+                        language: input.language,
                         invocation,
                         conversation_key,
                         content: input.message.into(),

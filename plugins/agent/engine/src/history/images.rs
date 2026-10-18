@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use maka_agent_facts::attachment::AttachmentRef;
 use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
@@ -31,8 +33,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::RunError;
 
-pub(super) const NO_VISION: &str =
-    "Image was read, but the selected model does not support image input.";
+pub(super) fn no_vision(language: Language) -> &'static str {
+    match language {
+        Language::En => "Image was read, but the selected model does not support image input.",
+        Language::ZhCn => "已读取图片，但所选模型不支持图片输入。",
+        Language::ZhTw => "已讀取圖片，但所選模型不支援圖片輸入。",
+    }
+}
 
 /// Targets borrow canonical evidence and are emitted alongside their messages.
 /// Arbitrary JSON tool results cannot authorize a storage read.
@@ -68,6 +75,7 @@ pub(crate) async fn materialize_replay(
     cancellation: &CancellationToken,
     replay: Option<super::Replay<'_>>,
     prior_unknown: bool,
+    language: Language,
 ) -> Result<Vec<Message>, RunError> {
     let mut targets = Vec::new();
     let selected = anchor
@@ -83,6 +91,7 @@ pub(crate) async fn materialize_replay(
         vision,
         replay,
         prior_unknown,
+        language,
     )?;
     for target in targets {
         if cancellation.is_cancelled() {
@@ -113,16 +122,28 @@ pub(crate) async fn materialize_replay(
                 },
             },
             ImageRead::Unavailable(reason) => match &target {
-                Target::User { image, .. } => ContentPart::text(format!(
-                    "Image attachment \"{}\" could not be loaded: {reason}.",
-                    image.name
-                )),
-                Target::Audio { .. } => ContentPart::text(format!(
-                    "Audio could not be loaded from artifact storage: {reason}."
-                )),
-                Target::Tool { .. } => ContentPart::text(format!(
-                    "Image could not be loaded from artifact storage: {reason}."
-                )),
+                Target::User { image, .. } => ContentPart::text(match language {
+                    Language::En => format!(
+                        "Image attachment \"{}\" could not be loaded: {reason}.",
+                        image.name
+                    ),
+                    Language::ZhCn => format!("无法加载图片附件 \"{}\"：{reason}。", image.name),
+                    Language::ZhTw => format!("無法載入圖片附件 \"{}\"：{reason}。", image.name),
+                }),
+                Target::Audio { .. } => ContentPart::text(match language {
+                    Language::En => {
+                        format!("Audio could not be loaded from artifact storage: {reason}.")
+                    }
+                    Language::ZhCn => format!("无法从工件存储加载音频：{reason}。"),
+                    Language::ZhTw => format!("無法從成品儲存載入音訊：{reason}。"),
+                }),
+                Target::Tool { .. } => ContentPart::text(match language {
+                    Language::En => {
+                        format!("Image could not be loaded from artifact storage: {reason}.")
+                    }
+                    Language::ZhCn => format!("无法从工件存储加载图片：{reason}。"),
+                    Language::ZhTw => format!("無法從成品儲存載入圖片：{reason}。"),
+                }),
             },
         };
         match target {

@@ -42,6 +42,7 @@ mod continuation;
 mod failures;
 fn request(base_url: &str, text: &str) -> ModelRequest {
     ModelRequest {
+        language: maka_agent_facts::language::Language::En,
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),

@@ -169,6 +169,7 @@ pub(super) async fn inspect(
     )
     .await?;
     let tools = maka_tools::RunTools::new(
+        input.configuration.language,
         inner.log.clone(),
         input.invocation.clone(),
         catalog.clone(),

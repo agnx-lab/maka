@@ -214,6 +214,7 @@ async fn discovery_loads_complete_schemas_without_running_effects() {
         preflight::accepted(&log, &invocation, &[invalid.clone(), search.clone()]).await;
         let loaded = maka_tools::availability::LoadedTools::default();
         let run = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog.clone(),
@@ -251,6 +252,7 @@ async fn discovery_loads_complete_schemas_without_running_effects() {
         let checkpoint = run.checkpoint();
         let restored_loaded = maka_tools::availability::LoadedTools::default();
         let restored = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog.clone(),
@@ -288,6 +290,7 @@ async fn discovery_loads_complete_schemas_without_running_effects() {
             "failed restore preserves the admitted view"
         );
         let changed = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             ToolCatalog::default(),
@@ -298,6 +301,7 @@ async fn discovery_loads_complete_schemas_without_running_effects() {
         assert!(changed.restore(&checkpoint).is_err());
         drop(changed);
         let coded = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog.clone(),

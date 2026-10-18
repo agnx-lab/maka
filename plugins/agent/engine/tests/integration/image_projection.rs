@@ -317,3 +317,52 @@ async fn prepared_context_breakdown_measures_projected_roles_and_freezes_literal
             Fact::ModelRequested { context_breakdown: Some(value), .. } if value == &measured)));
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn missing_image_guidance_uses_the_admitted_language_and_preserves_attachment_identity() {
+    use maka_agent_facts::language::Language;
+    for (language, guidance) in [
+        (Language::En, "could not be loaded"),
+        (Language::ZhCn, "无法加载图片附件"),
+        (Language::ZhTw, "無法載入圖片附件"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = Arc::new(
+            EventLog::open(&directory.path().join("events.sqlite"))
+                .await
+                .unwrap(),
+        );
+        log.create_session("session", "create", &json!({}), 1)
+            .await
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = request(&mut socket).await;
+            respond(&mut socket).await;
+            request
+        });
+        let mut image = attachment("missing_image");
+        image["name"] = "missing-原图.png".into();
+        let mut run = input(&base, json!([image]));
+        run.configuration.language = language;
+        let worker = engine(log.clone());
+        worker.run(run, CancellationToken::new()).await.unwrap();
+        worker.drain().await;
+        let request = server.await.unwrap();
+        let user = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "user")
+            .unwrap();
+        let text = user["content"].to_string();
+        assert!(text.contains(guidance));
+        assert!(text.contains("missing-原图.png"));
+        assert!(text.contains("not_found"));
+        assert!(text.contains("current"));
+        assert!(text.contains("image/png"));
+        log.shutdown().await.unwrap();
+    }
+}

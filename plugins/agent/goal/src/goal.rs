@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::Submit;
 use maka_capabilities::authorization::Id;
 use maka_capabilities::storage::Data;
@@ -44,6 +45,8 @@ pub fn invalid(e: impl std::fmt::Display) -> Error {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Arm<A = Id> {
+    #[serde(default, skip_serializing_if = "Language::is_english")]
+    pub language: Language,
     pub operation_id: Uuid,
     pub objective: String,
     pub grant: A,
@@ -163,7 +166,12 @@ impl<A> Goal<A> {
         match action {
             Control::Pause if !self.status.terminal() => {
                 self.status = Status::Paused;
-                self.note = "Paused by user; accepted execution may finish".into();
+                self.note = (match self.arm.language {
+                    Language::En => "Paused by user; accepted execution may finish",
+                    Language::ZhCn => "用户已暂停；已接纳的执行可能继续完成",
+                    Language::ZhTw => "使用者已暫停；已接納的執行可能繼續完成",
+                })
+                .into();
             }
             Control::Resume
                 if matches!(
@@ -173,7 +181,12 @@ impl<A> Goal<A> {
             {
                 self.status = Status::Active;
                 self.report = None;
-                self.note = "Resumed by user".into();
+                self.note = (match self.arm.language {
+                    Language::En => "Resumed by user",
+                    Language::ZhCn => "用户已恢复",
+                    Language::ZhTw => "使用者已恢復",
+                })
+                .into();
             }
             Control::Cancel
                 if !self.status.terminal()
@@ -181,13 +194,17 @@ impl<A> Goal<A> {
             {
                 self.status = Status::Cancelled;
                 self.report = None;
-                self.note = "Cancellation requested; a committed dispatch may still be \
-                    admitted before exact cancellation settles"
+                self.note = (match self.arm.language { Language::En => "Cancellation requested; a committed dispatch may still be admitted before exact cancellation settles", Language::ZhCn => "已请求取消；精确取消确认前，已提交的派发仍可能被接纳", Language::ZhTw => "已請求取消；精確取消確認前，已提交的派發仍可能被接納" })
                     .into();
             }
             Control::Complete if !self.status.terminal() && self.pending.is_none() => {
                 self.status = Status::Achieved;
-                self.note = "Marked complete by user".into();
+                self.note = (match self.arm.language {
+                    Language::En => "Marked complete by user",
+                    Language::ZhCn => "用户标记为完成",
+                    Language::ZhTw => "使用者標記為完成",
+                })
+                .into();
             }
             _ => return Err(invalid("Control is not valid in the current Goal state")),
         }
@@ -204,7 +221,12 @@ impl<A> Goal<A> {
             .map(|pending| pending.request.operation_id);
         if matches!(self.status, Status::Cancelled | Status::CancellationUnknown) {
             self.status = Status::Cancelled;
-            self.note = "Cancellation settled; the accepted execution is no longer running".into();
+            self.note = (match self.arm.language {
+                Language::En => "Cancellation settled; the accepted execution is no longer running",
+                Language::ZhCn => "取消已确认；已接纳的执行不再运行",
+                Language::ZhTw => "取消已確認；已接納的執行不再執行",
+            })
+            .into();
         }
         if self.status == Status::Active {
             match outcome {
@@ -221,8 +243,7 @@ impl<A> Goal<A> {
                 }
                 _ => {
                     self.status = Status::Blocked;
-                    self.note = "Goal execution did not complete normally; \
-                        inspect the Session before resuming"
+                    self.note = (match self.arm.language { Language::En => "Goal execution did not complete normally; inspect the Session before resuming", Language::ZhCn => "目标执行未正常完成；恢复前检查会话", Language::ZhTw => "目標執行未正常完成；恢復前檢查工作階段" })
                         .into();
                 }
             }
@@ -237,8 +258,13 @@ impl<A> Goal<A> {
                         Status::Blocked
                     };
                 }
-                self.note
-                    .push_str(" Usage could not be refreshed; no further iteration was scheduled.");
+                self.note.push_str(match self.arm.language {
+                    Language::En => {
+                        " Usage could not be refreshed; no further iteration was scheduled."
+                    }
+                    Language::ZhCn => " 无法刷新用量；未安排后续迭代。",
+                    Language::ZhTw => " 無法重新整理用量；未安排後續迭代。",
+                });
             }
         }
     }
@@ -250,11 +276,10 @@ impl<A> Goal<A> {
         self.report = None;
         if matches!(self.status, Status::Cancelled | Status::CancellationUnknown) {
             self.status = Status::Cancelled;
-            self.note = "Goal cancellation recorded; Host handoff is sealed and no continuation was scheduled".into();
+            self.note = (match self.arm.language { Language::En => "Goal cancellation recorded; Host handoff is sealed and no continuation was scheduled", Language::ZhCn => "已记录目标取消；Host 交接已封存，未安排继续执行", Language::ZhTw => "已記錄目標取消；Host 交接已封存，未安排繼續執行" }).into();
         } else {
             self.status = Status::Blocked;
-            self.note = "Host handoff is paused. Resume it through Session controls, then \
-                explicitly resume the Goal; no automatic continuation was submitted."
+            self.note = (match self.arm.language { Language::En => "Host handoff is paused. Resume it through Session controls, then explicitly resume the Goal; no automatic continuation was submitted.", Language::ZhCn => "Host 交接已暂停。先通过会话控件恢复，再明确恢复目标；未提交自动继续请求。", Language::ZhTw => "Host 交接已暫停。先透過工作階段控制項恢復，再明確恢復目標；未提交自動繼續請求。" })
                 .into();
         }
     }
@@ -264,21 +289,30 @@ impl<A> Goal<A> {
         }
         if self.iterations >= self.arm.max_iterations {
             self.status = Status::MaxIterations;
-            self.note = "Iteration limit reached".into();
+            self.note = (match self.arm.language {
+                Language::En => "Iteration limit reached",
+                Language::ZhCn => "已达迭代上限",
+                Language::ZhTw => "已達迭代上限",
+            })
+            .into();
             return Ok(());
         }
         self.iterations += 1;
         self.report = None;
-        let content = format!(
-            "Continue this explicitly authorized goal (iteration {} of {}):\n{}\n\n\
-             Work toward the objective. Before ending, use GoalStatus to report progress, \
-             achieved only with evidence, waiting if user input is needed, or impossible \
-             with a reason. A normal answer alone does not mark the goal achieved. \
-             Do not repeat work already completed. Goal token budget, if configured, \
-             is a retrospective scheduling threshold, not a hard request limit. \
-             Previous checkpoint: {}",
-            self.iterations, self.arm.max_iterations, self.arm.objective, self.note,
-        );
+        let content = match self.arm.language {
+            Language::En => format!(
+                "Continue this explicitly authorized goal (iteration {} of {}):\n{}\n\nBefore ending, use GoalStatus: progress; achieved only with evidence; waiting when user input is needed; or impossible with a reason. An answer alone does not mark achievement. Do not repeat completed work. A configured token budget is a retrospective scheduling threshold, not a hard request limit. Previous checkpoint: {}",
+                self.iterations, self.arm.max_iterations, self.arm.objective, self.note
+            ),
+            Language::ZhCn => format!(
+                "继续此已明确授权的目标（第 {} 次，共 {} 次迭代）：\n{}\n\n结束前使用 GoalStatus 报告 progress；仅有证据时报告 achieved，需要用户输入时报告 waiting，无法完成时报告 impossible 并说明原因。普通回答不会将目标标记为完成。不要重复已完成的工作。配置的 token 预算是事后调度阈值，不是单次请求的硬限制。上次检查点：{}",
+                self.iterations, self.arm.max_iterations, self.arm.objective, self.note
+            ),
+            Language::ZhTw => format!(
+                "繼續此已明確授權的目標（第 {} 次，共 {} 次迭代）：\n{}\n\n結束前使用 GoalStatus 回報 progress；僅有證據時回報 achieved，需要使用者輸入時回報 waiting，無法完成時回報 impossible 並說明原因。一般回答不會將目標標記為完成。不要重複已完成的工作。設定的 token 預算是事後排程門檻，不是單次請求的硬限制。上次檢查點：{}",
+                self.iterations, self.arm.max_iterations, self.arm.objective, self.note
+            ),
+        };
         self.pending = Some(Pending {
             dispatched: false,
             request: Submit {
@@ -303,10 +337,20 @@ impl<A> Goal<A> {
                 || self.consumed.missing > 0
             {
                 self.status = Status::BudgetUnknown;
-                self.note = "Token usage is incomplete; continuation stopped".into();
+                self.note = (match self.arm.language {
+                    Language::En => "Token usage is incomplete; continuation stopped",
+                    Language::ZhCn => "Token 用量不完整；已停止继续执行",
+                    Language::ZhTw => "Token 用量不完整；已停止繼續執行",
+                })
+                .into();
             } else if self.consumed.known >= limit {
                 self.status = Status::BudgetLimited;
-                self.note = "Observed token threshold reached".into();
+                self.note = (match self.arm.language {
+                    Language::En => "Observed token threshold reached",
+                    Language::ZhCn => "已达观测到的 token 阈值",
+                    Language::ZhTw => "已達觀測到的 token 門檻",
+                })
+                .into();
             }
         }
     }
@@ -547,6 +591,7 @@ mod tests {
 
     fn arm() -> Arm {
         Arm {
+            language: Language::En,
             operation_id: Uuid::new_v4(),
             objective: "Verify the feature".into(),
             grant: maka_capabilities::authorization::Id(Uuid::new_v4()),
@@ -835,5 +880,45 @@ mod tests {
         }
         saved.goal.control(Control::Resume).unwrap();
         assert!(saved.goal.keeps_host_awake());
+    }
+
+    #[tokio::test]
+    async fn goal_language_and_pending_input_survive_repository_reopen() {
+        let store = Arc::new(Store::default());
+        let repo = Repository::new(store.clone());
+        let mut input = arm();
+        input.language = Language::ZhTw;
+        input.objective = "Preserve /tmp/原始 file.rs and `exact-id`".into();
+        repo.arm("session", input.clone(), Meter::default())
+            .await
+            .unwrap();
+        let mut saved = repo.read("session").await.unwrap().unwrap();
+        assert_eq!(saved.goal.arm.language, Language::ZhTw);
+        saved.goal.reserve().unwrap();
+        let pending = saved.goal.pending.as_ref().unwrap().request.clone();
+        assert!(
+            pending
+                .content
+                .text
+                .contains("Preserve /tmp/原始 file.rs and `exact-id`")
+        );
+        repo.save(saved).await.unwrap();
+        let restarted = Repository::new(store);
+        let restored = restarted.read("session").await.unwrap().unwrap();
+        assert_eq!(restored.goal.arm.language, Language::ZhTw);
+        assert_eq!(
+            serde_json::to_value(&restored.goal.arm).unwrap()["language"],
+            "zh-TW"
+        );
+        assert_eq!(restored.goal.pending.unwrap().request, pending);
+        assert_eq!(
+            restarted
+                .arm("session", input, Meter::default())
+                .await
+                .unwrap()
+                .arm
+                .language,
+            Language::ZhTw
+        );
     }
 }

@@ -26,6 +26,7 @@ mod web;
 use crate::contract::{ServiceTool, ToolConfirmation, ToolInput, ToolResult};
 use futures_util::FutureExt;
 use maka_agent_facts::execution::EditingTools;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::tool_call::ToolRejection;
 use maka_agent_facts::tool_output::ToolOutput;
 use maka_agent_facts::tool_output::ToolSuccess;
@@ -477,6 +478,17 @@ impl ToolPreparer for Service {
                                         Ok(ToolSuccess::from(result))
                                     }
                                     MethodMode::Mutation => {
+                                        let language = store
+                                            .invocation_configuration(&invocation)
+                                            .await
+                                            .map_err(|error| ToolError::Failed(error.to_string()))?
+                                            .ok_or_else(|| {
+                                                ToolError::Failed(
+                                                    "Service call has no invocation configuration"
+                                                        .into(),
+                                                )
+                                            })?
+                                            .language;
                                         let observer = request
                                             .mutate(
                                                 &selection.import,
@@ -493,9 +505,10 @@ impl ToolPreparer for Service {
                                         let reply = observer.await.map_err(ToolError::Failed)?;
                                         observation = Some(Box::new(reply.clone()));
                                         if selection.result == ToolResult::Computer {
-                                            computer::project(&store, &invocation, reply).await
+                                            computer::project(&store, &invocation, reply, language)
+                                                .await
                                         } else {
-                                            mutation_result(reply)
+                                            mutation_result(reply, language)
                                         }
                                     }
                                     MethodMode::Subscription => {
@@ -583,7 +596,14 @@ fn operation_id(context: &ToolCallContext) -> Uuid {
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Uuid::from_bytes(bytes)
 }
-fn mutation_result(reply: OperationReply) -> Result<ToolSuccess, ToolError> {
+fn mutation_result(reply: OperationReply, language: Language) -> Result<ToolSuccess, ToolError> {
+    let unknown = match language {
+        Language::En => {
+            "Native service result is unknown; inspect its original receipt before retrying."
+        }
+        Language::ZhCn => "原生服务结果未知；重试前请检查其原始回执。",
+        Language::ZhTw => "原生服務結果未知；重試前請檢查其原始回執。",
+    };
     match &reply.receipt {
         Receipt::Recorded { outcome, cleanup } => {
             if *cleanup != OperationCleanup::Confirmed {
@@ -592,19 +612,91 @@ fn mutation_result(reply: OperationReply) -> Result<ToolSuccess, ToolError> {
                 ));
             }
             match outcome {
-                OperationOutcome::Returned { .. } => Ok(ToolOutput::Operation(Box::new(reply)).into()),
-                OperationOutcome::Unknown { .. } | OperationOutcome::Unresolved =>
-                    Err(ToolError::OperationUnknown { message: "Native service result is unknown; inspect its original receipt before retrying.".into(), observation: Box::new(reply) }),
+                OperationOutcome::Returned { .. } => {
+                    Ok(ToolOutput::Operation(Box::new(reply)).into())
+                }
+                OperationOutcome::Unknown { .. } | OperationOutcome::Unresolved => {
+                    Err(ToolError::OperationUnknown {
+                        message: unknown.into(),
+                        observation: Box::new(reply),
+                    })
+                }
             }
         }
         Receipt::Unavailable { .. } => Err(ToolError::OperationUnknown {
-            message:
-                "Native service result is unknown; inspect its original receipt before retrying."
-                    .into(),
+            message: unknown.into(),
             observation: Box::new(reply),
         }),
         Receipt::NotRecorded => Err(ToolError::Failed(
             "native service operation was not recorded".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_plugin_core::composition::InstanceId;
+    use maka_plugin_core::contract::Transport;
+    use maka_plugin_core::deployment::DeploymentRef;
+    use maka_plugin_core::operation::{RecoveryContract, RecoveryProtocol, RecoveryRef};
+
+    #[test]
+    fn uncertain_service_projection_localizes_recovery_and_preserves_original_receipt() {
+        let reference = RecoveryRef {
+            source: DeploymentRef {
+                state_domain: "a".repeat(64),
+                deployment: Uuid::from_u128(1),
+                revision: 3,
+            },
+            namespace: InstanceId(vec![Uuid::from_u128(2)]),
+            export: "Service".into(),
+            method: "apply".into(),
+            operation: Uuid::from_u128(3),
+            fingerprint: format!("sha256-{}", "b".repeat(64)),
+            contract: RecoveryContract {
+                name: "example.Service".into(),
+                version: 1,
+                transport: Transport::Remote,
+                digest: format!("sha256-{}", "c".repeat(64)),
+            },
+            recovery: RecoveryProtocol::JournalV1,
+        };
+        reference.validate().unwrap();
+        for receipt in [
+            Receipt::Recorded {
+                outcome: OperationOutcome::Unknown {
+                    diagnostic: "原始诊断 / no reply".into(),
+                },
+                cleanup: OperationCleanup::Confirmed,
+            },
+            Receipt::Recorded {
+                outcome: OperationOutcome::Unresolved,
+                cleanup: OperationCleanup::Confirmed,
+            },
+            Receipt::Unavailable {
+                diagnostic: "原始查询失败 / lookup failed".into(),
+            },
+        ] {
+            let original = OperationReply {
+                reference: reference.clone(),
+                receipt,
+            };
+            for (language, original_receipt, retry) in [
+                (Language::En, "original receipt", "retrying"),
+                (Language::ZhCn, "原始回执", "重试"),
+                (Language::ZhTw, "原始回執", "重試"),
+            ] {
+                let Err(ToolError::OperationUnknown {
+                    message,
+                    observation,
+                }) = mutation_result(original.clone(), language)
+                else {
+                    panic!("uncertain receipt must remain an unknown operation");
+                };
+                assert!(message.contains(original_receipt) && message.contains(retry));
+                assert_eq!(*observation, original);
+            }
+        }
     }
 }

@@ -21,29 +21,38 @@ use super::*;
 use crate::cursor::Spec;
 
 impl Browsers {
-    pub(crate) async fn configure_cursor(&mut self, cursor: &Spec) {
+    pub(crate) async fn configure_cursor(&mut self, cursor: &Spec, language: Language) {
         for tab in self.targets.values_mut() {
-            if tab.verify().await.is_ok() {
-                let _ = tab.draw_cursor(cursor, None, "idle", "update").await;
+            if tab.verify(language).await.is_ok() {
+                let _ = tab
+                    .draw_cursor(cursor, None, "idle", "update", language)
+                    .await;
             }
         }
     }
-    pub(crate) async fn cursor_state(&mut self, cursor: &Spec) -> Vec<Value> {
+    pub(crate) async fn cursor_state(&mut self, cursor: &Spec, language: Language) -> Vec<Value> {
         let mut states = Vec::new();
         for tab in self.targets.values_mut() {
-            if tab.verify().await.is_ok() {
-                match tab.draw_cursor(cursor, None, "idle", "state").await {
+            if tab.verify(language).await.is_ok() {
+                match tab
+                    .draw_cursor(cursor, None, "idle", "state", language)
+                    .await
+                {
                     Ok(state) => states.push(json!({"tab":tab.info.id,"state":state})),
-                    Err(error) => states.push(json!({"tab":tab.info.id,"error":error.to_string()})),
+                    Err(error) => states.push(json!({"tab":tab.info.id,"error":with_unknown_guidance(error, language).to_string()})),
                 }
             }
         }
         states
     }
     pub(crate) async fn remove_cursors(&mut self, cursor: &Spec) {
+        // Best-effort teardown discards these diagnostics; it does not render
+        // model-facing copy or select a language for accepted work.
         for tab in self.targets.values_mut() {
-            if tab.verify().await.is_ok() {
-                let _ = tab.draw_cursor(cursor, None, "idle", "remove").await;
+            if tab.verify(Language::En).await.is_ok() {
+                let _ = tab
+                    .draw_cursor(cursor, None, "idle", "remove", Language::En)
+                    .await;
             }
         }
     }
@@ -55,6 +64,7 @@ impl Tab {
         point: Option<[f64; 2]>,
         action: &str,
         operation: &str,
+        language: Language,
     ) -> Result<Value, ToolError> {
         let tree = self.request("Page.getFrameTree", json!({})).await?;
         let frame = &tree["frameTree"]["frame"];
@@ -63,7 +73,11 @@ impl Tab {
             .ok_or_else(|| failed("cursor frame unavailable"))?;
         let identity = format!("{}:{}", id, frame["loaderId"].as_str().unwrap_or_default());
         if operation == "update" && self.frame.as_ref() != Some(&identity) {
-            return Err(failed("stale_document: observe before showing its cursor"));
+            return Err(failed(match language {
+                Language::En => "stale_document: observe before showing its cursor",
+                Language::ZhCn => "stale_document: 请先观察，再显示光标",
+                Language::ZhTw => "stale_document: 請先觀察，再顯示游標",
+            }));
         }
         let context = match &self.cursor_world {
             Some((previous, context)) if *previous == identity => *context,
@@ -98,10 +112,14 @@ impl Tab {
         &mut self,
         target: &Position,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<[f64; 2], ToolError> {
         match target {
-            Position::Point(point) => self.point(*point).await,
-            Position::Element(index) => self.element_point(*index, false, cancellation).await,
+            Position::Point(point) => self.point(*point, language).await,
+            Position::Element(index) => {
+                self.element_point(*index, false, cancellation, language)
+                    .await
+            }
         }
     }
 }

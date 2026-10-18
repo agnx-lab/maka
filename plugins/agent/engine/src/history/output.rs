@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use super::images;
 use maka_agent_facts::tool_output::DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE;
 use maka_agent_facts::tool_output::DurableToolProjection;
@@ -28,13 +30,19 @@ pub(super) fn project<'a>(
     message: usize,
     images: &mut Vec<images::Target<'a>>,
     vision: bool,
+    language: Language,
 ) -> ToolOutput {
     match projection {
         DurableToolProjection::Text { text } => ToolOutput::Text(text.clone()),
         DurableToolProjection::Json { value } => ToolOutput::Json(value.clone()),
-        DurableToolProjection::Failure => {
-            ToolOutput::ErrorText(DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE.into())
-        }
+        DurableToolProjection::Failure => ToolOutput::ErrorText(
+            match language {
+                Language::En => DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE,
+                Language::ZhCn => "工具已完成，但无法安全投影其供模型读取的结果。",
+                Language::ZhTw => "工具已完成，但無法安全投影其供模型讀取的結果。",
+            }
+            .into(),
+        ),
         DurableToolProjection::Content { parts } => {
             let value: Vec<_> = parts
                 .iter()
@@ -47,7 +55,11 @@ pub(super) fn project<'a>(
                             part,
                             audio,
                         });
-                        ContentPart::text("Audio could not be loaded.")
+                        ContentPart::text(match language {
+                            Language::En => "Audio could not be loaded.",
+                            Language::ZhCn => "无法加载音频。",
+                            Language::ZhTw => "無法載入音訊。",
+                        })
                     }
                     ProjectionPart::Artifact { image } => {
                         if vision {
@@ -57,7 +69,7 @@ pub(super) fn project<'a>(
                                 image,
                             });
                         }
-                        ContentPart::text(images::NO_VISION)
+                        ContentPart::text(images::no_vision(language))
                     }
                 })
                 .collect();

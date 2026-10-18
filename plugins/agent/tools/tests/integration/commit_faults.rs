@@ -223,6 +223,7 @@ async fn check_boundary(boundary: Boundary) {
             faults: AtomicUsize::new(0),
         });
         let run = RunTools::new(
+            maka_agent_facts::language::Language::En,
             sink.clone(),
             invocation.clone(),
             catalog(log.clone(), effects.clone()),
@@ -327,6 +328,7 @@ async fn check_boundary(boundary: Boundary) {
     // Even explicitly retrying the same accepted provider call cannot replay
     // the cell or its effect: storage refuses a second parent dispatch first.
     let run = RunTools::new(
+        maka_agent_facts::language::Language::En,
         log.clone(),
         invocation,
         catalog(log.clone(), effects.clone()),
@@ -356,7 +358,7 @@ async fn notification_commit_failure_cancels_the_cell_without_fabricating_succes
         let call = ModelToolCall { id:"parent".into(), name:"exec".into(), input:json!({"code":"notify('progress'); await new Promise(resolve => setTimeout(resolve, 60000));"}).into(), provider_options:None, provider_executed:false };
         seed(&log, &invocation, &call).await;
         let sink = Arc::new(FaultSink { log:log.clone(), boundary:Boundary::Notification, attempts:Mutex::new(Vec::new()), faults:AtomicUsize::new(0) });
-        let run = RunTools::new(sink.clone(), invocation, ToolCatalog::default(), ToolMode::CodeMode, CodeExecutor::new(CellLimits::default()).unwrap(), Default::default());
+        let run = RunTools::new(maka_agent_facts::language::Language::En, sink.clone(), invocation, ToolCatalog::default(), ToolMode::CodeMode, CodeExecutor::new(CellLimits::default()).unwrap(), Default::default());
         let result = run.capture(".", CancellationToken::new()).await.unwrap().into_step("step").invoke(&call, CancellationToken::new()).await;
         assert!(matches!(result, Err(ToolError::Persistence(_))));
         assert!(matches!(run.shutdown().await, Err(ToolError::Persistence(_))));

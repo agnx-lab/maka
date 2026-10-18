@@ -18,6 +18,7 @@
  */
 
 use maka_agent_facts::execution::ModelBinding;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::model::ModelUsage;
 use maka_agent_ports::llm::Generate;
 use maka_capabilities::authorization::Boundary;
@@ -45,6 +46,7 @@ fn request() -> Request {
         boundary: Boundary::Profile,
         operation: Operation::Model {
             input: Generate {
+                language: Language::En,
                 prompt: "work".into(),
                 system: None,
                 max_output_tokens: None,
@@ -74,9 +76,13 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     let path = directory.path().join("auxiliary.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     assert!(
-        log.begin_auxiliary_model(AuxiliarySource::HostEffect { id: Uuid::new_v4() }, None)
-            .await
-            .is_err()
+        log.begin_auxiliary_model(
+            AuxiliarySource::HostEffect { id: Uuid::new_v4() },
+            Language::En,
+            None
+        )
+        .await
+        .is_err()
     );
     let parent = log.begin_host_effect(request()).await.unwrap();
     let source = AuxiliarySource::HostEffect { id: parent };
@@ -87,11 +93,11 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     }))
     .unwrap();
     let id = log
-        .begin_auxiliary_model(source.clone(), Some(quote.clone()))
+        .begin_auxiliary_model(source.clone(), Language::En, Some(quote.clone()))
         .await
         .unwrap();
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err(),
         "one accepted generation cannot be physically dispatched twice"
@@ -127,7 +133,7 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
             .is_err()
     );
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err()
     );
@@ -148,6 +154,7 @@ async fn auxiliary_accounting_requires_admission_and_preserves_usage_through_fai
     let interrupted = log
         .begin_auxiliary_model(
             AuxiliarySource::HostEffect { id: parent },
+            Language::En,
             Some(quote.clone()),
         )
         .await
@@ -212,11 +219,12 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
         invocation: invocation.clone(),
     };
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err()
     );
     let configuration = InvocationConfiguration {
+        language: Language::En,
         compaction_prompt: None,
         workspace_origin: WorkspaceOrigin::Selected,
         approval_policy: ApprovalPolicy::OnRequest,
@@ -266,7 +274,7 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
         .await
         .unwrap();
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err(),
         "archived Sessions cannot admit title work"
@@ -288,6 +296,7 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
             AuxiliarySource::SessionTitle {
                 invocation: later.clone()
             },
+            Language::En,
             None
         )
         .await
@@ -308,11 +317,11 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
     .await
     .unwrap();
     let id = log
-        .begin_auxiliary_model(source.clone(), None)
+        .begin_auxiliary_model(source.clone(), Language::En, None)
         .await
         .unwrap();
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err()
     );
@@ -345,7 +354,7 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
         "exclusive recovery releases the title owner without replay"
     );
     assert!(
-        log.begin_auxiliary_model(source.clone(), None)
+        log.begin_auxiliary_model(source.clone(), Language::En, None)
             .await
             .is_err(),
         "unknown title attempts are not replayable"
@@ -359,4 +368,56 @@ async fn title_accounting_uses_first_opening_after_stop_and_never_replays_after_
         "frozen"
     );
     assert_eq!(page.attempts[0].usage.input_tokens, Some(17));
+}
+
+#[test]
+fn persisted_host_model_effect_replays_literal_english_input() {
+    let original = r#"{"kind":"model","input":{"input":{"prompt":"Original 用户 text","system":null,"maxOutputTokens":null},"model":{"connection_id":"connection","connection_slug":"named","model":"chosen"},"thinking_level":null}}"#;
+    let operation: Operation = serde_json::from_str(original).unwrap();
+    let Operation::Model { ref input, .. } = operation else {
+        panic!("model effect")
+    };
+    assert_eq!(input.language, Language::En);
+    assert_eq!(serde_json::to_string(&operation).unwrap(), original);
+}
+
+#[tokio::test]
+async fn auxiliary_admission_records_language_without_changing_source_identity() {
+    use sqlx::Connection;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("languages.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let mut observer = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&path),
+    )
+    .await
+    .unwrap();
+    for (language, tag) in [
+        (Language::En, None),
+        (Language::ZhCn, Some("zh-CN")),
+        (Language::ZhTw, Some("zh-TW")),
+    ] {
+        let parent = log.begin_host_effect(request()).await.unwrap();
+        let source = AuxiliarySource::HostEffect { id: parent };
+        let id = log
+            .begin_auxiliary_model(source.clone(), language, None)
+            .await
+            .unwrap();
+        let raw: String = sqlx::query_scalar("SELECT event_json FROM event_log WHERE event_id = ?")
+            .bind(id.to_string())
+            .fetch_one(&mut observer)
+            .await
+            .unwrap();
+        let record: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(record.get("language").and_then(|value| value.as_str()), tag);
+        assert_eq!(
+            record["source"],
+            serde_json::json!({"kind":"host_effect","id":parent})
+        );
+        assert!(
+            log.begin_auxiliary_model(source, Language::ZhTw, None)
+                .await
+                .is_err()
+        );
+    }
 }

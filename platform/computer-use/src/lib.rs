@@ -28,6 +28,7 @@ pub mod cursor;
 pub mod desktop;
 mod driver;
 mod identity;
+pub mod language;
 #[cfg(target_os = "macos")]
 mod macos;
 mod observation;

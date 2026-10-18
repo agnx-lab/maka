@@ -192,21 +192,29 @@ impl Tab {
         Ok(frames)
     }
 
-    pub(super) async fn verify_element(&mut self, index: u64) -> Result<ElementRef, ToolError> {
-        let element = self
-            .refs
-            .get(&index)
-            .cloned()
-            .ok_or_else(|| failed("stale_element: read getAXState first"))?;
+    pub(super) async fn verify_element(
+        &mut self,
+        index: u64,
+        language: Language,
+    ) -> Result<ElementRef, ToolError> {
+        let element = self.refs.get(&index).cloned().ok_or_else(|| {
+            failed(match language {
+                Language::En => "stale_element: read getAXState first",
+                Language::ZhCn => "stale_element: 请先读取 getAXState",
+                Language::ZhTw => "stale_element: 請先讀取 getAXState",
+            })
+        })?;
         let frame = element
             .frame
             .as_ref()
             .ok_or_else(|| failed("element frame was not proven"))?;
         if !self.frames().await?.contains(frame) {
             self.refs.clear();
-            return Err(failed(
-                "stale_element: frame navigated or detached; observe again",
-            ));
+            return Err(failed(match language {
+                Language::En => "stale_element: frame navigated or detached; observe again",
+                Language::ZhCn => "stale_element: 框架已导航或分离；请重新观察",
+                Language::ZhTw => "stale_element: 框架已導覽或分離；請重新觀察",
+            }));
         }
         Ok(element)
     }
@@ -216,9 +224,10 @@ impl Tab {
         index: u64,
         scroll: bool,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<[f64; 2], ToolError> {
-        let element = self.verify_element(index).await?;
-        let value=self.call_element(index,"function(scroll){if(!this.isConnected||this.disabled)throw Error('element unavailable');if(scroll)this.scrollIntoView({block:'center',inline:'center'});const r=this.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;const hit=this.getRootNode().elementFromPoint(x,y);if(r.width<=0||r.height<=0||!(hit===this||this.contains(hit)))throw Error('element occluded');return {point:[x,y],width:this.ownerDocument.defaultView.innerWidth,height:this.ownerDocument.defaultView.innerHeight};}",vec![json!(scroll)],cancellation).await?;
+        let element = self.verify_element(index, language).await?;
+        let value=self.call_element(index,"function(scroll){if(!this.isConnected||this.disabled)throw Error('element unavailable');if(scroll)this.scrollIntoView({block:'center',inline:'center'});const r=this.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;const hit=this.getRootNode().elementFromPoint(x,y);if(r.width<=0||r.height<=0||!(hit===this||this.contains(hit)))throw Error('element occluded');return {point:[x,y],width:this.ownerDocument.defaultView.innerWidth,height:this.ownerDocument.defaultView.innerHeight};}",vec![json!(scroll)],cancellation, language).await?;
         let mut point: [f64; 2] = serde_json::from_value(value["point"].clone()).map_err(failed)?;
         let mut width = value["width"]
             .as_f64()
@@ -264,10 +273,15 @@ impl Tab {
                 "objectId":object,"functionDeclaration":"function(x,y,width,height){if(!this.isConnected)throw Error('iframe owner detached');for(let node=this;node;node=node.assignedSlot??node.parentElement??node.getRootNode().host){const style=getComputedStyle(node);if(style.transform!=='none'||style.rotate!=='none'||style.scale!=='none'||style.translate!=='none')throw Error('transformed iframe input unavailable; use a tab screenshot');}const r=this.getBoundingClientRect(),sx=r.width/this.offsetWidth,sy=r.height/this.offsetHeight;const px=r.x+this.clientLeft*sx+x/width*this.clientWidth*sx,py=r.y+this.clientTop*sy+y/height*this.clientHeight*sy;const hit=this.getRootNode().elementFromPoint(px,py);if(hit!==this)throw Error('iframe owner occluded');return {point:[px,py],width:this.ownerDocument.defaultView.innerWidth,height:this.ownerDocument.defaultView.innerHeight};}",
                 "arguments":[{"value":point[0]},{"value":point[1]},{"value":width},{"value":height}],"returnByValue":true
             })).await?;
-            if checked.get("exceptionDetails").is_some() {
-                return Err(failed(
-                    "iframe owner occluded, transformed or detached; use a fresh tab screenshot",
-                ));
+            if let Some(details) = checked.get("exceptionDetails") {
+                let guidance = match language {
+                    Language::En => {
+                        "iframe owner occluded, transformed or detached; use a fresh tab screenshot"
+                    }
+                    Language::ZhCn => "iframe 所属元素被遮挡、变换或分离；请重新获取标签页截图",
+                    Language::ZhTw => "iframe 所屬元素被遮擋、變換或分離；請重新取得分頁擷取畫面",
+                };
+                return Err(failed(format!("{details}\n{guidance}")));
             }
             let checked = &checked["result"]["value"];
             point = serde_json::from_value(checked["point"].clone()).map_err(failed)?;

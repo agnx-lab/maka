@@ -361,6 +361,7 @@ impl Owner {
             .ok_or("agent_session_unavailable")?;
         let permissions = &session.configuration.permissions;
         let mut configuration = InvocationConfiguration {
+            language: basis.language,
             compaction_prompt: basis.compaction_prompt.clone(),
             editing_tools: None,
             tool_discovery: basis.tool_discovery,
@@ -429,6 +430,7 @@ impl Owner {
                 configuration.thinking_level = backend.accepted.selection.settings.thinking_level;
                 PreparedRun::Executor(Box::new(maka_agent_engine::ExecutorInput {
                     request: maka_agent_ports::executor::Request {
+                        language: basis.language,
                         conversation_key: invocation.session_id.clone(),
                         invocation,
                         content: delivered.message.content.clone(),

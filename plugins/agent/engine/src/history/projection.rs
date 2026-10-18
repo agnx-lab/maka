@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use super::{EventRef, images, operation_id, user};
 use crate::RunError;
 use maka_agent_facts::context::ModelPurpose;
@@ -41,6 +43,7 @@ pub(super) fn build<'a>(
     vision: bool,
     replay: Option<super::Replay<'a>>,
     prior_unknown: bool,
+    language: Language,
 ) -> Result<Vec<Message>, RunError> {
     let cuts = replay.map(|policy| super::replay::Cuts::new(events.clone(), policy));
     let mut messages = Vec::new();
@@ -224,7 +227,7 @@ pub(super) fn build<'a>(
                 // Store verification retains the canonical codec; only current
                 // presentation describes the capability needed for continuation.
                 let mut value = value.clone();
-                value["readInstructions"] = "Use page.next only with a selected Session tool-result reader; without one, the remainder is unavailable.".into();
+                value["readInstructions"] = match language { Language::En => "Use page.next only with a selected Session tool-result reader; without one, the remainder is unavailable.", Language::ZhCn => "仅使用已选定的会话工具结果读取工具读取 page.next；没有读取工具时，其余内容不可用。", Language::ZhTw => "僅使用已選定的工作階段工具結果讀取工具讀取 page.next；沒有讀取工具時，其餘內容無法取得。" }.into();
                 let output = if archived.is_error {
                     ToolOutput::ErrorJson(value)
                 } else {
@@ -312,6 +315,7 @@ pub(super) fn build<'a>(
                     messages.len(),
                     images,
                     vision,
+                    language,
                 )?);
             }
             Fact::MessageSteered { message, .. } => {
@@ -326,6 +330,7 @@ pub(super) fn build<'a>(
                     messages.len(),
                     images,
                     vision,
+                    language,
                 )?);
             }
             Fact::ExecutorCompleted { text } => {
@@ -480,7 +485,7 @@ pub(super) fn build<'a>(
                         })?;
                         dispatched.remove(operation);
                         messages.push(tool_message(id, name, ToolOutput::ErrorText(
-                            "outcome_unknown: The tool was dispatched, but no durable result was recorded. Its effect may have happened. Inspect current state before repeating it.".into(),
+                            match language { Language::En => "outcome_unknown: The tool was dispatched, but no durable result was recorded. Its effect may have happened. Inspect current state before repeating it.", Language::ZhCn => "outcome_unknown: 工具已派发，但未记录持久结果；操作可能已生效。重复操作前先检查当前状态。", Language::ZhTw => "outcome_unknown: 工具已派發，但未記錄持久結果；操作可能已生效。重複操作前先檢查目前狀態。" }.into(),
                         ), custom_operations.contains(operation)));
                     }
                 }
@@ -560,9 +565,13 @@ pub(super) fn build<'a>(
                     let output = match outcome {
                         ToolOutcome::Succeeded {
                             model_projection, ..
-                        } => {
-                            super::output::project(model_projection, messages.len(), images, vision)
-                        }
+                        } => super::output::project(
+                            model_projection,
+                            messages.len(),
+                            images,
+                            vision,
+                            language,
+                        ),
                         ToolOutcome::Failed { message } | ToolOutcome::Unknown { message, .. } => {
                             ToolOutput::ErrorText(message.clone())
                         }

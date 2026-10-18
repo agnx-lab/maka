@@ -134,7 +134,7 @@ async fn malformed_arguments_are_rejected_and_corrected(mode: ToolMode) {
             } else { None }
         }).collect();
         assert_eq!(effects, vec![&json!({"n":7})]);
-        let history = project_model_history(&prefix, "session").unwrap();
+        let history = project_model_history(&prefix, "session", maka_agent_facts::language::Language::En).unwrap();
         let rejected = history.iter().find_map(|message| {
             if let Message::Tool { content, .. } = message {
                 content.iter().find(|result| result.tool_call_id == "malformed-call")
@@ -153,7 +153,7 @@ async fn malformed_arguments_are_rejected_and_corrected(mode: ToolMode) {
         Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();
         let reopened = EventLog::open(&directory.path().join("events.sqlite")).await.unwrap();
         let replay = reopened.prefix(100, 128 * 1024).await.unwrap();
-        assert_eq!(project_model_history(&replay, "session").unwrap(), history);
+        assert_eq!(project_model_history(&replay, "session", maka_agent_facts::language::Language::En).unwrap(), history);
         assert_eq!(replay.events.iter().filter(|stored| matches!(stored.event.fact,
             Fact::ToolRejected { .. })).count(), 1);
     }).await.expect("argument correction must make bounded progress");
@@ -232,7 +232,9 @@ async fn recovered_malformed_arguments_keep_raw_diagnostics_for_every_rejection_
         )
         .await;
         let prefix = log.prefix(100, 128 * 1024).await.unwrap();
-        let history = project_model_history(&prefix, "session").unwrap();
+        let history =
+            project_model_history(&prefix, "session", maka_agent_facts::language::Language::En)
+                .unwrap();
         let Message::Tool { content, .. } = history.last().unwrap() else {
             panic!("rejected tool result must remain model-visible");
         };
@@ -248,8 +250,12 @@ async fn recovered_malformed_arguments_keep_raw_diagnostics_for_every_rejection_
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();
         assert_eq!(
-            project_model_history(&reopened.prefix(100, 128 * 1024).await.unwrap(), "session")
-                .unwrap(),
+            project_model_history(
+                &reopened.prefix(100, 128 * 1024).await.unwrap(),
+                "session",
+                maka_agent_facts::language::Language::En
+            )
+            .unwrap(),
             history
         );
     }

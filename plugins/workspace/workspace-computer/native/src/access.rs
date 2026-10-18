@@ -19,6 +19,7 @@
 
 use super::*;
 use maka_agent_api::{contract::WorkspaceAccess, session::SessionConfiguration};
+use maka_agent_facts::language::Language;
 use maka_agent_facts::{
     event::{CommitFuture, EventSink, EventWrite, Fact},
     interaction::{Decision, InteractionOutcome, InteractionRecord, InteractionRequest},
@@ -31,7 +32,7 @@ pub(super) async fn current(
     owner: &Computer,
     call: &Scope,
     tool: &str,
-) -> Result<SessionConfiguration, ToolError> {
+) -> Result<(SessionConfiguration, Language), ToolError> {
     if owner.stopping.is_cancelled() || call.cancellation.is_cancelled() {
         return Err(failed("Computer Use cancelled"));
     }
@@ -71,14 +72,14 @@ pub(super) async fn current(
             "Computer Use tool is outside the original invocation ceiling",
         ));
     }
-    Ok(configuration)
+    Ok((configuration, accepted.language))
 }
 pub(super) async fn granted(
     owner: &Computer,
     call: &Scope,
     revision: u64,
 ) -> Result<(), ToolError> {
-    let current = current(owner, call, "cua_repl").await?;
+    let (current, _) = current(owner, call, "cua_repl").await?;
     if current.boundary_revision != revision {
         return Err(failed("Computer Use permission boundary changed"));
     }

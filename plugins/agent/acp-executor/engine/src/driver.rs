@@ -263,6 +263,7 @@ impl<'a> Driver<'a> {
 fn prompt(
     content: &maka_agent_facts::input::MessageInput,
     instructions: Option<&str>,
+    language: maka_agent_facts::language::Language,
 ) -> Result<Vec<String>, Error> {
     if content
         .attachments
@@ -271,9 +272,14 @@ fn prompt(
     {
         return Err(Error::Invalid("ACP attachment forwarding is not supported"));
     }
+    use maka_agent_facts::language::Language;
     let mut blocks = Vec::new();
     if let Some(instructions) = instructions.filter(|value| !value.is_empty()) {
-        blocks.push(format!("Instructions from Maka:\n{instructions}"));
+        blocks.push(match language {
+            Language::En => format!("Instructions from Maka:\n{instructions}"),
+            Language::ZhCn => format!("来自 Maka 的指令：\n{instructions}"),
+            Language::ZhTw => format!("來自 Maka 的指令：\n{instructions}"),
+        });
     }
     let mut text = content.text.clone();
     for quote in content.quotes.iter().flatten() {
@@ -282,7 +288,11 @@ fn prompt(
         text.push_str("\n</quoted_context>");
     }
     for directory in content.directory_references.iter().flatten() {
-        text.push_str("\n\nDirectory: ");
+        text.push_str(match language {
+            Language::En => "\n\nDirectory: ",
+            Language::ZhCn => "\n\n目录：",
+            Language::ZhTw => "\n\n目錄：",
+        });
         text.push_str(&directory.path);
     }
     if content
@@ -290,9 +300,55 @@ fn prompt(
         .as_ref()
         .is_some_and(|items| !items.is_empty())
     {
-        text.push_str("\n\nInline references: ");
+        text.push_str(match language {
+            Language::En => "\n\nInline references: ",
+            Language::ZhCn => "\n\n内联引用：",
+            Language::ZhTw => "\n\n行內參照：",
+        });
         text.push_str(&serde_json::to_string(&content.inline_references)?);
     }
     blocks.push(text);
     Ok(blocks)
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use maka_agent_facts::{
+        input::{DirectoryReference, QuoteRef},
+        language::Language,
+    };
+
+    #[test]
+    fn external_instructions_and_context_keep_original_data() {
+        let mut content: maka_agent_facts::input::MessageInput = "User text 原文".into();
+        content.quotes = Some(vec![QuoteRef {
+            text: "Quoted text 結果".into(),
+            label: None,
+            source_turn_id: None,
+            source: None,
+        }]);
+        content.directory_references = Some(vec![DirectoryReference {
+            host_id: "host".into(),
+            path: "/workspace/原文".into(),
+        }]);
+        for (language, header, directory) in [
+            (
+                Language::ZhCn,
+                "来自 Maka 的指令：\nCustom instruction 原文",
+                "目录：/workspace/原文",
+            ),
+            (
+                Language::ZhTw,
+                "來自 Maka 的指令：\nCustom instruction 原文",
+                "目錄：/workspace/原文",
+            ),
+        ] {
+            let blocks = prompt(&content, Some("Custom instruction 原文"), language).unwrap();
+            assert_eq!(blocks[0], header);
+            assert!(blocks[1].starts_with("User text 原文"));
+            assert!(blocks[1].contains("<quoted_context>\nQuoted text 結果\n</quoted_context>"));
+            assert!(blocks[1].ends_with(directory));
+        }
+    }
 }

@@ -649,3 +649,65 @@ async fn title_preparation_failure_is_public_without_a_physical_title_attempt() 
         }
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn independently_admitted_title_uses_current_language_after_english_main_capture() {
+    tokio::time::timeout(Duration::from_secs(45), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // Reuse the explicit generation path from title_preparation_failure:
+        // automatic dispatch is disabled so Settings can change after Main capture.
+        let f = Fixture::new(&format!("http://{}/v1", listener.local_addr().unwrap()), None).await;
+        let english = prompt_language::select_language(&f, "en").await;
+        let session = automatic(&f).await;
+        let original = "Please investigate title capture 🦀 /keep-original-bytes";
+        let sent = f.mutation(2, "send", json!({
+            "sessionId":session,"message":original,"model":f.selection().await,
+        }), Uuid::new_v4()).await.unwrap();
+        let (mut main_socket, _) = listener.accept().await.unwrap();
+        let main_request = request(&mut main_socket).await;
+        let accepted = f.owner.runs.lock().await.controls.get(&session).unwrap().basis.model.clone().unwrap();
+        let opening = f.store.invocation_boundary(&session, sent["invocationId"].as_str().unwrap())
+            .await.unwrap().unwrap().0;
+        let configuration = f.store.invocation_configuration(&opening.invocation).await.unwrap().unwrap();
+        let chinese = prompt_language::select_language(&f, "zh-CN").await;
+        let (generated, title_request) = tokio::join!(
+            f.owner.generate_title(opening.invocation, accepted),
+            async {
+                let (mut title_socket, _) = listener.accept().await.unwrap();
+                let outgoing = request(&mut title_socket).await;
+                response_with_text(&mut title_socket, "Investigate title capture").await;
+                outgoing
+            }
+        );
+        response(&mut main_socket).await;
+        f.drained().await;
+        let title = f.owner.session(&session).await.unwrap().configuration.title;
+        let physical_attempts = attempts(&f, &session).await;
+        let raw = rusqlite::Connection::open_with_flags(
+            f.root.join(maka_event_log::root::ROOT_DATABASE),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ).unwrap();
+        let recorded_language: String = raw.query_row(
+            "SELECT json_extract(event_json, '$.language') FROM event_log WHERE kind='auxiliary_model_started' AND json_extract(event_json, '$.source.kind')='session_title' AND json_extract(event_json, '$.source.invocation.session_id')=?1",
+            [&session], |row| row.get(0),
+        ).unwrap();
+        drop(raw);
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+
+        assert_eq!(english["kind"], "committed");
+        assert_eq!(chinese["kind"], "committed");
+        assert!(generated.is_ok(), "title generation failed: {generated:?}");
+        assert_eq!(configuration.language, maka_agent_facts::language::Language::En);
+        assert_eq!(main_request["messages"].as_array().unwrap().iter()
+            .find(|message| message["role"] == "user").unwrap()["content"], original);
+        assert_eq!(title_request["messages"][1]["content"], original);
+        let instruction = title_request["messages"][0]["content"].as_str().unwrap();
+        assert!(instruction.contains("会话标题"), "new title capture must use current Chinese builtin copy: {title_request}");
+        assert!(instruction.contains("与消息语言相同"), "the title's output language still follows original user text: {title_request}");
+        assert_eq!(recorded_language, "zh-CN");
+        assert_eq!(title, "Investigate title capture");
+        assert_eq!(physical_attempts.len(), 2);
+        assert_eq!(physical_attempts.iter().filter(|attempt| matches!(attempt.origin, Origin::Auxiliary { .. })).count(), 1);
+    }).await.unwrap();
+}

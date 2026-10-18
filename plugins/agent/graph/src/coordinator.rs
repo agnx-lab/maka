@@ -25,6 +25,7 @@ use crate::{
     store::Store,
 };
 use futures_util::future::BoxFuture;
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::ChildSession;
 use maka_agent_ports::execution::Commands;
 use maka_agent_ports::execution::Progress;
@@ -124,7 +125,7 @@ impl Coordinator {
 
     /// Reconcile accepted outcomes before attempting any new admissions. A caller
     /// owns this future through its Fiber; accepted Host work owns itself.
-    pub async fn reconcile(&mut self) -> Result<(), Error> {
+    pub async fn reconcile(&mut self, language: Language) -> Result<(), Error> {
         if !self.operators.active().await? {
             return Err(Error::Closed);
         }
@@ -144,7 +145,7 @@ impl Coordinator {
             if self.failures.contains_key(id) {
                 continue;
             }
-            if let Err(error) = self.advance(id).await {
+            if let Err(error) = self.advance(id, language).await {
                 self.failures.insert(id.clone(), error.to_string());
             }
         }
@@ -280,7 +281,7 @@ impl Coordinator {
         Ok((operator, child))
     }
 
-    async fn advance(&mut self, work: &WorkId) -> Result<(), Error> {
+    async fn advance(&mut self, work: &WorkId, language: Language) -> Result<(), Error> {
         let item = &self.schedule.work[work];
         let operator = match &item.work.target {
             Target::Operator { operator_id } => operator_id.clone(),
@@ -328,7 +329,7 @@ impl Coordinator {
             let mut input = String::new();
             for id in &item.work.input_ids {
                 if let Some(record) = self.read_record(id).await? {
-                    render(&mut input, &record)?;
+                    render(&mut input, &record, language)?;
                 } else {
                     missing.push(id.clone());
                 }
@@ -336,13 +337,21 @@ impl Coordinator {
             // Historical results are explicitly selected and resolved by a
             // completed earlier epoch, never by a same-named current record.
             for selection in &item.work.selected_result_inputs {
-                render(&mut input, &self.historical_record(selection).await?)?;
+                render(
+                    &mut input,
+                    &self.historical_record(selection).await?,
+                    language,
+                )?;
             }
             if !missing.is_empty() {
                 self.waiting.insert(work.clone(), missing);
                 return Ok(());
             }
-            input.push_str("\nTask:\n");
+            input.push_str(match language {
+                Language::En => "\nTask:\n",
+                Language::ZhCn => "\n任务：\n",
+                Language::ZhTw => "\n任務：\n",
+            });
             input.push_str(&item.work.instruction);
             if input.len() > 64 * 1024 {
                 return Err(Error::Invalid("rendered work exceeds 64 KiB".into()));
@@ -486,7 +495,7 @@ impl Coordinator {
                     .is_some_and(|signal| self.delivered_signal.as_ref() != Some(&signal)))
     }
 
-    pub async fn wake_supervisor(&mut self) -> Result<(), Error> {
+    pub async fn wake_supervisor(&mut self, language: Language) -> Result<(), Error> {
         if self.control.closed() {
             return Ok(());
         }
@@ -499,15 +508,31 @@ impl Coordinator {
         let content = if let Some(swarm) = self.swarm_snapshot() {
             let body = serde_json::to_string(&swarm.page(None))
                 .map_err(|error| Error::Invalid(error.to_string()))?;
-            format!(
-                "Agent Swarm reached a checkpoint. Use agent_swarm_status for compact statuses; read committed final results only. Replace failed work using replaces, then yield without polling while useful work remains active. Finish and synthesize when settled.\n{body}"
-            )
+            match language {
+                Language::En => format!(
+                    "Agent Swarm reached a checkpoint. Use agent_swarm_status for compact statuses; read committed final results only. Replace failed work using replaces, then yield without polling while useful work remains active. Finish and synthesize when settled.\n{body}"
+                ),
+                Language::ZhCn => format!(
+                    "Agent Swarm 已到检查点。用 agent_swarm_status 查看简要状态；仅读取已提交的最终结果。用 replaces 替换失败工作；仍有有用工作在运行时 yield 等待，不要轮询。全部稳定后结束并综合回答。\n{body}"
+                ),
+                Language::ZhTw => format!(
+                    "Agent Swarm 已到檢查點。用 agent_swarm_status 查看簡要狀態；僅讀取已提交的最終結果。用 replaces 替換失敗工作；仍有有用工作在執行時 yield 等待，不要輪詢。全部穩定後結束並綜合回答。\n{body}"
+                ),
+            }
         } else {
             let body = serde_json::to_string(&self.snapshot())
                 .map_err(|error| Error::Invalid(error.to_string()))?;
-            format!(
-                "Agent Graph has new durable outcomes. Inspect them and continue coordinating; do not repeat already accepted work.\n{body}"
-            )
+            match language {
+                Language::En => format!(
+                    "Agent Graph has new durable outcomes. Inspect them and continue coordinating; do not repeat already accepted work.\n{body}"
+                ),
+                Language::ZhCn => format!(
+                    "Agent Graph 有新的持久结果。检查后继续协调；不要重复已接纳的工作。\n{body}"
+                ),
+                Language::ZhTw => format!(
+                    "Agent Graph 有新的持久結果。檢查後繼續協調；不要重複已接納的工作。\n{body}"
+                ),
+            }
         };
         let wake = self
             .store
@@ -549,16 +574,21 @@ pub fn operator_id_for(epoch: &Epoch, work: &WorkId) -> OperatorId {
         .expect("generated identity")
 }
 
-fn render(text: &mut String, record: &Record) -> Result<(), Error> {
-    text.push_str(&format!(
-        "\nInput {} (work {}):\n",
-        record.record_id, record.work_id
-    ));
+fn render(text: &mut String, record: &Record, language: Language) -> Result<(), Error> {
+    text.push_str(&match language {
+        Language::En => format!("\nInput {} (work {}):\n", record.record_id, record.work_id),
+        Language::ZhCn => format!("\n输入 {}（工作 {}）：\n", record.record_id, record.work_id),
+        Language::ZhTw => format!("\n輸入 {}（工作 {}）：\n", record.record_id, record.work_id),
+    });
     text.push_str(&record.text);
     if record.truncated {
-        text.push_str(
-            "\n[Output preview truncated; inspect the source execution for full content.]",
-        );
+        text.push_str(match language {
+            Language::En => {
+                "\n[Output preview truncated; inspect the source execution for full content.]"
+            }
+            Language::ZhCn => "\n[输出预览已截断；检查源执行以获取完整内容。]",
+            Language::ZhTw => "\n[輸出預覽已截斷；檢查來源執行以取得完整內容。]",
+        });
     }
     if text.len() > 64 * 1024 {
         return Err(Error::Invalid("rendered inputs exceed 64 KiB".into()));

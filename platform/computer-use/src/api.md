@@ -18,8 +18,7 @@ Entry points (selection emits initial state):
   use `await cua.computer.launch_app({app: appId})` with an ID from cua.listApps(),
   then refresh inventory and select its exact window. Launch revalidates the ID
   against native inventory; arbitrary executable paths are not accepted.
-  Select an exact window when names are ambiguous. macOS may launch the app;
-  Linux and Windows require it to be open already.
+  Select an exact window when names are ambiguous. Linux requires the app to be open already.
 - `await cua.listBrowsers({emit?})`, `await cua.listTabs({browser?, emit?})`.
 - `const browser = await cua.getBrowser({id? , url?})`: select without opening a tab.
 - `const tab = await cua.getTab("tab ID", {browser?})` or `getTab({url}, {browser?})`.

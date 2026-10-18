@@ -17,17 +17,19 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use maka_model::prompt::{ContentPart, Message, ToolOutput, ToolResult};
 
 /// Chat serializes tool content as text. Expose already materialized media in
 /// a user message, after all responses in the tool batch have been delivered.
-pub(crate) fn project(messages: Vec<Message>) -> Vec<Message> {
+pub(crate) fn project(messages: Vec<Message>, language: Language) -> Vec<Message> {
     let mut projected = Vec::with_capacity(messages.len());
     let mut images = Vec::new();
     for mut message in messages {
         if let Message::Tool { content, .. } = &mut message {
             for result in content {
-                extract(result, &mut images);
+                extract(result, &mut images, language);
             }
         } else {
             flush(&mut projected, &mut images);
@@ -55,7 +57,7 @@ fn label(value: &str) -> String {
     value.chars().take(128).collect()
 }
 
-fn extract(result: &mut ToolResult, images: &mut Vec<ContentPart>) {
+fn extract(result: &mut ToolResult, images: &mut Vec<ContentPart>, language: Language) {
     let ToolOutput::Content(parts) = &mut result.output else {
         return;
     };
@@ -63,11 +65,25 @@ fn extract(result: &mut ToolResult, images: &mut Vec<ContentPart>) {
         return;
     }
     let kind = if parts.iter().any(|part| matches!(part, ContentPart::File { media_type, .. } if media_type.starts_with("audio/"))) { "Media" } else { "Images" };
-    images.push(ContentPart::text(format!(
-        "{kind} from tool {} (toolCallId: {}):",
-        label(&result.tool_name),
-        label(&result.tool_call_id)
-    )));
+    images.push(ContentPart::text(match language {
+        Language::En => format!(
+            "{kind} from tool {} (toolCallId: {}):",
+            label(&result.tool_name),
+            label(&result.tool_call_id)
+        ),
+        Language::ZhCn => format!(
+            "工具 {} 提供的{}（toolCallId: {}）：",
+            label(&result.tool_name),
+            if kind == "Images" { "图片" } else { "媒体" },
+            label(&result.tool_call_id)
+        ),
+        Language::ZhTw => format!(
+            "工具 {} 提供的{}（toolCallId: {}）：",
+            label(&result.tool_name),
+            if kind == "Images" { "圖片" } else { "媒體" },
+            label(&result.tool_call_id)
+        ),
+    }));
     let mut retained = Vec::new();
     for part in std::mem::take(parts) {
         if media(&part) {
@@ -77,10 +93,20 @@ fn extract(result: &mut ToolResult, images: &mut Vec<ContentPart>) {
         }
     }
     if retained.is_empty() {
-        retained.push(ContentPart::text(format!(
-            "Tool {} are supplied in the following user message.",
-            kind.to_ascii_lowercase()
-        )));
+        retained.push(ContentPart::text(match language {
+            Language::En => format!(
+                "Tool {} are supplied in the following user message.",
+                kind.to_ascii_lowercase()
+            ),
+            Language::ZhCn => format!(
+                "工具{}见下一条用户消息。",
+                if kind == "Images" { "图片" } else { "媒体" }
+            ),
+            Language::ZhTw => format!(
+                "工具{}見下一則使用者訊息。",
+                if kind == "Images" { "圖片" } else { "媒體" }
+            ),
+        }));
     }
     *parts = retained;
 }
@@ -129,9 +155,11 @@ mod tests {
                 result("four", json!([file("fourth-image")]))
             ]}),
         ];
-        let projected =
-            serde_json::to_value(project(serde_json::from_value(json!(messages)).unwrap()))
-                .unwrap();
+        let projected = serde_json::to_value(project(
+            serde_json::from_value(json!(messages)).unwrap(),
+            Language::En,
+        ))
+        .unwrap();
         assert_eq!(projected.as_array().unwrap().len(), 7);
         assert_eq!(projected[1]["role"], "tool");
         assert_eq!(projected[2]["role"], "tool");
@@ -189,8 +217,11 @@ mod tests {
             }, result("text", json!([{"type":"text","text":"plain"}]))]}),
         ];
         assert_eq!(
-            serde_json::to_value(project(serde_json::from_value(json!(messages)).unwrap()))
-                .unwrap(),
+            serde_json::to_value(project(
+                serde_json::from_value(json!(messages)).unwrap(),
+                Language::En
+            ))
+            .unwrap(),
             json!(messages)
         );
     }

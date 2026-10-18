@@ -18,6 +18,7 @@
  */
 
 use crate::{Access, Coordinator, assignment::Assignments};
+use maka_agent_facts::language::Language;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -52,7 +53,7 @@ impl Manager {
         }
     }
 
-    pub async fn recover(&self) {
+    pub async fn recover(&self, language: impl Fn() -> Language) {
         let mut delay = Duration::from_millis(250);
         loop {
             // Subscribe before reading facts: changes are invalidations, never
@@ -72,7 +73,7 @@ impl Manager {
             } else {
                 None
             };
-            let retry = match self.recover_decisions().await {
+            let retry = match self.recover_decisions(language()).await {
                 Ok(report) => {
                     let retry = report.retrying() || report.pending_results;
                     *self.report.lock().unwrap() = report;

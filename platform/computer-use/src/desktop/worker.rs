@@ -59,6 +59,7 @@ pub(crate) enum Request {
         session: String,
         browsers: Vec<BrowserConnection>,
         command: Command,
+        language: maka_agent_facts::language::Language,
     },
     CloseSession {
         session: String,
@@ -355,6 +356,7 @@ async fn serve(
                 session,
                 browsers,
                 command,
+                language,
             } => {
                 if session.is_empty() || session.len() > 256 {
                     Err(failed("invalid desktop Session identity"))
@@ -364,8 +366,12 @@ async fn serve(
                     let local = sessions
                         .entry(session.clone())
                         .or_insert_with(|| Session::new(driver.clone()));
-                    match local.configure_browsers(browsers) {
-                        Ok(()) => local.invoke(command, &session, &disconnected).await,
+                    match local.configure_browsers(browsers, language) {
+                        Ok(()) => {
+                            local
+                                .invoke(command, &session, &disconnected, language)
+                                .await
+                        }
                         Err(error) => Err(error),
                     }
                 }
@@ -460,6 +466,7 @@ mod tests {
             session: session.into(),
             browsers: Vec::new(),
             command: serde_json::from_value(command).unwrap(),
+            language: maka_agent_facts::language::Language::En,
         }
     }
 
@@ -502,6 +509,49 @@ mod tests {
         assert!(
             matches!(error, Failure::Failed(message) if message == "stale_target: bind the app again")
         );
+        send.send(Request::Shutdown).await.unwrap();
+        assert!(read::<_, Response>(&mut output).await.unwrap().is_ok());
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn desktop_transport_keeps_language_per_invoke_not_per_session() {
+        use maka_agent_facts::language::Language;
+        let (send, receive) = mpsc::channel(1);
+        let (mut output, writer) = tokio::io::duplex(64 * 1024);
+        let task = tokio::spawn(serve(
+            receive,
+            writer,
+            CancellationToken::new(),
+            Arc::new(Mutex::new(Driver::default())),
+        ));
+        let _: Hello = read(&mut output).await.unwrap();
+        for (language, tag, recovery) in [
+            (Language::ZhCn, "zh-CN", "重新绑定目标"),
+            (Language::ZhTw, "zh-TW", "重新綁定目標"),
+            (Language::En, "en", "target rebinding"),
+        ] {
+            let request = Request::Invoke {
+                session: "same-session".into(),
+                browsers: Vec::new(),
+                command: Command::Documentation,
+                language,
+            };
+            // Exercise the helper's real framed serializer/deserializer before
+            // dispatch; locale is transport metadata, never model command data.
+            let framed = encode(&request).unwrap();
+            let decoded: Request = read_sync(&mut framed.as_slice()).unwrap();
+            assert_eq!(serde_json::to_value(&decoded).unwrap()["language"], tag);
+            send.send(decoded).await.unwrap();
+            let response: Response = read(&mut output).await.unwrap();
+            let text = response.unwrap();
+            let text = text.as_str().unwrap();
+            assert!(
+                text.contains(recovery)
+                    && text.contains("cua_reset")
+                    && text.contains("getAXState")
+            );
+        }
         send.send(Request::Shutdown).await.unwrap();
         assert!(read::<_, Response>(&mut output).await.unwrap().is_ok());
         task.await.unwrap().unwrap();

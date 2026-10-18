@@ -496,3 +496,120 @@ async fn partial_text_survives_cancellation_without_becoming_replayed_model_hist
         ]);
     }).await.expect("partial model cancellation and recovery must make bounded progress");
 }
+
+#[tokio::test]
+async fn captured_language_is_evidenced_without_becoming_a_provider_parameter() {
+    use maka_agent_facts::language::Language;
+    // Independent wire-evidence types preserve canonical field order at every level.
+    #[derive(serde::Serialize)]
+    struct Text<'a> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        text: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    #[serde(tag = "role", rename_all = "lowercase")]
+    enum Prompt<'a> {
+        System { content: &'a str },
+        User { content: [Text<'a>; 1] },
+    }
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Evidence<'a> {
+        projection: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        language: Option<&'static str>,
+        prompt: [Prompt<'a>; 2],
+        tools: [(); 0],
+        provider_options: serde_json::Value,
+        max_output_tokens: u64,
+    }
+    for (language, tag, context_label) in [
+        (Language::En, None, "Session context"),
+        (Language::ZhCn, Some("zh-CN"), "会话上下文"),
+        (Language::ZhTw, Some("zh-TW"), "工作階段上下文"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = Arc::new(
+            EventLog::open(&directory.path().join("events.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut socket).await;
+            respond(&mut socket, false).await;
+            request
+        });
+        let mut run = input(&base, "language");
+        run.configuration.language = language;
+        let maka_agent_engine::RunWork::Message { message, .. } = &mut run.work else {
+            unreachable!()
+        };
+        *message = "Keep 原文 /tmp/exact.rs unchanged".into();
+        let worker = engine(log.clone());
+        worker.run(run, CancellationToken::new()).await.unwrap();
+        worker.drain().await;
+        let request = server.await.unwrap();
+        assert!(request.get("language").is_none());
+        let system = request["messages"][0].clone();
+        assert_eq!(system["role"], "system");
+        assert!(system["content"].as_str().unwrap().contains(context_label));
+        assert_eq!(
+            request["messages"][1],
+            json!({"role":"user","content":"Keep 原文 /tmp/exact.rs unchanged"})
+        );
+        let evidence = Evidence {
+            projection: "maka.model-history.v1",
+            language: tag,
+            prompt: [
+                Prompt::System {
+                    content: system["content"].as_str().unwrap(),
+                },
+                Prompt::User {
+                    content: [Text {
+                        kind: "text",
+                        text: "Keep 原文 /tmp/exact.rs unchanged",
+                    }],
+                },
+            ],
+            tools: [],
+            provider_options: json!({}),
+            max_output_tokens: request["max_tokens"].as_u64().unwrap(),
+        };
+        let expected_digest = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(serde_json::to_vec(&evidence).unwrap()))
+        );
+        let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+        let opening = prefix
+            .events
+            .iter()
+            .find_map(|event| match &event.event.fact {
+                Fact::InvocationOpened {
+                    configuration: Some(configuration),
+                    ..
+                } => Some(configuration),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(opening.language, language);
+        let recorded = serde_json::to_value(opening).unwrap();
+        assert_eq!(
+            recorded.get("language").and_then(serde_json::Value::as_str),
+            tag
+        );
+        let digest = prefix
+            .events
+            .iter()
+            .find_map(|event| match &event.event.fact {
+                Fact::ModelRequested { input_digest, .. } => Some(input_digest),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(digest, &expected_digest);
+        log.shutdown().await.unwrap();
+    }
+}

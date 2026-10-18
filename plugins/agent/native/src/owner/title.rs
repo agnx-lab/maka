@@ -181,7 +181,13 @@ impl Owner {
             .map_or(content.text.as_str(), |source| {
                 source.unprepared_content.text.as_str()
             });
-        let Some(input) = maka_session_title::Title.prepare(text) else {
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(persistence)?;
+        let language = self.resolve_language(&snapshot);
+        let Some(input) = maka_session_title::Title.prepare(text, language) else {
             return Ok(());
         };
         let cancellation = self.stop.child_token();
@@ -219,6 +225,7 @@ impl Owner {
             self.auxiliary
                 .generate(
                     ModelRequest {
+                        language: input.language,
                         provider: prepared.provider,
                         prompt,
                         tools: Vec::new(),

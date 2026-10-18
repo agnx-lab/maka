@@ -177,7 +177,11 @@ impl ToolResult {
 
 /// JSON-only APIs require exactly one result per call. Supplemental Code Mode
 /// output is carried as a labelled observation, never a second settlement.
-pub fn notification_fallback(messages: Vec<Message>) -> Vec<Message> {
+pub fn notification_fallback(
+    messages: Vec<Message>,
+    language: crate::language::Language,
+) -> Vec<Message> {
+    use crate::language::Language;
     messages
         .into_iter()
         .flat_map(|message| {
@@ -198,10 +202,12 @@ pub fn notification_fallback(messages: Vec<Message>) -> Vec<Message> {
             for part in content {
                 if part.is_notification() {
                     if let ToolOutput::Text(text) = part.output {
-                        result.push(Message::user(format!(
-                            "[Notification from exec {}]\n{text}",
-                            part.tool_call_id
-                        )));
+                        let id = part.tool_call_id;
+                        result.push(Message::user(match language {
+                            Language::En => format!("[Notification from exec {id}]\n{text}"),
+                            Language::ZhCn => format!("[来自 exec {id} 的通知]\n{text}"),
+                            Language::ZhTw => format!("[來自 exec {id} 的通知]\n{text}"),
+                        }));
                     }
                 } else {
                     result.push(Message::Tool {

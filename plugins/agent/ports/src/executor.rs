@@ -120,6 +120,7 @@ pub struct Query {
 
 #[derive(Clone)]
 pub struct Request {
+    pub language: maka_agent_facts::language::Language,
     pub invocation: Invocation,
     pub conversation_key: String,
     pub content: MessageInput,

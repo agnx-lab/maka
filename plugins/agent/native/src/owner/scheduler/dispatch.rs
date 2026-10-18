@@ -148,8 +148,15 @@ impl Owner {
         )
         .await
         .map_err(public_error)?;
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(|_| "agent_preferences_unavailable")?;
+        let language = self.resolve_language(&snapshot);
         let mut basis = MessageBasis {
-            compaction_prompt: Some(self.effective_compaction_prompt().await?),
+            language,
+            compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
             collaboration_mode: CollaborationMode::Agent,
             background_kind: kind,
@@ -159,7 +166,7 @@ impl Owner {
             internal_tools: self.internal_tools.clone(),
             internal_bindings: self.internal_bindings.clone(),
             behavior: self
-                .capture_behavior(&session.configuration.workspace)
+                .capture_behavior(&session.configuration.workspace, &snapshot, language)
                 .await?,
             model: Some(source.accepted),
             executor: None,

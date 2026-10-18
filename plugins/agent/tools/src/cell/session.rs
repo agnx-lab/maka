@@ -19,6 +19,7 @@
 
 use super::{CellTool, CodeInput, NestedTools, WaitInput};
 use futures_util::FutureExt;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_call::ToolOrigin;
 use maka_agent_facts::tool_output::ToolContent;
@@ -152,6 +153,7 @@ impl Cells {
     pub async fn start(
         &self,
         tool: CellTool,
+        language: Language,
         cancellation: CancellationToken,
     ) -> Result<ToolSuccess, ToolError> {
         self.check()?;
@@ -303,6 +305,7 @@ impl Cells {
                 max_tokens: max_output_tokens,
                 terminate: false,
             },
+            language,
             cancellation,
         )
         .await
@@ -311,11 +314,16 @@ impl Cells {
     pub async fn observe(
         &self,
         request: WaitInput,
+        language: Language,
         cancellation: CancellationToken,
     ) -> Result<ToolSuccess, ToolError> {
         self.check()?;
         let cell = self.0.cells.lock().unwrap().get(&request.cell_id).cloned()
-            .ok_or_else(|| ToolError::Failed("cell is unavailable: finished, cleared, or from another Run; do not repeat effects blindly".into()))?;
+            .ok_or_else(|| ToolError::Failed(match language {
+                Language::En => "cell is unavailable: finished, cleared, or from another Run; do not repeat effects blindly",
+                Language::ZhCn => "代码单元不可用：它已完成、已清理，或属于其他 Run；请勿盲目重复执行可能产生效果的操作",
+                Language::ZhTw => "程式碼單元無法使用：它已完成、已清除，或屬於其他 Run；請勿盲目重複執行可能產生效果的操作",
+            }.into()))?;
         let _observer = cell
             .observer
             .try_lock()

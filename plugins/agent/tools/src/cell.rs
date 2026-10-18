@@ -55,7 +55,7 @@ pub(super) fn definition() -> ToolDefinition {
     ToolDefinition {
         freeform: Some(maka_agent_facts::tools::FreeformGrammar::Lark { definition: EXEC_GRAMMAR.into() }), output_schema: None, provider: None,
         name: "exec".into(),
-        description: r#"Run JavaScript code to orchestrate tool calls in a fresh V8 isolate. Code is an async ES module: use top-level await and emit output with helpers; no top-level return. No Node, filesystem, network, imports or console.
+        description: r#"Orchestrate tool calls in a fresh V8 async ES module. Use top-level await and output helpers; top-level return, Node, filesystem, network, imports and console are unavailable.
 Pass raw JavaScript on freeform transports; on JSON-only transports put the same source in code. Optional first line: // @exec: {"yield_time_ms": 30000, "max_output_tokens": 10000}
 Call tools.<name>(input). Names are normalized JavaScript identifiers. Await every intended operation, including Promise.all/Promise.allSettled. When the module finishes, unawaited operations are cancelled; admitted Host effects still settle before completion.
 Helpers:
@@ -64,7 +64,7 @@ Helpers:
 - audio(value): emit an MCP audio block, audio_url object or base64 data URL. Audio bytes are delivered as native model input when supported; unsupported adapters receive an explicit notice. PCM WAV clips shorter than 25 ms are omitted with a text notice.
 - generatedImage({image_url, output_hint?}): emit image content and its hint.
 - store(key, value), load(key): retain JSON between exec calls in this live session, including across turns and compaction. No JS globals survive. Writes publish after settlement. Host restart/session retirement clears the store.
-- notify(value): independently inject additional output for the current exec into the model history; no wait call is needed. Does not yield or finish the cell. Notifications arriving during a model request are delivered on the next step.
+- notify(value): inject output into model history without wait, yielding or finishing the cell. Notifications during a model request arrive on the next step.
 - await yield_control(): return accumulated output while the cell continues.
 - exit(): end the script successfully.
 - setTimeout(callback, delayMs=0), clearTimeout(id): timers alone do not keep a finished cell alive.
@@ -119,7 +119,7 @@ pub(super) struct WaitInput {
 pub(super) fn wait_definition() -> ToolDefinition {
     ToolDefinition {
         freeform: None, output_schema: None, provider: None, name: "wait".into(),
-        description: "Use only after exec returns a running cell_id. Observe a running Code Mode cell using the cell_id from exec/wait. Returns only new output and its running/completed/terminated state. terminate requests cancellation; while cleanup is pending the state stays running. Completed cells are collected once. IDs are scoped to this Run and do not survive Host restart. yield_time_ms is 0..60000 (default 10000); max_tokens is an approximate text budget, 64..32768 (default 10000).".into(),
+        description: "Observe a cell_id returned by running exec/wait. Returns new output and running/completed/terminated state. terminate requests cancellation; state stays running through cleanup. Collect final output once. IDs expire with this Run or Host restart.".into(),
         input_schema: schemars::schema_for!(WaitInput).into(),
     }
 }

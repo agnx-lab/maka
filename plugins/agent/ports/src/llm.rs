@@ -17,6 +17,7 @@
  * under the License.
  */
 
+pub use maka_agent_facts::language::Language;
 pub use maka_agent_facts::model::ModelGeneration;
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +144,8 @@ pub enum SearchResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Generate {
+    #[serde(default, skip_serializing_if = "Language::is_english")]
+    pub language: Language,
     pub prompt: String,
     pub system: Option<String>,
     pub max_output_tokens: Option<u64>,
@@ -164,5 +167,30 @@ impl Generate {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_generation_has_one_canonical_english_default() {
+        let original = r#"{"prompt":"原始 user text","system":null,"maxOutputTokens":null}"#;
+        let mut input: Generate = serde_json::from_str(original).unwrap();
+        assert_eq!(input.language, Language::En);
+        assert_eq!(serde_json::to_string(&input).unwrap(), original);
+        for (language, tag) in [(Language::ZhCn, "zh-CN"), (Language::ZhTw, "zh-TW")] {
+            input.language = language;
+            let encoded = serde_json::to_value(&input).unwrap();
+            assert_eq!(encoded["language"], tag);
+            assert_eq!(encoded["prompt"], "原始 user text");
+            assert_eq!(
+                serde_json::from_value::<Generate>(encoded)
+                    .unwrap()
+                    .language,
+                language
+            );
+        }
     }
 }

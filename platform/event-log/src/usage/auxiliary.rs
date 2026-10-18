@@ -20,6 +20,7 @@
 use super::{AuxiliarySource as Source, Outcome, invalid};
 use crate::{EventLog, StoreError};
 use maka_agent_facts::execution::ModelBinding;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::model::ModelUsage;
 use maka_plugin_core::operation::RecoveryRef;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,8 @@ pub(super) struct Admission {
     binding: ModelBinding,
     session_id: Option<String>,
     started_at: SystemTime,
+    #[serde(default, skip_serializing_if = "Language::is_english")]
+    language: Language,
 }
 
 #[derive(Serialize)]
@@ -55,9 +58,11 @@ impl EventLog {
     pub async fn begin_auxiliary_model(
         &self,
         source: Source,
+        language: Language,
         quote: Option<maka_agent_facts::pricing::Quote>,
     ) -> Result<Uuid, StoreError> {
-        self.admit_auxiliary_model(source, None, quote).await
+        self.admit_auxiliary_model(source, None, language, quote)
+            .await
     }
 
     /// Trusted native owners supply their captured model selection only after
@@ -67,6 +72,7 @@ impl EventLog {
         reference: RecoveryRef,
         binding: ModelBinding,
         session_id: String,
+        language: Language,
         quote: Option<maka_agent_facts::pricing::Quote>,
     ) -> Result<Uuid, StoreError> {
         self.operation_domain(&reference)?;
@@ -76,14 +82,20 @@ impl EventLog {
             operation: reference.operation,
             fingerprint: reference.fingerprint.clone(),
         };
-        self.admit_auxiliary_model(source, Some((reference, binding, session_id)), quote)
-            .await
+        self.admit_auxiliary_model(
+            source,
+            Some((reference, binding, session_id)),
+            language,
+            quote,
+        )
+        .await
     }
 
     async fn admit_auxiliary_model(
         &self,
         source: Source,
         operation: Option<(RecoveryRef, ModelBinding, String)>,
+        language: Language,
         quote: Option<maka_agent_facts::pricing::Quote>,
     ) -> Result<Uuid, StoreError> {
         self.validate_root()?;
@@ -107,6 +119,7 @@ impl EventLog {
                     }
                     let record = Admission {
                         source,
+                        language,
                         binding,
                         session_id,
                         started_at: SystemTime::now(),
@@ -349,4 +362,17 @@ async fn insert(
             .execute(connection)
             .await?;
     crate::sequence_number(inserted.last_insert_rowid())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn original_english_admission_keeps_canonical_bytes() {
+        let original = r#"{"source":{"kind":"host_effect","id":"00000000-0000-0000-0000-000000000001"},"binding":{"connection_id":"connection","connection_slug":"named","model":"chosen"},"session_id":null,"started_at":{"secs_since_epoch":1,"nanos_since_epoch":0}}"#;
+        let admission: Admission = serde_json::from_str(original).unwrap();
+        assert_eq!(admission.language, Language::En);
+        assert_eq!(serde_json::to_string(&admission).unwrap(), original);
+    }
 }

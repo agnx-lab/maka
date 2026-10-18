@@ -34,23 +34,24 @@ struct Backend {
     original_resources: Arc<maka_capabilities::call::Resources>,
 }
 impl Owner {
-    async fn check_recap(&self, scope: &Scope, session: &str) -> Result<(), ToolError> {
+    async fn check_recap(
+        &self,
+        scope: &Scope,
+        session: &str,
+    ) -> Result<RuntimePolicySnapshot, ToolError> {
         if !self.settings.recaps || self.stop.is_cancelled() || scope.cancellation.is_cancelled() {
             return Err(failed("Session recap unavailable"));
         }
         self.session(session).await.map_err(failed)?;
-        if self
+        let snapshot = self
             .configuration
             .runtime_policy()
             .await
-            .map_err(persistence)?
-            .policy
-            .privacy
-            .incognito_active
-        {
+            .map_err(persistence)?;
+        if snapshot.policy.privacy.incognito_active {
             return Err(failed("Session recap is unavailable in incognito mode"));
         }
-        Ok(())
+        Ok(snapshot)
     }
     fn recaps(
         self: &Arc<Self>,
@@ -104,9 +105,11 @@ impl Owner {
         scope: &Scope,
         operation: &RecoveryRef,
     ) -> Result<RecapReceipt, String> {
-        self.check_recap(scope, &input.session_id)
+        let snapshot = self
+            .check_recap(scope, &input.session_id)
             .await
             .map_err(|e| e.to_string())?;
+        let language = self.resolve_language(&snapshot);
         // The full admitted identity, including namespace and immutable input, names this cache entry.
         let hash = Sha256::digest(serde_json::to_vec(operation).map_err(|e| e.to_string())?);
         let id = Uuid::from_bytes(hash[..16].try_into().expect("SHA-256 prefix"));
@@ -116,7 +119,7 @@ impl Owner {
             Some((operation.clone(), input.model)),
         );
         recaps
-            .generate(scope, &input.session_id, id)
+            .generate(scope, &input.session_id, id, language)
             .await
             .map_err(|e| e.to_string())
     }
@@ -288,6 +291,7 @@ impl Owner {
             self.auxiliary
                 .generate(
                     ModelRequest {
+                        language: input.language,
                         provider: prepared.provider,
                         prompt,
                         tools: Vec::new(),

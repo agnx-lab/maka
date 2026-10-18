@@ -592,6 +592,7 @@ impl Fixture {
             maka_config::oauth::enrollment::LoginCompletion::Committed(_)
         ));
         let mut settings = Configuration {
+            locale: String::new(),
             tool_discovery: false,
             isolated_workspaces: false,
             assistant: None,

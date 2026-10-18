@@ -19,7 +19,6 @@
 
 use super::*;
 
-const GLOBAL_PROMPT: &str = maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT;
 const ONCE_PROMPT: &str = "For this compression only, preserve the Unicode decision: 中文.";
 
 fn context_foreground(output: &[u8]) -> Option<[u8; 3]> {
@@ -37,6 +36,9 @@ fn context_foreground(output: &[u8]) -> Option<[u8; 3]> {
 #[test]
 #[ignore = "real bundled product compaction dialog, streamed summary and durable divider after restart"]
 fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() {
+    let global_prompt = maka_agent_facts::context::default_compaction_prompt(
+        maka_agent_facts::language::Language::En,
+    );
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}/v1", listener.local_addr().unwrap());
     let (requests, received) = mpsc::channel();
@@ -63,7 +65,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
         let revision = config.runtime_policy().await.unwrap().revision;
         assert!(matches!(
             config
-                .set_compaction_prompt(revision, Some(GLOBAL_PROMPT.into()))
+                .set_compaction_prompt(revision, Some(global_prompt.into()))
                 .await
                 .unwrap(),
             maka_agent_facts::configuration::policy::RuntimePolicyMutationResult::Committed { .. }
@@ -179,7 +181,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
     );
     click(&mut tui, "## Critical Context");
     tui.send(b"\x01");
-    copy_selection(&mut tui, GLOBAL_PROMPT);
+    copy_selection(&mut tui, global_prompt);
     paste(&mut tui, ONCE_PROMPT);
     tui.wait_for("For this compression only");
     evidence(&tui, "compact-edited");
@@ -207,7 +209,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
         summary["messages"].as_array().unwrap().last().unwrap()["content"],
         ONCE_PROMPT
     );
-    assert!(!summary["messages"].to_string().contains(GLOBAL_PROMPT));
+    assert!(!summary["messages"].to_string().contains(global_prompt));
     assert!(
         summary["messages"]
             .to_string()
@@ -279,7 +281,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
                 .policy
                 .compaction_prompt
                 .as_deref(),
-            Some(GLOBAL_PROMPT),
+            Some(global_prompt),
             "the dialog override must not modify global preferences"
         );
         config.shutdown().await.unwrap();

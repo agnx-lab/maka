@@ -92,6 +92,7 @@ impl Auxiliary {
                         *reference,
                         binding,
                         session_id,
+                        request.language,
                         Some(quote),
                     )
                     .await
@@ -116,7 +117,7 @@ impl Auxiliary {
                 .await?
             }
             Admission::Source(source) => log
-                .begin_auxiliary_model(source, Some(quote))
+                .begin_auxiliary_model(source, request.language, Some(quote))
                 .await
                 .map_err(|error| match error {
                     maka_event_log::StoreError::InvalidTransition(_)

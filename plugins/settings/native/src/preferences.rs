@@ -117,18 +117,19 @@ pub(crate) async fn read(
         .runtime_policy()
         .await
         .map_err(|_| "settings_store_unavailable")?;
+    let language = snapshot
+        .policy
+        .language
+        .unwrap_or(configured_locale)
+        .resolve(native_language);
     super::connections::encode(Preferences {
         language: snapshot.policy.language,
-        resolved_language: snapshot
-            .policy
-            .language
-            .unwrap_or(configured_locale)
-            .resolve(native_language),
-        compaction_prompt: snapshot
-            .policy
-            .compaction_prompt
-            .unwrap_or_else(|| maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT.into()),
-        default_compaction_prompt: maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT.into(),
+        resolved_language: language,
+        compaction_prompt: snapshot.policy.compaction_prompt.unwrap_or_else(|| {
+            maka_agent_facts::context::default_compaction_prompt(language).into()
+        }),
+        default_compaction_prompt: maka_agent_facts::context::default_compaction_prompt(language)
+            .into(),
         revision: snapshot.revision,
         display_name: snapshot.policy.personalization.display_name,
         assistant_tone: snapshot.policy.personalization.assistant_tone,

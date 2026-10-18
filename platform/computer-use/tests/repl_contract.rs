@@ -45,11 +45,13 @@ impl ToolExecutor for Fixture {
                 }
                 "action" => match input["action"]["kind"].as_str().unwrap() {
                     "click" => {
-                        json!({"effect":"unverifiable","route":"synthetic_events","delivery":{"mode":"foreground"}})
+                        json!({"effect":"unverifiable","route":"synthetic_events","delivery":{"mode":"foreground"},"guidance":"Fixture effect is uncertain; read getAXState(); do not replay input."})
                     }
-                    "setValue" => json!({"effect":"suspected_noop"}),
+                    "setValue" => {
+                        json!({"effect":"suspected_noop","guidance":"Fixture effect is uncertain; read getAXState(); do not replay input."})
+                    }
                     "typeText" => {
-                        json!({"effect":"partial","requested_chars":5,"delivered_chars":2})
+                        json!({"effect":"partial","requested_chars":5,"delivered_chars":2,"guidance":"Fixture effect is uncertain; read getAXState(); do not replay input."})
                     }
                     other => panic!("unexpected fixture action {other}"),
                 },
@@ -129,7 +131,11 @@ async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_se
     let driver = Arc::new(tokio::sync::Mutex::new(maka_computer_use::Driver::default()));
     let mut session = maka_computer_use::Session::new(driver.clone());
     session
-        .configure(maka_capabilities::computer::Desktop::Local, vec![])
+        .configure(
+            maka_capabilities::computer::Desktop::Local,
+            vec![],
+            maka_agent_facts::language::Language::En,
+        )
         .unwrap();
     for method in ["listBrowsers", "listTabs"] {
         let output = session
@@ -137,6 +143,7 @@ async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_se
                 serde_json::from_value(json!({"method":method,"options":{}})).unwrap(),
                 "fixture",
                 &CancellationToken::new(),
+                maka_agent_facts::language::Language::En,
             )
             .await
             .unwrap();
@@ -148,6 +155,7 @@ async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_se
                 .unwrap(),
             "fixture",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await;
     assert!(
@@ -157,5 +165,82 @@ async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_se
             .contains("no matching configured CDP provider")
     );
     session.close().await.unwrap();
+    driver.lock().await.close().await.unwrap();
+}
+
+// Each evaluation owns its language; the same REPL and native target owner can
+// serve differently captured invocations without changing persistent JS state.
+struct LocalBridge {
+    native: Arc<tokio::sync::Mutex<maka_computer_use::Session>>,
+    language: maka_agent_facts::language::Language,
+}
+impl ToolExecutor for LocalBridge {
+    fn names(&self) -> Vec<String> {
+        vec!["cua".into()]
+    }
+    fn invoke(&self, _: String, input: Value, cancellation: CancellationToken) -> ToolFuture {
+        let native = self.native.clone();
+        let language = self.language;
+        Box::pin(async move {
+            native
+                .lock()
+                .await
+                .invoke(
+                    serde_json::from_value(input).unwrap(),
+                    "language-fixture",
+                    &cancellation,
+                    language,
+                )
+                .await
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn persistent_repl_uses_each_evaluations_language_without_rewriting_user_output() {
+    use maka_agent_facts::language::Language;
+    let driver = Arc::new(tokio::sync::Mutex::new(maka_computer_use::Driver::default()));
+    let native = Arc::new(tokio::sync::Mutex::new(maka_computer_use::Session::new(
+        driver.clone(),
+    )));
+    let repl = Repl::new(facade(), CellLimits::default());
+    for (language, recovery) in [
+        (Language::ZhCn, "重新绑定目标"),
+        (Language::ZhTw, "重新綁定目標"),
+        (Language::En, "target rebinding"),
+        (Language::ZhCn, "重新绑定目标"),
+    ] {
+        let context = CellContext::new(Default::default(), 64 * 1024, vec![]);
+        let result = repl
+            .evaluate(
+                "await cua.listBrowsers(); nodeRepl.write('原始 user_DATA: zh-TW / en');".into(),
+                Arc::new(LocalBridge {
+                    native: native.clone(),
+                    language,
+                }),
+                CancellationToken::new(),
+                context.clone(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(result, CellResult::Success { .. }), "{result:?}");
+        let outputs = context.take_output();
+        assert!(outputs.iter().any(|part| matches!(part, CellOutput::Text { text }
+            if text.contains(recovery) && text.contains("cua_reset") && text.contains("getAXState"))));
+        assert!(
+            outputs
+                .iter()
+                .any(|part| matches!(part, CellOutput::Text { text }
+            if text == "原始 user_DATA: zh-TW / en"))
+        );
+        assert!(
+            outputs
+                .iter()
+                .any(|part| matches!(part, CellOutput::Text { text } if text == "[]"))
+        );
+    }
+    repl.close().await.unwrap();
+    native.lock().await.close().await.unwrap();
     driver.lock().await.close().await.unwrap();
 }

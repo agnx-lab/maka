@@ -24,6 +24,7 @@ use crate::{
     schedule::{Source, Update},
     view::Snapshot,
 };
+use maka_agent_facts::language::Language;
 use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -79,6 +80,7 @@ impl Handle {
 
 pub fn start(
     mut coordinator: Coordinator,
+    language: impl Fn() -> Language + Send + 'static,
 ) -> Result<
     (
         Handle,
@@ -110,7 +112,7 @@ pub fn start(
                 let next = tokio::select! {
                     biased;
                     command = requests.recv() => Next::Request(command),
-                    result = coordinator.reconcile() => Next::Reconciled(result),
+                    result = coordinator.reconcile(language()) => Next::Reconciled(result),
                 };
                 match next {
                     Next::Request(None) => return Ok(()),
@@ -132,7 +134,7 @@ pub fn start(
                             pending_work: coordinator.has_background_work(),
                         }));
                         let result = match result {
-                            Ok(()) => coordinator.wake_supervisor().await,
+                            Ok(()) => coordinator.wake_supervisor(language()).await,
                             Err(error) => Err(error),
                         };
                         let error = result.err().map(|error| error.to_string());

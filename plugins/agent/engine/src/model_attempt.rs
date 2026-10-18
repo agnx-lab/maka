@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use crate::{
     Inner, RunContext, RunError, RunInput, history,
     runner::{append, digest},
@@ -88,13 +90,16 @@ pub(super) async fn prompt<W>(
         cancellation,
         replay,
         prior_unknown,
+        input.configuration.language,
     )
     .await?;
     if let Some(baseline) = &source.baseline {
-        let text = format!(
-            "Continuation summary:\n{}",
-            baseline.checkpoint.summary.text
-        );
+        let label = match input.configuration.language {
+            Language::En => "Continuation summary:",
+            Language::ZhCn => "继续任务的摘要：",
+            Language::ZhTw => "繼續任務的摘要：",
+        };
+        let text = format!("{label}\n{}", baseline.checkpoint.summary.text);
         prompt.insert(0, Message::user(text));
     }
     let system_text = crate::request_composition::render_system(
@@ -117,7 +122,7 @@ pub(super) async fn prompt<W>(
     Ok(prompt)
 }
 
-pub(super) fn prior_unknown_notice(source: &ModelContextSource) -> String {
+pub(super) fn prior_unknown_notice(source: &ModelContextSource, language: Language) -> String {
     let events =
         source
             .anchor
@@ -167,17 +172,31 @@ pub(super) fn prior_unknown_notice(source: &ModelContextSource) -> String {
     if unknown.is_empty() {
         return String::new();
     }
-    let mut notice = String::from(
-        "Prior execution was interrupted after these tools were dispatched. Their results were never recorded; effects may or may not have happened. Inspect current state before repeating any action. This is historical uncertainty, not a new tool result:",
-    );
+    let mut notice = String::from(match language {
+        Language::En => {
+            "Prior execution was interrupted after these tools were dispatched. Their results were never recorded; effects may or may not have happened. Inspect current state before repeating any action. This is historical uncertainty, not a new tool result:"
+        }
+        Language::ZhCn => {
+            "先前执行在派发以下工具后中断，未记录结果；操作可能已经生效。重复操作前先检查当前状态。这是历史不确定性，不是新的工具结果："
+        }
+        Language::ZhTw => {
+            "先前執行在派發以下工具後中斷，未記錄結果；操作可能已經生效。重複操作前先檢查目前狀態。這是歷史不確定性，不是新的工具結果："
+        }
+    });
     for (name, operation) in unknown.iter().take(64) {
-        notice.push_str(&format!("\n- {name} (operation {operation})"));
+        notice.push_str(&match language {
+            Language::En => format!("\n- {name} (operation {operation})"),
+            Language::ZhCn => format!("\n- {name}（操作 {operation}）"),
+            Language::ZhTw => format!("\n- {name}（操作 {operation}）"),
+        });
     }
     if unknown.len() > 64 {
-        notice.push_str(&format!(
-            "\n- and {} more unknown operations",
-            unknown.len() - 64
-        ));
+        let remaining = unknown.len() - 64;
+        notice.push_str(&match language {
+            Language::En => format!("\n- and {remaining} more unknown operations"),
+            Language::ZhCn => format!("\n- 另有 {remaining} 个结果未知的操作"),
+            Language::ZhTw => format!("\n- 另有 {remaining} 個結果未知的操作"),
+        });
     }
     notice
 }
@@ -485,7 +504,7 @@ pub(super) fn prepare_request<W>(
             maka_model::ProviderKind::OpenaiChat
                 | maka_model::ProviderKind::OpenaiCompatible { .. }
         ) {
-        history::project_chat(prompt)
+        history::project_chat(prompt, input.configuration.language)
     } else {
         prompt
     };
@@ -505,6 +524,8 @@ pub(super) fn prepare_request<W>(
     #[serde(rename_all = "camelCase")]
     struct Evidence<'a> {
         projection: &'static str,
+        #[serde(skip_serializing_if = "Language::is_english")]
+        language: Language,
         prompt: &'a [Message],
         tools: &'a [ToolDefinition],
         provider_options: &'a serde_json::Value,
@@ -513,6 +534,7 @@ pub(super) fn prepare_request<W>(
     }
     let input_digest = digest(&Evidence {
         projection: "maka.model-history.v1",
+        language: input.configuration.language,
         prompt: &prompt,
         tools: &definitions,
         provider_options: &input.provider_options,
@@ -521,6 +543,7 @@ pub(super) fn prepare_request<W>(
     Ok(PreparedRequest {
         context_breakdown,
         request: ModelRequest {
+            language: input.configuration.language,
             provider: input.provider.clone(),
             prompt,
             tools: definitions,

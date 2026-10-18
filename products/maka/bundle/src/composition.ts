@@ -720,6 +720,7 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
     'agent',
     {
       ...configuration.agent,
+      locale: configuration.locale,
       executors: executors.map((e, member) => ({
         name: e.name,
         import: 'executors',

@@ -18,6 +18,7 @@
  */
 
 use crate::{Error, assignment::Assignment, repository::Pending};
+use maka_agent_facts::language::Language;
 use serde::Serialize;
 
 #[derive(Default, Clone, Serialize)]
@@ -43,7 +44,7 @@ pub struct Failure {
 impl crate::Manager {
     /// Replays frozen decisions, never repeats candidate selection. Revoked consent
     /// pauses the decision; explicitly remembering a new grant may wake it again.
-    pub async fn recover_decisions(&self) -> Result<Report, Error> {
+    pub async fn recover_decisions(&self, language: Language) -> Result<Report, Error> {
         let mut report = Report::default();
         for work in self.assignments.repository.pending().await? {
             let (id, result) = match work {
@@ -64,7 +65,8 @@ impl crate::Manager {
                         if assignment.delivery.is_none() {
                             self.assignments.route(assignment.request).await?;
                         }
-                        report.pending_results |= self.assignments.return_result(&id).await?;
+                        report.pending_results |=
+                            self.assignments.return_result(&id, language).await?;
                         Ok(())
                     }
                     .await;

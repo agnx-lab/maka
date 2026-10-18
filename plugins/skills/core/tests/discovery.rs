@@ -211,12 +211,39 @@ async fn snapshot_precedence_preferences_and_capabilities_preserve_selected_iden
     assert_eq!(long_query.query.encode_utf16().count(), 512);
     assert!(long_query.query_truncated);
     for budget in [0, 100, 600, 18_000] {
-        let prompt = catalog.prompt(budget);
+        let prompt = catalog.prompt(budget, maka_agent_facts::language::Language::En);
         assert!(prompt.len() <= budget);
         assert!(!prompt.contains("frozen"));
         if budget == 600 {
             assert!(prompt.contains("additional enabled skill(s) omitted"));
         }
+    }
+    for (language, omitted) in [
+        (
+            maka_agent_facts::language::Language::En,
+            "additional enabled skill(s) omitted",
+        ),
+        (
+            maka_agent_facts::language::Language::ZhCn,
+            "个已启用的技能未列出",
+        ),
+        (
+            maka_agent_facts::language::Language::ZhTw,
+            "個已啟用的技能未列出",
+        ),
+    ] {
+        let prompt = catalog.prompt_with(
+            600,
+            "captured host introduction",
+            "find remaining skills",
+            language,
+        );
+        assert!(!prompt.is_empty());
+        assert!(prompt.len() <= 600);
+        assert!(prompt.contains(omitted));
+        assert!(prompt.contains("captured host introduction"));
+        assert!(prompt.contains("find remaining skills"));
+        assert!(!prompt.contains("frozen"));
     }
     assert_eq!(loaded.skill.location.reference, "project:maka:review");
     assert_eq!(loaded.instructions, "frozen\n  instructions");

@@ -83,6 +83,9 @@ pub use permissions::*;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentConfiguration")]
 pub struct Configuration {
+    /// Deployment locale fallback; saved Root preference takes precedence.
+    #[serde(default)]
+    pub locale: String,
     /// Defer optional tool schemas until the model discovers them. This affects
     /// presentation only; every call still uses its current authorized binding.
     #[serde(default)]

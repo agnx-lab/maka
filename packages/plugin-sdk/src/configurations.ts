@@ -147,6 +147,11 @@ export const configurations = {
     title: 'AgentConfiguration',
     type: 'object',
     properties: {
+      locale: {
+        description: 'Deployment locale fallback; saved Root preference takes precedence.',
+        type: 'string',
+        default: '',
+      },
       toolDiscovery: {
         description:
           'Defer optional tool schemas until the model discovers them. This affects\npresentation only; every call still uses its current authorized binding.',
@@ -645,6 +650,11 @@ export const configurations = {
         type: 'object',
         additionalProperties: false,
         properties: {
+          locale: {
+            type: 'string',
+            description: 'Deployment locale fallback; saved Root preference takes precedence.',
+            default: '',
+          },
           toolDiscovery: {
             type: 'boolean',
             description:

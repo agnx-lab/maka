@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use maka_agent_facts::event::LogPrefix;
 use maka_model::prompt::Message;
 
@@ -66,7 +68,11 @@ pub fn operation_id(step_id: &str, call_id: &str) -> String {
 
 /// Only committed semantic facts produce provider input. No UI transcript or
 /// previous isolate state is read, including after process restart.
-pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunError> {
+pub fn project(
+    prefix: &LogPrefix,
+    session: &str,
+    language: Language,
+) -> Result<Vec<Message>, RunError> {
     if !matches!(prefix.scope, maka_agent_facts::event::LogScope::Root)
         && prefix
             .events
@@ -98,6 +104,7 @@ pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunErr
         false,
         None,
         false,
+        language,
     )
 }
 
@@ -189,7 +196,7 @@ mod tests {
                 })
                 .collect(),
         };
-        let history = project(&prefix, "session").unwrap();
+        let history = project(&prefix, "session", Language::En).unwrap();
         assert_eq!(history.len(), 3);
         assert_eq!(
             serde_json::to_value(&history[2]).unwrap(),
@@ -202,7 +209,7 @@ mod tests {
             stored.event =
                 serde_json::from_value(serde_json::to_value(&stored.event).unwrap()).unwrap();
         }
-        assert_eq!(project(&prefix, "session").unwrap(), history);
+        assert_eq!(project(&prefix, "session", Language::En).unwrap(), history);
         let valid = prefix.events.last().unwrap().event.fact.clone();
         for invalid in [
             rejected("step:call", ToolCallIdentity::standalone("call".into())),
@@ -210,7 +217,7 @@ mod tests {
             rejected("step:call", provider("step", "wrong-call")),
         ] {
             prefix.events.last_mut().unwrap().event.fact = invalid;
-            assert!(project(&prefix, "session").is_err());
+            assert!(project(&prefix, "session", Language::En).is_err());
         }
         prefix.events.last_mut().unwrap().event.fact = valid;
         prefix.events.insert(
@@ -230,6 +237,6 @@ mod tests {
                 ),
             },
         );
-        assert!(project(&prefix, "session").is_err());
+        assert!(project(&prefix, "session", Language::En).is_err());
     }
 }

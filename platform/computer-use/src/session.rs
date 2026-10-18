@@ -23,6 +23,7 @@ use cua_driver_contract::{
 };
 use maka_agent_facts::capability::CallResult;
 use maka_agent_facts::capability::ContentBlock;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::tools::ToolError;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -71,14 +72,16 @@ impl Session {
     pub fn configure_browsers(
         &mut self,
         connections: Vec<maka_capabilities::computer::BrowserConnection>,
+        language: Language,
     ) -> Result<(), ToolError> {
-        self.browsers.configure(connections)
+        self.browsers.configure(connections, language)
     }
     pub async fn invoke(
         &mut self,
         command: Command,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         if cancellation.is_cancelled() {
             return Err(failed("Computer Use cancelled before dispatch"));
@@ -90,11 +93,11 @@ impl Session {
             return Err(failed("Computer Use Session identity mismatch"));
         }
         self.id.get_or_insert_with(|| session.into());
-        match command {
-            Command::Documentation => Ok(json!(include_str!("api.md"))),
+        let mut result = match command {
+            Command::Documentation => Ok(json!(crate::language::documentation(language))),
             Command::ConfigureCursor { options } => {
                 self.cursor.configure(options)?;
-                self.browsers.configure_cursor(&self.cursor).await;
+                self.browsers.configure_cursor(&self.cursor, language).await;
                 let native = self
                     .native
                     .lock()
@@ -107,12 +110,12 @@ impl Session {
             Command::CursorState { .. } => {
                 let native = self.native.lock().await.cursors.state(&self.cursor).await;
                 Ok(
-                    json!({"settings":self.cursor,"native":native,"browsers":self.browsers.cursor_state(&self.cursor).await}),
+                    json!({"settings":self.cursor,"native":native,"browsers":self.browsers.cursor_state(&self.cursor, language).await}),
                 )
             }
-            Command::ListApps { .. } => self.apps(session, cancellation).await,
+            Command::ListApps { .. } => self.apps(session, cancellation, language).await,
             Command::ListWindows { .. } => Ok(json!(
-                self.windows(session, cancellation)
+                self.windows(session, cancellation, language)
                     .await?
                     .iter()
                     .map(window_info)
@@ -124,7 +127,7 @@ impl Session {
                 if let Err(error) = crate::macos::require_desktop() {
                     errors.push(error.to_string());
                 }
-                let apps = match self.apps(session, cancellation).await {
+                let apps = match self.apps(session, cancellation, language).await {
                     Ok(apps) => apps,
                     Err(error) => {
                         errors.push(error.to_string());
@@ -143,15 +146,15 @@ impl Session {
                     self.native
                         .lock()
                         .await
-                        .invoke("list_apps", json!({}), session, cancellation)
+                        .invoke("list_apps", json!({}), session, cancellation, language)
                         .await?,
                 )?;
-                let args = launch_args(&app, &apps.apps)?;
+                let args = launch_args(&app, &apps.apps, language)?;
                 let launched = self
                     .native
                     .lock()
                     .await
-                    .invoke("launch_app", args, session, cancellation)
+                    .invoke("launch_app", args, session, cancellation, language)
                     .await?;
                 Ok(launched.structured_content.unwrap_or(Value::Null))
             }
@@ -159,11 +162,13 @@ impl Session {
                 #[cfg(target_os = "macos")]
                 crate::macos::require_desktop()?;
                 if self.targets.len() >= 64 {
-                    return Err(failed(
-                        "target limit reached; reset Cua to release bindings",
-                    ));
+                    return Err(failed(match language {
+                        Language::En => "target limit reached; reset Cua to release bindings",
+                        Language::ZhCn => "目标数已达上限；请重置 Cua 以释放绑定",
+                        Language::ZhTw => "目標數已達上限；請重設 Cua 以釋放綁定",
+                    }));
                 }
-                let windows = self.windows(session, cancellation).await?;
+                let windows = self.windows(session, cancellation, language).await?;
                 let candidates: Vec<_> = match target {
                     AppReference::Window { window_id } => windows
                         .into_iter()
@@ -174,7 +179,7 @@ impl Session {
                             self.native
                                 .lock()
                                 .await
-                                .invoke("list_apps", json!({}), session, cancellation)
+                                .invoke("list_apps", json!({}), session, cancellation, language)
                                 .await?,
                         )?;
                         let pids: Vec<_> = apps
@@ -210,10 +215,10 @@ impl Session {
                                 .native
                                 .lock()
                                 .await
-                                .invoke("launch_app", args, session, cancellation)
+                                .invoke("launch_app", args, session, cancellation, language)
                                 .await?;
-                            let pid=launched.structured_content.as_ref().and_then(|value| value["pid"].as_u64()).ok_or_else(|| ToolError::OutcomeUnknown("launch requested but process identity unavailable; inspect inventory before retrying".into()))?;
-                            self.windows(session, cancellation)
+                            let pid=launched.structured_content.as_ref().and_then(|value| value["pid"].as_u64()).ok_or_else(|| ToolError::OutcomeUnknown(match language { Language::En => "launch requested but process identity unavailable; inspect inventory before retrying", Language::ZhCn => "已请求启动但无法获取进程标识；重试前请检查清单", Language::ZhTw => "已請求啟動但無法取得程序識別；重試前請檢查清單" }.into()))?;
+                            self.windows(session, cancellation, language)
                                 .await?
                                 .into_iter()
                                 .filter(|w| w.pid.map(u64::from) == Some(pid))
@@ -224,11 +229,23 @@ impl Session {
                     }
                 };
                 if candidates.len() != 1 {
-                    return Err(failed(format!(
-                        "App selection requires exactly one open window; found {}. Choose cua.getApp({{windowId}}) from {}",
-                        candidates.len(),
-                        json!(candidates.iter().map(window_info).collect::<Vec<_>>())
-                    )));
+                    return Err(failed(match language {
+                        Language::En => format!(
+                            "App selection requires exactly one open window; found {}. Choose cua.getApp({{windowId}}) from {}",
+                            candidates.len(),
+                            json!(candidates.iter().map(window_info).collect::<Vec<_>>())
+                        ),
+                        Language::ZhCn => format!(
+                            "应用选择需要恰好一个打开的窗口；找到 {} 个。请从 {} 中选择 cua.getApp({{windowId}})",
+                            candidates.len(),
+                            json!(candidates.iter().map(window_info).collect::<Vec<_>>())
+                        ),
+                        Language::ZhTw => format!(
+                            "應用程式選擇需要恰好一個開啟的視窗；找到 {} 個。請從 {} 中選擇 cua.getApp({{windowId}})",
+                            candidates.len(),
+                            json!(candidates.iter().map(window_info).collect::<Vec<_>>())
+                        ),
+                    }));
                 }
                 let window = candidates.into_iter().next().unwrap();
                 let pid = window
@@ -258,7 +275,14 @@ impl Session {
                     },
                 );
                 let state = match self
-                    .observe(&handle, ObservationKind::Ax, false, session, cancellation)
+                    .observe(
+                        &handle,
+                        ObservationKind::Ax,
+                        false,
+                        session,
+                        cancellation,
+                        language,
+                    )
                     .await
                 {
                     Ok(value) => value,
@@ -287,6 +311,7 @@ impl Session {
                         !options.disable_diffing,
                         session,
                         cancellation,
+                        language,
                     )
                     .await;
                 if result.is_err()
@@ -299,24 +324,41 @@ impl Session {
             Command::Action {
                 handle: Handle::App(handle),
                 action,
-            } => self.action(&handle, action, session, cancellation).await,
-            command => {
-                self.browsers
-                    .invoke(command, &self.cursor, cancellation)
+            } => {
+                self.action(&handle, action, session, cancellation, language)
                     .await
             }
+            command => self
+                .browsers
+                .invoke(command, &self.cursor, cancellation, language)
+                .await
+                .map_err(|error| crate::browser::with_unknown_guidance(error, language)),
+        }?;
+        if result
+            .get("effect")
+            .and_then(Value::as_str)
+            .is_some_and(|effect| {
+                matches!(
+                    effect,
+                    "unverifiable" | "unchanged" | "partial" | "suspected_noop"
+                )
+            })
+        {
+            result["guidance"] = json!(crate::language::uncertain(language));
         }
+        Ok(result)
     }
     async fn windows(
         &mut self,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Vec<WindowInfo>, ToolError> {
         let output: ListWindowsOutput = decode(
             self.native
                 .lock()
                 .await
-                .invoke("list_windows", json!({}), session, cancellation)
+                .invoke("list_windows", json!({}), session, cancellation, language)
                 .await?,
         )?;
         Ok(output.windows)
@@ -325,15 +367,16 @@ impl Session {
         &mut self,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         let apps: ListAppsOutput = decode(
             self.native
                 .lock()
                 .await
-                .invoke("list_apps", json!({}), session, cancellation)
+                .invoke("list_apps", json!({}), session, cancellation, language)
                 .await?,
         )?;
-        let windows = self.windows(session, cancellation).await?;
+        let windows = self.windows(session, cancellation, language).await?;
         Ok(json!(apps.apps.into_iter().map(|app| json!({
             "id":app_id(&app), "displayName":app.name,
             "isRunning":app.running, "windows":windows.iter().filter(|w| w.pid == Some(app.pid)).map(window_info).collect::<Vec<_>>()
@@ -344,11 +387,15 @@ impl Session {
         handle: &str,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<WindowInfo, ToolError> {
-        let target = self
-            .targets
-            .get(handle)
-            .ok_or_else(|| failed("stale_target: bind the app again"))?;
+        let target = self.targets.get(handle).ok_or_else(|| {
+            failed(match language {
+                Language::En => "stale_target: bind the app again",
+                Language::ZhCn => "stale_target: 请重新绑定应用",
+                Language::ZhTw => "stale_target: 請重新綁定應用程式",
+            })
+        })?;
         #[cfg(target_os = "macos")]
         crate::macos::require_desktop()?;
         let pid = target
@@ -357,20 +404,26 @@ impl Session {
             .ok_or_else(|| failed("window has no process"))?;
         if crate::identity::process(pid).ok().as_ref() != Some(&target.process) {
             self.targets.remove(handle);
-            return Err(failed(
-                "stale_target: application process ended or changed; bind it again",
-            ));
+            return Err(failed(match language {
+                Language::En => "stale_target: application process ended or changed; bind it again",
+                Language::ZhCn => "stale_target: 应用进程已结束或改变；请重新绑定",
+                Language::ZhTw => "stale_target: 應用程式程序已結束或變更；請重新綁定",
+            }));
         }
         let id = target.window.window_id;
         #[cfg(target_os = "macos")]
         let macos = target.macos.clone();
-        let windows = self.windows(session, cancellation).await?;
+        let windows = self.windows(session, cancellation, language).await?;
         let Some(window) = windows
             .into_iter()
             .find(|w| w.pid == Some(pid) && w.window_id == id)
         else {
             self.targets.remove(handle);
-            return Err(failed("stale_target: window closed; bind a current window"));
+            return Err(failed(match language {
+                Language::En => "stale_target: window closed; bind a current window",
+                Language::ZhCn => "stale_target: 窗口已关闭；请绑定当前窗口",
+                Language::ZhTw => "stale_target: 視窗已關閉；請綁定目前視窗",
+            }));
         };
         #[cfg(target_os = "macos")]
         let window = if let Some(macos) = macos {
@@ -406,8 +459,9 @@ impl Session {
         diff: bool,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
-        self.verify(handle, session, cancellation).await?;
+        self.verify(handle, session, cancellation, language).await?;
         let ax = !matches!(kind, ObservationKind::Screenshot);
         let screenshot = !matches!(kind, ObservationKind::Ax);
         // Clear old authority before attempting observation; failure cannot leave
@@ -425,9 +479,9 @@ impl Session {
         }
         crate::observation::settle(crate::observation::NATIVE_SETTLE, cancellation).await?;
         // The application may move or close during the settling window.
-        let window = self.verify(handle, session, cancellation).await?;
+        let window = self.verify(handle, session, cancellation, language).await?;
         let result = if !own_ax || screenshot {
-            self.native.lock().await.invoke("get_window_state", json!({"pid":window.pid,"window_id":window.window_id,"include_accessibility_tree":ax && !own_ax,"include_screenshot":screenshot,"max_elements":1000,"max_image_dimension":1600}), session, cancellation).await?
+            self.native.lock().await.invoke("get_window_state", json!({"pid":window.pid,"window_id":window.window_id,"include_accessibility_tree":ax && !own_ax,"include_screenshot":screenshot,"max_elements":1000,"max_image_dimension":1600}), session, cancellation, language).await?
         } else {
             CallResult {
                 content: vec![],
@@ -451,10 +505,18 @@ impl Session {
         if screenshot && image.is_none() {
             return Err(failed("screenshot_unavailable: provider returned no image"));
         }
-        if screenshot && self.verify(handle, session, cancellation).await?.bounds != window.bounds {
-            return Err(failed(
-                "window geometry changed during capture; capture again",
-            ));
+        if screenshot
+            && self
+                .verify(handle, session, cancellation, language)
+                .await?
+                .bounds
+                != window.bounds
+        {
+            return Err(failed(match language {
+                Language::En => "window geometry changed during capture; capture again",
+                Language::ZhCn => "截图期间窗口几何信息已改变；请重新截图",
+                Language::ZhTw => "擷取畫面期間視窗幾何資訊已變更；請重新擷取畫面",
+            }));
         }
         let target = self.targets.get_mut(handle).unwrap();
         let mut output = serde_json::Map::new();
@@ -468,24 +530,34 @@ impl Session {
             } else {
                 full
             };
-            let full = format!(
-                "Window: {:?}, App: {:?}.\n{full}",
-                window.title, window.app_name
-            );
-            let mut state = if diff && cfg!(target_os = "macos") {
-                display_diff(target.previous.as_deref(), &full)
+            // Retain raw observation rows, never localized framing, as the
+            // diff basis across evaluations with different captured languages.
+            let body = if diff && cfg!(target_os = "macos") {
+                display_diff(target.previous.as_deref(), &full, language)
             } else {
                 full.clone()
             };
+            let (window_label, app_label) = match language {
+                Language::En => ("Window", "App"),
+                Language::ZhCn => ("窗口", "应用"),
+                Language::ZhTw => ("視窗", "應用程式"),
+            };
+            let mut state = format!(
+                "{window_label}: {:?}, {app_label}: {:?}.\n{body}",
+                window.title, window.app_name
+            );
             if snapshot.truncated == Some(true) || snapshot.degraded == Some(true) {
-                state.push_str(&format!(
-                    "\nObservation incomplete: {}",
-                    snapshot
-                        .truncation_reason
-                        .as_deref()
-                        .or(snapshot.degraded_reason.as_deref())
-                        .unwrap_or("partial accessibility tree")
-                ));
+                let (label, fallback) = match language {
+                    Language::En => ("Observation incomplete", "partial accessibility tree"),
+                    Language::ZhCn => ("观察不完整", "部分无障碍树"),
+                    Language::ZhTw => ("觀察不完整", "部分輔助使用樹"),
+                };
+                let reason = snapshot
+                    .truncation_reason
+                    .as_deref()
+                    .or(snapshot.degraded_reason.as_deref())
+                    .unwrap_or(fallback);
+                state.push_str(&format!("\n{label}: {reason}"));
             }
             target.previous = Some(full);
             output.insert("state".into(), json!(state));
@@ -506,13 +578,14 @@ impl Session {
         action: Action,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
-        let window = self.verify(handle, session, cancellation).await?;
+        let window = self.verify(handle, session, cancellation, language).await?;
         let cursor_requested = matches!(action, Action::MoveCursor { .. });
         let point = if cursor_requested
             || (self.cursor.enabled && self.native.lock().await.cursors.registered())
         {
-            self.cursor_point(handle, action.cursor_target(), &window)
+            self.cursor_point(handle, action.cursor_target(), &window, language)
                 .await
         } else {
             Err(failed("automatic native cursor disabled"))
@@ -600,7 +673,7 @@ impl Session {
             return Ok(if restored {
                 Value::Null
             } else {
-                json!({"warning":"Clipboard changed during paste; preserved the newer clipboard contents."})
+                json!({"warning":match language { Language::En => "Clipboard changed during paste; preserved the newer clipboard contents.", Language::ZhCn => "粘贴期间剪贴板已改变；已保留较新的剪贴板内容。", Language::ZhTw => "貼上期間剪貼簿已變更；已保留較新的剪貼簿內容。" }})
             });
         }
         let (name, args) = match action {
@@ -615,10 +688,11 @@ impl Session {
                 let mut args = json!({"target":bound,"button":options.mouse_button.unwrap_or(MouseButton::Left).name(),"count":count,"delivery_mode":native_delivery_mode()});
                 match position {
                     Position::Element(index) => {
-                        args["element_token"] = json!(target.element(index)?.element_token)
+                        args["element_token"] =
+                            json!(target.element(index, language)?.element_token)
                     }
                     Position::Point(point) => {
-                        target.point(point, &window)?;
+                        target.point(point, &window, language)?;
                         args["x"] = json!(point[0]);
                         args["y"] = json!(point[1]);
                         args["capture_id"] = json!(target.capture);
@@ -628,10 +702,10 @@ impl Session {
             }
             Action::SetValue { index, value } => (
                 "set_value",
-                json!({"pid":window.pid,"window_id":window.window_id,"element_token":target.element(index)?.element_token,"value":value}),
+                json!({"pid":window.pid,"window_id":window.window_id,"element_token":target.element(index, language)?.element_token,"value":value}),
             ),
             Action::Secondary { index, action } if cfg!(target_os = "macos") => {
-                let element = target.element(index)?;
+                let element = target.element(index, language)?;
                 let (native, name) = match action.as_str() {
                     "AXShowMenu" | "Show Menu" => ("AXShowMenu", "show_menu"),
                     "AXPick" | "Pick" => ("AXPick", "pick"),
@@ -718,7 +792,7 @@ impl Session {
                 let mut args = json!({"direction":direction.name(),"by":by,"amount":amount,"delivery_mode":native_delivery_mode()});
                 match position {
                     Position::Point(point) => {
-                        target.point(point, &window)?;
+                        target.point(point, &window, language)?;
                         args["target"] = bound;
                         args["x"] = json!(point[0]);
                         args["y"] = json!(point[1]);
@@ -728,7 +802,8 @@ impl Session {
                     {
                         args["pid"] = json!(window.pid);
                         args["window_id"] = json!(window.window_id);
-                        args["element_token"] = json!(target.element(index)?.element_token);
+                        args["element_token"] =
+                            json!(target.element(index, language)?.element_token);
                         args["delivery_mode"] = json!(native_delivery_mode());
                     }
                     _ => {
@@ -740,8 +815,8 @@ impl Session {
                 ("scroll", args)
             }
             Action::Drag { from, to } => {
-                target.point(from, &window)?;
-                target.point(to, &window)?;
+                target.point(from, &window, language)?;
+                target.point(to, &window, language)?;
                 (
                     "drag",
                     json!({"target":bound,"from_x":from[0],"from_y":from[1],"to_x":to[0],"to_y":to[1],"delivery_mode":native_delivery_mode()}),
@@ -757,7 +832,7 @@ impl Session {
             .native
             .lock()
             .await
-            .invoke(name, args, session, cancellation)
+            .invoke(name, args, session, cancellation, language)
             .await;
         // Every attempt invalidates coordinates. Element tokens stay bound to
         // the retained native nodes and are revalidated by Cua on each action.
@@ -786,6 +861,7 @@ impl Session {
         handle: &str,
         position: Option<Position>,
         window: &WindowInfo,
+        language: Language,
     ) -> Result<[f64; 2], ToolError> {
         let target = self
             .targets
@@ -797,7 +873,7 @@ impl Session {
                 window.bounds.y + window.bounds.height / 2.0,
             ]),
             Some(Position::Point(point)) => {
-                target.point(point, window)?;
+                target.point(point, window, language)?;
                 let snapshot = target.snapshot.as_ref().unwrap();
                 let width = f64::from(snapshot.screenshot_width.unwrap_or(0));
                 let height = f64::from(snapshot.screenshot_height.unwrap_or(0));
@@ -819,9 +895,13 @@ impl Session {
                     .map_err(failed)?;
                 }
                 let _ = index;
-                Err(failed(
-                    "native cursor element geometry unavailable; use screenshot coordinates",
-                ))
+                Err(failed(match language {
+                    Language::En => {
+                        "native cursor element geometry unavailable; use screenshot coordinates"
+                    }
+                    Language::ZhCn => "无法获取原生光标元素几何信息；请使用截图坐标",
+                    Language::ZhTw => "無法取得原生游標元素幾何資訊；請使用擷取畫面座標",
+                }))
             }
         }
     }
@@ -836,7 +916,11 @@ impl Target {
             macos.lock().unwrap().clear();
         }
     }
-    fn element(&self, index: u64) -> Result<&cua_driver_contract::WindowElement, ToolError> {
+    fn element(
+        &self,
+        index: u64,
+        language: Language,
+    ) -> Result<&cua_driver_contract::WindowElement, ToolError> {
         self.snapshot
             .as_ref()
             .and_then(|s| s.elements.as_ref())
@@ -845,19 +929,40 @@ impl Target {
                     .iter()
                     .find(|e| e.element_index == index && e.element_token.is_some())
             })
-            .ok_or_else(|| failed("stale_element: read getAXState before using this index"))
+            .ok_or_else(|| {
+                failed(match language {
+                    Language::En => "stale_element: read getAXState before using this index",
+                    Language::ZhCn => "stale_element: 使用此索引前请先读取 getAXState",
+                    Language::ZhTw => "stale_element: 使用此索引前請先讀取 getAXState",
+                })
+            })
     }
-    fn point(&self, point: [f64; 2], window: &WindowInfo) -> Result<(), ToolError> {
+    fn point(
+        &self,
+        point: [f64; 2],
+        window: &WindowInfo,
+        language: Language,
+    ) -> Result<(), ToolError> {
         let snapshot = self.snapshot.as_ref().ok_or_else(|| {
-            failed("capture_required: read getScreenshot before coordinate input")
+            failed(match language {
+                Language::En => "capture_required: read getScreenshot before coordinate input",
+                Language::ZhCn => "capture_required: 按坐标输入前请先读取 getScreenshot",
+                Language::ZhTw => "capture_required: 按座標輸入前請先讀取 getScreenshot",
+            })
         })?;
         if self.capture.is_none()
             || self.window.bounds != window.bounds
             || snapshot.screenshot_frame_valid == Some(false)
         {
-            return Err(failed(
-                "stale_capture: window changed or capture was consumed; getScreenshot again",
-            ));
+            return Err(failed(match language {
+                Language::En => {
+                    "stale_capture: window changed or capture was consumed; getScreenshot again"
+                }
+                Language::ZhCn => "stale_capture: 窗口已改变或截图已消耗；请重新调用 getScreenshot",
+                Language::ZhTw => {
+                    "stale_capture: 視窗已變更或擷取畫面已消耗；請重新呼叫 getScreenshot"
+                }
+            }));
         }
         if !point.iter().all(|v| v.is_finite() && *v >= 0.0)
             || point[0] >= f64::from(snapshot.screenshot_width.unwrap_or(0))
@@ -889,12 +994,17 @@ fn decode<T: DeserializeOwned>(result: CallResult) -> Result<T, ToolError> {
 fn failed(error: impl std::fmt::Display) -> ToolError {
     ToolError::Failed(error.to_string())
 }
-pub(crate) fn display_diff(previous: Option<&str>, current: &str) -> String {
+pub(crate) fn display_diff(previous: Option<&str>, current: &str, language: Language) -> String {
     let Some(previous) = previous else {
         return current.into();
     };
     if previous == current {
-        return "Accessibility state unchanged.".into();
+        return match language {
+            Language::En => "Accessibility state unchanged.",
+            Language::ZhCn => "无障碍状态未改变。",
+            Language::ZhTw => "輔助使用狀態未變更。",
+        }
+        .into();
     }
     let old: std::collections::HashSet<_> = previous.lines().collect();
     let new: std::collections::HashSet<_> = current.lines().collect();
@@ -909,7 +1019,12 @@ pub(crate) fn display_diff(previous: Option<&str>, current: &str) -> String {
                 .map(|line| format!("+ {line}")),
         )
         .collect();
-    let diff = format!("Accessibility changes:\n{}", changes.join("\n"));
+    let label = match language {
+        Language::En => "Accessibility changes",
+        Language::ZhCn => "无障碍变化",
+        Language::ZhTw => "輔助使用變更",
+    };
+    let diff = format!("{label}:\n{}", changes.join("\n"));
     if changes.is_empty() || diff.len() >= current.len() {
         current.into()
     } else {
@@ -934,17 +1049,23 @@ fn app_id(app: &AppInfo) -> String {
     format!("pid:{}", app.pid)
 }
 
-fn launch_args(app: &str, inventory: &[AppInfo]) -> Result<Value, ToolError> {
+fn launch_args(app: &str, inventory: &[AppInfo], language: Language) -> Result<Value, ToolError> {
     let mut matches = inventory
         .iter()
         .filter(|candidate| app_id(candidate) == app);
-    let target = matches
-        .next()
-        .ok_or_else(|| failed("app identity missing; refresh cua.listApps before launch"))?;
+    let target = matches.next().ok_or_else(|| {
+        failed(match language {
+            Language::En => "app identity missing; refresh cua.listApps before launch",
+            Language::ZhCn => "应用标识已缺失；启动前请刷新 cua.listApps",
+            Language::ZhTw => "應用程式識別已缺少；啟動前請重新整理 cua.listApps",
+        })
+    })?;
     if matches.next().is_some() {
-        return Err(failed(
-            "app identity ambiguous; refresh cua.listApps before launch",
-        ));
+        return Err(failed(match language {
+            Language::En => "app identity ambiguous; refresh cua.listApps before launch",
+            Language::ZhCn => "应用标识有歧义；启动前请刷新 cua.listApps",
+            Language::ZhTw => "應用程式識別有歧義；啟動前請重新整理 cua.listApps",
+        }));
     }
     if target.kind.as_deref() == Some("uwp")
         && let Some(bundle) = target
@@ -956,9 +1077,11 @@ fn launch_args(app: &str, inventory: &[AppInfo]) -> Result<Value, ToolError> {
     } else if let Some(path) = &target.launch_path {
         Ok(json!({"launch_path":path}))
     } else {
-        Err(failed(
-            "launch unavailable for this inventory entry; select its open window",
-        ))
+        Err(failed(match language {
+            Language::En => "launch unavailable for this inventory entry; select its open window",
+            Language::ZhCn => "此清单条目不支持启动；请选择其已打开的窗口",
+            Language::ZhTw => "此清單項目不支援啟動；請選擇其已開啟的視窗",
+        }))
     }
 }
 
@@ -974,7 +1097,10 @@ mod tests {
         assert_ne!(app_id(&first), app_id(&second));
         let id = app_id(&second);
         let expected = json!({"launch_path":second.launch_path});
-        assert_eq!(launch_args(&id, &[first, second]).unwrap(), expected);
+        assert_eq!(
+            launch_args(&id, &[first, second], Language::En).unwrap(),
+            expected
+        );
     }
     #[test]
     fn launch_uses_revalidated_inventory_identity_not_pid_zero_or_caller_path() {
@@ -994,31 +1120,31 @@ mod tests {
         let id = app_id(&first);
         let inventory = [first.clone(), second];
         assert_eq!(
-            launch_args(&id, &inventory).unwrap(),
+            launch_args(&id, &inventory, Language::En).unwrap(),
             json!({"launch_path":first.launch_path})
         );
         assert!(
-            matches!(launch_args("C:\\Apps\\First.exe", &inventory), Err(ToolError::Failed(message)) if message.contains("app identity missing"))
+            matches!(launch_args("C:\\Apps\\First.exe", &inventory, Language::En), Err(ToolError::Failed(message)) if message.contains("app identity missing"))
         );
         assert!(
-            matches!(launch_args(&id, &[inventory[1].clone()]), Err(ToolError::Failed(message)) if message.contains("app identity missing"))
+            matches!(launch_args(&id, &[inventory[1].clone()], Language::En), Err(ToolError::Failed(message)) if message.contains("app identity missing"))
         );
         assert!(
-            matches!(launch_args(&id, &[first.clone(), first.clone()]), Err(ToolError::Failed(message)) if message.contains("app identity ambiguous"))
+            matches!(launch_args(&id, &[first.clone(), first.clone()], Language::En), Err(ToolError::Failed(message)) if message.contains("app identity ambiguous"))
         );
         let mut family_only = first.clone();
         family_only.kind = Some("uwp".into());
         family_only.bundle_id = Some("Maka_fixture_family".into());
         family_only.launch_path = Some(r"shell:appsFolder\Maka_fixture_family!App".into());
         assert_eq!(
-            launch_args("Maka_fixture_family", &[family_only]).unwrap(),
+            launch_args("Maka_fixture_family", &[family_only], Language::En).unwrap(),
             json!({"launch_path":r"shell:appsFolder\Maka_fixture_family!App"})
         );
         let mut packaged = first;
         packaged.bundle_id = Some("Maka_fixture!App".into());
         packaged.kind = Some("uwp".into());
         assert_eq!(
-            launch_args("Maka_fixture!App", &[packaged]).unwrap(),
+            launch_args("Maka_fixture!App", &[packaged], Language::En).unwrap(),
             json!({"aumid":"Maka_fixture!App"})
         );
     }

@@ -193,7 +193,7 @@ impl Availability {
             provider: None,
             name: SEARCH.into(),
             description: format!(
-                "Search available capabilities by name or description. Activated tools become callable on the next model step, never in the same batch or JavaScript cell. Loaded names persist across turns in this Session until successful context compaction or Host restart. Current permissions and tool availability still apply. Inventory: {}.",
+                "Find tools by name or description. Matches become callable on the next model step. Loaded names persist in this Session until successful compaction or Host restart; current permissions and availability apply. Inventory: {}.",
                 names.join(", ")
             ),
             input_schema: schemars::schema_for!(SearchInput).into(),

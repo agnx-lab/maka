@@ -51,6 +51,7 @@ async fn plan_receipts_survive_lost_replies_restart_and_competing_approvals() {
     assert_eq!(proposed.proposal.as_ref().unwrap().submitted_at, 1);
     let proposal = proposed.proposal.as_ref().unwrap();
     let approval = Command::Approve {
+        language: maka_agent_facts::language::Language::En,
         grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
         proposal_id: proposal.id.clone(),
         proposal_revision: proposal.revision,
@@ -88,6 +89,7 @@ async fn plan_receipts_survive_lost_replies_restart_and_competing_approvals() {
                     "approve_a",
                     1,
                     Command::Approve {
+                        language: maka_agent_facts::language::Language::En,
                         grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
                         proposal_id: proposal.id,
                         proposal_revision: 1,
@@ -164,6 +166,7 @@ async fn plan_receipts_survive_lost_replies_restart_and_competing_approvals() {
                 "resume",
                 interrupted.revision,
                 Command::Resume {
+                    language: maka_agent_facts::language::Language::En,
                     grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
                     execution_id: id.clone(),
                 },
@@ -287,6 +290,7 @@ async fn frozen_native_approval_and_business_receipt_share_the_original_plan_cas
         operation_id: "approve".into(),
         expected_revision: proposed.revision,
         command: Command::Approve {
+            language: maka_agent_facts::language::Language::En,
             proposal_id: proposal.id.clone(),
             proposal_revision: proposal.revision,
             behavior: "maka.plan.execute".to_owned().try_into().unwrap(),

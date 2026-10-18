@@ -160,10 +160,7 @@ impl Catalog<'_> {
         if !self.compatible(skill) {
             return Err(SkillFailureReason::HostIncompatible);
         }
-        let mut instructions = fields::clean(&skill.document.body);
-        if instructions.is_empty() {
-            instructions.push_str("(empty)");
-        }
+        let instructions = fields::clean(&skill.document.body);
         let relative_path = skill
             .location
             .path

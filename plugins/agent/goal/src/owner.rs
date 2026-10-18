@@ -19,6 +19,7 @@
 
 use crate::goal::{Arm, Control, Error, Goal, Meter, Report, Repository, Saved, Status, invalid};
 use maka_agent_facts::event::Invocation;
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::Progress;
 use maka_agent_ports::usage;
 use maka_capabilities::authorization::Capability;
@@ -338,7 +339,12 @@ impl Owner {
                 Err(CommandError::NotFound) if goal.status == Status::Active => {
                     if self.privacy().await.is_err() {
                         goal.status = Status::Paused;
-                        goal.note = "Incognito mode stopped Goal continuation".into();
+                        goal.note = (match goal.arm.language {
+                            Language::En => "Incognito mode stopped Goal continuation",
+                            Language::ZhCn => "隐私模式已停止目标继续执行",
+                            Language::ZhTw => "隱私模式已停止目標繼續執行",
+                        })
+                        .into();
                         self.repo.save(saved).await?;
                         self.written();
                         return Ok(());
@@ -407,9 +413,11 @@ impl Owner {
                             goal.pending = None;
                         } else {
                             goal.status = Status::CancellationUnknown;
-                            goal.note = "Cancellation acceptance is unknown. Only the original \
-                                receipt will be checked; no request is resubmitted. \
-                                This does not keep Host awake."
+                            goal.note = (match goal.arm.language {
+                                Language::En => "Cancellation acceptance is unknown. Only the original receipt will be checked; no request is resubmitted. This does not keep Host awake.",
+                                Language::ZhCn => "取消是否被接纳未知。只检查原始回执，不重新提交请求。此状态不会使 Host 保持唤醒。",
+                                Language::ZhTw => "取消是否被接納未知。只檢查原始回執，不重新提交請求。此狀態不會使 Host 保持喚醒。",
+                            })
                                 .into();
                         }
                         self.repo.save(saved).await?;
@@ -456,7 +464,12 @@ impl Owner {
         }
         if self.privacy().await.is_err() {
             goal.status = Status::Paused;
-            goal.note = "Incognito mode stopped Goal continuation".into();
+            goal.note = (match goal.arm.language {
+                Language::En => "Incognito mode stopped Goal continuation",
+                Language::ZhCn => "隐私模式已停止目标继续执行",
+                Language::ZhTw => "隱私模式已停止目標繼續執行",
+            })
+            .into();
             self.repo.save(saved).await?;
             self.written();
             return Ok(());

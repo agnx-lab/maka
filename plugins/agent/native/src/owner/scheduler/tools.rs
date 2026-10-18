@@ -67,7 +67,7 @@ impl Scheduler {
     pub fn tools(self: &Arc<Self>) -> Vec<ToolRegistration> {
         vec![ToolRegistration {
             definition: ToolDefinition { provider: None, name: "ScheduledTask".into(),
-                description: "Propose and manage scheduled tasks owned by this conversation. Create saves a paused proposal; the user must approve its exact background execution in Scheduled tasks. Model calls cannot grant background access. Session and agent_run targets use this conversation's actual workspace and model. Times are Unix milliseconds; timezone is an IANA name. List returns this conversation's tasks and revisions. Resume requires an existing user approval.".into(),
+                description: "Manage this conversation's scheduled tasks. Create saves a paused proposal requiring user approval of its exact execution in Scheduled tasks; model calls cannot grant background access. Session and agent_run use this conversation's workspace and model. Times are Unix milliseconds; timezone is an IANA name. List returns tasks and revisions. Resume requires existing user approval.".into(),
                 input_schema: serde_json::to_value(schemars::schema_for!(ToolRequest<Input>)).expect("task tool schema"),
                 output_schema: None, freeform: None },
             nesting: ToolNesting::DirectOnly, semantics: ToolSemantics::ExclusiveStep,

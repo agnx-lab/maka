@@ -393,3 +393,131 @@ async fn goal_cancelled_before_dispatch_never_calls_the_model() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn goal_language_stays_approved_until_an_idle_resume_renews_both_captures() {
+    fn system(request: &Value) -> String {
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|message| message["role"] == "system")
+            .map(|message| message["content"].as_str().unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    fn user(request: &Value) -> &str {
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|message| message["role"] == "user")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap()
+    }
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let f = Fixture::configured(&format!("http://{}/v1", listener.local_addr().unwrap()), None, None, None, |settings| {
+            settings.goals = true;
+            settings.tool_discovery = true;
+            settings.assistant = Some(contract::AssistantConfiguration { home: Some(home.path().to_str().unwrap().into()) });
+        }).await;
+        let session = f.create("Goal language authority").await;
+        let english = prompt_language::select_language(&f, "en").await;
+        let objective = "GOAL_ORIGINAL_🦀 原样数据 \\\"quoted\\\" must survive every approval";
+        let input = json!({"kind":"create","sessionId":session,"objective":objective,"start":true,"maxIterations":8,"tokenBudget":null,"approval":approval(&f,&session).await});
+        let operation = Uuid::new_v4();
+        let created = f.mutation(2, "changeGoal", input.clone(), operation).await.unwrap();
+        let mut watch = f.app.client().subscribe(f.binding(2).await, "watchGoal".into(), json!({"sessionId":session}),
+            scope(&f.issuer, true), Attachments::new().into()).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let first = request(&mut socket).await;
+        let first_invocation = f.store.latest_turn_boundary(&session).await.unwrap().unwrap().invocation;
+        let first_configuration = f.store.invocation_configuration(&first_invocation).await.unwrap().unwrap();
+        let accepted = session_context::composition(&f, &session).await;
+        let chinese = prompt_language::select_language(&f, "zh-CN").await;
+        let pending = current(&f, &session).await;
+        let retried = f.mutation(2, "changeGoal", input, operation).await.unwrap();
+        let after_retry = current(&f, &session).await;
+        report(&mut socket, false, "progress").await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let followup = request(&mut socket).await;
+        response(&mut socket).await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let original_chain = request(&mut socket).await;
+        let chain_invocation = f.store.latest_turn_boundary(&session).await.unwrap().unwrap().invocation;
+        let chain_configuration = f.store.invocation_configuration(&chain_invocation).await.unwrap().unwrap();
+        let paused = control(&f, &session, "pause").await;
+        response(&mut socket).await;
+        let idle_english = loop {
+            let observed = watch.recv().await.unwrap();
+            if observed["current"]["status"] == "paused" && observed["current"]["pending"] == false {
+                break observed["current"].clone();
+            }
+        };
+        let renewed_cn = f.mutation(2, "changeGoal", json!({"kind":"control","sessionId":session,"goalId":idle_english["id"],"revision":idle_english["revision"],"action":"resume","approval":approval(&f,&session).await}), Uuid::new_v4()).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let cn_request = request(&mut socket).await;
+        let cn_invocation = f.store.latest_turn_boundary(&session).await.unwrap().unwrap().invocation;
+        let cn_configuration = f.store.invocation_configuration(&cn_invocation).await.unwrap().unwrap();
+        let paused_cn = control(&f, &session, "pause").await;
+        response(&mut socket).await;
+        let idle_cn = loop {
+            let observed = watch.recv().await.unwrap();
+            if observed["current"]["status"] == "paused" && observed["current"]["pending"] == false {
+                break observed["current"].clone();
+            }
+        };
+        let traditional = prompt_language::select_language(&f, "zh-TW").await;
+        let renewed_tw = f.mutation(2, "changeGoal", json!({"kind":"control","sessionId":session,"goalId":idle_cn["id"],"revision":idle_cn["revision"],"action":"resume","approval":approval(&f,&session).await}), Uuid::new_v4()).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let tw_request = request(&mut socket).await;
+        let tw_invocation = f.store.latest_turn_boundary(&session).await.unwrap().unwrap().invocation;
+        let tw_configuration = f.store.invocation_configuration(&tw_invocation).await.unwrap().unwrap();
+        let paused_tw = control(&f, &session, "pause").await;
+        response(&mut socket).await;
+        let idle_tw = loop {
+            let observed = watch.recv().await.unwrap();
+            if observed["current"]["status"] == "paused" && observed["current"]["pending"] == false {
+                break observed["current"].clone();
+            }
+        };
+        let completed = control(&f, &session, "complete").await;
+        drop(watch);
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+
+        for receipt in [english, chinese, traditional, created.clone(), paused, renewed_cn, paused_cn, renewed_tw, paused_tw, completed] {
+            assert_eq!(receipt["kind"], "committed", "{receipt}");
+        }
+        assert_eq!(retried, created, "retrying accepted Goal approval returns its exact original receipt");
+        assert_eq!(pending["pending"], true);
+        assert_eq!(after_retry, pending, "pending operation retry must not replace the approved Goal");
+        assert_eq!(user(&followup), user(&first), "the accepted iteration retains exact input after the setting changes");
+        assert!(system(&followup).contains(accepted.system_prompt.as_deref().unwrap()));
+        for request in [&first, &followup, &original_chain] {
+            assert!(system(request).to_lowercase().contains("permission"));
+            assert!(user(request).contains(objective));
+            assert!(user(request).contains("iteration"), "the approved English Arm keeps rendering English iterations: {request}");
+        }
+        assert_eq!(serde_json::to_value(first_configuration.language).unwrap(), "en");
+        assert_eq!(serde_json::to_value(chain_configuration.language).unwrap(), "en");
+        for (request, configuration, tag, permission) in [
+            (&cn_request, &cn_configuration, "zh-CN", "权限"),
+            (&tw_request, &tw_configuration, "zh-TW", "權限"),
+        ] {
+            assert!(system(request).contains(permission), "renewed grant language reaches actual builtin guidance: {request}");
+            assert!(user(request).contains("迭代"), "renewed Arm language reaches actual iteration input: {request}");
+            assert!(user(request).contains(objective));
+            assert_eq!(serde_json::to_value(configuration.language).unwrap(), tag);
+        }
+        for idle in [idle_english, idle_cn, idle_tw] {
+            assert_eq!(idle["status"], "paused");
+            assert_eq!(idle["pending"], false);
+            assert_eq!(idle["objective"], objective);
+        }
+    }).await.unwrap();
+}

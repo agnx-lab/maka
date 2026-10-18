@@ -30,6 +30,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 pub(super) fn request(kind: ProviderKind, base_url: String) -> ModelRequest {
     ModelRequest {
+        language: maka_agent_facts::language::Language::En,
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),

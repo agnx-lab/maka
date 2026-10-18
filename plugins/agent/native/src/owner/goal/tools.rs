@@ -26,7 +26,7 @@ impl Goals {
         vec![ToolRegistration {
             definition: ToolDefinition {
                 provider: None, name: "GoalStatus".into(),
-                description: "Report progress on the current user-approved Goal. Use achieved only with evidence, waiting when user input is required, or impossible with a reason. The report takes effect only after this iteration completes normally; it cannot create or authorize a Goal.".into(),
+                description: "Report on the current user-approved Goal: achieved needs evidence, waiting needs user input, impossible needs a reason. Takes effect after this iteration completes normally; cannot create or authorize Goals.".into(),
                 input_schema: serde_json::to_value(schemars::schema_for!(Report)).expect("goal report schema"),
                 output_schema: None, freeform: None,
             },

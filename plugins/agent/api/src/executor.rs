@@ -52,6 +52,11 @@ pub struct Selection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "ExecutorExecute")]
 pub struct Execute {
+    #[serde(
+        default,
+        skip_serializing_if = "maka_agent_facts::language::Language::is_english"
+    )]
+    pub language: maka_agent_facts::language::Language,
     pub invocation: maka_agent_facts::event::Invocation,
     #[schemars(length(min = 1, max = 256))]
     pub conversation_key: String,
@@ -96,4 +101,28 @@ pub struct AttachmentMetadata {
     pub mime_type: String,
     pub bytes: u64,
     pub digest: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maka_agent_facts::language::Language;
+
+    #[test]
+    fn persisted_execute_uses_canonical_english_omission_and_exact_chinese_tags() {
+        let original = serde_json::json!({
+            "invocation":{"session_id":"session","turn_id":"turn","run_id":"run","invocation_id":"invocation"},
+            "conversationKey":"conversation", "message":"Original 原文", "cwd":"/workspace",
+            "instructions":null, "settings":{}
+        });
+        let mut input: Execute = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(input.language, Language::En);
+        assert_eq!(serde_json::to_value(&input).unwrap(), original);
+        for (language, tag) in [(Language::ZhCn, "zh-CN"), (Language::ZhTw, "zh-TW")] {
+            input.language = language;
+            let mut expected = original.clone();
+            expected["language"] = tag.into();
+            assert_eq!(serde_json::to_value(&input).unwrap(), expected);
+        }
+    }
 }

@@ -22,7 +22,7 @@ use cua_driver_sdk::{
     SessionPermissionMode, TrustedSessionOptions, worker::ActionCompletion,
 };
 use maka_agent_facts::capability::CallResult;
-use maka_agent_facts::tools::ToolError;
+use maka_agent_facts::{language::Language, tools::ToolError};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -81,6 +81,7 @@ impl Driver {
         input: Value,
         session_id: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<CallResult, ToolError> {
         if ![
             "list_apps",
@@ -103,27 +104,31 @@ impl Driver {
                 "Computer Use cancelled before dispatch".into(),
             ));
         }
-        let session = self.session(session_id).await?;
+        let session = self.session(session_id, language).await?;
         // Every operation, including inventory whose schema has no `session`
         // field, uses the same bound SDK surface. Once dispatched, await its
         // result: dropping an FFI future is not evidence of settlement.
         let result = session
             .call_tool(name.into(), input.to_string())
             .await
-            .map_err(error)?;
+            .map_err(|error| native_error(error, language))?;
         if result.is_error {
             let code = result
                 .error_code
                 .as_deref()
                 .unwrap_or("computer_use_refused");
-            let message = refusal(code, &result.text);
+            let message = refusal(code, &result.text, language);
             return Err(ToolError::Failed(format!("{code}: {message}")));
         }
         serde_json::from_str(&result.raw_json)
             .map_err(|error| ToolError::OutcomeUnknown(format!("invalid native result: {error}")))
     }
 
-    async fn session(&mut self, id: &str) -> Result<&CuaDriverSession, ToolError> {
+    async fn session(
+        &mut self,
+        id: &str,
+        language: Language,
+    ) -> Result<&CuaDriverSession, ToolError> {
         if matches!(self.state, State::Idle) {
             self.state = State::Active(
                 CuaDriver::create_configured(ConfiguredDriverOptions {
@@ -158,7 +163,7 @@ impl Driver {
                     capability_manifest_path: None,
                     bounded_manifest_path: None,
                 })
-                .map_err(error)?;
+                .map_err(|error| native_error(error, language))?;
             session
                 .start_session(cua_driver_contract::StartSessionInput {
                     session: None,
@@ -166,7 +171,7 @@ impl Driver {
                     cursor_theme: None,
                 })
                 .await
-                .map_err(error)?;
+                .map_err(|error| native_error(error, language))?;
             self.sessions.insert(id.into(), session);
         }
         Ok(self.sessions.get(id).expect("bound session created"))
@@ -188,32 +193,29 @@ impl Driver {
     }
 }
 
-fn refusal(code: &str, reason: &str) -> String {
+fn refusal(code: &str, reason: &str, language: Language) -> String {
     if code.starts_with("background_unavailable") {
-        return "Background input is unavailable for this control on the current desktop. Use an indexed accessibility action if one is exposed by app.getAXState(); otherwise this action requires a supported desktop input backend. The public Cua API cannot switch this call to foreground delivery.".into();
+        return format!(
+            "{}\n{}",
+            reason.chars().take(8192).collect::<String>(),
+            crate::language::background_unavailable(language)
+        );
     }
     let terminal = matches!(code, "session_ended" | "authorization_revoked")
         // The pinned SDK reports expiry under permission_denied, without a
         // structured subcode. Keep this adaptation at its native boundary;
         // ordinary permission refusals must not imply that reset grants access.
         || (code == "permission_denied" && reason.contains("authorization context expired"));
-    let reason = if code == "session_ended" {
-        "this session has ended"
-    } else {
-        reason
-    };
     let mut message: String = reason.chars().take(8192).collect();
     if terminal {
-        message.push_str("\nCall cua_reset, then bind and observe the current app or tab before acting. This refused operation did not dispatch input.");
+        message.push_str(crate::language::terminal(language));
     }
     message
 }
 
-fn error(error: DriverError) -> ToolError {
+fn native_error(error: DriverError, language: Language) -> ToolError {
     match error {
-        DriverError::Shutdown => ToolError::Failed(
-            "Computer Use session is no longer active. Call cua_reset, then bind and observe the current app or tab before acting.".into(),
-        ),
+        DriverError::Shutdown => ToolError::Failed(crate::language::inactive(language).into()),
         DriverError::ActionInterrupted {
             completion: ActionCompletion::NotStarted,
             reason,
@@ -241,8 +243,8 @@ mod tests {
     )]
     async fn bound_sessions_ignore_ended_implicit_state_and_reset_independently() {
         let mut driver = Driver::default();
-        driver.session("a").await.unwrap();
-        driver.session("b").await.unwrap();
+        driver.session("a", Language::En).await.unwrap();
+        driver.session("b", Language::En).await.unwrap();
         let a = driver.sessions["a"].clone();
         let b = driver.sessions["b"].clone();
         let State::Active(native) = &driver.state else {
@@ -280,7 +282,7 @@ mod tests {
                 .is_err()
         );
         let after = driver
-            .session("a")
+            .session("a", Language::En)
             .await
             .unwrap()
             .get_session(GetSessionInput { session: None })
@@ -303,7 +305,7 @@ mod tests {
             .unwrap();
         driver.release_session("b").await.unwrap();
         driver
-            .session("b")
+            .session("b", Language::En)
             .await
             .unwrap()
             .get_session(GetSessionInput { session: None })
@@ -342,6 +344,7 @@ mod tests {
                 serde_json::json!({}),
                 "expired",
                 &CancellationToken::new(),
+                Language::En,
             )
             .await
             .unwrap_err()
@@ -354,13 +357,14 @@ mod tests {
         assert!(
             !refusal(
                 "permission_denied",
-                "desktop observation is forbidden by policy"
+                "desktop observation is forbidden by policy",
+                Language::En,
             )
             .contains("cua_reset")
         );
         driver.release_session("expired").await.unwrap();
         driver
-            .session("expired")
+            .session("expired", Language::En)
             .await
             .unwrap()
             .get_session(GetSessionInput { session: None })

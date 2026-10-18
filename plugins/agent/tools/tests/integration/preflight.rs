@@ -178,6 +178,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
         )
         .await;
         let run = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog(effect.clone()),
@@ -304,6 +305,7 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
         let call = call("exec", "exec", json!({"code":code}));
         accepted(&log, &invocation, std::slice::from_ref(&call)).await;
         let run = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog(effect.clone()),

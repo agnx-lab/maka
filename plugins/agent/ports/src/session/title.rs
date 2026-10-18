@@ -24,7 +24,11 @@ use std::sync::Arc;
 /// Generation is a separate auxiliary request using that opening's model.
 /// The Host caps output at 2048 tokens and cancels it after 30 seconds.
 pub trait Policy: Send + Sync {
-    fn prepare(&self, text: &str) -> Option<crate::llm::Generate>;
+    fn prepare(
+        &self,
+        text: &str,
+        language: maka_agent_facts::language::Language,
+    ) -> Option<crate::llm::Generate>;
 }
 
 pub struct SessionTitlePolicy(pub Arc<dyn Policy>);

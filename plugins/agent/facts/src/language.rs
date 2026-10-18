@@ -33,6 +33,10 @@ pub enum Language {
 }
 
 impl Language {
+    pub fn is_english(&self) -> bool {
+        *self == Self::En
+    }
+
     /// Normalize native POSIX/BCP 47 locales to supported copy, falling back to English.
     pub fn from_locale(locale: &str) -> Self {
         let locale = locale.trim().split(['.', '@']).next().unwrap_or("");

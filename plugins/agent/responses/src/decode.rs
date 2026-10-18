@@ -766,6 +766,7 @@ mod tests {
         let definitions = [tool];
         let options = json!({"openai":{"store":false}});
         let request = crate::request::Request {
+            language: maka_agent_facts::language::Language::En,
             model: "fixture",
             prompt: &[],
             tools: &definitions,
@@ -806,6 +807,7 @@ mod tests {
             },
         ];
         let replay = crate::request::Request {
+            language: maka_agent_facts::language::Language::En,
             prompt: &prompt,
             tools: &[],
             ..request
@@ -820,6 +822,7 @@ mod tests {
             ])
         );
         let fallback = crate::request::Request {
+            language: maka_agent_facts::language::Language::En,
             prompt: &prompt,
             tools: &definitions,
             plaintext: Some(maka_agent_facts::model::PlaintextResponses {
@@ -949,6 +952,7 @@ mod tests {
         assert_eq!(calls[3].input, ToolInput::Json(json!("abc")));
         let options = json!({"openai":{"store":false}});
         let request = crate::request::Request {
+            language: maka_agent_facts::language::Language::En,
             model: "fixture",
             prompt: &prompt,
             tools: &definitions,
@@ -971,6 +975,7 @@ mod tests {
             ])
         );
         let fallback = crate::request::Request {
+            language: maka_agent_facts::language::Language::En,
             plaintext: Some(maka_agent_facts::model::PlaintextResponses {
                 reasoning_replay:
                     maka_agent_facts::model::PlaintextReasoningReplay::PlaintextContent,
@@ -1036,6 +1041,7 @@ mod tests {
             }
             let options = json!({"openai":{"store":false}});
             let request = crate::request::Request {
+                language: maka_agent_facts::language::Language::En,
                 model: "fixture",
                 prompt: &prompt,
                 tools: &[],
@@ -1045,6 +1051,7 @@ mod tests {
             };
             assert_eq!(request.encode().unwrap()["input"], json!(expected));
             let fallback = crate::request::Request {
+                language: maka_agent_facts::language::Language::En,
                 plaintext: Some(maka_agent_facts::model::PlaintextResponses {
                     reasoning_replay:
                         maka_agent_facts::model::PlaintextReasoningReplay::PlaintextContent,

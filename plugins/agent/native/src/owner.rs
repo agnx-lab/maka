@@ -55,10 +55,12 @@ mod work;
 mod worktrees;
 use maka_agent_facts::composition::SourceKind;
 use maka_agent_facts::composition::SourceRevision;
+use maka_agent_facts::configuration::policy::RuntimePolicySnapshot;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::execution::*;
 use maka_agent_facts::input::DeliveredMessage;
 use maka_agent_facts::input::MessageInput;
+use maka_agent_facts::language::{Language, LanguagePreference};
 use maka_agent_facts::message::*;
 use maka_config::ConfigurationStore;
 use maka_event_log::{EventLog, sessions::SessionRecord};
@@ -107,6 +109,8 @@ struct MessageBasis {
     workspace: Workspace,
     fingerprint: String,
     tools: Vec<crate::tools::SelectedTool>,
+    #[serde(default, skip_serializing_if = "Language::is_english")]
+    language: Language,
 }
 fn is_agent_collaboration(mode: &CollaborationMode) -> bool {
     *mode == CollaborationMode::Agent
@@ -168,7 +172,9 @@ pub(crate) struct Owner {
     pub(crate) configuration: Arc<ConfigurationStore>,
     credentials: crate::model::Credentials,
     revision: SourceRevision,
-    behavior: Option<SystemPrompt>,
+    behavior: Option<BuiltinBehavior>,
+    configured_locale: LanguagePreference,
+    native_language: Language,
     pub workspace_roots: Vec<workspace::Root>,
     instruction_home: Option<Arc<cap_std::fs::Dir>>,
     pub import_roots: Vec<workspace::Root>,
@@ -190,7 +196,20 @@ pub(crate) struct Owner {
     title_write_gate: std::sync::Mutex<Option<Arc<title::WriteGate>>>,
     stop: CancellationToken,
 }
+#[derive(Clone, Copy)]
+pub(crate) enum BuiltinBehavior {
+    WorkHub,
+}
+
 impl Owner {
+    pub(crate) fn resolve_language(&self, snapshot: &RuntimePolicySnapshot) -> Language {
+        snapshot
+            .policy
+            .language
+            .unwrap_or(self.configured_locale)
+            .resolve(self.native_language)
+    }
+
     pub(crate) async fn executor_setup(
         &self,
         input: maka_agent_api::executor::setup::Input,
@@ -215,7 +234,7 @@ impl Owner {
         context: NativeContext,
         input: Value,
         implementation: &'static str,
-        prompt: Option<&'static str>,
+        behavior: Option<BuiltinBehavior>,
         mut additional: Vec<maka_agent_facts::tools::ToolRegistration>,
         internal_bindings: BTreeMap<String, Option<String>>,
         graphs: Option<Arc<crate::workhub::tasks::graph::Graphs>>,
@@ -265,15 +284,8 @@ impl Owner {
         let models = ModelExecutor::for_source(Duration::from_secs(300), revision.clone())
             .map_err(|_| "agent_executor_unavailable")?;
         let auxiliary = auxiliary::Auxiliary::new(revision.clone())?;
-        let behavior = prompt.map(|text| {
-            let mut source = revision.clone();
-            source.kind = SourceKind::PromptSection;
-            SystemPrompt {
-                text: text.into(),
-                policy_revision: 0,
-                sources: vec![source],
-            }
-        });
+        let configured_locale = LanguagePreference::from_locale(&settings.locale);
+        let native_language = maka_config::language::native_language();
         let skills = skills::Library::select(&context, &settings, revision.clone())?;
         let instruction_home = assistant::open_home(settings.assistant.as_ref())?;
         let executors = crate::executor::Executors::capture(&context, &settings.executors)?;
@@ -441,6 +453,8 @@ impl Owner {
             managed_worktrees,
             revision,
             behavior,
+            configured_locale,
+            native_language,
             instruction_home,
             internal_tools,
             internal_bindings,
@@ -921,8 +935,15 @@ impl Owner {
         {
             return Err("agent_planning_unavailable".into());
         }
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(|_| "agent_preferences_unavailable")?;
+        let language = self.resolve_language(&snapshot);
         let mut basis = MessageBasis {
-            compaction_prompt: Some(self.effective_compaction_prompt().await?),
+            language,
+            compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
             collaboration_mode: session.configuration.collaboration_mode,
             background_kind: BackgroundKind::Schedule,
@@ -940,7 +961,7 @@ impl Owner {
                 self.internal_bindings.clone()
             },
             behavior: self
-                .capture_behavior(&session.configuration.workspace)
+                .capture_behavior(&session.configuration.workspace, &snapshot, language)
                 .await?,
             model,
             executor,
@@ -968,6 +989,7 @@ impl Owner {
         let (message, required_tools) = match self
             .prepare_skills(
                 unprepared.clone(),
+                language,
                 Some(session.configuration.workspace.clone()),
                 parent,
                 if basis.executor.is_some() {

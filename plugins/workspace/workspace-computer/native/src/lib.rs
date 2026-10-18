@@ -128,7 +128,7 @@ impl Computer {
             _ => return Err(failed("Computer method unavailable")),
         };
         api::validate(tool, &input).map_err(failed)?;
-        let configuration = access::current(self, context.scope(), tool).await?;
+        let (configuration, _) = access::current(self, context.scope(), tool).await?;
         let cancellation = context.scope().cancellation.child_token();
         let execute = async {
             if name == "evaluate" {

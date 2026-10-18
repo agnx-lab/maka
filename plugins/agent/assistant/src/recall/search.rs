@@ -135,12 +135,12 @@ pub fn definitions() -> [(&'static str, &'static str, serde_json::Value); 3] {
         ),
         (
             "RecallMore",
-            "Expand a Recall anchor using its Session and message IDs. before/after select 0–8 neighboring messages (default 8 each). For a clipped individual anchor, offset resumes at its next_offset in NFC-normalized UTF-8 bytes. The current Turn remains excluded; deleted or unavailable sources fail explicitly.",
+            "Expand a Recall anchor using its Session and message IDs. before/after select 0–8 neighboring messages (default 8 each). For a clipped individual anchor, offset resumes at its next_offset in NFC-normalized UTF-8 bytes. Excludes the current Turn.",
             schemars::schema_for!(More).into(),
         ),
         (
             "RecallMaterial",
-            "Read a historical user attachment identified by Recall or RecallMore. Supply its source session_id and artifact_id. Copies the material into this Session before reading, so later source deletion does not break the evidence. Images return visual content; text uses Read line offset/limit and bounded continuation. Unsupported binary formats fail explicitly.",
+            "Read a historical user attachment identified by Recall or RecallMore. Supply its source session_id and artifact_id. Copies the material into this Session before reading, so later source deletion does not break the evidence. Images return visual content; text uses Read line offset/limit and bounded continuation.",
             schemars::schema_for!(Material).into(),
         ),
     ]

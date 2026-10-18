@@ -23,6 +23,7 @@ use super::*;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SkillPrepare")]
 pub struct Prepare {
+    pub language: maka_agent_facts::language::Language,
     pub message: String,
     /// Actual selected tools bound to this Library; these names grant no access.
     #[schemars(length(min = 1, max = 128))]

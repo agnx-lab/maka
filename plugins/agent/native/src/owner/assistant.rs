@@ -81,19 +81,27 @@ impl Owner {
     pub(super) async fn capture_behavior(
         &self,
         workspace: &Workspace,
+        snapshot: &RuntimePolicySnapshot,
+        language: Language,
     ) -> Result<Option<SystemPrompt>, String> {
+        let role = self.behavior.map(|behavior| {
+            let mut source = self.revision.clone();
+            source.kind = SourceKind::PromptSection;
+            SystemPrompt {
+                text: match behavior {
+                    BuiltinBehavior::WorkHub => crate::workhub::prompt(language).into(),
+                },
+                policy_revision: snapshot.revision,
+                sources: vec![source],
+            }
+        });
         if self.settings.assistant.is_none() {
-            return Ok(self.behavior.clone());
+            return Ok(role);
         }
-        let snapshot = self
-            .configuration
-            .runtime_policy()
-            .await
-            .map_err(|_| "agent_preferences_unavailable")?;
         let preferences = maka_agent_ports::preferences::Snapshot {
             revision: snapshot.revision,
-            privacy: snapshot.policy.privacy,
-            personalization: snapshot.policy.personalization,
+            privacy: snapshot.policy.privacy.clone(),
+            personalization: snapshot.policy.personalization.clone(),
             workspace_instructions: snapshot.policy.workspace_instructions.enabled,
         };
         let instructions = if preferences.workspace_instructions {
@@ -123,6 +131,7 @@ impl Owner {
                 Ok::<_, String>(maka_assistant::prompt::workspace::render(
                     global,
                     read(&project, true),
+                    language,
                 ))
             })
             .await
@@ -130,11 +139,11 @@ impl Owner {
         } else {
             String::new()
         };
-        let mut prompt = maka_assistant::prompt::compose(preferences);
+        let mut prompt = maka_assistant::prompt::compose(preferences, language);
         let mut source = self.revision.clone();
         source.kind = SourceKind::PromptSection;
         prompt.sources.push(source);
-        if let Some(behavior) = &self.behavior {
+        if let Some(behavior) = &role {
             prompt.text.push_str("\n\n");
             prompt.text.push_str(&behavior.text);
             prompt.sources.extend(behavior.sources.clone());

@@ -139,6 +139,8 @@ pub struct InvocationConfiguration {
     /// None means there was no Session-owned model binding (e.g. local Code).
     pub model: Option<ModelBinding>,
     pub thinking_level: Option<ThinkingLevel>,
+    #[serde(default, skip_serializing_if = "crate::language::Language::is_english")]
+    pub language: crate::language::Language,
 }
 
 /// Admission evidence for Host-owned handlers whose behavior is not in schema.
@@ -261,5 +263,30 @@ impl TryFrom<String> for WorkspaceIdentity {
 impl From<WorkspaceIdentity> for String {
     fn from(identity: WorkspaceIdentity) -> Self {
         identity.0
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use crate::language::Language;
+
+    #[test]
+    fn canonical_english_default_and_chinese_invocation_fields() {
+        const ORIGINAL: &str = r#"{"cwd":"/tmp","workspace_origin":"selected","sandbox_mode":"workspace-write","approval_policy":{"kind":"on-request"},"boundary_revision":0,"collaboration_mode":"agent","orchestration_mode":"default","tool_mode":"direct","model":null,"thinking_level":null}"#;
+        let mut configuration: InvocationConfiguration = serde_json::from_str(ORIGINAL).unwrap();
+        assert_eq!(configuration.language, Language::En);
+        assert_eq!(serde_json::to_string(&configuration).unwrap(), ORIGINAL);
+        for (language, tag) in [(Language::ZhCn, "zh-CN"), (Language::ZhTw, "zh-TW")] {
+            configuration.language = language;
+            let encoded = serde_json::to_value(&configuration).unwrap();
+            assert_eq!(encoded["language"], tag);
+            assert_eq!(
+                serde_json::from_value::<InvocationConfiguration>(encoded)
+                    .unwrap()
+                    .language,
+                language
+            );
+        }
     }
 }

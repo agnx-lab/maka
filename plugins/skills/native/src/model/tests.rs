@@ -153,7 +153,7 @@ async fn model_resolution_uses_original_eligibility_preferences_and_identity_bef
         .model(
             "prepare",
             json!({"tools":["Read"], "input": {
-                "message":"/skill:review /skill:disabled /skill:network", "loadTool":"Read"
+                "language":"en","message":"/skill:review /skill:disabled /skill:network", "loadTool":"Read"
             }}),
             &call,
         )
@@ -193,7 +193,7 @@ async fn model_resolution_uses_original_eligibility_preferences_and_identity_bef
         .model(
             "prepare",
             json!({"tools":["Read"], "input":{
-                "message":"review this change", "loadTool":"Read"
+                "language":"en","message":"review this change", "loadTool":"Read"
             }}),
             &call,
         )
@@ -209,7 +209,7 @@ async fn model_resolution_uses_original_eligibility_preferences_and_identity_bef
         library
             .model(
                 "prepare",
-                json!({"tools":[], "input": {"message":"hello", "loadTool":"Read"}}),
+                json!({"tools":[], "input": {"language":"en","message":"hello", "loadTool":"Read"}}),
                 &call
             )
             .await
@@ -218,7 +218,7 @@ async fn model_resolution_uses_original_eligibility_preferences_and_identity_bef
     let blocked = library
         .model(
             "prepare",
-            json!({"tools":[], "input":{"message":"/skill:review"}}),
+            json!({"tools":[], "input":{"language":"en","message":"/skill:review"}}),
             &call,
         )
         .await
@@ -605,7 +605,7 @@ async fn bundled_skills_share_model_eligibility_preparation_and_exact_resource_p
             "resource_unavailable"
         );
     }
-    let prepared = library.model("prepare", json!({"tools":tools,"input":{"message":"/skill:maka-plugin-authoring","loadTool":"Skill","searchTool":"SkillSearch"}}), &call).await.unwrap();
+    let prepared = library.model("prepare", json!({"tools":tools,"input":{"language":"en","message":"/skill:maka-plugin-authoring","loadTool":"Skill","searchTool":"SkillSearch"}}), &call).await.unwrap();
     schema("prepare", &prepared);
     assert_eq!(prepared["kind"], "ready");
     assert_eq!(prepared["record"]["revision"], *revision);
@@ -654,4 +654,99 @@ async fn bundled_skills_share_model_eligibility_preparation_and_exact_resource_p
     library.bundled = false;
     assert!(library.snapshot(&call).await.unwrap().entries.is_empty());
     call.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn preparation_language_preserves_opaque_skills_metadata_and_protocol_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("skills");
+    let body = "Opaque instructions 中文 / 繁體 and OriginalProtocolName.";
+    write(&source_path, "review", body);
+    write(&source_path, "empty", "");
+    let library = Library::open(
+        Configuration {
+            home: None,
+            project_roots: vec![],
+            bundled: false,
+            manage: false,
+            preferences: false,
+            sources: vec![source("original", &source_path)],
+        },
+        dir.path().join("private"),
+        preferences(dir.path()).await,
+    )
+    .unwrap();
+    let call = scope();
+    let user_text = "Keep MyExactUserText 中文 / 繁體";
+    let mut original_receipts = None;
+    let mut revision = None;
+    for (language, safety_word, discovery_word) in [
+        ("en", "permission", "Available local skills"),
+        ("zh-CN", "权限", "可用的本地技能"),
+        ("zh-TW", "權限", "可用的本機技能"),
+    ] {
+        let result = library
+            .model(
+                "prepare",
+                json!({
+                    "tools": ["OriginalLoadTool", "OriginalSearchTool"],
+                    "input": {
+                        "language": language,
+                        "message": format!("/skill:review {user_text}"),
+                        "loadTool": "OriginalLoadTool",
+                        "searchTool": "OriginalSearchTool"
+                    }
+                }),
+                &call,
+            )
+            .await
+            .unwrap();
+        schema("prepare", &result);
+        assert_eq!(result["kind"], "ready");
+        let text = result["text"].as_str().unwrap();
+        assert!(text.contains(safety_word));
+        assert!(text.contains(body));
+        assert!(text.contains(user_text));
+        let record = &result["record"];
+        let metadata = record["metadataPrompt"].as_str().unwrap();
+        assert!(metadata.contains(discovery_word));
+        assert!(metadata.contains("Reference for review"));
+        assert!(metadata.contains("source:original:review"));
+        assert!(metadata.contains("OriginalLoadTool"));
+        assert!(metadata.contains("OriginalSearchTool"));
+        assert!(metadata.contains(record["revision"].as_str().unwrap()));
+        if let Some(original) = &original_receipts {
+            assert_eq!(&record["invocation"], original);
+            assert_eq!(&record["revision"], revision.as_ref().unwrap());
+        } else {
+            original_receipts = Some(record["invocation"].clone());
+            revision = Some(record["revision"].clone());
+        }
+    }
+    for (name, original_body) in [("review", body), ("empty", "")] {
+        let loaded = load(
+            &library,
+            &call,
+            json!(["OriginalLoadTool", "OriginalSearchTool"]),
+            revision.as_ref().unwrap(),
+            name,
+            Value::Null,
+        )
+        .await;
+        schema("load", &loaded);
+        assert_eq!(loaded["kind"], "loaded");
+        assert_eq!(loaded["metadata"]["id"], name);
+        assert_eq!(loaded["instructions"], original_body);
+        assert_eq!(loaded["relativePath"], format!("{name}/SKILL.md"));
+    }
+    assert!(
+        library
+            .model(
+                "prepare",
+                json!({"tools":[],"input":{"message":"ordinary"}}),
+                &call
+            )
+            .await
+            .is_err()
+    );
 }

@@ -62,8 +62,8 @@ impl Todo {
     }
     pub fn tools(self: &Arc<Self>) -> Vec<ToolRegistration> {
         [
-            ("todo_read", "Read the complete current session checklist. Completed items are model-reported progress, not verified execution evidence.", serde_json::to_value(schemars::schema_for!(Read)).expect("todo schema")),
-            ("todo_write", "Atomically replace the complete current session checklist; include every item to keep. Completed is model-reported progress, not verified execution evidence.", serde_json::to_value(schemars::schema_for!(Write)).expect("todo schema")),
+            ("todo_read", "Read this session's checklist. Completed means model-reported progress, not verified execution.", serde_json::to_value(schemars::schema_for!(Read)).expect("todo schema")),
+            ("todo_write", "Atomically replace this session's checklist; include every item to keep. Completed means model-reported progress, not verified execution.", serde_json::to_value(schemars::schema_for!(Write)).expect("todo schema")),
         ].into_iter().map(|(name, description, input_schema)| ToolRegistration {
             definition: ToolDefinition { provider: None, name: name.into(), description: description.into(), input_schema, output_schema: None, freeform: None },
             nesting: ToolNesting::Nestable, semantics: ToolSemantics::Parallel, handler: ToolHandler::Prepared(self.clone()),

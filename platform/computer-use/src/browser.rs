@@ -19,6 +19,7 @@
 
 use crate::protocol::*;
 use base64::Engine;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::tools::ToolError;
 use maka_capabilities::computer::BrowserConnection;
 use serde::Deserialize;
@@ -158,9 +159,20 @@ impl Cdp {
                 if message.contains(" failed (") {
                     failed(message)
                 } else {
-                    unknown(format!("{message}; do not replay a mutation"))
+                    unknown(message)
                 }
             })
+    }
+}
+
+// This is a typed owner boundary, not an error-text classifier. Lower CDP
+// requests retain raw diagnostics; the model-facing result adds advice once.
+pub(crate) fn with_unknown_guidance(error: ToolError, language: Language) -> ToolError {
+    match error {
+        ToolError::OutcomeUnknown(message) => {
+            ToolError::OutcomeUnknown(message + crate::language::browser_unknown(language))
+        }
+        error => error,
     }
 }
 
@@ -217,12 +229,17 @@ impl Browsers {
     pub(crate) fn configure(
         &mut self,
         connections: Vec<BrowserConnection>,
+        language: Language,
     ) -> Result<(), ToolError> {
         validate_connections(&connections)?;
         if connections != self.connections && !self.targets.is_empty() {
-            return Err(failed(
-                "browser configuration changed; reset Cua before using the new providers",
-            ));
+            return Err(failed(match language {
+                Language::En => {
+                    "browser configuration changed; reset Cua before using the new providers"
+                }
+                Language::ZhCn => "浏览器配置已改变；请先重置 Cua，再使用新的提供方",
+                Language::ZhTw => "瀏覽器設定已變更；請先重設 Cua，再使用新的提供者",
+            }));
         }
         self.connections = connections;
         Ok(())
@@ -243,6 +260,7 @@ impl Browsers {
         command: Command,
         cursor: &crate::cursor::Spec,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         match command {
             Command::ListBrowsers { .. } => {
@@ -279,9 +297,13 @@ impl Browsers {
                     }
                 }
                 if matches.len() != 1 {
-                    return Err(failed(
-                        "browser selection is ambiguous or missing; select an ID from listBrowsers",
-                    ));
+                    return Err(failed(match language {
+                        Language::En => {
+                            "browser selection is ambiguous or missing; select an ID from listBrowsers"
+                        }
+                        Language::ZhCn => "浏览器选择不明确或缺失；请从 listBrowsers 选择 ID",
+                        Language::ZhTw => "瀏覽器選擇不明確或缺少；請從 listBrowsers 選擇 ID",
+                    }));
                 }
                 Ok(json!({"id":matches[0].id}))
             }
@@ -307,12 +329,17 @@ impl Browsers {
                     }
                 }
                 if matches.len() != 1 {
-                    return Err(failed(
-                        "tab selection is ambiguous or missing; choose an exact ID from listTabs",
-                    ));
+                    return Err(failed(match language {
+                        Language::En => {
+                            "tab selection is ambiguous or missing; choose an exact ID from listTabs"
+                        }
+                        Language::ZhCn => "标签页选择不明确或缺失；请从 listTabs 选择确切 ID",
+                        Language::ZhTw => "分頁選擇不明確或缺少；請從 listTabs 選擇確切 ID",
+                    }));
                 }
                 let (provider, generation, tab) = matches.pop().unwrap();
-                self.bind(provider, generation, tab, cancellation).await
+                self.bind(provider, generation, tab, cancellation, language)
+                    .await
             }
             Command::CreateBrowserTab {
                 browser_id,
@@ -339,22 +366,36 @@ impl Browsers {
                     return Err(unknown("browser restarted after tab creation"));
                 }
                 let tab = tabs.into_iter().find(|t| t.id == id).ok_or_else(|| {
-                    unknown("created tab is not observable; do not create it again blindly")
+                    unknown(match language {
+                        Language::En => "created tab is not observable",
+                        Language::ZhCn => "已创建的标签页不可观察",
+                        Language::ZhTw => "已建立的分頁無法觀察",
+                    })
                 })?;
-                self.bind(provider, generation, tab, cancellation).await
+                self.bind(provider, generation, tab, cancellation, language)
+                    .await
             }
             Command::Observe {
                 handle: Handle::Tab(handle),
                 kind,
                 options,
             } => {
-                self.observe(&handle, kind, !options.disable_diffing, cancellation)
-                    .await
+                self.observe(
+                    &handle,
+                    kind,
+                    !options.disable_diffing,
+                    cancellation,
+                    language,
+                )
+                .await
             }
             Command::Action {
                 handle: Handle::Tab(handle),
                 action,
-            } => self.action(&handle, action, cursor, cancellation).await,
+            } => {
+                self.action(&handle, action, cursor, cancellation, language)
+                    .await
+            }
             _ => Err(failed("invalid browser operation")),
         }
     }
@@ -377,9 +418,14 @@ impl Browsers {
         generation: String,
         info: TabInfo,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         if self.targets.len() >= 64 {
-            return Err(failed("tab binding limit reached; reset Cua"));
+            return Err(failed(match language {
+                Language::En => "tab binding limit reached; reset Cua",
+                Language::ZhCn => "标签页绑定数已达上限；请重置 Cua",
+                Language::ZhTw => "分頁綁定數已達上限；請重設 Cua",
+            }));
         }
         let handle = uuid::Uuid::new_v4().to_string();
         let id = format!("{}:{}", provider.id, info.id);
@@ -401,7 +447,7 @@ impl Browsers {
             },
         );
         match self
-            .observe(&handle, ObservationKind::Ax, false, cancellation)
+            .observe(&handle, ObservationKind::Ax, false, cancellation, language)
             .await
         {
             Ok(value) => Ok(
@@ -419,16 +465,20 @@ impl Browsers {
         kind: ObservationKind,
         diff: bool,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
-        let tab = self
-            .targets
-            .get_mut(handle)
-            .ok_or_else(|| failed("stale_tab: bind it again"))?;
+        let tab = self.targets.get_mut(handle).ok_or_else(|| {
+            failed(match language {
+                Language::En => "stale_tab: bind it again",
+                Language::ZhCn => "stale_tab: 请重新绑定标签页",
+                Language::ZhTw => "stale_tab: 請重新綁定分頁",
+            })
+        })?;
         tab.refs.clear();
         tab.capture = None;
         tab.frame = None;
-        tab.verify().await?;
-        let result = tab.observe(kind, diff, cancellation).await;
+        tab.verify(language).await?;
+        let result = tab.observe(kind, diff, cancellation, language).await;
         if result.is_err() {
             tab.socket = None;
             tab.refs.clear();
@@ -443,15 +493,19 @@ impl Browsers {
         action: Action,
         cursor: &crate::cursor::Spec,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         let closing = matches!(&action, Action::Close);
         let moving_cursor = matches!(&action, Action::MoveCursor { .. });
-        let tab = self
-            .targets
-            .get_mut(handle)
-            .ok_or_else(|| failed("stale_tab: bind it again"))?;
-        tab.verify().await?;
-        let result = tab.action(action, cursor, cancellation).await;
+        let tab = self.targets.get_mut(handle).ok_or_else(|| {
+            failed(match language {
+                Language::En => "stale_tab: bind it again",
+                Language::ZhCn => "stale_tab: 请重新绑定标签页",
+                Language::ZhTw => "stale_tab: 請重新綁定分頁",
+            })
+        })?;
+        tab.verify(language).await?;
+        let result = tab.action(action, cursor, cancellation, language).await;
         if !moving_cursor {
             tab.capture = None;
         }
@@ -470,7 +524,7 @@ impl Browsers {
     }
 }
 impl Tab {
-    async fn wait_ready(&mut self) -> Result<(), ToolError> {
+    async fn wait_ready(&mut self, language: Language) -> Result<(), ToolError> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let tree = self.request("Page.getFrameTree", json!({})).await?;
@@ -500,23 +554,29 @@ impl Tab {
             }
             if tokio::time::Instant::now() >= deadline {
                 self.navigation = None;
-                return Err(failed(
-                    "page has not reached an observable document; call getAXState again, without repeating navigation",
-                ));
+                return Err(failed(match language {
+                    Language::En => {
+                        "page has not reached an observable document; call getAXState again, without repeating navigation"
+                    }
+                    Language::ZhCn => "页面尚无可观察的文档；请再次调用 getAXState，不要重复导航",
+                    Language::ZhTw => "頁面尚無可觀察的文件；請再次呼叫 getAXState，不要重複導覽",
+                }));
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
-    async fn verify(&mut self) -> Result<(), ToolError> {
+    async fn verify(&mut self, language: Language) -> Result<(), ToolError> {
         let (generation, tabs) = inventory(&self.provider).await?;
         if generation != self.generation || !tabs.iter().any(|tab| tab.id == self.info.id) {
             self.socket = None;
             self.refs.clear();
             self.capture = None;
             self.frame = None;
-            return Err(failed(
-                "stale_tab: browser restarted or tab closed; bind the current tab",
-            ));
+            return Err(failed(match language {
+                Language::En => "stale_tab: browser restarted or tab closed; bind the current tab",
+                Language::ZhCn => "stale_tab: 浏览器已重启或标签页已关闭；请绑定当前标签页",
+                Language::ZhTw => "stale_tab: 瀏覽器已重新啟動或分頁已關閉；請綁定目前分頁",
+            }));
         }
         self.info = tabs
             .into_iter()
@@ -565,10 +625,11 @@ impl Tab {
         kind: ObservationKind,
         diff: bool,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
-        self.wait_ready().await?;
+        self.wait_ready(language).await?;
         crate::observation::settle(crate::observation::BROWSER_SETTLE, cancellation).await?;
-        self.verify().await?;
+        self.verify(language).await?;
         self.request(
             "Runtime.releaseObjectGroup",
             json!({"objectGroup":"maka-cua"}),
@@ -658,21 +719,33 @@ impl Tab {
                 }
             }
             if self.frames().await? != frames {
-                return Err(failed("frame changed during observation; observe again"));
+                return Err(failed(match language {
+                    Language::En => "frame changed during observation; observe again",
+                    Language::ZhCn => "观察期间框架已改变；请重新观察",
+                    Language::ZhTw => "觀察期間框架已變更；請重新觀察",
+                }));
             }
-            let mut rows = vec![format!("Tab {}: {}", self.info.id, self.info.url)];
-            let (tree, refs) = self.ax.render(&frame, &nodes)?;
-            rows.push(tree);
+            let (full, refs) = self.ax.render(&frame, &nodes, language)?;
             self.refs = refs;
-            if nodes.len() > 2000 {
-                rows.push("Accessibility tree truncated at 2000 nodes.".into());
-            }
-            let full = rows.join("\n");
-            value["state"] = json!(if diff {
-                crate::session::display_diff(self.previous.as_deref(), &full)
+            let body = if diff {
+                crate::session::display_diff(self.previous.as_deref(), &full, language)
             } else {
                 full.clone()
-            });
+            };
+            let label = match language {
+                Language::En => "Tab",
+                Language::ZhCn => "标签页",
+                Language::ZhTw => "分頁",
+            };
+            let mut state = format!("{label} {}: {}\n{body}", self.info.id, self.info.url);
+            if nodes.len() > 2000 {
+                state.push_str(match language {
+                    Language::En => "\nAccessibility tree truncated at 2000 nodes.",
+                    Language::ZhCn => "\n无障碍树已在 2000 个节点处截断。",
+                    Language::ZhTw => "\n輔助使用樹已在 2000 個節點處截斷。",
+                });
+            }
+            value["state"] = json!(state);
             self.previous = Some(full);
         } else {
             self.previous = None;
@@ -717,7 +790,11 @@ impl Tab {
             });
         }
         if self.frame().await? != frame {
-            return Err(failed("document changed during observation; observe again"));
+            return Err(failed(match language {
+                Language::En => "document changed during observation; observe again",
+                Language::ZhCn => "观察期间文档已改变；请重新观察",
+                Language::ZhTw => "觀察期間文件已變更；請重新觀察",
+            }));
         }
         self.frame = Some(frame);
         Ok(value)
@@ -728,8 +805,9 @@ impl Tab {
         function: &str,
         arguments: Vec<Value>,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
-        let element = self.verify_element(index).await?;
+        let element = self.verify_element(index, language).await?;
         let frame = element
             .frame
             .as_ref()
@@ -761,16 +839,21 @@ impl Tab {
         &mut self,
         index: Option<u64>,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<(), ToolError> {
         if let Some(index) = index {
-            self.call_element(index,"function(){ if(!this.isConnected) throw Error('detached'); this.focus(); if(this.getRootNode().activeElement!==this) throw Error('focus not confirmed'); }",vec![],cancellation).await?;
+            self.call_element(index,"function(){ if(!this.isConnected) throw Error('detached'); this.focus(); if(this.getRootNode().activeElement!==this) throw Error('focus not confirmed'); }",vec![],cancellation, language).await?;
         }
         Ok(())
     }
-    async fn point(&mut self, point: [f64; 2]) -> Result<[f64; 2], ToolError> {
-        let capture = self
-            .capture
-            .ok_or_else(|| failed("capture_required: getScreenshot before coordinate input"))?;
+    async fn point(&mut self, point: [f64; 2], language: Language) -> Result<[f64; 2], ToolError> {
+        let capture = self.capture.ok_or_else(|| {
+            failed(match language {
+                Language::En => "capture_required: getScreenshot before coordinate input",
+                Language::ZhCn => "capture_required: 按坐标输入前请先调用 getScreenshot",
+                Language::ZhTw => "capture_required: 按座標輸入前請先呼叫 getScreenshot",
+            })
+        })?;
         let metrics = self.request("Page.getLayoutMetrics", json!({})).await?;
         if metrics["cssVisualViewport"]["clientWidth"].as_f64() != Some(capture.width)
             || metrics["cssVisualViewport"]["clientHeight"].as_f64() != Some(capture.height)
@@ -792,6 +875,7 @@ impl Tab {
     async fn before_input(
         &mut self,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<(), ToolError> {
         check_input(cancellation)?;
         let frame = self.frame().await?;
@@ -799,9 +883,11 @@ impl Tab {
         if self.frame.as_ref() != Some(&frame) {
             self.refs.clear();
             self.capture = None;
-            return Err(failed(
-                "stale_document: observe after navigation before acting",
-            ));
+            return Err(failed(match language {
+                Language::En => "stale_document: observe after navigation before acting",
+                Language::ZhCn => "stale_document: 导航后请先观察，再操作",
+                Language::ZhTw => "stale_document: 導覽後請先觀察，再操作",
+            }));
         }
         Ok(())
     }
@@ -809,10 +895,11 @@ impl Tab {
         &mut self,
         index: Option<u64>,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<(), ToolError> {
-        self.before_input(cancellation).await?;
+        self.before_input(cancellation, language).await?;
         if let Some(index) = index {
-            self.verify_element(index).await?;
+            self.verify_element(index, language).await?;
         }
         check_input(cancellation)
     }
@@ -821,6 +908,7 @@ impl Tab {
         action: Action,
         cursor: &crate::cursor::Spec,
         cancellation: &tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         if !matches!(
             &action,
@@ -830,16 +918,16 @@ impl Tab {
                 | Action::Reload
                 | Action::Close
         ) {
-            self.before_input(cancellation).await?;
+            self.before_input(cancellation, language).await?;
         }
         let selected_index = match action.cursor_target() {
             Some(Position::Element(index)) => Some(index),
             _ => None,
         };
         if let Action::MoveCursor { target } = &action {
-            let point = self.cursor_point(target, cancellation).await?;
+            let point = self.cursor_point(target, cancellation, language).await?;
             return self
-                .draw_cursor(cursor, Some(point), "idle", "update")
+                .draw_cursor(cursor, Some(point), "idle", "update", language)
                 .await;
         }
         if cursor.enabled
@@ -848,7 +936,7 @@ impl Tab {
                 Action::Click { .. } | Action::Scroll { .. } | Action::Drag { .. }
             )
             && let Some(target) = action.cursor_target()
-            && let Ok(point) = self.cursor_point(&target, cancellation).await
+            && let Ok(point) = self.cursor_point(&target, cancellation, language).await
         {
             let _ = self
                 .draw_cursor(
@@ -856,6 +944,7 @@ impl Tab {
                     Some(point),
                     action.cursor_action().as_str(),
                     "update",
+                    language,
                 )
                 .await;
         }
@@ -913,8 +1002,8 @@ impl Tab {
                 self.request("Page.close", json!({})).await?;
             }
             Action::TypeText { index, text } => {
-                self.focus(index, cancellation).await?;
-                self.before_element_input(selected_index, cancellation)
+                self.focus(index, cancellation, language).await?;
+                self.before_element_input(selected_index, cancellation, language)
                     .await?;
                 self.request("Input.insertText", json!({"text":text}))
                     .await?;
@@ -928,10 +1017,10 @@ impl Tab {
                     let index = index.ok_or_else(|| {
                         failed("HTML paste requires an observed editable element")
                     })?;
-                    self.call_element(index,"function(html){ if(!this.isConnected || !this.isContentEditable) throw Error('HTML paste requires contenteditable'); this.focus(); if(!document.execCommand('insertHTML',false,html)) throw Error('HTML insertion not supported'); }",vec![json!(text)],cancellation).await?;
+                    self.call_element(index,"function(html){ if(!this.isConnected || !this.isContentEditable) throw Error('HTML paste requires contenteditable'); this.focus(); if(!document.execCommand('insertHTML',false,html)) throw Error('HTML insertion not supported'); }",vec![json!(text)],cancellation, language).await?;
                 } else {
-                    self.focus(index, cancellation).await?;
-                    self.before_element_input(selected_index, cancellation)
+                    self.focus(index, cancellation, language).await?;
+                    self.before_element_input(selected_index, cancellation, language)
                         .await?;
                     self.request("Input.insertText", json!({"text":text}))
                         .await?;
@@ -943,6 +1032,7 @@ impl Tab {
                     include_str!("browser/set-value.js"),
                     vec![json!(value)],
                     cancellation,
+                    language,
                 )
                 .await?;
             }
@@ -966,6 +1056,7 @@ impl Tab {
                         json!(selection),
                     ],
                     cancellation,
+                    language,
                 )
                 .await?;
             }
@@ -976,17 +1067,18 @@ impl Tab {
                 }
                 let button = options.mouse_button.unwrap_or(MouseButton::Left).name();
                 let point = match target {
-                    Position::Point(point) => self.point(point).await?,
+                    Position::Point(point) => self.point(point, language).await?,
                     Position::Element(index) => {
-                        self.element_point(index, true, cancellation).await?
+                        self.element_point(index, true, cancellation, language)
+                            .await?
                     }
                 };
                 if cursor.enabled {
                     let _ = self
-                        .draw_cursor(cursor, Some(point), "click", "update")
+                        .draw_cursor(cursor, Some(point), "click", "update", language)
                         .await;
                 }
-                self.before_element_input(selected_index, cancellation)
+                self.before_element_input(selected_index, cancellation, language)
                     .await?;
                 let pressed=self.request("Input.dispatchMouseEvent",json!({"type":"mousePressed","x":point[0],"y":point[1],"button":button,"clickCount":count})).await;
                 self.request("Input.dispatchMouseEvent",json!({"type":"mouseReleased","x":point[0],"y":point[1],"button":button,"clickCount":count})).await.map_err(|error|ToolError::CleanupUnconfirmed(format!("mouse release was not acknowledged: {error}")))?;
@@ -994,8 +1086,8 @@ impl Tab {
             }
             Action::PressKey { index, key } => {
                 let (key, code, modifiers) = key_event(&key)?;
-                self.focus(index, cancellation).await?;
-                self.before_element_input(selected_index, cancellation)
+                self.focus(index, cancellation, language).await?;
+                self.before_element_input(selected_index, cancellation, language)
                     .await?;
                 let mut event = json!({"type":"keyDown","key":key,"windowsVirtualKeyCode":code,"modifiers":modifiers});
                 if modifiers & 7 == 0 {
@@ -1039,17 +1131,18 @@ impl Tab {
                     Direction::Right => (pixels, 0.0),
                 };
                 let point = match target {
-                    Position::Point(point) => self.point(point).await?,
+                    Position::Point(point) => self.point(point, language).await?,
                     Position::Element(index) => {
-                        self.element_point(index, false, cancellation).await?
+                        self.element_point(index, false, cancellation, language)
+                            .await?
                     }
                 };
                 if cursor.enabled {
                     let _ = self
-                        .draw_cursor(cursor, Some(point), "scroll", "update")
+                        .draw_cursor(cursor, Some(point), "scroll", "update", language)
                         .await;
                 }
-                self.before_element_input(selected_index, cancellation)
+                self.before_element_input(selected_index, cancellation, language)
                     .await?;
                 self.request(
                     "Input.dispatchMouseEvent",
@@ -1058,19 +1151,23 @@ impl Tab {
                 .await?;
             }
             Action::Drag { from, to } => {
-                let from = self.point(from).await?;
-                let to = self.point(to).await?;
+                let from = self.point(from, language).await?;
+                let to = self.point(to, language).await?;
                 if cursor.enabled {
-                    let _ = self.draw_cursor(cursor, Some(from), "drag", "update").await;
+                    let _ = self
+                        .draw_cursor(cursor, Some(from), "drag", "update", language)
+                        .await;
                 }
-                self.before_element_input(selected_index, cancellation)
+                self.before_element_input(selected_index, cancellation, language)
                     .await?;
                 let pressed=self.request("Input.dispatchMouseEvent",json!({"type":"mousePressed","x":from[0],"y":from[1],"button":"left","clickCount":1})).await;
                 let moved = if pressed.is_ok() {
                     if cursor.enabled {
-                        let _ = self.draw_cursor(cursor, Some(to), "drag", "update").await;
+                        let _ = self
+                            .draw_cursor(cursor, Some(to), "drag", "update", language)
+                            .await;
                     }
-                    if let Err(error) = self.before_input(cancellation).await {
+                    if let Err(error) = self.before_input(cancellation, language).await {
                         Err(error)
                     } else {
                         self.request("Input.dispatchMouseEvent",json!({"type":"mouseMoved","x":to[0],"y":to[1],"button":"left","buttons":1})).await
@@ -1093,7 +1190,7 @@ impl Tab {
             }
         }
         if self.navigation.is_some() {
-            self.wait_ready().await?;
+            self.wait_ready(language).await?;
         }
         Ok(Value::Null)
     }

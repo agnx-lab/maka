@@ -177,6 +177,7 @@ impl executor::Backend for Backend {
                 .expect("UUID digest"),
         );
         let body = Execute {
+            language: input.language,
             invocation: input.invocation.clone(),
             conversation_key: input.conversation_key,
             message: input.content.text,

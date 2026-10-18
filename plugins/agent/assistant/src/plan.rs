@@ -26,6 +26,7 @@ pub use artifact::{Artifact, Complexity, Step};
 
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::execution::BehaviorId;
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::Receipt;
 use maka_agent_ports::execution::Submit;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,8 @@ pub enum Command<A = maka_capabilities::authorization::Id> {
         proposal_id: String,
     },
     Approve {
+        #[serde(default, skip_serializing_if = "Language::is_english")]
+        language: Language,
         proposal_id: String,
         proposal_revision: u64,
         behavior: BehaviorId,
@@ -114,6 +117,8 @@ pub enum Command<A = maka_capabilities::authorization::Id> {
         reason: String,
     },
     Resume {
+        #[serde(default, skip_serializing_if = "Language::is_english")]
+        language: Language,
         execution_id: String,
         grant: A,
     },

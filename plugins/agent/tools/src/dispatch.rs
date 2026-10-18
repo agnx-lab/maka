@@ -25,6 +25,7 @@ use std::sync::{
 
 use maka_agent_facts::event::EventSink;
 use maka_agent_facts::event::Invocation;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::model::ModelToolCall;
 use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_call::ToolRejection;
@@ -41,6 +42,7 @@ use crate::{
 
 /// Run-scoped authority. Cell capacity is shared across runs, not recreated here.
 pub struct RunTools {
+    language: Language,
     model: Option<maka_agent_facts::tools::ModelToolContext>,
     journal: ToolJournal,
     availability: Availability,
@@ -57,6 +59,7 @@ impl Drop for RunTools {
 
 impl RunTools {
     pub fn new(
+        language: Language,
         sink: Arc<dyn EventSink>,
         invocation: Invocation,
         catalog: ToolCatalog,
@@ -65,6 +68,7 @@ impl RunTools {
         loaded: LoadedTools,
     ) -> Self {
         Self {
+            language,
             model: None,
             journal: ToolJournal::new(sink, invocation),
             availability: Availability::new(catalog, loaded),
@@ -196,7 +200,7 @@ impl<'a> RequestTools<'a> {
         if self.run.mode == ToolMode::CodeMode {
             let mut exec = cell::definition();
             let definitions: Vec<_> = self.described.definitions().cloned().collect();
-            exec.description.push_str("\nSome authorized tools may be omitted below. Find them by name and description in ALL_TOOLS; all are callable within the current cell.\n");
+            exec.description.push('\n');
             exec.description.push_str(&cell::declarations(&definitions));
             std::iter::once(exec)
                 .chain(std::iter::once(cell::wait_definition()))
@@ -322,8 +326,9 @@ impl<'a> StepTools<'a> {
                         call.id.clone(),
                     );
                     let code = run.code.clone();
+                    let language = run.language;
                     let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
-                        Box::pin(async move { code.start(executor, cancellation).await })
+                        Box::pin(async move { code.start(executor, language, cancellation).await })
                     });
                     Ok(effect.titled(maka_agent_facts::display::Text::localized(
                         "Run tools",
@@ -333,8 +338,9 @@ impl<'a> StepTools<'a> {
                 } else if call.name == "wait" && run.mode == ToolMode::CodeMode {
                     let input = cell::wait_input(input)?;
                     let code = run.code.clone();
+                    let language = run.language;
                     Ok(PreparedEffect::new(move |cancellation| {
-                        Box::pin(async move { code.observe(input, cancellation).await })
+                        Box::pin(async move { code.observe(input, language, cancellation).await })
                     }))
                 } else if run.mode == ToolMode::Direct
                     && call.name == SEARCH

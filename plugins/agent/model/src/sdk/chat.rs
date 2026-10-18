@@ -18,10 +18,11 @@
  */
 
 use crate::prompt::{ContentPart, Message, ToolOutput};
+use maka_agent_facts::language::Language;
 
 /// Chat has text-only tool messages. Keep the entire result group together and
 /// carry media in the following user message, never between parallel results.
-pub(super) fn project(messages: Vec<Message>) -> Vec<Message> {
+pub(super) fn project(messages: Vec<Message>, language: Language) -> Vec<Message> {
     let mut projected = Vec::with_capacity(messages.len());
     let mut images = Vec::new();
     for mut message in messages {
@@ -34,22 +35,32 @@ pub(super) fn project(messages: Vec<Message>) -> Vec<Message> {
                 for part in parts {
                     if matches!(part, ContentPart::File { media_type, .. } if media_type.starts_with("image/") || media_type.starts_with("audio/"))
                     {
-                        let kind = if matches!(part, ContentPart::File { media_type, .. } if media_type.starts_with("audio/"))
-                        {
-                            "Audio"
-                        } else {
-                            "Image"
+                        let audio = matches!(part, ContentPart::File { media_type, .. } if media_type.starts_with("audio/"));
+                        let kind = match (language, audio) {
+                            (Language::En, true) => "Audio",
+                            (Language::En, false) => "Image",
+                            (Language::ZhCn, true) => "音频",
+                            (Language::ZhCn, false) => "图像",
+                            (Language::ZhTw, true) => "音訊",
+                            (Language::ZhTw, false) => "影像",
                         };
                         if !labelled {
-                            images.push(ContentPart::text(format!(
-                                "{kind} from tool {} ({}):",
-                                result.tool_name, result.tool_call_id
-                            )));
+                            let name = &result.tool_name;
+                            let id = &result.tool_call_id;
+                            images.push(ContentPart::text(match language {
+                                Language::En => format!("{kind} from tool {name} ({id}):"),
+                                Language::ZhCn => format!("来自工具 {name}（{id}）的{kind}："),
+                                Language::ZhTw => format!("來自工具 {name}（{id}）的{kind}："),
+                            }));
                             labelled = true;
                         }
                         images.push(std::mem::replace(
                             part,
-                            ContentPart::text(format!("{kind} supplied below.")),
+                            ContentPart::text(match language {
+                                Language::En => format!("{kind} supplied below."),
+                                Language::ZhCn => format!("{kind}见下方。"),
+                                Language::ZhTw => format!("{kind}見下方。"),
+                            }),
                         ));
                     }
                 }
@@ -69,4 +80,44 @@ pub(super) fn project(messages: Vec<Message>) -> Vec<Message> {
         });
     }
     projected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prompt::FileData;
+
+    #[test]
+    fn tool_media_projection_uses_captured_language_and_keeps_payload() {
+        let media = ContentPart::File {
+            data: FileData::Data("aW1hZ2U=".into()),
+            media_type: "image/png".into(),
+            provider_options: None,
+        };
+        for (language, expected) in [
+            (Language::ZhCn, "来自工具 read（call-原文）的图像："),
+            (Language::ZhTw, "來自工具 read（call-原文）的影像："),
+        ] {
+            let messages = project(
+                vec![Message::tool(
+                    "call-原文",
+                    "read",
+                    ToolOutput::Content(vec![ContentPart::text("Tool result 原文"), media.clone()]),
+                )],
+                language,
+            );
+            let Message::User { content, .. } = &messages[1] else {
+                panic!("media user message")
+            };
+            assert_eq!(content, &[ContentPart::text(expected), media.clone()]);
+            let Message::Tool { content, .. } = &messages[0] else {
+                panic!("settled tool result")
+            };
+            let ToolOutput::Content(parts) = &content[0].output else {
+                panic!("tool content")
+            };
+            assert_eq!(parts[0], ContentPart::text("Tool result 原文"));
+            assert_eq!(content[0].tool_call_id, "call-原文");
+        }
+    }
 }

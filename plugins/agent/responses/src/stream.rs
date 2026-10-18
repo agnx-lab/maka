@@ -119,6 +119,7 @@ async fn run(
         _ => None,
     };
     let mut body = crate::request::Request {
+        language: request.language,
         model: &request.provider.model,
         prompt: &request.prompt,
         tools: &request.tools,

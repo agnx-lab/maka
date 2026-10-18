@@ -961,7 +961,9 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         tui.send(b"\x01");
         copy_selection(
             &mut tui,
-            maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT,
+            maka_agent_facts::context::default_compaction_prompt(
+                maka_agent_facts::language::Language::En,
+            ),
         );
         edit_menu(&mut tui, "details are needed.");
         click(&mut tui, "Select all");
@@ -971,7 +973,9 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         clipboard_output(
             &mut tui,
             start,
-            maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT,
+            maka_agent_facts::context::default_compaction_prompt(
+                maka_agent_facts::language::Language::En,
+            ),
         );
         tui.wait_until(|screen| !screen.contains("Select all"));
         settings_evidence(&tui, "settings");

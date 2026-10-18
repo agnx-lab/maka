@@ -91,8 +91,9 @@ const invoke = async (method, args = {}) => {
 let documented = false;
 let reference;
 const documentation = async () => {
-  const text = reference ?? (reference = await invoke('documentation'));
-  if (!documented) {
+  const text = await invoke('documentation');
+  if (!documented || reference !== text) {
+    reference = text;
     write(text);
     documented = true;
   }
@@ -132,8 +133,7 @@ const bind = async (method, args) => {
           delivery: result.delivery,
           requestedChars: result.requested_chars,
           deliveredChars: result.delivered_chars,
-          warning:
-            'The driver did not verify the requested effect. Read getAXState() or getScreenshot() before deciding what to do next; do not replay an uncertain action.',
+          warning: result.guidance,
         });
     });
   const target = {

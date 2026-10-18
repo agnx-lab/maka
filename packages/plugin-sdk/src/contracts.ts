@@ -27889,6 +27889,9 @@ export const contracts = {
               'Observations and text; immutable attachments travel in the actual request resources.\nNo path, invocation or conversation key is authority.',
             type: 'object',
             properties: {
+              language: {
+                $ref: '#/$defs/Language',
+              },
               invocation: {
                 $ref: '#/$defs/Invocation',
               },
@@ -27917,6 +27920,10 @@ export const contracts = {
             additionalProperties: false,
             required: ['invocation', 'conversationKey', 'message', 'cwd', 'settings'],
             $defs: {
+              Language: {
+                type: 'string',
+                enum: ['en', 'zh-CN', 'zh-TW'],
+              },
               Invocation: {
                 type: 'object',
                 properties: {
@@ -34291,6 +34298,9 @@ export const contracts = {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
+                  language: {
+                    $ref: '#/$defs/Language',
+                  },
                   message: {
                     type: 'string',
                   },
@@ -34307,7 +34317,11 @@ export const contracts = {
                     maxLength: 128,
                   },
                 },
-                required: ['message'],
+                required: ['language', 'message'],
+              },
+              Language: {
+                type: 'string',
+                enum: ['en', 'zh-CN', 'zh-TW'],
               },
             },
           },

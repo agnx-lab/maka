@@ -298,6 +298,7 @@ impl Owner {
             Err(_) => return Ok(parked(Reason::SourceNotResumable)),
         };
         let basis = MessageBasis {
+            language: configuration.language,
             compaction_prompt: configuration.compaction_prompt.clone(),
             graph,
             collaboration_mode: configuration.collaboration_mode,

@@ -18,6 +18,7 @@
  */
 
 use super::*;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::{
     artifact::{ArtifactKind, ArtifactSource},
     event::Invocation,
@@ -98,7 +99,7 @@ impl RequestBinding for Binding {
                 .map_err(|_| ToolError::Failed("Computer state invalid".into()))?;
             let hint = match state {
                 ReplState::Fresh => {
-                    "Current REPL state: fresh. No variables or target bindings exist in this Host process; bind targets before using them. Earlier transcript bindings may belong to a previous process."
+                    "Current REPL state: fresh. Bind targets before use; earlier transcript variables and bindings are unavailable."
                 }
                 ReplState::Ready => {
                     "Current REPL state: ready. Existing variables and target bindings are retained in this Host process."
@@ -124,9 +125,10 @@ pub(super) async fn project(
     store: &EventLog,
     invocation: &Invocation,
     reply: OperationReply,
+    language: Language,
 ) -> Result<ToolSuccess, ToolError> {
     // Validate original physical completion before interpreting business output.
-    mutation_result(reply.clone())?;
+    mutation_result(reply.clone(), language)?;
     let Receipt::Recorded {
         outcome: OperationOutcome::Returned { value },
         ..
@@ -136,7 +138,7 @@ pub(super) async fn project(
     };
     let result = serde_json::from_value(value.clone());
     let raw = ToolOutput::Operation(Box::new(reply));
-    match parts(store, invocation, result).await {
+    match parts(store, invocation, result, language).await {
         Ok(parts) => Ok(ToolSuccess::content(raw, parts)),
         // A display failure cannot erase a completed native effect or its original receipt.
         Err(_) => Ok(ToolSuccess::projected(
@@ -149,11 +151,17 @@ async fn parts(
     store: &EventLog,
     invocation: &Invocation,
     result: Result<ResultValue, serde_json::Error>,
+    language: Language,
 ) -> Result<Vec<ToolContent>, ToolError> {
     let result = result.map_err(|_| ToolError::Failed("Computer result invalid".into()))?;
+    let state_label = match language {
+        Language::En => "REPL state",
+        Language::ZhCn => "REPL 状态",
+        Language::ZhTw => "REPL 狀態",
+    };
     let parts = match result {
         ResultValue::Failed { message, state } => vec![ToolContent::Text(format!(
-            "{message}\nREPL state: {}",
+            "{message}\n{state_label}: {}",
             serde_json::to_string(&state).expect("state")
         ))],
         ResultValue::Completed { artifact, state } => {
@@ -207,7 +215,7 @@ async fn parts(
                 })
                 .collect();
             parts.push(ToolContent::Text(format!(
-                "REPL state: {}",
+                "{state_label}: {}",
                 serde_json::to_string(&state).expect("state")
             )));
             parts

@@ -1848,7 +1848,7 @@ async fn skill_preparation_parent_scope_owns_work_after_observer_loss_and_cleanu
             let request = parent.clone();
             let observer = tokio::spawn(async move {
                 owner
-                    .prepare_skills("hello".into(), None, &request, vec![])
+                    .prepare_skills("hello".into(), Language::En, None, &request, vec![])
                     .await
             });
             probe.entered.acquire().await.unwrap().forget();

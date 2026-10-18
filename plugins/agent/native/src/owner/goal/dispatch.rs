@@ -19,6 +19,7 @@
 
 use super::*;
 use maka_agent_facts::event::InvocationOutcome;
+use maka_agent_facts::language::Language;
 use maka_event_log::{
     message_admissions::{PendingExecution, PendingMessageAdmission},
     turns::InvocationState,
@@ -200,7 +201,12 @@ impl Owner {
                     // observed no accepted original request after prior writes settled.
                     saved.goal.pending = None;
                     saved.goal.status = Status::Cancelled;
-                    saved.goal.note = "Cancelled before execution admission".into();
+                    saved.goal.note = (match saved.goal.arm.language {
+                        Language::En => "Cancelled before execution admission",
+                        Language::ZhCn => "执行接纳前已取消",
+                        Language::ZhTw => "執行接納前已取消",
+                    })
+                    .into();
                     self.goals.save(saved).await?;
                 }
                 return Ok(());

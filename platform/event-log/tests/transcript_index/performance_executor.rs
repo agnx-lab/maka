@@ -48,6 +48,7 @@ async fn executor_invocation_transcript() {
             unreachable!()
         };
         *configuration = Some(Box::new(InvocationConfiguration {
+            language: maka_agent_facts::language::Language::En,
             compaction_prompt: None,
             workspace_origin: WorkspaceOrigin::Selected,
             approval_policy: ApprovalPolicy::OnRequest,

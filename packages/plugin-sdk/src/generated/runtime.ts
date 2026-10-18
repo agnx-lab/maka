@@ -1497,6 +1497,7 @@ export type AgentGlobalInstructionsUpdated =
   | {
       kind: 'rejected';
     };
+export type Language = 'en' | 'zh-CN' | 'zh-TW';
 export type ExecutorSetupAction =
   | {
       kind: 'check';
@@ -2212,7 +2213,6 @@ export type PricingMutation =
       kind: 'delete';
     };
 export type LanguagePreference = 'auto' | 'en' | 'zh-CN' | 'zh-TW';
-export type Language = 'en' | 'zh-CN' | 'zh-TW';
 export type ProxyProtocol = 'http' | 'https' | 'socks5';
 export type CredentialLocator =
   | {
@@ -6786,6 +6786,10 @@ export interface TextChunk {
 }
 export interface AgentConfiguration {
   /**
+   * Deployment locale fallback; saved Root preference takes precedence.
+   */
+  locale?: string;
+  /**
    * Defer optional tool schemas until the model discovers them. This affects
    * presentation only; every call still uses its current authorized binding.
    */
@@ -7067,6 +7071,7 @@ export interface AgentExecutors {
  * No path, invocation or conversation key is authority.
  */
 export interface ExecutorExecute {
+  language?: Language;
   invocation: Invocation;
   conversationKey: string;
   message: string;
@@ -8731,6 +8736,7 @@ export interface SkillMetadata {
   [k: string]: unknown | undefined;
 }
 export interface SkillPrepare {
+  language: Language;
   message: string;
   /**
    * Actual selected tools bound to this Library; these names grant no access.

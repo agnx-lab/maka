@@ -47,6 +47,7 @@ async fn opening(log: &EventLog, session: &str, id: &str) -> Invocation {
         &invocation,
         Fact::InvocationOpened {
             configuration: Some(Box::new(InvocationConfiguration {
+                language: maka_agent_facts::language::Language::En,
                 compaction_prompt: None,
                 workspace_origin: WorkspaceOrigin::Selected,
                 approval_policy: ApprovalPolicy::OnRequest,

@@ -19,7 +19,7 @@
 
 //! Select the desktop independently of the OS running the Agent.
 use crate::{Driver, protocol::Command, session};
-use maka_agent_facts::tools::ToolError;
+use maka_agent_facts::{language::Language, tools::ToolError};
 use maka_capabilities::computer::BrowserConnection;
 use maka_capabilities::computer::Desktop;
 use serde_json::Value;
@@ -106,6 +106,7 @@ impl Session {
         &mut self,
         desktop: Desktop,
         browsers: Vec<BrowserConnection>,
+        language: Language,
     ) -> Result<(), ToolError> {
         if self.closed {
             return Err(failed("Computer Use Session is closed"));
@@ -115,9 +116,13 @@ impl Session {
         if let Some(backend) = &self.backend
             && windows != matches!(backend, Backend::Windows { .. })
         {
-            return Err(failed(
-                "desktop configuration changed; reset Cua before switching desktops",
-            ));
+            return Err(failed(match language {
+                Language::En => {
+                    "desktop configuration changed; reset Cua before switching desktops"
+                }
+                Language::ZhCn => "桌面配置已改变；请先重置 Cua，再切换桌面",
+                Language::ZhTw => "桌面設定已變更；請先重設 Cua，再切換桌面",
+            }));
         }
         let backend = self.backend.get_or_insert_with(|| {
             if windows {
@@ -130,7 +135,7 @@ impl Session {
             }
         });
         match backend {
-            Backend::Local(local) => local.configure_browsers(browsers),
+            Backend::Local(local) => local.configure_browsers(browsers, language),
             Backend::Windows {
                 browsers: current, ..
             } => {
@@ -143,8 +148,9 @@ impl Session {
     pub fn configure_browsers(
         &mut self,
         browsers: Vec<BrowserConnection>,
+        language: Language,
     ) -> Result<(), ToolError> {
-        self.configure(Desktop::Auto, browsers)
+        self.configure(Desktop::Auto, browsers, language)
     }
 
     pub fn platform(&self) -> &'static str {
@@ -157,7 +163,11 @@ impl Session {
 
     /// Prepare dependencies and the private channel outside the REPL deadline.
     /// This does not create a native Cua runtime or dispatch any input.
-    pub async fn prepare(&mut self, cancellation: &CancellationToken) -> Result<(), ToolError> {
+    pub async fn prepare(
+        &mut self,
+        cancellation: &CancellationToken,
+        language: Language,
+    ) -> Result<(), ToolError> {
         if cancellation.is_cancelled() {
             return Err(failed("Computer Use preparation cancelled"));
         }
@@ -165,7 +175,7 @@ impl Session {
             return Err(failed("Computer Use Session is closed"));
         }
         if self.backend.is_none() {
-            self.configure(Desktop::Auto, Vec::new())?;
+            self.configure(Desktop::Auto, Vec::new(), language)?;
         }
         if matches!(self.backend, Some(Backend::Windows { .. })) {
             let mut driver = tokio::select! {
@@ -183,6 +193,7 @@ impl Session {
         command: Command,
         session: &str,
         cancellation: &CancellationToken,
+        language: Language,
     ) -> Result<Value, ToolError> {
         if cancellation.is_cancelled() {
             return Err(failed("Computer Use cancelled before dispatch"));
@@ -191,10 +202,10 @@ impl Session {
             return Err(failed("Computer Use Session is closed"));
         }
         if self.backend.is_none() {
-            self.configure(Desktop::Auto, Vec::new())?;
+            self.configure(Desktop::Auto, Vec::new(), language)?;
         }
         match self.backend.as_mut().unwrap() {
-            Backend::Local(local) => local.invoke(command, session, cancellation).await,
+            Backend::Local(local) => local.invoke(command, session, cancellation, language).await,
             Backend::Windows { id, browsers } => {
                 if id.as_deref().is_some_and(|id| id != session) {
                     return Err(failed("Computer Use Session identity mismatch"));
@@ -211,6 +222,7 @@ impl Session {
                             session: session.into(),
                             browsers: browsers.clone(),
                             command,
+                            language,
                         },
                         cancellation,
                     )

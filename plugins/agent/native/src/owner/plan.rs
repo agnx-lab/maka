@@ -21,6 +21,7 @@
 mod dispatch;
 mod tools;
 use super::*;
+use maka_agent_facts::language::Language;
 use maka_assistant::plan::{Command, Error, Phase, Request, Snapshot, repository::Repository};
 use maka_capabilities::storage::{Data, Mutation, Namespace, Store};
 use maka_plugin_core::operation::RecoveryRef;
@@ -326,9 +327,10 @@ impl Owner {
                 .await;
         }
         let command: Result<_, String> = async { Ok(match input.action {
-            PlanAction::Approve { proposal_id, proposal_revision, approval } => Command::Approve {
-                grant: self.plan_approval(&input.session_id, &proposal_id, approval).await?, proposal_id, proposal_revision,
-                behavior: EXECUTION.to_owned().try_into().expect("Plan behavior"),
+            PlanAction::Approve { proposal_id, proposal_revision, approval } => {
+                let grant = self.plan_approval(&input.session_id, &proposal_id, approval).await?;
+                Command::Approve { language: grant.language, grant, proposal_id, proposal_revision,
+                    behavior: EXECUTION.to_owned().try_into().expect("Plan behavior") }
             },
             PlanAction::Resume { execution_id, approval } => {
                 if self.store.latest_turn_boundary(&input.session_id).await.map_err(reason)?.is_some_and(|boundary|
@@ -336,7 +338,8 @@ impl Owner {
                     return Err("plan_resume_session_first".into());
                 }
                 let execution = snapshot.execution.as_ref().filter(|execution| execution.id == execution_id).ok_or("plan_execution_changed")?;
-                Command::Resume { grant: self.plan_approval(&input.session_id, &execution.proposal_id, approval).await?, execution_id }
+                let grant = self.plan_approval(&input.session_id, &execution.proposal_id, approval).await?;
+                Command::Resume { language: grant.language, grant, execution_id }
             },
             PlanAction::Revise { proposal_id } => Command::Revise { proposal_id },
             PlanAction::Abandon { proposal_id } => Command::Abandon { proposal_id },
@@ -422,9 +425,29 @@ impl Owner {
             return Err("plan_disabled".into());
         }
         let instructions = if planning {
-            "You are planning a change for user approval. Inspect and discuss only. Workspace mutation, Shell, subagents and autonomous workflows are unavailable. Ask focused questions when needed. When ready, call SubmitPlan once with concrete ordered steps and material risks. Submission ends this planning Turn; it does not start implementation."
+            match basis.language {
+                Language::En => {
+                    "You are planning a change for user approval. Inspect and discuss only. Workspace mutation, Shell, subagents and autonomous workflows are unavailable. Ask focused questions when needed. When ready, call SubmitPlan once with concrete ordered steps and material risks. Submission ends this planning Turn; it does not start implementation."
+                }
+                Language::ZhCn => {
+                    "你正在规划变更，供用户批准。仅检查和讨论；不能修改工作区、使用 Shell、子代理或自主工作流。需要时提出聚焦的问题。准备好后调用一次 SubmitPlan，列出具体有序步骤及重大风险。提交会结束此规划轮次，不会开始实现。"
+                }
+                Language::ZhTw => {
+                    "你正在規劃變更，供使用者批准。僅檢查和討論；不能修改工作區、使用 Shell、子代理或自主工作流程。需要時提出聚焦的問題。準備好後呼叫一次 SubmitPlan，列出具體有序步驟及重大風險。提交會結束此規劃回合，不會開始實作。"
+                }
+            }
         } else {
-            "Execute the frozen user-approved Plan in the opening message. Use update_plan to report every step with the exact IDs, at most one in progress. Mark completed only with evidence. Report interruptions truthfully. Use cancel_plan only when the user asks to abandon execution. Model-reported completion takes effect only after this execution ends successfully."
+            match basis.language {
+                Language::En => {
+                    "Execute the frozen user-approved Plan in the opening message. Use update_plan to report every step with the exact IDs, at most one in progress. Mark completed only with evidence. Report interruptions truthfully. Use cancel_plan only when the user asks to abandon execution. Model-reported completion takes effect only after this execution ends successfully."
+                }
+                Language::ZhCn => {
+                    "执行开头消息中已冻结且经用户批准的计划。使用 update_plan 按精确 ID 报告每一步，最多一步处于进行中。只有证据充分才能标记完成；如实报告中断。仅在用户要求放弃执行时使用 cancel_plan。模型报告的完成仅在此次执行成功结束后生效。"
+                }
+                Language::ZhTw => {
+                    "執行開頭訊息中已凍結且經使用者批准的計劃。使用 update_plan 按精確 ID 回報每一步，最多一步處於進行中。只有證據充分才能標記完成；如實回報中斷。僅在使用者要求放棄執行時使用 cancel_plan。模型回報的完成僅在此次執行成功結束後生效。"
+                }
+            }
         };
         let prompt = basis.behavior.get_or_insert_with(|| SystemPrompt {
             text: String::new(),
@@ -441,9 +464,11 @@ impl Owner {
                 .await
                 .map_err(reason)?;
             if let Some(proposal) = snapshot.proposal {
-                prompt
-                    .text
-                    .push_str("\nCurrent Plan proposal for review and revision:\n");
+                prompt.text.push_str(match basis.language {
+                    Language::En => "\nCurrent Plan proposal for review and revision:\n",
+                    Language::ZhCn => "\n当前待审阅和修订的计划提案：\n",
+                    Language::ZhTw => "\n目前待審閱和修訂的計劃提案：\n",
+                });
                 prompt
                     .text
                     .push_str(&serde_json::to_string(&proposal).map_err(reason)?);

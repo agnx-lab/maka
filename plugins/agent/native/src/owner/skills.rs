@@ -144,7 +144,9 @@ impl Owner {
                 .map(|control| control.epoch),
             None => None,
         };
+        // This read-only basis selects tool names; it never renders or admits model work.
         let basis = MessageBasis {
+            language: Language::En,
             compaction_prompt: None,
             graph,
             collaboration_mode: session.configuration.collaboration_mode,
@@ -205,6 +207,7 @@ impl Owner {
     pub(super) async fn prepare_skills(
         &self,
         mut message: MessageInput,
+        language: Language,
         workspace: Option<crate::contract::Workspace>,
         parent: &Scope,
         tools: Vec<String>,
@@ -222,7 +225,7 @@ impl Owner {
                 preferences: &preferences,
                 host: &host,
             };
-            return match catalog.prepare_invocation(&message.text, &[]) {
+            return match catalog.prepare_invocation(&message.text, &[], language) {
                 maka_skills::PreparedInvocation::Blocked(invocation) => {
                     reject(SkillInputRejection::SkillsUnavailable, Some(invocation))
                 }
@@ -239,6 +242,7 @@ impl Owner {
             workspace,
             tools: tools.clone(),
             input: Prepare {
+                language,
                 message: message.text.clone(),
                 load_tool: library
                     .load

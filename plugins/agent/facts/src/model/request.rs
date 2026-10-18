@@ -109,6 +109,7 @@ pub struct Provider {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
+    pub language: crate::language::Language,
     pub provider: Provider,
     pub prompt: Vec<Message>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

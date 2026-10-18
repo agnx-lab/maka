@@ -28,6 +28,7 @@ use crate::tools::ToolRequest;
 use contract::{Task, TaskStatus};
 use futures_util::FutureExt;
 use maka_agent_facts::event::Invocation;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::tool_call::ToolRejection;
 use maka_agent_facts::tools::PreparationFuture;
 use maka_agent_facts::tools::PreparedEffect;
@@ -258,7 +259,7 @@ pub(super) fn prepare(
         vec![ToolRegistration {
         definition: ToolDefinition {
             provider: None, name: NAME.into(),
-            description: "Coordinate work using the explicitly selected Agent services. List workers and sessions before routing. Tools lists the worker's installed tool names. Presets lists saved subagent configurations; route_preset freezes that preset's worker, model, thinking level and restricted tools into a new session. Later preset edits do not change accepted tasks. Route and route_preset accept dependencies: existing taskIds that must complete successfully before this task starts. Their complete final answers are frozen into its input. Deferred tasks advance automatically; finish your coordinator response and await notifications instead of polling. Failed or shared dependencies reject downstream work; route replacement work explicitly. cancel_pending can cancel a deferred route only before its input is resolved; already_resolved is not a confirmed stop. Use control stop for admitted work. A new target may also explicitly narrow tools (null uses installed tools; [] disables all tools). Restricted sessions cannot use external executors. A new target or preset may select isolatedWorkspace to create a separate Git worktree from a clean published repository. The source stays unchanged. After completion, control snapshot_patch freezes the original task result as an immutable patch; use read_patch with that controlId and the exact next offset to read every page. A Busy result requires a new explicit snapshot control after cleanup; never claim a patch was applied to the source. Executors lists a worker’s explicitly configured service backends; select either model/thinkingLevel or executor/settings when routing, never both. Executor service routing transfers the original user attachments and uses its own model settings; it does not use Host model credentials. Executor tasks cannot resume as native model invocations. Directories reads that worker’s published choices; pass complete selections to a new target. Route targets an existing session or creates a new one, transfers the original user attachments, then sends the original text and your note. Creation/upload preparations are not worker execution. Sessions browses the live catalog in ID order, returning display excerpts and an after cursor; pass that cursor unchanged to continue. Changes before the cursor require a fresh browse. Route preserves the original user request and adds your note. Admission is not completion. Inspect the returned taskId after uncertain replies; advance only resumes that same frozen dispatch and never redirects it. Wait observes an admitted task until it completes, needs input, pauses, or becomes unavailable; use it to receive the result during this conversation. Inspect returns bounded original answer pages; continue with its exact cursor. Control freezes stop/resume on that task's observed work; shared delivery cannot control the whole Run. Use controls and inspect_control after a missing reply, or advance_control for the same original operation. A requested stop is not confirmed termination. Preparation receipts stay with the original task. Unknown or an original resource capture requirement never authorizes a new route or recapture.".into(),
+            description: "Coordinate work using the explicitly selected Agent services. List workers and sessions before routing. Tools lists the worker's installed tool names. Presets lists saved configurations; route_preset freezes the selected worker, model, thinking level and tool restrictions into a new session. Route and route_preset accept dependencies: existing taskIds that must complete successfully before this task starts. Their complete final answers are frozen into its input. Deferred tasks advance automatically; finish your coordinator response and await notifications instead of polling. Failed or shared dependencies reject downstream work; route replacement work explicitly. cancel_pending can cancel a deferred route only before its input is resolved; already_resolved is not a confirmed stop. Use control stop for admitted work. A new target may also explicitly narrow tools (null uses installed tools; [] disables all tools). Restricted sessions cannot use external executors. A new target or preset may select isolatedWorkspace to create a separate Git worktree from a clean published repository. The source stays unchanged. After completion, control snapshot_patch freezes the original task result as an immutable patch; use read_patch with that controlId and the exact next offset to read every page. A Busy result requires a new explicit snapshot control after cleanup; never claim a patch was applied to the source. Executors lists a worker’s explicitly configured service backends; select either model/thinkingLevel or executor/settings when routing, never both. Executor routing uses its own model settings, not Host model credentials. Executor tasks cannot resume as native model invocations. Directories reads that worker’s published choices; pass complete selections to a new target. Route sends the original request, attachments and your note to an existing or new session. Creation/upload preparation is not worker execution; admission is not completion. Sessions browses the live catalog in ID order, returning display excerpts and an after cursor; pass that cursor unchanged to continue. Changes before the cursor require a fresh browse. Inspect the returned taskId after uncertain replies; advance only resumes that same frozen dispatch and never redirects it. Wait observes an admitted task until it completes, needs input, pauses, or becomes unavailable; use it to receive the result during this conversation. Inspect returns bounded original answer pages; continue with its exact cursor. Control freezes stop/resume on that task's observed work; shared delivery cannot control the whole Run. Use controls and inspect_control after a missing reply, or advance_control for the same original operation. A requested stop is not confirmed termination. Preparation receipts stay with the original task. Unknown or an original resource capture requirement never authorizes a new route or recapture.".into(),
             input_schema: schemars::schema_for!(ToolRequest<Input>).into(), output_schema: None, freeform: None,
         },
         nesting: ToolNesting::DirectOnly, semantics: ToolSemantics::ExclusiveStep,
@@ -364,6 +365,16 @@ impl ToolPreparer for Tool {
     }
 }
 impl Hub {
+    async fn source_language(&self, invocation: &Invocation) -> Result<Language, String> {
+        self.agent
+            .0
+            .store
+            .invocation_configuration(invocation)
+            .await
+            .map_err(|_| "workhub_source_unavailable")?
+            .map(|configuration| configuration.language)
+            .ok_or_else(|| "workhub_source_unavailable".into())
+    }
     async fn coordinator_source(
         &self,
         invocation: &Invocation,
@@ -703,6 +714,7 @@ impl Hub {
             .and_then(Option::as_ref)
             .ok_or("workhub_worker_unavailable")?;
         let original = self.coordinator_source(&context.invocation).await?;
+        let language = self.source_language(&context.invocation).await?;
         let maka_agent_facts::input::InvocationInput::Message {
             content,
             source_messages,
@@ -756,9 +768,19 @@ impl Hub {
             128,
         );
         let message = if graph.is_some() {
-            format!("Task:\n{note}")
+            match language {
+                Language::En => format!("Task:\n{note}"),
+                Language::ZhCn => format!("任务：\n{note}"),
+                Language::ZhTw => format!("任務：\n{note}"),
+            }
         } else {
-            format!("Original user request:\n{original}\n\nCoordinator instructions:\n{note}")
+            match language {
+                Language::En => format!(
+                    "Original user request:\n{original}\n\nCoordinator instructions:\n{note}"
+                ),
+                Language::ZhCn => format!("原始用户请求：\n{original}\n\n协调者指令：\n{note}"),
+                Language::ZhTw => format!("原始使用者請求：\n{original}\n\n協調者指令：\n{note}"),
+            }
         };
         input["message"] = serde_json::json!(message);
         Ok(Some((

@@ -22,6 +22,7 @@ use crate::RunInput;
 use maka_agent_facts::context::{
     ContextBucket, ContextCounts, ModelPurpose, PreparedContextBreakdown,
 };
+use maka_agent_facts::language::Language;
 use maka_agent_facts::model::ToolInput;
 use maka_model::prompt::{AssistantPart, ContentPart, Message, ToolOutput};
 
@@ -186,7 +187,7 @@ pub(super) fn needs_compaction<W>(input: &RunInput<W>, prompt: &[Message]) -> bo
 /// Keep complete recent turns when possible. A single enormous turn becomes a
 /// labelled head/tail excerpt, not an invalid partial tool-call/result sequence.
 /// This is a summary-only rendering; the exact request digest records this input.
-pub(super) fn fit_summary(prompt: &[Message], tokens: u64) -> Vec<Message> {
+pub(super) fn fit_summary(prompt: &[Message], tokens: u64, language: Language) -> Vec<Message> {
     if estimate(prompt) <= tokens {
         return prompt.to_vec();
     }
@@ -200,14 +201,24 @@ pub(super) fn fit_summary(prompt: &[Message], tokens: u64) -> Vec<Message> {
     let (system, prompt) = prompt.split_at(system_end);
     let tokens = tokens.saturating_sub(estimate(system));
     let bytes = usize::try_from(tokens.saturating_mul(3)).unwrap_or(usize::MAX);
-    const NOTICE: &str = "Conversation excerpts for summarization: some older text is omitted to fit this model. The complete original history remains stored locally. Preserve known goals and recent progress; do not infer facts from omitted text.\n\n";
-    let available = bytes.saturating_sub(NOTICE.len() + 100);
+    let notice = match language {
+        Language::En => {
+            "Conversation excerpts for summarization: some older text is omitted to fit this model. The complete original history remains stored locally. Preserve known goals and recent progress; do not infer facts from omitted text.\n\n"
+        }
+        Language::ZhCn => {
+            "用于总结的对话节选：为适应模型，已省略部分较早文本，完整历史仍保存在本地。保留已知目标和近期进展，不得从省略内容推测事实。\n\n"
+        }
+        Language::ZhTw => {
+            "用於總結的對話節錄：為符合模型容量，已省略部分較早文字，完整歷史仍保存在本機。保留已知目標和近期進展，不得從省略內容推測事實。\n\n"
+        }
+    };
+    let available = bytes.saturating_sub(notice.len() + 100);
     // Preserve the original task or previous checkpoint as well as the recent tail.
     let head = prompt
         .first()
         .map(|message| serde_json::to_string(message).expect("model prompt"))
         .unwrap_or_default();
-    let head = excerpt(&head, available / 4);
+    let head = excerpt(&head, available / 4, language);
     let remaining = available.saturating_sub(head.len() + 32);
     let mut starts = vec![0];
     for (index, message) in prompt.iter().enumerate().skip(1) {
@@ -230,27 +241,41 @@ pub(super) fn fit_summary(prompt: &[Message], tokens: u64) -> Vec<Message> {
         first = *starts.iter().rev().nth(1).unwrap_or(&0);
     }
     let tail = serde_json::to_string(&prompt[first..]).expect("model prompt");
+    let earlier = match language {
+        Language::En => "Earlier task or summary:",
+        Language::ZhCn => "早期任务或摘要：",
+        Language::ZhTw => "早期任務或摘要：",
+    };
+    let recent = match language {
+        Language::En => "Recent conversation:",
+        Language::ZhCn => "近期对话：",
+        Language::ZhTw => "近期對話：",
+    };
     let text = format!(
-        "{NOTICE}Earlier task or summary:\n{head}\n\nRecent conversation:\n{}",
-        excerpt(&tail, remaining)
+        "{notice}{earlier}\n{head}\n\n{recent}\n{}",
+        excerpt(&tail, remaining, language)
     );
     let mut fitted = system.to_vec();
     fitted.push(Message::user(text));
     fitted
 }
 
-fn excerpt(text: &str, bytes: usize) -> String {
+fn excerpt(text: &str, bytes: usize, language: Language) -> String {
     if text.len() <= bytes {
         return text.into();
     }
-    const GAP: &str = "\n[… omitted from summary input …]\n";
-    if bytes < GAP.len() {
+    let gap = match language {
+        Language::En => "\n[… omitted from summary input …]\n",
+        Language::ZhCn => "\n[… 已从总结输入中省略 …]\n",
+        Language::ZhTw => "\n[… 已從總結輸入中省略 …]\n",
+    };
+    if bytes < gap.len() {
         return String::new();
     }
-    let remaining = bytes - GAP.len();
+    let remaining = bytes - gap.len();
     let start = text.floor_char_boundary(remaining / 2);
     let end = text.ceil_char_boundary(text.len() - (remaining - remaining / 2));
-    format!("{}{GAP}{}", &text[..start], &text[end..])
+    format!("{}{gap}{}", &text[..start], &text[end..])
 }
 
 /// The final request owns its output reserve, after all prompt/tool projections.

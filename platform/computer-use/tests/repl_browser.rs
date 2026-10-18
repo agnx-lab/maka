@@ -17,8 +17,8 @@
  * under the License.
  */
 
-use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
+use maka_agent_facts::{language::Language, tools::ToolExecutor};
 use maka_capabilities::computer::BrowserConnection;
 use maka_computer_use::{Driver, Session, facade};
 use maka_js_runtime::{CellContext, CellLimits, CellOutput, CellResult, CellStore, repl::Repl};
@@ -31,7 +31,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-struct Bridge(Arc<Mutex<Session>>, &'static str);
+struct Bridge(Arc<Mutex<Session>>, &'static str, Language);
 impl ToolExecutor for Bridge {
     fn names(&self) -> Vec<String> {
         vec!["cua".into()]
@@ -39,11 +39,17 @@ impl ToolExecutor for Bridge {
     fn invoke(&self, _: String, input: Value, cancellation: CancellationToken) -> ToolFuture {
         let session = self.0.clone();
         let id = self.1;
+        let language = self.2;
         Box::pin(async move {
             session
                 .lock()
                 .await
-                .invoke(serde_json::from_value(input).unwrap(), id, &cancellation)
+                .invoke(
+                    serde_json::from_value(input).unwrap(),
+                    id,
+                    &cancellation,
+                    language,
+                )
                 .await
         })
     }
@@ -101,6 +107,7 @@ async fn native_form_retains_exact_ax_elements_and_verifies_submission() {
             serde_json::from_value(json!({"method":"listWindows","options":{}})).unwrap(),
             "browser-fixture",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await
         .unwrap();
@@ -110,7 +117,11 @@ async fn native_form_retains_exact_ax_elements_and_verifies_submission() {
         .iter()
         .find(|window| window["id"] == window_id)
         .unwrap();
-    let bridge = Arc::new(Bridge(Arc::new(Mutex::new(native)), "browser-fixture"));
+    let bridge = Arc::new(Bridge(
+        Arc::new(Mutex::new(native)),
+        "browser-fixture",
+        Language::En,
+    ));
     let clipboard = clipboard_snapshot();
     let repl = Repl::new(
         facade(),
@@ -380,6 +391,7 @@ async fn native_observation_recovers_after_busy_and_preserves_external_edits() {
     let bridge = Arc::new(Bridge(
         Arc::new(Mutex::new(Session::new(driver.clone()))),
         "browser-fixture",
+        Language::En,
     ));
     let repl = Repl::new(
         facade(),
@@ -487,10 +499,12 @@ async fn native_cursors_are_visible_independent_and_retire_without_moving_system
     let a = Arc::new(Bridge(
         Arc::new(Mutex::new(Session::new(driver.clone()))),
         "cursor-a",
+        Language::En,
     ));
     let b = Arc::new(Bridge(
         Arc::new(Mutex::new(Session::new(driver.clone()))),
         "cursor-b",
+        Language::En,
     ));
     let first = Repl::new(facade(), CellLimits::default());
     let second = Repl::new(facade(), CellLimits::default());
@@ -522,6 +536,7 @@ async fn native_cursors_are_visible_independent_and_retire_without_moving_system
             json!({}),
             "cursor-inspection",
             &CancellationToken::new(),
+            Language::En,
         )
         .await
         .unwrap();
@@ -543,6 +558,7 @@ async fn native_cursors_are_visible_independent_and_retire_without_moving_system
             }),
             "cursor-inspection",
             &CancellationToken::new(),
+            Language::En,
         )
         .await
         .unwrap();
@@ -829,13 +845,16 @@ async fn browser_form_uses_independent_repl_and_rejects_stale_document_and_tab()
     let driver = Arc::new(Mutex::new(Driver::default()));
     let mut native = Session::new(driver.clone());
     native
-        .configure_browsers(vec![BrowserConnection {
-            id: "fixture".into(),
-            endpoint: format!("http://127.0.0.1:{}", url.port().unwrap()),
-        }])
+        .configure_browsers(
+            vec![BrowserConnection {
+                id: "fixture".into(),
+                endpoint: format!("http://127.0.0.1:{}", url.port().unwrap()),
+            }],
+            maka_agent_facts::language::Language::En,
+        )
         .unwrap();
     let session = Arc::new(Mutex::new(native));
-    let bridge = Arc::new(Bridge(session.clone(), "browser-fixture"));
+    let bridge = Arc::new(Bridge(session.clone(), "browser-fixture", Language::En));
     let repl = Repl::new(
         facade(),
         CellLimits {
@@ -851,6 +870,27 @@ async fn browser_form_uses_independent_repl_and_rejects_stale_document_and_tab()
     )
     .await;
     assert!(ok, "{}", texts(&output));
+    // A fresh AX observation deliberately has no screenshot mapping. Changing
+    // the evaluation's captured language must change recovery instructions,
+    // while the same tab's native document content remains untouched.
+    for (language, recovery) in [
+        (Language::En, "getScreenshot before coordinate input"),
+        (Language::ZhCn, "按坐标输入前"),
+        (Language::ZhTw, "按座標輸入前"),
+    ] {
+        let localized = Arc::new(Bridge(session.clone(), "browser-fixture", language));
+        let (ok, output) = evaluate(&repl, localized,
+            "await tab.getAXState({disableDiffing:true}); try { await tab.click([0,0]); throw Error('input unexpectedly dispatched'); } catch (error) { if (!String(error).includes('capture_required')) throw error; nodeRepl.write(String(error)); }".into()).await;
+        let output = texts(&output);
+        assert!(
+            ok && output.contains("capture_required") && output.contains(recovery),
+            "{output}"
+        );
+        assert!(
+            output.contains("Name") && output.contains("Maka Cua fixture"),
+            "{output}"
+        );
+    }
     let mut state = browser_cursor_scenario(
         driver.clone(),
         format!("http://127.0.0.1:{}", url.port().unwrap()),
@@ -1136,6 +1176,20 @@ async fn browser_form_uses_independent_repl_and_rejects_stale_document_and_tab()
     )
     .await;
     assert!(ok);
+    for (language, recovery) in [
+        (Language::En, "bind it again"),
+        (Language::ZhCn, "重新绑定标签页"),
+        (Language::ZhTw, "重新綁定分頁"),
+    ] {
+        let localized = Arc::new(Bridge(session.clone(), "browser-fixture", language));
+        let (ok, output) = evaluate(&repl, localized,
+            "try { await tab.getAXState(); throw Error('closed tab was rebound'); } catch (error) { if (!String(error).includes('stale_tab')) throw error; nodeRepl.write(String(error)); }".into()).await;
+        let output = texts(&output);
+        assert!(
+            ok && output.contains("stale_tab") && output.contains(recovery),
+            "{output}"
+        );
+    }
     let (ok, _) = evaluate(&repl, bridge, "await tab.getAXState();".into()).await;
     assert!(!ok, "closed tab was rebound");
     repl.close().await.unwrap();
@@ -1156,12 +1210,19 @@ async fn browser_cursor_scenario(
 ) -> String {
     let mut native = Session::new(driver);
     native
-        .configure_browsers(vec![BrowserConnection {
-            id: "fixture".into(),
-            endpoint,
-        }])
+        .configure_browsers(
+            vec![BrowserConnection {
+                id: "fixture".into(),
+                endpoint,
+            }],
+            maka_agent_facts::language::Language::En,
+        )
         .unwrap();
-    let b = Arc::new(Bridge(Arc::new(Mutex::new(native)), "cursor-browser-b"));
+    let b = Arc::new(Bridge(
+        Arc::new(Mutex::new(native)),
+        "cursor-browser-b",
+        Language::En,
+    ));
     let second = Repl::new(facade(), CellLimits::default());
     let (ok,output)=evaluate(first,a.clone(),"await cua.cursor.configure({label:'Maka A',color:'blue',reducedMotion:true}); await tab.getScreenshot(); nodeRepl.write(await tab.moveCursor([90,100]));".into()).await;
     assert!(

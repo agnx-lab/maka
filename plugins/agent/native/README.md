@@ -25,6 +25,10 @@ Exposes Agent execution as native application services. `provide` registers fact
 
 The service owns its activation and delegates runs to `maka-agent-engine`. Session history, controls and tool calls use admitted scopes and original operation receipts. Files, processes, skills and other services are explicit dependencies selected by composition.
 
+New instruction captures select English, Simplified Chinese or Traditional Chinese from the saved Root language preference, then the configured locale, then the native environment. Explicit Auto uses the native environment. One policy snapshot supplies the language for builtin instructions, skills, default summaries and runtime guidance; tool schemas stay English and user, custom and external content stays unchanged.
+
+Queued work, retries, resumed invocations and approved Goal/schedule chains retain their accepted language. New messages, notifications and independently admitted title/recap requests capture the current preference. Titles and recaps still request output in the user's language. Compaction preserves a reused Main prefix and localizes only newly rendered framing. Persisted language defaults to English and omits that field for English records; Chinese records use the full `zh-CN` or `zh-TW` tag.
+
 Historical answers and thinking retain each step's requested model and any provider-reported model. History and source excerpts preserve this evidence across model changes, copies and restarts. The UI labels an unreported model as requested and imported model metadata as imported; executor output carries no inferred model identity.
 
 The [independent public-client acceptance](../../../products/maka/cli/src/acp/tests/public_client.rs) runs the real Agent in a public Host with a controlled HTTP model, without an ACP, TUI or GPUI adapter. It verifies fenced history pagination, watch continuation, a pending question across complete client detachment and reconnect, and response followed by an exact invocation stop. The existing fixture supplies the original endpoint and epoch; reconnect does not resend the message. See the [client contract entrypoint](../api/README.md) for integration.

@@ -189,7 +189,12 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
         )
         .await
         .unwrap();
-    let history = maka_agent_engine::project_model_history(&prefix, "imported").unwrap();
+    let history = maka_agent_engine::project_model_history(
+        &prefix,
+        "imported",
+        maka_agent_facts::language::Language::En,
+    )
+    .unwrap();
     assert_eq!(history.len(), 2);
     assert!(
         serde_json::to_string(&history)
@@ -317,9 +322,13 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
         .await
         .unwrap();
     assert_eq!(
-        maka_agent_engine::project_model_history(&prefix, "imported")
-            .unwrap()
-            .len(),
+        maka_agent_engine::project_model_history(
+            &prefix,
+            "imported",
+            maka_agent_facts::language::Language::En
+        )
+        .unwrap()
+        .len(),
         3
     );
     assert!(!prefix.events.iter().any(|event| matches!(
@@ -452,9 +461,13 @@ async fn imported_conversation_compacts_before_its_first_native_turn() {
         .await
         .unwrap();
     assert_eq!(
-        maka_agent_engine::project_model_history(&prefix, "session")
-            .unwrap()
-            .len(),
+        maka_agent_engine::project_model_history(
+            &prefix,
+            "session",
+            maka_agent_facts::language::Language::En
+        )
+        .unwrap()
+        .len(),
         2
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

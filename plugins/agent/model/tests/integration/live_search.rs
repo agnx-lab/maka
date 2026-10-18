@@ -86,6 +86,7 @@ async fn sglang_protocols_preserve_reasoning_tools_and_replay() {
             let mut stream = executor
                 .stream(
                     ModelRequest {
+                        language: maka_agent_facts::language::Language::En,
                         provider: provider.clone(),
                         prompt: prompt.clone(),
                         tools: tools.clone(),
@@ -227,6 +228,7 @@ async fn codex_search_preserves_real_provider_calls_and_citations() {
         let executor = ModelExecutor::new(Duration::from_secs(60)).unwrap();
         let lane = Conversation::default();
         let request = ModelRequest {
+            language: maka_agent_facts::language::Language::En,
             provider: ProviderConfig {
                 adapter: Some(maka_providers::codex::ADAPTER.into()),
                 capabilities: Default::default(),

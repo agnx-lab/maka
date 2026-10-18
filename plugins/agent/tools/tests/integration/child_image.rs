@@ -141,6 +141,7 @@ async fn nested_image_is_committed_before_js_and_explicit_output_projects_it() {
     );
     support::accepted(&log, &invocation, std::slice::from_ref(&call)).await;
     let run = RunTools::new(
+        maka_agent_facts::language::Language::En,
         log.clone(),
         invocation.clone(),
         catalog,

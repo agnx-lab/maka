@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 
 /// Protocol input only. Credential resolution and history ownership remain with Host.
 pub struct Request<'a> {
+    pub language: maka_agent_facts::language::Language,
     pub model: &'a str,
     pub prompt: &'a [Message],
     pub tools: &'a [ToolDefinition],
@@ -326,10 +327,21 @@ impl Request<'_> {
                                 input.push(Input::Message {
                                     role: "user",
                                     content: vec![Content::InputText {
-                                        text: format!(
-                                            "[Notification from exec {}]\n{text}",
-                                            result.tool_call_id
-                                        ),
+                                        text: {
+                                            use maka_agent_facts::language::Language;
+                                            let id = &result.tool_call_id;
+                                            match self.language {
+                                                Language::En => {
+                                                    format!("[Notification from exec {id}]\n{text}")
+                                                }
+                                                Language::ZhCn => {
+                                                    format!("[来自 exec {id} 的通知]\n{text}")
+                                                }
+                                                Language::ZhTw => {
+                                                    format!("[來自 exec {id} 的通知]\n{text}")
+                                                }
+                                            }
+                                        },
                                     }],
                                 });
                             }
@@ -463,5 +475,40 @@ impl Request<'_> {
             object.insert("store".into(), json!(false));
         }
         Ok(body)
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use maka_agent_facts::language::Language;
+
+    #[test]
+    fn notification_adaptation_keeps_worker_text_and_call_identity() {
+        let messages = [Message::notification("task-原文", "Result: unchanged 結果")];
+        for (language, expected) in [
+            (
+                Language::ZhCn,
+                "[来自 exec task-原文 的通知]\nResult: unchanged 結果",
+            ),
+            (
+                Language::ZhTw,
+                "[來自 exec task-原文 的通知]\nResult: unchanged 結果",
+            ),
+        ] {
+            let encoded = Request {
+                language,
+                model: "fixture",
+                prompt: &messages,
+                tools: &[],
+                options: &json!({}),
+                max_output_tokens: None,
+                plaintext: None,
+            }
+            .encode()
+            .unwrap();
+            assert_eq!(encoded["input"][0]["content"][0]["text"], expected);
+            assert_eq!(encoded.get("language"), None);
+        }
     }
 }

@@ -21,8 +21,8 @@ use crate::{Inner, RunContext, RunError, context_input, model_attempt};
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::context::CompactOutcome;
 use maka_agent_facts::context::ContextCheckpoint;
-use maka_agent_facts::context::DEFAULT_COMPACTION_PROMPT;
 use maka_agent_facts::context::TextSummary;
+use maka_agent_facts::context::default_compaction_prompt;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::RuntimeEvent;
 use std::sync::Arc;
@@ -197,7 +197,7 @@ impl Job {
                 .configuration
                 .compaction_prompt
                 .clone()
-                .unwrap_or_else(|| DEFAULT_COMPACTION_PROMPT.into()),
+                .unwrap_or_else(|| default_compaction_prompt(input.configuration.language).into()),
         );
         let mut input_budget = context_input::summary_budget(&input)
             .saturating_sub(context_input::estimate(std::slice::from_ref(&instruction)))
@@ -205,7 +205,7 @@ impl Job {
         let mut overflowed = false;
         loop {
             let mut request = if overflowed {
-                context_input::fit_summary(&prompt, input_budget)
+                context_input::fit_summary(&prompt, input_budget, input.configuration.language)
             } else {
                 prompt.clone()
             };

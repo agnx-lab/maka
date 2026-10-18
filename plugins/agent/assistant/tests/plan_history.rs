@@ -36,6 +36,7 @@ async fn advance(repository: &Repository, state: &mut Snapshot, id: &str, comman
 fn approval(state: &Snapshot) -> Command {
     let p = state.proposal.as_ref().unwrap();
     Command::Approve {
+        language: maka_agent_facts::language::Language::En,
         grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
         proposal_id: p.id.clone(),
         proposal_revision: p.revision,
@@ -102,6 +103,7 @@ async fn revisions_replanning_and_admission_recovery_do_not_reuse_stale_authorit
         &repository,
         &state,
         Command::Approve {
+            language: maka_agent_facts::language::Language::En,
             grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
             proposal_id: old.id,
             proposal_revision: old.revision,
@@ -139,6 +141,7 @@ async fn revisions_replanning_and_admission_recovery_do_not_reuse_stale_authorit
     // Pending admission cannot be replanned or assigned a new request.
     for command in [
         Command::Resume {
+            language: maka_agent_facts::language::Language::En,
             grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
             execution_id: id.clone(),
         },
@@ -188,6 +191,7 @@ async fn revisions_replanning_and_admission_recovery_do_not_reuse_stale_authorit
         &repository,
         &state,
         Command::Resume {
+            language: maka_agent_facts::language::Language::En,
             grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
             execution_id: id.clone(),
         },
@@ -259,6 +263,7 @@ async fn revisions_replanning_and_admission_recovery_do_not_reuse_stale_authorit
         &mut state,
         "resume",
         Command::Resume {
+            language: maka_agent_facts::language::Language::En,
             grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
             execution_id: id.clone(),
         },

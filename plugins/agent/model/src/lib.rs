@@ -74,6 +74,7 @@ pub struct ProviderConfig {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelRequest {
+    pub language: maka_agent_facts::language::Language,
     pub provider: ProviderConfig,
     pub prompt: Vec<prompt::Message>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -116,6 +117,7 @@ impl ModelRequest {
             }
         };
         Ok(Request {
+            language: self.language,
             provider: Provider {
                 kind: self.provider.kind,
                 model: self.provider.model,

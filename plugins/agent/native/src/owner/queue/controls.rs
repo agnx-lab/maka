@@ -22,7 +22,8 @@ use maka_event_log::message_queue::{MessageQueue, QueueCommand, QueueEdit};
 
 impl MessageBasis {
     fn same_execution(&self, other: &Self) -> bool {
-        self.compaction_prompt == other.compaction_prompt
+        self.language == other.language
+            && self.compaction_prompt == other.compaction_prompt
             && self.graph == other.graph
             && self.collaboration_mode == other.collaboration_mode
             && self.tool_discovery == other.tool_discovery
@@ -188,6 +189,7 @@ impl Owner {
                 let (message, required_tools) = match self
                     .prepare_skills(
                         unprepared.clone(),
+                        basis.language,
                         Some(
                             self.session(&input.session_id)
                                 .await?

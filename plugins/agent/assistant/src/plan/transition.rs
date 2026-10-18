@@ -18,6 +18,7 @@
  */
 
 use super::*;
+use maka_agent_facts::language::Language;
 
 impl<A: Clone> Snapshot<A> {
     pub(super) fn apply(
@@ -86,6 +87,7 @@ impl<A: Clone> Snapshot<A> {
                 };
             }
             Command::Approve {
+                language,
                 proposal_id,
                 proposal_revision,
                 behavior,
@@ -138,11 +140,12 @@ impl<A: Clone> Snapshot<A> {
                     cancellation: None,
                     updated_at: now,
                 };
-                execution.freeze_request()?;
+                execution.freeze_request(*language)?;
                 proposal.status = ProposalStatus::Approved;
                 self.execution = Some(execution);
             }
             Command::Resume {
+                language,
                 execution_id,
                 grant,
             } => {
@@ -157,7 +160,7 @@ impl<A: Clone> Snapshot<A> {
                 }
                 let execution = self.execution.as_mut().unwrap();
                 execution.request.operation_id = format!("plan_{operation}");
-                execution.freeze_request()?;
+                execution.freeze_request(*language)?;
                 execution.phase = Phase::AwaitingAdmission;
                 execution.grant = grant.clone();
                 execution.dispatched = false;
@@ -377,17 +380,18 @@ impl<A> Execution<A> {
             _ => Err(Error::Conflict),
         }
     }
-    fn freeze_request(&mut self) -> Result<(), Error> {
+    fn freeze_request(&mut self, language: Language) -> Result<(), Error> {
         // IDs and current progress are durable model input, not UI-only metadata.
-        self.request.content = format!(
-            "Execute the user-approved plan. Report progress using these exact step IDs.\n{}",
-            serde_json::to_string(&serde_json::json!({
-                "executionId": self.id, "proposalId": self.proposal_id,
-                "plan": self.artifact, "progress": self.steps,
-            }))
-            .map_err(invalid)?,
-        )
-        .into();
+        let plan = serde_json::to_string(&serde_json::json!({
+            "executionId": self.id, "proposalId": self.proposal_id,
+            "plan": self.artifact, "progress": self.steps,
+        }))
+        .map_err(invalid)?;
+        self.request.content = match language {
+            Language::En => format!("Execute the user-approved plan. Report progress using these exact step IDs.\n{plan}"),
+            Language::ZhCn => format!("执行用户已批准的计划。使用这些精确的步骤 ID 报告进度。\n{plan}"),
+            Language::ZhTw => format!("執行使用者已批准的計劃。使用這些精確的步驟 ID 回報進度。\n{plan}"),
+        }.into();
         self.request.validate().map_err(invalid)
     }
 }

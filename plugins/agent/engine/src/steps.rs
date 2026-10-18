@@ -41,6 +41,7 @@ pub(super) async fn run(
     let lane = maka_model::Conversation::default();
     let session = inner.session_state(&input.invocation.session_id);
     let mut tools = RunTools::new(
+        input.configuration.language,
         inner.log.clone(),
         input.invocation.clone(),
         catalog,
@@ -204,8 +205,9 @@ pub(super) async fn run(
             let request_tools = tools
                 .capture(&input.configuration.cwd, cancellation.clone())
                 .await?;
-            let unknown_notice =
-                prior_unknown.then(|| model_attempt::prior_unknown_notice(&context));
+            let unknown_notice = prior_unknown.then(|| {
+                model_attempt::prior_unknown_notice(&context, input.configuration.language)
+            });
             if unknown_notice.as_deref() == Some("") {
                 return Err(RunError::ReconciliationRequired(
                     "unknown prior tool is missing from model context".into(),

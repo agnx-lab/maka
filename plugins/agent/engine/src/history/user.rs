@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use super::{images, references};
 use crate::RunError;
 use maka_agent_facts::attachment::AttachmentKind;
@@ -32,6 +34,7 @@ pub(super) fn project<'a>(
     index: usize,
     images: &mut Vec<images::Target<'a>>,
     vision: bool,
+    language: Language,
 ) -> Result<Message, RunError> {
     if vision {
         images.extend(
@@ -46,11 +49,14 @@ pub(super) fn project<'a>(
                 }),
         );
     }
-    let text = references::text(content, resources)?;
+    let text = references::text(content, resources, language)?;
     let text = if steering {
-        format!(
-            "The user sent a message while you were working:\n<user_query>\n{text}\n</user_query>"
-        )
+        let label = match language {
+            Language::En => "The user sent a message while you were working:",
+            Language::ZhCn => "用户在你工作期间发来消息：",
+            Language::ZhTw => "使用者在你工作期間傳來訊息：",
+        };
+        format!("{label}\n<user_query>\n{text}\n</user_query>")
     } else {
         text
     };

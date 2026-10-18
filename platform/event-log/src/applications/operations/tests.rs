@@ -19,6 +19,7 @@
 
 use super::*;
 use crate::applications::tests::{input, store};
+use maka_agent_facts::language::Language;
 use maka_plugin_core::contract::{Interface, Method, MethodMode, Transport};
 use std::collections::BTreeMap;
 
@@ -469,6 +470,7 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
                 reference.clone(),
                 binding.clone(),
                 "recap".into(),
+                Language::En,
                 None
             )
             .await
@@ -500,7 +502,13 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
     ] {
         assert!(
             store
-                .begin_auxiliary_operation_model(changed, binding.clone(), "recap".into(), None)
+                .begin_auxiliary_operation_model(
+                    changed,
+                    binding.clone(),
+                    "recap".into(),
+                    Language::En,
+                    None
+                )
                 .await
                 .is_err()
         );
@@ -514,6 +522,7 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
                     operation: reference.operation,
                     fingerprint: reference.fingerprint.clone(),
                 },
+                Language::En,
                 None
             )
             .await
@@ -521,7 +530,13 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
         "a displayed usage source is not admission evidence"
     );
     let attempt = store
-        .begin_auxiliary_operation_model(reference.clone(), binding.clone(), "recap".into(), None)
+        .begin_auxiliary_operation_model(
+            reference.clone(),
+            binding.clone(),
+            "recap".into(),
+            Language::En,
+            None,
+        )
         .await
         .unwrap();
     assert!(
@@ -530,6 +545,7 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
                 reference.clone(),
                 binding.clone(),
                 "recap".into(),
+                Language::ZhTw,
                 None
             )
             .await
@@ -545,6 +561,7 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
                 reference.clone(),
                 binding.clone(),
                 "recap".into(),
+                Language::En,
                 None
             )
             .await
@@ -563,7 +580,13 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
         .unwrap();
     assert!(
         store
-            .begin_auxiliary_operation_model(reference, binding.clone(), "recap".into(), None)
+            .begin_auxiliary_operation_model(
+                reference,
+                binding.clone(),
+                "recap".into(),
+                Language::En,
+                None
+            )
             .await
             .is_err()
     );
@@ -585,7 +608,7 @@ async fn auxiliary_model_requires_exact_pending_application_operation_and_cannot
         .unwrap();
     assert!(
         store
-            .begin_auxiliary_operation_model(original, binding, "recap".into(), None)
+            .begin_auxiliary_operation_model(original, binding, "recap".into(), Language::En, None)
             .await
             .is_err(),
         "completed operations cannot start auxiliary work"

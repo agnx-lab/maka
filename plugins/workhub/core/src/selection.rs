@@ -30,6 +30,7 @@ use maka_agent_facts::capability::FormValue;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::input::MessageInput;
 use maka_agent_facts::interaction::InteractionOutcome;
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::OfferInteraction;
 use maka_agent_ports::execution::Prompt;
 use maka_capabilities::authorization;
@@ -60,6 +61,7 @@ impl crate::Manager {
         revision: String,
         references: Vec<String>,
         text: String,
+        language: Language,
     ) -> Result<Selection, Error> {
         if !(2..=16).contains(&references.len())
             || references
@@ -104,7 +106,7 @@ impl crate::Manager {
             .collect::<Result<Vec<_>, Error>>()?;
         Ok(Selection {
             operation,
-            content: self.delegation_content(&source, &text).await?,
+            content: self.delegation_content(&source, &text, language).await?,
             source,
             choices,
         })

@@ -25,7 +25,7 @@ pub use breakdown::{ContextBucket, ContextCounts, PreparedContextBreakdown};
 mod checkpoint_mode;
 mod summary;
 pub use checkpoint_mode::CheckpointMode;
-pub use summary::{DEFAULT_COMPACTION_PROMPT, SUMMARY_FORMAT_TEMPLATE};
+pub use summary::{default_compaction_prompt, summary_format_template};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

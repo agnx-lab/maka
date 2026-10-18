@@ -85,6 +85,7 @@ async fn live_luna_subscription_streams_and_confirms_canonical_ws_continuation()
                 append_probe_images(&mut prompt);
             }
             let request = ModelRequest {
+                language: maka_agent_facts::language::Language::En,
                 provider: provider.clone(),
                 prompt: prompt.clone(),
                 tools: vec![],
@@ -160,6 +161,7 @@ async fn live_luna_subscription_http_decodes_the_stream_without_a_content_type_h
         let mut stream = models
             .stream(
                 ModelRequest {
+                    language: maka_agent_facts::language::Language::En,
                     provider: provider(),
                     prompt,
                     tools: vec![],

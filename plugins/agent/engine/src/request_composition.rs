@@ -17,6 +17,8 @@
  * under the License.
  */
 
+use maka_agent_facts::language::Language;
+
 use crate::{RunContext, RunError, RunInput};
 use maka_agent_facts::composition::FrozenComposition;
 use maka_agent_facts::composition::RequestComposition;
@@ -26,7 +28,12 @@ use std::sync::Arc;
 
 pub(super) fn session_context<W>(input: &RunInput<W>) -> Vec<String> {
     vec![format!(
-        "Session context (data):\n{}",
+        "{}\n{}",
+        match input.configuration.language {
+            Language::En => "Session context (data):",
+            Language::ZhCn => "会话上下文（数据）：",
+            Language::ZhTw => "工作階段上下文（資料）：",
+        },
         serde_json::json!({
             "cwd": input.configuration.cwd,
             "sessionId": input.invocation.session_id,

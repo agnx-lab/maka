@@ -35,6 +35,7 @@ async fn wsl_uses_windows_targets_input_cursors_and_session_cleanup() {
                 serde_json::from_value(command).unwrap(),
                 id,
                 &CancellationToken::new(),
+                maka_agent_facts::language::Language::En,
             )
             .await
             .unwrap()
@@ -52,14 +53,30 @@ async fn wsl_uses_windows_targets_input_cursors_and_session_cleanup() {
     let driver = std::sync::Arc::new(tokio::sync::Mutex::new(maka_computer_use::Driver::default()));
     let mut a = Session::new(driver.clone());
     let mut b = Session::new(driver.clone());
-    a.configure(Desktop::Auto, vec![]).unwrap();
-    b.configure(Desktop::Windows, vec![]).unwrap();
+    a.configure(
+        Desktop::Auto,
+        vec![],
+        maka_agent_facts::language::Language::En,
+    )
+    .unwrap();
+    b.configure(
+        Desktop::Windows,
+        vec![],
+        maka_agent_facts::language::Language::En,
+    )
+    .unwrap();
     assert_eq!(a.platform(), "windows");
     assert!(
-        matches!(a.configure(Desktop::Local, vec![]), Err(maka_agent_facts::tools::ToolError::Failed(message)) if message.contains("reset Cua"))
+        matches!(a.configure(Desktop::Local, vec![], maka_agent_facts::language::Language::En), Err(maka_agent_facts::tools::ToolError::Failed(message)) if message.contains("reset Cua"))
     );
     let mut local = Session::new(driver.clone());
-    local.configure(Desktop::Local, vec![]).unwrap();
+    local
+        .configure(
+            Desktop::Local,
+            vec![],
+            maka_agent_facts::language::Language::En,
+        )
+        .unwrap();
     assert_eq!(local.platform(), "linux");
     local.close().await.unwrap();
 
@@ -103,6 +120,7 @@ async fn wsl_uses_windows_targets_input_cursors_and_session_cleanup() {
             .unwrap(),
             "wsl-b",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await;
     assert!(
@@ -190,7 +208,7 @@ async fn closed_or_cancelled_session_cannot_start_native_work() {
     let stop = CancellationToken::new();
     stop.cancel();
     assert!(
-        matches!(run.prepare(&stop).await, Err(maka_agent_facts::tools::ToolError::Failed(message)) if message == "Computer Use preparation cancelled")
+        matches!(run.prepare(&stop, maka_agent_facts::language::Language::En).await, Err(maka_agent_facts::tools::ToolError::Failed(message)) if message == "Computer Use preparation cancelled")
     );
     assert!(
         run.invoke(
@@ -198,7 +216,8 @@ async fn closed_or_cancelled_session_cannot_start_native_work() {
                 options: InventoryOptions::default()
             },
             "cancelled",
-            &stop
+            &stop,
+            maka_agent_facts::language::Language::En
         )
         .await
         .unwrap_err()
@@ -207,7 +226,7 @@ async fn closed_or_cancelled_session_cannot_start_native_work() {
     );
     run.close().await.unwrap();
     assert!(
-        matches!(run.prepare(&CancellationToken::new()).await, Err(maka_agent_facts::tools::ToolError::Failed(message)) if message == "Computer Use Session is closed")
+        matches!(run.prepare(&CancellationToken::new(), maka_agent_facts::language::Language::En).await, Err(maka_agent_facts::tools::ToolError::Failed(message)) if message == "Computer Use Session is closed")
     );
     assert!(
         run.invoke(
@@ -215,7 +234,8 @@ async fn closed_or_cancelled_session_cannot_start_native_work() {
                 options: InventoryOptions::default()
             },
             "closed",
-            &CancellationToken::new()
+            &CancellationToken::new(),
+            maka_agent_facts::language::Language::En
         )
         .await
         .unwrap_err()
@@ -237,6 +257,7 @@ async fn native_application_observation_and_shutdown() {
             },
             "maka-native-smoke",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await;
     let mut other = Session::new(driver.clone());
@@ -247,6 +268,7 @@ async fn native_application_observation_and_shutdown() {
             },
             "maka-native-second",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await
         .unwrap();
@@ -259,6 +281,7 @@ async fn native_application_observation_and_shutdown() {
             },
             "maka-native-second",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await
         .unwrap();
@@ -284,6 +307,7 @@ async fn locked_desktop_refuses_target_binding_before_app_resolution() {
             },
             "locked-fixture",
             &CancellationToken::new(),
+            maka_agent_facts::language::Language::En,
         )
         .await
         .unwrap_err();

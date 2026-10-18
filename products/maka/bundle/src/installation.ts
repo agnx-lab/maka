@@ -66,7 +66,7 @@ export function installation(
     'processes',
     'health',
     'BackgroundTaskHealth',
-    'Check a tracked process returned by Shell and optionally an HTTP(S) endpoint. Process state and endpoint health are independent; a healthy endpoint does not prove listener ownership or browser readiness. Uses HEAD with one GET fallback for 405/501, never follows redirects or reads bodies. Logs are omitted unless include_logs is true. Endpoint access needs its own network permission; elapsed time includes approval.',
+    'Check a Shell process and optionally an HTTP(S) endpoint. Process state and endpoint health are independent; endpoint success does not prove listener ownership or browser readiness. Uses HEAD, falling back to GET for 405/501, without redirects or response bodies. Set include_logs for logs. Endpoint access requires network permission; elapsed time includes approval.',
   );
   add('processes', 'writeStdin', 'ProcessInput', 'Send input to a previously started command.');
   add('processes', 'stop', 'ProcessStop', 'Stop a previously started command.');

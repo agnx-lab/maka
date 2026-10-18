@@ -144,6 +144,7 @@ mod tests {
         snapshot
             .apply(
                 &Command::Approve {
+                    language: maka_agent_facts::language::Language::En,
                     grant: maka_capabilities::authorization::Id(uuid::Uuid::from_u128(1)),
                     proposal_id: snapshot.proposal.as_ref().unwrap().id.clone(),
                     proposal_revision: 1,

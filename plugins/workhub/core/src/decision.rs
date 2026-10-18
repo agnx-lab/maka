@@ -25,6 +25,7 @@ use crate::{
 };
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::input::MessageInput;
+use maka_agent_facts::language::Language;
 use maka_agent_ports::execution::CreateRoot;
 use maka_agent_ports::execution::RootSettings;
 use maka_capabilities::authorization;
@@ -149,6 +150,7 @@ impl crate::Manager {
         source: Invocation,
         input: Decision,
         cancellation: tokio_util::sync::CancellationToken,
+        language: Language,
     ) -> Result<serde_json::Value, Error> {
         maka_agent_ports::execution::Resume {
             operation_id: operation.clone(),
@@ -171,11 +173,18 @@ impl crate::Manager {
                         candidates,
                         text,
                     } => Resolved::Selection(
-                        self.selection(operation.clone(), source, revision, candidates, text)
-                            .await?,
+                        self.selection(
+                            operation.clone(),
+                            source,
+                            revision,
+                            candidates,
+                            text,
+                            language,
+                        )
+                        .await?,
                     ),
                     Decision::Route { target, text } => Resolved::Route(
-                        self.resolve_route(operation.clone(), source, target, text)
+                        self.resolve_route(operation.clone(), source, target, text, language)
                             .await?,
                     ),
                     Decision::Correct {
@@ -192,6 +201,7 @@ impl crate::Manager {
                                     source,
                                     target,
                                     text,
+                                    language,
                                 )
                                 .await?,
                             ),
@@ -282,8 +292,9 @@ impl crate::Manager {
         source: Invocation,
         destination: Destination,
         text: String,
+        language: Language,
     ) -> Result<Route, Error> {
-        let content = self.delegation_content(&source, &text).await?;
+        let content = self.delegation_content(&source, &text, language).await?;
         let (target, authorization) = match destination {
             Destination::Existing {
                 revision,
@@ -350,6 +361,7 @@ impl crate::Manager {
         &self,
         source: &Invocation,
         text: &str,
+        language: Language,
     ) -> Result<MessageInput, Error> {
         if text.trim().is_empty() || text.len() > 48 * 1024 {
             return Err(invalid("Delegation text must contain 1–49152 bytes"));
@@ -364,10 +376,17 @@ impl crate::Manager {
             .ok_or(Error::Conflict)?;
         // Original metadata and attachments come from Host facts, never model arguments.
         // Preparation receipts cannot be asserted by a submitting plugin.
-        let mut content = MessageInput::from(format!(
-            "Original user request:\n{}\n\nDelegation instructions:\n{}",
-            original.text, text,
-        ));
+        let mut content = MessageInput::from(match language {
+            Language::En => format!(
+                "Original user request:\n{}\n\nDelegation instructions:\n{}",
+                original.text, text
+            ),
+            Language::ZhCn => format!("原始用户请求：\n{}\n\n委派指令：\n{}", original.text, text),
+            Language::ZhTw => format!(
+                "原始使用者請求：\n{}\n\n委派指令：\n{}",
+                original.text, text
+            ),
+        });
         content.attachments = original.attachments;
         content.quotes = original.quotes;
         content.directory_references = original.directory_references;

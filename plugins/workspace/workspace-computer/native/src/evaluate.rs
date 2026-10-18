@@ -18,6 +18,7 @@
  */
 
 use super::*;
+use maka_agent_facts::language::Language;
 use maka_agent_facts::{
     artifact::{Artifact, ArtifactKind, ArtifactSource},
     capability::{CallResult, ContentBlock},
@@ -50,7 +51,7 @@ impl Computer {
         if interaction.retiring.is_cancelled() {
             return Err(failed("Computer Session is retiring"));
         }
-        let current = access::current(
+        let (current, language) = access::current(
             self,
             &call,
             if name == "reset" {
@@ -77,7 +78,7 @@ impl Computer {
                 .output(
                     &invocation,
                     vec![CellOutput::Text {
-                        text: "Computer Use REPL reset. Bind targets again.".into(),
+                        text: maka_computer_use::language::reset(language).into(),
                     }],
                     ReplState::Fresh,
                 )
@@ -89,8 +90,9 @@ impl Computer {
             native.configure(
                 self.configuration.desktop,
                 self.configuration.browsers.clone(),
+                language,
             )?;
-            native.prepare(&cancellation).await?;
+            native.prepare(&cancellation, language).await?;
             native.platform()
         };
         let input: api::Evaluate = serde_json::from_value(input).map_err(failed)?;
@@ -109,6 +111,7 @@ impl Computer {
             call: call.clone(),
             native: interaction.native.clone(),
             revision,
+            language,
         });
         let mut changes = self.store.subscribe_catalog_changes();
         let monitor = async {
@@ -134,23 +137,35 @@ impl Computer {
                 cancellation.cancel();
                 let settled = result.await;
                 match settled {
-                    Err(maka_js_runtime::CellAbort::Tool(error)) if !matches!(error, ToolError::Failed(_)) => return Err(partial(error, &context, runtime.is_closed())),
-                    _ => return Err(partial(stopped.err().unwrap_or_else(|| failed("Computer permission monitor closed")), &context, runtime.is_closed())),
+                    Err(maka_js_runtime::CellAbort::Tool(error)) if !matches!(error, ToolError::Failed(_)) => return Err(partial(error, &context, runtime.is_closed(), language)),
+                    _ => return Err(partial(stopped.err().unwrap_or_else(|| failed("Computer permission monitor closed")), &context, runtime.is_closed(), language)),
                 }
             },
         };
         match result {
             Ok(CellResult::Failure { error, .. }) => {
                 return Err(partial(
-                    failed(format!("Cua JavaScript error: {}", error.message)),
+                    failed(match language {
+                        Language::En => format!("Cua JavaScript error: {}", error.message),
+                        Language::ZhCn => format!("Cua JavaScript 错误：{}", error.message),
+                        Language::ZhTw => format!("Cua JavaScript 錯誤：{}", error.message),
+                    }),
                     &context,
                     runtime.is_closed(),
+                    language,
                 ));
             }
             Err(maka_js_runtime::CellAbort::Tool(error)) => {
-                return Err(partial(error, &context, runtime.is_closed()));
+                return Err(partial(error, &context, runtime.is_closed(), language));
             }
-            Err(error) => return Err(partial(failed(error), &context, runtime.is_closed())),
+            Err(error) => {
+                return Err(partial(
+                    failed(error),
+                    &context,
+                    runtime.is_closed(),
+                    language,
+                ));
+            }
             Ok(_) => {}
         }
         self.output(
@@ -199,6 +214,7 @@ impl Computer {
         input: Value,
         native: Arc<tokio::sync::Mutex<maka_computer_use::Session>>,
         revision: u64,
+        language: Language,
         cancellation: CancellationToken,
     ) -> Result<Value, ToolError> {
         let command: maka_computer_use::protocol::Command =
@@ -221,7 +237,9 @@ impl Computer {
         let effect = PreparedEffect::new(move |cancellation| {
             Box::pin(async move {
                 let _device = device;
-                let mut output = native.invoke(command, &session, &cancellation).await?;
+                let mut output = native
+                    .invoke(command, &session, &cancellation, language)
+                    .await?;
                 let content = output
                     .as_object_mut()
                     .and_then(|object| object.remove("image"))
@@ -294,6 +312,7 @@ struct Bridge {
     call: Scope,
     native: Arc<tokio::sync::Mutex<maka_computer_use::Session>>,
     revision: u64,
+    language: Language,
 }
 impl ToolExecutor for Bridge {
     fn names(&self) -> Vec<String> {
@@ -304,17 +323,18 @@ impl ToolExecutor for Bridge {
         let call = self.call.clone();
         let native = self.native.clone();
         let revision = self.revision;
+        let language = self.language;
         Box::pin(async move {
             if name != "cua" {
                 return Err(failed("Computer operation unavailable"));
             }
             owner
-                .operation(call, input, native, revision, cancellation)
+                .operation(call, input, native, revision, language, cancellation)
                 .await
         })
     }
 }
-fn partial(error: ToolError, context: &CellContext, reset: bool) -> ToolError {
+fn partial(error: ToolError, context: &CellContext, reset: bool, language: Language) -> ToolError {
     let mut observations = String::new();
     for output in context.take_output() {
         if let CellOutput::Text { text } = output {
@@ -328,11 +348,11 @@ fn partial(error: ToolError, context: &CellContext, reset: bool) -> ToolError {
     }
     let mut suffix = String::new();
     if !observations.is_empty() {
-        suffix += "\nObservations emitted before failure (actions may already have completed):\n";
+        suffix += maka_computer_use::language::partial_observations(language);
         suffix += &observations;
     }
     if reset {
-        suffix += "\nThis REPL is closed. Use cua_reset, rebind and observe before further actions; do not replay uncertain input.";
+        suffix += maka_computer_use::language::closed(language);
     }
     match error {
         ToolError::Failed(value) => ToolError::Failed(value + &suffix),

@@ -169,6 +169,7 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
         invocation.clone(),
         Fact::InvocationOpened {
             configuration: Some(Box::new(InvocationConfiguration {
+                language: maka_agent_facts::language::Language::En,
                 compaction_prompt: None,
                 workspace_origin: maka_agent_facts::execution::WorkspaceOrigin::Selected,
                 system_prompt: None,

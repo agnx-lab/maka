@@ -61,6 +61,19 @@ async fn invoke(
     name: &str,
     input: Value,
 ) -> Value {
+    invoke_result(log, run, invocation, step, name, input)
+        .await
+        .unwrap()
+}
+
+async fn invoke_result(
+    log: &EventLog,
+    run: &RunTools,
+    invocation: &Invocation,
+    step: &str,
+    name: &str,
+    input: Value,
+) -> Result<Value, maka_agent_facts::tools::ToolError> {
     let call = fixture::call(step, name, input);
     log.append_batch(&[
         EventWrite::plain(RuntimeEvent::new(
@@ -115,7 +128,6 @@ async fn invoke(
         .into_step(step)
         .invoke(&call, CancellationToken::new())
         .await
-        .unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -133,7 +145,7 @@ async fn yielding_cells_keep_ancestry_deliver_deltas_share_json_and_drain_on_run
             handler:ToolHandler::Immediate(Arc::new(Block(release.clone()))),nesting:ToolNesting::Nestable,semantics:ToolSemantics::Parallel,
         }]).unwrap();
         let loaded = maka_tools::availability::LoadedTools::default();
-        let run = RunTools::new(log.clone(), invocation.clone(), catalog, ToolMode::CodeMode, CodeExecutor::new(CellLimits::default()).unwrap(), loaded.clone());
+        let run = RunTools::new(maka_agent_facts::language::Language::En, log.clone(), invocation.clone(), catalog, ToolMode::CodeMode, CodeExecutor::new(CellLimits::default()).unwrap(), loaded.clone());
         let first = invoke(&log, &run, &invocation, "first", "exec", json!("// @exec: {\"yield_time_ms\":1000,\"max_output_tokens\":1000}\ntext('early'); await yield_control(); await tools.block({}); text('late'); store('n',42);")).await;
         assert_eq!(first["state"], "running");
         assert_eq!(first["content"], json!([{"kind":"text","text":"early"}]));
@@ -177,4 +189,76 @@ async fn yielding_cells_keep_ancestry_deliver_deltas_share_json_and_drain_on_run
         assert!(reopened.invocation_recovery(&invocation,100,1024*1024).await.unwrap().uncertain_operations.is_empty());
         reopened.close().await.unwrap();
     }).await.expect("Code Mode observation and shutdown must not hang");
+}
+
+#[tokio::test]
+async fn collected_cell_recovery_uses_the_original_run_language_and_keeps_user_output() {
+    use maka_agent_facts::{language::Language, tools::ToolError};
+    for (language, unavailable, caution) in [
+        (
+            Language::En,
+            "cell is unavailable",
+            "do not repeat effects blindly",
+        ),
+        (Language::ZhCn, "代码单元不可用", "请勿盲目重复执行"),
+        (Language::ZhTw, "程式碼單元無法使用", "請勿盲目重複執行"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let log = Arc::new(
+            EventLog::open(&directory.path().join("events.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let invocation = fixture::invocation("collected-cell-language");
+        log.create_session(&invocation.session_id, "create", &json!({}), 1)
+            .await
+            .unwrap();
+        fixture::accepted(&log, &invocation, &[]).await;
+        let run = RunTools::new(
+            language,
+            log.clone(),
+            invocation.clone(),
+            ToolCatalog::default(),
+            ToolMode::CodeMode,
+            CodeExecutor::new(CellLimits::default()).unwrap(),
+            Default::default(),
+        );
+        let finished = invoke(
+            &log,
+            &run,
+            &invocation,
+            "execute",
+            "exec",
+            json!({"code":"text('original 用户資料');"}),
+        )
+        .await;
+        let missing = invoke_result(
+            &log,
+            &run,
+            &invocation,
+            "observe-collected",
+            "wait",
+            json!({"cell_id":finished["cell_id"]}),
+        )
+        .await;
+        run.shutdown().await.unwrap();
+        drop(run);
+        fixture::close(log).await;
+        assert_eq!(finished["state"], "completed");
+        assert_eq!(
+            finished["content"],
+            json!([{"kind":"text","text":"original 用户資料"}])
+        );
+        let Err(ToolError::Failed(message)) = missing else {
+            panic!("waiting on the actually collected cell must fail")
+        };
+        assert!(
+            message.starts_with(unavailable),
+            "missing-cell recovery language differs: {message}"
+        );
+        assert!(
+            message.contains(caution),
+            "missing-cell recovery must warn against duplicate effects: {message}"
+        );
+    }
 }

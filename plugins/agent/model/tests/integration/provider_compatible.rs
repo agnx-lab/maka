@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 fn request(base_url: &str) -> ModelRequest {
     ModelRequest {
+        language: maka_agent_facts::language::Language::En,
         provider: ProviderConfig {
             adapter: None,
             capabilities: Default::default(),
@@ -285,4 +286,53 @@ async fn cancellation_drains_failure_body_and_retry_without_poisoning_capacity()
         assert!(collect(&executor.clone(), &url).await.is_ok());
         server.await.unwrap();
     }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn captured_language_reaches_sdk_notifications_without_becoming_provider_parameter() {
+    use maka_agent_facts::language::Language;
+    use maka_model::prompt::Message;
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let executor = ModelExecutor::new(Duration::from_secs(10)).unwrap();
+        for (language, expected) in [
+            (
+                Language::ZhCn,
+                "[来自 exec call-原文 的通知]\nworker result: Keep 原文",
+            ),
+            (
+                Language::ZhTw,
+                "[來自 exec call-原文 的通知]\nworker result: Keep 原文",
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/v1", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let wire = body(&mut socket).await;
+                response(&mut socket, 200, &completion(&[json!({"content":"seen"})])).await;
+                wire
+            });
+            let mut input = request(&url);
+            input.language = language;
+            input.prompt = vec![Message::notification(
+                "call-原文",
+                "worker result: Keep 原文",
+            )];
+            let mut stream = executor
+                .stream(input, CancellationToken::new())
+                .await
+                .unwrap();
+            while let Some(event) = stream.next().await {
+                event.unwrap();
+            }
+            stream.cancel_and_wait().await.unwrap();
+            let wire = server.await.unwrap();
+            assert_eq!(wire["messages"][0]["role"], "user");
+            assert_eq!(wire["messages"][0]["content"], expected);
+            assert_eq!(wire.get("language"), None);
+        }
+    })
+    .await
+    .unwrap();
 }

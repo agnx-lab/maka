@@ -103,8 +103,11 @@ async fn frozen_string_and_attachment_text_keep_distinct_sdk_shapes() {
         settled(&log, &raw).await;
         let prefix = log.prefix(100, 128 * 1024).await.unwrap();
         assert_eq!(
-            serde_json::to_value(project_model_history(&prefix, "session").unwrap()).unwrap()[2]["content"]
-                [0]["output"],
+            serde_json::to_value(
+                project_model_history(&prefix, "session", maka_agent_facts::language::Language::En)
+                    .unwrap()
+            )
+            .unwrap()[2]["content"][0]["output"],
             expected
         );
     }
@@ -118,7 +121,12 @@ async fn reopened_history_uses_frozen_projection_without_raw_store_access() {
     let raw = ToolOutput::Text("raw-only-marker".repeat(800_000));
     settled(&log, &raw).await;
     let original = log.prefix(100, 16 * 1024 * 1024).await.unwrap();
-    let expected = project_model_history(&original, "session").unwrap();
+    let expected = project_model_history(
+        &original,
+        "session",
+        maka_agent_facts::language::Language::En,
+    )
+    .unwrap();
     assert_eq!(
         serde_json::to_value(&expected).unwrap()[2]["content"][0]["output"],
         json!({"type":"json","value":{"kind":"text","text":"raw-only-marker".repeat(800_000)}})
@@ -138,7 +146,12 @@ async fn reopened_history_uses_frozen_projection_without_raw_store_access() {
     // A detached committed prefix is sufficient: there is no live store from
     // which a current projector could accidentally fetch or reinterpret raw.
     assert_eq!(
-        project_model_history(&reopened, "session").unwrap(),
+        project_model_history(
+            &reopened,
+            "session",
+            maka_agent_facts::language::Language::En
+        )
+        .unwrap(),
         expected
     );
 }

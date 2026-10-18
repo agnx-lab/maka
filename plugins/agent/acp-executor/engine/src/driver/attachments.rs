@@ -52,12 +52,17 @@ impl Driver<'_> {
         } else {
             vec![]
         };
-        let text = prompt(&self.request.content, self.request.instructions.as_deref())?;
+        let text = prompt(
+            &self.request.content,
+            self.request.instructions.as_deref(),
+            self.request.language,
+        )?;
         let content = blocks(
             text,
             attachments,
             image,
             embedded,
+            self.request.language,
             &self.context.cancellation,
         )?;
         content
@@ -71,6 +76,7 @@ fn blocks(
     attachments: Vec<crate::ports::PromptAttachment>,
     image: bool,
     embedded: bool,
+    language: maka_agent_facts::language::Language,
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> Result<Vec<Value>, Error> {
     let mut blocks: Vec<_> = text
@@ -138,7 +144,12 @@ fn blocks(
             ));
         };
         // Keep the filename as a separate ordinary text block for all protocol versions.
-        let name = json!({"type":"text","text":format!("Attachment: {}", attachment.name)});
+        let label = match language {
+            maka_agent_facts::language::Language::En => "Attachment: ",
+            maka_agent_facts::language::Language::ZhCn => "附件：",
+            maka_agent_facts::language::Language::ZhTw => "附件：",
+        };
+        let name = json!({"type":"text","text":format!("{label}{}", attachment.name)});
         size = size
             .saturating_add(serde_json::to_vec(&block)?.len())
             .saturating_add(serde_json::to_vec(&name)?.len())

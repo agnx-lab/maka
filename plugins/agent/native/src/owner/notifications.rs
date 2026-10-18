@@ -66,7 +66,7 @@ impl Owner {
         source: &Invocation,
         route: &ReturnRoute,
         identity: &str,
-        text: String,
+        render: impl FnOnce(Language) -> String,
         origin: MessageOrigin,
     ) -> Result<Option<PendingMessageAdmission>, String> {
         let runs = self.runs.lock().await;
@@ -94,8 +94,16 @@ impl Owner {
         {
             return Ok(None);
         }
+        let snapshot = self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(|_| "agent_preferences_unavailable")?;
+        let language = self.resolve_language(&snapshot);
+        let text = render(language);
         let mut basis = MessageBasis {
-            compaction_prompt: Some(self.effective_compaction_prompt().await?),
+            language,
+            compaction_prompt: Some(self.effective_compaction_prompt(&snapshot, language)),
             graph: None,
             collaboration_mode: session.configuration.collaboration_mode,
             background_kind: BackgroundKind::Schedule,
@@ -109,7 +117,9 @@ impl Owner {
             tools: self.tool_basis.clone(),
             internal_tools: self.internal_tools.clone(),
             internal_bindings: self.internal_bindings.clone(),
-            behavior: self.capture_behavior(&route.workspace).await?,
+            behavior: self
+                .capture_behavior(&route.workspace, &snapshot, language)
+                .await?,
         };
         self.prepare_plan_behavior(&source.session_id, &mut basis)
             .await?;

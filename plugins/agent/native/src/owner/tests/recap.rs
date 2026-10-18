@@ -163,3 +163,75 @@ async fn recap_cancelled_owner_keeps_original_pending_cache_and_finishes_physica
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn native_recap_captures_current_language_and_replays_original_receipt_after_change() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut f = fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+        let english = prompt_language::select_language(&f, "en").await;
+        let session = opening(&f, &listener).await;
+        let main = f.store.latest_turn_boundary(&session).await.unwrap().unwrap().invocation;
+        let main_configuration = f.store.invocation_configuration(&main).await.unwrap().unwrap();
+        let chinese = prompt_language::select_language(&f, "zh-CN").await;
+        let operation = Uuid::new_v4();
+        let input = json!({"sessionId":session,"model":f.selection().await});
+        let (result, (sent, pending, traditional)) = tokio::join!(
+            f.mutation(2, "generateRecap", input.clone(), operation),
+            async {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let sent = request(&mut socket).await;
+                let pending = read(&f, &session).await;
+                // The request is already physically admitted under Chinese.
+                let traditional = prompt_language::select_language(&f, "zh-TW").await;
+                response_with_text(&mut socket, "Tests passed. Deployment is next.").await;
+                (sent, pending, traditional)
+            }
+        );
+        let result = result.unwrap();
+        f.drained().await;
+        let original_attempts = attempts(&f, &session).await;
+        let repeated = f.mutation(2, "generateRecap", input.clone(), operation).await.unwrap();
+        let raw = rusqlite::Connection::open_with_flags(
+            f.root.join(maka_event_log::root::ROOT_DATABASE),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ).unwrap();
+        let original_admission: String = raw.query_row(
+            "SELECT event_json FROM event_log WHERE kind='auxiliary_model_started' AND json_extract(event_json, '$.source.operation')=?1",
+            [operation.to_string()], |row| row.get(0),
+        ).unwrap();
+        todo_tests::reopen(&mut f).await;
+        let restored = read(&f, &session).await;
+        let replayed = f.mutation(2, "generateRecap", input, operation).await.unwrap();
+        let current_attempts = attempts(&f, &session).await;
+        let restored_admissions: Vec<String> = raw.prepare(
+            "SELECT event_json FROM event_log WHERE kind='auxiliary_model_started' AND json_extract(event_json, '$.source.operation')=?1",
+        ).unwrap().query_map([operation.to_string()], |row| row.get(0))
+            .unwrap().collect::<Result<_, _>>().unwrap();
+        drop(raw);
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+
+        for receipt in [english, chinese, traditional] { assert_eq!(receipt["kind"], "committed"); }
+        assert_eq!(main_configuration.language, maka_agent_facts::language::Language::En);
+        let instruction = sent["messages"][0]["content"].as_str().unwrap();
+        assert!(instruction.contains("已确认的进展"), "independent recap must capture current Chinese instructions: {sent}");
+        assert!(instruction.contains("最新一条实质性用户消息的语言"), "recap output still follows original user language: {sent}");
+        let history = sent["messages"][1]["content"].as_str().unwrap();
+        assert!(history.contains("Hello"), "original English user text must be retained: {sent}");
+        assert!(history.contains("Tests passed; deployment is still pending."), "original model history must be retained: {sent}");
+        assert_eq!(pending["kind"], "pending");
+        assert_eq!(result["kind"], "ready");
+        assert_eq!(result["text"], "Tests passed. Deployment is next.");
+        assert_eq!(repeated, result);
+        assert_eq!(restored, result);
+        assert_eq!(replayed, result);
+        let admission: Value = serde_json::from_str(&original_admission).unwrap();
+        assert_eq!(admission["language"], "zh-CN");
+        assert_eq!(admission["source"]["operation"], operation.to_string());
+        assert_eq!(restored_admissions, vec![original_admission], "restart/retry must retain the exact original physical admission");
+        assert_eq!(original_attempts.len(), 2);
+        assert_eq!(current_attempts, original_attempts, "language change and receipt replay must not add another model attempt");
+        assert_eq!(current_attempts.iter().filter(|attempt| matches!(attempt.origin, Origin::Auxiliary { .. })).count(), 1);
+    }).await.unwrap();
+}

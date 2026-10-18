@@ -91,6 +91,7 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
         let call = support::call("exec", "exec", json!({"code": code}));
         support::accepted(&log, &invocation, std::slice::from_ref(&call)).await;
         let run = RunTools::new(
+            maka_agent_facts::language::Language::En,
             log.clone(),
             invocation.clone(),
             catalog.clone(),

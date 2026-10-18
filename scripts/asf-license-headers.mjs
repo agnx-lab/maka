@@ -248,6 +248,8 @@ export const exclusionRules = [
     matches: isOneOf(
       'platform/computer-use/skills/maka-cua/SKILL.md',
       'platform/computer-use/src/api.md',
+      'platform/computer-use/src/api.zh-CN.md',
+      'platform/computer-use/src/api.zh-TW.md',
     ),
   },
   {

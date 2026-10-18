@@ -18,7 +18,7 @@
  */
 
 use super::{ElementRef, failed};
-use maka_agent_facts::tools::ToolError;
+use maka_agent_facts::{language::Language, tools::ToolError};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -36,6 +36,7 @@ impl Projection {
         &mut self,
         document: &str,
         nodes: &[Value],
+        language: Language,
     ) -> Result<(String, HashMap<u64, ElementRef>), ToolError> {
         if self.document != document {
             self.document = document.to_owned();
@@ -67,7 +68,7 @@ impl Projection {
             .collect();
         roots.sort_unstable();
         for root in roots {
-            walk.visit(root, 0, "")?;
+            walk.visit(root, 0, "", language)?;
         }
         walk.projection
             .indices
@@ -85,7 +86,13 @@ struct Walk<'a> {
     refs: HashMap<u64, ElementRef>,
 }
 impl<'a> Walk<'a> {
-    fn visit(&mut self, id: &'a str, depth: usize, parent_name: &str) -> Result<(), ToolError> {
+    fn visit(
+        &mut self,
+        id: &'a str,
+        depth: usize,
+        parent_name: &str,
+        language: Language,
+    ) -> Result<(), ToolError> {
         if depth > 60 || !self.seen.insert(id) {
             return Ok(());
         }
@@ -124,7 +131,13 @@ impl<'a> Walk<'a> {
                 self.projection.next = index
                     .checked_add(1)
                     .filter(|next| *next <= 9_007_199_254_740_991)
-                    .ok_or_else(|| failed("accessibility index limit reached; reset Cua"))?;
+                    .ok_or_else(|| {
+                        failed(match language {
+                            Language::En => "accessibility index limit reached; reset Cua",
+                            Language::ZhCn => "无障碍索引数已达上限；请重置 Cua",
+                            Language::ZhTw => "輔助使用索引數已達上限；請重設 Cua",
+                        })
+                    })?;
                 self.projection.indices.insert(identity.clone(), index);
                 index
             };
@@ -172,7 +185,7 @@ impl<'a> Walk<'a> {
         if let Some(children) = node["childIds"].as_array() {
             for child in children {
                 if let Some(child) = child.as_str() {
-                    self.visit(child, child_depth, child_name)?;
+                    self.visit(child, child_depth, child_name, language)?;
                 }
             }
         }
@@ -195,7 +208,7 @@ mod tests {
             {"nodeId":"5","parentId":"4","role":{"value":"InlineTextBox"},"name":{"value":"Delete"}}
         ]);
         let (state, refs) = projection
-            .render("document1", tree.as_array().unwrap())
+            .render("document1", tree.as_array().unwrap(), Language::En)
             .unwrap();
         assert_eq!(state.lines().count(), 3, "{state}");
         assert!(
@@ -211,11 +224,13 @@ mod tests {
         replacement.retain(|node| !matches!(node["nodeId"].as_str(), Some("2" | "4" | "5")));
         replacement[0]["childIds"] = json!(["3", "6"]);
         replacement.push(json!({"nodeId":"6","parentId":"1","backendDOMNodeId":12,"role":{"value":"button"},"name":{"value":"Submit"}}));
-        let (_, fresh) = projection.render("document1", &replacement).unwrap();
+        let (_, fresh) = projection
+            .render("document1", &replacement, Language::En)
+            .unwrap();
         assert!(!fresh.contains_key(&removed));
         assert_eq!(fresh.get(&2).map(|element| element.backend), Some(11));
         let (_, navigated) = projection
-            .render("document2", tree.as_array().unwrap())
+            .render("document2", tree.as_array().unwrap(), Language::En)
             .unwrap();
         assert!(navigated.keys().all(|key| !fresh.contains_key(key)));
     }

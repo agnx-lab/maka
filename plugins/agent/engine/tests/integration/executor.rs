@@ -143,6 +143,7 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
         configuration.model = None;
         let input = ExecutorInput {
             request: Request {
+                language: configuration.language,
                 invocation: Invocation {
                     session_id: "session".into(),
                     turn_id: id.into(),
@@ -331,6 +332,7 @@ async fn unconfirmed_executor(sql_failure: bool) {
         .start_executor(
             ExecutorInput {
                 request: Request {
+                    language: configuration.language,
                     invocation: Invocation {
                         session_id: "session".into(),
                         turn_id: "turn".into(),

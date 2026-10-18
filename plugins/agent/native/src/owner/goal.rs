@@ -355,6 +355,7 @@ impl Owner {
                     Err(error) => return self.reject_goal(operation, error).await,
                 };
                 let arm = Arm {
+                    language: grant.language,
                     operation_id: id,
                     objective,
                     grant,
@@ -422,6 +423,7 @@ impl Owner {
                             Ok(grant) => grant,
                             Err(error) => return self.reject_goal(operation, error).await,
                         };
+                    saved.goal.arm.language = saved.goal.arm.grant.language;
                 }
                 if action == GoalControl::Resume {
                     if let Err(error) = self.goal_privacy().await {
