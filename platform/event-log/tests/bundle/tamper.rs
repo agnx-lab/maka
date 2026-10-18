@@ -47,6 +47,36 @@ pub(super) async fn verify_original_proofs(
         staged.close().await.unwrap();
     }
     let mut changed = false;
+    let duplicate_calls = super::frames::rewrite_events(bytes, |event| {
+        if !changed && event["fact"]["kind"] == "model_completed" {
+            let parts = event["fact"]["output"]["parts"].as_array_mut().unwrap();
+            if let Some(call) = parts
+                .iter()
+                .find(|part| part["kind"] == "tool_call")
+                .cloned()
+            {
+                parts.push(call);
+                changed = true;
+            }
+        }
+        true
+    });
+    assert!(changed, "missing completed ToolCall fixture");
+    // rewrite_events repairs the transport digest; canonical submission must
+    // reject the ambiguity before later context proofs can obscure its cause.
+    bundle::inspect(duplicate_calls.as_slice()).await.unwrap();
+    let mut staged = StagedBundle::read(duplicate_calls.as_slice())
+        .await
+        .unwrap();
+    let result = staged.validate_history().await;
+    staged.close().await.unwrap();
+    assert!(
+        matches!(&result,
+            Err(BundleError::Store(StoreError::InvalidTransition(message)))
+                if message.contains("duplicate tool call")),
+        "duplicate completion reached canonical replay: {result:?}"
+    );
+    let mut changed = false;
     let mismatched_dispatch = super::frames::rewrite_events(bytes, |event| {
         if !changed && event["fact"]["kind"] == "tool_dispatched" {
             event["fact"]["input"] = json!({"path":"different-source"});
