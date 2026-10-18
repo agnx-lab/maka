@@ -1172,8 +1172,9 @@ pub struct HistorySearch {
 pub struct HistoryMatch {
     /// Exact canonical field to read through the source query; history body may omit it.
     pub field: maka_agent_ports::session::history::SourceField,
-    /// Use this exact cursor with HistoryPosition::After and the same raw-event fence.
-    pub cursor: Cursor,
+    /// Exact transcript row. Open with HistoryPosition::Row at the same raw-event
+    /// fence: Thinking for a thinking match, Body for every other source field.
+    pub position: RowPosition,
     #[schemars(length(max = 384))]
     pub preview: String,
 }

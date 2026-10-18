@@ -730,8 +730,9 @@ test('reading prompt context belongs to the retained page and ignores late repli
   assert.equal(c.find(reader).props.leadingPrompt.text, 'Earlier question');
   c.child(reader, 'prompt', { position: { sourceSequence: 8, itemIndex: 0 } });
   assert.deepEqual(c.action('history').input.position, {
-    kind: 'after',
-    cursor: { position: { sourceSequence: 8, itemIndex: 0 }, offset: 0, field: 'body' },
+    kind: 'row',
+    position: { sourceSequence: 8, itemIndex: 0 },
+    field: 'body',
   });
   assert.equal(c.action('history').input.through, 20);
   assert.equal(c.find('task-goal'), undefined);

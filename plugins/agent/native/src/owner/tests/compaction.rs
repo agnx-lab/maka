@@ -57,7 +57,7 @@ async fn manual_compaction_has_receipt_busy_stop_and_one_shot_prompt() {
         assert!(!found["passages"].as_array().unwrap().is_empty(), "{found}");
         let hit = &found["passages"][0];
         let through = f.query("observe",json!({"sessionId":session})).await.unwrap()["through"].clone();
-        let history = f.query("history",json!({"sessionId":session,"through":through,"position":{"kind":"after","cursor":{"position":hit["anchorPosition"],"offset":0,"field":"body"}}})).await.unwrap();
+        let history = f.query("history",json!({"sessionId":session,"through":through,"position":{"kind":"row","position":hit["anchorPosition"],"field":"body"}})).await.unwrap();
         assert!(history.to_string().contains("original-needle-429"), "{history}");
         f.send(&session).await.unwrap();
         let (mut socket, _) = listener.accept().await.unwrap(); request(&mut socket).await; response(&mut socket).await;

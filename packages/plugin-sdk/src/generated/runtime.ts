@@ -4565,9 +4565,9 @@ export type TitleFailureCause =
       kind: 'empty_output';
     };
 /**
- * Cursor position addresses a transcript row; Event addresses the raw
- * event log. Before excludes its end and After includes its start. Returned
- * chunks always retain ascending source order, including a reverse window.
+ * Row reveals an exact field; Before/After continue at byte boundaries and
+ * Event addresses the raw event log. Returned chunks retain ascending source
+ * order, including a reverse window.
  */
 export type HistoryPosition =
   | {
@@ -4575,6 +4575,11 @@ export type HistoryPosition =
     }
   | {
       kind: 'tail';
+    }
+  | {
+      position: HistoryRowPosition;
+      field: HistoryField;
+      kind: 'row';
     }
   | {
       cursor: Cursor;
@@ -10249,9 +10254,10 @@ export interface AgentHistoryMatch {
    */
   field: SourceField;
   /**
-   * Use this exact cursor with HistoryPosition::After and the same raw-event fence.
+   * Exact transcript row. Open with HistoryPosition::Row at the same raw-event
+   * fence: Thinking for a thinking match, Body for every other source field.
    */
-  cursor: Cursor;
+  position: HistoryRowPosition;
   preview: string;
 }
 export interface AgentHistorySourceRead {

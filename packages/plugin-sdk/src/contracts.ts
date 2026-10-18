@@ -12920,7 +12920,7 @@ export const contracts = {
             $defs: {
               HistoryPosition: {
                 description:
-                  'Cursor position addresses a transcript row; Event addresses the raw\nevent log. Before excludes its end and After includes its start. Returned\nchunks always retain ascending source order, including a reverse window.',
+                  'Row reveals an exact field; Before/After continue at byte boundaries and\nEvent addresses the raw event log. Returned chunks retain ascending source\norder, including a reverse window.',
                 oneOf: [
                   {
                     type: 'object',
@@ -12943,6 +12943,25 @@ export const contracts = {
                     },
                     required: ['kind'],
                     additionalProperties: false,
+                  },
+                  {
+                    description:
+                      'Reveal this exact row field from its beginning, including empty tool rows.',
+                    type: 'object',
+                    properties: {
+                      position: {
+                        $ref: '#/$defs/HistoryRowPosition',
+                      },
+                      field: {
+                        $ref: '#/$defs/HistoryField',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'row',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'position', 'field'],
                   },
                   {
                     type: 'object',
@@ -12993,6 +13012,32 @@ export const contracts = {
                   },
                 ],
               },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+              HistoryField: {
+                description: 'A readable field in a conversation window, in presentation order.',
+                type: 'string',
+                enum: ['thinking', 'body'],
+              },
               Cursor: {
                 description:
                   "Byte offset in one message field's UTF-8 text, not a bearer capability.",
@@ -13014,32 +13059,6 @@ export const contracts = {
                 },
                 additionalProperties: false,
                 required: ['position', 'offset'],
-              },
-              HistoryField: {
-                description: 'A readable field in a conversation window, in presentation order.',
-                type: 'string',
-                enum: ['thinking', 'body'],
-              },
-              HistoryRowPosition: {
-                description:
-                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
-                type: 'object',
-                properties: {
-                  sourceSequence: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 1,
-                    maximum: 9007199254740991,
-                  },
-                  itemIndex: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                    maximum: 9007199254740991,
-                  },
-                },
-                additionalProperties: false,
-                required: ['sourceSequence', 'itemIndex'],
               },
               HistoryView: {
                 description:
@@ -23522,10 +23541,10 @@ export const contracts = {
                       'Exact canonical field to read through the source query; history body may omit it.',
                     $ref: '#/$defs/SourceField',
                   },
-                  cursor: {
+                  position: {
                     description:
-                      'Use this exact cursor with HistoryPosition::After and the same raw-event fence.',
-                    $ref: '#/$defs/Cursor',
+                      'Exact transcript row. Open with HistoryPosition::Row at the same raw-event\nfence: Thinking for a thinking match, Body for every other source field.',
+                    $ref: '#/$defs/HistoryRowPosition',
                   },
                   preview: {
                     type: 'string',
@@ -23533,7 +23552,7 @@ export const contracts = {
                   },
                 },
                 additionalProperties: false,
-                required: ['field', 'cursor', 'preview'],
+                required: ['field', 'position', 'preview'],
               },
               SourceField: {
                 description:
@@ -23558,33 +23577,6 @@ export const contracts = {
                     const: 'receipt',
                   },
                 ],
-              },
-              Cursor: {
-                description:
-                  "Byte offset in one message field's UTF-8 text, not a bearer capability.",
-                type: 'object',
-                properties: {
-                  field: {
-                    $ref: '#/$defs/HistoryField',
-                    default: 'body',
-                  },
-                  position: {
-                    $ref: '#/$defs/HistoryRowPosition',
-                  },
-                  offset: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                    maximum: 9007199254740991,
-                  },
-                },
-                additionalProperties: false,
-                required: ['position', 'offset'],
-              },
-              HistoryField: {
-                description: 'A readable field in a conversation window, in presentation order.',
-                type: 'string',
-                enum: ['thinking', 'body'],
               },
               HistoryRowPosition: {
                 description:

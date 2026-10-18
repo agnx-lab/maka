@@ -568,11 +568,7 @@ impl Handler for Agent {
                                 .into_iter()
                                 .map(|found| HistoryMatch {
                                     field: found.field,
-                                    cursor: maka_agent_ports::session::history::Cursor {
-                                        field: Default::default(),
-                                        position: found.position,
-                                        offset: 0,
-                                    },
+                                    position: found.position,
                                     preview: found.preview,
                                 })
                                 .collect(),

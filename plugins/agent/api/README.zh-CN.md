@@ -29,7 +29,7 @@
 
 历史行引用使用 `position: { sourceSequence, itemIndex }`，先按产生该行的原始事件排序，再按该事件内的行序号排序。游标、来源读取、提示词锚点及工具图片引用共用这一位置。`through` 和 `{ kind: "event", sequence }` 仍指向原始事件；模型完成时产生的所有历史行都归属于该完成事件。
 
-`search` 在所选 Session 的历史中按字面量查询，显式传入 `caseSensitive` 和 `wholeWord`。忽略大小写使用 Unicode 简单大小写折叠，不做规范化；全字匹配要求两侧不紧邻 Unicode 单词字符（字母、组合标记、十进制数字、连接标点或连接控制符）。以 `after: null` 开始，分页时保持查询、选项和 `through` 不变，沿 `nextAfter` 继续，即使当前页没有命中；null 表示扫描结束。每条命中标明原始字段，可通过 `source` 精确读取。
+`search` 在所选 Session 的历史中按字面量查询，显式传入 `caseSensitive` 和 `wholeWord`。忽略大小写使用 Unicode 简单大小写折叠，不做规范化；全字匹配要求两侧不紧邻 Unicode 单词字符（字母、组合标记、十进制数字、连接标点或连接控制符）。以 `after: null` 开始，分页时保持查询、选项和 `through` 不变，沿 `nextAfter` 继续，即使当前页没有命中；null 表示扫描结束。每条命中标明原始字段，可通过 `source` 精确读取。搜索命中以 `position` 和原始 `field` 定位。用相同 `through` 调用 `history`，位置为 `{ kind: "row", position: hit.position, field: hit.field === "thinking" ? "thinking" : "body" }`，可打开空工具行及明确指定的内部工具；后续隐藏规则不变。已有字节游标仍用于续页。
 
 Executor 的 `execute` 通过名为 `attachments` 的单个可选二进制资源接收不可变文件。资源 metadata 是按顺序排列的 `{ name, mimeType, bytes, digest }` 数组；资源内容按同一顺序连接各文件的原始字节，偏移由前项长度累加得到。必须通过实际请求资源读取，Host 字节预算和清理责任仍归原请求所有；metadata 本身不授予访问权限。
 

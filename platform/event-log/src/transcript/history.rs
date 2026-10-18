@@ -122,6 +122,17 @@ impl EventLog {
                 "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)"
             ).bind(&session).fetch_one(&mut *tx).await?;
             if !exists { return Err(invalid("Session no longer exists")); }
+            let target = if let Position::Row { position, field } = position {
+                if position.validate().is_err() || position.source_sequence > fence
+                    || (!include_thinking && field == HistoryField::Thinking) {
+                    return Err(invalid("history row exceeds its fence"));
+                }
+                materialize(&mut tx, &session, position, view, through_sql).await?;
+                // Header lookup requires the actual field; a tool Body cannot
+                // impersonate a Thinking field that was never recorded.
+                header(&mut tx, &session, position, field, view, through_sql).await?;
+                Some((position, field))
+            } else { None };
             let anchor = match position {
                 Position::Before { cursor } | Position::After { cursor } => {
                     if cursor.position.source_sequence > fence || (!include_thinking && cursor.field == HistoryField::Thinking) {
@@ -147,6 +158,7 @@ impl EventLog {
             let (reverse, boundary, inclusive) = match position {
                 Position::Start => (false, None, true),
                 Position::Tail => (true, None, true),
+                Position::Row { position, .. } => (false, Some(position), true),
                 Position::Before { cursor } => (true, Some(cursor.position), cursor.offset > 0 || (include_thinking && cursor.field == HistoryField::Body)),
                 Position::After { cursor } => (false, Some(cursor.position), cursor.offset < anchor.as_ref().unwrap().1.total || cursor.field == HistoryField::Thinking),
                 Position::Event { sequence } => {
@@ -191,7 +203,11 @@ impl EventLog {
                 if reverse { fields.reverse(); }
                 for field in fields {
                     if chunks.len() == max_chunks || bytes == max_bytes { break 'rows; }
+                    if target == Some((locator, HistoryField::Body)) && field == HistoryField::Thinking {
+                        continue;
+                    }
                     let row = header(&mut tx, &session, locator, field, view, through_sql).await?;
+                    let exact_target = target == Some((locator, field));
                     if let Some((cursor, _)) = &anchor && cursor.position == locator {
                         let before = field == HistoryField::Thinking && cursor.field == HistoryField::Body;
                         let after = field == HistoryField::Body && cursor.field == HistoryField::Thinking;
@@ -229,8 +245,9 @@ impl EventLog {
                     let ending = (Cursor { field, position: locator, offset: end }, row.total);
                     let candidate_left = if reverse { Some(beginning) } else { left.or(Some(beginning)) };
                     let candidate_right = if reverse { right.or(Some(ending)) } else { Some(ending) };
-                    let emit = row.total != 0 || matches!(row.role.as_str(), "tool_call" | "tool_result")
-                        || (view == HistoryView::Conversation && row.role == "context_compacted");
+                    let emit = (!row.hidden || exact_target) && (exact_target || row.total != 0
+                        || matches!(row.role.as_str(), "tool_call" | "tool_result")
+                        || (view == HistoryView::Conversation && row.role == "context_compacted"));
                     if emit {
                     let role = match row.role.as_str() {
                         "user" => Role::User, "assistant" => Role::Assistant,
@@ -349,6 +366,7 @@ struct Header {
     turn: String,
     timestamp: u64,
     role: String,
+    hidden: bool,
     total: u64,
 }
 async fn header(
@@ -360,6 +378,7 @@ async fn header(
     through: i64,
 ) -> Result<Header, StoreError> {
     if view == HistoryView::Conversation
+        && field == HistoryField::Body
         && let Some(row) = conversation_tool(tx, session, locator, through).await?
     {
         return Ok(row);
@@ -379,6 +398,7 @@ async fn header(
         turn: row.try_get(1)?,
         timestamp: sequence_number(row.try_get(2)?)?,
         role: row.try_get(3)?,
+        hidden: false,
         total: sequence_number(row.try_get(4)?)?,
     })
 }
@@ -417,11 +437,8 @@ async fn conversation_tool(
         message: row.try_get(0)?,
         turn: row.try_get(1)?,
         timestamp: sequence_number(row.try_get(2)?)?,
-        role: if internal {
-            String::new()
-        } else {
-            row.try_get(3)?
-        },
+        role: row.try_get(3)?,
+        hidden: internal,
         total: 0,
     }))
 }
@@ -564,7 +581,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-            assert_eq!(!row.role.is_empty(), visible, "locator {locator}");
+            assert_eq!(!row.hidden, visible, "locator {locator}");
             assert_eq!(row.total, 0);
         }
         // A parent without a child at the requested fence remains visible.

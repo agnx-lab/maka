@@ -150,15 +150,20 @@ pub struct Cursor {
     pub offset: u64,
 }
 
-/// Cursor position addresses a transcript row; Event addresses the raw
-/// event log. Before excludes its end and After includes its start. Returned
-/// chunks always retain ascending source order, including a reverse window.
+/// Row reveals an exact field; Before/After continue at byte boundaries and
+/// Event addresses the raw event log. Returned chunks retain ascending source
+/// order, including a reverse window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "HistoryPosition")]
 pub enum Position {
     Start,
     Tail,
+    /// Reveal this exact row field from its beginning, including empty tool rows.
+    Row {
+        position: RowPosition,
+        field: HistoryField,
+    },
     Before {
         cursor: Cursor,
     },
@@ -192,6 +197,16 @@ impl Read {
             return Err(invalid());
         }
         match self.position {
+            Position::Row { position, field }
+                if self.through.is_none()
+                    || position.validate().is_err()
+                    || self
+                        .through
+                        .is_some_and(|through| position.source_sequence > through)
+                    || (!self.include_thinking && field == HistoryField::Thinking) =>
+            {
+                Err(invalid())
+            }
             Position::Before { cursor } | Position::After { cursor }
                 if self.through.is_none()
                     || cursor.position.validate().is_err()
@@ -514,7 +529,14 @@ mod tests {
             },
             offset: 0,
         };
-        for position in [Position::Before { cursor }, Position::After { cursor }] {
+        for position in [
+            Position::Before { cursor },
+            Position::After { cursor },
+            Position::Row {
+                position: cursor.position,
+                field: HistoryField::Body,
+            },
+        ] {
             let mut read = Read {
                 include_thinking: false,
                 session_id: "session".into(),

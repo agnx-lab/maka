@@ -474,7 +474,12 @@ const removedHistoryPosition = {
   kind: 'cursor',
   cursor: { position: { sourceSequence: 16, itemIndex: 0 }, offset: 0 },
 } satisfies HistoryPosition;
-void [historyWindow, missingHistoryBoundary, removedHistoryPosition];
+const exactHistoryRow = {
+  kind: 'row',
+  position: { sourceSequence: 16, itemIndex: 2 },
+  field: 'thinking',
+} satisfies HistoryPosition;
+void [historyWindow, missingHistoryBoundary, removedHistoryPosition, exactHistoryRow];
 
 const nativeContinuation = {
   input: { type: 'null' },

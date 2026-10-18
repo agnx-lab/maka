@@ -965,8 +965,8 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
         assert_eq!(original_search["matches"], json!([]));
         let current_search = fixture.query("search", search(newer_fence.unwrap())).await.unwrap();
         assert_eq!(current_search["matches"].as_array().unwrap().len(), 1);
-        let match_cursor = current_search["matches"][0]["cursor"].clone();
-        let located = fixture.query("history", json!({"sessionId":session,"through":newer_fence.unwrap(),"position":{"kind":"after","cursor":match_cursor}})).await.unwrap();
+        let match_position = current_search["matches"][0]["position"].clone();
+        let located = fixture.query("history", json!({"sessionId":session,"through":newer_fence.unwrap(),"position":{"kind":"row","position":match_position,"field":"body"}})).await.unwrap();
         assert_eq!(located["chunks"][0]["text"], "Later response");
         let tail = fixture.query("history", json!({"sessionId":session,"through":event_fence,"position":{"kind":"tail"}})).await.unwrap();
         let cursor = tail["before"].clone();

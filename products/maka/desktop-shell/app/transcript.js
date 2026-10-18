@@ -332,11 +332,11 @@ export class Transcript {
 
   /**
    * The history page that starts at the anchor's row, read at `fence` as the
-   * TUI reads it: after the row's start. Null when it cannot be read or has
+   * exact inclusive row boundary. Null when it cannot be read or has
    * nothing, and the transcript then opens at the newest row as usual.
    */
   async readAnchor(fence) {
-    const position = { kind: 'after', cursor: { position: this.anchor, offset: 0, field: 'body' } };
+    const position = { kind: 'row', position: this.anchor, field: 'body' };
     try {
       const { page, calls } = await readHistory(this.historyInput(fence, position), this.endpoint);
       this.stats.tailCalls += calls;

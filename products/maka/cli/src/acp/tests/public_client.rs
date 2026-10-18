@@ -871,16 +871,15 @@ async fn independent_public_agent_client_searches_history_with_case_and_word_fla
             assert_eq!(hits.len(), 1);
             assert_eq!(hits[0]["field"], "body");
             assert_eq!(hits[0]["preview"], "catalog Cat");
-            assert_eq!(hits[0]["cursor"]["offset"], 0);
             let source = support::query(&fixture.native, "agent", "source", json!({
                 "sessionId":session,"through":through,
-                "source":{"kind":"row","position":hits[0]["cursor"]["position"]},
+                "source":{"kind":"row","position":hits[0]["position"]},
                 "field":hits[0]["field"],"position":{"kind":"start"},
             })).await;
             assert_eq!(source["kind"], "ready");
             assert_eq!(source["through"], through);
             assert_eq!(source["source"]["role"], "user");
-            assert_eq!(source["source"]["position"], hits[0]["cursor"]["position"]);
+            assert_eq!(source["source"]["position"], hits[0]["position"]);
             assert_eq!(source["source"]["field"], "body");
             assert_eq!(source["source"]["text"], "catalog Cat");
             for (query, case_sensitive, whole_word, expected) in [

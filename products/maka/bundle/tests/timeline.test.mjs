@@ -1027,5 +1027,37 @@ for (const target of ['tui']) {
       0,
       'returning to the conversation reuses completed summary parts',
     );
+    out = timeline.event(
+      out.frame.state,
+      { kind: 'raw', key: 'find-scope', event: { kind: 'activate' } },
+      props,
+      {},
+    );
+    const scan = out.actions.find((action) => action.method === 'search');
+    assert.ok(scan, 'history search uses the actual captured query');
+    const matchedPosition = { sourceSequence: 7, itemIndex: 3 };
+    out = timeline.event(
+      out.frame.state,
+      {
+        kind: 'action',
+        key: scan.key,
+        event: {
+          status: 'succeeded',
+          value: {
+            kind: 'ready',
+            through: 8,
+            matches: [{ position: matchedPosition, field: 'arguments', preview: '/src/a0.rs' }],
+            nextAfter: null,
+          },
+        },
+      },
+      props,
+      {},
+    );
+    const preview = out.actions.find((action) => action.method === 'source');
+    assert.ok(preview, 'the actual hit opens its original source field');
+    assert.deepEqual(preview.input.source, { kind: 'row', position: matchedPosition });
+    assert.equal(preview.input.field, 'arguments');
+    assert.equal(preview.input.through, 8);
   });
 }

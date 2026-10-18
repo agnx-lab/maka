@@ -103,7 +103,7 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
     let calls: Vec<_> = (0..128)
         .map(|index| ModelToolCall {
             id: format!("call-{index}"),
-            name: "Read".into(),
+            name: if index < 2 { "wait" } else { "Read" }.into(),
             input: input(index).into(),
             provider_options: None,
             provider_executed: false,
@@ -208,6 +208,148 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
         129
     );
     let check = async |log: &EventLog| {
+        use maka_agent_ports::session::history::{HistoryField, HistoryView, Page, Position};
+        // These are real siblings from one completed canonical ModelStep. Event
+        // navigation would choose item zero instead of the requested item127.
+        for index in [0, 127] {
+            let position = RowPosition {
+                source_sequence: completion,
+                item_index: index,
+            };
+            let Page::Ready { chunks, after, .. } = log
+                .history_view(
+                    SESSION,
+                    through,
+                    Position::Row {
+                        position,
+                        field: HistoryField::Body,
+                    },
+                    false,
+                    HistoryView::Conversation,
+                    8192,
+                    Some(1),
+                    65536,
+                )
+                .await
+                .unwrap()
+            else {
+                panic!("prepared");
+            };
+            assert_eq!(chunks[0].position, position);
+            assert_eq!(chunks[0].field, HistoryField::Body);
+            assert_eq!(
+                chunks[0].role,
+                maka_agent_ports::session::history::Role::ToolCall
+            );
+            assert_eq!(chunks[0].total_bytes, 0);
+            let expected_name = if index == 0 { "wait" } else { "Read" };
+            assert_eq!(
+                chunks[0].tool.as_ref().unwrap().call.as_ref().unwrap().name,
+                expected_name
+            );
+            if index == 0 {
+                let Page::Ready { chunks, .. } = log
+                    .history_view(
+                        SESSION,
+                        through,
+                        Position::After {
+                            cursor: after.unwrap(),
+                        },
+                        false,
+                        HistoryView::Conversation,
+                        8192,
+                        Some(1),
+                        65536,
+                    )
+                    .await
+                    .unwrap()
+                else {
+                    panic!("prepared");
+                };
+                assert_eq!(
+                    chunks[0].position,
+                    RowPosition {
+                        source_sequence: completion,
+                        item_index: 2
+                    },
+                    "the following internal sibling remains hidden and continuation advances"
+                );
+            }
+            assert!(
+                log.history_view(
+                    SESSION,
+                    through,
+                    Position::Row {
+                        position,
+                        field: HistoryField::Thinking
+                    },
+                    true,
+                    HistoryView::Conversation,
+                    8192,
+                    Some(1),
+                    65536,
+                )
+                .await
+                .is_err(),
+                "a tool Body is not a Thinking field"
+            );
+        }
+        for include_internal in [false, true] {
+            let hits = log
+                .search_transcript(
+                    SESSION,
+                    maka_event_log::transcript::search::TranscriptSearch {
+                        through,
+                        after: None,
+                        query: "wait".into(),
+                        case_sensitive: true,
+                        whole_word: true,
+                        include_internal,
+                        max_matches: 16,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(hits.matches.len(), if include_internal { 2 } else { 0 });
+            if include_internal {
+                assert_eq!(
+                    hits.matches[0].position,
+                    RowPosition {
+                        source_sequence: completion,
+                        item_index: 0
+                    }
+                );
+                assert_eq!(hits.matches[0].field, SourceField::ToolName);
+            }
+        }
+        for position in [
+            RowPosition {
+                source_sequence: completion,
+                item_index: 999,
+            },
+            RowPosition {
+                source_sequence: through + 1,
+                item_index: 0,
+            },
+        ] {
+            assert!(
+                log.history_view(
+                    SESSION,
+                    through,
+                    Position::Row {
+                        position,
+                        field: HistoryField::Body
+                    },
+                    false,
+                    HistoryView::Conversation,
+                    8192,
+                    Some(1),
+                    65536
+                )
+                .await
+                .is_err()
+            );
+        }
         for index in [0, 127] {
             let position = RowPosition {
                 source_sequence: completion,

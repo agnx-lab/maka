@@ -329,7 +329,7 @@ function readPreview(
   const request = action(search, 'source', {
     sessionId: search.context.sessionId,
     through: history.through,
-    source: { kind: 'row', position: preview.hit.cursor.position },
+    source: { kind: 'row', position: preview.hit.position },
     field,
     position,
   });
@@ -348,7 +348,7 @@ function pick(search: ConversationSearch, index: number, actions: Action[]) {
   };
   const sequence = (history.preview?.command?.sequence ?? 0) + 1;
   history.preview = {
-    key: `find-preview-reading-${hit.cursor.position.sourceSequence}-${hit.cursor.position.itemIndex}-${hit.field}`,
+    key: `find-preview-reading-${hit.position.sourceSequence}-${hit.position.itemIndex}-${hit.field}`,
     hit,
     sections: [{ field: hit.field, source: null, failed: false }],
     expanded: true,
@@ -430,10 +430,9 @@ function historyEvent(
       page.matches.length > 16 ||
       page.matches.some((hit) => {
         const invalid =
-          (after !== null && comparePosition(hit.cursor.position, after) <= 0) ||
-          hit.cursor.offset !== 0 ||
-          hit.cursor.position.sourceSequence > history.through;
-        after = hit.cursor.position;
+          (after !== null && comparePosition(hit.position, after) <= 0) ||
+          hit.position.sourceSequence > history.through;
+        after = hit.position;
         return invalid;
       }) ||
       (page.nextAfter !== null &&
@@ -447,7 +446,7 @@ function historyEvent(
     const remaining = 32 - history.matches.length;
     history.matches.push(...page.matches.slice(0, remaining));
     history.next =
-      page.matches.length > remaining ? history.matches.at(-1)!.cursor.position : page.nextAfter;
+      page.matches.length > remaining ? history.matches.at(-1)!.position : page.nextAfter;
     if (!history.selectLast && history.selected < 0 && history.matches.length)
       pick(search, 0, actions);
     scan(search, actions);
@@ -489,7 +488,7 @@ function historyEvent(
       position = request.position,
       header = preview.sections.find((section) => section.source)?.source;
     if (
-      comparePosition(source.position, preview.hit.cursor.position) !== 0 ||
+      comparePosition(source.position, preview.hit.position) !== 0 ||
       source.path != null ||
       source.field !== request.field ||
       !source.fields.includes(source.field) ||

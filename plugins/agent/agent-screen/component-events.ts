@@ -776,13 +776,7 @@ export function handleComponent<N extends Node>(
           comparePosition(prompt.value.position, position) === 0)
       ) {
         if (visit) visit.following = false;
-        history(
-          state,
-          actions,
-          { kind: 'after', cursor: { position, offset: 0, field: 'body' } },
-          page.through,
-          false,
-        );
+        history(state, actions, { kind: 'row', position, field: 'body' }, page.through, false);
       }
     } else if (input.name === 'source') {
       const chunk = page.chunks.find(

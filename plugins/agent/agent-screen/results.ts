@@ -615,9 +615,7 @@ export function querySucceeded(state: State, actions: Action[], request: Request
         history(
           state,
           actions,
-          anchor === null
-            ? { kind: 'tail' }
-            : { kind: 'after', cursor: { position: anchor, offset: 0, field: 'body' } },
+          anchor === null ? { kind: 'tail' } : { kind: 'row', position: anchor, field: 'body' },
           observation.through,
           anchor === null,
         );
