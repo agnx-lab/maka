@@ -20,7 +20,7 @@
 #[cfg(unix)]
 use maka_agent_facts::read::ReadInput;
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadLimits, WriteCoordinator, directory};
+use maka_fs_tools::{MutationExecutor, ReadExecutor, WriteCoordinator, directory};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -33,13 +33,8 @@ async fn directory_consent_does_not_mark_workspaces_or_follow_replacements() {
     let (location, identity) = directory::capture(&root).unwrap();
     assert!(!root.join(".maka-workspace.json").exists());
     let handle = directory::open(&location, &identity).unwrap();
-    let read = ReadExecutor::from_directory(
-        location.clone(),
-        handle.try_clone().unwrap(),
-        ReadLimits::default(),
-        None,
-    )
-    .unwrap();
+    let read =
+        ReadExecutor::from_directory(location.clone(), handle.try_clone().unwrap(), None).unwrap();
     let write = MutationExecutor::from_directory(
         location.clone(),
         handle,
@@ -76,6 +71,7 @@ async fn directory_consent_does_not_mark_workspaces_or_follow_replacements() {
                 }
                 .resolve()
                 .unwrap(),
+                maka_agent_facts::read::MAX_PAGE_CHARS,
                 Default::default(),
             )
             .await
@@ -145,7 +141,6 @@ async fn policy_directory_allows_external_access_without_following_workspace_rep
     let read = ReadExecutor::from_directory(
         location.clone(),
         handle.try_clone().unwrap(),
-        ReadLimits::default(),
         Some(policy.clone()),
     )
     .unwrap();

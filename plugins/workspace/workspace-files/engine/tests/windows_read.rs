@@ -20,9 +20,7 @@
 #![cfg(windows)]
 
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{
-    MutationExecutor, ReadExecutor, ReadLimits, ReadScope, WriteCoordinator, WriteScope,
-};
+use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadScope, WriteCoordinator, WriteScope};
 use serde_json::json;
 use std::{fs, path::Path, sync::Arc};
 use tokio_util::sync::CancellationToken;
@@ -80,7 +78,6 @@ async fn case_sensitive_sibling_roots_do_not_alias_reads_or_mutations() {
         ReadScope::Restricted {
             roots: vec![upper.clone()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     assert!(read(&reader, lower.join("file")).await.is_err());
@@ -147,7 +144,6 @@ async fn windows_path_spellings_preserve_the_captured_scope_and_directory_identi
         ReadScope::Restricted {
             roots: vec![canonical.clone()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     for path in [
@@ -188,7 +184,6 @@ async fn windows_path_spellings_preserve_the_captured_scope_and_directory_identi
         ReadScope::Restricted {
             roots: vec![canonical.clone(), temp.path().to_owned()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     assert_eq!(
@@ -207,8 +202,7 @@ async fn windows_path_spellings_preserve_the_captured_scope_and_directory_identi
     drop(union);
     fs::rename(&root, &moved).unwrap();
 
-    let bypass =
-        ReadExecutor::new(&outside, ReadScope::Unrestricted, ReadLimits::default()).unwrap();
+    let bypass = ReadExecutor::new(&outside, ReadScope::Unrestricted).unwrap();
     assert_eq!(
         read(&bypass, outside.join("text")).await.unwrap(),
         json!({"content":"outside","offset":0,"returnedLines":1,"totalLines":1,"next":null})

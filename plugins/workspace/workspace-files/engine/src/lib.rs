@@ -71,19 +71,6 @@ pub enum ReadScope {
     Unrestricted,
 }
 
-#[derive(Clone, Copy)]
-pub struct ReadLimits {
-    pub max_source_bytes: usize,
-}
-
-impl Default for ReadLimits {
-    fn default() -> Self {
-        Self {
-            max_source_bytes: 1024 * 1024,
-        }
-    }
-}
-
 /// Bytes remain internal until the Host commits the image snapshot and result.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReadOutput {
@@ -94,7 +81,6 @@ pub enum ReadOutput {
 #[derive(Clone)]
 pub struct ReadExecutor {
     authority: Arc<scoped::Authority>,
-    limits: ReadLimits,
 }
 
 impl ReadExecutor {
@@ -103,43 +89,30 @@ impl ReadExecutor {
     pub fn from_directory(
         path: PathBuf,
         directory: cap_std::fs::Dir,
-        limits: ReadLimits,
         policy: Option<Arc<maka_sandbox::filesystem::Compiled>>,
     ) -> Result<Self, ToolError> {
-        if limits.max_source_bytes == 0 || limits.max_source_bytes.checked_add(1).is_none() {
-            return Err(failed("Read byte limits must be positive and bounded"));
-        }
         Ok(Self {
             authority: Arc::new(scoped::Authority::from_directory(path, directory, policy)?),
-            limits,
         })
     }
-    pub fn new(
-        cwd: impl AsRef<Path>,
-        scope: ReadScope,
-        limits: ReadLimits,
-    ) -> Result<Self, ToolError> {
-        if limits.max_source_bytes == 0 || limits.max_source_bytes.checked_add(1).is_none() {
-            return Err(failed("Read byte limits must be positive and bounded"));
-        }
+    pub fn new(cwd: impl AsRef<Path>, scope: ReadScope) -> Result<Self, ToolError> {
         Ok(Self {
             authority: Arc::new(scoped::Authority::new(cwd.as_ref(), scope)?),
-            limits,
         })
     }
 
     pub async fn read(
         &self,
         input: ReadRequest,
+        page_budget: usize,
         cancellation: CancellationToken,
     ) -> Result<ReadOutput, ToolError> {
         let authority = self.authority.clone();
-        let limits = self.limits;
         if input.path().contains("://") {
             return Err(failed("Filesystem Read requires a file path"));
         }
         // Always join blocking I/O: cancellation must not detach unsettled work.
-        tokio::task::spawn_blocking(move || authority.read(input, limits, cancellation))
+        tokio::task::spawn_blocking(move || authority.read(input, page_budget, cancellation))
             .await
             .map_err(|e| failed(format!("Read worker failed: {e}")))?
     }
@@ -165,7 +138,14 @@ impl ToolExecutor for ReadExecutor {
             let input: ReadInput =
                 serde_json::from_value(input).map_err(|e| failed(e.to_string()))?;
             let request = input.resolve().map_err(|e| failed(e.to_string()))?;
-            match executor.read(request, cancellation).await? {
+            match executor
+                .read(
+                    request,
+                    maka_agent_facts::read::MAX_PAGE_CHARS,
+                    cancellation,
+                )
+                .await?
+            {
                 ReadOutput::Text(page) => Ok(serde_json::to_value(page).expect("ReadPage is JSON")),
                 ReadOutput::Image { .. } => Err(failed(
                     "Read image requires a durable journal snapshot; use the Host typed Read path",
@@ -208,10 +188,6 @@ mod image_tests {
             ReadScope::Restricted {
                 roots: vec![root.to_owned()],
             },
-            // Images have an independent cap, including when text limits are tiny.
-            ReadLimits {
-                max_source_bytes: 1,
-            },
         )
         .unwrap()
     }
@@ -227,7 +203,7 @@ mod image_tests {
             ("picture.webp", b"RIFF\x16\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec(), "image/webp"),
         ] {
             fs::write(temp.path().join(path), &bytes).unwrap();
-            assert_eq!(read.read(request(path), CancellationToken::new()).await.unwrap(),
+            assert_eq!(read.read(request(path), maka_agent_facts::read::MAX_PAGE_CHARS, CancellationToken::new()).await.unwrap(),
                 ReadOutput::Image { bytes, mime_type: mime_type.into() });
         }
         let error = read
@@ -250,9 +226,13 @@ mod image_tests {
         at_cap.resize(5 * 1024 * 1024, 0);
         fs::write(&path, &at_cap).unwrap();
         assert!(
-            read.read(request(&path), CancellationToken::new())
-                .await
-                .is_ok()
+            read.read(
+                request(&path),
+                maka_agent_facts::read::MAX_PAGE_CHARS,
+                CancellationToken::new()
+            )
+            .await
+            .is_ok()
         );
         at_cap.push(0);
         let mut corrupt_png = png(1, 1);
@@ -271,15 +251,27 @@ mod image_tests {
         ] {
             fs::write(&path, bytes).unwrap();
             assert!(
-                read.read(request(&path), CancellationToken::new())
-                    .await
-                    .is_err()
+                read.read(
+                    request(&path),
+                    maka_agent_facts::read::MAX_PAGE_CHARS,
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
             );
         }
         fs::write(&path, png(1, 1)).unwrap();
         let cancellation = CancellationToken::new();
         cancellation.cancel();
-        assert!(read.read(request(path), cancellation).await.is_err());
+        assert!(
+            read.read(
+                request(path),
+                maka_agent_facts::read::MAX_PAGE_CHARS,
+                cancellation
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test]
@@ -300,13 +292,16 @@ mod image_tests {
             ReadScope::Restricted {
                 roots: vec![alias.clone()],
             },
-            ReadLimits::default(),
         )
         .unwrap();
         assert_eq!(
-            read.read(request(alias.join("alias.png")), CancellationToken::new())
-                .await
-                .unwrap(),
+            read.read(
+                request(alias.join("alias.png")),
+                maka_agent_facts::read::MAX_PAGE_CHARS,
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
             ReadOutput::Image {
                 bytes: bytes.clone(),
                 mime_type: "image/png".into()
@@ -318,17 +313,25 @@ mod image_tests {
             root.clone(),
         ] {
             assert!(
-                read.read(request(path), CancellationToken::new())
-                    .await
-                    .is_err()
+                read.read(
+                    request(path),
+                    maka_agent_facts::read::MAX_PAGE_CHARS,
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
             );
         }
         for name in ["data", "data.svg", "data.avif", "data.pdf"] {
             fs::write(root.join(name), &bytes).unwrap();
             assert!(
-                read.read(request(name), CancellationToken::new())
-                    .await
-                    .is_err()
+                read.read(
+                    request(name),
+                    maka_agent_facts::read::MAX_PAGE_CHARS,
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
             );
         }
         // Replacing the ambient root cannot redirect an already captured capability.
@@ -336,9 +339,13 @@ mod image_tests {
         fs::create_dir(&root).unwrap();
         fs::write(root.join("alias.png"), "attacker").unwrap();
         assert_eq!(
-            read.read(request(alias.join("alias.png")), CancellationToken::new())
-                .await
-                .unwrap(),
+            read.read(
+                request(alias.join("alias.png")),
+                maka_agent_facts::read::MAX_PAGE_CHARS,
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
             ReadOutput::Image {
                 bytes,
                 mime_type: "image/png".into()

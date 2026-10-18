@@ -21,7 +21,7 @@ use super::{MAX_PAGE_CHARS, PREFIX, ReadError, ReadInput, ReadRequest, Start, UR
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{cell::OnceCell, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -41,9 +41,40 @@ pub struct ReadPage {
 struct Position {
     byte: usize,
     utf16: usize,
+    line: usize,
+    line_start: usize,
+    before_newline: bool,
+}
+
+/// One text scan, retaining only candidates for the requested bounded page.
+/// The caller must feed the entire source before finishing, including its tail.
+pub struct TextPageScan<'a> {
+    request: &'a ReadRequest,
+    budget: usize,
+    digest: Sha256,
+    position: Position,
+    start: Option<Position>,
+    end: Option<Position>,
+    content: String,
+    candidates: Vec<Position>,
+    full: bool,
 }
 
 impl ReadRequest {
+    pub fn scan_with_budget(&self, budget: usize) -> TextPageScan<'_> {
+        TextPageScan {
+            request: self,
+            budget,
+            digest: Sha256::new(),
+            position: Position::default(),
+            start: None,
+            end: None,
+            content: String::new(),
+            candidates: Vec::new(),
+            full: false,
+        }
+    }
+
     pub fn page(&self, text: &str) -> Result<ReadPage, ReadError> {
         self.page_with_budget(text, MAX_PAGE_CHARS)
     }
@@ -51,61 +82,103 @@ impl ReadRequest {
     /// Budget is the serialized page's UTF-16 length, including continuation.
     /// Callers adding execution metadata reserve its serialized size here.
     pub fn page_with_budget(&self, text: &str, budget: usize) -> Result<ReadPage, ReadError> {
-        let digest = OnceCell::new();
-        let requested_position = match &self.start {
-            Start::Line(_) => None,
-            Start::Continuation {
-                position,
-                digest: expected,
-            } => {
-                let actual = digest.get_or_init(|| content_digest(text));
-                if actual != expected {
-                    return Err(ReadError::ContentChanged);
+        let mut scan = self.scan_with_budget(budget);
+        scan.push(text);
+        scan.finish()
+    }
+}
+
+impl TextPageScan<'_> {
+    fn select_start(&mut self) {
+        if self.start.is_some() {
+            return;
+        }
+        let matches = match self.request.start {
+            Start::Line(line) => {
+                self.position.line == line && self.position.byte == self.position.line_start
+            }
+            Start::Continuation { position, .. } => self.position.utf16 == position,
+        };
+        if matches {
+            self.start = Some(self.position);
+            self.candidates.push(self.position);
+        }
+    }
+
+    pub fn push(&mut self, text: &str) {
+        self.digest.update(text.as_bytes());
+        for character in text.chars() {
+            self.select_start();
+            self.position.before_newline = character == '\n';
+            if let Some(last) = self.candidates.last_mut()
+                && last.byte == self.position.byte
+            {
+                last.before_newline = self.position.before_newline;
+            }
+            if let Some(start) = self.start {
+                if self.end.is_none()
+                    && character == '\n'
+                    && self.request.limit.is_some_and(|limit| {
+                        self.position.line + 1 == start.line.saturating_add(limit.get())
+                    })
+                {
+                    self.end = Some(self.position);
                 }
-                Some(*position)
+                if self.end.is_none() && !self.full {
+                    if self.position.utf16 - start.utf16 + character.len_utf16() <= self.budget {
+                        self.content.push(character);
+                    } else {
+                        self.full = true;
+                    }
+                }
             }
-        };
-        let mut lines = vec![Position::default()];
-        let mut position = Position::default();
-        let mut resumed = None;
-        for (byte, character) in text.char_indices() {
-            if requested_position == Some(position.utf16) {
-                resumed = Some(position);
-            }
-            position = Position {
-                byte: byte + character.len_utf8(),
-                utf16: position.utf16 + character.len_utf16(),
-            };
+            self.position.byte += character.len_utf8();
+            self.position.utf16 += character.len_utf16();
             if character == '\n' {
-                lines.push(position);
+                self.position.line += 1;
+                self.position.line_start = self.position.byte;
+            }
+            self.position.before_newline = false;
+            if self.start.is_some() && self.end.is_none() && !self.full {
+                self.candidates.push(self.position);
             }
         }
-        if requested_position == Some(position.utf16) {
-            resumed = Some(position);
-        }
-        let line_at = |byte| lines.partition_point(|line| line.byte <= byte) - 1;
-        let (offset, start) = match self.start {
-            Start::Line(offset) => (offset, lines.get(offset).copied().unwrap_or(position)),
-            Start::Continuation { .. } => {
-                let start = resumed.ok_or(ReadError::InvalidPosition)?;
-                (line_at(start.byte), start)
+    }
+
+    pub fn finish(mut self) -> Result<ReadPage, ReadError> {
+        self.select_start();
+        let digest = hex::encode(self.digest.finalize());
+        let digest = &digest[..32];
+        if let Start::Continuation {
+            digest: expected, ..
+        } = &self.request.start
+        {
+            if digest != expected {
+                return Err(ReadError::ContentChanged);
             }
+            if self.start.is_none() {
+                return Err(ReadError::InvalidPosition);
+            }
+        }
+        let start = self.start.unwrap_or(self.position);
+        if self.candidates.is_empty() {
+            self.candidates.push(start);
+        }
+        let offset = match self.request.start {
+            Start::Line(offset) => offset,
+            Start::Continuation { .. } => start.line,
         };
+        let total_lines = self.position.line + 1;
         let last_line = offset
-            .saturating_add(self.limit.map_or(lines.len(), NonZeroUsize::get))
-            .min(lines.len());
-        let end = lines.get(last_line).map_or(position, |line| Position {
-            byte: line.byte - 1,
-            utf16: line.utf16 - 1,
-        });
+            .saturating_add(self.request.limit.map_or(total_lines, NonZeroUsize::get))
+            .min(total_lines);
+        let end = self.end.unwrap_or(self.position);
         let make_page = |stop: Position| {
             let complete = stop.byte >= end.byte;
-            let next_line = offset.max(line_at(stop.byte));
-            let boundary = lines
-                .get(next_line + 1)
-                .is_some_and(|line| stop.byte == line.byte - 1);
+            let next_line = offset.max(stop.line);
+            let boundary = stop.before_newline && stop.line == next_line;
             let partial = !complete && !boundary;
-            let returned_lines = if offset >= lines.len() {
+            let returned_lines = if offset >= total_lines {
                 0
             } else if complete {
                 last_line - offset
@@ -114,20 +187,19 @@ impl ReadRequest {
             };
             ReadPage {
                 metadata: None,
-                content: text[start.byte..stop.byte.max(start.byte)].into(),
+                content: self.content[..stop.byte.saturating_sub(start.byte)].into(),
                 offset,
                 returned_lines,
-                total_lines: lines.len(),
-                partial_line: partial || (offset < lines.len() && start.byte > lines[offset].byte),
+                total_lines,
+                partial_line: partial || (offset < total_lines && start.byte > start.line_start),
                 next: (!complete).then(|| ReadInput {
                     path: format!(
-                        "{PREFIX}{}?at={}&sha={}",
-                        URL_SAFE_NO_PAD.encode(&self.path),
-                        stop.utf16 + usize::from(!partial),
-                        digest.get_or_init(|| content_digest(text))
+                        "{PREFIX}{}?at={}&sha={digest}",
+                        URL_SAFE_NO_PAD.encode(&self.request.path),
+                        stop.utf16 + usize::from(!partial)
                     ),
                     offset: None,
-                    limit: self.limit.map(|limit| {
+                    limit: self.request.limit.map(|limit| {
                         NonZeroUsize::new(limit.get() - returned_lines)
                             .expect("incomplete line range")
                     }),
@@ -139,32 +211,18 @@ impl ReadRequest {
                 .expect("ReadPage contains only JSON fields")
                 .encode_utf16()
                 .count()
-                <= budget
+                <= self.budget
         };
-        if end.utf16.saturating_sub(start.utf16) <= budget {
+        if end.utf16.saturating_sub(start.utf16) <= self.budget {
             let page = make_page(end);
             if fits(&page) {
                 return Ok(page);
             }
         }
-        // Only retain candidate boundaries for this bounded page, not every
-        // character in a potentially large source. Rust slices remain UTF-8 safe.
-        let mut candidates = vec![start];
-        let mut utf16 = start.utf16;
-        for (relative, character) in text[start.byte..end.byte].char_indices() {
-            utf16 += character.len_utf16();
-            if utf16 - start.utf16 > budget {
-                break;
-            }
-            candidates.push(Position {
-                byte: start.byte + relative + character.len_utf8(),
-                utf16,
-            });
-        }
-        let (mut low, mut high) = (0, candidates.len() - 1);
+        let (mut low, mut high) = (0, self.candidates.len() - 1);
         while low < high {
             let middle = low + (high - low).div_ceil(2);
-            if fits(&make_page(candidates[middle])) {
+            if fits(&make_page(self.candidates[middle])) {
                 low = middle;
             } else {
                 high = middle - 1;
@@ -173,18 +231,16 @@ impl ReadRequest {
         if low == 0 {
             return Err(ReadError::AddressTooLong);
         }
-        let mut stop = candidates[low];
-        if let Some(relative) = text[start.byte..stop.byte]
+        let mut stop = self.candidates[low];
+        if let Some(relative) = self.content[..stop.byte - start.byte]
             .rfind('\n')
-            .filter(|relative| *relative > 0 && text.as_bytes().get(stop.byte) != Some(&b'\n'))
+            .filter(|relative| *relative > 0 && !stop.before_newline)
         {
-            stop = Position {
-                byte: start.byte + relative,
-                utf16: start.utf16
-                    + text[start.byte..start.byte + relative]
-                        .encode_utf16()
-                        .count(),
-            };
+            stop = *self
+                .candidates
+                .iter()
+                .find(|candidate| candidate.byte == start.byte + relative)
+                .expect("retained scalar boundary");
         }
         let page = make_page(stop);
         if !fits(&page) {
@@ -194,6 +250,7 @@ impl ReadRequest {
     }
 }
 
+#[cfg(test)]
 fn content_digest(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))[..32].into()
 }
@@ -240,6 +297,18 @@ mod tests {
                         .unwrap()
                         .page_with_budget(&text, 512)
                         .unwrap();
+                    for chunk_bytes in [1, 7, 8192] {
+                        let request = input.resolve().unwrap();
+                        let mut scan = request.scan_with_budget(512);
+                        let mut start = 0;
+                        while start < text.len() {
+                            let end =
+                                text.ceil_char_boundary((start + chunk_bytes).min(text.len()));
+                            scan.push(&text[start..end]);
+                            start = end;
+                        }
+                        assert_eq!(scan.finish().unwrap(), page);
+                    }
                     assert!(serde_json::to_string(&page).unwrap().encode_utf16().count() <= 512);
                     actual.push_str(&page.content);
                     consumed += page.content.encode_utf16().count();
@@ -285,5 +354,38 @@ mod tests {
             input.resolve().unwrap().page(&text),
             Err(ReadError::AddressTooLong)
         );
+    }
+
+    #[test]
+    fn every_scalar_cut_preserves_literal_bom_nul_and_line_metadata() {
+        let text = "\u{feff}零\0😀\r\n尾\n";
+        let input: ReadInput = serde_json::from_value(json!({"path":"file"})).unwrap();
+        let request = input.resolve().unwrap();
+        for cut in text
+            .char_indices()
+            .map(|(byte, _)| byte)
+            .chain([text.len()])
+        {
+            let mut scan = request.scan_with_budget(512);
+            scan.push(&text[..cut]);
+            scan.push(&text[cut..]);
+            assert_eq!(
+                serde_json::to_value(scan.finish().unwrap()).unwrap(),
+                json!({
+                    "content":"\u{feff}零\0😀\r\n尾\n","offset":0,"returnedLines":3,"totalLines":3,"next":null
+                })
+            );
+        }
+        let request = ReadRequest {
+            path: "file".into(),
+            start: Start::Continuation {
+                position: 999,
+                digest: "0".repeat(32),
+            },
+            limit: None,
+        };
+        let mut scan = request.scan_with_budget(512);
+        scan.push(text);
+        assert_eq!(scan.finish(), Err(ReadError::ContentChanged));
     }
 }

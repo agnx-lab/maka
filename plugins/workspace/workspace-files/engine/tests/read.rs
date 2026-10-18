@@ -19,20 +19,19 @@
 
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{ReadExecutor, ReadLimits, ReadScope};
+use maka_fs_tools::{ReadExecutor, ReadScope};
 use serde_json::{Value, json};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tokio_util::sync::CancellationToken;
 
-fn scoped(root: &std::path::Path, limits: ReadLimits) -> ReadExecutor {
+fn scoped(root: &std::path::Path) -> ReadExecutor {
     ReadExecutor::new(
         root,
         ReadScope::Restricted {
             roots: vec![root.to_owned()],
         },
-        limits,
     )
     .unwrap()
 }
@@ -50,13 +49,7 @@ async fn file_pages_bind_the_full_source_and_preserve_limits_and_cancellation() 
     fs::write(root.join("text"), "零\r\n一\n二\n").unwrap();
     fs::write(root.join("binary"), [0xff, 0xfe]).unwrap();
     fs::write(root.join("nul"), b"a\0b").unwrap();
-    fs::write(root.join("large"), vec![b'x'; 65]).unwrap();
-    let executor = scoped(
-        &root,
-        ReadLimits {
-            max_source_bytes: 64,
-        },
-    );
+    let executor = scoped(&root);
     for (input, content, offset, returned) in [
         (json!({"path":"text"}), "零\r\n一\n二\n", 0, 4),
         (json!({"path":"text","offset":1,"limit":2}), "一\n二", 1, 2),
@@ -72,7 +65,6 @@ async fn file_pages_bind_the_full_source_and_preserve_limits_and_cancellation() 
         json!({"path":"runtime-resource://text"}),
         json!({"path":"binary"}),
         json!({"path":"nul"}),
-        json!({"path":"large","limit":1}),
     ] {
         assert!(read(&executor, input).await.is_err());
     }
@@ -95,7 +87,7 @@ async fn file_pages_bind_the_full_source_and_preserve_limits_and_cancellation() 
             .is_err()
     );
 
-    let executor = scoped(&root, ReadLimits::default());
+    let executor = scoped(&root);
     let line = "中文😀\\\"".repeat(3_000);
     let source = format!("before\n{line}\nafter");
     fs::write(root.join("pages"), &source).unwrap();
@@ -135,6 +127,43 @@ async fn file_pages_bind_the_full_source_and_preserve_limits_and_cancellation() 
 }
 
 #[tokio::test]
+async fn text_reads_validate_the_tail_and_carry_utf8_across_actual_io_cuts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let executor = scoped(&root);
+    for fill in [8180, 8181, 8182] {
+        let text = format!("\u{feff}first\n{}😀\nlast", "x".repeat(fill));
+        fs::write(root.join("carry"), &text).unwrap();
+        assert_eq!(
+            read(&executor, json!({"path":"carry","offset":0,"limit":1}))
+                .await
+                .unwrap(),
+            json!({"content":"\u{feff}first","offset":0,"returnedLines":1,"totalLines":3,"next":null})
+        );
+        assert_eq!(
+            read(&executor, json!({"path":"carry","offset":2,"limit":1}))
+                .await
+                .unwrap(),
+            json!({"content":"last","offset":2,"returnedLines":1,"totalLines":3,"next":null})
+        );
+    }
+    for tail in [&[0xff][..], &[0xe2, 0x82][..], &[0][..]] {
+        let mut bytes = b"first\n".to_vec();
+        bytes.resize(1_048_600, b'x');
+        bytes.extend_from_slice(tail);
+        fs::write(root.join("bad-tail"), bytes).unwrap();
+        let error = read(&executor, json!({"path":"bad-tail","offset":0,"limit":1}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ToolError::Failed(message) if message == if tail == [0] {
+            "Read does not support binary files"
+        } else { "Read requires UTF-8 text" })
+        );
+    }
+}
+
+#[tokio::test]
 #[cfg(unix)]
 async fn captured_directory_survives_replacement_and_denies_escape_and_special_files() {
     let temp = tempfile::tempdir().unwrap();
@@ -158,7 +187,6 @@ async fn captured_directory_survives_replacement_and_denies_escape_and_special_f
         ReadScope::Restricted {
             roots: vec![root.clone(), base.clone()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     let outside_cursor = read(&overlapping, json!({"path":"../outside/pages"}))
@@ -184,7 +212,6 @@ async fn captured_directory_survives_replacement_and_denies_escape_and_special_f
         ReadScope::Restricted {
             roots: vec![root.clone(), alias.clone()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     assert!(read(&executor, outside_cursor).await.is_err());
@@ -256,8 +283,7 @@ async fn captured_directory_survives_replacement_and_denies_escape_and_special_f
     .await
     .expect("opening a FIFO must not wait for a writer")
     .unwrap_err();
-    let bypass =
-        ReadExecutor::new(&outside, ReadScope::Unrestricted, ReadLimits::default()).unwrap();
+    let bypass = ReadExecutor::new(&outside, ReadScope::Unrestricted).unwrap();
     assert_eq!(
         read(&bypass, json!({"path":outside.join("text")}))
             .await

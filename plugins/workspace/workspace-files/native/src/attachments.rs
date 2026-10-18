@@ -85,15 +85,9 @@ pub async fn read(
         if text.contains('\0') {
             return Err(failed("Read cannot decode this binary attachment as text"));
         }
-        // Reserve the public service envelope as well as the ReadPage itself;
-        // otherwise pruning hides the attachment continuation inside an archive.
-        let envelope = serde_json::to_string(&FileResult::Completed { value: Value::Null })
-            .expect("file result envelope")
-            .len()
-            - "null".len();
         serde_json::to_value(
             request
-                .page_with_budget(&text, maka_agent_facts::read::MAX_PAGE_CHARS - envelope)
+                .page_with_budget(&text, read_page_budget())
                 .map_err(failed)?,
         )
         .map(Output::Json)

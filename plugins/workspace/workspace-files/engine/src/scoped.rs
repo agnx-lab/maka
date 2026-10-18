@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::{ReadLimits, ReadOutput, ReadScope, failed};
+use crate::{ReadOutput, ReadScope, failed};
 #[cfg(unix)]
 use cap_std::fs::OpenOptionsExt;
 use cap_std::{
@@ -327,7 +327,7 @@ impl Authority {
     pub(crate) fn read(
         &self,
         input: ReadRequest,
-        limits: ReadLimits,
+        page_budget: usize,
         cancellation: CancellationToken,
     ) -> Result<ReadOutput, ToolError> {
         check_cancelled(&cancellation)?;
@@ -342,11 +342,6 @@ impl Authority {
                     .iter()
                     .any(|known| ext.eq_ignore_ascii_case(known))
             });
-        let max_source_bytes = if image {
-            MAX_IMAGE_BYTES
-        } else {
-            limits.max_source_bytes
-        };
         // Keep parent components intact for capability resolution, so symlink/..
         // semantics cannot be changed by a lexical normalization.
         let absolute = path::resolve(&self.cwd, path)?;
@@ -355,25 +350,25 @@ impl Authority {
         if !metadata.is_file() {
             return Err(failed("Read supports only regular files"));
         }
-        if metadata.len() > max_source_bytes as u64 {
-            return Err(failed("Read source exceeds byte limit"));
-        }
-        let mut bytes = Vec::new();
-        let mut chunk = [0_u8; 8192];
-        loop {
-            check_cancelled(&cancellation)?;
-            let available = (max_source_bytes + 1 - bytes.len()).min(chunk.len());
-            let count = file.read(&mut chunk[..available]).map_err(io_error)?;
-            if count == 0 {
-                break;
-            }
-            bytes.extend_from_slice(&chunk[..count]);
-            if bytes.len() > max_source_bytes {
+        if image {
+            if metadata.len() > MAX_IMAGE_BYTES as u64 {
                 return Err(failed("Read source exceeds byte limit"));
             }
-        }
-        check_cancelled(&cancellation)?;
-        if image {
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 8192];
+            loop {
+                check_cancelled(&cancellation)?;
+                let available = (MAX_IMAGE_BYTES + 1 - bytes.len()).min(chunk.len());
+                let count = file.read(&mut chunk[..available]).map_err(io_error)?;
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if bytes.len() > MAX_IMAGE_BYTES {
+                    return Err(failed("Read source exceeds byte limit"));
+                }
+            }
+            check_cancelled(&cancellation)?;
             let mime_type = crate::image::validate(&bytes)?;
             check_cancelled(&cancellation)?;
             return Ok(ReadOutput::Image {
@@ -381,14 +376,52 @@ impl Authority {
                 mime_type: mime_type.into(),
             });
         }
-        let content = String::from_utf8(bytes).map_err(|_| failed("Read requires UTF-8 text"))?;
-        if content.contains('\0') {
-            return Err(failed("Read does not support binary files"));
-        }
-        let page = input.page(&content).map_err(|e| failed(e.to_string()))?;
+        let page = text_page(&mut file, &input, page_budget, &cancellation)?;
         check_cancelled(&cancellation)?;
         Ok(ReadOutput::Text(page))
     }
+}
+
+fn text_page(
+    file: &mut impl Read,
+    input: &ReadRequest,
+    page_budget: usize,
+    cancellation: &CancellationToken,
+) -> Result<maka_agent_facts::read::ReadPage, ToolError> {
+    let mut scan = input.scan_with_budget(page_budget);
+    let mut buffer = [0_u8; 8192 + 3];
+    let mut carry = 0;
+    let mut binary = false;
+    loop {
+        check_cancelled(cancellation)?;
+        let count = file
+            .read(&mut buffer[carry..carry + 8192])
+            .map_err(io_error)?;
+        if count == 0 {
+            break;
+        }
+        let length = carry + count;
+        let text = match std::str::from_utf8(&buffer[..length]) {
+            Ok(text) => text,
+            Err(error) if error.error_len().is_none() => {
+                std::str::from_utf8(&buffer[..error.valid_up_to()]).expect("validated UTF-8 prefix")
+            }
+            Err(_) => return Err(failed("Read requires UTF-8 text")),
+        };
+        let valid = text.len();
+        binary |= text.contains('\0');
+        scan.push(text);
+        carry = length - valid;
+        buffer.copy_within(valid..length, 0);
+    }
+    check_cancelled(cancellation)?;
+    if carry != 0 {
+        return Err(failed("Read requires UTF-8 text"));
+    }
+    if binary {
+        return Err(failed("Read does not support binary files"));
+    }
+    scan.finish().map_err(|error| failed(error.to_string()))
 }
 
 fn check_cancelled(token: &CancellationToken) -> Result<(), ToolError> {
@@ -405,3 +438,6 @@ fn io_error(error: std::io::Error) -> ToolError {
         message: format!("Read filesystem error: {error}"),
     }
 }
+
+#[cfg(test)]
+mod tests;

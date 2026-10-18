@@ -18,7 +18,7 @@
  */
 
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{ReadExecutor, ReadLimits, ReadScope};
+use maka_fs_tools::{ReadExecutor, ReadScope};
 use serde_json::json;
 use std::fs;
 use tokio_util::sync::CancellationToken;
@@ -32,7 +32,6 @@ async fn exact_caps_and_unscanned_paths_have_explicit_completeness() {
         ReadScope::Restricted {
             roots: vec![root.clone()],
         },
-        ReadLimits::default(),
     )
     .unwrap();
     for (lines, complete) in [

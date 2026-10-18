@@ -37,9 +37,7 @@ use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_agent_facts::tools::ToolFuture;
 use maka_event_log::EventLog;
-use maka_fs_tools::{
-    MutationExecutor, ReadExecutor, ReadLimits, ReadScope, WriteCoordinator, WriteScope,
-};
+use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadScope, WriteCoordinator, WriteScope};
 use maka_js_runtime::{
     CellAbort, CellContext, CellDiagnosticKind, CellLimits, CellResult, CellStore, CodeExecutor,
     ToolMetadata,
@@ -149,7 +147,7 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
         Sandbox::External { .. } => unreachable!("workspace presets never delegate isolation"),
     };
     let local_tools = LocalTools {
-        read: ReadExecutor::new(&cwd, read_scope, ReadLimits::default())?,
+        read: ReadExecutor::new(&cwd, read_scope)?,
         write: MutationExecutor::new(&cwd, write_scope, Arc::new(WriteCoordinator::default()))?,
     };
     let limits = CellLimits::default();

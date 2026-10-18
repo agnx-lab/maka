@@ -22,7 +22,7 @@ mod page;
 mod resource;
 mod shell;
 mod tool_result;
-pub use page::ReadPage;
+pub use page::{ReadPage, TextPageScan};
 pub use resource::ResourceAddress;
 pub use shell::ReadMetadata;
 

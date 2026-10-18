@@ -18,7 +18,7 @@
  */
 
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{ReadExecutor, ReadLimits, ReadScope};
+use maka_fs_tools::{ReadExecutor, ReadScope};
 use serde_json::json;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -31,7 +31,6 @@ fn reader(root: &Path) -> ReadExecutor {
         ReadScope::Restricted {
             roots: vec![root.to_owned()],
         },
-        ReadLimits::default(),
     )
     .unwrap()
 }

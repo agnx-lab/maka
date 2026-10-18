@@ -18,9 +18,7 @@
  */
 
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{
-    MutationExecutor, ReadExecutor, ReadLimits, ReadScope, WriteCoordinator, WriteScope,
-};
+use maka_fs_tools::{MutationExecutor, ReadExecutor, ReadScope, WriteCoordinator, WriteScope};
 use maka_sandbox::filesystem::{Access, Policy, Rule};
 use serde_json::json;
 use std::{fs, sync::Arc};
@@ -55,12 +53,7 @@ async fn read_search_and_mutations_share_nested_policy_including_missing_targets
         .compile()
         .unwrap(),
     );
-    let read = ReadExecutor::new(
-        &root,
-        ReadScope::Policy(policy.clone()),
-        ReadLimits::default(),
-    )
-    .unwrap();
+    let read = ReadExecutor::new(&root, ReadScope::Policy(policy.clone())).unwrap();
     let write = MutationExecutor::new(
         &root,
         WriteScope::Policy(policy),

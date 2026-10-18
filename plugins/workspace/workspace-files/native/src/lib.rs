@@ -27,7 +27,7 @@ use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
 use maka_event_log::EventLog;
 use maka_fs_tools::{
-    MutationExecutor, ReadExecutor, ReadLimits, ReadOutput, ReadScope, WriteCoordinator, WriteScope,
+    MutationExecutor, ReadExecutor, ReadOutput, ReadScope, WriteCoordinator, WriteScope,
 };
 use maka_host_runtime::application::{
     Context, Handler, NativeActivation, NativeOwner, NativeRegistry,
@@ -359,24 +359,19 @@ async fn execute(
             .map(Output::Json)
     } else {
         let executor = if let Some(policy) = policy {
-            ReadExecutor::from_directory(
-                captured.path,
-                captured.directory,
-                ReadLimits::default(),
-                Some(policy),
-            )?
+            ReadExecutor::from_directory(captured.path, captured.directory, Some(policy))?
         } else {
-            ReadExecutor::new(
-                captured.path,
-                ReadScope::Unrestricted,
-                ReadLimits::default(),
-            )?
+            ReadExecutor::new(captured.path, ReadScope::Unrestricted)?
         };
         if tool == maka_fs_tools::READ_NAME {
             let input: maka_agent_facts::read::ReadInput =
                 serde_json::from_value(input).map_err(failed)?;
             match executor
-                .read(input.resolve().map_err(failed)?, cancellation.clone())
+                .read(
+                    input.resolve().map_err(failed)?,
+                    read_page_budget(),
+                    cancellation.clone(),
+                )
                 .await?
             {
                 ReadOutput::Text(_) if image => {
@@ -409,4 +404,13 @@ fn cancelled(cancellation: &CancellationToken) -> Result<(), ToolError> {
 }
 fn failed(message: impl std::fmt::Display) -> ToolError {
     ToolError::Failed(message.to_string())
+}
+
+// Reserve the public service envelope so model pruning preserves the file continuation.
+fn read_page_budget() -> usize {
+    let envelope = serde_json::to_string(&FileResult::Completed { value: Value::Null })
+        .expect("file result envelope")
+        .len()
+        - "null".len();
+    maka_agent_facts::read::MAX_PAGE_CHARS - envelope
 }

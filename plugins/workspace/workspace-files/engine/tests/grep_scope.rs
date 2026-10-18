@@ -18,7 +18,7 @@
  */
 
 use maka_agent_facts::tools::ToolExecutor;
-use maka_fs_tools::{ReadExecutor, ReadLimits, ReadScope};
+use maka_fs_tools::{ReadExecutor, ReadScope};
 use serde_json::json;
 use std::{fs, process::Command};
 use tokio_util::sync::CancellationToken;
@@ -57,9 +57,7 @@ async fn slash_glob_uses_session_cwd_independently_of_the_granted_root() {
         .collect();
     assert_eq!(expected.len(), 1);
     for roots in [vec![root.clone()], vec![root.clone(), cwd.clone()]] {
-        let executor =
-            ReadExecutor::new(&cwd, ReadScope::Restricted { roots }, ReadLimits::default())
-                .unwrap();
+        let executor = ReadExecutor::new(&cwd, ReadScope::Restricted { roots }).unwrap();
         for path in [".", "src/../src"] {
             let result = executor
                 .invoke(

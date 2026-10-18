@@ -21,7 +21,9 @@
 
 [简体中文](README.zh-CN.md)
 
-Implements file reads, search, edits, writes, patches and worktree operations. Callers provide the authorized filesystem scope. `ReadExecutor` handles bounded reads; `MutationExecutor` and `WriteCoordinator` prepare and serialize writes. Patch parsing is delegated to the adjacent `patch` crate.
+Implements file reads, search, edits, writes, patches and worktree operations. Callers provide the authorized filesystem scope. `ReadExecutor` handles paged reads; `MutationExecutor` and `WriteCoordinator` prepare and serialize writes. Patch parsing is delegated to the adjacent `patch` crate.
+
+Text reads scan the original authorized file descriptor once per page, retaining only a bounded page candidate. The serialized response budget does not limit total text size. Every page validates the complete UTF-8 source (rejecting NUL), counts all lines and binds continuations to its content digest; reading later pages repeats that full scan. Cancellation is checked between chunks and the caller awaits the worker. This does not provide an atomic snapshot of concurrently edited files. Image reads retain their separate byte and format limits.
 
 `workspace` prepares intrinsic identity through the original captured directory. For a usable Git repository, it appends `.maka-workspace.json` to the common `info/exclude` only when absent, preserving existing bytes. This fixed preparation covers selected subdirectories and linked worktrees; it requires the real private Root/control boundaries and an inspected binding for managed worktrees. An unusable nearest `.git` entry does not redirect preparation to an ancestor repository; failures writing a valid exclusion remain errors. Existing tracked files and user ignore rules retain their normal Git precedence.
 

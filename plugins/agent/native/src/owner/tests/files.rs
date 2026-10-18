@@ -161,6 +161,83 @@ async fn close(f: &Fixture) {
 }
 
 #[tokio::test]
+async fn native_read_text_pages_source_larger_than_one_mib() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (listener, f, session) = fixture("readText").await;
+        let source: String = (0..65_537)
+            .map(|line| format!("row-{line:08}-data\n"))
+            .collect();
+        let source_bytes = source.len();
+        std::fs::write(f.workspace.join("large-numbered.txt"), &source).unwrap();
+        let mut ranges = Vec::new();
+        for offset in [0, 32_768, 65_536, 65_538] {
+            call(&listener, &f, &session,
+                json!({"path":"large-numbered.txt","offset":offset,"limit":1})).await;
+            ranges.push(finish(&listener, &f).await);
+        }
+        let line = "中文😀\\\"\t".repeat(2_000);
+        let original = format!("prefix\n{line}\n{source}");
+        std::fs::write(f.workspace.join("large-unicode.txt"), &original).unwrap();
+        let mut input = json!({"path":"large-unicode.txt","offset":1,"limit":1});
+        let mut pages = Vec::new();
+        loop {
+            call(&listener, &f, &session, input).await;
+            let page = finish(&listener, &f).await;
+            let next = page["value"]["next"].clone();
+            pages.push(page);
+            if next.is_null() { break; }
+            input = next;
+        }
+        let first_next = pages[0]["value"]["next"].clone();
+        let changed = if !first_next.is_null() {
+            std::fs::write(f.workspace.join("large-unicode.txt"),
+                original.replace("row-00065536-data", "row-99965536-data")).unwrap();
+            call(&listener, &f, &session, first_next).await;
+            Some(finish(&listener, &f).await)
+        } else { None };
+        call(&listener, &f, &session,
+            json!({"path":"large-unicode.txt","offset":1,"limit":1})).await;
+        let fresh = finish(&listener, &f).await;
+        // All public result assertions follow real Host/Agent owner cleanup.
+        close(&f).await;
+        assert_eq!(source_bytes, 1_179_666);
+        for (result, (offset, content, returned)) in ranges.iter().zip([
+            (0, "row-00000000-data", 1),
+            (32_768, "row-00032768-data", 1),
+            (65_536, "row-00065536-data", 1),
+            (65_538, "", 0),
+        ]) {
+            assert_eq!(result, &json!({"kind":"completed","value":{
+                "content":content,"offset":offset,"returnedLines":returned,"totalLines":65_538,"next":null
+            }}));
+        }
+        assert!(pages.len() > 1, "long Unicode line must exercise actual continuations: {pages:?}");
+        let mut reconstructed = String::new();
+        for (index, page) in pages.iter().enumerate() {
+            assert_eq!(page["kind"], "completed", "{page}");
+            assert!(serde_json::to_string(page).unwrap().encode_utf16().count()
+                <= maka_agent_facts::read::MAX_PAGE_CHARS);
+            let value = &page["value"];
+            assert!(serde_json::to_string(value).unwrap().encode_utf16().count()
+                <= maka_agent_facts::read::MAX_PAGE_CHARS);
+            assert_eq!(value["offset"], 1);
+            assert_eq!(value["totalLines"], 65_540);
+            assert_eq!(value["partialLine"], true);
+            assert_eq!(value["returnedLines"], usize::from(index + 1 == pages.len()));
+            reconstructed.push_str(value["content"].as_str().unwrap());
+        }
+        assert!(reconstructed == line, "public continuations changed the original Unicode bytes");
+        assert_eq!(changed, Some(json!({"kind":"failed","message":
+            "The content changed since the previous page. Read the original path again"})));
+        assert_eq!(fresh["kind"], "completed", "{fresh}");
+        assert_eq!(fresh["value"]["content"], pages[0]["value"]["content"]);
+        assert_ne!(fresh["value"]["next"], pages[0]["value"]["next"]);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() {
     tokio::time::timeout(Duration::from_secs(90), async {
         for (method, input, expected) in [
