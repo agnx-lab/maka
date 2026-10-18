@@ -97,13 +97,15 @@ pub(super) async fn prompt<W>(
         );
         prompt.insert(0, Message::user(text));
     }
-    let system_text = input
-        .configuration
-        .system_prompt
-        .as_ref()
-        .map(|system| system.text.clone())
-        .unwrap_or_default();
-    if !system_text.is_empty() {
+    let system_text = crate::request_composition::render_system(
+        input
+            .configuration
+            .system_prompt
+            .as_ref()
+            .map(|system| system.text.as_str()),
+        &crate::request_composition::session_context(input),
+    );
+    if let Some(system_text) = system_text {
         prompt.insert(
             0,
             Message::System {

@@ -258,6 +258,11 @@ async fn prepared_context_breakdown_measures_projected_roles_and_freezes_literal
         });
         let effect = Arc::new(crate::support::agent_loop::Effect { log: log.clone(), count: Arc::new(std::sync::atomic::AtomicUsize::new(0)) });
         let mut input = crate::support::agent_loop::input(&base, "current", effect);
+        input.configuration.cwd = if cfg!(windows) {
+            r"C:\selected\image"
+        } else {
+            "/selected/image"
+        }.into();
         input.supports_vision = true;
         input.configuration.system_prompt = Some(maka_agent_facts::execution::SystemPrompt { text: "系".into(), policy_revision: 1, sources: Vec::new() });
         input.context = Some(maka_agent_facts::context::ModelRequestContext {
@@ -281,7 +286,13 @@ async fn prepared_context_breakdown_measures_projected_roles_and_freezes_literal
         reopened.close().await.unwrap();
 
         assert_eq!(body["messages"].as_array().unwrap().len(), 6);
-        assert_eq!(body["messages"][0]["content"], "系");
+        assert_eq!(body["messages"][0]["role"], "system");
+        let system = body["messages"][0]["content"].as_str().unwrap();
+        assert!(system.starts_with("系"));
+        let system_bytes = system.len() as u64;
+        let system_tokens = 16 + system_bytes.div_ceil(3);
+        let total_tokens = 1190 + system_tokens;
+        let output_tokens = 1300 - total_tokens;
         assert_eq!(body["messages"][3]["role"], "tool");
         assert_eq!(body["messages"][3]["content"], r#"[{"type":"text","text":"Image read successfully."}]"#);
         assert_eq!(body["messages"][4]["role"], "user");
@@ -289,7 +300,7 @@ async fn prepared_context_breakdown_measures_projected_roles_and_freezes_literal
         assert!(body["messages"][4]["content"][1]["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
         assert_eq!(body["tools"][0]["function"]["name"], "echo");
         assert_eq!(serde_json::to_value(&measured).unwrap(), json!({
-            "system":{"contentBytes":3,"estimatedTokens":17},
+            "system":{"contentBytes":system_bytes,"estimatedTokens":system_tokens},
             "user":{"contentBytes":47,"estimatedTokens":1089},
             "assistant":{"contentBytes":6,"estimatedTokens":35},
             "tool":{"contentBytes":28,"estimatedTokens":42},
@@ -298,8 +309,10 @@ async fn prepared_context_breakdown_measures_projected_roles_and_freezes_literal
         }));
         // Original estimator: tool message 16 + result 16 + ceil(Read's 4/3)
         // + ceil(the retained 24-byte success text / 3) = 42; no fallback text.
-        assert_eq!(measured.estimated_tokens(), 1207);
-        assert_eq!(body["max_tokens"], 93, "1300 capacity minus the original 1207-token input heuristic");
+        // System text uses UTF-8 bytes: 16 message tokens + ceil(bytes / 3).
+        // The other projected roles and schemas retain their original 1190 tokens.
+        assert_eq!(measured.estimated_tokens(), total_tokens);
+        assert_eq!(body["max_tokens"], output_tokens, "1300 capacity minus the complete projected input heuristic");
         assert!(persisted.events.iter().any(|event| matches!(&event.event.fact,
             Fact::ModelRequested { context_breakdown: Some(value), .. } if value == &measured)));
     }).await.unwrap();

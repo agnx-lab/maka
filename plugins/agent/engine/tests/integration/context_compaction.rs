@@ -93,10 +93,13 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
     let requests = server.await.unwrap();
     for index in [0, 2, 3] {
         assert_eq!(requests[index]["messages"][0]["role"], "system");
-        assert_eq!(
-            requests[index]["messages"][0]["content"],
-            "MAIN_SYSTEM_PROMPT_EVIDENCE"
+        assert!(
+            requests[index]["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("MAIN_SYSTEM_PROMPT_EVIDENCE")
         );
+        assert_eq!(requests[index]["messages"][0], requests[0]["messages"][0]);
     }
     assert_eq!(requests[1]["messages"][0], requests[0]["messages"][0]);
     assert_eq!(requests[1]["messages"][1], requests[0]["messages"][1]);
@@ -167,6 +170,7 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(composition.dynamic_context, original.dynamic_context);
     let adapter = original
         .sources
         .iter()
@@ -675,7 +679,25 @@ async fn overflow_preserves_system_and_first_goal_or_continuation_summary() {
         let (full, fitted) = server.await.unwrap();
         assert_eq!(full["messages"][0], fitted["messages"][0]);
         assert_eq!(fitted["messages"][0]["role"], "system");
-        assert_eq!(fitted["messages"][0]["content"], SYSTEM);
+        let system = fitted["messages"][0]["content"].as_str().unwrap();
+        assert!(system.starts_with(SYSTEM));
+        let events = log.prefix(100, 1024 * 1024).await.unwrap();
+        let breakdowns: Vec<_> = events
+            .events
+            .iter()
+            .filter(|event| event.event.invocation.invocation_id == "invocation-final")
+            .filter_map(|event| match &event.event.fact {
+                Fact::ModelRequested {
+                    context_breakdown: Some(breakdown),
+                    ..
+                } => Some(breakdown),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(breakdowns.len(), 2);
+        for breakdown in breakdowns {
+            assert_eq!(breakdown.system.content_bytes, system.len() as u64);
+        }
         assert!(full["messages"].to_string().contains(GOAL));
         assert!(
             !full["messages"]

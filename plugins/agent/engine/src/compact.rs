@@ -142,6 +142,8 @@ pub(super) async fn capture(
                 .map(|prompt| prompt.sources.clone())
                 .unwrap_or_default(),
         });
+    // A relocated project can change the admitted cwd since the last Main.
+    composition.dynamic_context = crate::request_composition::session_context(input);
     // The prompt/tool surface can be reused, while execution binds the currently
     // captured adapter and model revision on this admitted route.
     composition.sources.retain(|source| {

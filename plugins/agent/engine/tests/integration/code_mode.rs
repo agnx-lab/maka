@@ -372,11 +372,21 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
             assert_eq!(schema["required"], json!(["code"]));
             assert_eq!(schema["additionalProperties"], false);
         }
+        // This test owns conversation replay; system instructions have their own contract.
+        let conversation = |request: &serde_json::Value| {
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|message| message["role"] != "system")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            requests[0]["messages"],
-            json!([{"role":"user","content":"question first"}])
+            conversation(&requests[0]),
+            vec![json!({"role":"user","content":"question first"})]
         );
-        let second = requests[1]["messages"].as_array().unwrap();
+        let second = conversation(&requests[1]);
         assert_eq!(second.len(), 3, "nested tool messages must remain hidden");
         assert_eq!(second[1]["role"], "assistant");
         let calls = second[1]["tool_calls"].as_array().unwrap();
@@ -402,12 +412,12 @@ async fn streamed_exec_journals_parallel_children_and_reopens_without_reexecutio
             .unwrap()["result"],
             envelope
         );
-        let reopened = requests[2]["messages"].as_array().unwrap();
+        let reopened = conversation(&requests[2]);
         assert_eq!(reopened.len(), second.len() + 2);
         assert_eq!(
             &reopened[..second.len()],
-            second,
-            "past model input must be identical after reopening"
+            second.as_slice(),
+            "past conversation input must be identical after reopening"
         );
         assert_eq!(
             reopened[second.len()],

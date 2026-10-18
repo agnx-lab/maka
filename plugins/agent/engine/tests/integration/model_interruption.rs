@@ -450,6 +450,18 @@ async fn partial_text_survives_cancellation_without_becoming_replayed_model_hist
                 TerminalStatus::Completed
             }));
         }
+        let requests = server.await.unwrap();
+        // This test owns conversation replay; system instructions have their own contract.
+        let conversation = |request: &serde_json::Value| {
+            request["messages"].as_array().unwrap().iter()
+                .filter(|message| message["role"] != "system")
+                .cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(conversation(&requests[0]), vec![json!({"role":"user","content":"question cancelled"})]);
+        // Couple the digest to the system bytes actually sent, without fixing their wording.
+        let mut expected_prompt: Vec<_> = requests[0]["messages"].as_array().unwrap().iter()
+            .filter(|message| message["role"] == "system").cloned().collect();
+        expected_prompt.push(json!({"role":"user","content":[{"type":"text","text":"question cancelled"}]}));
         // Rebuild each exact pre-request prefix in an independent log. Its
         // digest includes original event identities and sequence, not history.
         let replica = EventLog::open(&directory.path().join("replica.sqlite")).await.unwrap();
@@ -464,24 +476,23 @@ async fn partial_text_survives_cancellation_without_becoming_replayed_model_hist
                 if stored.event.invocation.invocation_id == "invocation-cancelled" {
                     let expected = serde_json::to_vec(&json!({
                         "projection":"maka.model-history.v1",
-                        "prompt":[{"role":"user","content":[{"type":"text","text":"question cancelled"}]}],
-                        "tools":[], "providerOptions":{}, "maxOutputTokens":8000
+                        "prompt": expected_prompt,
+                        "tools":[], "providerOptions":{}, "maxOutputTokens":requests[0]["max_tokens"]
                     })).unwrap();
                     assert_eq!(*input_digest, format!("sha256:{}", hex::encode(Sha256::digest(expected))));
                 }
             }
             assert_eq!(replica.append(&maka_agent_facts::event::EventWrite::plain(stored.event.clone()).unwrap()).await.unwrap(), stored.sequence);
         }
-        let requests = server.await.unwrap();
-        assert_eq!(requests[1]["messages"], json!([
-            {"role":"user","content":"question cancelled"},
-            {"role":"user","content":"question next"}
-        ]));
-        assert_eq!(requests[2]["messages"], json!([
-            {"role":"user","content":"question cancelled"},
-            {"role":"user","content":"question next"},
-            {"role":"assistant","content":"done"},
-            {"role":"user","content":"question reopened"}
-        ]));
+        assert_eq!(conversation(&requests[1]), vec![
+            json!({"role":"user","content":"question cancelled"}),
+            json!({"role":"user","content":"question next"})
+        ]);
+        assert_eq!(conversation(&requests[2]), vec![
+            json!({"role":"user","content":"question cancelled"}),
+            json!({"role":"user","content":"question next"}),
+            json!({"role":"assistant","content":"done"}),
+            json!({"role":"user","content":"question reopened"})
+        ]);
     }).await.expect("partial model cancellation and recovery must make bounded progress");
 }

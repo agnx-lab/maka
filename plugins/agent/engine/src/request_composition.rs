@@ -17,12 +17,34 @@
  * under the License.
  */
 
-use crate::{RunContext, RunError};
+use crate::{RunContext, RunError, RunInput};
 use maka_agent_facts::composition::FrozenComposition;
 use maka_agent_facts::composition::RequestComposition;
 use maka_model::prompt::Message;
 use maka_tools::RequestTools;
 use std::sync::Arc;
+
+pub(super) fn session_context<W>(input: &RunInput<W>) -> Vec<String> {
+    vec![format!(
+        "Session context (data):\n{}",
+        serde_json::json!({
+            "cwd": input.configuration.cwd,
+            "sessionId": input.invocation.session_id,
+        })
+    )]
+}
+
+pub(super) fn render_system(system: Option<&str>, context: &[String]) -> Option<String> {
+    let mut rendered = system.map(str::to_owned);
+    for section in context {
+        let text = rendered.get_or_insert_with(String::new);
+        if !text.is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(section);
+    }
+    rendered
+}
 
 pub(super) struct Surface {
     pub adapter: maka_agent_ports::model::Binding,
@@ -63,9 +85,11 @@ impl Surface {
             sources.push(source.clone());
         }
         let max_output_tokens = crate::auto_context::output_limit(input, source)?;
+        let dynamic_context = session_context(input);
+        let rendered = render_system(system.as_deref(), &dynamic_context);
         let evidence = RequestComposition {
-            system_prompt: system.clone(),
-            dynamic_context: Vec::new(),
+            system_prompt: system,
+            dynamic_context,
             tool_catalog_digest: tools.catalog_digest().into(),
             tools: tools.definitions(),
             provider_options: Some(input.provider_options.clone()),
@@ -77,7 +101,7 @@ impl Surface {
         Ok(Self {
             adapter,
             max_output_tokens,
-            system,
+            system: rendered,
             evidence: Arc::new(evidence),
         })
     }
@@ -91,7 +115,10 @@ impl Surface {
         Ok(Self {
             adapter,
             max_output_tokens: Some(output_budget),
-            system: composition.system_prompt.clone(),
+            system: render_system(
+                composition.system_prompt.as_deref(),
+                &composition.dynamic_context,
+            ),
             evidence: Arc::new(
                 composition
                     .freeze()

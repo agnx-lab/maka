@@ -603,17 +603,6 @@ async fn workhub_uses_original_agent_engine_and_freezes_coordinator_prompt() {
         let (mut socket, _) = listener.accept().await.unwrap();
         let request = request(&mut socket).await;
         assert!(!fixture.app.shutdown_if_idle().await.unwrap());
-        assert!(
-            request["messages"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|message| message["role"] == "system"
-                    && message["content"]
-                        .as_str()
-                        .unwrap()
-                        .contains("WorkHub coordinator"))
-        );
         response(&mut socket).await;
         loop {
             let execution = fixture
@@ -642,12 +631,26 @@ async fn workhub_uses_original_agent_engine_and_freezes_coordinator_prompt() {
             .unwrap()
             .unwrap();
         let prompt = config.system_prompt.unwrap();
-        assert!(prompt.text.contains("WorkHub coordinator"));
-        assert_eq!(prompt.sources[0].name, hub::IMPLEMENTATION);
+        let frozen_system = session_context::composition(&fixture, session).await;
         while !fixture.app.shutdown_if_idle().await.unwrap() {
             tokio::task::yield_now().await;
         }
         fixture.config.shutdown().await.unwrap();
+        assert!(
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|message| {
+                    message["role"] == "system"
+                        && message["content"]
+                            .as_str()
+                            .is_some_and(|text| text.contains(&prompt.text))
+                })
+        );
+        assert_eq!(prompt.sources[0].name, hub::IMPLEMENTATION);
+        session_context::assert_current_context(&request, &ready["session"]);
+        session_context::assert_frozen_context(&request, &frozen_system);
     })
     .await
     .unwrap();

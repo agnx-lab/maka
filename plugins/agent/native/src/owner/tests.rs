@@ -85,6 +85,8 @@ mod execution;
 #[path = "tests/executor.rs"]
 mod executor;
 
+#[path = "tests/session_context.rs"]
+mod session_context;
 #[path = "tests/tool_schemas.rs"]
 mod tool_schemas;
 #[path = "tests/workhub.rs"]

@@ -201,11 +201,21 @@ async fn loop_commits_before_effects_replays_history_after_reopen_and_rejects_du
             );
         }
         let requests = server.await.unwrap();
+        // This test owns conversation replay; system instructions have their own contract.
+        let conversation = |request: &serde_json::Value| {
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|message| message["role"] != "system")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            requests[0]["messages"],
-            json!([{"role":"user","content":"question first"}])
+            conversation(&requests[0]),
+            vec![json!({"role":"user","content":"question first"})]
         );
-        let second = requests[1]["messages"].as_array().unwrap();
+        let second = conversation(&requests[1]);
         assert!(second.iter().any(|m| m["role"] == "user"
             && m["content"].as_str().is_some_and(|text| {
                 text.contains("<user_query>\nA queued correction\n</user_query>")
@@ -219,8 +229,8 @@ async fn loop_commits_before_effects_replays_history_after_reopen_and_rejects_du
             serde_json::from_str::<Value>(result["content"].as_str().unwrap()).unwrap(),
             json!({"value":42})
         );
-        let after_reopen = requests[2]["messages"].as_array().unwrap();
-        assert_eq!(&after_reopen[..second.len()], second);
+        let after_reopen = conversation(&requests[2]);
+        assert_eq!(&after_reopen[..second.len()], second.as_slice());
         assert_eq!(
             after_reopen.last().unwrap(),
             &json!({"role":"user","content":"question next"})

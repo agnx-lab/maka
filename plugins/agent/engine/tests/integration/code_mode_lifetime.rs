@@ -250,7 +250,13 @@ async fn dropping_caller_keeps_child_session_and_cell_owned_until_drain() {
             );
         }
         let requests = server.await.unwrap();
-        let history = requests[1]["messages"].as_array().unwrap();
+        // This test owns conversation replay; system instructions have their own contract.
+        let conversation = |request: &serde_json::Value| {
+            request["messages"].as_array().unwrap().iter()
+                .filter(|message| message["role"] != "system")
+                .cloned().collect::<Vec<_>>()
+        };
+        let history = conversation(&requests[1]);
         assert_eq!(history.len(), 4);
         assert_eq!(history[2]["role"], "tool");
         assert_eq!(history[2]["tool_call_id"], "exec-slow");

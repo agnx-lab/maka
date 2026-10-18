@@ -77,7 +77,11 @@ async fn skill_input_freezes_original_admission_and_queue_edits_before_actual_ht
         assert_eq!(source_messages[0].message.submitted_content_digest, MessageInput::from(original).content_digest().unwrap());
         assert_eq!(content.preparation.len(), 1);
         assert_eq!(content.preparation[0].receipt["invocation"]["receipts"][0]["success"], true);
-        assert_eq!(content.preparation[0].receipt["metadataPrompt"], prompt);
+        let metadata = content.preparation[0].receipt["metadataPrompt"].as_str().unwrap();
+        assert!(metadata.contains("VERSION ONE"));
+        let composition = session_context::composition(&f, &session).await;
+        assert_eq!(composition.system_prompt.as_deref(), Some(metadata));
+        assert!(prompt.contains(metadata), "the actual request must retain the exact prepared metadata");
         let operation = Uuid::new_v4();
         let queued = send(&f, &session, "/skill:review queued", operation).await;
         assert_eq!(queued["kind"], "queued");
@@ -113,7 +117,11 @@ async fn skill_input_freezes_original_admission_and_queue_edits_before_actual_ht
 async fn skill_input_has_no_implicit_tools_grant_or_model_fallback_for_rejections() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let dir = tempfile::tempdir().unwrap();
-        document(dir.path(), "Review", "Explicit instructions");
+        document(
+            dir.path(),
+            "EXPLICIT ONLY REVIEW METADATA",
+            "Explicit instructions",
+        );
         for mode in ["absent", "no_grant", "explicit_only"] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let setup = match mode {
@@ -140,7 +148,9 @@ async fn skill_input_has_no_implicit_tools_grant_or_model_fallback_for_rejection
                 assert_eq!(value["kind"], "started", "{value}");
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let sent = request(&mut socket).await;
-                assert_eq!(model_text(&sent, "system"), "");
+                let system = model_text(&sent, "system");
+                assert!(!system.contains("EXPLICIT ONLY REVIEW METADATA"));
+                assert!(!system.contains("Explicit instructions"));
                 assert!(sent["tools"].is_null() || sent["tools"].as_array().unwrap().is_empty());
                 let user = model_text(&sent, "user");
                 assert!(user.contains("Explicit instructions"));
@@ -197,7 +207,10 @@ async fn skill_preparation_survives_host_restart_without_preparing_again() {
         let (mut socket, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept()).await
             .unwrap_or_else(|_| panic!("restored input never reached the model")).unwrap();
         let sent = request(&mut socket).await;
-        assert!(model_text(&sent, "system").is_empty());
+        let system = model_text(&sent, "system");
+        for skill_content in ["FROZEN METADATA", "CHANGED METADATA", "FROZEN INSTRUCTIONS", "CHANGED INSTRUCTIONS"] {
+            assert!(!system.contains(skill_content), "explicit skill content must remain user input: {system}");
+        }
         assert!(model_text(&sent, "user").contains("FROZEN INSTRUCTIONS"));
         assert!(!model_text(&sent, "user").contains("CHANGED INSTRUCTIONS"));
         response(&mut socket).await;
