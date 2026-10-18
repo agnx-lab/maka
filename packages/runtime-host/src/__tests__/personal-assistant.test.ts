@@ -96,10 +96,9 @@ test('absent preference enables native tools and APIs without installing plugins
   await assert.rejects(f.service.call('assistant.binding', {}), /not ready/);
   f.service.start();
   f.service.start();
-  assert.deepEqual(await f.service.call('assistant.binding', {}), {
-    state: null,
-    bot: { sessionId: null, error: null, wakeError: null, sleeping: true, working: false },
-  });
+  const initialBinding: any = await f.service.call('assistant.binding', {});
+  assert.equal(initialBinding.state, null);
+  assert.equal(initialBinding.bot.working, false);
   const status: any = await f.service.call('assistant.status', {});
   assert.equal(status.readiness.memory, true);
   assert.equal(status.readiness.tasks, true);

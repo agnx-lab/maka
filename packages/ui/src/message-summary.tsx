@@ -18,6 +18,7 @@
  */
 
 import { useId, useState, type ReactNode } from 'react';
+import { Button } from '@astryxdesign/core';
 import { Markdown } from './markdown.js';
 import { ChevronDown } from './icons.js';
 import { assistantChatCopy } from './assistant-chat-copy.js';
@@ -34,8 +35,11 @@ export function MessageSummary({ summary, children }: { summary?: string; childr
     <div className="maka-message-summary">
       <div className="maka-message-summary-preview"><Markdown text={summary} density="compact" /></div>
       <div id={bodyId} className="maka-message-summary-body" hidden={!expanded}>{children}</div>
-      <button
+      <Button
         type="button"
+        label={expanded ? labels.collapse : labels.expand}
+        variant="ghost"
+        size="sm"
         className="maka-message-summary-toggle"
         aria-expanded={expanded}
         aria-controls={bodyId}
@@ -43,7 +47,7 @@ export function MessageSummary({ summary, children }: { summary?: string; childr
       >
         {expanded ? labels.collapse : labels.expand}
         <ChevronDown size={14} aria-hidden="true" />
-      </button>
+      </Button>
     </div>
   );
 }

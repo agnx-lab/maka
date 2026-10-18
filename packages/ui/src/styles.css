@@ -1261,15 +1261,5 @@
 }
 .maka-message-summary-body:not([hidden]) { padding-top: 12px; }
 .maka-message-summary-body[hidden] { display: none; }
-.maka-message-summary-toggle {
-  display: flex; align-items: center; gap: 4px;
-  appearance: none; border: 0; background: transparent;
-  padding: 8px 0 0; margin: 0; font: inherit; font-size: 12px;
-  color: var(--muted-foreground); cursor: pointer;
-}
-.maka-message-summary-toggle:hover { color: var(--foreground); }
-.maka-message-summary-toggle:focus-visible {
-  outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px;
-}
-
-.maka-message-summary-toggle[aria-expanded='true'] > svg { transform: rotate(180deg); }
+.maka-message-summary-toggle { margin-top: 8px; }
+.maka-message-summary-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }

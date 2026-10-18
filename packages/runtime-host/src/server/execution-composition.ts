@@ -22,7 +22,8 @@ import { PersonalAssistantService, ASSISTANT_LEGACY_PACKAGES } from '../assistan
 import { createAssistantMessageReader } from './session-transcript-reader.js';
 import { createImageFileReader } from '@maka/runtime/image-file-reader';
 import { ChatImageDeliveryService } from './chat-image-delivery.js';
-import { downloadChatImage, localImagePath, ImageSourceError } from './chat-image-source.js';
+import { downloadChatImage, ImageSourceError } from './chat-image-source.js';
+import { readAvatarImageSource } from './avatar-image-source.js';
 import { createWorkHubResultRuntime } from './workhub-result-runtime.js';
 import { createWorkHubInspectionTool } from './workhub-inspection-tool.js';
 import { copyWorkHubAttachmentsToTarget } from './workhub-message-attachments.js';
@@ -189,6 +190,8 @@ import { HostExternalSessionCoordinator } from './external-session-coordinator.j
 import { boundedFailureDiagnostic } from './failure-diagnostic.js';
 import { HostSessionBundleCoordinator } from './session-bundle-coordinator.js';
 import { HostGoalCoordinator } from './goal-coordinator.js';
+import { readGoalFormEvidence, unreadGoalFormToolResponses } from './goal-form-evidence.js';
+import { recentGoalToolReferences } from './goal-evaluation-context.js';
 import { HostGoalExecutionCoordinator } from './goal-execution-coordinator.js';
 import { HostHostedExecutionCoordinator } from './hosted-execution-coordinator.js';
 import { HostHostedExecutionRunner } from './hosted-execution-runner.js';
@@ -234,10 +237,7 @@ import {
 } from './project-directory-authority.js';
 import { HostProjectCatalogCoordinator } from './project-catalog-coordinator.js';
 import { HostProjectMembershipGate } from './project-membership-gate.js';
-import {
-  HostBuiltinExternalAgentPluginCoordinator,
-  withBuiltinExternalAgentCatalog,
-} from './builtin-external-agent-plugins.js';
+import { HostBuiltinExternalAgentPluginCoordinator } from './builtin-external-agent-plugins.js';
 import { HostPluginPlatformCoordinator } from './plugin-platform-coordinator.js';
 import { HostPluginPlatform } from './plugin-platform.js';
 import { RootAdmissionOwner } from './root-admission-owner.js';
@@ -445,8 +445,7 @@ export async function createExecutionRuntimeHostComposition(
             ...(header.executorConfig ? { configuration: header.executorConfig } : {}),
           });
         }
-        const catalog = await pluginExecutors.catalog({ cwd: input.cwd, refresh: input.refresh });
-        return withBuiltinExternalAgentCatalog(catalog);
+        return pluginExecutors.catalog({ cwd: input.cwd, refresh: input.refresh });
       },
     );
 
@@ -468,16 +467,19 @@ export async function createExecutionRuntimeHostComposition(
           if (failures.length)
             throw new AggregateError(failures, 'Failed to stop assistant sessions');
         },
-        readAvatarImage: async (sessionId, source, signal) => {
-          const path = localImagePath(source);
-          return path === undefined
-            ? downloadImage(source, signal)
-            : readLocalImage(sessionId, path, signal);
-        },
+        readAvatarImage: (sessionId, source, signal) =>
+          readAvatarImageSource(source, signal, {
+            workspace: async () => (await stores.sessionStore.readHeaderSnapshot(sessionId)).cwd,
+            readLocal: (path, boundedSignal) => readLocalImage(sessionId, path, boundedSignal),
+            download: downloadImage,
+          }),
         appendConversation: async (sessionId, message) => {
           await sessionAdmission.run(sessionId, async (lease) => {
-            if (!personalAssistant.isConversation(sessionId) || !personalAssistant.enabled)
-              throw Error('Assistant conversation is unavailable');
+            const assertAvailable = () => {
+              if (!personalAssistant.isConversation(sessionId) || !personalAssistant.enabled)
+                throw Error('Assistant conversation is unavailable');
+            };
+            assertAvailable();
             const header = await stores.sessionStore.readHeaderSnapshot(sessionId);
             const existing = (await stores.sessionStore.readMessagesSnapshot(sessionId)).find(
               (row) => row.id === message.id,
@@ -496,7 +498,8 @@ export async function createExecutionRuntimeHostComposition(
               '../assistant/bot/conversation.js'
             );
             await requireSessionManager(manager).ensureTranscriptLedgerForRead(sessionId);
-            await publishBotConversationMessage(stores, header, message);
+            await publishBotConversationMessage(stores, header, message, assertAvailable);
+            assertAvailable();
             if (!existing) await stores.sessionStore.appendMessages(sessionId, [message]);
             await continuityCoordinator.refreshCanonical(sessionId, lease);
           });
@@ -2469,7 +2472,23 @@ export async function createExecutionRuntimeHostComposition(
     goal = new HostGoalCoordinator({
       store: openedGoalStore,
       stores,
-      readSessionMessages: (sessionId) => requireSessionManager(manager).getMessages(sessionId),
+      readSessionContext: async (sessionId) => {
+        const { messages, events } =
+          await requireSessionManager(manager).readConversationCopySnapshot(sessionId);
+        const formAnswers = await readGoalFormEvidence(sessionId, events, (requestId) =>
+          stores.interactionStore.readInteraction(requestId),
+        );
+        return {
+          messages,
+          formAnswers,
+          unreadFormTools: unreadGoalFormToolResponses(
+            sessionId,
+            events,
+            formAnswers,
+            recentGoalToolReferences(messages),
+          ),
+        };
+      },
       executions: coordinator,
       sessionAdmission,
       evaluator: createHostGoalEvaluator({
@@ -3471,8 +3490,17 @@ export async function createExecutionRuntimeHostComposition(
               };
             },
             'turn.message.submit': async (input, connection) => {
-              if (!personalAssistant.isConversation(input.sessionId))
+              if (!personalAssistant.isConversation(input.sessionId)) {
+                if (input.externalSource)
+                  return {
+                    ok: false,
+                    error: {
+                      code: 'operation_unavailable',
+                      message: 'External connector input requires the assistant Inbox',
+                    },
+                  };
                 return messages.handlers['turn.message.submit'](input, connection);
+              }
               if (input.originHostEpoch !== context.hostEpoch)
                 return {
                   ok: false,
@@ -3503,6 +3531,7 @@ export async function createExecutionRuntimeHostComposition(
                     input.sessionId,
                     input.messageId,
                     input.content,
+                    input.externalSource,
                   ))
                 )
                   throw Error('Assistant is stopping; message was not admitted');

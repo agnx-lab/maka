@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { DEFAULT_TOOL_MODE } from '@maka/core/tool-mode';
 import { buildInvocationOpenedEvent } from '@maka/core/runtime-invocation';
@@ -32,6 +33,7 @@ export async function publishBotConversationMessage(
   stores: ExecutionStoresWriter<'interactive'>,
   header: SessionHeader,
   message: StoredMessage,
+  assertAvailable: () => void = () => {},
 ) {
   if (message.type !== 'user' && message.type !== 'assistant')
     throw Error('Expected conversation text');
@@ -47,6 +49,11 @@ export async function publishBotConversationMessage(
     if (
       text?.content?.kind !== 'text' ||
       text.content.text !== message.text ||
+      !isDeepStrictEqual(
+        text.content.origin,
+        message.type === 'user' ? message.origin : undefined,
+      ) ||
+      text.author !== (message.type === 'user' ? (message.origin ? 'host' : 'user') : 'agent') ||
       text.content.summary !== (message.type === 'assistant' ? message.summary : undefined)
     )
       throw Error('Assistant conversation ledger identity conflict');
@@ -116,6 +123,9 @@ export async function publishBotConversationMessage(
       actions: { endInvocation: true },
     },
   ];
+  // Reads above can yield while the assistant is being disabled. Fence the
+  // first durable write; the outbox retains accepted input for later replay.
+  assertAvailable();
   await stores.runtimeEventStore.importConversationCopyRuntimeEvents(header.id, [
     { runId, events },
   ]);

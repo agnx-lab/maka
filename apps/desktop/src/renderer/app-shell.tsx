@@ -230,7 +230,7 @@ function AppShellContent({
 }) {
   const toastApi = useToast();
   const {
-    renderPublishedConversation,
+    renderCompleteConversation,
     refreshMessages,
     transcriptEmpty,
     transcriptHasHistory,
@@ -272,6 +272,7 @@ function AppShellContent({
     openProjectSettings,
     openProviderCatalog,
     openConnectionDetail,
+    openExternalAgentSettings,
     openProviderCreate,
     setSettingsProfileId,
   } = overlays.commands;
@@ -296,7 +297,7 @@ function AppShellContent({
   const composerStaging = useMemo(Conversation.createComposerStagingCommands, []);
   const composerSubmission = useMemo(Conversation.createComposerSubmissionCommands, []);
   const [petCompletionNonce, setPetCompletionNonce] = useState(0);
-  const [navigationState, setNavigationState] = useState(() => readNavigationState());
+  const [navigationState, setNavigationState] = useState(readNavigationState);
   const navSelection = navigationState.selection;
   const sessionsSelected = navSelection.section === 'sessions';
   const setNavSelection = useCallback<Dispatch<SetStateAction<NavSelection>>>((nextSelection) => {
@@ -1002,7 +1003,7 @@ function AppShellContent({
         : projectCapabilities.viewClientPath,
     connections: defaultHostConnections.snapshot.connections,
     defaultConnection: defaultHostConnections.snapshot.defaultConnection,
-    renderPublishedConversation,
+    renderCompleteConversation,
     newTaskProfileId: taskEntry.selectors.selectedProfileId,
     settingsOpen,
     settingsProfileId: overlays.selectors.settings.request.profileId,
@@ -1303,14 +1304,13 @@ function AppShellContent({
                 onOpenUsage={() => commands.toggleTool('inspector')} onToggleWorkbar={commands.toggleRightPanel}
                 onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
               <WorkHubDock workbar={selectors} workbarTogglePosition={workbarTogglePosition} visible={workHubActive && sessionsSelected && !shellObscured} />
-              <PersonalAssistantTaskLayout session={activeSessionForView}
-                className={activeSessionForView?.labels?.includes('personal-assistant') ? 'personal-assistant-chat' : undefined}
-                data-session-history-surface="true"
+              <PersonalAssistantTaskLayout
+                session={activeSessionForView}
                 // ChatView positions this transcript: switching conversations,
                 // following the tail and the moves the reader asks for are one
                 // authority there, and the composer never remounts for any of
                 // them — its contenteditable DOM carries the live draft.
-                data-maka-onboarding={showOnboardingHero ? 'true' : undefined}
+                onboarding={showOnboardingHero}
                 scrollToBottomLabel={
                   desktopConversationCopy.actions.scrollMainToBottom
                 }
@@ -1362,11 +1362,8 @@ function AppShellContent({
                   onDeleteQueuedEntry={activeId ? queueSurface.deleteQueuedEntry : undefined}
                   onReorderQueuedEntries={activeId ? queueSurface.reorderQueuedEntries : undefined}
                   contextPickEnabled={canStageComposerContext}
-                  executorComposer={{ selection: executor, taskSubmissionHardBlocked, connectionCount: connections.length, onSetup: () => openSettingsSection('external-agents'), onNewTask: openNewTaskSurface }}
+                  executorComposer={{ selection: executor, taskSubmissionHardBlocked, connectionCount: connections.length, onSetup: openExternalAgentSettings, onNewTask: openNewTaskSurface }}
                   activeSession={activeSessionForView}
-                  compactControls={activeSessionForView?.labels?.includes('personal-assistant')}
-                  placeholder={activeSessionForView?.labels?.includes('personal-assistant')
-                    ? (uiLocale === 'zh-CN' ? '聊点什么…' : 'Send a message…') : undefined}
                   {...{ executorTarget, onExecutorTargetChange }}
                   usageModel={activeModel}
                   usageRoute={activeSessionForModelControls}

@@ -146,7 +146,7 @@ test('source sync → stale index → fresh original → discovery Inbox → Bot
                   ? '已核对最新原文，委派任务完成。'
                   : undefined;
             if (text) {
-              await invoke('SendUser', { messageId: row.id, messages: [text] });
+              await invoke('SendUser', { messageId: row.id, messages: [{ text }] });
               visible.push(text);
             }
           }

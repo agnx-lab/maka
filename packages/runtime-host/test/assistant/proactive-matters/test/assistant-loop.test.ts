@@ -43,7 +43,7 @@ test('unified entry + background index + timed task + parent feedback run togeth
           if (JSON.parse(message.content).status === 'completed')
             await invoke('SendUser', {
               messageId: 'acceptance-complete',
-              messages: ['已核对，验收通过。'],
+              messages: [{ text: '已核对，验收通过。' }],
             });
         }
         await invoke('Sleep', {});
@@ -189,7 +189,7 @@ test('Bot delegates for the visible owner and delivers task completion through S
               if (report.status === 'completed')
                 await invoke('SendUser', {
                   messageId: 'delegated-result',
-                  messages: ['验收结果已经核对完成。'],
+                  messages: [{ text: '验收结果已经核对完成。' }],
                 });
             }
           }
