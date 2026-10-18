@@ -37,7 +37,7 @@ import { InitiativeStore } from '../assistant/index-initiative/store.js';
 import { PERSONAL_ASSISTANT_OPERATION_SPECS } from '../protocol/personal-assistant.js';
 import { operationAllowsRemoteOwner } from '../protocol/operations.js';
 
-async function fixture(enabled = true) {
+async function fixture(enabled: boolean | null = null) {
   const root = await mkdtemp(join(tmpdir(), 'maka-native-assistant-中文-'));
   const ctx = new Context();
   const agents = new PluginAgentService(ctx);
@@ -58,9 +58,9 @@ async function fixture(enabled = true) {
     resolveTools: (id: string, core: any) => pluginTools.resolve(id, core),
   };
   const directory = join(root, 'native');
-  if (enabled) {
+  if (enabled !== null) {
     await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, 'enablement.json'), JSON.stringify({ enabled: true }));
+    await writeFile(join(directory, 'enablement.json'), JSON.stringify({ enabled }));
   }
   const legacy = new HostPluginDataRuntime(root);
   const service = new PersonalAssistantService(directory, dependencies);
@@ -78,10 +78,11 @@ async function fixture(enabled = true) {
   };
 }
 
-test('native tools and APIs initialize without installing any plugin or invoking a model', async (t) => {
+test('absent preference enables native tools and APIs without installing plugins or invoking a model', async (t) => {
   const f = await fixture();
   t.after(f.close);
   await f.service.recover(f.legacy, []);
+  assert.equal(f.service.enabled, true);
   const names = f.service.tools.map((x) => x.name);
   for (const name of [
     'MemoryIndexCreateGroup',
@@ -95,7 +96,10 @@ test('native tools and APIs initialize without installing any plugin or invoking
   await assert.rejects(f.service.call('assistant.binding', {}), /not ready/);
   f.service.start();
   f.service.start();
-  assert.deepEqual(await f.service.call('assistant.binding', {}), { state: null });
+  assert.deepEqual(await f.service.call('assistant.binding', {}), {
+    state: null,
+    bot: { sessionId: null, error: null, wakeError: null, sleeping: true, working: false },
+  });
   const status: any = await f.service.call('assistant.status', {});
   assert.equal(status.readiness.memory, true);
   assert.equal(status.readiness.tasks, true);
@@ -351,7 +355,7 @@ test('ambiguous or malformed adopted settings fail closed without creating repla
   }
 });
 
-test('default-off is cold: no legacy adoption, databases, tools, prompts or schedulers', async (t) => {
+test('explicitly disabled stays cold: no legacy adoption, databases, tools, prompts or schedulers', async (t) => {
   const f = await fixture(false);
   t.after(f.close);
   let legacyReads = 0;
@@ -387,7 +391,7 @@ test('default-off is cold: no legacy adoption, databases, tools, prompts or sche
     'assistant.status',
   ])
     await assert.rejects(f.service.call(method, {}), /disabled/);
-  await assert.rejects(readdir(f.directory), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(f.directory), ['enablement.json']);
   assert.equal(legacyReads, 0);
   assert.deepEqual(f.marked, []);
 });
@@ -441,7 +445,7 @@ test('master switch is persistent, repeatable, rejects stale tools and retains s
   await again.call('assistant.set-enabled', { enabled: false });
 });
 
-test('existing component configuration is not implicit consent; enable failure stays disabled and can be retried', async (t) => {
+test('explicit disable overrides component configuration; enable failure stays disabled and can be retried', async (t) => {
   const f = await fixture(false);
   t.after(f.close);
   await mkdir(f.directory, { recursive: true });

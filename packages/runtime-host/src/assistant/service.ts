@@ -328,7 +328,7 @@ class AssistantRuntime {
   }
 }
 
-/** Host-owned opt-in. Disabled Hosts do not load modules, open their databases or start timers. */
+/** Host-owned enablement, on by default. Disabled Hosts do not load modules, open their databases or start timers. */
 export class PersonalAssistantService {
   private runtime?: AssistantRuntime;
   private legacy?: HostPluginDataRuntime;
@@ -355,7 +355,7 @@ export class PersonalAssistantService {
     if (this.recovered) throw Error('Personal assistant already initialized');
     this.legacy = legacy;
     this.entries = entries;
-    let enabled = false;
+    let enabled = true;
     try {
       const saved = JSON.parse(await readFile(join(this.directory, 'enablement.json'), 'utf8'));
       if (typeof saved.enabled !== 'boolean') throw Error('Invalid personal assistant enablement');

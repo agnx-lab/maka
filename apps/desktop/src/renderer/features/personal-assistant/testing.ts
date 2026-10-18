@@ -18,3 +18,6 @@
  */
 
 export { createAssistantNavigation, originalHost } from './navigation.js';
+
+export { projectTasks } from './task-float-model.js';
+export { readFloatTasks, watchFloatTasks } from './task-float-source.js';

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { MemoryOriginalHost, PersonalAssistantEntry, createInternalUriDispatcher } from './features/personal-assistant/index.js';
+import { PersonalAssistantTaskLayout, MemoryOriginalHost, PersonalAssistantEntry, createInternalUriDispatcher } from './features/personal-assistant/index.js';
 import { WorkHubControlOverlay, WorkHubDock, WorkHubMainNavigation } from './features/workhub';
 import { WorkHubEnablementWatch } from './application/contracts/workhub-workspace/workhub-enablement.js';
 import { RuntimeHostHandoffOverlay } from './features/runtime-host-management/index.js';
@@ -39,7 +39,6 @@ import { isLinkedSubagentSession } from '@maka/core/session';
 import { resolveUiLocale } from '@maka/core/ui-locale';
 import { hasSettledInitialOnboarding } from '@maka/core/onboarding-milestone';
 import {
-  ChatSurfaceLayout,
   type ComposerHandle,
   MakaUriContext,
   AstryxLocaleProvider,
@@ -1304,7 +1303,7 @@ function AppShellContent({
                 onOpenUsage={() => commands.toggleTool('inspector')} onToggleWorkbar={commands.toggleRightPanel}
                 onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
               <WorkHubDock workbar={selectors} workbarTogglePosition={workbarTogglePosition} visible={workHubActive && sessionsSelected && !shellObscured} />
-              <ChatSurfaceLayout
+              <PersonalAssistantTaskLayout session={activeSessionForView}
                 className={activeSessionForView?.labels?.includes('personal-assistant') ? 'personal-assistant-chat' : undefined}
                 data-session-history-surface="true"
                 // ChatView positions this transcript: switching conversations,
@@ -1478,7 +1477,7 @@ function AppShellContent({
                   />
 
                 ) : null}
-              </ChatSurfaceLayout>
+              </PersonalAssistantTaskLayout>
             </Conversation.ConversationHomeSurface>
             {/* Collapse hides the Workbar surface without unmounting its tools. */}
             <WorkbarHost togglePosition={workbarTogglePosition} />

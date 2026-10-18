@@ -1,0 +1,65 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { useEffect, useState } from 'react';
+import { useUiLocale } from '@maka/ui';
+import { ChevronLeft, ChevronRight, Minus, ChevronDown, ArrowLeft } from '@maka/ui/icons';
+import { usePersonalAssistantServices } from './services.js';
+import { readFloatTasks, watchFloatTasks } from './task-float-source.js';
+import { taskFloatCopy } from './task-float-copy.js';
+import type { FloatTask } from './task-float-model.js';
+
+export function PersonalAssistantTaskFloat({ sessionId }: { sessionId: string }) {
+  const services = usePersonalAssistantServices();
+  const locale = useUiLocale();
+  const copy = taskFloatCopy[locale];
+  const [tasks, setTasks] = useState<FloatTask[]>([]);
+  const [offline, setOffline] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [page, setPage] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => watchFloatTasks(() => readFloatTasks(services, sessionId), result => {
+    setOffline(result === null);
+    setTasks(result ?? []);
+  }), [services, sessionId]);
+  const visibleTasks = showCompleted ? tasks : tasks.filter(task => task.phase !== 'completed');
+  const pages = Math.max(1, Math.ceil(visibleTasks.length / 3));
+  const currentPage = Math.min(page, pages - 1);
+  const selected = visibleTasks.find(task => task.id === selectedId);
+  const running = tasks.filter(task => task.phase === 'running').length;
+  const waiting = tasks.filter(task => task.phase === 'waiting').length;
+  const other = tasks.filter(task => ['queued', 'attention', 'paused'].includes(task.phase));
+  const countText = offline ? copy.offline : `${running} ${copy.phase.running} · ${waiting} ${copy.phase.waiting}${other.length ? ` · ${other.length} ${copy.other}` : ''}`;
+  if (!tasks.length && !offline) return null;
+  const time = (task: FloatTask) => task.updatedAt ? new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(task.updatedAt) : '—';
+  return <aside className={`assistant-task-float${expanded ? '' : ' is-collapsed'}`} aria-label={copy.tasks}>
+    {!expanded ? <button className="assistant-task-pill" onClick={() => setExpanded(true)} aria-label={`${copy.expand}: ${countText}`}><span className="assistant-task-brand">m</span><span>{countText}</span><ChevronDown size={14} /></button> : <>
+      <header><span className="assistant-task-brand">m</span><strong>Maka</strong><button onClick={() => setExpanded(false)} aria-label={copy.collapse} title={copy.collapse}><Minus size={15} /></button></header>
+      <div className="assistant-task-counts" role="status">{countText}</div>
+      <div className="assistant-task-list">
+        {offline ? <p className="assistant-task-empty">{copy.offline}</p> : selected ? <div className="assistant-task-detail"><button className="assistant-task-back" onClick={() => setSelectedId(null)}><ArrowLeft size={12} />{copy.back}</button><strong>{selected.title}</strong><small>{copy.phase[selected.phase]} · {time(selected)}</small><p>{selected.progress}</p></div> : !visibleTasks.length ? <p className="assistant-task-empty">{copy.empty}</p> : visibleTasks.slice(currentPage * 3, currentPage * 3 + 3).map(task => <button key={task.id} className="assistant-task-row" onClick={() => setSelectedId(task.id)}>
+          <span className="assistant-task-heading"><strong title={task.title}>{task.title}</strong><time dateTime={task.updatedAt ? new Date(task.updatedAt).toISOString() : undefined} title={task.updatedAt ? `${copy.updated}: ${new Date(task.updatedAt).toLocaleString(locale)}` : copy.unknown}>{time(task)}</time></span>
+          <span className={`assistant-task-progress is-${task.phase}`}><i aria-hidden="true" /><span title={`${copy.phase[task.phase]}${task.progress ? ` · ${task.progress}` : ''}`}><b>{copy.phase[task.phase]}</b>{task.progress ? ` · ${task.progress}` : ''}</span></span>
+        </button>)}
+      </div>
+      {!selected && <footer><button className="assistant-task-completed-toggle" aria-pressed={showCompleted} onClick={() => { setShowCompleted(!showCompleted); setPage(0); setSelectedId(null); }}>{showCompleted ? copy.hideCompleted : copy.showCompleted}</button><nav aria-label={copy.tasks}><button aria-label={copy.previous} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={13} /></button><span>{currentPage + 1}/{pages}</span><button aria-label={copy.next} disabled={currentPage >= pages - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={13} /></button></nav></footer>}
+    </>}
+  </aside>;
+}

@@ -462,3 +462,5 @@ function PersonalAssistantStatusSettings({
 }
 
 export { createInternalUriDispatcher } from './internal-uri.js';
+
+export { PersonalAssistantTaskLayout } from './task-layout.js';
