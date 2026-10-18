@@ -327,8 +327,12 @@ fn launch_option(arguments: &HostArguments) -> Result<bool, HostError> {
 /// the script asks the user about.
 const LAUNCHABLE: &str = "launchable:";
 
-/// Extensions of files that run code when the system opens them, on macOS:
-/// applications and installers, which run their own scripts (app, pkg,
+/// Extensions of files that run code when the system opens them. Each
+/// platform has its own list: a name that runs a program on one is a
+/// document on another, and asking about every `.js` file on macOS would
+/// teach the user to dismiss the question.
+///
+/// On macOS: applications and installers, which run their own scripts (app, pkg,
 /// mpkg); shell scripts, which Terminal runs (command, tool, sh, bash, zsh,
 /// csh, ksh, fish); Terminal settings, which can run a command (terminal);
 /// Automator workflows and actions (workflow, action); AppleScript, which
@@ -337,6 +341,7 @@ const LAUNCHABLE: &str = "launchable:";
 /// launcher runs (py, rb, pl); and location files, which open a URL or
 /// another file, an application among them (webloc, inetloc, fileloc). The
 /// bundles among them are folders, which `open` refuses anyway.
+#[cfg(target_os = "macos")]
 const LAUNCHABLE_EXTENSIONS: &[&str] = &[
     "app",
     "pkg",
@@ -362,6 +367,63 @@ const LAUNCHABLE_EXTENSIONS: &[&str] = &[
     "webloc",
     "inetloc",
     "fileloc",
+];
+
+/// On Windows, where the system opens a file through the shell's `open`
+/// verb: programs and installers (exe, com, scr, pif, cpl, msi, msp, msix,
+/// msixbundle, appx, appxbundle, application, appref-ms); command and
+/// PowerShell scripts (bat, cmd, ps1, psm1); Windows Script Host scripts
+/// (vbs, vbe, js, jse, wsf, wsh); HTML applications (hta); management
+/// consoles (msc); registry files, which change settings when merged (reg);
+/// shortcuts and location files, which open another file or a URL, a
+/// program among them (lnk, url, scf); Java archives (jar); and scripts an
+/// installed launcher runs (py, pyw).
+#[cfg(windows)]
+const LAUNCHABLE_EXTENSIONS: &[&str] = &[
+    "exe",
+    "com",
+    "scr",
+    "pif",
+    "cpl",
+    "msi",
+    "msp",
+    "msix",
+    "msixbundle",
+    "appx",
+    "appxbundle",
+    "application",
+    "appref-ms",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "hta",
+    "msc",
+    "reg",
+    "lnk",
+    "url",
+    "scf",
+    "jar",
+    "py",
+    "pyw",
+];
+
+/// On Linux and the other Unix systems, where `xdg-open` picks the handler:
+/// desktop entries, which name a command (desktop); shell scripts (sh,
+/// bash, zsh, csh, ksh, fish); self-running installers and images (run,
+/// appimage); Java archives (jar); and scripts an installed launcher runs
+/// (py, rb, pl). A file with an execute bit is asked about whatever its
+/// name.
+#[cfg(not(any(target_os = "macos", windows)))]
+const LAUNCHABLE_EXTENSIONS: &[&str] = &[
+    "desktop", "sh", "bash", "zsh", "csh", "ksh", "fish", "run", "appimage", "jar", "py", "rb",
+    "pl",
 ];
 
 /// What `open` hands to the system for `path` in the folder `root`: the
@@ -857,7 +919,13 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("maka-files-launch-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let refusal = |result: Result<PathBuf, HostError>| result.unwrap_err().message().to_owned();
-        for name in ["run.command", "Setup.PKG", "tool.sh", "page.webloc"] {
+        #[cfg(target_os = "macos")]
+        let names = ["run.command", "Setup.PKG", "tool.sh", "page.webloc"];
+        #[cfg(windows)]
+        let names = ["Setup.EXE", "run.bat", "tool.ps1", "link.lnk"];
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let names = ["app.desktop", "tool.sh", "Tool.JAR", "page.py"];
+        for name in names {
             let file = directory.join(name);
             std::fs::write(&file, "").unwrap();
             assert!(
