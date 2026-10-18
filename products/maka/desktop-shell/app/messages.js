@@ -771,11 +771,11 @@ export const MESSAGES = {
     '模型服务商及其 API Key。',
     '模型服務商及其 API Key。',
   ],
-  settingsSubagents: ['Subagents', '子代理', '子代理'],
+  settingsSubagents: ['Subagents', 'Subagent', 'Subagent'],
   settingsSubagentsDetail: [
     'Save reusable worker configurations for WorkHub. Each task keeps its original model and tool selection; later edits affect new tasks only.',
-    '为 WorkHub 保存可复用的代理配置。任务会保留派发时的模型和工具选择，后续修改只影响新任务。',
-    '為 WorkHub 儲存可重用的代理設定。任務會保留派發時的模型和工具選擇，後續修改只影響新任務。',
+    '为 WorkHub 保存可复用的 Agent 配置。任务会保留派发时的模型和工具选择，后续修改只影响新任务。',
+    '為 WorkHub 儲存可重用的 Agent 設定。任務會保留派發時的模型和工具選擇，後續修改只影響新任務。',
   ],
   settingsArchived: ['Archived', '已归档', '已封存'],
   settingsArchivedDetail: [
@@ -904,18 +904,22 @@ export const MESSAGES = {
 
   // Settings: Subagents (subagents.js). Where the TUI's page
   // (plugins/shared/tui-messages.ts) words the same thing, these copy it.
-  subagentsNew: ['New subagent', '新建子代理', '新增子代理'],
+  subagentsNew: ['New subagent', '新建 Subagent', '新增 Subagent'],
   subagentsReadFailed: [
     'Couldn’t read the subagents: {value}',
-    '读取子代理失败：{value}',
-    '讀取子代理失敗：{value}',
+    '读取 Subagent 失败：{value}',
+    '讀取 Subagent 失敗：{value}',
   ],
   subagentsEmpty: [
     'No subagents yet. WorkHub uses a subagent to decide which model and tools a delegated task gets.',
-    '还没有子代理。WorkHub 派发任务时，用子代理决定交给哪个模型、可以用哪些工具。',
-    '還沒有子代理。WorkHub 派發任務時，用子代理決定交給哪個模型、可以用哪些工具。',
+    '还没有 Subagent。WorkHub 派发任务时，用 Subagent 决定交给哪个模型、可以用哪些工具。',
+    '還沒有 Subagent。WorkHub 派發任務時，用 Subagent 決定交給哪個模型、可以用哪些工具。',
   ],
-  subagentsSaved: ['Subagent configurations saved.', '子代理配置已保存。', '子代理設定已儲存。'],
+  subagentsSaved: [
+    'Subagent configurations saved.',
+    'Subagent 配置已保存。',
+    'Subagent 設定已儲存。',
+  ],
   edit: ['Edit', '编辑', '編輯'],
   subagentToolsOne: ['{count} tool', '{count} 个工具', '{count} 個工具'],
   subagentToolsOther: ['{count} tools', '{count} 个工具', '{count} 個工具'],
@@ -931,20 +935,20 @@ export const MESSAGES = {
     '该模型当前不可用，请重新选择',
     '此模型目前無法使用，請重新選擇',
   ],
-  subagentsAll: ['All subagents', '所有子代理', '所有子代理'],
+  subagentsAll: ['All subagents', '所有 Subagent', '所有 Subagent'],
   subagentDescription: ['Description', '说明', '說明'],
   subagentDescriptionHint: [
     'What it is for. WorkHub reads this when it picks a subagent.',
-    '它适合做什么。WorkHub 选择子代理时会读这段说明。',
-    '它適合做什麼。WorkHub 選擇子代理時會讀這段說明。',
+    '它适合做什么。WorkHub 选择 Subagent 时会读这段说明。',
+    '它適合做什麼。WorkHub 選擇 Subagent 時會讀這段說明。',
   ],
   subagentModel: ['Model', '模型', '模型'],
   subagentChooseModel: ['Choose a model', '选择模型', '選擇模型'],
   subagentTools: ['Tools', '工具', '工具'],
   subagentToolsHelp: [
     'Choose the tools this subagent may use. Unchecked tools remain unavailable even if the model requests them. Workspace permissions still apply. Restricted sessions use native models.',
-    '选择子代理可用的工具。即使模型主动调用，未选工具也不会执行；工作区权限仍然生效。受限会话使用原生模型。',
-    '選擇子代理可用的工具。即使模型主動呼叫，未選工具也不會執行；工作區權限仍然生效。受限工作階段使用原生模型。',
+    '选择 Subagent 可用的工具。即使模型主动调用，未选工具也不会执行；工作区权限仍然生效。受限会话使用原生模型。',
+    '選擇 Subagent 可用的工具。即使模型主動呼叫，未選工具也不會執行；工作區權限仍然生效。受限工作階段使用原生模型。',
   ],
   subagentsRead: ['Local read tools', '本地读取工具', '本機讀取工具'],
   subagentsWeb: ['Web research tools', '网页研究工具', '網頁研究工具'],
@@ -954,18 +958,18 @@ export const MESSAGES = {
   subagentsEnabled: ['Available to WorkHub', '允许 WorkHub 使用', '允許 WorkHub 使用'],
   subagentsEnabledHelp: [
     'Allow WorkHub to delegate tasks to this subagent.',
-    '允许 WorkHub 将任务交给这个子代理。',
-    '允許 WorkHub 將任務交給這個子代理。',
+    '允许 WorkHub 将任务交给这个 Subagent。',
+    '允許 WorkHub 將任務交給這個 Subagent。',
   ],
   subagentId: ['ID: {id}', '标识：{id}', '識別碼：{id}'],
-  subagentSave: ['Save subagent', '保存子代理', '儲存子代理'],
-  subagentRemove: ['Remove subagent', '移除子代理', '移除子代理'],
+  subagentSave: ['Save subagent', '保存 Subagent', '儲存 Subagent'],
+  subagentRemove: ['Remove subagent', '移除 Subagent', '移除 Subagent'],
   subagentRemoveQuestion: [
     'Remove this saved configuration? Existing tasks and sessions are retained.',
     '移除此配置？已有任务和会话会保留。',
     '移除此設定？已有任務和工作階段會保留。',
   ],
-  subagentNameMissing: ['Name the subagent', '请为子代理命名', '請為子代理命名'],
+  subagentNameMissing: ['Name the subagent', '请为 Subagent 命名', '請為 Subagent 命名'],
   subagentNameTooLong: [
     'The name is longer than 128 characters',
     '名称超过 128 个字符',
@@ -978,8 +982,8 @@ export const MESSAGES = {
   ],
   subagentsConflict: [
     'Subagents were changed elsewhere and have been read again. Check, then save again.',
-    '子代理配置已被其他操作修改，已重新读取。请检查后再保存。',
-    '子代理設定已被其他操作修改，已重新讀取。請檢查後再儲存。',
+    'Subagent 配置已被其他操作修改，已重新读取。请检查后再保存。',
+    'Subagent 設定已被其他操作修改，已重新讀取。請檢查後再儲存。',
   ],
   subagentsInvalid: [
     'Check the name, model and tool selection.',
@@ -988,8 +992,8 @@ export const MESSAGES = {
   ],
   subagentSaveFailed: [
     'Couldn’t save the subagent: {value}',
-    '保存子代理失败：{value}',
-    '儲存子代理失敗：{value}',
+    '保存 Subagent 失败：{value}',
+    '儲存 Subagent 失敗：{value}',
   ],
 
   // Settings: Archived (archived.js). Where the TUI (plugins/shared/
@@ -1091,10 +1095,10 @@ export const MESSAGES = {
   ],
   workhubNeedsSubagent: [
     'WorkHub needs at least one available subagent to delegate tasks.',
-    'WorkHub 需要至少一个可用的子代理才能派发任务。',
-    'WorkHub 需要至少一個可用的子代理才能派發任務。',
+    'WorkHub 需要至少一个可用的 Subagent 才能派发任务。',
+    'WorkHub 需要至少一個可用的 Subagent 才能派發任務。',
   ],
-  workhubSetUpSubagents: ['Set up subagents', '设置子代理', '設定子代理'],
+  workhubSetUpSubagents: ['Set up subagents', '设置 Subagent', '設定 Subagent'],
 
   // WorkHub: tasks (workhub.js)
   workhubNoTasks: [

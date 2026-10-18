@@ -430,10 +430,10 @@ impl Owner {
                     "You are planning a change for user approval. Inspect and discuss only. Workspace mutation, Shell, subagents and autonomous workflows are unavailable. SubmitPlan proposes concrete ordered steps and material risks for approval; submission ends this planning Turn without starting implementation."
                 }
                 Language::ZhCn => {
-                    "你正在规划变更，供用户批准。仅检查和讨论；不能修改工作区、使用 Shell、子代理或自主工作流。通过 SubmitPlan 提交具体有序步骤及重大风险，供用户批准；提交会结束此规划轮次，不会开始实现。"
+                    "你正在规划变更，供用户批准。仅检查和讨论；不能修改工作区、使用 Shell、Subagent 或自主工作流。通过 SubmitPlan 提交具体有序步骤及重大风险，供用户批准；提交会结束此规划轮次，不会开始实现。"
                 }
                 Language::ZhTw => {
-                    "你正在規劃變更，供使用者批准。僅檢查和討論；不能修改工作區、使用 Shell、子代理或自主工作流程。透過 SubmitPlan 提交具體有序步驟及重大風險，供使用者批准；提交會結束此規劃回合，不會開始實作。"
+                    "你正在規劃變更，供使用者批准。僅檢查和討論；不能修改工作區、使用 Shell、Subagent 或自主工作流程。透過 SubmitPlan 提交具體有序步驟及重大風險，供使用者批准；提交會結束此規劃回合，不會開始實作。"
                 }
             }
         } else {

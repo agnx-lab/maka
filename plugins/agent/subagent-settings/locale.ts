@@ -79,8 +79,8 @@ export type Copy = ReturnType<typeof copy>;
 const terminalMessages = {
   'subagents-enabled-help': [
     'Allow WorkHub to delegate tasks to this subagent.',
-    '允许 WorkHub 将任务交给这个子代理。',
-    '允許 WorkHub 將任務交給這個子代理。',
+    '允许 WorkHub 将任务交给这个 Subagent。',
+    '允許 WorkHub 將任務交給這個 Subagent。',
   ] as const,
   'subagents-description': tui_subagents_description,
   'subagents-name': tui_subagents_name,

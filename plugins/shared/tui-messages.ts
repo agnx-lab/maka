@@ -80,17 +80,17 @@ export const tui_anonymous_credential: Message = [
   '未保存凭据；此服务支持匿名连接。',
   '未儲存憑據；此服務支援匿名連線。',
 ];
-export const tui_settings_subagents: Message = ['Subagents', '子代理', '子代理'];
+export const tui_settings_subagents: Message = ['Subagents', 'Subagent', 'Subagent'];
 export const tui_subagents_help: Message = [
   'Save reusable worker configurations for WorkHub. Each task keeps its original model and tool selection; later edits affect new tasks only.',
-  '为 WorkHub 保存可复用的代理配置。任务会保留派发时的模型和工具选择，后续修改只影响新任务。',
-  '為 WorkHub 儲存可重用的代理設定。任務會保留派發時的模型和工具選擇，後續修改只影響新任務。',
+  '为 WorkHub 保存可复用的 Agent 配置。任务会保留派发时的模型和工具选择，后续修改只影响新任务。',
+  '為 WorkHub 儲存可重用的 Agent 設定。任務會保留派發時的模型和工具選擇，後續修改只影響新任務。',
 ];
-export const tui_subagents_new: Message = ['New subagent', '新建子代理', '新增子代理'];
+export const tui_subagents_new: Message = ['New subagent', '新建 Subagent', '新增 Subagent'];
 export const tui_subagents_loading: Message = [
   'Loading subagents…',
-  '正在加载子代理…',
-  '正在載入子代理…',
+  '正在加载 Subagent…',
+  '正在載入 Subagent…',
 ];
 export const tui_subagents_selected: Message = ['Selected tools', '已选择工具', '已選擇工具'];
 export const tui_subagents_isolated: Message = [
@@ -115,8 +115,8 @@ export const tui_subagents_model: Message = ['Model', '模型', '模型'];
 export const tui_subagents_choose_model: Message = ['Choose a model', '选择模型', '選擇模型'];
 export const tui_subagents_tools_help: Message = [
   'Choose the tools this subagent may use. Unchecked tools remain unavailable even if the model requests them. Workspace permissions still apply. Restricted sessions use native models.',
-  '选择子代理可用的工具。即使模型主动调用，未选工具也不会执行；工作区权限仍然生效。受限会话使用原生模型。',
-  '選擇子代理可用的工具。即使模型主動呼叫，未選工具也不會執行；工作區權限仍然生效。受限工作階段使用原生模型。',
+  '选择 Subagent 可用的工具。即使模型主动调用，未选工具也不会执行；工作区权限仍然生效。受限会话使用原生模型。',
+  '選擇 Subagent 可用的工具。即使模型主動呼叫，未選工具也不會執行；工作區權限仍然生效。受限工作階段使用原生模型。',
 ];
 export const tui_subagents_read: Message = ['Local read tools', '本地读取工具', '本機讀取工具'];
 export const tui_subagents_web: Message = ['Web research tools', '网页研究工具', '網頁研究工具'];
@@ -131,8 +131,8 @@ export const tui_subagents_missing_tool: Message = [
   '工具不可用',
   '工具無法使用',
 ];
-export const tui_subagents_save: Message = ['Save subagent', '保存子代理', '儲存子代理'];
-export const tui_subagents_remove: Message = ['Remove subagent', '移除子代理', '移除子代理'];
+export const tui_subagents_save: Message = ['Save subagent', '保存 Subagent', '儲存 Subagent'];
+export const tui_subagents_remove: Message = ['Remove subagent', '移除 Subagent', '移除 Subagent'];
 export const tui_subagents_remove_question: Message = [
   'Remove this saved configuration? Existing tasks and sessions are retained.',
   '移除此配置？已有任务和会话会保留。',
@@ -145,8 +145,8 @@ export const tui_subagents_reload: Message = [
 ];
 export const tui_subagents_saved: Message = [
   'Subagent configurations saved.',
-  '子代理配置已保存。',
-  '子代理設定已儲存。',
+  'Subagent 配置已保存。',
+  'Subagent 設定已儲存。',
 ];
 export const tui_subagents_conflict: Message = [
   'Configurations changed elsewhere. Reload before saving again.',
@@ -165,8 +165,8 @@ export const tui_subagents_unknown: Message = [
 ];
 export const tui_subagents_unavailable: Message = [
   'Subagent settings are unavailable.',
-  '子代理设置暂不可用。',
-  '子代理設定暫時無法使用。',
+  'Subagent 设置暂不可用。',
+  'Subagent 設定暫時無法使用。',
 ];
 export const tui_subagents_connections: Message = [
   'Add or repair model connections in Settings → Models.',
