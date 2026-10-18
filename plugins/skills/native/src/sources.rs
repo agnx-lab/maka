@@ -218,9 +218,17 @@ mod tests {
         std::fs::create_dir_all(path).unwrap();
         let (path, directory_identity) = directory::capture(path).unwrap();
         let handle = directory::open(&path, &directory_identity).unwrap();
-        let identity = workspace::ensure_directory_identity(path.clone(), handle)
-            .await
-            .unwrap();
+        let private = tempfile::tempdir().unwrap();
+        let control = tempfile::tempdir().unwrap();
+        let identity = workspace::ensure_directory_identity(
+            path.clone(),
+            handle,
+            private.path().to_owned(),
+            control.path().to_owned(),
+            None,
+        )
+        .await
+        .unwrap();
         Workspace {
             worktree: None,
             project_id: None,

@@ -17,10 +17,11 @@
  * under the License.
  */
 
-use super::{MARKER_FILE, invalid, options, read_bounded};
+use super::{MARKER_FILE, Workspace, identity, invalid, options};
+use cap_fs_ext::DirExt;
 use cap_std::{ambient_authority, fs::Dir};
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     path::Path,
 };
 
@@ -69,15 +70,219 @@ fn repository_directory(path: &Path) -> io::Result<Option<&Path>> {
     Ok(None)
 }
 
-pub(super) async fn exclude_marker(path: &Path) -> io::Result<()> {
-    let path = path.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let repository = discover(&path)?;
-        // Preserve the final component for the no-follow writer.
-        append_exclusion(&repository.common_dir().join("info/exclude"))
-    })
-    .await
-    .map_err(io::Error::other)?
+pub(super) fn exclude_marker(
+    workspace: &Workspace,
+    private: &Path,
+    control: &Path,
+    binding: Option<&crate::worktree::Binding>,
+) -> io::Result<()> {
+    let Some(directory) = repository_directory(&workspace.path)? else {
+        return Ok(());
+    };
+    // Open the nearest entry itself: gix must not substitute another repository.
+    let entry = directory.join(".git");
+    let repository = match gix::open::Options::isolated()
+        .strict_config(true)
+        .open(&entry)
+    {
+        Ok(repository) => repository.to_thread_local(),
+        Err(gix::open::Error::NotARepository { source, .. }) => {
+            use gix::discover::is_git::Error;
+            // gix's exists/is_dir layout checks hide some IO failures. Probe only
+            // their reported sentinel, without reconstructing repository validity.
+            match &source {
+                Error::MissingHead => {
+                    let metadata = entry.metadata()?;
+                    let git = if metadata.is_file() {
+                        gix::discover::path::from_gitdir_file(&entry).map_err(io::Error::other)?
+                    } else {
+                        entry.clone()
+                    };
+                    probe_missing(&git.join("HEAD"))?;
+                }
+                Error::MissingObjectsDirectory { missing } => {
+                    // Pinned gix's directory-form linked-admin check discards
+                    // commondir read errors before falling back to local objects.
+                    // Preserve that IO without parsing a second Git layout.
+                    if entry.metadata()?.is_dir() {
+                        match std::fs::File::open(entry.join("commondir")) {
+                            Ok(mut file) => {
+                                if file.metadata()?.is_file() {
+                                    let mut buffer = [0; 8192];
+                                    while file.read(&mut buffer)? != 0 {}
+                                }
+                            }
+                            Err(error)
+                                if matches!(
+                                    error.kind(),
+                                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                                ) => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    probe_missing(missing)?;
+                }
+                Error::MissingRefsDirectory { missing } => probe_missing(missing)?,
+                _ => {}
+            }
+            if let Some(error) = exposed_io(&source)
+                && !matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::InvalidData
+                )
+            {
+                return Err(error);
+            }
+            return Ok(());
+        }
+        Err(gix::open::Error::Config(error)) => {
+            if let Some(error) = exposed_io(&error) {
+                return Err(error);
+            }
+            return Ok(());
+        }
+        Err(gix::open::Error::Io(error)) => return Err(error),
+        Err(error) => return Err(io::Error::other(error)),
+    };
+    let git = dunce::canonicalize(repository.git_dir())?;
+    let common = dunce::canonicalize(repository.common_dir())?;
+    let admin = binding
+        .map(crate::worktree::Binding::admin)
+        .map(dunce::canonicalize)
+        .transpose()?;
+    for path in [&git, &common] {
+        if path.starts_with(control)
+            || (path.starts_with(private)
+                && !admin.as_ref().is_some_and(|admin| path.starts_with(admin)))
+        {
+            return Err(invalid("Git marker exclusion targets private Host state"));
+        }
+    }
+    if let Some(binding) = binding
+        && (Some(&git) != admin.as_ref()
+            || common != dunce::canonicalize(binding.common_directory())?)
+    {
+        return Err(invalid("workspace Git binding changed"));
+    }
+    let directory = Dir::open_ambient_dir(&common, ambient_authority())?;
+    validate_anchor(&common, &directory)?;
+    workspace.validate_directory()?;
+    match directory.create_dir("info") {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let info = directory.open_dir_nofollow("info")?;
+    let info_path = common.join("info");
+    validate_anchor(&info_path, &info)?;
+    workspace.validate_directory()?;
+    let mut file = info.open_with("exclude", options().read(true).append(true).create(true))?;
+    let (found, bytes, last) = scan_exclusion(&info, &mut file)?;
+    validate_anchor(&common, &directory)?;
+    validate_anchor(&info_path, &info)?;
+    workspace.validate_directory()?;
+    if !found {
+        let addition = format!(
+            "{}{MARKER_FILE}\n",
+            if bytes != 0 && last != Some(b'\n') {
+                "\n"
+            } else {
+                ""
+            }
+        );
+        file.write_all(addition.as_bytes())?;
+        file.sync_all()?;
+    }
+    validate_anchor(&common, &directory)?;
+    validate_anchor(&info_path, &info)
+}
+
+fn probe_missing(path: &Path) -> io::Result<()> {
+    match path.metadata() {
+        Ok(_) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn exposed_io(mut error: &(dyn std::error::Error + 'static)) -> Option<io::Error> {
+    loop {
+        if let Some(error) = error.downcast_ref::<io::Error>() {
+            return Some(match error.raw_os_error() {
+                Some(code) => io::Error::from_raw_os_error(code),
+                None => io::Error::new(error.kind(), error.to_string()),
+            });
+        }
+        error = error.source()?;
+    }
+}
+
+fn validate_anchor(path: &Path, directory: &Dir) -> io::Result<()> {
+    let visible = Dir::open_ambient_dir(path, ambient_authority())?;
+    if dunce::canonicalize(path)? != path
+        || identity(&visible.dir_metadata()?) != identity(&directory.dir_metadata()?)
+    {
+        return Err(invalid("Git metadata directory changed"));
+    }
+    Ok(())
+}
+
+fn scan_exclusion(
+    directory: &Dir,
+    file: &mut cap_std::fs::File,
+) -> io::Result<(bool, u64, Option<u8>)> {
+    let before = file.metadata()?;
+    let named = directory.symlink_metadata("exclude")?;
+    if !before.is_file() || !named.is_file() || identity(&before) != identity(&named) {
+        return Err(invalid("Git exclude must be a regular file"));
+    }
+    let marker = MARKER_FILE.as_bytes();
+    let mut buffer = [0; 8192];
+    let (mut found, mut total, mut last, mut position, mut matches) =
+        (false, 0_u64, None, 0_usize, true);
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        for &byte in &buffer[..read] {
+            last = Some(byte);
+            if byte == b'\n' {
+                found |= matches && (position == marker.len() || position == marker.len() + 1);
+                position = 0;
+                matches = true;
+            } else {
+                matches &= if position < marker.len() {
+                    byte == marker[position]
+                } else {
+                    position == marker.len() && byte == b'\r'
+                };
+                position = position.saturating_add(1).min(marker.len() + 2);
+            }
+        }
+    }
+    found |= matches && (position == marker.len() || position == marker.len() + 1);
+    let after = file.metadata()?;
+    let named = directory.symlink_metadata("exclude")?;
+    if total != before.len()
+        || after.len() != before.len()
+        || before.modified()? != after.modified()?
+        || !named.is_file()
+        || identity(&before) != identity(&named)
+    {
+        return Err(invalid("Git exclude changed while reading"));
+    }
+    Ok((found, total, last))
 }
 
 /// Repository-local metadata only: no Git executable, ambient discovery overrides,
@@ -92,36 +297,4 @@ pub(crate) fn discover(path: &Path) -> io::Result<gix::Repository> {
         .open(directory)
         .map(|repository| repository.to_thread_local())
         .map_err(|error| invalid(&format!("workspace Git discovery failed: {error}")))
-}
-
-fn append_exclusion(path: &Path) -> io::Result<()> {
-    let dir = Dir::open_ambient_dir(
-        path.parent()
-            .ok_or_else(|| invalid("Git exclude has no parent"))?,
-        ambient_authority(),
-    )?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| invalid("Git exclude has no file name"))?;
-    let mut file = dir.open_with(name, options().read(true).append(true).create(true))?;
-    let bytes = read_bounded(&dir, name, &mut file, 1024 * 1024)?;
-    if bytes
-        .split(|b| *b == b'\n')
-        .any(|line| line.strip_suffix(b"\r").unwrap_or(line) == MARKER_FILE.as_bytes())
-    {
-        return Ok(());
-    }
-    let addition = format!(
-        "{}{MARKER_FILE}\n",
-        if bytes.is_empty() || bytes.ends_with(b"\n") {
-            ""
-        } else {
-            "\n"
-        }
-    );
-    if bytes.len() + addition.len() > 1024 * 1024 {
-        return Err(invalid("Git exclude exceeds capacity"));
-    }
-    file.write_all(addition.as_bytes())?;
-    file.sync_all()
 }

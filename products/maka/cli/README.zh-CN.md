@@ -48,6 +48,8 @@ maka application update-defaults --root /path/to/host --apply
 
 先检查预览中的具体包版本。执行更新会将组合中显式选择、且 ID 与当前可执行文件所带插件匹配的包替换为发行版本，包括使用相同 ID 的本地修改包。其他包、组合设置、权限和业务数据保留，不自动添加新的默认组件；组合校验失败时拒绝更新。中断后再次执行 `--apply` 完成同一次更新，再启动 Host。此命令更新应用包；`host upgrade` 更新原生可执行文件。
 
+`update-defaults` 要求当前可执行文件能够解码已有的包记录。包含已移除内部格式（例如旧 `desktop` surface）的 Root 会在预览前失败；保留原 Root，另行初始化新的 Root。
+
 恢复前先关闭产品 UI；恢复通过管理服务更新独立 Host。直接安装插件包时，所选 Root 必须处于未运行状态。两个命令默认使用 `~/.maka/application`；可用 `--root DIRECTORY` 选择其他安装。
 
 ```sh

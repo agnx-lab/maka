@@ -68,55 +68,42 @@ pub fn open_directory(path: &Path, expected: &WorkspaceIdentity) -> io::Result<D
     Ok(workspace.dir)
 }
 
-/// Prepare an ambient execution workspace, including repository-local Git exclusion.
-/// A concurrent first publisher wins; malformed or changing markers are never repaired.
-pub async fn ensure_identity(path: &Path) -> io::Result<WorkspaceIdentity> {
-    let path = path.to_owned();
-    ensure_captured(move || Workspace::capture(&path), true).await
-}
-
-/// Initialize the already-opened directory, rejecting replacement of its name.
-/// Only the original directory marker may change. This does not discover Git or
-/// modify repository metadata outside the captured directory. Callers must not
-/// recapture a replaced ambient path.
+/// Prepare the original opened directory and its fixed repository-local marker exclusion.
+/// Private state and Host control are never ordinary directory-selection authority.
 pub async fn ensure_directory_identity(
     path: PathBuf,
     directory: Dir,
+    private_root: PathBuf,
+    control: PathBuf,
+    worktree: Option<crate::worktree::Binding>,
 ) -> io::Result<WorkspaceIdentity> {
-    ensure_captured(
-        move || {
-            let workspace = Workspace {
-                path,
-                dir: directory,
-            };
-            workspace.validate_directory()?;
-            Ok(workspace)
-        },
-        false,
-    )
-    .await
-}
-
-async fn ensure_captured(
-    capture: impl FnOnce() -> io::Result<Workspace> + Send + 'static,
-    exclude_git_marker: bool,
-) -> io::Result<WorkspaceIdentity> {
-    let (workspace, existing, in_git) = tokio::task::spawn_blocking(move || {
-        let workspace = capture()?;
+    tokio::task::spawn_blocking(move || {
+        let workspace = Workspace {
+            path,
+            dir: directory,
+        };
+        workspace.validate_directory()?;
         let existing = match workspace.read() {
             Ok(identity) => Some(identity),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let in_git = exclude_git_marker && git::has_entry(&workspace.path)?;
-        Ok::<_, io::Error>((workspace, existing, in_git))
-    })
-    .await
-    .map_err(io::Error::other)??;
-    if in_git {
-        git::exclude_marker(&workspace.path).await?;
-    }
-    tokio::task::spawn_blocking(move || {
+        let private_root = dunce::canonicalize(private_root)?;
+        let control = dunce::canonicalize(control)?;
+        let workspace_path = dunce::canonicalize(&workspace.path)?;
+        if let Some(binding) = &worktree {
+            if binding.directory() != workspace_path {
+                return Err(invalid("workspace worktree binding changed"));
+            }
+            crate::worktree::Worktrees::open(&private_root.join("subagent-worktrees"))?
+                .inspect(binding)?;
+        }
+        if workspace_path.starts_with(&control)
+            || (workspace_path.starts_with(&private_root) && worktree.is_none())
+        {
+            return Err(invalid("workspace is private Host state"));
+        }
+        git::exclude_marker(&workspace, &private_root, &control, worktree.as_ref())?;
         workspace.validate_directory()?;
         if existing.is_none() {
             workspace.publish()?;

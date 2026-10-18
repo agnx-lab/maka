@@ -48,6 +48,8 @@ maka application update-defaults --root /path/to/host --apply
 
 Review the exact package revisions in the preview. Apply replaces explicitly selected packages whose IDs match this executable's bundle, including locally modified packages with those IDs. Other packages, composition settings, permissions and business data stay intact; new default components are not added. Invalid combinations are rejected before updating. After an interruption, rerun `--apply` to finish the same update, then start the Host. This updates application packages; `host upgrade` updates the native executable.
 
+`update-defaults` requires stored package records that the current executable can decode. A Root containing a removed internal format, such as the old `desktop` surface, fails before preview; preserve that Root and initialize a new one.
+
 Close the product UI before recovery; restoration updates the independent Host through its management service. Direct package installation requires the selected Root to be inactive. Both commands default to `~/.maka/application`; select another installation with `--root DIRECTORY`.
 
 ```sh

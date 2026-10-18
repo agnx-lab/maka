@@ -266,9 +266,18 @@ impl Owner {
             Err(StoreError::Project(_)) => return Ok(None),
             Err(_) => return Err("agent_project_registration_unknown".into()),
         };
-        let Some(mut workspace) =
-            workspace::initialize(&self.workspace_roots, selection, &self.managed_worktrees)
-                .await?
+        let root = self
+            .store
+            .owned_root()
+            .map_err(|_| "agent_root_unavailable")?;
+        let Some(mut workspace) = workspace::initialize(
+            &self.workspace_roots,
+            selection,
+            &self.managed_worktrees,
+            root.canonical_path(),
+            root.control_directory(),
+        )
+        .await?
         else {
             return Ok(None);
         };
@@ -322,9 +331,18 @@ impl Owner {
             Err(StoreError::Project(_)) => return Ok(None),
             Err(_) => return Err("agent_project_selection_unknown".into()),
         };
-        let Some(mut workspace) =
-            workspace::initialize(&self.workspace_roots, selection, &self.managed_worktrees)
-                .await?
+        let root = self
+            .store
+            .owned_root()
+            .map_err(|_| "agent_root_unavailable")?;
+        let Some(mut workspace) = workspace::initialize(
+            &self.workspace_roots,
+            selection,
+            &self.managed_worktrees,
+            root.canonical_path(),
+            root.control_directory(),
+        )
+        .await?
         else {
             return Ok(None);
         };
@@ -449,10 +467,16 @@ impl Owner {
                     }
                     after = pending.last().cloned();
                 }
+                let root = self
+                    .store
+                    .owned_root()
+                    .map_err(|_| "agent_root_unavailable")?;
                 let Some(mut selected) = workspace::initialize(
                     &self.workspace_roots,
                     selection,
                     &self.managed_worktrees,
+                    root.canonical_path(),
+                    root.control_directory(),
                 )
                 .await?
                 else {

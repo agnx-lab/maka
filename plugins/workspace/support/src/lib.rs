@@ -287,6 +287,8 @@ pub async fn initialize(
     roots: &[Root],
     selection: DirectorySelection,
     managed: &Path,
+    private_root: &Path,
+    control: &Path,
 ) -> Result<Option<Workspace>, String> {
     let Ok(root) = root(roots, &selection.root_id) else {
         return Ok(None);
@@ -323,9 +325,15 @@ pub async fn initialize(
     let Some((path, directory)) = prepared else {
         return Ok(None);
     };
-    let identity = workspace::ensure_directory_identity(path.clone(), directory)
-        .await
-        .map_err(|_| "agent_workspace_initialization_failed")?;
+    let identity = workspace::ensure_directory_identity(
+        path.clone(),
+        directory,
+        private_root.to_owned(),
+        control.to_owned(),
+        None,
+    )
+    .await
+    .map_err(|_| "agent_workspace_initialization_failed")?;
     published
         .validate(&path)
         .map_err(|_| "agent_workspace_initialization_failed")?;

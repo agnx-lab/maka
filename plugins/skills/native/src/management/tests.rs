@@ -477,9 +477,14 @@ async fn project_installation_keeps_its_reviewed_workspace_and_relative_resource
     )
     .unwrap();
     let (project, directory_identity) = maka_fs_tools::directory::capture(&project).unwrap();
+    let private = tempfile::tempdir().unwrap();
+    let control = tempfile::tempdir().unwrap();
     let identity = maka_fs_tools::workspace::ensure_directory_identity(
         project.clone(),
         maka_fs_tools::directory::open(&project, &directory_identity).unwrap(),
+        private.path().to_owned(),
+        control.path().to_owned(),
+        None,
     )
     .await
     .unwrap();

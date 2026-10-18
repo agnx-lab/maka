@@ -159,9 +159,14 @@ fn large_history_fixture(model_base: Option<&str>) -> (tempfile::TempDir, std::p
     bootstrap.finish();
     host_guard.stop();
     runtime.block_on(async {
-        let identity = maka_fs_tools::workspace::ensure_identity(&workspace).await.unwrap();
-        let published = maka_fs_tools::workspace::directory::PublishedDirectory::open(&workspace).unwrap();
         let owner = Arc::new(RootOwner::open(&host, &namespaces).unwrap());
+        let (workspace, observed) = maka_fs_tools::directory::capture(&workspace).unwrap();
+        let directory = maka_fs_tools::directory::open(&workspace, &observed).unwrap();
+        let identity = maka_fs_tools::workspace::ensure_directory_identity(
+            workspace.clone(), directory, owner.canonical_path().to_owned(),
+            owner.control_directory().to_owned(), None,
+        ).await.unwrap();
+        let published = maka_fs_tools::workspace::directory::PublishedDirectory::open(&workspace).unwrap();
         let log = EventLog::for_root(owner).await.unwrap();
         use sqlx::Connection;
         let mut db = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(host.join(maka_event_log::root::ROOT_DATABASE)).read_only(true)).await.unwrap();

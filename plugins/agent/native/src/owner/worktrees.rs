@@ -200,9 +200,21 @@ impl Owner {
         let path = allocation.binding.directory().to_owned();
         let (path, directory_identity) =
             maka_fs_tools::directory::capture(&path).map_err(|_| "agent_worktree_unavailable")?;
-        let identity = maka_fs_tools::workspace::ensure_identity(&path)
-            .await
-            .map_err(|_| "agent_worktree_initialization_unknown")?;
+        let root = self
+            .store
+            .owned_root()
+            .map_err(|_| "agent_root_unavailable")?;
+        let directory = maka_fs_tools::directory::open(&path, &directory_identity)
+            .map_err(|_| "agent_worktree_unavailable")?;
+        let identity = maka_fs_tools::workspace::ensure_directory_identity(
+            path.clone(),
+            directory,
+            root.canonical_path().to_owned(),
+            root.control_directory().to_owned(),
+            Some(allocation.binding.clone()),
+        )
+        .await
+        .map_err(|_| "agent_worktree_initialization_unknown")?;
         let selected = Workspace {
             project_id: None,
             path: maka_fs_tools::workspace::project::host_path(&path)

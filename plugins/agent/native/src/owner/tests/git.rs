@@ -21,8 +21,8 @@ use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
 
-// Git is only a fixture author. All observed status/diff values come from the
-// public ApplicationClient through the actual Agent service and Session scope.
+// Git authors fixtures and supplies an independent status oracle. Agent values
+// come from the public ApplicationClient through the real Session scope.
 fn git(workspace: &Path, arguments: &[&str]) {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -76,6 +76,84 @@ fn changed_lines(result: &Value) -> Vec<&str> {
                 || (line.starts_with('-') && !line.starts_with("---"))
         })
         .collect()
+}
+
+#[tokio::test]
+async fn selected_directory_create_excludes_workspace_marker_from_agent_and_git_status() {
+    tokio::time::timeout(Duration::from_secs(45), async {
+        let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+        // Unlike repository(), this leaves marker exclusion to actual create.
+        git(&f.workspace, &["init", "--quiet", "--initial-branch=main"]);
+        let user_file = "literal-user-untracked.txt";
+        std::fs::write(f.workspace.join(user_file), "user file\n").unwrap();
+        let input = f.create_input("Selected Git directory").await;
+        let created = f.mutation(2, "create", input, Uuid::new_v4()).await;
+        let status = match created
+            .as_ref()
+            .ok()
+            .and_then(|value| value["session"]["id"].as_str())
+        {
+            Some(session) => Some(f.query("gitStatus", json!({"sessionId":session})).await),
+            None => None,
+        };
+        let marker = maka_fs_tools::workspace::MARKER_FILE;
+        let marker_exists = f.workspace.join(marker).is_file();
+        let oracle = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&f.workspace)
+            .args(["status", "--porcelain", "--untracked-files=all"])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output();
+        // Complete real Host cleanup before the expected marker-leak RED.
+        let app_shutdown = f.app.shutdown().await;
+        let config_shutdown = f.config.shutdown().await;
+        app_shutdown.unwrap();
+        config_shutdown.unwrap();
+        let created = created.expect("selected-directory create must succeed");
+        assert_eq!(created["kind"], "created", "{created}");
+        assert!(
+            marker_exists,
+            "create must preserve intrinsic workspace identity"
+        );
+        let status = status
+            .expect("created Session ID")
+            .expect("Agent gitStatus");
+        let entries = status["entries"].as_array().unwrap();
+        let oracle = oracle.expect("real Git status oracle");
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        let porcelain = String::from_utf8(oracle.stdout).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry["area"] == "untracked" && entry["path"] == path(user_file)),
+            "{status}"
+        );
+        assert!(
+            porcelain
+                .lines()
+                .any(|line| line == format!("?? {user_file}")),
+            "{porcelain}"
+        );
+        let agent_has_marker = entries.iter().any(|entry| entry["path"] == path(marker));
+        let git_has_marker = porcelain.lines().any(|line| line == format!("?? {marker}"));
+        assert!(
+            !agent_has_marker && !git_has_marker,
+            "workspace marker leaked: Agent={status}, Git={porcelain}"
+        );
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

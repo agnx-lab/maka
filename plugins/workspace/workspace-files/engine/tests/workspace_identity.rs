@@ -17,8 +17,30 @@
  * under the License.
  */
 
-use maka_fs_tools::workspace::{MARKER_FILE, ensure_identity, read_identity};
+use maka_fs_tools::workspace::{MARKER_FILE, read_identity};
 use std::{io, path::Path, process::Command};
+
+async fn prepare(path: &Path) -> io::Result<maka_agent_facts::execution::WorkspaceIdentity> {
+    let (path, observed) = maka_fs_tools::directory::capture(path)?;
+    let opened = maka_fs_tools::directory::open(&path, &observed)?;
+    prepare_opened(path, opened).await
+}
+
+async fn prepare_opened(
+    path: std::path::PathBuf,
+    opened: cap_std::fs::Dir,
+) -> io::Result<maka_agent_facts::execution::WorkspaceIdentity> {
+    let private = tempfile::tempdir()?;
+    let control = tempfile::tempdir()?;
+    maka_fs_tools::workspace::ensure_directory_identity(
+        path,
+        opened,
+        private.path().to_owned(),
+        control.path().to_owned(),
+        None,
+    )
+    .await
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace_identity_is_intrinsic_atomic_and_never_repairs_invalid_evidence() {
@@ -33,7 +55,7 @@ async fn workspace_identity_is_intrinsic_atomic_and_never_repairs_invalid_eviden
     let mut tasks = tokio::task::JoinSet::new();
     for _ in 0..8 {
         let root = root.clone();
-        tasks.spawn(async move { ensure_identity(&root).await.unwrap() });
+        tasks.spawn(async move { prepare(&root).await.unwrap() });
     }
     let mut identities = Vec::new();
     while let Some(result) = tasks.join_next().await {
@@ -46,19 +68,19 @@ async fn workspace_identity_is_intrinsic_atomic_and_never_repairs_invalid_eviden
         "no candidate files remain"
     );
     let original = std::fs::read(root.join(MARKER_FILE)).unwrap();
-    assert_eq!(ensure_identity(&root).await.unwrap(), identities[0]);
+    assert_eq!(prepare(&root).await.unwrap(), identities[0]);
     assert_eq!(std::fs::read(root.join(MARKER_FILE)).unwrap(), original);
 
     let moved = temp.path().join("moved");
     std::fs::rename(&root, &moved).unwrap();
     assert_eq!(read_identity(&moved).unwrap(), identities[0]);
-    assert_eq!(ensure_identity(&moved).await.unwrap(), identities[0]);
+    assert_eq!(prepare(&moved).await.unwrap(), identities[0]);
     let marker = moved.join(MARKER_FILE);
     // Node preserves existing UUID spelling and accepts integral numeric spellings.
     let uppercase = identities[0].marker_id().to_uppercase();
     let compatible = format!(r#"{{"schemaVersion":1e0,"workspaceId":"{uppercase}"}}"#);
     std::fs::write(&marker, &compatible).unwrap();
-    let identity = ensure_identity(&moved).await.unwrap();
+    let identity = prepare(&moved).await.unwrap();
     assert_eq!(identity.marker_id(), uppercase);
     assert_eq!(
         serde_json::to_value(&identity).unwrap(),
@@ -76,13 +98,13 @@ async fn workspace_identity_is_intrinsic_atomic_and_never_repairs_invalid_eviden
     ] {
         std::fs::write(&marker, &invalid).unwrap();
         assert!(read_identity(&moved).is_err());
-        assert!(ensure_identity(&moved).await.is_err());
+        assert!(prepare(&moved).await.is_err());
         assert_eq!(std::fs::read_to_string(&marker).unwrap(), invalid);
         assert_eq!(std::fs::read_dir(&moved).unwrap().count(), 1);
     }
     std::fs::remove_file(&marker).unwrap();
     std::fs::create_dir(&marker).unwrap();
-    assert!(ensure_identity(&moved).await.is_err());
+    assert!(prepare(&moved).await.is_err());
     assert!(marker.is_dir());
 
     #[cfg(unix)]
@@ -92,11 +114,11 @@ async fn workspace_identity_is_intrinsic_atomic_and_never_repairs_invalid_eviden
         std::fs::write(&outside, &compatible).unwrap();
         std::os::unix::fs::symlink(&outside, &marker).unwrap();
         assert!(read_identity(&moved).is_err());
-        assert!(ensure_identity(&moved).await.is_err());
+        assert!(prepare(&moved).await.is_err());
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), compatible);
         std::fs::remove_file(&outside).unwrap();
         assert!(
-            ensure_identity(&moved).await.is_err(),
+            prepare(&moved).await.is_err(),
             "dangling marker must not be rebound"
         );
         assert!(!outside.exists());
@@ -139,7 +161,7 @@ async fn linked_worktree_marker_uses_git_owned_exclusion_without_overwriting_it(
                 ..
             }
         ));
-        ensure_identity(&linked.path).await.unwrap();
+        prepare(&linked.path).await.unwrap();
         return;
     }
     let temp = tempfile::tempdir().unwrap();
@@ -269,10 +291,10 @@ async fn linked_worktree_marker_uses_git_owned_exclusion_without_overwriting_it(
         String::from_utf8_lossy(&child.stdout),
         String::from_utf8_lossy(&child.stderr)
     );
-    let identity = ensure_identity(&linked).await.unwrap();
+    let identity = prepare(&linked).await.unwrap();
     let expected = format!("# preserve\r\nuser.txt\n{MARKER_FILE}\n");
     assert_eq!(std::fs::read_to_string(&exclude).unwrap(), expected);
-    assert_eq!(ensure_identity(&linked).await.unwrap(), identity);
+    assert_eq!(prepare(&linked).await.unwrap(), identity);
     assert_eq!(std::fs::read_to_string(&exclude).unwrap(), expected);
     assert_eq!(git(&linked, &["check-ignore", MARKER_FILE]), MARKER_FILE);
     assert_eq!(git(&linked, &["status", "--porcelain"]), "");
@@ -298,7 +320,7 @@ async fn linked_worktree_marker_uses_git_owned_exclusion_without_overwriting_it(
             outside.canonicalize().unwrap(),
             "Git resolves a final link before open; use its parent directory instead"
         );
-        assert!(ensure_identity(&linked).await.is_err());
+        assert!(prepare(&linked).await.is_err());
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "preserve");
         assert_eq!(
             read_identity(&linked).unwrap(),
@@ -309,8 +331,8 @@ async fn linked_worktree_marker_uses_git_owned_exclusion_without_overwriting_it(
 }
 
 #[tokio::test]
-async fn opened_directory_identity_never_updates_ancestor_git_metadata() {
-    use maka_fs_tools::{directory, workspace::ensure_directory_identity};
+async fn opened_directory_identity_prepares_only_fixed_ancestor_git_exclusion() {
+    use maka_fs_tools::directory;
     let temp = tempfile::tempdir().unwrap();
     let repository = temp.path().join("repository");
     std::fs::create_dir(&repository).unwrap();
@@ -321,25 +343,27 @@ async fn opened_directory_identity_never_updates_ancestor_git_metadata() {
     let original = std::fs::read(&exclude).unwrap();
     let (path, observed) = directory::capture(&selected).unwrap();
     let opened = directory::open(&path, &observed).unwrap();
-    let identity = ensure_directory_identity(path, opened).await.unwrap();
+    let identity = prepare_opened(path, opened).await.unwrap();
     assert_eq!(read_identity(&selected).unwrap(), identity);
-    assert_eq!(std::fs::read(&exclude).unwrap(), original);
+    let prepared = std::fs::read(&exclude).unwrap();
+    assert!(prepared.starts_with(&original));
+    assert_eq!(git(&selected, &["check-ignore", MARKER_FILE]), MARKER_FILE);
     assert!(!repository.join(MARKER_FILE).exists());
     let bytes = std::fs::read(selected.join(MARKER_FILE)).unwrap();
     let (path, observed) = directory::capture(&selected).unwrap();
     let opened = directory::open(&path, &observed).unwrap();
-    assert_eq!(
-        ensure_directory_identity(path, opened).await.unwrap(),
-        identity
-    );
+    assert_eq!(prepare_opened(path, opened).await.unwrap(), identity);
     assert_eq!(std::fs::read(selected.join(MARKER_FILE)).unwrap(), bytes);
-    assert_eq!(std::fs::read(&exclude).unwrap(), original);
+    assert_eq!(std::fs::read(&exclude).unwrap(), prepared);
 }
 
 #[tokio::test]
 async fn opened_directory_identity_does_not_depend_on_ambient_git_metadata() {
-    use maka_fs_tools::{directory, workspace::ensure_directory_identity};
+    use maka_fs_tools::directory;
     let temp = tempfile::tempdir().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    let ancestor_exclude = temp.path().join(".git/info/exclude");
+    let original = std::fs::read(&ancestor_exclude).unwrap();
     let selected = temp.path().join("published");
     std::fs::create_dir(&selected).unwrap();
     std::fs::write(
@@ -349,18 +373,19 @@ async fn opened_directory_identity_does_not_depend_on_ambient_git_metadata() {
     .unwrap();
     let (path, observed) = directory::capture(&selected).unwrap();
     let opened = directory::open(&path, &observed).unwrap();
-    let identity = ensure_directory_identity(path, opened).await.unwrap();
+    let identity = prepare_opened(path, opened).await.unwrap();
     assert_eq!(read_identity(&selected).unwrap(), identity);
     assert_eq!(
         std::fs::read_to_string(selected.join(".git")).unwrap(),
         "gitdir: missing-outside-repository\n"
     );
     assert!(!temp.path().join("missing-outside-repository").exists());
+    assert_eq!(std::fs::read(ancestor_exclude).unwrap(), original);
 }
 
 #[tokio::test]
 async fn opened_directory_identity_rejects_replacement_without_marker_effects() {
-    use maka_fs_tools::{directory, workspace::ensure_directory_identity};
+    use maka_fs_tools::directory;
     let temp = tempfile::tempdir().unwrap();
     let selected = temp.path().join("published");
     let retired = temp.path().join("retired");
@@ -372,15 +397,15 @@ async fn opened_directory_identity_rejects_replacement_without_marker_effects() 
     git(&selected, &["init", "-q"]);
     let exclude = selected.join(".git/info/exclude");
     let original = std::fs::read(&exclude).unwrap();
-    assert!(ensure_directory_identity(path, opened).await.is_err());
+    assert!(prepare_opened(path, opened).await.is_err());
     assert!(!selected.join(MARKER_FILE).exists());
     assert!(!retired.join(MARKER_FILE).exists());
     assert_eq!(std::fs::read(&exclude).unwrap(), original);
 }
 
 #[tokio::test]
-async fn opened_directory_identity_never_updates_linked_worktree_common_metadata() {
-    use maka_fs_tools::{directory, workspace::ensure_directory_identity};
+async fn opened_directory_identity_prepares_fixed_linked_worktree_common_exclusion() {
+    use maka_fs_tools::directory;
     let temp = tempfile::tempdir().unwrap();
     let repository = temp.path().join("repository");
     let selected = temp.path().join("published-worktree");
@@ -416,9 +441,436 @@ async fn opened_directory_identity_never_updates_linked_worktree_common_metadata
     let original = std::fs::read(&exclude).unwrap();
     let (path, observed) = directory::capture(&selected).unwrap();
     let opened = directory::open(&path, &observed).unwrap();
-    let identity = ensure_directory_identity(path, opened).await.unwrap();
+    let identity = prepare_opened(path, opened).await.unwrap();
     assert_eq!(read_identity(&selected).unwrap(), identity);
-    assert_eq!(std::fs::read(&exclude).unwrap(), original);
+    assert!(std::fs::read(&exclude).unwrap().starts_with(&original));
+    assert_eq!(git(&selected, &["check-ignore", MARKER_FILE]), MARKER_FILE);
     assert!(selected.join(".git").is_file());
+    assert!(!repository.join(MARKER_FILE).exists());
+}
+
+#[tokio::test]
+async fn marker_exclusion_streams_large_existing_bytes_and_creates_missing_info() {
+    let temp = tempfile::tempdir().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    let info = temp.path().join(".git/info");
+    std::fs::remove_dir_all(&info).unwrap();
+    prepare(temp.path()).await.unwrap();
+    let exclude = info.join("exclude");
+    assert_eq!(
+        std::fs::read(&exclude).unwrap(),
+        format!("{MARKER_FILE}\n").as_bytes()
+    );
+    let mut original = b"# preserve\r\n".to_vec();
+    original.extend(std::iter::repeat_n(b'x', 2 * 1024 * 1024));
+    original.extend_from_slice(b"\0\nuser.txt\r");
+    std::fs::write(&exclude, &original).unwrap();
+    let identity = prepare(temp.path()).await.unwrap();
+    let mut expected = original;
+    expected.extend_from_slice(format!("\n{MARKER_FILE}\n").as_bytes());
+    assert_eq!(std::fs::read(&exclude).unwrap(), expected);
+    assert_eq!(prepare(temp.path()).await.unwrap(), identity);
+    assert_eq!(std::fs::read(&exclude).unwrap(), expected);
+    assert_eq!(
+        git(temp.path(), &["check-ignore", MARKER_FILE]),
+        MARKER_FILE
+    );
+    let existing = format!("# existing\r\n{MARKER_FILE}\r\nlast line without LF");
+    std::fs::write(&exclude, &existing).unwrap();
+    prepare(temp.path()).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&exclude).unwrap(), existing);
+}
+
+#[tokio::test]
+async fn invalid_marker_precedes_git_exclusion_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    let exclude = temp.path().join(".git/info/exclude");
+    let original = std::fs::read(&exclude).unwrap();
+    std::fs::write(temp.path().join(MARKER_FILE), "{broken").unwrap();
+    assert!(prepare(temp.path()).await.is_err());
+    assert_eq!(std::fs::read(&exclude).unwrap(), original);
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join(MARKER_FILE)).unwrap(),
+        "{broken"
+    );
+}
+
+#[tokio::test]
+async fn marker_exclusion_refuses_private_and_control_git_indirection() {
+    let temp = tempfile::tempdir().unwrap();
+    let private = temp.path().join("private");
+    let control = temp.path().join("control");
+    std::fs::create_dir(&private).unwrap();
+    std::fs::create_dir(&control).unwrap();
+    for protected in [&private, &control] {
+        let repository = protected.join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        git(&repository, &["init", "-q"]);
+        let common = repository.join(".git");
+        let original = std::fs::read(common.join("info/exclude")).unwrap();
+        for indirection in ["gitdir", "commondir"] {
+            let selected = tempfile::tempdir().unwrap();
+            let admin = if indirection == "commondir" {
+                let admin = selected.path().join("admin");
+                std::fs::create_dir(&admin).unwrap();
+                std::fs::write(admin.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+                std::fs::write(admin.join("commondir"), format!("{}\n", common.display())).unwrap();
+                admin
+            } else {
+                common.clone()
+            };
+            std::fs::write(
+                selected.path().join(".git"),
+                format!("gitdir: {}\n", admin.display()),
+            )
+            .unwrap();
+            let (path, observed) = maka_fs_tools::directory::capture(selected.path()).unwrap();
+            let opened = maka_fs_tools::directory::open(&path, &observed).unwrap();
+            assert!(
+                maka_fs_tools::workspace::ensure_directory_identity(
+                    path,
+                    opened,
+                    private.clone(),
+                    control.clone(),
+                    None
+                )
+                .await
+                .is_err(),
+                "{protected:?}/{indirection}"
+            );
+            assert!(!selected.path().join(MARKER_FILE).exists());
+            assert_eq!(
+                std::fs::read(common.join("info/exclude")).unwrap(),
+                original
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn marker_exclusion_rejects_info_links_and_special_excludes() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    let info = temp.path().join(".git/info");
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("exclude"), "untouched\n").unwrap();
+    std::fs::remove_dir_all(&info).unwrap();
+    symlink(outside.path(), &info).unwrap();
+    assert!(prepare(temp.path()).await.is_err());
+    assert!(!temp.path().join(MARKER_FILE).exists());
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("exclude")).unwrap(),
+        "untouched\n"
+    );
+    std::fs::remove_file(&info).unwrap();
+    std::fs::create_dir(&info).unwrap();
+    std::fs::create_dir(info.join("exclude")).unwrap();
+    assert!(prepare(temp.path()).await.is_err());
+    assert!(!temp.path().join(MARKER_FILE).exists());
+}
+
+#[tokio::test]
+async fn managed_marker_preparation_requires_the_original_verified_binding() {
+    use maka_fs_tools::{directory, workspace::ensure_directory_identity, worktree::Worktrees};
+    use std::sync::{Arc, atomic::AtomicBool};
+    let temp = tempfile::tempdir().unwrap();
+    let private = temp.path().join("private");
+    let control = temp.path().join("control");
+    let repository = temp.path().join("repository");
+    for path in [&private, &control, &repository] {
+        std::fs::create_dir(path).unwrap();
+    }
+    git(&repository, &["init", "-q"]);
+    git(
+        &repository,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    );
+    let worktrees = Worktrees::open(&private.join("subagent-worktrees")).unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let binding = worktrees
+        .plan(&repository, &"a".repeat(64), cancel.clone())
+        .unwrap();
+    worktrees.ensure(&binding, &cancel).unwrap();
+    let (path, observed) = directory::capture(binding.directory()).unwrap();
+    let opened = directory::open(&path, &observed).unwrap();
+    assert!(
+        ensure_directory_identity(path.clone(), opened, private.clone(), control.clone(), None)
+            .await
+            .is_err()
+    );
+    assert!(!path.join(MARKER_FILE).exists());
+    let opened = directory::open(&path, &observed).unwrap();
+    let identity = ensure_directory_identity(path.clone(), opened, private, control, Some(binding))
+        .await
+        .unwrap();
+    assert_eq!(read_identity(&path).unwrap(), identity);
+    assert_eq!(git(&path, &["check-ignore", MARKER_FILE]), MARKER_FILE);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn marker_preparation_preserves_permission_errors_hidden_by_git_layout_checks() {
+    use std::os::unix::{fs::PermissionsExt, fs::symlink};
+    for sentinel in ["HEAD", "objects", "refs"] {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        git(&repository, &["init", "-q"]);
+        let exclude = repository.join(".git/info/exclude");
+        let original = std::fs::read(&exclude).unwrap();
+        let blocked = temp.path().join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        let target = blocked.join(sentinel);
+        let entry = repository.join(".git").join(sentinel);
+        if sentinel == "HEAD" {
+            std::fs::copy(&entry, &target).unwrap();
+        } else {
+            std::fs::create_dir(&target).unwrap();
+        }
+        std::fs::rename(&entry, entry.with_extension("original")).unwrap();
+        symlink(&target, &entry).unwrap();
+        let permissions = std::fs::metadata(&blocked).unwrap().permissions();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let enforced = std::fs::metadata(&entry)
+            .is_err_and(|error| error.kind() == io::ErrorKind::PermissionDenied);
+        println!(
+            "Git layout permission fixture: sentinel={sentinel}, enforced={enforced}{}",
+            if enforced {
+                ""
+            } else {
+                " (Unix mode restriction ineffective)"
+            }
+        );
+        let result = if enforced {
+            Some(prepare(&repository).await)
+        } else {
+            None
+        };
+        // Restore traversal before assertions and TempDir cleanup, including RED.
+        std::fs::set_permissions(&blocked, permissions).unwrap();
+        let Some(result) = result else {
+            // A privileged process/filesystem can ignore Unix mode restrictions.
+            continue;
+        };
+        assert_eq!(
+            result.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied,
+            "{sentinel}"
+        );
+        assert!(!repository.join(MARKER_FILE).exists());
+        assert_eq!(std::fs::read(&exclude).unwrap(), original);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_selected_directories_keep_shared_exclusion_lines_complete() {
+    use std::sync::Arc;
+    let temp = tempfile::tempdir().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    std::fs::write(temp.path().join(".git/info/exclude"), b"").unwrap();
+    let start = Arc::new(tokio::sync::Barrier::new(8));
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut selected = Vec::new();
+    for index in 0..8 {
+        let path = temp.path().join(format!("selected-{index}"));
+        std::fs::create_dir(&path).unwrap();
+        selected.push(path.clone());
+        let start = start.clone();
+        tasks.spawn(async move {
+            start.wait().await;
+            prepare(&path).await
+        });
+    }
+    let mut prepared = 0;
+    while let Some(result) = tasks.join_next().await {
+        match result.unwrap() {
+            Ok(_) => prepared += 1,
+            // The existing same-fd observation rejects concurrent file changes.
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{error}"),
+        }
+    }
+    assert!(prepared > 0);
+    let exclusion = std::fs::read(temp.path().join(".git/info/exclude")).unwrap();
+    for line in exclusion
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        assert_eq!(line, MARKER_FILE.as_bytes());
+    }
+    // No retry can repair a malformed interleaved append before this oracle.
+    for path in selected {
+        assert_eq!(git(&path, &["check-ignore", MARKER_FILE]), MARKER_FILE);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn linked_admin_directory_preserves_commondir_permission_errors() {
+    use std::os::unix::{fs::PermissionsExt, fs::symlink};
+    let temp = tempfile::tempdir().unwrap();
+    let repository = temp.path().join("repository");
+    let linked = temp.path().join("linked");
+    std::fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "-q"]);
+    git(
+        &repository,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    );
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let admin = std::path::PathBuf::from(git(
+        &linked,
+        &["rev-parse", "--path-format=absolute", "--git-dir"],
+    ));
+    std::fs::remove_file(linked.join(".git")).unwrap();
+    symlink(&admin, linked.join(".git")).unwrap();
+    std::fs::write(linked.join("user.txt"), "user file\n").unwrap();
+    assert_eq!(
+        git(&linked, &["status", "--porcelain", "--untracked-files=all"]),
+        "?? user.txt"
+    );
+    prepare(&linked).await.unwrap();
+    assert!(linked.join(MARKER_FILE).is_file());
+    assert_eq!(git(&linked, &["check-ignore", MARKER_FILE]), MARKER_FILE);
+    assert_eq!(
+        git(&linked, &["status", "--porcelain", "--untracked-files=all"]),
+        "?? user.txt"
+    );
+    std::fs::remove_file(linked.join(MARKER_FILE)).unwrap();
+    let exclude = repository.join(".git/info/exclude");
+    let original = std::fs::read(&exclude).unwrap();
+    let commondir = admin.join("commondir");
+    let permissions = std::fs::metadata(&commondir).unwrap().permissions();
+    std::fs::set_permissions(&commondir, std::fs::Permissions::from_mode(0o0)).unwrap();
+    let enforced = std::fs::read(&commondir)
+        .is_err_and(|error| error.kind() == io::ErrorKind::PermissionDenied);
+    println!(
+        "Git linked admin permission fixture: sentinel=commondir, enforced={enforced}{}",
+        if enforced {
+            ""
+        } else {
+            " (Unix mode restriction ineffective)"
+        }
+    );
+    let observed = if enforced {
+        Some((
+            prepare(&linked).await,
+            Command::new("git")
+                .arg("-C")
+                .arg(&linked)
+                .args(["status", "--porcelain", "--untracked-files=all"])
+                .output(),
+        ))
+    } else {
+        None
+    };
+    // Even an expected RED must restore the real repository before unwinding.
+    std::fs::set_permissions(&commondir, permissions).unwrap();
+    let Some((prepared, oracle)) = observed else {
+        return;
+    };
+    assert!(
+        !oracle.unwrap().status.success(),
+        "Git must reject the unreadable common-directory control file"
+    );
+    assert!(
+        matches!(&prepared, Err(error) if error.kind() == io::ErrorKind::PermissionDenied),
+        "preparation swallowed commondir IO: {prepared:?}"
+    );
+    assert!(!linked.join(MARKER_FILE).exists());
+    assert_eq!(std::fs::read(&exclude).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn malformed_large_nearest_commondir_keeps_directory_usable_without_ancestor_effects() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().unwrap();
+    let repository = temp.path().join("repository");
+    let selected = repository.join("selected");
+    std::fs::create_dir(&repository).unwrap();
+    git(&repository, &["init", "-q"]);
+    git(
+        &repository,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+    );
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            selected.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let admin = std::path::PathBuf::from(git(
+        &selected,
+        &["rev-parse", "--path-format=absolute", "--git-dir"],
+    ));
+    std::fs::remove_file(selected.join(".git")).unwrap();
+    symlink(&admin, selected.join(".git")).unwrap();
+    let exclude = repository.join(".git/info/exclude");
+    let original_exclude = std::fs::read(&exclude).unwrap();
+    let commondir = admin.join("commondir");
+    let original_commondir = std::fs::read(&commondir).unwrap();
+    let malformed = vec![b'x'; 64 * 1024 + 1];
+    std::fs::write(&commondir, &malformed).unwrap();
+    let prepared = prepare(&selected).await;
+    let retained = std::fs::read(&commondir).unwrap();
+    let ancestor_exclude = std::fs::read(&exclude).unwrap();
+    // Restore Git's real control file before any expected RED can unwind.
+    std::fs::write(&commondir, original_commondir).unwrap();
+    let identity =
+        prepared.expect("malformed nearest metadata must not reject the selected directory");
+    assert_eq!(read_identity(&selected).unwrap(), identity);
+    assert_eq!(retained, malformed);
+    assert_eq!(ancestor_exclude, original_exclude);
     assert!(!repository.join(MARKER_FILE).exists());
 }
