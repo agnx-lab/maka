@@ -23,7 +23,9 @@ use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::Tool;
 use sqlx::SqliteConnection;
 
-const METADATA_SQL: &str = "WITH RECURSIVE owner AS (
+// Materialize the one-row owner and keep it before each indexed lookup.
+// Reordering these joins can scan the Session's payloads or entire tool indexes.
+const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
             SELECT session_id, turn_id, source_sequence, item_index, message_id,
                 json_extract(payload, '$.type') AS kind,
                 CASE json_extract(payload, '$.type') WHEN 'tool_call' THEN message_id
@@ -38,7 +40,7 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS (
                 json_extract(row.payload, '$.origin') AS origin,
                 json_extract(row.payload, '$.parentToolCallId') AS parent_call,
                 json_extract(row.payload, '$.parentOperationId') AS parent_operation
-            FROM transcript_rows row JOIN owner ON row.session_id = owner.session_id
+            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
                 AND row.message_id = owner.tool_id AND row.turn_id = owner.turn_id
             WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_call'
                 AND json_type(row.payload, '$.args') IS NOT NULL
@@ -46,25 +48,25 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS (
             SELECT parent.message_id, parent.source_sequence, parent.item_index,
                 CASE WHEN json_extract(parent.payload, '$.origin') IN ('host_sdk', 'code_mode')
                     THEN json_extract(parent.payload, '$.parentToolCallId') END, 1
-            FROM transcript_rows parent JOIN owner
+            FROM owner CROSS JOIN call_row CROSS JOIN transcript_rows parent
                 ON parent.session_id = owner.session_id AND parent.turn_id = owner.turn_id
-                JOIN call_row ON parent.message_id = call_row.parent_call
+                AND parent.message_id = call_row.parent_call
             WHERE (parent.source_sequence, parent.item_index) < (call_row.source_sequence, call_row.item_index) AND json_extract(parent.payload, '$.type') = 'tool_call'
                 AND call_row.origin IN ('host_sdk', 'code_mode')
             UNION ALL
             SELECT parent.message_id, parent.source_sequence, parent.item_index,
                 CASE WHEN json_extract(parent.payload, '$.origin') IN ('host_sdk', 'code_mode')
                     THEN json_extract(parent.payload, '$.parentToolCallId') END, ancestors.depth + 1
-            FROM transcript_rows parent JOIN owner
+            FROM ancestors CROSS JOIN owner CROSS JOIN transcript_rows parent
                 ON parent.session_id = owner.session_id AND parent.turn_id = owner.turn_id
-                JOIN ancestors ON parent.message_id = ancestors.parent_id
+                AND parent.message_id = ancestors.parent_id
             WHERE (parent.source_sequence, parent.item_index) < (ancestors.source_sequence, ancestors.item_index) AND json_extract(parent.payload, '$.type') = 'tool_call'
                 AND ancestors.depth < 32
         ), activity AS MATERIALIZED (
             SELECT row.source_sequence, row.item_index, json_extract(row.payload, '$.toolName') AS name,
                 json_extract(row.payload, '$.title') AS title,
                 json_extract(row.payload, '$.presentation') AS presentation
-            FROM transcript_rows row JOIN owner ON row.session_id = owner.session_id
+            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
                 AND row.turn_id = owner.turn_id AND json_extract(row.payload, '$.toolUseId') = owner.tool_id
             WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_activity'
             ORDER BY row.source_sequence, row.item_index LIMIT 2
@@ -79,7 +81,7 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS (
                 'title', json((SELECT title FROM activity WHERE (SELECT count(*) FROM activity) = 1
                     AND (activity.source_sequence, activity.item_index) > (call_row.source_sequence, call_row.item_index) AND activity.name = call_row.name)),
                 'pending', json(CASE WHEN call_row.origin IN ('provider', 'host_sdk', 'code_mode')
-                    AND (SELECT json_extract(row.payload, '$.status') FROM transcript_rows row JOIN owner
+                    AND (SELECT json_extract(row.payload, '$.status') FROM owner CROSS JOIN transcript_rows row
                         ON row.session_id = owner.session_id AND row.turn_id = owner.turn_id
                         WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'turn_state'
                         ORDER BY row.source_sequence DESC, row.item_index DESC LIMIT 1) = 'running'
@@ -92,7 +94,7 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS (
                 json_extract(row.payload, '$.settlement') AS settlement,
                 json_extract(row.payload, '$.isError') AS error,
                 json_extract(row.payload, '$.content.kind') IS 'image' AS image
-            FROM transcript_rows row JOIN owner ON row.session_id = owner.session_id
+            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
                 AND row.turn_id = owner.turn_id AND json_extract(row.payload, '$.toolUseId') = owner.tool_id
             WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_result'
             ORDER BY row.source_sequence, row.item_index LIMIT 2
@@ -185,7 +187,8 @@ mod tests {
     async fn database() -> SqliteConnection {
         let mut db = SqliteConnection::connect(":memory:").await.unwrap();
         sqlx::query("CREATE TABLE transcript_rows (source_sequence INTEGER, item_index INTEGER, session_id TEXT, turn_id TEXT, message_id TEXT, payload BLOB, PRIMARY KEY(session_id, source_sequence, item_index), UNIQUE(session_id, message_id))").execute(&mut db).await.unwrap();
-        sqlx::raw_sql("CREATE INDEX transcript_tool_results ON transcript_rows (session_id, turn_id, json_extract(payload, '$.toolUseId'), source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'tool_result';
+        sqlx::raw_sql("CREATE INDEX transcript_session_turn ON transcript_rows (session_id, turn_id, source_sequence, item_index);
+CREATE INDEX transcript_tool_results ON transcript_rows (session_id, turn_id, json_extract(payload, '$.toolUseId'), source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'tool_result';
 CREATE INDEX transcript_tool_activity ON transcript_rows (session_id, turn_id, json_extract(payload, '$.toolUseId'), source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'tool_activity';
 CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'turn_state';").execute(&mut db).await.unwrap();
         db
@@ -453,6 +456,29 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
         }
     }
     #[tokio::test]
+    async fn unpaired_result_does_not_evaluate_the_call_activity_title() {
+        let mut db = database().await;
+        insert(&mut db, "a", "turn", 1, "call", call()).await;
+        insert(
+            &mut db,
+            "a",
+            "turn",
+            2,
+            "activity",
+            json!({"type":"tool_activity","toolUseId":"call","toolName":"Read","title":"not JSON"}),
+        )
+        .await;
+        let mut outcome = result();
+        outcome["origin"] = json!("future");
+        insert(&mut db, "a", "turn", 3, "result", outcome).await;
+        let metadata = read(&mut db, "a", position(3), 3, 65536)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(metadata.call.is_none());
+        assert_eq!(metadata.result.unwrap().position, position(3));
+    }
+    #[tokio::test]
     async fn activity_titles_and_open_turns_are_scoped_bounded_and_fenced() {
         let mut db = database().await;
         insert(
@@ -612,13 +638,39 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
             .map(|row| row.get::<String, _>(3))
             .collect::<Vec<_>>()
             .join("\n");
-        for index in [
-            "transcript_tool_activity",
-            "transcript_turn_state",
-            "transcript_tool_results",
+        for (index, keys) in [
+            (
+                "transcript_tool_activity",
+                "session_id=? AND turn_id=? AND <expr>=? AND source_sequence<?",
+            ),
+            (
+                "transcript_turn_state",
+                "session_id=? AND turn_id=? AND source_sequence<?",
+            ),
+            (
+                "transcript_tool_results",
+                "session_id=? AND turn_id=? AND <expr>=? AND source_sequence<?",
+            ),
         ] {
-            assert!(plan.contains(&format!("USING INDEX {index}")), "{plan}");
+            assert!(
+                plan.contains(&format!("USING INDEX {index} ({keys})")),
+                "{plan}"
+            );
         }
+        let unique_call_key =
+            "USING INDEX sqlite_autoindex_transcript_rows_2 (session_id=? AND message_id=?)";
+        assert!(
+            plan.contains(&format!("SEARCH row {unique_call_key}")),
+            "{plan}"
+        );
+        let parents = plan
+            .lines()
+            .filter(|line| line.starts_with("SEARCH parent "))
+            .collect::<Vec<_>>();
+        assert!(
+            !parents.is_empty() && parents.iter().all(|line| line.contains(unique_call_key)),
+            "{plan}"
+        );
     }
 
     #[tokio::test]
