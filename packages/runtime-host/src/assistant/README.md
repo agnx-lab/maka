@@ -100,7 +100,7 @@ assistant-wide discovery schedule.
 - `InitiativeConfigure({intervalMinutes})` explicitly changes that schedule and
   preserves its enabled/paused state. `InitiativeControl` pauses/resumes it or requests
   one general exploration. These operations create no goal-specific task.
-- `MemoryIndexControl` configures a particular index's maintenance;
+- `MemoryIndexControl configure` configures one persisted maintenance clock (12 hours by default); per-index pause/resume only controls participation. At each deadline the scheduler gives all eligible indexes of the same owner to one organizing Agent, retaining independent ranges/checkpoints. It decides what needs changing and which reads/updates to share. Ownership boundaries remain isolated. Creating or manually maintaining an index does not reset the clock; interrupted shared rounds retain their exact ranges and completed members across restarts;
   `MemoryIndexMaintain` runs one organizing round. Shared-job stop semantics remain
   unchanged.
 - `MatterDelegate` creates concrete work; `MatterTasks` reads progress;
