@@ -22,7 +22,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, sep, extname } from 'node:path';
 import { AssistantWebError, type AssistantWebBackend } from './assistant-web-backend.js';
 
-/** Explicitly opt-in, same-origin LAN chat. Authentication is outside this first version. */
+/** Opt-in web chat. Public access requires an authenticated reverse proxy. */
 export async function startAssistantWebServer(options: {
   backend: AssistantWebBackend;
   assets: string;
@@ -31,7 +31,13 @@ export async function startAssistantWebServer(options: {
   publicOrigin?: string;
   onError?: (error: unknown) => void;
 }) {
-  const publicOrigin = options.publicOrigin ? new URL(options.publicOrigin).origin : undefined;
+  const bindHost = options.host ?? '127.0.0.1';
+  const publicUrl = options.publicOrigin ? new URL(options.publicOrigin) : undefined;
+  if (publicUrl && (!['http:', 'https:'].includes(publicUrl.protocol) || publicUrl.username || publicUrl.password))
+    throw new Error('Assistant web origin must be an HTTP(S) origin without credentials');
+  const publicOrigin = publicUrl?.origin;
+  if (!['127.0.0.1', '::1', 'localhost'].includes(bindHost))
+    throw new Error('Assistant web must bind to loopback; use an authenticated reverse proxy for remote access');
   const streams = new Set<ServerResponse>();
   let stopped = false;
   let lastState = '';
@@ -45,12 +51,22 @@ export async function startAssistantWebServer(options: {
   };
   const server = createServer(async (req, res) => {
     try {
-      const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : options.port;
+      const localOrigins = ['127.0.0.1', 'localhost', '[::1]'].map((host) => new URL(`http://${host}:${port}`));
+      const allowedHosts = new Set([...localOrigins.map((url) => url.host), ...(publicUrl ? [publicUrl.host] : [])]);
+      const allowedOrigins = new Set([...localOrigins.map((url) => url.origin), ...(publicOrigin ? [publicOrigin] : [])]);
+      // Host must be independently trusted: comparing Origin to the supplied Host
+      // alone allows both headers to agree on a DNS-rebinding attacker's domain.
+      if (!req.headers.host || !allowedHosts.has(req.headers.host.toLowerCase()))
+        throw new AssistantWebError(403, '不允许的访问地址');
+      if (!req.url?.startsWith('/') || req.url.startsWith('//'))
+        throw new AssistantWebError(400, '无效的请求地址');
+      const url = new URL(req.url, `http://${req.headers.host}`);
       // Do not let an unrelated website submit messages to a locally running assistant.
       if (
         req.headers.origin &&
-        req.headers.origin !== url.origin &&
-        req.headers.origin !== publicOrigin
+        !allowedOrigins.has(req.headers.origin)
       )
         throw new AssistantWebError(403, '仅支持同源访问');
       res.setHeader('X-Content-Type-Options', 'nosniff');

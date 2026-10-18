@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
+import { request } from 'node:http';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -299,7 +300,25 @@ test('HTTP serves app, validates messages, streams state, and closes live connec
     publicOrigin: 'https://assistant.example',
   });
   const url = `http://127.0.0.1:${server.port}`;
+  const rawRequest = (host: string, origin?: string, path = '/api/history') => new Promise<number>((resolve, reject) => {
+    const req = request(`${url}${path}`, { headers: { Host: host, ...(origin ? { Origin: origin } : {}) } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode!));
+    });
+    req.on('error', reject);
+    req.end();
+  });
   try {
+    for (const path of ['/api/history', '/api/events', '/api/avatar', '/api/messages', '/']) {
+      assert.equal(await rawRequest(`attacker.example:${server.port}`, `http://attacker.example:${server.port}`, path), 403);
+      assert.equal(await rawRequest(`attacker.example:${server.port}`, undefined, path), 403);
+    }
+    assert.equal(await rawRequest('assistant.example', 'https://assistant.example'), 200);
+    assert.equal(await rawRequest(`localhost:${server.port}`, `http://localhost:${server.port}`), 200);
+    assert.equal(await rawRequest(`localhost:${server.port + 1}`), 403);
+    assert.equal(await rawRequest(`127.0.0.1:${server.port}`, 'null'), 403);
+    await assert.rejects(startAssistantWebServer({backend, assets, port: 0, host: '0.0.0.0'}), /loopback/);
+    await assert.rejects(startAssistantWebServer({backend, assets, port: 0, host: '192.168.1.5', publicOrigin: 'https://assistant.example'}), /loopback/);
     assert.match(await (await fetch(url)).text(), /Maka/);
     const imageResponse = await fetch(url + '/api/avatar?conversationId=owner&id=image');
     assert.equal(imageResponse.headers.get('content-type'), 'image/png');

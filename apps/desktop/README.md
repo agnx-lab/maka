@@ -35,15 +35,18 @@ npm run build --workspace @maka/desktop
 MAKA_ASSISTANT_WEB_PORT=8787 npm start --workspace @maka/desktop
 ```
 
-Open `http://127.0.0.1:8787`. To use a phone on the same trusted LAN, also set
-`MAKA_ASSISTANT_WEB_HOST=0.0.0.0` and open `http://<computer-LAN-IP>:8787` on the
-phone. The listener is off unless `MAKA_ASSISTANT_WEB_PORT` is supplied, defaults
-to loopback, and closes with the desktop app. This version intentionally has no
-authentication; do not expose the listener directly to the public Internet.
-For an existing authenticated HTTPS reverse proxy (for example Cloudflare Access),
-keep the listener on loopback and set `MAKA_ASSISTANT_WEB_ORIGIN=https://your-hostname`.
-This allows that exact browser origin; forwarded headers do not grant origin access.
-The proxy must protect the page and all `/api/` routes.
+Open `http://127.0.0.1:8787`. The listener is off unless
+`MAKA_ASSISTANT_WEB_PORT` is supplied and closes with the desktop app.
+Only loopback bindings (`127.0.0.1`, `::1`, `localhost`) are accepted. Direct
+LAN/public bindings such as `0.0.0.0` are rejected because this listener has no
+built-in authentication.
+For phone or remote access, use an authenticated HTTPS reverse proxy (for example
+Cloudflare Access) and set `MAKA_ASSISTANT_WEB_ORIGIN=https://your-hostname`.
+The proxy must protect the page and all `/api/` routes; configuring an origin is
+not authentication. Host headers must match a loopback address at the listener's
+port or the configured public origin's host. Origins are independently checked;
+forwarded headers do not grant access. This prevents DNS-rebinding domains from
+using their own matching Host/Origin pair to reach the local assistant.
 
 The page supports text, Markdown, optional authored summaries, older history,
 typing state and live updates. An SSE connection announces transcript changes;

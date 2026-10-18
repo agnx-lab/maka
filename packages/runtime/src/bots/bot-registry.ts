@@ -121,8 +121,11 @@ export class BotRegistry {
 
   async getMessageReadStatus(platform: BotPlatform, messageId: string, userId: string) {
     const bridge = this.bridges.get(platform) as (BotBridge & Partial<SendCapable>) | undefined;
-    return await bridge?.getMessageReadStatus?.(messageId, userId).catch(() => ({ state: 'unknown' as const }))
-      ?? { state: 'unknown' as const };
+    return (
+      (await bridge
+        ?.getMessageReadStatus?.(messageId, userId)
+        .catch(() => ({ state: 'unknown' as const }))) ?? { state: 'unknown' as const }
+    );
   }
 
   async stopAll(): Promise<void> {

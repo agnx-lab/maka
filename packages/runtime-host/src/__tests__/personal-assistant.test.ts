@@ -335,20 +335,30 @@ test('ambiguous or malformed adopted settings fail closed without creating repla
     children: [],
     config: {},
   };
-  await assert.rejects(
-    f.service.recover(f.legacy, [entry, { ...entry, id: 'duplicate' }] as any),
+  await f.service.recover(f.legacy, [entry, { ...entry, id: 'duplicate' }] as any);
+  f.service.start();
+  assert.equal(f.service.enabled, false);
+  assert.match(
+    ((await f.service.call('assistant.enablement', {})) as any).error,
     /Multiple legacy configurations/,
   );
+  assert.deepEqual(f.service.tools, []);
   await assert.rejects(readFile(join(f.directory, 'assistant.json')), { code: 'ENOENT' });
   await mkdir(f.directory, { recursive: true });
   await writeFile(join(f.directory, 'assistant.json'), '{broken');
   const service = new PersonalAssistantService(f.directory, f.dependencies);
   try {
-    await assert.rejects(service.recover(f.legacy, []), SyntaxError);
+    await service.recover(f.legacy, []);
+    service.start();
+    assert.equal(service.enabled, false);
+    assert.ok(((await service.call('assistant.enablement', {})) as any).error);
     assert.equal(await readFile(join(f.directory, 'assistant.json'), 'utf8'), '{broken');
     await assert.rejects(readFile(join(f.directory, 'memory-network', 'network.sqlite')), {
       code: 'ENOENT',
     });
+    await rm(join(f.directory, 'assistant.json'));
+    await service.call('assistant.set-enabled', { enabled: true });
+    assert.deepEqual(await service.call('assistant.enablement', {}), { enabled: true });
   } finally {
     await service.close();
   }
@@ -487,3 +497,20 @@ test('disable fences admission before waiting for stop and serializes re-enable'
   await on;
   assert.equal(f.service.enabled, true);
 });
+
+for (const preference of ['{broken', JSON.stringify({ enabled: true })]) {
+  test(`assistant startup failure is isolated with persisted preference ${preference}`, async (t) => {
+    const f = await fixture(true);
+    t.after(f.close);
+    await writeFile(join(f.directory, 'enablement.json'), preference);
+    await writeFile(join(f.directory, 'assistant.json'), '{broken');
+    await f.service.recover(f.legacy, []);
+    f.service.start();
+    assert.equal(f.service.enabled, false);
+    assert.deepEqual(f.service.tools, []);
+    assert.ok(((await f.service.call('assistant.enablement', {})) as any).error);
+    assert.equal(await readFile(join(f.directory, 'enablement.json'), 'utf8'), preference);
+    assert.equal(await readFile(join(f.directory, 'assistant.json'), 'utf8'), '{broken');
+    await assert.rejects(f.service.call('assistant.status', {}), /disabled/);
+  });
+}

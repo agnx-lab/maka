@@ -52,7 +52,7 @@ function useAssistantEnablement(host?: DesktopRuntimeHostRef) {
         const target = host ?? (await assistantDesktop.defaultHost());
         const result = await assistantCall('assistant.enablement', {}, target);
         if (live && version === revision.current)
-          setState({ enabled: result.enabled === true, ready: true, error: '' });
+          setState({ enabled: result.enabled === true, ready: true, error: typeof result.error === 'string' ? result.error : '' });
       } catch (e) {
         if (live && version === revision.current)
           setState({ enabled: false, ready: false, error: String(e) });
