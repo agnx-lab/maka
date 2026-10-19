@@ -116,10 +116,7 @@ async fn verify(load: &Load<'_>, session: &str, sent: &Value, expected: &str) {
             assert_eq!(through, &page["through"]);
         }
         input["through"] = page["through"].clone();
-        if page["kind"] == "preparing" {
-            tokio::task::yield_now().await;
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         for chunk in page["chunks"].as_array().unwrap() {
             if chunk["role"] == "assistant" {
                 let text = chunk["text"].as_str().unwrap();

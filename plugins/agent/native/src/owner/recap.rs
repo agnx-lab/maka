@@ -141,29 +141,20 @@ impl recap::History for Backend {
             if through > high_water {
                 return Err(failed("Recap history fence invalid"));
             }
-            let page = if !self
+            let page = self
                 .owner
                 .store
-                .prepare_transcript(&self.session, through, 32)
+                .history_text(
+                    &self.session,
+                    through,
+                    input.position,
+                    false,
+                    8192,
+                    8,
+                    96 * 1024,
+                )
                 .await
-                .map_err(persistence)?
-            {
-                history::Page::Preparing { through }
-            } else {
-                self.owner
-                    .store
-                    .history_text(
-                        &self.session,
-                        through,
-                        input.position,
-                        false,
-                        8192,
-                        8,
-                        96 * 1024,
-                    )
-                    .await
-                    .map_err(persistence)?
-            };
+                .map_err(persistence)?;
             self.owner.check_recap(&scope, &self.session).await?;
             Ok(page)
         })

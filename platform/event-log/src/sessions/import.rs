@@ -209,6 +209,12 @@ async fn append(
                     .bind(&event.id).bind(&event.invocation.invocation_id).bind(json).execute(&mut *connection).await?;
         last = Some(inserted.last_insert_rowid() as u64);
         super::project_execution(&mut *connection, inserted.last_insert_rowid() as u64).await?;
+        crate::transcript::directory::record_source(
+            connection,
+            session,
+            inserted.last_insert_rowid() as u64,
+        )
+        .await?;
         sqlx::query("UPDATE session_imports SET records=records+1,bytes=?,conversation=conversation+? WHERE session_id=?")
                     .bind(bytes as i64).bind(i64::from(conversation)).bind(session).execute(&mut *connection).await?;
     }

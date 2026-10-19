@@ -433,14 +433,7 @@ impl Handler for Agent {
                     }
                     .validate()
                     .map_err(|_| "agent_cursor_invalid")?;
-                    let result = if !owner
-                        .store
-                        .prepare_transcript(&input.session_id, through, 32)
-                        .await
-                        .map_err(|_| "agent_history_unavailable")?
-                    {
-                        HistoryPage::Preparing { through }
-                    } else {
+                    let result = {
                         let Page::Ready {
                             through,
                             chunks,
@@ -461,10 +454,7 @@ impl Handler for Agent {
                                 64 * 1024,
                             )
                             .await
-                            .map_err(|_| "agent_history_unavailable")?
-                        else {
-                            return Err("agent_history_unavailable".into());
-                        };
+                            .map_err(|_| "agent_history_unavailable")?;
                         HistoryPage::Ready {
                             through,
                             before,
@@ -539,12 +529,7 @@ impl Handler for Agent {
                     {
                         return Err("agent_search_invalid".into());
                     }
-                    let page = if owner
-                        .store
-                        .prepare_transcript(&input.session_id, input.through, 32)
-                        .await
-                        .map_err(|_| "agent_history_unavailable")?
-                    {
+                    let page = {
                         let batch = owner
                             .store
                             .search_transcript(
@@ -574,10 +559,6 @@ impl Handler for Agent {
                                 .collect(),
                             next_after: batch.next_after,
                         }
-                    } else {
-                        HistorySearchPage::Preparing {
-                            through: input.through,
-                        }
                     };
                     owner.session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
@@ -594,12 +575,7 @@ impl Handler for Agent {
                     if input.through > *owner.store.subscribe_commits().borrow() {
                         return Err("agent_cursor_invalid".into());
                     }
-                    let page = if owner
-                        .store
-                        .prepare_transcript(&input.session_id, input.through, 32)
-                        .await
-                        .map_err(|_| "agent_history_unavailable")?
-                    {
+                    let page = {
                         let position = match input.source {
                             HistorySourceReference::Row { position } => position,
                             HistorySourceReference::ToolUse { tool_use_id } => owner
@@ -635,10 +611,6 @@ impl Handler for Agent {
                             source: Box::new(source),
                             file_path,
                         }
-                    } else {
-                        HistorySourcePage::Preparing {
-                            through: input.through,
-                        }
                     };
                     owner.session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
@@ -655,12 +627,7 @@ impl Handler for Agent {
                     if input.through > *owner.store.subscribe_commits().borrow() {
                         return Err("agent_cursor_invalid".into());
                     }
-                    let page = if owner
-                        .store
-                        .prepare_transcript(&input.session_id, input.through, 32)
-                        .await
-                        .map_err(|_| "agent_history_unavailable")?
-                    {
+                    let page = {
                         let image = owner
                             .store
                             .tool_image(
@@ -680,10 +647,6 @@ impl Handler for Agent {
                             mime_type: image.mime_type,
                             digest: image.digest,
                             data: STANDARD.encode(image.bytes),
-                        }
-                    } else {
-                        ToolImagePage::Preparing {
-                            through: input.through,
                         }
                     };
                     owner.session(&input.session_id).await?;

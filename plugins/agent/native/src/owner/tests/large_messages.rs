@@ -118,7 +118,7 @@ async fn public_send_preserves_six_hundred_kib_through_durable_admission_and_mai
             let mut history = json!({"sessionId":session,"position":{"kind":"start"}});
             loop {
                 let page = f.query("history", history.clone()).await.unwrap();
-                if page["kind"] == "preparing" { tokio::task::yield_now().await; continue; }
+                assert_eq!(page["kind"], "ready");
                 history["through"] = page["through"].clone();
                 for chunk in page["chunks"].as_array().unwrap().iter().filter(|chunk| chunk["role"] == "user") {
                     if source_position.is_none() { source_position = Some(chunk["position"].clone()); }
@@ -165,7 +165,7 @@ async fn public_send_preserves_six_hundred_kib_through_durable_admission_and_mai
             let mut history = json!({"sessionId":session,"position":{"kind":"start"}});
             loop {
                 let page = f.query("history", history.clone()).await.unwrap();
-                if page["kind"] == "preparing" { tokio::task::yield_now().await; continue; }
+                assert_eq!(page["kind"], "ready");
                 history["through"] = page["through"].clone();
                 for chunk in page["chunks"].as_array().unwrap().iter().filter(|chunk| chunk["role"] == "user") {
                     reopened_text.push_str(chunk["text"].as_str().unwrap());

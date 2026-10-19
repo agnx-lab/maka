@@ -92,7 +92,6 @@ type Part = {
   page: HistorySource | null;
   filePath: string | null;
   failed: boolean;
-  preparing: boolean;
   pending: { key: string; position: SourcePosition } | null;
   position: SourcePosition;
   reveal?: ReadingCommand;
@@ -142,7 +141,6 @@ function add(
     page: null,
     filePath: null,
     failed: false,
-    preparing: false,
     pending: null,
     position: { kind: 'start' },
   };
@@ -155,7 +153,6 @@ function request(state: State, part: Part, position: SourcePosition, actions: Ac
   part.pending = { key, position };
   part.position = position;
   part.failed = false;
-  part.preparing = false;
   actions.push({
     key,
     binding: 'agent',
@@ -194,10 +191,6 @@ function scalar(state: State, id: string): string | number | boolean | null {
 function accept(state: State, part: Part, value: AgentHistorySourcePage, position: SourcePosition) {
   if (value.through !== state.context.through) {
     part.failed = true;
-    return;
-  }
-  if (value.kind === 'preparing') {
-    part.preparing = true;
     return;
   }
   const page = value.source,
@@ -348,7 +341,7 @@ export function toolDetails<N extends Node>(
       if (
         props.load !== false &&
         (props.expanded || compactPart(id)) &&
-        (!part.page || part.preparing) &&
+        !part.page &&
         !part.pending &&
         !part.failed
       )
@@ -787,20 +780,13 @@ export function toolDetails<N extends Node>(
           else {
             const value = result.value as AgentHistorySourcePage;
             accept(state, part, value, position);
-            if (part.page && !part.failed && value.kind !== 'preparing')
+            if (part.page && !part.failed)
               part.reveal = {
                 sequence: (part.reveal?.sequence ?? 0) + 1,
                 target: {
                   kind: position.kind === 'before' || position.kind === 'tail' ? 'end' : 'start',
                 },
               };
-            if (
-              value.kind === 'preparing' &&
-              props.load !== false &&
-              !part.failed &&
-              (props.expanded || compactPart(entry![0]))
-            )
-              request(state, part, position, actions);
           }
         }
       } else if (input.kind === 'raw') {

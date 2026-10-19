@@ -17,6 +17,9 @@
  * under the License.
  */
 
+#[path = "support/transcript.rs"]
+mod transcript_cache;
+
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
@@ -57,14 +60,18 @@ mod performance_executor;
 mod prefix_replay;
 #[path = "transcript_index/source.rs"]
 mod source;
+#[path = "transcript_index/sparse_directory.rs"]
+mod sparse_directory;
 use fixtures::*;
 
 #[tokio::test]
-async fn completed_bytes_digest_identity_reopen_and_exact_rebuild() {
+async fn completed_bytes_digest_identity_reopen_and_selected_rebuild() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
-    assert!(log.prepare_transcript("a", 0, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", 0)
+        .await
+        .unwrap();
     assert!(
         log.transcript_headers(
             "a",
@@ -119,7 +126,9 @@ async fn completed_bytes_digest_identity_reopen_and_exact_rebuild() {
     .unwrap();
     let through = end(&log, "a", InvocationOutcome::Completed).await;
     let wake = log.subscribe_commits();
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
     assert!(!wake.has_changed().unwrap());
     let db = Connection::open(&path).unwrap();
     let original = rows(&db, "a");
@@ -134,29 +143,149 @@ async fn completed_bytes_digest_identity_reopen_and_exact_rebuild() {
             format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
         );
     }
-    // Derived progress may be discarded; replay must verify exactly the same rows.
-    db.execute("DELETE FROM transcript_progress", []).unwrap();
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+    // Optional bodies may be discarded; selected reconstruction preserves the same rows.
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "a"), original);
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
-    assert!(reopened.prepare_transcript("a", through, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "a"), original);
-    // Corruption cannot silently replace an already published payload.
+    let canonical = serde_json::to_vec(&reopened.prefix(32, 65536).await.unwrap()).unwrap();
+    // This real completed producer emits assistant then usage. Derive positions
+    // from the emitted fixture, rather than assuming fixed event/ordinal numbers.
+    let assistant_row = original
+        .iter()
+        .find(|row| serde_json::from_slice::<Value>(&row.1).unwrap()["type"] == "assistant")
+        .unwrap();
+    let usage_row = original
+        .iter()
+        .find(|row| serde_json::from_slice::<Value>(&row.1).unwrap()["type"] == "token_usage")
+        .unwrap();
+    assert_eq!(assistant_row.0.source_sequence, usage_row.0.source_sequence);
+    assert_eq!(
+        original
+            .iter()
+            .filter(|row| row.0.source_sequence == assistant_row.0.source_sequence)
+            .map(|row| row.0)
+            .collect::<Vec<_>>(),
+        [assistant_row.0, usage_row.0]
+    );
+    let assistant_source = i64::try_from(assistant_row.0.source_sequence).unwrap();
+    let assistant_item = i64::try_from(assistant_row.0.item_index).unwrap();
+    let usage_source = i64::try_from(usage_row.0.source_sequence).unwrap();
+    let usage_item = i64::try_from(usage_row.0.item_index).unwrap();
+    // Preserve the original byte-identity refusal: a missing sibling triggers
+    // whole-S reconstruction, which must not overwrite an existing bad payload.
+    db.execute("UPDATE transcript_rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap();
     db.execute(
-        "UPDATE transcript_rows SET payload = X'00' WHERE source_sequence = ? AND item_index = ?",
-        [
-            original[1].0.source_sequence as i64,
-            original[1].0.item_index as i64,
-        ],
+        "DELETE FROM transcript_rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",
+        [usage_source, usage_item],
     )
     .unwrap();
-    db.execute("DELETE FROM transcript_progress", []).unwrap();
+    let damaged = rows(&db, "a");
     assert!(matches!(
-        reopened.prepare_transcript("a", through, 32).await,
+        reopened
+            .transcript_headers(
+                "a",
+                &maka_event_log::transcript::TranscriptRead {
+                    through,
+                    position: Some(usage_row.0),
+                    direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                    limit: 1,
+                }
+            )
+            .await,
         Err(StoreError::TranscriptConflict)
     ));
-    assert_eq!(progress(&db, "a"), 0);
+    assert_eq!(rows(&db, "a"), damaged);
+    assert_eq!(
+        serde_json::to_vec(&reopened.prefix(32, 65536).await.unwrap()).unwrap(),
+        canonical
+    );
+    db.execute("UPDATE transcript_rows SET payload=?1 WHERE session_id='a' AND source_sequence=?2 AND item_index=?3",rusqlite::params![&assistant_row.1,assistant_source,assistant_item]).unwrap();
+    crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
+        .await
+        .unwrap();
+    assert_eq!(rows(&db, "a"), original);
+    // Cache hits retain their separate directory-identity check without hashing
+    // every cached payload on each fragment.
+    db.execute(
+        "UPDATE transcript_rows SET turn_id = 'wrong-turn' WHERE source_sequence = ? AND item_index = ?",
+        [i64::try_from(original[1].0.source_sequence).unwrap(),i64::try_from(original[1].0.item_index).unwrap()],
+    ).unwrap();
+    assert!(matches!(
+        crate::transcript_cache::materialize_all_rows(&reopened, "a", through).await,
+        Err(StoreError::TranscriptConflict)
+    ));
+    assert_eq!(
+        serde_json::to_vec(&reopened.prefix(32, 65536).await.unwrap()).unwrap(),
+        canonical
+    );
+    reopened.close().await.unwrap();
+    db.execute(
+        "UPDATE transcript_rows SET turn_id='turn-a' WHERE session_id='a'",
+        [],
+    )
+    .unwrap();
+    db.close().map_err(|(_, error)| error).unwrap();
+    // All connections are now closed (including the last SQLite connection's
+    // WAL close/checkpoint). Copy this task fixture, never a live-WAL DB or hardlink.
+    for operation in ["headers", "fragment", "turn_bounds"] {
+        let copy = temp.path().join(format!("{operation}.sqlite"));
+        std::fs::copy(&path, &copy).unwrap();
+        let fault = Connection::open(&copy).unwrap();
+        // A miss inserts the first emitted row, then the existing second row
+        // fails the exact byte comparison. Only optional cache bytes are damaged.
+        fault.execute("DELETE FROM transcript_rows WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[assistant_source,assistant_item]).unwrap();
+        fault.execute("UPDATE transcript_rows SET payload=X'00' WHERE session_id='a' AND source_sequence=?1 AND item_index=?2",[usage_source,usage_item]).unwrap();
+        let before = rows(&fault, "a");
+        fault.close().map_err(|(_, error)| error).unwrap();
+        let copied = EventLog::open(&copy).await.unwrap();
+        let error = match operation {
+            "headers" => copied
+                .transcript_headers(
+                    "a",
+                    &maka_event_log::transcript::TranscriptRead {
+                        through,
+                        position: Some(assistant_row.0),
+                        direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                        limit: 1,
+                    },
+                )
+                .await
+                .unwrap_err(),
+            "fragment" => copied
+                .transcript_fragment("a", assistant_row.0, 0, 1)
+                .await
+                .unwrap_err(),
+            "turn_bounds" => copied
+                .transcript_turn_bounds("a", "turn-a", through)
+                .await
+                .unwrap_err(),
+            _ => unreachable!(),
+        };
+        assert!(
+            matches!(&error, StoreError::TranscriptConflict),
+            "{operation}: {error}"
+        );
+        assert_eq!(
+            serde_json::to_vec(&copied.prefix(32, 65536).await.unwrap()).unwrap(),
+            canonical
+        );
+        copied.close().await.unwrap();
+        let after = Connection::open(&copy).unwrap();
+        assert_eq!(
+            rows(&after, "a"),
+            before,
+            "{operation}: failed source fill must roll back its first row"
+        );
+    }
 }
 
 #[tokio::test]
@@ -189,7 +318,9 @@ async fn interleaved_stream_preserves_order_and_excludes_other_session_evidence(
         .collect();
     log.append_batch(&events).await.unwrap();
     let through = interrupt(&log, "a").await;
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
 
     let db = Connection::open(&path).unwrap();
     let projected = rows(&db, "a");
@@ -197,10 +328,11 @@ async fn interleaved_stream_preserves_order_and_excludes_other_session_evidence(
     let assistant: Value = serde_json::from_slice(&projected[2].1).unwrap();
     assert_eq!(assistant["id"], id);
     assert_eq!(assistant["text"], expected);
-    assert_eq!(progress(&db, "a"), through as i64);
 
     let other = interrupt(&log, "b").await;
-    assert!(log.prepare_transcript("b", other, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "b", other)
+        .await
+        .unwrap();
     let other_rows = rows(&db, "b");
     let assistant: Value = serde_json::from_slice(&other_rows[2].1).unwrap();
     assert_eq!(
@@ -242,7 +374,9 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
             .unwrap()
             .is_empty()
     );
-    assert!(log.prepare_transcript("a", live, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", live)
+        .await
+        .unwrap();
     let running = rows(&db, "a");
     assert_eq!(running.len(), 2);
     let state: Value = serde_json::from_slice(&running[1].1).unwrap();
@@ -251,14 +385,18 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
         state["status"], "running",
         "pending work is not interrupted"
     );
-    assert_eq!(progress(&db, "a"), live as i64);
-    assert!(log.prepare_transcript("a", interrupted, 32).await.unwrap());
+
+    crate::transcript_cache::materialize_all_rows(&log, "a", interrupted)
+        .await
+        .unwrap();
     let frozen = rows(&db, "a");
     assert_eq!(frozen.len(), 3);
     let assistant: Value = serde_json::from_slice(&frozen[2].1).unwrap();
     assert_eq!(assistant["id"], id);
     assert_eq!(assistant["text"], "partial😀");
-    assert!(log.prepare_transcript("a", ended, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", ended)
+        .await
+        .unwrap();
     let final_rows = rows(&db, "a");
     assert_eq!(&final_rows[..3], frozen.as_slice());
     assert_eq!(final_rows.len(), 4); // no invented unknown usage
@@ -267,7 +405,7 @@ async fn partial_freezes_at_interruption_and_old_fence_excludes_later_boundaries
 }
 
 #[tokio::test]
-async fn bounded_progress_and_session_isolation() {
+async fn directory_fences_and_sparse_body_session_isolation() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -276,10 +414,10 @@ async fn bounded_progress_and_session_isolation() {
     let a_end = end(&log, "a", InvocationOutcome::Completed).await;
     let through = end(&log, "b", InvocationOutcome::Completed).await;
     let db = Connection::open(&path).unwrap();
-    assert!(!log.prepare_transcript("a", through, 1).await.unwrap());
-    assert_eq!(progress(&db, "a"), 1);
-    assert!(log.prepare_transcript("a", through, 1).await.unwrap());
-    assert_eq!(progress(&db, "a"), through as i64);
+    assert!(rows(&db, "a").is_empty() && rows(&db, "b").is_empty());
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
     assert_eq!(
         rows(&db, "a").last().unwrap().0,
         RowPosition {
@@ -288,8 +426,12 @@ async fn bounded_progress_and_session_isolation() {
         }
     );
     assert!(rows(&db, "b").is_empty());
-    assert!(log.prepare_transcript("a", through + 1, 1).await.is_err());
-    assert!(log.prepare_transcript("a", through, 33).await.is_err());
+    assert!(
+        crate::transcript_cache::materialize_all_rows(&log, "a", through + 1)
+            .await
+            .is_err()
+    );
+    log.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -310,11 +452,15 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
         let (id, live) = partial(&log, "a", "committed😀 prefix").await;
         let invocation = event("a", opening()).event().invocation.clone();
         let overlay = log.active_transcript(&invocation, live).await.unwrap();
-        assert!(log.prepare_transcript("a", live, 32).await.unwrap());
+        crate::transcript_cache::materialize_all_rows(&log, "a", live)
+            .await
+            .unwrap();
         // A persistence fault may prevent ModelInterrupted while a later
         // terminal append succeeds. The source facts allow this boundary.
         let through = end(&log, "a", outcome.clone()).await;
-        assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+        crate::transcript_cache::materialize_all_rows(&log, "a", through)
+            .await
+            .unwrap();
         assert!(
             log.active_transcript(&invocation, through)
                 .await
@@ -356,10 +502,13 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
             }
         );
         // Index reset and process reopen must not drop or relabel the prefix.
-        db.execute("DELETE FROM transcript_progress", []).unwrap();
+        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+            .unwrap();
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();
-        assert!(reopened.prepare_transcript("a", through, 32).await.unwrap());
+        crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
+            .await
+            .unwrap();
         assert_eq!(rows(&db, "a"), original);
         assert_eq!(
             reopened.active_transcript(&invocation, live).await.unwrap(),
@@ -369,7 +518,7 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
 }
 
 #[tokio::test]
-async fn oversized_text_and_invalid_tool_fail_without_committing_progress() {
+async fn optional_projection_failures_preserve_canonical_admission() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -377,12 +526,10 @@ async fn oversized_text_and_invalid_tool_fail_without_committing_progress() {
     let through = interrupt(&log, "a").await;
     let db = Connection::open(&path).unwrap();
     assert!(matches!(
-        log.prepare_transcript("a", through, 32).await,
-        Err(StoreError::Projection(
-            maka_presentation::ProjectionError::TooLarge
-        ))
+        crate::transcript_cache::materialize_all_rows(&log, "a", through).await,
+        Err(StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
     ));
-    assert_eq!(progress(&db, "a"), 0);
+
     assert!(rows(&db, "a").is_empty());
     log.append(&event("b", opening())).await.unwrap();
     let through = log
@@ -400,10 +547,10 @@ async fn oversized_text_and_invalid_tool_fail_without_committing_progress() {
         .await
         .unwrap();
     assert!(matches!(
-        log.prepare_transcript("b", through, 32).await,
-        Err(StoreError::Projection(_))
+        crate::transcript_cache::materialize_all_rows(&log, "b", through).await,
+        Err(StoreError::InvalidTransition(message)) if message.contains(&format!("history source {through}:"))
     ));
-    assert_eq!(progress(&db, "b"), 0);
+
     assert!(rows(&db, "b").is_empty());
 }
 
@@ -503,7 +650,9 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
     .0;
     let result_fact = log.append(&success).await.unwrap();
     let through = end(&log, "fanout", InvocationOutcome::Completed).await;
-    while !log.prepare_transcript("fanout", through, 1).await.unwrap() {}
+    crate::transcript_cache::materialize_all_rows(&log, "fanout", through)
+        .await
+        .unwrap();
     let db = Connection::open(&path).unwrap();
     let original = rows(&db, "fanout");
     let completed: Vec<_> = original
@@ -626,9 +775,7 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
         )
         .await
         .unwrap();
-    let Page::Ready { chunks, .. } = first else {
-        panic!("prepared")
-    };
+    let Page::Ready { chunks, .. } = first;
     assert_eq!(chunks.len(), 1);
     assert_eq!(
         chunks[0].position,
@@ -746,10 +893,7 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
             } = log
                 .history_text("fanout", through, position, false, 8192, 17, 65536)
                 .await
-                .unwrap()
-            else {
-                panic!("prepared")
-            };
+                .unwrap();
             for chunk in chunks {
                 if chunk.role == maka_agent_ports::session::history::Role::ToolCall {
                     assert_eq!(chunk.position.source_sequence, completion);
@@ -802,15 +946,13 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
     assert_eq!(search.matches[0].position, result_position);
     let canonical = log.prefix(1024, 8 * 1024 * 1024).await.unwrap().digest;
     log.close().await.unwrap();
-    for table in ["transcript_text", "transcript_rows", "transcript_progress"] {
+    for table in ["transcript_text", "transcript_rows"] {
         db.execute(&format!("DELETE FROM {table}"), []).unwrap();
     }
     let reopened = EventLog::open(&path).await.unwrap();
-    while !reopened
-        .prepare_transcript("fanout", through, 32)
+    crate::transcript_cache::materialize_all_rows(&reopened, "fanout", through)
         .await
-        .unwrap()
-    {}
+        .unwrap();
     assert_eq!(rows(&db, "fanout"), original);
     assert_eq!(
         reopened.prefix(1024, 8 * 1024 * 1024).await.unwrap().digest,

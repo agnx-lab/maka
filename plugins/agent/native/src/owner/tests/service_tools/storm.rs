@@ -658,18 +658,9 @@ async fn verify(
     let mut result_offsets = BTreeMap::new();
     let mut history_calls = BTreeSet::new();
     loop {
-        let page = match fixture.query("history", input.clone()).await {
-            Ok(page) => page,
-            Err(error) => {
-                let preparation = fixture.store.prepare_transcript(session, through, 32).await;
-                panic!("public history failed: {error}; preparation diagnostic: {preparation:?}");
-            }
-        };
+        let page = fixture.query("history", input.clone()).await.unwrap();
         assert_eq!(page["through"], through);
-        if page["kind"] == "preparing" {
-            tokio::task::yield_now().await;
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         for chunk in page["chunks"].as_array().unwrap() {
             if chunk["role"] == "tool_call" && chunk["field"] == "body" {
                 let tool = &chunk["tool"];

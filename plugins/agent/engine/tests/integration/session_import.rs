@@ -211,11 +211,7 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
             .unwrap()
             .contains("original thought")
     );
-    while !log
-        .prepare_transcript("imported", prefix.high_water, 32)
-        .await
-        .unwrap()
-    {}
+
     let read = log
         .history_text(
             "imported",

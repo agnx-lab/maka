@@ -122,11 +122,9 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             matches!(&facts[0], StreamFact::PartFinished { step_id, .. } if step_id == "main-a")
         );
         assert!(matches!(&facts[1], StreamFact::StepEnded { step_id, .. } if step_id == "main-a"));
-        assert!(
-            log.prepare_transcript("session", summary_fence, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", summary_fence)
+            .await
+            .unwrap();
         let db = Connection::open(&path).unwrap();
         let before_rows = transcript(&db);
         if ending == "success" {
@@ -222,11 +220,9 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             | StreamFact::StepEnded { step_id, .. } => step_id != "summary",
             _ => true,
         }));
-        assert!(
-            log.prepare_transcript("session", end.sequence, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", end.sequence)
+            .await
+            .unwrap();
         let projected = transcript(&db);
         assert_eq!(&projected[..before_rows.len()], before_rows.as_slice());
         assert_eq!(projected.len(), expected.len());
@@ -238,17 +234,15 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             );
         }
         db.execute("DELETE FROM transcript_rows", []).unwrap();
-        db.execute("DELETE FROM transcript_progress", []).unwrap();
+        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+            .unwrap();
         db.execute("DELETE FROM catalog_message_watermark", [])
             .unwrap();
         log.close().await.unwrap();
         let reopened = EventLog::open(&path).await.unwrap();
-        assert!(
-            reopened
-                .prepare_transcript("session", end.sequence, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&reopened, "session", end.sequence)
+            .await
+            .unwrap();
         assert_eq!(transcript(&db), projected);
         assert!(
             reopened

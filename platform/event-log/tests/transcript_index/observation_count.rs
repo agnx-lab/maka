@@ -103,7 +103,7 @@ async fn more_than_ten_thousand_actual_observations_remain_readable() {
         .await
         .unwrap();
     let through = end(&log, session, InvocationOutcome::Completed).await;
-    assert!(log.prepare_transcript(session, through, 32).await.unwrap());
+
     let Page::Ready { chunks, .. } = log
         .history_text(
             session,
@@ -117,10 +117,7 @@ async fn more_than_ten_thousand_actual_observations_remain_readable() {
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("prepared history")
-    };
+        .unwrap();
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].message_id, message_id);
     assert_eq!(
@@ -132,8 +129,11 @@ async fn more_than_ten_thousand_actual_observations_remain_readable() {
     );
     assert_eq!(chunks[0].text, expected);
     assert_eq!(chunks[0].total_bytes, 10_001);
+    crate::transcript_cache::materialize_all_rows(&log, session, through)
+        .await
+        .unwrap();
     let db = Connection::open(&path).unwrap();
-    assert_eq!(progress(&db, session), through as i64);
+
     assert_eq!(rows(&db, session).len(), 4);
     log.close().await.unwrap();
 }

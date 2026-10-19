@@ -237,7 +237,7 @@ async fn graph_real_model_dispatches_original_work_wakes_and_selects_actual_resu
         for _ in 0..128 {
             let page = fixture.query("history",history_request.clone()).await.unwrap();
             history_request["through"] = page["through"].clone();
-            if page["kind"] == "preparing" {continue;}
+            assert_eq!(page["kind"], "ready");
             notice_chunks.extend(page["chunks"].as_array().unwrap().iter()
                 .filter(|chunk| chunk["role"] == "user" && chunk["messageId"] == notice_id).cloned());
             if page["after"].is_null() {history_finished = true;break;}

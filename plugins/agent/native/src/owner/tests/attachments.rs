@@ -85,17 +85,12 @@ async fn attachment_upload_send_queue_and_resource_read_keep_session_and_receipt
         let sent = request(&mut socket).await;
         assert!(sent.to_string().contains(id), "model receives the canonical resource reference: {sent}");
         assert!(!sent.to_string().contains(&text), "uploaded text is read on demand");
-        let mut fence = None;
-        loop {
-            let history = f.query("history", json!({"sessionId":session,"through":fence,"position":{"kind":"start"},"includeThinking":true})).await.unwrap();
-            fence = history["through"].as_u64();
-            if history["kind"] == "preparing" { continue; }
-            let user = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "user").unwrap();
-            assert_eq!(user["attachments"][0]["name"], "notes.md");
-            assert_eq!(user["attachments"][0]["mimeType"], "text/markdown");
-            assert!(user["attachments"][0].get("ref").is_none(), "history descriptors confer no storage access");
-            break;
-        }
+        let history = f.query("history", json!({"sessionId":session,"position":{"kind":"start"},"includeThinking":true})).await.unwrap();
+        assert_eq!(history["kind"], "ready");
+        let user = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "user").unwrap();
+        assert_eq!(user["attachments"][0]["name"], "notes.md");
+        assert_eq!(user["attachments"][0]["mimeType"], "text/markdown");
+        assert!(user["attachments"][0].get("ref").is_none(), "history descriptors confer no storage access");
         let queued = send("queued text").await.unwrap();
         assert_eq!(queued["kind"], "queued");
         let queue = f.store.message_queue(&session).await.unwrap();

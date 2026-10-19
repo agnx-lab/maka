@@ -353,7 +353,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     let rows = support::transcript(&log, "a").await;
     let canonical = serde_json::to_vec(&log.prefix(100, 1024 * 1024).await.unwrap()).unwrap();
     log.close().await.unwrap();
-    db.execute_batch("DELETE FROM message_sources; DELETE FROM catalog_messages; DELETE FROM transcript_rows; DELETE FROM transcript_progress;").unwrap();
+    db.execute_batch("DELETE FROM message_sources; DELETE FROM catalog_messages; DELETE FROM transcript_rows; DELETE FROM transcript_text; DELETE FROM transcript_rows;").unwrap();
     drop(db);
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

@@ -208,6 +208,7 @@ impl EventLog {
             ).bind(&request.target_session_id).bind(observed.saturating_add(1))
                 .bind(&request.source_session_id).bind(through as i64).execute(&mut *tx).await?;
             crate::artifacts::history::retain(&mut tx, &request.source_session_id, &request.target_session_id, now).await?;
+            crate::transcript::directory::copy(&mut tx, &request.source_session_id, &request.target_session_id, through).await?;
             if let CopyPurpose::Revision { turn_id } = &request.purpose {
                 let retained = sqlx::query(
                     "INSERT INTO session_revision_sources

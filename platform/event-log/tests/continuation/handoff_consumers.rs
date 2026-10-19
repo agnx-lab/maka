@@ -335,7 +335,7 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
 
 async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {
     let through = *log.subscribe_commits().borrow();
-    while !log.prepare_transcript(session, through, 32).await.unwrap() {}
+
     let headers = log
         .transcript_headers(
             session,

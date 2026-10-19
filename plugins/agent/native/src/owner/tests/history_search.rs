@@ -76,7 +76,7 @@ async fn history_search_options_match_persisted_unicode_literals_and_original_pr
             for _ in 0..32 {
                 let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":after,"query":query,"caseSensitive":case_sensitive,"wholeWord":whole_word,"includeInternal":false})).await.unwrap();
                 assert_eq!(page["through"], through);
-                if page["kind"] == "preparing" { continue; }
+                assert_eq!(page["kind"], "ready");
                 for hit in page["matches"].as_array().unwrap() {
                     assert_eq!(hit["field"], "body");
                     actual.push(hit["preview"].as_str().unwrap().to_owned());
@@ -125,13 +125,12 @@ async fn history_search_preserves_empty_batches_and_exact_cursors_with_original_
         let mut input = request.clone();
         let mut matches = Vec::new();
         let mut empty_continuation = false;
-        let mut preparing = false;
         let mut ended = false;
         for _ in 0..32 {
             let page = fixture.query("search", input.clone()).await.unwrap();
             assert_eq!(page["through"], through);
             assert!(serde_json::to_vec(&page).unwrap().len() <= 16 * 1024);
-            if page["kind"] == "preparing" { preparing = true; continue; }
+            assert_eq!(page["kind"], "ready");
             let found = page["matches"].as_array().unwrap();
             assert!(found.len() <= 16);
             for item in found {
@@ -146,7 +145,7 @@ async fn history_search_preserves_empty_batches_and_exact_cursors_with_original_
             assert!(after.source_sequence <= through);
             input["after"] = json!(after);
         }
-        assert!(preparing && empty_continuation && ended);
+        assert!(empty_continuation && ended);
         assert_eq!(matches.len(), 40);
         assert!(matches.windows(2).all(|pair| serde_json::from_value::<maka_agent_ports::session::history::RowPosition>(pair[0]["position"].clone()).unwrap() < serde_json::from_value(pair[1]["position"].clone()).unwrap()));
         let located = fixture.query("history", json!({"sessionId":session,"through":through,
@@ -219,7 +218,7 @@ async fn search_hits_read_the_exact_field_when_history_body_is_absent_or_differe
             for _ in 0..64 {
                 let page = fixture.query("history", json!({"sessionId":session,"through":through,"position":position,"includeThinking":include})).await.unwrap();
                 assert!(serde_json::to_vec(&page).unwrap().len() <= 64 * 1024);
-                if page["kind"] == "preparing" { continue; }
+                assert_eq!(page["kind"], "ready");
                 for chunk in page["chunks"].as_array().unwrap() {
                     if chunk["field"] == "thinking" {
                         assert!(include);
@@ -243,14 +242,10 @@ async fn search_hits_read_the_exact_field_when_history_body_is_absent_or_differe
             ("argument-key-hit", "arguments", serde_json::to_string(&args).unwrap(), true),
             ("RESULT-KEY-HIT", "result", serde_json::to_string(&result).unwrap(), true),
         ] {
-            let mut hit = None;
-            for _ in 0..8 {
-                let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":null,"query":query,"caseSensitive":!matches!(field, "thinking" | "result"),"wholeWord":false,"includeInternal":false})).await.unwrap();
-                if page["kind"] == "preparing" { continue; }
-                assert_eq!(page["matches"].as_array().unwrap().len(), 1, "{query}");
-                hit = Some(page["matches"][0].clone()); break;
-            }
-            let hit = hit.unwrap();
+            let page = fixture.query("search", json!({"sessionId":session,"through":through,"after":null,"query":query,"caseSensitive":!matches!(field, "thinking" | "result"),"wholeWord":false,"includeInternal":false})).await.unwrap();
+            assert_eq!(page["kind"], "ready");
+            assert_eq!(page["matches"].as_array().unwrap().len(), 1, "{query}");
+            let hit = page["matches"][0].clone();
             assert_eq!(hit["field"], field);
             let sequence = hit["position"].clone();
             if query == "tool-name-hit" {

@@ -135,12 +135,3 @@ pub(super) fn rows(db: &Connection, session: &str) -> Vec<Row> {
     .collect::<Result<_, _>>()
     .unwrap()
 }
-pub(super) fn progress(db: &Connection, session: &str) -> i64 {
-    db.query_row(
-        "SELECT COALESCE((SELECT through_sequence FROM transcript_progress
-        WHERE session_id = ?), 0)",
-        [session],
-        |row| row.get(0),
-    )
-    .unwrap()
-}

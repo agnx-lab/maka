@@ -107,7 +107,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
         },
     )
     .await;
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+
     log.set_session_archived::<Value>("a", true, 10)
         .await
         .unwrap();
@@ -153,10 +153,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
                     64 * 1024,
                 )
                 .await
-                .unwrap()
-            else {
-                panic!("prepared")
-            };
+                .unwrap();
             for chunk in chunks {
                 if matches!(chunk.role, Role::ToolCall | Role::ToolResult) {
                     assert!(chunk.origin.is_none());
@@ -187,9 +184,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
             .await
             .unwrap();
         assert!(serde_json::to_vec(&page).unwrap().len() < 256 * 1024);
-        let Page::Ready { chunks, after, .. } = page else {
-            panic!("prepared")
-        };
+        let Page::Ready { chunks, after, .. } = page;
         for chunk in chunks {
             let timing = chunk.timing.as_ref().expect("original turn timing");
             let finished = timing.finished.as_ref().unwrap();
@@ -255,10 +250,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
     let Page::Ready { chunks, after, .. } = log
         .history_text("a", old, Position::Start, false, 16 * 1024, 8, 1024 * 1024)
         .await
-        .unwrap()
-    else {
-        panic!("prepared")
-    };
+        .unwrap();
     assert!(after.is_none());
     assert!(
         chunks.iter().all(|chunk| chunk
@@ -287,13 +279,6 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
         .unwrap();
     cache
         .execute(
-            "INSERT INTO transcript_progress SELECT 'b', through_sequence
-         FROM transcript_progress WHERE session_id = 'a'",
-            [],
-        )
-        .unwrap();
-    cache
-        .execute(
             "INSERT INTO transcript_text
          SELECT 'b', source_sequence, item_index, field, timestamp, role, CASE WHEN role IN ('user', 'assistant', 'tool_call', 'tool_result') THEN CAST('destination cache' AS BLOB) ELSE body END
          FROM transcript_text WHERE session_id = 'a'",
@@ -306,23 +291,15 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
     } = log
         .history_text("b", old, Position::Start, false, 16 * 1024, 8, 1024 * 1024)
         .await
-        .unwrap()
-    else {
-        panic!("prepared destination");
-    };
-    assert!(!destination.is_empty());
+        .unwrap();
     assert!(
-        destination
-            .iter()
-            .all(|chunk| chunk.text == "destination cache")
+        destination.is_empty(),
+        "optional cache cannot grant another Session canonical visibility"
     );
     let Page::Ready { chunks: source, .. } = log
         .history_text("a", old, Position::Start, false, 16 * 1024, 8, 1024 * 1024)
         .await
-        .unwrap()
-    else {
-        panic!("prepared source");
-    };
+        .unwrap();
     assert_eq!(
         serde_json::to_value(source).unwrap(),
         serde_json::to_value(chunks).unwrap()
@@ -334,15 +311,14 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
         .history_text("b", old, Position::Start, false, 16 * 1024, 8, 1024 * 1024)
         .await
         .unwrap();
-    assert_eq!(
-        serde_json::to_value(rebuilt).unwrap(),
-        serde_json::to_value(
-            log.history_text("a", old, Position::Start, false, 16 * 1024, 8, 1024 * 1024)
-                .await
-                .unwrap()
-        )
-        .unwrap(),
-    );
+    let Page::Ready {
+        chunks: destination,
+        before,
+        after,
+        ..
+    } = rebuilt;
+    assert!(destination.is_empty());
+    assert!(before.is_none() && after.is_none());
     drop(cache);
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
@@ -357,10 +333,7 @@ async fn history_pages_preserve_utf8_nul_suffixes_archive_and_frozen_fences() {
             1024 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("prepared")
-    };
+        .unwrap();
     assert!(!chunks.is_empty(), "restart retains readable archive");
     log.close().await.unwrap();
 }
@@ -490,7 +463,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
             .unwrap();
         }
         let through = end(&log, session, InvocationOutcome::Completed).await;
-        assert!(log.prepare_transcript(session, through, 32).await.unwrap());
+
         let Page::Ready { chunks, .. } = log
             .history_text(
                 session,
@@ -502,10 +475,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                 64 * 1024,
             )
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         assert!(chunks.iter().any(|chunk| chunk.role == Role::ToolCall
             && chunk.text.is_empty()
             && chunk.tool.as_ref().is_some_and(|tool| {
@@ -533,10 +503,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                 } = log
                     .history_text(session, through, position, false, 8192, 1, 64 * 1024)
                     .await
-                    .unwrap()
-                else {
-                    panic!("ready")
-                };
+                    .unwrap();
                 assert!(chunks.len() <= 1);
                 for chunk in chunks {
                     if matches!(chunk.role, Role::ToolCall | Role::ToolResult) {
@@ -655,9 +622,8 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
     log.close().await.unwrap();
     let db = Connection::open(&path).unwrap();
     let canonical = rows(&db, "numeric");
-    db.execute_batch("DELETE FROM transcript_rows WHERE json_extract(payload, '$.type') = 'tool_activity';
-        UPDATE transcript_rows SET payload = json_remove(payload, '$.settlement') WHERE json_extract(payload, '$.type') = 'tool_result';
-        DELETE FROM _sqlx_migrations WHERE version = 15;").unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     drop(db);
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(
@@ -673,12 +639,11 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
     );
     drop(db);
     let through = *log.subscribe_commits().borrow();
-    assert!(
-        log.prepare_transcript("numeric", through, 32)
-            .await
-            .unwrap()
-    );
+
     let db = Connection::open(&path).unwrap();
+    crate::transcript_cache::materialize_all_rows(&log, "numeric", through)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "numeric"), canonical);
     drop(db);
     let Page::Ready { chunks, .. } = log
@@ -692,10 +657,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     assert!(
         chunks
             .iter()
@@ -765,7 +727,7 @@ async fn oversized_tool_metadata_returns_accepted_window_without_consuming_its_b
     .unwrap();
 
     let through = *log.subscribe_commits().borrow();
-    assert!(log.prepare_transcript("budget", through, 32).await.unwrap());
+
     for reverse in [false, true] {
         let position = if reverse {
             Position::Tail
@@ -780,10 +742,7 @@ async fn oversized_tool_metadata_returns_accepted_window_without_consuming_its_b
         } = log
             .history_text("budget", through, position, false, 8192, 8, 1024)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(
             chunks[0].text,
@@ -808,10 +767,7 @@ async fn oversized_tool_metadata_returns_accepted_window_without_consuming_its_b
         let Page::Ready { chunks, .. } = log
             .history_text("budget", through, position, false, 8192, 1, 64 * 1024)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].role, Role::ToolCall);
         assert!(chunks[0].tool.is_some());
@@ -880,7 +836,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
     .unwrap();
 
     let through = *log.subscribe_commits().borrow();
-    while !log.prepare_transcript("window", through, 32).await.unwrap() {}
+
     for position in [Position::Start, Position::Tail] {
         let page = log
             .history_view(
@@ -901,10 +857,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
             before,
             after,
             ..
-        } = page
-        else {
-            panic!("prepared")
-        };
+        } = page;
         assert_eq!(
             chunks
                 .iter()
@@ -954,9 +907,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
                 .unwrap();
             let actual = serde_json::to_vec(&limited).unwrap();
             assert!(actual.len() <= budget);
-            let Page::Ready { chunks, .. } = limited else {
-                panic!("prepared")
-            };
+            let Page::Ready { chunks, .. } = limited;
             let count = if budget < encoded.len() { 5 } else { 6 };
             assert_eq!(chunks.len(), count);
             let texts = chunks
@@ -999,10 +950,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
                 } = log
                     .history_text("window", through, position, false, budget, 2, 1024 * 1024)
                     .await
-                    .unwrap()
-                else {
-                    panic!("prepared");
-                };
+                    .unwrap();
                 assert_eq!(actual, through);
                 assert!(chunks.len() <= 2);
                 assert!(chunks.iter().map(|chunk| chunk.text.len()).sum::<usize>() <= budget);
@@ -1135,7 +1083,7 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
         .await
         .unwrap();
     let high = *log.subscribe_commits().borrow();
-    assert!(log.prepare_transcript("other", high, 32).await.unwrap());
+
     assert!(
         log.history_text(
             "other",
@@ -1166,17 +1114,14 @@ async fn bounded_history_windows_cover_sparse_rows_both_directions_and_validate_
             1024 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("prepared");
-    };
+        .unwrap();
     assert!(chunks.is_empty());
     assert!(after.is_none());
     log.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn history_text_requires_the_actual_prepared_raw_fence() {
+async fn history_text_accepts_committed_fences_without_preparation_and_rejects_future_fences() {
     let temp = tempfile::tempdir().unwrap();
     let log = EventLog::open(&temp.path().join("fence.sqlite"))
         .await
@@ -1185,23 +1130,20 @@ async fn history_text_requires_the_actual_prepared_raw_fence() {
         .await
         .unwrap();
     let (_, through) = partial(&log, "a", "answer").await;
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
+
     let later = interrupt(&log, "a").await;
     assert!(later > through);
     assert!(
-        log.history_text("a", later, Position::Start, false, 16, 2, 1024 * 1024)
+        log.history_text("a", later + 1, Position::Start, false, 16, 2, 1024 * 1024)
             .await
             .is_err(),
-        "reads require preparation through the requested raw fence"
+        "a fence beyond committed canonical history is invalid"
     );
-    assert!(log.prepare_transcript("a", later, 32).await.unwrap());
+
     let Page::Ready { chunks, .. } = log
         .history_text("a", later, Position::Tail, false, 16, 2, 1024 * 1024)
         .await
-        .unwrap()
-    else {
-        panic!("prepared");
-    };
+        .unwrap();
     assert!(chunks.iter().any(|chunk| chunk.role == Role::Assistant));
     log.close().await.unwrap();
 }
@@ -1274,7 +1216,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
         }
     }
     let through = end(&log, "a", InvocationOutcome::Completed).await;
-    while !log.prepare_transcript("a", through, 32).await.unwrap() {}
+
     let Page::Ready { chunks, .. } = log
         .history_text(
             "a",
@@ -1286,10 +1228,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
             1024 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("prepared");
-    };
+        .unwrap();
     let cursor = maka_agent_ports::session::history::Cursor {
         field: Default::default(),
         position: chunks[0].position,
@@ -1352,9 +1291,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
             .await
             .unwrap();
         assert!(serde_json::to_vec(&next).unwrap().len() <= budget);
-        let Page::Ready { chunks, after, .. } = next else {
-            panic!("prepared");
-        };
+        let Page::Ready { chunks, after, .. } = next;
         assert!(chunks.is_empty());
         let Some(after) = after else {
             ended = true;
@@ -1368,7 +1305,7 @@ async fn empty_projection_boundaries_obey_the_exact_json_window_budget() {
 }
 
 #[tokio::test]
-async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_upgrade() {
+async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_loss() {
     use maka_agent_facts::attachment::AttachmentKind;
     use maka_agent_facts::attachment::AttachmentRef;
     use maka_agent_facts::attachment::StorageRef;
@@ -1438,14 +1375,11 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
             .append(&maka_agent_facts::event::EventWrite::plain(original).unwrap())
             .await
             .unwrap();
-        assert!(log.prepare_transcript(session, through, 32).await.unwrap());
+
         let Page::Ready { chunks, .. } = log
             .history_text(session, through, Position::Start, false, 8192, 1, 64 * 1024)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         assert_eq!(chunks.len(), 1, "material-only prompts remain visible");
         assert_eq!(chunks[0].text, expected);
         assert_eq!(chunks[0].timestamp, timestamp);
@@ -1470,10 +1404,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
                     } = log
                         .history_text(session, through, position, false, budget, 1, 64 * 1024)
                         .await
-                        .unwrap()
-                    else {
-                        panic!("ready")
-                    };
+                        .unwrap();
                     assert!(chunks.len() <= 1);
                     for chunk in &chunks {
                         assert_eq!(chunk.timestamp, timestamp);
@@ -1540,8 +1471,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
         [],
     )
     .unwrap();
-    db.execute("DELETE FROM _sqlx_migrations WHERE version = 9", [])
-        .unwrap();
+    db.execute("DELETE FROM transcript_text", []).unwrap();
     drop(db);
     let log = EventLog::open(&path).await.unwrap();
     let db = Connection::open(&path).unwrap();
@@ -1566,10 +1496,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_up
         let Page::Ready { chunks, .. } = log
             .history_text(session, through, Position::Start, false, 8192, 1, 64 * 1024)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         assert_eq!(chunks[0].text, expected);
         assert_eq!(chunks[0].position, sequence);
         assert_eq!(chunks[0].timestamp, timestamp);
@@ -1648,11 +1575,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
     .unwrap();
 
     let through = *log.subscribe_commits().borrow();
-    while !log
-        .prepare_transcript("thinking", through, 32)
-        .await
-        .unwrap()
-    {}
+
     let Page::Ready { chunks, .. } = log
         .history_text(
             "thinking",
@@ -1664,10 +1587,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     let imported_message = chunks
         .iter()
         .find(|chunk| chunk.text == body)
@@ -1711,10 +1631,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
                         before,
                         after,
                         ..
-                    } = page
-                    else {
-                        panic!("ready")
-                    };
+                    } = page;
                     assert!(chunks.len() <= 2);
                     assert!(chunks.iter().map(|c| c.text.len()).sum::<usize>() <= budget);
                     let keys = chunks
@@ -1820,10 +1737,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     assert_eq!(chunks[0].text, thinking);
     assert_eq!(chunks[1].text, body);
     let body_cursor = Cursor {
@@ -1843,10 +1757,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     assert_eq!(chunks[0].field, HistoryField::Thinking);
     assert_eq!(chunks[0].text, thinking);
     let source = log
@@ -1884,20 +1795,14 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
         "Thinking offsets must not split UTF-8"
     );
     log.close().await.unwrap();
-    // Reopen an actual pre-field cache shape. Migration may rebuild derived
-    // text, but must preserve canonical identities, fences and both fields.
+    // Reopen with optional bodies/text missing; preserve canonical identities,
+    // fences and both fields without rewriting directory metadata.
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("ALTER TABLE transcript_text RENAME TO field_cache;
-        CREATE TABLE transcript_text AS SELECT session_id, source_sequence AS sequence, timestamp, role, body FROM field_cache WHERE field = 'body';
-        DROP TABLE field_cache;
-        DELETE FROM _sqlx_migrations WHERE version IN (10, 31);").unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     drop(db);
     let reopened = EventLog::open(&path).await.unwrap();
-    while !reopened
-        .prepare_transcript("thinking", through, 32)
-        .await
-        .unwrap()
-    {}
+
     let Page::Ready {
         chunks,
         through: restored_fence,
@@ -1913,10 +1818,7 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     assert_eq!(restored_fence, through);
     assert_eq!(chunks[0].text, thinking);
     assert_eq!(chunks[1].text, body);
@@ -1976,7 +1878,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
         },
     )
     .await;
-    assert!(log.prepare_transcript("failed", through, 32).await.unwrap());
+
     for view in [HistoryView::Text, HistoryView::Conversation] {
         let mut position = Position::Start;
         let mut failures = BTreeMap::<RowPosition, String>::new();
@@ -1984,10 +1886,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
             let Page::Ready { chunks, after, .. } = log
                 .history_view("failed", through, position, false, view, 17, Some(1), 8192)
                 .await
-                .unwrap()
-            else {
-                panic!("prepared history")
-            };
+                .unwrap();
             for chunk in chunks {
                 if chunk.role != Role::Failure {
                     continue;
@@ -2038,10 +1937,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
                 8192,
             )
             .await
-            .unwrap()
-        else {
-            panic!("prepared history")
-        };
+            .unwrap();
         assert_eq!(
             chunks
                 .iter()
@@ -2052,24 +1948,20 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
         );
     }
     log.close().await.unwrap();
-    // Simulate the prior cache projection, then apply the diagnostic-body upgrade.
+    // Discard diagnostic text only; reconstruct the requested failure body.
     let db = Connection::open(&path).unwrap();
     db.execute(
         "UPDATE transcript_text SET body = x'' WHERE role IN ('turn_state', 'model_interruption')",
         [],
     )
     .unwrap();
-    db.execute("DELETE FROM _sqlx_migrations WHERE version = 21", [])
-        .unwrap();
+    db.execute("DELETE FROM transcript_text", []).unwrap();
     drop(db);
     let log = EventLog::open(&path).await.unwrap();
     let Page::Ready { chunks, .. } = log
         .history_text("failed", through, Position::Tail, false, 8192, 16, 8192)
         .await
-        .unwrap()
-    else {
-        panic!("prepared history")
-    };
+        .unwrap();
     assert_eq!(
         chunks
             .iter()
@@ -2144,7 +2036,7 @@ async fn notification_origin_survives_every_history_and_source_fragment_within_j
         ))
         .await
         .unwrap();
-    assert!(log.prepare_transcript("notice", through, 32).await.unwrap());
+
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     let mut position = Position::Start;
@@ -2158,9 +2050,7 @@ async fn notification_origin_survives_every_history_and_source_fragment_within_j
             .await
             .unwrap();
         assert!(serde_json::to_vec(&page).unwrap().len() <= 1536);
-        let Page::Ready { chunks, after, .. } = page else {
-            panic!("prepared")
-        };
+        let Page::Ready { chunks, after, .. } = page;
         for chunk in chunks {
             assert_eq!(chunk.role, Role::User);
             assert_eq!(chunk.message_id, "notification");
@@ -2365,7 +2255,6 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         (through, expected)
     }
     async fn read(log: &EventLog, session: &str, through: u64, expected: &Expected) {
-        assert!(log.prepare_transcript(session, through, 32).await.unwrap());
         for reverse in [false, true] {
             let mut position = if reverse {
                 Position::Tail
@@ -2385,10 +2274,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                     before,
                     after,
                     ..
-                } = page
-                else {
-                    panic!("prepared")
-                };
+                } = page;
                 for chunk in chunks {
                     if chunk.role != Role::Assistant {
                         assert!(chunk.model.is_none());
@@ -2570,15 +2456,13 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
 }
 
 #[tokio::test]
-async fn item_accepted_text_at_old_fence_is_independent_of_later_cache_preparation() {
+async fn item_accepted_text_at_old_fence_is_independent_of_later_body_cache() {
     async fn snapshot(log: &EventLog, through: u64) -> (Value, Vec<(Role, String)>) {
         let page = log
             .history_text("a", through, Position::Start, false, 4096, 16, 16384)
             .await
             .unwrap();
-        let Page::Ready { chunks, .. } = &page else {
-            panic!("explicitly prepared fence")
-        };
+        let Page::Ready { chunks, .. } = &page;
         let messages = chunks
             .iter()
             .map(|chunk| (chunk.role, chunk.text.clone()))
@@ -2676,13 +2560,13 @@ async fn item_accepted_text_at_old_fence_is_independent_of_later_cache_preparati
         ))
         .await
         .unwrap();
-    // All canonical facts exist before the first preparation. Only disposable
+    // All canonical facts exist before the first read. Only disposable
     // cache warmth changes in the three old-fence observations below.
     let original = canonical(&log).await;
-    assert!(log.prepare_transcript("a", old, 32).await.unwrap());
+
     let cold_old = snapshot(&log, old).await;
     let after_cold = canonical(&log).await;
-    assert!(log.prepare_transcript("a", later, 32).await.unwrap());
+
     let later_page = snapshot(&log, later).await;
     let warm_old = snapshot(&log, old).await;
     let after_warm = canonical(&log).await;
@@ -2713,6 +2597,6 @@ async fn item_accepted_text_at_old_fence_is_independent_of_later_cache_preparati
     assert_eq!(
         (&warm_old, &reopened_old),
         (&cold_old, &cold_old),
-        "one frozen public history fence must not depend on later preparation or reopening"
+        "one frozen public history fence must not depend on later body materialization or reopening"
     );
 }

@@ -204,18 +204,10 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             .active_streams
             .is_empty()
     );
-    assert!(
-        log.prepare_transcript("session", through, 32)
-            .await
-            .unwrap()
-    );
+
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
-    assert!(
-        log.prepare_transcript("session", through, 32)
-            .await
-            .unwrap()
-    );
+
     let maka_agent_ports::session::history::Page::Ready { chunks, .. } = log
         .history_text(
             "session",
@@ -227,10 +219,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     let answer = chunks
         .iter()
         .find(|chunk| chunk.text == "final authoritative answer")

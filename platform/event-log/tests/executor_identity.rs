@@ -18,6 +18,9 @@
  */
 
 //! Canonical executor result identities cannot alias accepted client messages.
+#[path = "support/transcript.rs"]
+mod transcript_cache;
+
 use maka_agent_facts::{
     event::{
         CommitError, EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent,
@@ -284,12 +287,10 @@ fn preflight_rejected(error: StoreError) {
         "unexpected preflight error: {error}"
     );
 }
-async fn prepare(log: &EventLog, through: u64) {
-    assert!(
-        log.prepare_transcript("session", through, 32)
-            .await
-            .unwrap()
-    );
+async fn materialize_all(log: &EventLog, through: u64) {
+    crate::transcript_cache::materialize_all_rows(log, "session", through)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -367,11 +368,11 @@ async fn executor_closing_rejects_prior_client_result_identity_and_rolls_back() 
         if matches!(at, CloseAt::ExecutorCompleted) {
             through = finish_invocation(&log, &executor).await;
         }
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         let committed = events(&db);
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         assert_eq!(events(&db), committed);
         log.close().await.unwrap();
     }
@@ -438,7 +439,7 @@ async fn client_source_rejects_executor_result_identity_after_reopen() {
         let through = log.append(&legitimate).await.unwrap();
         assert_eq!(log.append(&legitimate).await.unwrap(), through);
         assert!(log.pending_messages("session").await.unwrap().is_empty());
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         let committed = events(&db);
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
@@ -447,7 +448,7 @@ async fn client_source_rejects_executor_result_identity_after_reopen() {
                 .await
                 .unwrap_err(),
         );
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         assert_eq!(events(&db), committed);
         log.close().await.unwrap();
     }
@@ -518,7 +519,7 @@ async fn executor_result_identity_reserves_only_actual_pending_slots() {
                 .unwrap();
             log.append(&claim(&other, &occupied)).await.unwrap();
         }
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         let synthetic: Vec<String> = db.prepare("SELECT message_id FROM transcript_rows WHERE session_id='session' AND source_sequence=? AND json_extract(payload,'$.type')='tool_result' ORDER BY item_index").unwrap()
             .query_map([i64::try_from(complete_sequence).unwrap()], |row| row.get(0)).unwrap().collect::<Result<_,_>>().unwrap();
         assert_eq!(
@@ -530,7 +531,7 @@ async fn executor_result_identity_reserves_only_actual_pending_slots() {
         let committed = events(&db);
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         assert_eq!(events(&db), committed);
         log.close().await.unwrap();
     }
@@ -673,7 +674,7 @@ async fn executor_tool_call_identity_is_atomic_session_scoped_and_reopens() {
                 .unwrap();
             through = log.append(&claim(&active, available)).await.unwrap();
         }
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         log.create_session("other", "other-create", &json!({}), 1)
             .await
             .unwrap();
@@ -687,7 +688,7 @@ async fn executor_tool_call_identity_is_atomic_session_scoped_and_reopens() {
         let committed = events(&db);
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
-        prepare(&log, through).await;
+        materialize_all(&log, through).await;
         assert_eq!(events(&db), committed);
         log.close().await.unwrap();
     }

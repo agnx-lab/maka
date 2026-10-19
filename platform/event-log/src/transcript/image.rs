@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::read::{prepared, sql_number, sql_position};
+use super::read::{sql_number, sql_position};
 use crate::{EventLog, StoreError, artifacts::ImageChunk};
 use maka_agent_facts::attachment::StorageRef;
 use maka_agent_facts::history::RowPosition;
@@ -47,7 +47,8 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    prepared(&mut tx, &session, through).await?;
+                    super::directory::check_read(&mut tx, &session, through).await?;
+                    super::bodycache::ensure(&mut tx, &session, position).await?;
                     let raw: String = sqlx::query_scalar(
                         "SELECT json_remove(json_extract(payload, '$.content'), '$.kind')
                  FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3

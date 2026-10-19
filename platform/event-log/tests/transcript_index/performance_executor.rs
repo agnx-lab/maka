@@ -131,22 +131,21 @@ async fn executor_invocation_transcript() {
             std::fs::copy(&database, &path).unwrap();
             let log = EventLog::open(&path).await.unwrap();
             let started = Instant::now();
-            let mut batches = 1usize;
-            while !log.prepare_transcript("a", through, 32).await.unwrap() {
-                batches += 1;
-            }
-            let transcript_prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
+            crate::transcript_cache::materialize_all_rows(&log, "a", through)
+                .await
+                .unwrap();
+            let body_materialize_ms = started.elapsed().as_secs_f64() * 1000.0;
             let db = Connection::open(&path).unwrap();
             let rows: Vec<Value> = db.prepare("SELECT CAST(payload AS TEXT) FROM transcript_rows WHERE session_id='a' ORDER BY source_sequence, item_index").unwrap()
                 .query_map([], |row| row.get::<_, String>(0)).unwrap()
                 .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();
             assert_eq!(rows, expected);
-            assert_eq!(progress(&db, "a"), through as i64);
+
             println!(
                 "{}",
                 json!({"benchmark":"executor_invocation_transcript", "shape":"external_invocation",
                 "tool_calls":count, "history_events":through, "repetition":repetition,
-                "transcript_prepare_ms":transcript_prepare_ms, "prepare_calls":batches,
+                "body_materialize_ms":body_materialize_ms,
                 "messages":rows.len(), "errors":0})
             );
             drop(db);

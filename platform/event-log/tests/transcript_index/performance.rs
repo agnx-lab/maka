@@ -92,11 +92,10 @@ async fn one_invocation_transcript() {
             std::fs::copy(&database, &path).unwrap();
             let log = EventLog::open(&path).await.unwrap();
             let started = Instant::now();
-            let mut batches = 1usize;
-            while !log.prepare_transcript("a", through, 32).await.unwrap() {
-                batches += 1;
-            }
-            let transcript_prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
+            crate::transcript_cache::materialize_all_rows(&log, "a", through)
+                .await
+                .unwrap();
+            let body_materialize_ms = started.elapsed().as_secs_f64() * 1000.0;
             let db = Connection::open(&path).unwrap();
             let texts: Vec<String> = db
                 .prepare(
@@ -113,12 +112,12 @@ async fn one_invocation_transcript() {
             for (step, text) in texts.iter().enumerate() {
                 assert_eq!(text, &format!("one-invocation-step-{step}. ").repeat(13));
             }
-            assert_eq!(progress(&db, "a"), through as i64);
+
             println!(
                 "{}",
                 json!({"benchmark":"one_invocation_transcript", "shape":"one_invocation",
                 "model_steps":steps, "history_events":through, "repetition":repetition,
-                "transcript_prepare_ms":transcript_prepare_ms, "preparation_calls":batches,
+                "body_materialize_ms":body_materialize_ms,
                 "assistant_messages":texts.len(), "errors":0})
             );
             drop(db);

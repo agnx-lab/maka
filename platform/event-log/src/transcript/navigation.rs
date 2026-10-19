@@ -83,7 +83,7 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    super::read::prepared(&mut tx, &session, through).await?;
+                    super::directory::check_read(&mut tx, &session, through).await?;
                     let rows = sqlx::query(queries::ROWS)
                         .bind(&session)
                         .bind(through_sql)
@@ -127,9 +127,16 @@ impl EventLog {
                             ),
                         };
                         if contribution.user_prompt_preview.is_none() {
-                            contribution.user_prompt_preview = row.try_get(3)?;
+                            let role: String = row.try_get(3)?;
+                            let kind: String = row.try_get(4)?;
+                            if role == "user" && matches!(kind.as_str(), "invocation_opened" | "message_steered") {
+                                contribution.user_prompt_preview = preview(&mut tx,&session,position,256).await?;
+                            }
                         }
-                        if let Some(bytes) = row.try_get::<Option<Vec<u8>>, _>(4)? {
+                        if row.try_get::<String,_>(3)? == "turn_state" {
+                            super::bodycache::ensure(&mut tx,&session,position).await?;
+                            let bytes: Vec<u8> = sqlx::query_scalar("SELECT payload FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                                .bind(&session).bind(sql_position(position)?.0).bind(sql_position(position)?.1).fetch_one(&mut *tx).await?;
                             let mut message: TurnStateMessage = serde_json::from_slice(&bytes)?;
                             if message.turn_id != contribution.turn_id {
                                 return Err(StoreError::TranscriptConflict);
@@ -158,6 +165,7 @@ impl EventLog {
                             contributions.push(contribution);
                         }
                     }
+                    tx.commit().await?;
                     Ok(TurnPage {
                         contributions,
                         next_position,
@@ -190,18 +198,18 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    super::read::prepared(&mut tx, &session, through).await?;
+                    super::directory::check_read(&mut tx, &session, through).await?;
                     if let Some(turn) = turn {
                         let bounds: Option<(i64, i64, i64, i64)> = sqlx::query_as(queries::BOUNDS)
                             .bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?;
                         let Some((first_source, first_index, last_source, last_index)) = bounds else { return Ok(vec![]); };
-                        let label: Option<String> = sqlx::query_scalar(
-                            "SELECT navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
-                                json_extract(row.payload, '$.text')), 96)
-                             FROM transcript_rows row JOIN runtime_events source ON source.sequence = row.source_sequence
-                             WHERE row.session_id = ?1 AND row.turn_id = ?2 AND row.source_sequence <= ?3
-                             AND source.kind IN ('invocation_opened', 'message_steered') ORDER BY row.source_sequence, row.item_index LIMIT 1",
-                        ).bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?.flatten();
+                        let prompt: Option<(i64,i64)> = sqlx::query_as(
+                            "SELECT row.source_sequence,row.item_index FROM transcript_directory row JOIN runtime_events source ON source.sequence=row.source_sequence
+                             WHERE row.session_id=?1 AND row.turn_id=?2 AND row.source_sequence<=?3 AND row.role='user'
+                             AND source.kind IN ('invocation_opened','message_steered') ORDER BY row.source_sequence,row.item_index LIMIT 1")
+                            .bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?;
+                        let label = if let Some((source,item)) = prompt { preview(&mut tx,&session,row_position(source,item)?,96).await? } else { None };
+                        tx.commit().await?;
                         return Ok(vec![TurnLandmark {
                             turn_id: turn, position: row_position(first_source, first_index)?, last_position: row_position(last_source, last_index)?,
                             label: label.unwrap_or_default(),
@@ -222,7 +230,7 @@ impl EventLog {
                             .fetch_optional(&mut *tx)
                             .await?
                         {
-                            let label: Option<String> = row.try_get(1)?;
+                            let label = preview(&mut tx,&session,row_position(row.try_get(1)?,row.try_get(2)?)?,96).await?;
                             if let Some(label) = label {
                                 let turn_id: String = row.try_get(0)?;
                                 let (first_source, first_index, last_source, last_index): (i64, i64, i64, i64) = sqlx::query_as(queries::BOUNDS)
@@ -236,11 +244,23 @@ impl EventLog {
                             }
                         }
                     }
+                    tx.commit().await?;
                     Ok(result)
                 })
             })
             .await
     }
+}
+
+async fn preview(
+    db: &mut sqlx::SqliteConnection,
+    session: &str,
+    position: RowPosition,
+    budget: i64,
+) -> Result<Option<String>, StoreError> {
+    super::bodycache::ensure(db, session, position).await?;
+    sqlx::query_scalar("SELECT navigation_preview(COALESCE(json_extract(payload,'$.displayText'),json_extract(payload,'$.text')),?4) FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+        .bind(session).bind(sql_position(position)?.0).bind(sql_position(position)?.1).bind(budget).fetch_one(db).await.map_err(Into::into)
 }
 
 /// SQLite borrows the selected string; only the bounded preview is allocated in Rust.

@@ -1191,9 +1191,6 @@ pub struct HistoryMatch {
 )]
 #[schemars(rename = "AgentHistorySearchPage")]
 pub enum HistorySearchPage {
-    Preparing {
-        through: u64,
-    },
     Ready {
         through: u64,
         #[schemars(length(max = 16))]
@@ -1213,9 +1210,6 @@ pub enum HistorySearchPage {
 )]
 #[schemars(rename = "AgentHistoryPage")]
 pub enum HistoryPage {
-    Preparing {
-        through: u64,
-    },
     Ready {
         through: u64,
         chunks: Vec<HistoryChunk>,
@@ -1263,9 +1257,6 @@ pub enum HistorySourceReference {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "AgentHistorySourcePage")]
 pub enum HistorySourcePage {
-    Preparing {
-        through: u64,
-    },
     Ready {
         through: u64,
         source: Box<maka_agent_ports::session::history::HistorySource>,
@@ -1298,9 +1289,6 @@ pub struct ToolImageRead {
 )]
 #[schemars(rename = "AgentToolImagePage")]
 pub enum ToolImagePage {
-    Preparing {
-        through: u64,
-    },
     Ready {
         through: u64,
         position: RowPosition,

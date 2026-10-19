@@ -112,7 +112,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
     let artifact = result.projection_artifacts()[0].artifact().clone();
     log.append(&result).await.unwrap();
     let through = end(&log, "images", InvocationOutcome::Completed).await;
-    assert!(log.prepare_transcript("images", through, 32).await.unwrap());
+
     let Page::Ready { chunks, .. } = log
         .history_text(
             "images",
@@ -124,10 +124,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     let sequence = chunks
         .iter()
         .find(|chunk| chunk.role == Role::ToolResult)
@@ -223,11 +220,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
         maka_event_log::sessions::SessionCopyResult::Committed(_)
     ));
     let copy_fence = *log.subscribe_commits().borrow();
-    assert!(
-        log.prepare_transcript("copy", copy_fence, 32)
-            .await
-            .unwrap()
-    );
+
     let Page::Ready {
         chunks: copy_chunks,
         ..
@@ -242,10 +235,7 @@ async fn actual_tool_images_are_immutable_scoped_and_reconstructed_without_paths
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("copy ready")
-    };
+        .unwrap();
     let copied_sequence = copy_chunks
         .iter()
         .find(|chunk| chunk.role == Role::ToolResult)
@@ -522,14 +512,10 @@ async fn borrowed_upload_is_frozen_at_settlement_before_any_history_copy() {
     .await
     .unwrap();
     for session in ["borrowed", "borrowed-copy"] {
-        assert!(log.prepare_transcript(session, through, 32).await.unwrap());
         let Page::Ready { chunks, .. } = log
             .history_text(session, through, Position::Start, false, 8192, 8, 64 * 1024)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         let sequence = chunks
             .iter()
             .find(|chunk| chunk.role == Role::ToolResult)

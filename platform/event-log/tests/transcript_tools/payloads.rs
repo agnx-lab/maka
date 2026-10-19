@@ -60,7 +60,7 @@ async fn ten_mib_raw_fragments_rebuild_after_restart_from_durable_facts() {
     let through = log.append(&write).await.unwrap();
     let id = write.event().id.clone();
     drop(write);
-    prepare(&log, through).await;
+    materialize_all(&log, through).await;
     assert!(log.prefix(100, 16 * 1024 * 1024).await.is_ok());
     let db = Connection::open(&path).unwrap();
     let original: Vec<u8> = db
@@ -93,7 +93,8 @@ async fn ten_mib_raw_fragments_rebuild_after_restart_from_durable_facts() {
         raw
     );
     db.execute("DELETE FROM transcript_rows", []).unwrap();
-    db.execute("DELETE FROM transcript_progress", []).unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(
@@ -103,7 +104,7 @@ async fn ten_mib_raw_fragments_rebuild_after_restart_from_durable_facts() {
             .to_json(),
         raw
     );
-    prepare(&log, through).await;
+    materialize_all(&log, through).await;
     let rebuilt: Vec<u8> = db
         .query_row(
             "SELECT payload FROM transcript_rows WHERE message_id = ?",
@@ -123,7 +124,7 @@ async fn selected_boundary_does_not_hydrate_an_earlier_sibling_payload() {
     let operation = dispatch(&log, "sibling").await;
     let sibling = success(&operation, json!({"text":"x".repeat(12 * 1024 * 1024)}));
     let previous = log.append(&sibling).await.unwrap();
-    prepare(&log, previous).await;
+    materialize_all(&log, previous).await;
     let db = Connection::open(&path).unwrap();
     db.execute(
         "DELETE FROM tool_result_payloads WHERE event_id = ?",
@@ -133,7 +134,7 @@ async fn selected_boundary_does_not_hydrate_an_earlier_sibling_payload() {
     let operation = dispatch(&log, "target").await;
     let target = success(&operation, json!({"text":"target"}));
     let through = log.append(&target).await.unwrap();
-    prepare(&log, through).await;
+    materialize_all(&log, through).await;
     assert!(
         log.resolve_tool_result("session", &sibling.event().id)
             .await
@@ -163,10 +164,8 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
     let write = success(&operation, raw.clone());
     let through = log.append(&write).await.unwrap();
     assert!(matches!(
-        log.prepare_transcript("session", through, 32).await,
-        Err(maka_event_log::StoreError::Projection(
-            maka_presentation::ProjectionError::TooLarge
-        ))
+        crate::transcript_cache::materialize_all_rows(&log, "session", through).await,
+        Err(maka_event_log::StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
     ));
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
@@ -188,10 +187,8 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
     )
     .unwrap();
     assert!(matches!(
-        log.prepare_transcript("session", through, 32).await,
-        Err(maka_event_log::StoreError::Projection(
-            maka_presentation::ProjectionError::TooLarge
-        ))
+        crate::transcript_cache::materialize_all_rows(&log, "session", through).await,
+        Err(maka_event_log::StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
     ));
     assert!(
         log.resolve_tool_result("session", &write.event().id)
@@ -204,9 +201,8 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
 async fn multiple_large_results_keep_conversation_metadata_readable() {
     use maka_agent_ports::session::history::{HistoryView, Page, Position, Role};
     let directory = tempfile::tempdir().unwrap();
-    let log = EventLog::open(&directory.path().join("large-history.sqlite"))
-        .await
-        .unwrap();
+    let path = directory.path().join("large-history.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
     log.create_session("session", "create", &json!({}), 1)
         .await
         .unwrap();
@@ -219,7 +215,14 @@ async fn multiple_large_results_keep_conversation_metadata_readable() {
         through = log.append(&result).await.unwrap();
         ids.push(result.event().id.clone());
     }
-    prepare(&log, through).await;
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM transcript_rows", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+
     let Page::Ready { chunks, .. } = log
         .history_view(
             "session",
@@ -232,10 +235,7 @@ async fn multiple_large_results_keep_conversation_metadata_readable() {
             1024 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!()
-    };
+        .unwrap();
     let results: Vec<_> = chunks
         .iter()
         .filter(|chunk| chunk.role == Role::ToolResult)
@@ -253,5 +253,6 @@ async fn multiple_large_results_keep_conversation_metadata_readable() {
             .iter()
             .all(|chunk| chunk.tool.as_ref().unwrap().result.is_some() && chunk.text.is_empty())
     );
+    assert_eq!(db.query_row("SELECT count(*) FROM transcript_rows body JOIN transcript_directory row USING(session_id,source_sequence,item_index) WHERE row.role IN ('tool_call','tool_result')",[],|row|row.get::<_,i64>(0)).unwrap(),0,"conversation metadata must not hydrate large tool bodies");
     log.close().await.unwrap();
 }

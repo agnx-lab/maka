@@ -259,27 +259,19 @@ impl History for Recall {
             if through > high_water {
                 return Err(failed("Recall history fence invalid"));
             }
-            let page = if !self
+            let page = self
                 .store
-                .prepare_transcript(&input.session_id, through, 32)
+                .history_text(
+                    &input.session_id,
+                    through,
+                    input.position,
+                    false,
+                    8192,
+                    8,
+                    96 * 1024,
+                )
                 .await
-                .map_err(failed)?
-            {
-                history::Page::Preparing { through }
-            } else {
-                self.store
-                    .history_text(
-                        &input.session_id,
-                        through,
-                        input.position,
-                        false,
-                        8192,
-                        8,
-                        96 * 1024,
-                    )
-                    .await
-                    .map_err(failed)?
-            };
+                .map_err(failed)?;
             self.session(&input.session_id).await.map_err(failed)?;
             self.check(&call).await?;
             Ok(page)

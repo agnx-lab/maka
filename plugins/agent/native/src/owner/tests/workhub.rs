@@ -923,7 +923,7 @@ async fn workhub_real_model_routes_original_input_and_recovers_child_receipt_wit
         for _ in 0..128 {
             let page = fixture.query("history",history_request.clone()).await.unwrap();
             history_request["through"] = page["through"].clone();
-            if page["kind"] == "preparing" {continue;}
+            assert_eq!(page["kind"], "ready");
             notice_chunks.extend(page["chunks"].as_array().unwrap().iter()
                 .filter(|chunk| chunk["role"] == "user" && chunk["messageId"] == notification_message_id)
                 .cloned());

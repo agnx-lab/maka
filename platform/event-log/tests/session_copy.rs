@@ -17,6 +17,9 @@
  * under the License.
  */
 
+#[path = "support/transcript.rs"]
+mod transcript_cache;
+
 use maka_agent_facts::artifact::Artifact;
 use maka_agent_facts::artifact::ArtifactKind;
 use maka_agent_facts::artifact::ArtifactSource;
@@ -656,11 +659,9 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
         );
         let fence = log.navigation_fence(session).await.unwrap().unwrap();
         assert_eq!(fence, root.high_water);
-        assert!(
-            log.prepare_transcript(session, root.high_water, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, session, root.high_water)
+            .await
+            .unwrap();
         let turns = log
             .navigation_turns(session, fence, None, 32)
             .await
@@ -686,9 +687,7 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             )
             .await
             .unwrap();
-        let maka_agent_ports::session::history::Page::Ready { chunks, after, .. } = &history else {
-            panic!("prepared history");
-        };
+        let maka_agent_ports::session::history::Page::Ready { chunks, after, .. } = &history;
         assert!(after.is_none());
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "first\n↳ input.txt · 5 B");
@@ -700,7 +699,7 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
             }
         );
         let inspect = rusqlite::Connection::open(&path).unwrap();
-        for table in ["transcript_text", "transcript_rows", "transcript_progress"] {
+        for table in ["transcript_text", "transcript_rows"] {
             inspect
                 .execute(
                     &format!("DELETE FROM {table} WHERE session_id = ?"),
@@ -709,11 +708,9 @@ async fn copies_own_history_and_files_without_replaying_execution_across_retries
                 .unwrap();
         }
         drop(inspect);
-        assert!(
-            log.prepare_transcript(session, root.high_water, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, session, root.high_water)
+            .await
+            .unwrap();
         assert_eq!(
             serde_json::to_value(
                 log.history_text(
@@ -914,7 +911,9 @@ async fn revisions_own_excluded_inputs_and_allocate_one_durable_family() {
                 .tail
                 .is_empty()
         );
-        assert!(log.prepare_transcript(&record.id, 0, 32).await.unwrap());
+        crate::transcript_cache::materialize_all_rows(&log, &record.id, 0)
+            .await
+            .unwrap();
         assert!(
             log.navigation_turns(&record.id, 0, None, 32)
                 .await

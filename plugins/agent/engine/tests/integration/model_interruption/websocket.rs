@@ -418,7 +418,7 @@ async fn accepted_call_runs_before_stream_completion_and_survives_retry_in_direc
             assert_ne!(attempts[0].1,attempts[1].1,"retry must carry accepted progress");
             assert_eq!(prefix.events.iter().filter(|event| matches!(&event.event.fact,
                 Fact::ToolDispatched { call, .. } if matches!(call.origin, ToolOrigin::Provider { .. }))).count(),1);
-            while !log.prepare_transcript("session",prefix.high_water,32).await.unwrap() {}
+
             let settled = prefix.events.iter().find(|event| matches!(&event.event.fact,
                 Fact::ToolSettled { operation_id, .. } if operation_id.ends_with(":call-1"))).unwrap();
             assert!(log.read_tool_result("session",&settled.event.id).await.unwrap().is_some(),"archive lookup must use item acceptance before dispatch");

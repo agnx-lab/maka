@@ -97,6 +97,12 @@ impl EventLog {
             {
                 return Ok(MaterialCollection::Retained(session));
             }
+            // No live owner remains. Retained facts/membership, not UI metadata,
+            // remain the material-collection authority; descendants were checked above.
+            for table in ["transcript_directory", "transcript_failures", "transcript_rows", "transcript_text"] {
+                let sql = format!("DELETE FROM {table} WHERE session_id=?");
+                sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(&session).execute(&mut *tx).await?;
+            }
             let rows: Vec<(String, String)> = sqlx::query_as(
                 "SELECT event_id, event_json FROM event_log WHERE event_session=?
                  AND event_json IS NOT NULL ORDER BY sequence LIMIT 8"

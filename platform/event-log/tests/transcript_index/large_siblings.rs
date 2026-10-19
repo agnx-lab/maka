@@ -144,11 +144,9 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
         .unwrap();
     // This completed canonical step is valid even though its siblings together
     // exceed the old whole-step evidence and retained-presentation budgets.
-    while !log
-        .prepare_transcript(SESSION, completion, 32)
+    crate::transcript_cache::materialize_all_rows(&log, SESSION, completion)
         .await
-        .unwrap()
-    {}
+        .unwrap();
     for index in [0, 127] {
         source(
             &log,
@@ -197,7 +195,9 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
     .0;
     let result = log.append(&success).await.unwrap();
     let through = end(&log, SESSION, InvocationOutcome::Completed).await;
-    while !log.prepare_transcript(SESSION, through, 32).await.unwrap() {}
+    crate::transcript_cache::materialize_all_rows(&log, SESSION, through)
+        .await
+        .unwrap();
     let db = Connection::open(&path).unwrap();
     let original = fingerprints(&db);
     assert_eq!(
@@ -231,10 +231,7 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
                     65536,
                 )
                 .await
-                .unwrap()
-            else {
-                panic!("prepared");
-            };
+                .unwrap();
             assert_eq!(chunks[0].position, position);
             assert_eq!(chunks[0].field, HistoryField::Body);
             assert_eq!(
@@ -262,10 +259,7 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
                         65536,
                     )
                     .await
-                    .unwrap()
-                else {
-                    panic!("prepared");
-                };
+                    .unwrap();
                 assert_eq!(
                     chunks[0].position,
                     RowPosition {
@@ -418,15 +412,13 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
     };
     check(&log).await;
     log.close().await.unwrap();
-    for table in ["transcript_text", "transcript_rows", "transcript_progress"] {
+    for table in ["transcript_text", "transcript_rows"] {
         db.execute(&format!("DELETE FROM {table}"), []).unwrap();
     }
     let reopened = EventLog::open(&path).await.unwrap();
-    while !reopened
-        .prepare_transcript(SESSION, through, 32)
+    crate::transcript_cache::materialize_all_rows(&reopened, SESSION, through)
         .await
-        .unwrap()
-    {}
+        .unwrap();
     assert_eq!(fingerprints(&db), original);
     check(&reopened).await;
     reopened.close().await.unwrap();

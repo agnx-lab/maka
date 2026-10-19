@@ -223,12 +223,12 @@ async fn native_process_foreground_enforces_workspace_and_protected_boundaries()
         let facts = service_tools::facts(&f, &session).await;
         assert!(facts.iter().any(|fact| matches!(fact, maka_agent_facts::event::Fact::ToolDispatched {presentation:Some(key), ..} if key == "maka.workspace.Processes@1/execute")));
         let through = *f.store.subscribe_commits().borrow();
-        while !f.store.prepare_transcript(&session, through, 32).await.unwrap() {}
+
         let mut position = json!({"kind":"start"});
         let mut result_row = None;
         for _ in 0..32 {
             let page=f.query("history",json!({"sessionId":session,"through":through,"position":position})).await.unwrap();
-            if page["kind"] == "preparing" { continue; }
+            assert_eq!(page["kind"], "ready");
             if let Some(row)=page["chunks"].as_array().unwrap().iter().find(|row| row["role"]=="tool_result") {
                 result_row=Some(row.clone()); break;
             }

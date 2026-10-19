@@ -51,33 +51,28 @@ async fn page(call: &mut LocalCall) -> DeliveryPage {
 async fn history_page(
     client: &Client,
     session: &str,
-    mut through: Option<u64>,
+    through: Option<u64>,
     position: Value,
 ) -> HistoryPage {
-    loop {
-        let page: HistoryPage = serde_json::from_value(
-            support::query(
-                client,
-                "agent",
-                "history",
-                json!({
-                    "sessionId":session,"through":through,"position":position,
-                }),
-            )
-            .await,
+    let page: HistoryPage = serde_json::from_value(
+        support::query(
+            client,
+            "agent",
+            "history",
+            json!({
+                "sessionId":session,"through":through,"position":position,
+            }),
         )
-        .unwrap();
-        let fence = match &page {
-            HistoryPage::Preparing { through } | HistoryPage::Ready { through, .. } => *through,
-        };
-        if let Some(through) = through {
-            assert_eq!(fence, through);
-        }
-        through = Some(fence);
-        if matches!(page, HistoryPage::Ready { .. }) {
-            return page;
-        }
+        .await,
+    )
+    .unwrap();
+    let fence = match &page {
+        HistoryPage::Ready { through, .. } => *through,
+    };
+    if let Some(through) = through {
+        assert_eq!(fence, through);
     }
+    page
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -121,7 +116,7 @@ async fn independent_public_agent_client_reconnects_history_watch_and_pending_in
         let request = &pending.entries[0];
         let tool = request.tool_use_id.as_ref().unwrap();
         let original = support::query(&fixture.native, "agent", "interaction", json!({"sessionId":session,"requestId":request.request_id})).await;
-        let HistoryPage::Ready { through, chunks: mut pinned, after: mut continuation, .. } = history_page(&fixture.native, &session, None, json!({"kind":"start"})).await else { unreachable!() };
+        let HistoryPage::Ready { through, chunks: mut pinned, after: mut continuation, .. } = history_page(&fixture.native, &session, None, json!({"kind":"start"})).await;
         assert!(continuation.is_some(), "the original message must require real history pagination");
 
         original_watch.close().await.unwrap();
@@ -174,7 +169,7 @@ async fn independent_public_agent_client_reconnects_history_watch_and_pending_in
 
         // Continue the pre-disconnect snapshot after new facts have committed.
         while let Some(cursor) = continuation {
-            let HistoryPage::Ready { through: fence, chunks, after, .. } = history_page(&client, &session, Some(through), json!({"kind":"after","cursor":cursor})).await else { unreachable!() };
+            let HistoryPage::Ready { through: fence, chunks, after, .. } = history_page(&client, &session, Some(through), json!({"kind":"after","cursor":cursor})).await;
             assert_eq!(fence, through);
             pinned.extend(chunks);
             continuation = after;
@@ -807,30 +802,27 @@ async fn independent_public_agent_client_finds_published_fork_after_uncertain_ho
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn independent_public_agent_client_searches_history_with_case_and_word_flags() {
     async fn search(client: &Client, input: Value) -> Result<Value, String> {
-        loop {
-            let mut call = client
-                .call("agent", "search".into(), input.clone(), Default::default())
-                .await?;
-            let result = async {
-                call.start().await?;
-                match call.receive().await? {
-                    Reply::Finished { result, cleanup } => {
-                        cleanup?;
-                        result
-                    }
-                    reply => Err(format!(
-                        "history search did not return a query result: {reply:?}"
-                    )),
+        let mut call = client
+            .call("agent", "search".into(), input.clone(), Default::default())
+            .await?;
+        let result = async {
+            call.start().await?;
+            match call.receive().await? {
+                Reply::Finished { result, cleanup } => {
+                    cleanup?;
+                    result
                 }
-            }
-            .await;
-            call.close().await?;
-            assert!(call.cleanup_confirmed());
-            let page = result?;
-            if page["kind"] != "preparing" {
-                return Ok(page);
+                reply => Err(format!(
+                    "history search did not return a query result: {reply:?}"
+                )),
             }
         }
+        .await;
+        call.close().await?;
+        assert!(call.cleanup_confirmed());
+        let page = result?;
+        assert_eq!(page["kind"], "ready");
+        Ok(page)
     }
 
     tokio::time::timeout(Duration::from_secs(40), async {

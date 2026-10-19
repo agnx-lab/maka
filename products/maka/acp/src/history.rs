@@ -36,19 +36,12 @@ pub async fn read(
     let mut cursors = HashSet::new();
     loop {
         let page: HistoryPage = client.query("agent", "history", json!({"sessionId":session,"through":through,"position":position,"includeThinking":true})).await?;
-        let (fence, chunks, next) = match page {
-            HistoryPage::Preparing { through: fence } => {
-                freeze(&mut through, fence)?;
-                tokio::task::yield_now().await;
-                continue;
-            }
-            HistoryPage::Ready {
-                through,
-                chunks,
-                after,
-                ..
-            } => (through, chunks, after),
-        };
+        let HistoryPage::Ready {
+            through: fence,
+            chunks,
+            after: next,
+            ..
+        } = page;
         freeze(&mut through, fence)?;
         history.extend(chunks);
         let Some(cursor) = next else {
@@ -72,7 +65,7 @@ fn freeze(through: &mut Option<u64>, fence: u64) -> Result<(), Error> {
 mod tests {
     use super::*;
     #[test]
-    fn history_preparation_keeps_the_original_fence() {
+    fn history_pagination_keeps_the_original_fence() {
         let mut fence = None;
         freeze(&mut fence, 42).unwrap();
         freeze(&mut fence, 42).unwrap();

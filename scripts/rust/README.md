@@ -132,9 +132,12 @@ longer than the measured run.
 
 For history and cancellation, set `MAKA_RESPONSIVENESS_FIXTURES` to a
 comma-separated list of those disposable `.sqlite` snapshots and use
-`--kind responsive`. This checks cold transcript preparation, a real history
-page, and cancellation before admission, 10 ms after admission, and after model
-HTTP receipt. Before-admission cases cover ordinary and manual-message preflight:
+`--kind responsive`. This checks a real bounded history
+page and cancellation before admission, 10 ms after admission, and after model
+HTTP receipt. `long_history_window` measures the direct first page after opening
+the copied store; initial directory installation during that open is excluded and
+must be measured separately. Retained `long_history_preparation` records describe
+the earlier prepare-then-read probe and keep their original meaning. Before-admission cases cover ordinary and manual-message preflight:
 start must remain pending at the 10 ms stimulus, then cancel without an opening
 or model request. Use a sufficiently large fixture; early admission fails the probe.
 The after-admission trigger does not guarantee preparation is still running;
@@ -149,7 +152,7 @@ synchronous Rust computation is not immediately interruptible.
 
 `--kind transcript --sizes 128,512` uses retained release
 `maka-event-log --test transcript_index` executables to check many model steps
-inside one invocation. It verifies every assistant message after preparing each
+inside one invocation. It verifies every assistant message from each
 fresh copy; this workload complements many-turn Engine fixtures.
 
 `--kind executor --sizes 128,512` uses the same transcript executable for

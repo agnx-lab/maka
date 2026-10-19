@@ -56,7 +56,6 @@ import { sameValue } from '../../shared/value.js';
 import { sameFile } from '../../shared/attachments.js';
 
 import { type Request, type Mutation, type DisplayPart, type State } from './state.js';
-import { readingKey } from './state.js';
 import { utf8Bytes, appendLive, closeLive, rememberActivity } from './messages.js';
 import {
   intent,
@@ -653,16 +652,6 @@ export function querySucceeded(state: State, actions: Action[], request: Request
         queryFailed(state, request);
         break;
       }
-      if (page.kind === 'preparing') {
-        intent(state, actions, request, 'agent', 'source', {
-          sessionId: state.selected!.id,
-          through: request.through,
-          source: { kind: 'row', position: request.rowPosition },
-          field: request.field,
-          position: request.position,
-        });
-        break;
-      }
       const next = page.source;
       const end = next.offset + utf8Bytes(next.text);
       if (
@@ -720,11 +709,8 @@ export function querySucceeded(state: State, actions: Action[], request: Request
       if (request.epoch !== state.epoch || request.turnId !== state.run?.turnId) break;
       const page = value as AgentHistoryPage;
       if (page.through !== request.through) break;
-      if (page.kind === 'preparing' || (!page.chunks.length && page.before)) {
-        const position =
-          page.kind === 'preparing'
-            ? request.position
-            : { kind: 'before' as const, cursor: page.before! };
+      if (!page.chunks.length && page.before) {
+        const position = { kind: 'before' as const, cursor: page.before };
         intent(state, actions, { ...request, position }, 'agent', 'history', {
           sessionId: state.selected!.id,
           through: request.through,
@@ -750,25 +736,6 @@ export function querySucceeded(state: State, actions: Action[], request: Request
       const page = value as AgentHistoryPage;
       if (page.through !== request.through) {
         queryFailed(state, request);
-        break;
-      }
-      if (page.kind === 'preparing') {
-        intent(
-          state,
-          actions,
-          request,
-          'agent',
-          'history',
-          {
-            sessionId: state.selected!.id,
-            through: request.through,
-            position: request.position,
-            includeThinking: true,
-            view: 'conversation',
-          },
-          {},
-          request.implicit ? [{ child: readingKey(state), method: 'tail', input: null }] : [],
-        );
         break;
       }
       // A bounded canonical page may contain only non-text state rows. The

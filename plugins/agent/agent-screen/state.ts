@@ -350,7 +350,7 @@ export interface State {
     | 'approval'
     | null;
   window: {
-    page: Extract<AgentHistoryPage, { kind: 'ready' }>;
+    page: AgentHistoryPage;
     latest: boolean;
   } | null;
   navigation: number;

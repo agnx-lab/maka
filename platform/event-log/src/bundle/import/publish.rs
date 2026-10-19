@@ -88,6 +88,8 @@ pub(super) async fn all(
     events(destination, relocated, &receipt.bundle_digest).await?;
     copies(destination, relocated, &receipt.bundle_digest).await?;
     materials(destination, staged, positions).await?;
+    crate::transcript::directory::index_imported_sessions(destination, &receipt.session_ids)
+        .await?;
     crate::bundle::accounting::validate(staged, destination).await
 }
 

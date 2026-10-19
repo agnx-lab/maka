@@ -131,17 +131,14 @@ async fn rows(
         .await
         .unwrap()
         .high_water;
-    assert!(log.prepare_transcript(session, through, 32).await.unwrap());
+
     let mut rows = BTreeMap::new();
     let mut position = Position::Start;
     loop {
         let Page::Ready { chunks, after, .. } = log
             .history_text(session, through, position, false, 8192, 8, 65536)
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         for chunk in chunks {
             if chunk.role == Role::ToolResult
                 && let Some(Tool { tool_use_id, .. }) = chunk.tool

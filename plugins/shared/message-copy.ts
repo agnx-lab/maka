@@ -62,7 +62,6 @@ export interface MessageCopy {
   key: string;
   serial: number;
   pending: { key: string; kind: 'source' | 'format' } | null;
-  preparing: number;
   arguments: boolean;
   total: number | null;
   format: SourceFormat | null;
@@ -169,7 +168,6 @@ export function syncMessageCopy(
     key: `message-copy-${props.copyRequest}-${state.revision}`,
     serial: 0,
     pending: null,
-    preparing: 0,
     arguments: false,
     total: null,
     format: null,
@@ -205,11 +203,6 @@ export function messageCopyEvent(state: State, input: ComponentInput, actions: A
   const page = result.value as AgentHistorySourcePage;
   if (page.through !== copy.basis.through) {
     copy.status = 'unavailable';
-    return true;
-  }
-  if (page.kind === 'preparing') {
-    if (++copy.preparing <= 8) action(copy, actions, 'source');
-    else copy.status = 'unavailable';
     return true;
   }
   const source = page.source,
@@ -261,7 +254,6 @@ export function messageCopyEvent(state: State, input: ComponentInput, actions: A
       copy.arguments = true;
       copy.total = null;
       copy.format = null;
-      copy.preparing = 0;
       action(copy, actions, 'source');
     } else finishTool(copy, copy.basis.field === 'arguments' ? body : null);
   } else if (copy.raw === null) copy.status = 'empty';

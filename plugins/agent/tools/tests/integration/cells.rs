@@ -179,10 +179,16 @@ async fn yielding_cells_keep_ancestry_deliver_deltas_share_json_and_drain_on_run
         run.shutdown().await.unwrap();
         assert!(log.invocation_recovery(&invocation,100,1024*1024).await.unwrap().uncertain_operations.is_empty());
         let fence = log.prefix(100,1024*1024).await.unwrap().high_water;
-        for _ in 0..4 {
-            if log.prepare_transcript(&invocation.session_id, fence, 32).await.unwrap() { break; }
+        let headers = log.transcript_headers(&invocation.session_id, &maka_event_log::transcript::TranscriptRead {
+            through: fence, position: None, direction: maka_event_log::transcript::TranscriptDirection::Older, limit: 8,
+        }).await.unwrap();
+        let mut result = false;
+        for header in headers {
+            let bytes = log.transcript_fragment(&invocation.session_id, header.position, 0, header.total_bytes).await.unwrap();
+            let row: Value = serde_json::from_slice(&bytes).unwrap();
+            result |= row["type"] == "tool_result";
         }
-        assert!(log.prepare_transcript(&invocation.session_id, fence, 32).await.unwrap(), "nested cells remain renderable after their control call settles");
+        assert!(result, "nested cells remain renderable after their control call settles");
         drop(run);
         fixture::close(log).await;
         let reopened = EventLog::open(&path).await.unwrap();

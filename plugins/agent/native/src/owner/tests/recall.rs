@@ -168,7 +168,7 @@ async fn recall_native_model_tools_expand_exclude_active_turn_and_retain_materia
         loop {
             let page = f.query("history",history_input.clone()).await.unwrap();
             history_input["through"] = page["through"].clone();
-            if page["kind"] == "preparing" { continue; }
+            assert_eq!(page["kind"], "ready");
             for chunk in page["chunks"].as_array().unwrap() {
                 if matches!(chunk["role"].as_str(),Some("tool_call" | "tool_result")) {
                     historical_tools.push_str(chunk["text"].as_str().unwrap());

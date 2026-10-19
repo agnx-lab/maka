@@ -4697,190 +4697,180 @@ export type Role = 'compaction' | 'failure' | 'user' | 'assistant' | 'tool_call'
  * Foreign/provider results do not establish this Host evidence.
  */
 export type ToolSettlement = 'returned' | 'failed' | 'unknown' | 'rejected';
-export type AgentHistoryPage =
-  | {
-      through: number;
-      kind: 'preparing';
-    }
-  | {
-      through: number;
-      chunks: AgentHistoryChunk[];
-      before: Cursor | null;
-      after: Cursor | null;
-      kind: 'ready';
-    };
-export type AgentHistorySearchPage =
-  | {
-      through: number;
-      kind: 'preparing';
-    }
-  | {
-      through: number;
-      /**
-       * @maxItems 16
-       */
-      matches:
-        | []
-        | [AgentHistoryMatch]
-        | [AgentHistoryMatch, AgentHistoryMatch]
-        | [AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch]
-        | [AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ]
-        | [
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-            AgentHistoryMatch,
-          ];
-      /**
-       * Continue even when this batch has no matches. Null is the end of the scan.
-       */
-      nextAfter: HistoryRowPosition | null;
-      kind: 'ready';
-    };
+export type AgentHistoryPage = {
+  through: number;
+  chunks: AgentHistoryChunk[];
+  before: Cursor | null;
+  after: Cursor | null;
+  kind: 'ready';
+};
+export type AgentHistorySearchPage = {
+  through: number;
+  /**
+   * @maxItems 16
+   */
+  matches:
+    | []
+    | [AgentHistoryMatch]
+    | [AgentHistoryMatch, AgentHistoryMatch]
+    | [AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch]
+    | [AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch, AgentHistoryMatch]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ]
+    | [
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+        AgentHistoryMatch,
+      ];
+  /**
+   * Continue even when this batch has no matches. Null is the end of the scan.
+   */
+  nextAfter: HistoryRowPosition | null;
+  kind: 'ready';
+};
 /**
  * An explicitly selected canonical transcript field, never an execution grant.
  */
@@ -4916,21 +4906,16 @@ export type SourcePosition =
       offset: number;
       kind: 'after';
     };
-export type AgentHistorySourcePage =
-  | {
-      through: number;
-      kind: 'preparing';
-    }
-  | {
-      through: number;
-      source: HistorySource;
-      /**
-       * Complete file-path evidence resolved on the Host for copying only.
-       * This is display text, never a filesystem capability or open command.
-       */
-      filePath?: string | null;
-      kind: 'ready';
-    };
+export type AgentHistorySourcePage = {
+  through: number;
+  source: HistorySource;
+  /**
+   * Complete file-path evidence resolved on the Host for copying only.
+   * This is display text, never a filesystem capability or open command.
+   */
+  filePath?: string | null;
+  kind: 'ready';
+};
 /**
  * Presentation role of the exact row. This carries no execution authority.
  */
@@ -4951,24 +4936,19 @@ export type AgentToolImageFrame =
   | {
       kind: 'complete';
     };
-export type AgentToolImagePage =
-  | {
-      through: number;
-      kind: 'preparing';
-    }
-  | {
-      through: number;
-      position: HistoryRowPosition;
-      offset: number;
-      totalBytes: number;
-      mimeType: string;
-      digest: string;
-      /**
-       * Standard padded Base64 of at most 32KiB of encoded image bytes.
-       */
-      data: string;
-      kind: 'ready';
-    };
+export type AgentToolImagePage = {
+  through: number;
+  position: HistoryRowPosition;
+  offset: number;
+  totalBytes: number;
+  mimeType: string;
+  digest: string;
+  /**
+   * Standard padded Base64 of at most 32KiB of encoded image bytes.
+   */
+  data: string;
+  kind: 'ready';
+};
 /**
  * Resource names select slots in the current request, not durable grants.
  */

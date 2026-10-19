@@ -180,14 +180,18 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
             let db = Connection::open(&path).unwrap();
             let canonical = canonical_bytes(&db);
             let unaccepted = cuts[0] - 1;
-            assert!(log.prepare_transcript("a", unaccepted, 32).await.unwrap());
+            crate::transcript_cache::materialize_all_rows(&log, "a", unaccepted)
+                .await
+                .unwrap();
             assert_eq!(rows(&db, "a"), expected(&events, unaccepted));
             assert_eq!(rows(&db, "a").len(), 2);
             let unaccepted_page = page(&log, unaccepted).await;
             let mut cold = Vec::new();
             for (index, &cut) in cuts.iter().enumerate() {
-                assert!(log.prepare_transcript("a", cut, 32).await.unwrap());
-                assert_eq!(progress(&db, "a"), cut as i64);
+                crate::transcript_cache::materialize_all_rows(&log, "a", cut)
+                    .await
+                    .unwrap();
+
                 let actual = rows(&db, "a");
                 assert_eq!(actual, expected(&events, cut));
                 assert_eq!(actual.len(), if accepted { 3 + index } else { 2 });
@@ -213,7 +217,9 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
                 }
                 cold.push(page(&log, cut).await);
             }
-            assert!(log.prepare_transcript("a", later, 32).await.unwrap());
+            crate::transcript_cache::materialize_all_rows(&log, "a", later)
+                .await
+                .unwrap();
             assert_eq!(rows(&db, "a"), expected(&events, later));
             for (&cut, original) in cuts.iter().zip(&cold) {
                 assert_eq!(page(&log, cut).await, *original);
@@ -228,7 +234,7 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
             }
             let db = Connection::open(&path).unwrap();
             assert_eq!(rows(&db, "a"), expected(&events, later));
-            assert_eq!(progress(&db, "a"), later as i64);
+
             assert_eq!(page(&reopened, unaccepted).await, unaccepted_page);
             assert_eq!(canonical_bytes(&db), canonical);
             drop(db);
@@ -238,51 +244,45 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
 }
 
 #[tokio::test]
-async fn projection_upgrade_repairs_old_ready_missing_accepted_item_once() {
+async fn accepted_observation_directory_survives_missing_optional_bodies_and_reopen() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("upgrade.sqlite");
+    let path = directory.path().join("cache.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     let (cuts, _, events) = seed(&log, true, false).await;
     let old = cuts[0];
-    assert!(log.prepare_transcript("a", old, 32).await.unwrap());
-    let _ = page(&log, old).await;
+    let original = page(&log, old).await;
     log.close().await.unwrap();
     let db = Connection::open(&path).unwrap();
     let canonical = canonical_bytes(&db);
-    // Exact reachable pre-upgrade shape: Ready through PartFinished, opening rows
-    // only, canonical accepted observations intact; migration32 has not run yet.
-    db.execute_batch(
-        "DELETE FROM transcript_text;
-        DELETE FROM transcript_rows WHERE source_sequence>1;
-        DELETE FROM _sqlx_migrations WHERE version=32;",
-    )
-    .unwrap();
-    assert_eq!(progress(&db, "a"), old as i64);
-    assert_eq!(rows(&db, "a").len(), 2);
-    drop(db);
+    let metadata: i64 = db
+        .query_row(
+            "SELECT count(*) FROM transcript_directory WHERE session_id='a'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
-    let db = Connection::open(&path).unwrap();
-    for table in ["transcript_text", "transcript_rows", "transcript_progress"] {
-        assert_eq!(
-            db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-    }
-    assert_eq!(canonical_bytes(&db), canonical);
-    assert!(reopened.prepare_transcript("a", old, 32).await.unwrap());
+    assert!(rows(&db, "a").is_empty());
+    assert_eq!(page(&reopened, old).await, original);
+    crate::transcript_cache::materialize_all_rows(&reopened, "a", old)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "a"), expected(&events, old));
-    let repaired = page(&reopened, old).await;
-    assert_eq!(repaired["chunks"].as_array().unwrap().len(), 2);
-    drop(db);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM transcript_directory WHERE session_id='a'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        metadata
+    );
+    assert_eq!(canonical_bytes(&db), canonical);
     reopened.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
-    assert_eq!(page(&reopened, old).await, repaired);
-    let db = Connection::open(&path).unwrap();
-    assert_eq!(rows(&db, "a"), expected(&events, old));
-    assert_eq!(progress(&db, "a"), old as i64);
+    assert_eq!(page(&reopened, old).await, original);
     assert_eq!(canonical_bytes(&db), canonical);
-    drop(db);
     reopened.close().await.unwrap();
 }

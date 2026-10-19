@@ -126,8 +126,6 @@ pub enum Error {
     Private,
     #[error("Session history access was refused or is unavailable")]
     History,
-    #[error("Session history is still preparing; try again shortly")]
-    Preparing,
     #[error("Session history exceeds the bounded recap scan; recap was not generated")]
     TooLong,
     #[error("Session has no conversation text to recap")]
@@ -354,45 +352,34 @@ impl Recaps {
                 )
                 .await
                 .map_err(|_| Error::History)?;
-            match page {
-                history::Page::Preparing { through: fence } => {
-                    through = Some(fence);
-                    tokio::task::yield_now().await;
-                }
-                history::Page::Ready {
-                    through: fence,
-                    chunks,
-                    after,
-                    ..
-                } => {
-                    through = Some(fence);
-                    for chunk in chunks {
-                        text.push_str(&format!("\n{:?}: ", chunk.role));
-                        text.push_str(&chunk.text);
-                        if text.len() > INPUT_BYTES {
-                            let mut offset = text.len() - INPUT_BYTES;
-                            while !text.is_char_boundary(offset) {
-                                offset += 1;
-                            }
-                            text.drain(..offset);
-                        }
+            let history::Page::Ready {
+                through: fence,
+                chunks,
+                after,
+                ..
+            } = page;
+            through = Some(fence);
+            for chunk in chunks {
+                text.push_str(&format!("\n{:?}: ", chunk.role));
+                text.push_str(&chunk.text);
+                if text.len() > INPUT_BYTES {
+                    let mut offset = text.len() - INPUT_BYTES;
+                    while !text.is_char_boundary(offset) {
+                        offset += 1;
                     }
-                    cursor = after;
-                    if cursor.is_none() {
-                        return if text.trim().is_empty() {
-                            Err(Error::Empty)
-                        } else {
-                            Ok((fence, text))
-                        };
-                    }
+                    text.drain(..offset);
                 }
             }
+            cursor = after;
+            if cursor.is_none() {
+                return if text.trim().is_empty() {
+                    Err(Error::Empty)
+                } else {
+                    Ok((fence, text))
+                };
+            }
         }
-        Err(if cursor.is_some() {
-            Error::TooLong
-        } else {
-            Error::Preparing
-        })
+        Err(Error::TooLong)
     }
 }
 fn prefix(session: &str) -> String {

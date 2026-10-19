@@ -54,9 +54,7 @@ async fn tail(log: &EventLog, through: u64, turns: u64) -> (f64, usize) {
         .await
         .unwrap();
     let elapsed = started.elapsed().as_secs_f64() * 1000.0;
-    let Page::Ready { chunks, .. } = page else {
-        panic!("prepared history returned Preparing")
-    };
+    let Page::Ready { chunks, .. } = page;
     assert!(!chunks.is_empty());
     assert!(chunks.iter().any(|chunk| {
         chunk
@@ -99,24 +97,10 @@ async fn long_history_responsiveness() {
                 .unwrap();
         }
         let through = *log.subscribe_commits().borrow();
-        let started = Instant::now();
-        let mut preparation_calls = 0;
-        loop {
-            preparation_calls += 1;
-            if log
-                .prepare_transcript("session", through, 32)
-                .await
-                .unwrap()
-            {
-                break;
-            }
-        }
-        let prepare_ms = started.elapsed().as_secs_f64() * 1000.0;
         let (first_page_ms, chunks) = tail(&log, through, turns).await;
         println!(
             "{}",
-            json!({"benchmark":"long_history_preparation", "history_turns":turns,
-            "transcript_prepare_ms":prepare_ms, "preparation_calls":preparation_calls,
+            json!({"benchmark":"long_history_window", "history_turns":turns,
             "first_page_ms":first_page_ms, "chunks":chunks, "errors":0})
         );
         log.close().await.unwrap();

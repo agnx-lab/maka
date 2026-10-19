@@ -88,9 +88,11 @@ async fn interrupted_streaming_tool_ancestry_and_later_model_step_replay_exactly
         .unwrap();
     // Commit progress beyond the interruption so the next batch does not
     // independently select it. The next batch still needs the old tool ancestry.
-    assert!(log.prepare_transcript("a", cut, 32).await.unwrap());
+    crate::transcript_cache::materialize_all_rows(&log, "a", cut)
+        .await
+        .unwrap();
     let db = Connection::open(&path).unwrap();
-    assert_eq!(progress(&db, "a"), cut as i64);
+
     assert_eq!(rows(&db, "a").len(), 4);
 
     // The ordinary Message main-request append contract permits this order.
@@ -170,11 +172,9 @@ async fn interrupted_streaming_tool_ancestry_and_later_model_step_replay_exactly
         })
         .collect();
     assert_eq!(expected.len(), 6);
-    let prepared = log.prepare_transcript("a", through, 32).await;
-    assert!(
-        prepared.expect("append-accepted evidence must preserve the selected-boundary contract")
-    );
-    assert_eq!(progress(&db, "a"), through as i64);
+    let prepared = crate::transcript_cache::materialize_all_rows(&log, "a", through).await;
+    prepared.expect("append-accepted evidence must preserve the selected-boundary contract");
+
     assert_eq!(rows(&db, "a"), expected);
     drop(db);
     log.close().await.unwrap();

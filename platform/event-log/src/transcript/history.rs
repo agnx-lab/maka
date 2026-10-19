@@ -18,7 +18,7 @@
  */
 
 use super::{
-    read::{prepared, row_position, sql_number, sql_position},
+    read::{row_position, sql_number, sql_position},
     tool_metadata::read as tool_metadata,
 };
 use crate::{EventLog, StoreError, sequence_number};
@@ -117,7 +117,7 @@ impl EventLog {
         let session = session.to_owned();
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin().await?;
-            prepared(&mut tx, &session, fence).await?;
+            super::directory::check_read(&mut tx, &session, fence).await?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)"
             ).bind(&session).fetch_one(&mut *tx).await?;
@@ -167,12 +167,12 @@ impl EventLog {
                 }
             };
             let query = match (reverse, boundary.is_some(), inclusive) {
-                (true, false, _) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence DESC,item_index DESC LIMIT ?3",
-                (false, false, _) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT ?3",
-                (true, true, true) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
-                (true, true, false) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND (source_sequence,item_index)<(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
-                (false, true, true) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
-                (false, true, false) => "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
+                (true, false, _) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence DESC,item_index DESC LIMIT ?3",
+                (false, false, _) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT ?3",
+                (true, true, true) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
+                (true, true, false) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
+                (false, true, true) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
+                (false, true, false) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
             };
             let mut query = sqlx::query_as::<_,(i64,i64)>(sqlx::AssertSqlSafe(query)).bind(&session);
             // A validated reverse anchor already implies the raw fence. Keep the
@@ -196,7 +196,7 @@ impl EventLog {
                 // following rows. One oversized first row still progresses.
                 projected += materialize(&mut tx, &session, locator, view, through_sql).await?;
                 let has_thinking: bool = include_thinking && sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = 'thinking')"
+                    "SELECT has_thinking FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
                 ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                 let mut fields = vec![HistoryField::Body];
                 if include_thinking && has_thinking { fields.insert(0, HistoryField::Thinking); }
@@ -313,7 +313,7 @@ impl EventLog {
                     left = Some(cursor); right = Some((cursor, row.total));
                 } else if matches!(position, Position::Event { .. }) {
                     let last: Option<(i64,i64)> = sqlx::query_as(
-                        "SELECT source_sequence,item_index FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 ORDER BY source_sequence DESC,item_index DESC LIMIT 1"
+                        "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id = ?1 AND source_sequence <= ?2 ORDER BY source_sequence DESC,item_index DESC LIMIT 1"
                     ).bind(&session).bind(through_sql).fetch_optional(&mut *tx).await?;
                     if let Some(locator) = last {
                         let locator = row_position(locator.0, locator.1)?;
@@ -384,9 +384,9 @@ async fn header(
         return Ok(row);
     }
     let row = sqlx::query(
-        "SELECT source.message_id, source.turn_id, cached.timestamp, cached.role, length(cached.body),
-            CASE WHEN cached.role = 'user' THEN source.payload -> '$.origin' END
-            FROM transcript_rows source JOIN transcript_text cached USING(session_id, source_sequence, item_index)
+        "SELECT source.message_id, source.turn_id, source.timestamp, source.role, length(cached.body),
+            CASE WHEN source.role = 'user' THEN source.user_origin END
+            FROM transcript_directory source JOIN transcript_text cached USING(session_id, source_sequence, item_index)
             WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND item_index = ?3 AND cached.field = ?4"
     ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(tx).await?;
     Ok(Header {
@@ -409,16 +409,16 @@ async fn conversation_tool(
     through: i64,
 ) -> Result<Option<Header>, StoreError> {
     let row = sqlx::query(
-        "SELECT row.message_id, row.turn_id, json_extract(row.payload, '$.ts'),
-            json_extract(row.payload, '$.type'), json_extract(row.payload, '$.origin'),
-            COALESCE(json_extract(row.payload, '$.toolName'), json_extract(call.payload, '$.toolName')),
-            COALESCE(json_extract(row.payload, '$.isError'), 0)
-        FROM transcript_rows row LEFT JOIN transcript_rows call
+        "SELECT row.message_id, row.turn_id, row.timestamp,
+            row.role, row.tool_origin,
+            COALESCE(row.tool_name, call.tool_name),
+            COALESCE(row.is_error, 0)
+        FROM transcript_directory row LEFT JOIN transcript_directory call
             ON call.session_id = row.session_id AND call.turn_id = row.turn_id
-            AND call.message_id = json_extract(row.payload, '$.toolUseId')
-            AND json_extract(call.payload, '$.type') = 'tool_call'
+            AND call.message_id = row.tool_use_id
+            AND call.role = 'tool_call' AND call.source_sequence <= ?4
         WHERE row.session_id = ?1 AND row.source_sequence = ?2 AND row.item_index = ?3 AND row.source_sequence <= ?4
-            AND json_extract(row.payload, '$.type') IN ('tool_call', 'tool_result')"
+            AND row.role IN ('tool_call', 'tool_result')"
     ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(through).fetch_optional(tx).await?;
     let Some(row) = row else {
         return Ok(None);
@@ -457,21 +457,25 @@ async fn neighbor(
         }
         if before && cursor.field == HistoryField::Body {
             let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = 'thinking')"
+                "SELECT has_thinking FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
             ).bind(session).bind(sql_position(cursor.position)?.0).bind(sql_position(cursor.position)?.1).fetch_one(&mut *tx).await?;
             if exists {
                 return Ok(true);
             }
         }
     }
+    // A predecessor of a validated cursor is already within its fence. Keep
+    // the pair as the sole upper bound, as in reverse anchored pagination.
     let query = if before {
-        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 AND (source_sequence,item_index) < (?3,?4))"
+        "SELECT EXISTS(SELECT 1 FROM transcript_directory WHERE session_id = ?1 AND (source_sequence,item_index) < (?2,?3))"
     } else {
-        "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id = ?1 AND source_sequence <= ?2 AND (source_sequence,item_index) > (?3,?4))"
+        "SELECT EXISTS(SELECT 1 FROM transcript_directory WHERE session_id = ?1 AND source_sequence <= ?2 AND (source_sequence,item_index) > (?3,?4))"
     };
-    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(query))
-        .bind(session)
-        .bind(through)
+    let mut query = sqlx::query_scalar(sqlx::AssertSqlSafe(query)).bind(session);
+    if !before {
+        query = query.bind(through);
+    }
+    Ok(query
         .bind(sql_position(cursor.position)?.0)
         .bind(sql_position(cursor.position)?.1)
         .fetch_one(tx)
@@ -491,6 +495,7 @@ async fn materialize(
     {
         return Ok(0);
     }
+    super::bodycache::ensure(tx, session, locator).await?;
     let source: Option<(i64, bool)> = sqlx::query_as(
         "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_text cached WHERE cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence AND cached.item_index = source.item_index AND cached.field = 'body')
             FROM transcript_rows source WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
@@ -540,7 +545,11 @@ mod tests {
     #[tokio::test]
     async fn conversation_retains_trace_parents_and_hides_transport_helpers() {
         let mut db = SqliteConnection::connect(":memory:").await.unwrap();
-        sqlx::query("CREATE TABLE transcript_rows (session_id TEXT, source_sequence INTEGER, item_index INTEGER, message_id TEXT, turn_id TEXT, payload BLOB)").execute(&mut db).await.unwrap();
+        let schema = include_str!("../../migrations/0033_transcript_directory.sql");
+        sqlx::raw_sql(&schema[schema.find("CREATE TABLE transcript_directory (").unwrap()..])
+            .execute(&mut db)
+            .await
+            .unwrap();
         let rows = [
             json!({"type":"tool_call","origin":"provider","toolName":"exec"}),
             json!({"type":"tool_call","origin":"code_mode","toolName":"code_cell"}),
@@ -552,10 +561,8 @@ mod tests {
         ];
         for (i, mut value) in rows.into_iter().enumerate() {
             value["ts"] = json!(1);
-            sqlx::query("INSERT INTO transcript_rows VALUES ('a', ?, 0, ?, 'turn', ?)")
-                .bind((i + 1) as i64)
-                .bind((i + 1).to_string())
-                .bind(serde_json::to_vec(&value).unwrap())
+            sqlx::query("INSERT INTO transcript_directory (session_id,source_sequence,item_index,message_id,turn_id,timestamp,role,has_thinking,tool_origin,tool_name,tool_use_id,is_error) SELECT 'a',?1,0,?2,'turn',1,json_extract(?3,'$.type'),0,json_extract(?3,'$.origin'),json_extract(?3,'$.toolName'),json_extract(?3,'$.toolUseId'),json_extract(?3,'$.isError')")
+                .bind((i+1) as i64).bind((i+1).to_string()).bind(serde_json::to_vec(&value).unwrap())
                 .execute(&mut db)
                 .await
                 .unwrap();
@@ -600,6 +607,96 @@ mod tests {
             .unwrap()
             .role,
             "tool_call"
+        );
+    }
+
+    #[tokio::test]
+    async fn predecessor_seek_work_is_bounded_by_cursor_not_following_history() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        async fn probe(db: &mut SqliteConnection, through: i64) -> usize {
+            let steps = Arc::new(AtomicUsize::new(0));
+            let observed = steps.clone();
+            db.lock_handle()
+                .await
+                .unwrap()
+                .set_progress_handler(1, move || {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    true
+                });
+            let found = neighbor(
+                db,
+                "a",
+                through,
+                Cursor {
+                    position: RowPosition {
+                        source_sequence: 1,
+                        item_index: 0,
+                    },
+                    field: HistoryField::Body,
+                    offset: 0,
+                },
+                false,
+                true,
+            )
+            .await;
+            db.lock_handle().await.unwrap().remove_progress_handler();
+            assert!(!found.unwrap(), "the first row has no predecessor");
+            steps.load(Ordering::Relaxed)
+        }
+
+        let mut db = SqliteConnection::connect(":memory:").await.unwrap();
+        let schema = include_str!("../../migrations/0033_transcript_directory.sql");
+        sqlx::raw_sql(&schema[schema.find("CREATE TABLE transcript_directory (").unwrap()..])
+            .execute(&mut db)
+            .await
+            .unwrap();
+        let mut measurements = Vec::new();
+        for (first, last) in [(1_i64, 64_i64), (65, 4096)] {
+            // Use the production directory schema/indexes. Setup is outside the
+            // handler; count only the real neighbor function, not a SQL copy.
+            sqlx::query("WITH RECURSIVE n(value) AS (SELECT ?1 UNION ALL SELECT value+1 FROM n WHERE value<?2) INSERT INTO transcript_directory(session_id,source_sequence,item_index,turn_id,message_id,timestamp,role,has_thinking) SELECT 'a',value,0,'turn',CAST(value AS TEXT),1,'user',0 FROM n")
+                .bind(first)
+                .bind(last)
+                .execute(&mut db)
+                .await
+                .unwrap();
+            measurements.push(probe(&mut db, last).await);
+        }
+        let [small, large] = measurements.as_slice() else {
+            unreachable!()
+        };
+        assert!(
+            *small > 0 && *large > 0,
+            "progress handler must observe work"
+        );
+        eprintln!("predecessor progress callbacks: 64={small}, 4096={large}");
+        assert!(
+            *large <= *small + 128,
+            "same empty predecessor lookup grew with following rows: 64={small}, 4096={large}"
+        );
+
+        let first = Cursor {
+            position: RowPosition {
+                source_sequence: 1,
+                item_index: 0,
+            },
+            field: HistoryField::Body,
+            offset: 0,
+        };
+        assert!(
+            neighbor(&mut db, "a", 4096, first, false, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !neighbor(&mut db, "a", 1, first, false, false)
+                .await
+                .unwrap(),
+            "a successor beyond the frozen fence must not appear"
         );
     }
 }

@@ -18,7 +18,7 @@
  */
 
 use super::{
-    read::{prepared, row_position, sql_number, sql_position},
+    read::{row_position, sql_number, sql_position},
     tool_metadata::read as tool_metadata,
 };
 use crate::{EventLog, StoreError, sequence_number};
@@ -65,7 +65,7 @@ fn source_sql() -> String {
 }
 
 impl EventLog {
-    /// Locate the original call in an already prepared immutable transcript.
+    /// Locate the original call in the complete immutable directory.
     pub async fn tool_source_position(
         &self,
         session: &str,
@@ -82,11 +82,11 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    prepared(&mut tx, &session, fence).await?;
+                    super::directory::check_read(&mut tx, &session, fence).await?;
                     let (source, item): (i64, i64) = sqlx::query_as(
-                        "SELECT source_sequence,item_index FROM transcript_rows
+                        "SELECT source_sequence,item_index FROM transcript_directory
                  WHERE session_id = ? AND message_id = ? AND source_sequence <= ?
-                 AND json_extract(payload, '$.type') = 'tool_call'",
+                 AND role = 'tool_call'",
                     )
                     .bind(&session)
                     .bind(tool_use_id)
@@ -100,7 +100,7 @@ impl EventLog {
             })
             .await
     }
-    /// Reads one selected immutable canonical field; no cache or arbitrary path.
+    /// Reads one selected immutable canonical field with bounded JSON paths.
     #[allow(clippy::too_many_arguments)]
     pub async fn history_source(
         &self,
@@ -141,7 +141,7 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    prepared(&mut tx, &session, fence).await?;
+                    super::directory::check_read(&mut tx, &session, fence).await?;
                     let exists: bool = sqlx::query_scalar(
                         "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)",
                     )
@@ -151,6 +151,7 @@ impl EventLog {
                     if !exists {
                         return Err(invalid("Session no longer exists"));
                     }
+                    super::bodycache::ensure(&mut tx, &session, locator).await?;
                     let sql = source_sql();
                     let header = format!(
                         "{sql} SELECT format, length(CAST(body AS BLOB)), role, thinking, failure_message, error_class, timestamp, operation, message_origin FROM source"

@@ -336,10 +336,7 @@ async fn original_history(
     loop {
         let page = load.query("history", input.clone()).await;
         assert_eq!(page["through"], through);
-        if page["kind"] == "preparing" {
-            tokio::task::yield_now().await;
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         for chunk in page["chunks"].as_array().unwrap() {
             let role = match chunk["role"].as_str().unwrap() {
                 "user" => 0,

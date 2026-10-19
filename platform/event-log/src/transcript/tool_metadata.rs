@@ -27,48 +27,48 @@ use sqlx::SqliteConnection;
 // Reordering these joins can scan the Session's payloads or entire tool indexes.
 const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
             SELECT session_id, turn_id, source_sequence, item_index, message_id,
-                json_extract(payload, '$.type') AS kind,
-                CASE json_extract(payload, '$.type') WHEN 'tool_call' THEN message_id
-                    ELSE json_extract(payload, '$.toolUseId') END AS tool_id,
-                json_extract(payload, '$.toolName') AS name,
-                json_extract(payload, '$.settlement') AS settlement,
-                json_extract(payload, '$.isError') AS error,
-                json_extract(payload, '$.content.kind') IS 'image' AS image
-            FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND source_sequence <= ?4
+                role AS kind,
+                CASE role WHEN 'tool_call' THEN message_id
+                    ELSE tool_use_id END AS tool_id,
+                tool_name AS name,
+                settlement AS settlement,
+                is_error AS error,
+                content_kind IS 'image' AS image
+            FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND source_sequence <= ?4
         ), call_row AS (
-            SELECT row.source_sequence, row.item_index, json_extract(row.payload, '$.toolName') AS name,
-                json_extract(row.payload, '$.origin') AS origin,
-                json_extract(row.payload, '$.parentToolCallId') AS parent_call,
-                json_extract(row.payload, '$.parentOperationId') AS parent_operation
-            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
+            SELECT row.source_sequence, row.item_index, row.tool_name AS name,
+                row.tool_origin AS origin,
+                row.parent_tool_call_id AS parent_call,
+                row.parent_operation_id AS parent_operation
+            FROM owner CROSS JOIN transcript_directory row ON row.session_id = owner.session_id
                 AND row.message_id = owner.tool_id AND row.turn_id = owner.turn_id
-            WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_call'
-                AND json_type(row.payload, '$.args') IS NOT NULL
+            WHERE row.source_sequence <= ?4 AND row.role = 'tool_call'
+                AND row.has_args = 1
         ), ancestors(message_id, source_sequence, item_index, parent_id, depth) AS (
             SELECT parent.message_id, parent.source_sequence, parent.item_index,
-                CASE WHEN json_extract(parent.payload, '$.origin') IN ('host_sdk', 'code_mode')
-                    THEN json_extract(parent.payload, '$.parentToolCallId') END, 1
-            FROM owner CROSS JOIN call_row CROSS JOIN transcript_rows parent
+                CASE WHEN parent.tool_origin IN ('host_sdk', 'code_mode')
+                    THEN parent.parent_tool_call_id END, 1
+            FROM owner CROSS JOIN call_row CROSS JOIN transcript_directory parent
                 ON parent.session_id = owner.session_id AND parent.turn_id = owner.turn_id
                 AND parent.message_id = call_row.parent_call
-            WHERE (parent.source_sequence, parent.item_index) < (call_row.source_sequence, call_row.item_index) AND json_extract(parent.payload, '$.type') = 'tool_call'
+            WHERE (parent.source_sequence, parent.item_index) < (call_row.source_sequence, call_row.item_index) AND parent.role = 'tool_call'
                 AND call_row.origin IN ('host_sdk', 'code_mode')
             UNION ALL
             SELECT parent.message_id, parent.source_sequence, parent.item_index,
-                CASE WHEN json_extract(parent.payload, '$.origin') IN ('host_sdk', 'code_mode')
-                    THEN json_extract(parent.payload, '$.parentToolCallId') END, ancestors.depth + 1
-            FROM ancestors CROSS JOIN owner CROSS JOIN transcript_rows parent
+                CASE WHEN parent.tool_origin IN ('host_sdk', 'code_mode')
+                    THEN parent.parent_tool_call_id END, ancestors.depth + 1
+            FROM ancestors CROSS JOIN owner CROSS JOIN transcript_directory parent
                 ON parent.session_id = owner.session_id AND parent.turn_id = owner.turn_id
                 AND parent.message_id = ancestors.parent_id
-            WHERE (parent.source_sequence, parent.item_index) < (ancestors.source_sequence, ancestors.item_index) AND json_extract(parent.payload, '$.type') = 'tool_call'
+            WHERE (parent.source_sequence, parent.item_index) < (ancestors.source_sequence, ancestors.item_index) AND parent.role = 'tool_call'
                 AND ancestors.depth < 32
         ), activity AS MATERIALIZED (
-            SELECT row.source_sequence, row.item_index, json_extract(row.payload, '$.toolName') AS name,
-                json_extract(row.payload, '$.title') AS title,
-                json_extract(row.payload, '$.presentation') AS presentation
-            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
-                AND row.turn_id = owner.turn_id AND json_extract(row.payload, '$.toolUseId') = owner.tool_id
-            WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_activity'
+            SELECT row.source_sequence, row.item_index, row.tool_name AS name,
+                row.tool_title AS title,
+                row.presentation AS presentation
+            FROM owner CROSS JOIN transcript_directory row ON row.session_id = owner.session_id
+                AND row.turn_id = owner.turn_id AND row.tool_use_id = owner.tool_id
+            WHERE row.source_sequence <= ?4 AND row.role = 'tool_activity'
             ORDER BY row.source_sequence, row.item_index LIMIT 2
         ), call AS (
             SELECT call_row.*, json_object('position', json_object('sourceSequence', call_row.source_sequence, 'itemIndex', call_row.item_index), 'name', call_row.name,
@@ -81,22 +81,22 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
                 'title', json((SELECT title FROM activity WHERE (SELECT count(*) FROM activity) = 1
                     AND (activity.source_sequence, activity.item_index) > (call_row.source_sequence, call_row.item_index) AND activity.name = call_row.name)),
                 'pending', json(CASE WHEN call_row.origin IN ('provider', 'host_sdk', 'code_mode')
-                    AND (SELECT json_extract(row.payload, '$.status') FROM owner CROSS JOIN transcript_rows row
+                    AND (SELECT row.state_status FROM owner CROSS JOIN transcript_directory row
                         ON row.session_id = owner.session_id AND row.turn_id = owner.turn_id
-                        WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'turn_state'
+                        WHERE row.source_sequence <= ?4 AND row.role = 'turn_state'
                         ORDER BY row.source_sequence DESC, row.item_index DESC LIMIT 1) = 'running'
                     THEN 'true' ELSE 'false' END)) AS reference FROM call_row
         ), results AS MATERIALIZED (
-            SELECT row.source_sequence, row.item_index, json_extract(row.payload, '$.origin') AS origin,
-                json_extract(row.payload, '$.parentToolCallId') AS parent_call,
-                json_extract(row.payload, '$.parentOperationId') AS parent_operation,
-                json_type(row.payload, '$.isError') IN ('true', 'false') AND json_type(row.payload, '$.content') = 'object' AS valid,
-                json_extract(row.payload, '$.settlement') AS settlement,
-                json_extract(row.payload, '$.isError') AS error,
-                json_extract(row.payload, '$.content.kind') IS 'image' AS image
-            FROM owner CROSS JOIN transcript_rows row ON row.session_id = owner.session_id
-                AND row.turn_id = owner.turn_id AND json_extract(row.payload, '$.toolUseId') = owner.tool_id
-            WHERE row.source_sequence <= ?4 AND json_extract(row.payload, '$.type') = 'tool_result'
+            SELECT row.source_sequence, row.item_index, row.tool_origin AS origin,
+                row.parent_tool_call_id AS parent_call,
+                row.parent_operation_id AS parent_operation,
+                row.result_valid AS valid,
+                row.settlement AS settlement,
+                row.is_error AS error,
+                row.content_kind IS 'image' AS image
+            FROM owner CROSS JOIN transcript_directory row ON row.session_id = owner.session_id
+                AND row.turn_id = owner.turn_id AND row.tool_use_id = owner.tool_id
+            WHERE row.source_sequence <= ?4 AND row.role = 'tool_result'
             ORDER BY row.source_sequence, row.item_index LIMIT 2
         ), pair AS (
             SELECT call.reference AS call_ref,
@@ -186,11 +186,11 @@ mod tests {
 
     async fn database() -> SqliteConnection {
         let mut db = SqliteConnection::connect(":memory:").await.unwrap();
-        sqlx::query("CREATE TABLE transcript_rows (source_sequence INTEGER, item_index INTEGER, session_id TEXT, turn_id TEXT, message_id TEXT, payload BLOB, PRIMARY KEY(session_id, source_sequence, item_index), UNIQUE(session_id, message_id))").execute(&mut db).await.unwrap();
-        sqlx::raw_sql("CREATE INDEX transcript_session_turn ON transcript_rows (session_id, turn_id, source_sequence, item_index);
-CREATE INDEX transcript_tool_results ON transcript_rows (session_id, turn_id, json_extract(payload, '$.toolUseId'), source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'tool_result';
-CREATE INDEX transcript_tool_activity ON transcript_rows (session_id, turn_id, json_extract(payload, '$.toolUseId'), source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'tool_activity';
-CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, source_sequence, item_index) WHERE json_extract(payload, '$.type') = 'turn_state';").execute(&mut db).await.unwrap();
+        let schema = include_str!("../../migrations/0033_transcript_directory.sql");
+        sqlx::raw_sql(&schema[schema.find("CREATE TABLE transcript_directory (").unwrap()..])
+            .execute(&mut db)
+            .await
+            .unwrap();
         db
     }
     fn call() -> Value {
@@ -207,15 +207,13 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
         id: &str,
         value: Value,
     ) {
-        sqlx::query("INSERT INTO transcript_rows VALUES (?, 0, ?, ?, ?, ?)")
-            .bind(sequence)
-            .bind(session)
-            .bind(turn)
-            .bind(id)
-            .bind(serde_json::to_vec(&value).unwrap())
-            .execute(db)
-            .await
-            .unwrap();
+        sqlx::query("INSERT INTO transcript_directory (source_sequence,item_index,session_id,turn_id,message_id,timestamp,role,has_thinking,tool_use_id,tool_name,tool_origin,parent_tool_call_id,parent_operation_id,has_args,result_valid,settlement,is_error,content_kind,tool_title,presentation,state_status)
+            SELECT ?1,0,?2,?3,?4,0,json_extract(?5,'$.type'),0,
+            CASE json_extract(?5,'$.type') WHEN 'tool_call' THEN ?4 ELSE json_extract(?5,'$.toolUseId') END,
+            json_extract(?5,'$.toolName'),json_extract(?5,'$.origin'),json_extract(?5,'$.parentToolCallId'),json_extract(?5,'$.parentOperationId'),
+            json_type(?5,'$.args') IS NOT NULL,json_type(?5,'$.isError') IN ('true','false') AND json_type(?5,'$.content')='object',
+            json_extract(?5,'$.settlement'),json_extract(?5,'$.isError'),json_extract(?5,'$.content.kind'),json_extract(?5,'$.title'),json_extract(?5,'$.presentation'),json_extract(?5,'$.status')")
+            .bind(sequence).bind(session).bind(turn).bind(id).bind(serde_json::to_vec(&value).unwrap()).execute(db).await.unwrap();
     }
     #[tokio::test]
     async fn trace_parent_is_an_earlier_native_call_in_the_same_turn() {
@@ -368,10 +366,7 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
             .map(|row| row.get::<String, _>(3))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(
-            plan.contains("USING INDEX transcript_tool_results"),
-            "{plan}"
-        );
+        assert!(plan.contains("USING INDEX directory_results"), "{plan}");
     }
     #[tokio::test]
     async fn same_fact_ordinals_pair_beyond_the_old_slot_boundary() {
@@ -388,7 +383,7 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
         .await;
         insert(&mut db, "a", "turn", 3, "result", result()).await;
         sqlx::query(
-            "UPDATE transcript_rows SET item_index = source_sequence + 254, source_sequence = 9",
+            "UPDATE transcript_directory SET item_index = source_sequence + 254, source_sequence = 9",
         )
         .execute(&mut db)
         .await
@@ -640,16 +635,16 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
             .join("\n");
         for (index, keys) in [
             (
-                "transcript_tool_activity",
-                "session_id=? AND turn_id=? AND <expr>=? AND source_sequence<?",
+                "directory_activity",
+                "session_id=? AND turn_id=? AND tool_use_id=? AND source_sequence<?",
             ),
             (
-                "transcript_turn_state",
+                "directory_state",
                 "session_id=? AND turn_id=? AND source_sequence<?",
             ),
             (
-                "transcript_tool_results",
-                "session_id=? AND turn_id=? AND <expr>=? AND source_sequence<?",
+                "directory_results",
+                "session_id=? AND turn_id=? AND tool_use_id=? AND source_sequence<?",
             ),
         ] {
             assert!(
@@ -658,7 +653,7 @@ CREATE INDEX transcript_turn_state ON transcript_rows (session_id, turn_id, sour
             );
         }
         let unique_call_key =
-            "USING INDEX sqlite_autoindex_transcript_rows_2 (session_id=? AND message_id=?)";
+            "USING INDEX sqlite_autoindex_transcript_directory_2 (session_id=? AND message_id=?)";
         assert!(
             plan.contains(&format!("SEARCH row {unique_call_key}")),
             "{plan}"

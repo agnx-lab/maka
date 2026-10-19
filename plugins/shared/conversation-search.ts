@@ -421,10 +421,7 @@ function historyEvent(
       history.scanning = false;
       return true;
     }
-    if (page.kind === 'preparing') {
-      scan(search, actions, request.after === null);
-      return true;
-    }
+
     let after = request.after;
     if (
       page.matches.length > 16 ||
@@ -479,10 +476,7 @@ function historyEvent(
       fail();
       return true;
     }
-    if (page.kind === 'preparing') {
-      readPreview(search, actions, request.field, request.position);
-      return true;
-    }
+
     const source = page.source,
       end = source.offset + utf8Bytes(source.text),
       position = request.position,

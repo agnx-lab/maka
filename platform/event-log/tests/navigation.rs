@@ -74,9 +74,6 @@ async fn end(log: &EventLog, run: &str, turn: &str) -> u64 {
     .await
     .unwrap()
 }
-async fn prepare(log: &EventLog, raw: u64) {
-    while !log.prepare_transcript("session", raw, 32).await.unwrap() {}
-}
 async fn pages(log: &EventLog, through: u64, limit: usize) -> Vec<TurnContribution> {
     let mut position = None;
     let mut all = Vec::new();
@@ -166,7 +163,7 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
     };
     assert_eq!(empty.context.source_evidence.high_water, 0);
     assert!(empty.context.tail.is_empty());
-    prepare(&log, last).await;
+
     let fence = last;
     for cut in [
         position(first, 0),
@@ -200,7 +197,7 @@ async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_bounda
     );
     open(&log, "resumed-parent", "parent", "continued").await;
     let last = end(&log, "resumed-parent", "parent").await;
-    prepare(&log, last).await;
+
     let sampled = log
         .navigation_landmarks("session", last, 64, None)
         .await
@@ -235,8 +232,8 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     assert_eq!(log.navigation_fence("session").await.unwrap(), Some(first));
     end(&log, "first", "shared").await;
     let second = open(&log, "middle", "middle", "middle").await;
-    let ending = end(&log, "middle", "middle").await;
-    prepare(&log, ending).await;
+    end(&log, "middle", "middle").await;
+
     let fence = log.navigation_fence("session").await.unwrap().unwrap();
     let initial = pages(&log, fence, 1).await;
     assert_eq!(initial.len(), 2);
@@ -273,7 +270,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     assert!(mid.contributions[0].latest_state.is_some());
 
     let active = open(&log, "active", "active", "not settled").await;
-    prepare(&log, active).await;
+
     let active_fence = active;
     assert_eq!(
         log.navigation_fence("session").await.unwrap(),
@@ -306,7 +303,7 @@ async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         end(&log, &run, &run).await;
     }
     let current = log.navigation_fence("session").await.unwrap().unwrap();
-    prepare(&log, current).await;
+
     assert_eq!(
         pages(&log, fence, 1).await,
         initial,

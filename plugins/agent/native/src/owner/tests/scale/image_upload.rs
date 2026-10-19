@@ -285,9 +285,7 @@ async fn verify(f: &Fixture, session: &str, invocation: &str, pictures: &[Pictur
     loop {
         let page = f.query("history", input.clone()).await.unwrap();
         assert_eq!(page["through"], through);
-        if page["kind"] == "preparing" {
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         for chunk in page["chunks"].as_array().unwrap() {
             if chunk["field"] != "body" {
                 continue;

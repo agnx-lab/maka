@@ -169,7 +169,7 @@ async fn explicit_models_switch_in_one_session_and_stale_selection_has_no_admiss
             for _ in 0..128 {
                 let page = fixture.query("history",history_request.clone()).await.unwrap();
                 history_request["through"] = page["through"].clone();
-                if page["kind"] == "preparing" {continue;}
+                assert_eq!(page["kind"], "ready");
                 assistant_chunks.extend(page["chunks"].as_array().unwrap().iter()
                     .filter(|chunk|chunk["role"] == "assistant")
                     .map(|chunk|json!({"text":chunk["text"],"model":chunk["model"]})));

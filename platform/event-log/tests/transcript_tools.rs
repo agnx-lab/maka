@@ -17,6 +17,9 @@
  * under the License.
  */
 
+#[path = "support/transcript.rs"]
+mod transcript_cache;
+
 use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
@@ -122,13 +125,10 @@ fn rows(db: &Connection) -> Vec<(maka_agent_facts::history::RowPosition, Vec<u8>
         .collect::<Result<_, _>>()
         .unwrap()
 }
-async fn prepare(log: &EventLog, fence: u64) {
-    for _ in 0..32 {
-        if log.prepare_transcript("session", fence, 2).await.unwrap() {
-            return;
-        }
-    }
-    panic!("bounded preparation did not advance");
+async fn materialize_all(log: &EventLog, fence: u64) {
+    crate::transcript_cache::materialize_all_rows(log, "session", fence)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -213,7 +213,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
     let db = Connection::open(&path).unwrap();
     // A historical fence sees the planned provider call, but no later dispatch,
     // nested call, result or rejection from the already-existing future suffix.
-    prepare(&log, accepted_fence).await;
+    materialize_all(&log, accepted_fence).await;
     let first = rows(&db);
     assert_eq!(first.len(), 3);
     let parent_id = tool_message_id("invocation", parent);
@@ -224,7 +224,7 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         planned.get("stepId").is_none(),
         "pure-tool steps need no fake assistant anchor"
     );
-    prepare(&log, through).await;
+    materialize_all(&log, through).await;
     assert!(
         !notices.has_changed().unwrap(),
         "derived cache must not publish execution commits"
@@ -331,10 +331,11 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         "search emits no execution commits"
     );
     let canonical = log.prefix(128, 32 * 1024 * 1024).await.unwrap().digest;
-    db.execute("DELETE FROM transcript_progress", []).unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
-    prepare(&reopened, through).await;
+    materialize_all(&reopened, through).await;
     assert_eq!(
         rows(&db),
         original,
@@ -345,7 +346,8 @@ async fn tool_boundaries_page_independently_and_rebuild_exact_ids_without_readin
         canonical
     );
     db.execute("DELETE FROM transcript_rows", []).unwrap();
-    db.execute("DELETE FROM transcript_progress", []).unwrap();
-    prepare(&reopened, through).await;
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
+    materialize_all(&reopened, through).await;
     assert_eq!(rows(&db), original, "the complete index is disposable");
 }

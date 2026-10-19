@@ -182,27 +182,21 @@ pub async fn canonical(
     let mut history = Vec::new();
     for _ in 0..64 {
         let page = query(client, "agent", "history", json!({"sessionId":session,"through":through,"position":position,"includeThinking":true})).await;
-        match serde_json::from_value(page).unwrap() {
-            maka_agent_api::contract::HistoryPage::Preparing { through: fence } => {
-                through = Some(fence);
-            }
-            maka_agent_api::contract::HistoryPage::Ready {
-                through: fence,
-                chunks,
-                after,
-                ..
-            } => {
-                if let Some(through) = through {
-                    assert_eq!(fence, through);
-                }
-                through = Some(fence);
-                history.extend(chunks);
-                let Some(cursor) = after else {
-                    return history;
-                };
-                position = json!({"kind":"after","cursor":cursor});
-            }
+        let maka_agent_api::contract::HistoryPage::Ready {
+            through: fence,
+            chunks,
+            after,
+            ..
+        } = serde_json::from_value(page).unwrap();
+        if let Some(through) = through {
+            assert_eq!(fence, through);
         }
+        through = Some(fence);
+        history.extend(chunks);
+        let Some(cursor) = after else {
+            return history;
+        };
+        position = json!({"kind":"after","cursor":cursor});
     }
     panic!("fixture history did not reach its original fence")
 }

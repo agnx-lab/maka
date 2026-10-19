@@ -303,6 +303,12 @@ impl EventLog {
             crate::sessions::project_execution(transaction, sequence).await?;
             crate::sessions::advance_revision(transaction, &event.invocation.session_id).await?;
         }
+        crate::transcript::directory::record_source(
+            transaction,
+            &event.invocation.session_id,
+            sequence,
+        )
+        .await?;
         Ok(AppendResult::Inserted(sequence))
     }
 }

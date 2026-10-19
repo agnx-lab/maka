@@ -17,6 +17,9 @@
  * under the License.
  */
 
+#[path = "support/transcript.rs"]
+mod transcript_cache;
+
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::context::CompactOutcome;
 use maka_agent_facts::context::ModelPurpose;
@@ -83,11 +86,9 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
             .await
             .unwrap();
         assert!(!previous.read_state.has_unread);
-        assert!(
-            log.prepare_transcript("session", old_end.sequence, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", old_end.sequence)
+            .await
+            .unwrap();
         let db = Connection::open(&path).unwrap();
         let old_rows = transcript(&db);
         let compact = identity(mode);
@@ -186,11 +187,9 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         ));
         assert!(delivery.next_after.is_none());
         assert_eq!(delivery.through_sequence, delta.sequence);
-        assert!(
-            log.prepare_transcript("session", delta.sequence, 1)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", delta.sequence)
+            .await
+            .unwrap();
         assert_eq!(transcript(&db), old_rows);
         let outcome = match mode {
             "accepted" | "rejected" => {
@@ -291,11 +290,9 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         assert_eq!(terminal_event.id, terminal.event.id);
         assert!(page.next_after.is_none());
         assert_eq!(page.through_sequence, terminal.sequence);
-        assert!(
-            log.prepare_transcript("session", terminal.sequence, 1)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", terminal.sequence)
+            .await
+            .unwrap();
         assert_eq!(transcript(&db), old_rows);
         let acknowledged = log
             .set_session_read_marker::<Value>("session", &opened.event.id)
@@ -306,17 +303,16 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         // Reopening rebuilds the discarded projection, preserving canonical bytes.
         db.execute("DELETE FROM catalog_messages", []).unwrap();
         db.execute("DELETE FROM transcript_rows", []).unwrap();
-        db.execute("DELETE FROM transcript_progress", []).unwrap();
+        db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+            .unwrap();
         log.close().await.unwrap();
         let log = EventLog::open(&path).await.unwrap();
         let rebuilt = log.get_session::<Value>("session").await.unwrap().unwrap();
         assert_eq!(rebuilt.read_state, previous.read_state);
         assert_eq!(rebuilt.last_message, previous.last_message);
-        assert!(
-            log.prepare_transcript("session", terminal.sequence, 32)
-                .await
-                .unwrap()
-        );
+        crate::transcript_cache::materialize_all_rows(&log, "session", terminal.sequence)
+            .await
+            .unwrap();
         assert_eq!(transcript(&db), old_rows);
         assert_eq!(
             log.prefix(100, 1024 * 1024).await.unwrap().digest,

@@ -562,11 +562,7 @@ async fn item_acceptance_survives_crashes_before_dispatch_before_settlement_and_
             matches!(&prefix.events.last().unwrap().event.fact,Fact::InvocationEnded {outcome:InvocationOutcome::Failed {class,..}}
             if class == if cut == 1 {"outcome_unknown"} else {"host_interrupted"})
         );
-        while !log
-            .prepare_transcript("session", prefix.high_water, 32)
-            .await
-            .unwrap()
-        {}
+
         if cut != 1 {
             let source = log.read_model_context("session", None).await.unwrap();
             assert!(source.tail.iter().any(

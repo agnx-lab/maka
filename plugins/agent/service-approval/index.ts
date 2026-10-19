@@ -85,7 +85,6 @@ function accept(state: State, value: AgentHistorySourcePage, position: SourcePos
     state.failed = true;
     return;
   }
-  if (value.kind === 'preparing') return;
   const next = value.source,
     end = next.offset + bytes(next.text);
   if (
@@ -305,8 +304,6 @@ export function serviceApproval<N extends Node>(
         else {
           const page = result.value as AgentHistorySourcePage;
           accept(state, page, position);
-          if (page.kind === 'preparing' && !state.failed && props.open)
-            read(state, actions, position);
         }
       } else if (props.open && input.kind === 'raw') {
         if (input.key === 'close') events.push({ name: 'closed', value: {} });

@@ -100,27 +100,23 @@ impl Reader {
                 }
                 return Ok(None);
             }
-            match self
+            let Page::Ready {
+                through,
+                chunks,
+                after,
+                ..
+            } = self
                 .history
                 .read(self.call.clone(), self.input.clone())
                 .await
-                .map_err(failed)?
-            {
-                Page::Preparing { through } => self.input.through = Some(through),
-                Page::Ready {
-                    through,
-                    chunks,
-                    after,
-                    ..
-                } => {
-                    self.input.through = Some(through);
-                    if let Some(cursor) = after {
-                        self.input.position = Position::After { cursor };
-                    }
-                    self.done = after.is_none();
-                    self.chunks = chunks.into();
-                }
+                .map_err(failed)?;
+            self.input.through = Some(through);
+            if let Some(cursor) = after {
+                self.input.position = Position::After { cursor };
             }
+            self.done = after.is_none();
+            self.chunks = chunks.into();
+
             tokio::task::yield_now().await;
         }
     }

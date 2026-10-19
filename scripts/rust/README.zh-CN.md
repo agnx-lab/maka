@@ -114,8 +114,11 @@ Engine 夹具走真实 append 校验，每 1,000 轮执行真实压缩；关闭�
 造数据与请求耗时分开，前者可能远长于实际测量过程。
 
 历史与取消测试使用 `--kind responsive`，并将 `MAKA_RESPONSIVENESS_FIXTURES`
-设为上述一次性 `.sqlite` 快照路径，以逗号分隔。它验证冷 transcript 准备、真实
+设为上述一次性 `.sqlite` 快照路径，以逗号分隔。它验证真实的有界
 历史页，以及 admission 前、admission 完成后 10 ms 和模型 HTTP 请求到达后的取消。
+`long_history_window` 在打开复制的存储后直接测量首个历史页，不含打开时首次安装目录
+的耗时；首次安装必须单独测量。保留的 `long_history_preparation` 记录仍表示旧探针的
+先准备再读取过程，不重新解释为直接读取结果。
 admission 前覆盖普通与手动消息预检：10 ms 触发时 start 必须仍在等待，随后取消且
 不产生 opening 或模型请求。夹具需足够大，提前完成 admission 会使测试失败。
 admission 后的定时触发不保证引擎仍处于准备阶段，需核对模型请求计数。

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::read::{prepared, row_position, sql_number, sql_position};
+use super::read::{row_position, sql_number, sql_position};
 use crate::{EventLog, StoreError, sequence_number, sessions};
 use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::SourceField;
@@ -46,8 +46,9 @@ pub struct TranscriptSearchBatch {
 }
 
 impl EventLog {
-    /// Read the disposable index without hydrating canonical events or emitting commits.
-    /// At most 64 rows / 16 MiB of indexed payload are scanned per call.
+    /// Search complete directory rows, reconstructing only each visited producer.
+    /// At most 64 rows / 16 MiB of payload are searched per call. A body miss
+    /// reconstructs and caches the selected producer, which can contain other rows.
     pub async fn search_transcript(
         &self,
         session: &str,
@@ -83,11 +84,11 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    prepared(&mut tx, &session, input.through).await?;
+                    super::directory::check_read(&mut tx, &session, input.through).await?;
                     let query = if after.is_some() {
-                        "SELECT source_sequence,item_index,total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?3,?4) ORDER BY source_sequence,item_index LIMIT 65"
+                        "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?3,?4) ORDER BY source_sequence,item_index LIMIT 65"
                     } else {
-                        "SELECT source_sequence,item_index,total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT 65"
+                        "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT 65"
                     };
                     let mut query=sqlx::query(sqlx::AssertSqlSafe(query)).bind(&session).bind(through);
                     if let Some((source,item))=after { query=query.bind(source).bind(item); }
@@ -99,19 +100,23 @@ impl EventLog {
                     let mut bytes = 0;
                     let mut position = input.after;
                     for (index, header) in headers.iter().enumerate() {
-                        let size = sequence_number(header.try_get(2)?)?;
+                        if index == 64 || result.matches.len() == input.max_matches {
+                            result.next_after = position;
+                            break;
+                        }
+                        let locator = row_position(header.try_get(0)?,header.try_get(1)?)?;
+                        super::bodycache::ensure(&mut tx,&session,locator).await?;
+                        let size: i64 = sqlx::query_scalar("SELECT total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
+                            .bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
+                        let size = sequence_number(size)?;
                         if size > maka_presentation::MAX_TOOL_ROW_BYTES as u64 {
                             return Err(StoreError::PrefixTooLarge);
                         }
-                        if index == 64
-                            || (index > 0 && bytes + size > 16 * 1024 * 1024)
-                            || result.matches.len() == input.max_matches
-                        {
+                        if index > 0 && bytes + size > 16 * 1024 * 1024 {
                             result.next_after = position;
                             break;
                         }
                         bytes += size;
-                        let locator = row_position(header.try_get(0)?,header.try_get(1)?)?;
                         position = Some(locator);
                         let payload: Vec<u8> = sqlx::query_scalar(
                     "SELECT payload FROM transcript_rows WHERE session_id = ? AND source_sequence = ? AND item_index = ?"
@@ -130,6 +135,7 @@ impl EventLog {
                             });
                         }
                     }
+                    tx.commit().await?;
                     Ok(result)
                 })
             })

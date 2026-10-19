@@ -970,7 +970,7 @@ async fn service_confirmation_reviews_exact_large_arguments_and_never_replaces_g
             loop {
                 let page = fixture.query("source", json!({"sessionId":session,"through":through,
                     "source":{"kind":"tool_use","toolUseId":tool_use_id},"field":"arguments","position":position})).await.unwrap();
-                if page["kind"] == "preparing" { continue; }
+                assert_eq!(page["kind"], "ready");
                 assert_eq!(page["source"]["tool"]["toolUseId"], *tool_use_id);
                 assert_eq!(page["source"]["tool"]["call"]["title"]["translations"]["zh-CN"], "审核计数器");
                 assert_eq!(page["source"]["tool"]["call"]["pending"], true);
@@ -1165,12 +1165,7 @@ async fn installed_javascript_service_is_a_real_model_tool_with_business_project
             maka_agent_facts::tool_output::ToolOutput::Operation(_)
         ));
         let through = *fixture.store.subscribe_commits().borrow();
-        while !fixture
-            .store
-            .prepare_transcript(&session, through, 32)
-            .await
-            .unwrap()
-        {}
+
         use maka_agent_ports::session::history::Page;
         use maka_agent_ports::session::history::Position;
         use maka_agent_ports::session::history::SourceField;
@@ -1188,10 +1183,7 @@ async fn installed_javascript_service_is_a_real_model_tool_with_business_project
                 64 * 1024,
             )
             .await
-            .unwrap()
-        else {
-            panic!("ready")
-        };
+            .unwrap();
         let result = chunks
             .iter()
             .find(|chunk| chunk.role == maka_agent_ports::session::history::Role::ToolResult)

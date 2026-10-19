@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Check committed stages before any later replay can repair derived rows.
+//! Compare selected producer reconstruction with the original full canonical replay.
 use super::*;
 use maka_agent_facts::{
     event::{EventWrite, ToolOutcome},
@@ -149,81 +149,80 @@ async fn seed(log: &EventLog) -> (u64, Vec<fixtures::Row>) {
 }
 
 #[tokio::test]
-async fn sibling_boundary_prefixes_reset_and_commit_exact_rows_before_reopen() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("log.sqlite");
+async fn sibling_sources_match_full_canonical_replay_with_empty_cache_after_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     let (through, expected) = seed(&log).await;
-    // Six boundaries cover opening/completion, both dispatch/result prefixes,
-    // and the first-result -> second-dispatch nonprefix reset in one callback.
-    assert!(!log.prepare_transcript("a", through, 6).await.unwrap());
     let db = Connection::open(&path).unwrap();
-    assert_eq!(progress(&db, "a"), 9);
-    assert_eq!(rows(&db, "a"), expected[..8]);
-    log.close().await.unwrap();
-    let reopened = EventLog::open(&path).await.unwrap();
-    assert!(reopened.prepare_transcript("a", through, 32).await.unwrap());
-    assert_eq!(progress(&db, "a"), 10);
+    assert!(rows(&db, "a").is_empty());
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "a"), expected);
-    drop(db);
+    let canonical = log.prefix(32, 65536).await.unwrap().digest;
+    log.close().await.unwrap();
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
+    let reopened = EventLog::open(&path).await.unwrap();
+    assert!(rows(&db, "a").is_empty());
+    crate::transcript_cache::materialize_all_rows(&reopened, "a", through)
+        .await
+        .unwrap();
+    assert_eq!(rows(&db, "a"), expected);
+    assert_eq!(reopened.prefix(32, 65536).await.unwrap().digest, canonical);
     reopened.close().await.unwrap();
 }
 
 #[tokio::test]
-async fn later_raw_damage_and_row_conflict_roll_back_the_entire_callback() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("log.sqlite");
+async fn selected_raw_damage_and_cached_identity_conflict_are_not_repaired() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     let (through, expected) = seed(&log).await;
-    assert!(!log.prepare_transcript("a", through, 3).await.unwrap());
     let db = Connection::open(&path).unwrap();
-    assert_eq!(progress(&db, "a"), 6);
-    assert_eq!(rows(&db, "a"), expected[..5]);
-    let before = rows(&db, "a");
     let raw: Vec<u8> = db
         .query_row(
             "SELECT payload FROM tool_result_payloads WHERE event_id='result-1'",
             [],
-            |row| row.get(0),
+            |r| r.get(0),
         )
         .unwrap();
-    // Preserve length so the original resolver must still reject invalid bytes/digest.
     db.execute("UPDATE tool_result_payloads SET payload=zeroblob(length(payload)) WHERE event_id='result-1'",[]).unwrap();
-    assert!(matches!(log.prepare_transcript("a",through,32).await,
-        Err(StoreError::InvalidTransition(message)) if message=="missing or inconsistent durable tool payload"));
-    assert_eq!(progress(&db, "a"), 6);
-    assert_eq!(rows(&db, "a"), before);
+    // An earlier fence excludes the damaged later source and remains readable.
+    crate::transcript_cache::materialize_all_rows(&log, "a", 6)
+        .await
+        .unwrap();
+    assert_eq!(rows(&db, "a"), expected[..5]);
+    let before = rows(&db, "a");
+    assert!(
+        matches!(crate::transcript_cache::materialize_all_rows(&log,"a",through).await,
+        Err(StoreError::InvalidTransition(message)) if message=="missing or inconsistent durable tool payload")
+    );
+    assert_eq!(
+        rows(&db, "a"),
+        before,
+        "failed full header batch must roll back its new rows"
+    );
     db.execute(
         "UPDATE tool_result_payloads SET payload=? WHERE event_id='result-1'",
         [raw],
     )
     .unwrap();
-    assert!(log.prepare_transcript("a", through, 32).await.unwrap());
-    assert_eq!(progress(&db, "a"), 10);
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
     assert_eq!(rows(&db, "a"), expected);
-
-    // Disposable-index damage leaves a later conflicting row but removes earlier
-    // suffix rows. The next batch must roll back its new writes before that conflict.
-    db.execute_batch(
-        "UPDATE transcript_rows SET payload=X'00' WHERE source_sequence=9;
-        DELETE FROM transcript_rows WHERE source_sequence>6 AND source_sequence<>9;
-        UPDATE transcript_progress SET through_sequence=6 WHERE session_id='a';",
+    db.execute(
+        "UPDATE transcript_rows SET turn_id='wrong-turn' WHERE source_sequence=9",
+        [],
     )
     .unwrap();
     let damaged = rows(&db, "a");
-    assert_eq!(
-        damaged
-            .iter()
-            .map(|r| r.0.source_sequence)
-            .collect::<Vec<_>>(),
-        [1, 1, 5, 5, 6, 9]
-    );
     assert!(matches!(
-        log.prepare_transcript("a", through, 32).await,
+        crate::transcript_cache::materialize_all_rows(&log, "a", through).await,
         Err(StoreError::TranscriptConflict)
     ));
-    assert_eq!(progress(&db, "a"), 6);
     assert_eq!(rows(&db, "a"), damaged);
-    drop(db);
     log.close().await.unwrap();
 }

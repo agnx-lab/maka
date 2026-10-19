@@ -461,8 +461,7 @@ pub enum TurnOutcome {
     Aborted,
 }
 
-/// Index preparation is bounded too. Repeat with the returned fence and the
-/// same position. Ready windows expose exact byte boundaries in both directions.
+/// Bounded windows expose exact byte boundaries in both directions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -471,9 +470,6 @@ pub enum TurnOutcome {
     deny_unknown_fields
 )]
 pub enum Page {
-    Preparing {
-        through: u64,
-    },
     Ready {
         through: u64,
         chunks: Vec<Chunk>,

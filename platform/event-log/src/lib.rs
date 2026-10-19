@@ -251,7 +251,12 @@ impl EventLog {
                 lease,
                 root: root_owner.clone(),
             },
-            |connection| Box::pin(schema::initialize_connection(connection)),
+            |connection| {
+                Box::pin(async move {
+                    schema::initialize_connection(connection).await?;
+                    transcript::directory::initialize(connection).await
+                })
+            },
         )
         .await?;
         let context_cache = Arc::new(context::cache::Cache::default());

@@ -98,7 +98,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
     .unwrap();
 
     let through = *log.subscribe_commits().borrow();
-    while !log.prepare_transcript("source", through, 32).await.unwrap() {}
+
     let Page::Ready { chunks, .. } = log
         .history_text(
             "source",
@@ -110,14 +110,11 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
             64 * 1024,
         )
         .await
-        .unwrap()
-    else {
-        panic!("ready")
-    };
+        .unwrap();
     // Long projected JSON strings can split one row into several text chunks.
     let sequences = Connection::open(dir.path().join("source.sqlite"))
         .unwrap()
-        .prepare("SELECT source_sequence, item_index FROM transcript_rows WHERE session_id='source' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY source_sequence, item_index")
+        .prepare("SELECT source_sequence, item_index FROM transcript_directory WHERE session_id='source' AND role IN ('tool_call','tool_result') ORDER BY source_sequence, item_index")
         .unwrap()
         .query_map([], |row| {
             Ok(RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 })
@@ -382,7 +379,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
         },
     )
     .await;
-    assert!(log.prepare_transcript("failed", through, 32).await.unwrap());
+
     // The first '..' touches 'a'; the overlapping second occurrence is valid.
     // Simple case folding does not normalize é or expand ß into SS.
     for (query, count) in [
@@ -578,12 +575,8 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
     .unwrap();
 
     let through = *log.subscribe_commits().borrow();
-    while !log
-        .prepare_transcript("structured", through, 32)
-        .await
-        .unwrap()
-    {}
-    let sequences = Connection::open(&database).unwrap().prepare("SELECT source_sequence, item_index FROM transcript_rows WHERE session_id='structured' AND json_extract(payload, '$.type') IN ('tool_call','tool_result') ORDER BY source_sequence, item_index").unwrap().query_map([], |row| Ok(RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 })).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+
+    let sequences = Connection::open(&database).unwrap().prepare("SELECT source_sequence, item_index FROM transcript_directory WHERE session_id='structured' AND role IN ('tool_call','tool_result') ORDER BY source_sequence, item_index").unwrap().query_map([], |row| Ok(RowPosition { source_sequence: row.get::<_, i64>(0)? as u64, item_index: row.get::<_, i64>(1)? as u64 })).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
     assert_eq!(sequences.len(), 2);
     for (sequence, field) in [
         (sequences[0], SourceField::Arguments),

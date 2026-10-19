@@ -917,7 +917,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
             let through = page["through"].as_u64().unwrap();
             assert_eq!(*fence.get_or_insert(through), through);
             input["through"] = json!(through);
-            if page["kind"] == "preparing" { continue; }
+            assert_eq!(page["kind"], "ready");
             let chunks = page["chunks"].as_array().unwrap();
             assert!(chunks.len() <= 2);
             assert!(chunks.iter().map(|chunk| chunk["text"].as_str().unwrap().len()).sum::<usize>() <= 32 * 1024);
@@ -953,7 +953,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
             let through = page["through"].as_u64().unwrap();
             assert_eq!(*newer_fence.get_or_insert(through), through);
             input["through"] = json!(through);
-            if page["kind"] == "preparing" { continue; }
+            assert_eq!(page["kind"], "ready");
             for chunk in page["chunks"].as_array().unwrap() {
                 assert!(chunk["position"]["sourceSequence"].as_u64().unwrap() > event_fence);
                 match chunk["role"].as_str().unwrap() {
@@ -989,7 +989,7 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
             let page = fixture.query("history", reverse_input.clone()).await.unwrap();
             assert_eq!(page["through"], event_fence);
             assert!(serde_json::to_vec(&page).unwrap().len() < 64 * 1024);
-            if page["kind"] == "preparing" { continue; }
+            assert_eq!(page["kind"], "ready");
             for chunk in page["chunks"].as_array().unwrap().iter().rev() {
                 let text = chunk["text"].as_str().unwrap();
                 match chunk["role"].as_str().unwrap() {

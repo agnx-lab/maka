@@ -103,18 +103,25 @@ test('tool summaries pause in background and reuse completed reads on return', (
   assert.equal(out.actions.length, 4, 'expanded Read fetches content and line metadata');
 });
 
-test('a preparing source pauses polling in a background reader', () => {
+test('a completed source is cached while its reader is in the background', () => {
   const current = props();
   current.load = true;
   let out = component.mount(current, {});
   const action = out.actions[0];
   current.load = false;
-  out = reply(out, action, { kind: 'preparing', through: 8 }, current);
+  out = reply(out, action, page(action, current, '/workspace/source.rs'), current);
   assert.equal(out.actions.length, 0);
+  assert.equal(
+    Object.values(out.frame.state.parts).find(
+      (part) =>
+        part.field === action.input.field &&
+        JSON.stringify(part.path) === JSON.stringify(action.input.path),
+    ).page.text,
+    '/workspace/source.rs',
+  );
   current.load = true;
   out = component.update(out.frame.state, current, {});
-  assert.equal(out.actions.length, 1);
-  assert.deepEqual(out.actions[0].input, action.input);
+  assert.equal(out.actions.length, 0, 'completed source does not poll on return');
 });
 
 test('omitting load keeps compact summaries eager', () => {
@@ -174,7 +181,7 @@ for (const target of ['tui']) {
     assert.equal(out.actions.length, 0, 'all completed parts remain cached');
   });
 
-  test(`${target}: background expanded readers do not prefetch or poll preparing sources`, () => {
+  test(`${target}: background expanded readers retain a completed excerpt`, () => {
     const current = props();
     current.expanded = true;
     let out = details.mount(current, {});
@@ -188,15 +195,22 @@ for (const target of ['tui']) {
       {
         kind: 'action',
         key: action.key,
-        event: { status: 'succeeded', value: { kind: 'preparing', through: 8 } },
+        event: { status: 'succeeded', value: page(action, current, 'completed excerpt') },
       },
       current,
       {},
     );
     assert.equal(out.actions.length, 0);
+    assert.equal(
+      Object.values(out.frame.state.parts).find(
+        (part) =>
+          part.field === action.input.field &&
+          JSON.stringify(part.path) === JSON.stringify(action.input.path),
+      ).page.text,
+      'completed excerpt',
+    );
     current.load = true;
     out = details.update(out.frame.state, current, {});
-    assert.equal(out.actions.length, 1);
-    assert.deepEqual(out.actions[0].input, action.input);
+    assert.equal(out.actions.length, 0, 'completed excerpt remains cached');
   });
 }

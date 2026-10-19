@@ -154,9 +154,7 @@ async fn canonical_images_use_original_agent_grants_and_bounded_base64() {
             )
             .await
             .unwrap();
-        if page["kind"] == "preparing" {
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         if let Some(row) = page["chunks"]
             .as_array()
             .unwrap()
@@ -308,9 +306,7 @@ pub(super) async fn canonical_image(f: &Fixture, session: &str, bytes: &[u8]) ->
             )
             .await
             .unwrap();
-        if page["kind"] == "preparing" {
-            continue;
-        }
+        assert_eq!(page["kind"], "ready");
         if let Some(row) = page["chunks"]
             .as_array()
             .unwrap()

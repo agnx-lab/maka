@@ -112,12 +112,6 @@ pub(super) async fn fence(tx: &mut SqliteConnection, through: u64) -> Result<i64
     checked_fence(through, high)
 }
 
-pub(super) fn fence_on_handle(db: &RawConnection, through: u64) -> Result<i64, StoreError> {
-    let through = i64::try_from(through).map_err(|_| ProjectionError::OutOfRange)?;
-    let high = db.prepare_cached(HIGH)?.query_row([], |row| row.get(0))?;
-    checked_fence(through, high)
-}
-
 fn checked_fence(through: i64, high: i64) -> Result<i64, StoreError> {
     if through > high {
         return Err(StoreError::InvalidTransition(

@@ -97,7 +97,6 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
     log.append(&outcome).await.unwrap();
     let before = serde_json::to_vec(&log.prefix(10, 16384).await.unwrap()).unwrap();
     let session = log.get_session::<Value>("session").await.unwrap();
-    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
     log.close().await.unwrap();
     let connection = Connection::open(&path).unwrap();
     let checksums = migration_checksums(&connection);
@@ -110,9 +109,9 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
             |row| row.get(0),
         )
         .unwrap();
-    // A projection upgrade discards only the derived cache, never accepted work.
+    // Dropping optional bodies preserves committed metadata and accepted work.
     connection
-        .execute("DELETE FROM _sqlx_migrations WHERE version = 31", [])
+        .execute("DELETE FROM transcript_rows", [])
         .unwrap();
     drop(connection);
     let log = EventLog::open(&path).await.unwrap();
@@ -124,7 +123,17 @@ async fn initialization_and_reopen_preserve_facts_payloads_and_schema_identity()
             .unwrap(),
         0
     );
-    assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
+    log.transcript_headers(
+        "session",
+        &maka_event_log::transcript::TranscriptRead {
+            through: 1,
+            position: None,
+            direction: maka_event_log::transcript::TranscriptDirection::Newer,
+            limit: 256,
+        },
+    )
+    .await
+    .unwrap();
     assert!(
         cache
             .query_row("SELECT count(*) FROM transcript_rows", [], |row| row

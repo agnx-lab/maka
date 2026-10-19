@@ -437,11 +437,7 @@ async fn adoption_markers_are_durable_timed_and_hidden_from_recall() {
             } else {
                 log.append(&terminal).await.unwrap()
             };
-            while !log
-                .prepare_transcript("session", through, 32)
-                .await
-                .unwrap()
-            {}
+
             for view in [HistoryView::Conversation, HistoryView::Text] {
                 let Page::Ready { chunks, .. } = log
                     .history_view(
@@ -455,10 +451,7 @@ async fn adoption_markers_are_durable_timed_and_hidden_from_recall() {
                         1024 * 1024,
                     )
                     .await
-                    .unwrap()
-                else {
-                    panic!()
-                };
+                    .unwrap();
                 let markers: Vec<_> = chunks
                     .iter()
                     .filter(|chunk| chunk.role == Role::Compaction)
@@ -475,11 +468,7 @@ async fn adoption_markers_are_durable_timed_and_hidden_from_recall() {
             }
             log.close().await.unwrap();
             let log = EventLog::open(&path).await.unwrap();
-            while !log
-                .prepare_transcript("session", through, 32)
-                .await
-                .unwrap()
-            {}
+
             let Page::Ready { chunks, .. } = log
                 .history_view(
                     "session",
@@ -492,10 +481,7 @@ async fn adoption_markers_are_durable_timed_and_hidden_from_recall() {
                     1024 * 1024,
                 )
                 .await
-                .unwrap()
-            else {
-                panic!()
-            };
+                .unwrap();
             let markers: Vec<_> = chunks
                 .iter()
                 .filter(|chunk| chunk.compaction.is_some())

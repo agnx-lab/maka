@@ -42,7 +42,7 @@ def records(kind, output):
         if line.startswith('{'):
             row = json.loads(line)
             if row.get("benchmark") in ("engine_long_history", "archive_context",
-                                        "long_history_preparation", "long_history_responsiveness",
+                                        "long_history_preparation", "long_history_window", "long_history_responsiveness",
                                         "one_invocation_transcript", "executor_invocation_transcript") and not row.get("summary"):
                 if kind == "context":
                     row["history_turns"] = row["archived_count"]

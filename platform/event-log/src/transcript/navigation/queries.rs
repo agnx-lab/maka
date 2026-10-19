@@ -31,17 +31,11 @@ SELECT MAX(sequence) FROM (
  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff'))";
 
 pub(super) const ROWS: &str = "
-SELECT row.source_sequence, row.item_index, row.turn_id,
- CASE WHEN source.kind IN ('invocation_opened', 'message_steered')
-      AND json_extract(row.payload, '$.type') = 'user' THEN
-   navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
-                              json_extract(row.payload, '$.text')), 256) END,
- CASE WHEN json_extract(row.payload, '$.type') = 'turn_state' THEN row.payload END
-FROM transcript_rows row
-JOIN runtime_events source ON source.sequence = row.source_sequence
-WHERE row.session_id = ?1 AND row.source_sequence <= ?2
-AND (row.source_sequence, row.item_index) >= (COALESCE(?3, 1), COALESCE(?4, 0))
-ORDER BY row.source_sequence, row.item_index LIMIT 257";
+SELECT row.source_sequence,row.item_index,row.turn_id,row.role,source.kind
+FROM transcript_directory row JOIN runtime_events source ON source.sequence=row.source_sequence
+WHERE row.session_id=?1 AND row.source_sequence<=?2
+AND (row.source_sequence,row.item_index)>=(COALESCE(?3,1),COALESCE(?4,0))
+ORDER BY row.source_sequence,row.item_index LIMIT 257";
 
 pub(super) const LANDMARKS: &str = "
 WITH openings AS (
@@ -62,24 +56,20 @@ JOIN samples ON rank = CASE WHEN ?3 = 1 THEN total - 1 ELSE n * (total - 1) / (?
 ORDER BY sequence";
 
 pub(super) const PROMPT: &str = "
-SELECT row.turn_id,
- navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
-                             json_extract(row.payload, '$.text')), 96)
-FROM runtime_events source
-JOIN transcript_rows row ON row.source_sequence = source.sequence
-WHERE source.invocation_id = ?2 AND source.kind IN ('invocation_opened', 'message_steered')
-AND json_extract(row.payload, '$.type') = 'user'
-AND row.session_id = ?1 AND row.source_sequence <= ?3
-ORDER BY row.source_sequence, row.item_index LIMIT 1";
+SELECT row.turn_id,row.source_sequence,row.item_index
+FROM runtime_events source JOIN transcript_directory row ON row.source_sequence=source.sequence
+WHERE source.invocation_id=?2 AND source.kind IN ('invocation_opened','message_steered')
+AND row.role='user' AND row.session_id=?1 AND row.source_sequence<=?3
+ORDER BY row.source_sequence,row.item_index LIMIT 1";
 
 pub(super) const BOUNDS: &str = "
 SELECT first.source_sequence, first.item_index, last.source_sequence, last.item_index
 FROM (
- SELECT source_sequence, item_index FROM transcript_rows
+ SELECT source_sequence, item_index FROM transcript_directory
  WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
  ORDER BY source_sequence, item_index LIMIT 1
 ) first CROSS JOIN (
- SELECT source_sequence, item_index FROM transcript_rows
+ SELECT source_sequence, item_index FROM transcript_directory
  WHERE session_id = ?1 AND turn_id = ?2 AND source_sequence <= ?3
  ORDER BY source_sequence DESC, item_index DESC LIMIT 1
 ) last";

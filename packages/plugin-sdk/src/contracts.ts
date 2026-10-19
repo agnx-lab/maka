@@ -13080,22 +13080,6 @@ export const contracts = {
                     format: 'uint64',
                     minimum: 0,
                   },
-                  kind: {
-                    type: 'string',
-                    const: 'preparing',
-                  },
-                },
-                additionalProperties: false,
-                required: ['kind', 'through'],
-              },
-              {
-                type: 'object',
-                properties: {
-                  through: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
                   chunks: {
                     type: 'array',
                     items: {
@@ -23488,22 +23472,6 @@ export const contracts = {
                     format: 'uint64',
                     minimum: 0,
                   },
-                  kind: {
-                    type: 'string',
-                    const: 'preparing',
-                  },
-                },
-                additionalProperties: false,
-                required: ['kind', 'through'],
-              },
-              {
-                type: 'object',
-                properties: {
-                  through: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
                   matches: {
                     type: 'array',
                     items: {
@@ -24948,22 +24916,6 @@ export const contracts = {
                     format: 'uint64',
                     minimum: 0,
                   },
-                  kind: {
-                    type: 'string',
-                    const: 'preparing',
-                  },
-                },
-                additionalProperties: false,
-                required: ['kind', 'through'],
-              },
-              {
-                type: 'object',
-                properties: {
-                  through: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
                   source: {
                     $ref: '#/$defs/HistorySource',
                   },
@@ -25465,22 +25417,6 @@ export const contracts = {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
             title: 'AgentToolImagePage',
             oneOf: [
-              {
-                type: 'object',
-                properties: {
-                  through: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
-                  kind: {
-                    type: 'string',
-                    const: 'preparing',
-                  },
-                },
-                additionalProperties: false,
-                required: ['kind', 'through'],
-              },
               {
                 type: 'object',
                 properties: {

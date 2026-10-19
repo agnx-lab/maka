@@ -225,11 +225,7 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
         row.event.fact,
         Fact::ModelRequested { .. } | Fact::ToolDispatched { .. }
     )));
-    assert!(
-        log.prepare_transcript("session", prefix.high_water, 32)
-            .await
-            .unwrap()
-    );
+
     let stream = log
         .session_stream_events("session", 0, prefix.high_water, 64, 1024 * 1024)
         .await
