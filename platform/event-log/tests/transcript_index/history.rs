@@ -2568,3 +2568,151 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
     read(&reopened, "model-copy", copied_fence, &copied_expected).await;
     reopened.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn item_accepted_text_at_old_fence_is_independent_of_later_cache_preparation() {
+    async fn snapshot(log: &EventLog, through: u64) -> (Value, Vec<(Role, String)>) {
+        let page = log
+            .history_text("a", through, Position::Start, false, 4096, 16, 16384)
+            .await
+            .unwrap();
+        let Page::Ready { chunks, .. } = &page else {
+            panic!("explicitly prepared fence")
+        };
+        let messages = chunks
+            .iter()
+            .map(|chunk| (chunk.role, chunk.text.clone()))
+            .collect();
+        (serde_json::to_value(page).unwrap(), messages)
+    }
+    async fn canonical(log: &EventLog) -> Vec<u8> {
+        serde_json::to_vec(&log.prefix(32, 32768).await.unwrap().events).unwrap()
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("fence.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("a", "create", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
+    log.append(&event("a", opening())).await.unwrap();
+    let source = log.prefix(16, 16384).await.unwrap();
+    let mut requested = request("a");
+    let Fact::ModelRequested {
+        item_acceptance,
+        source_scope,
+        source_high_water,
+        source_digest,
+        ..
+    } = &mut requested
+    else {
+        unreachable!()
+    };
+    *item_acceptance = true;
+    *source_scope = source.scope;
+    *source_high_water = source.high_water;
+    *source_digest = source.digest;
+    log.append(&event("a", requested)).await.unwrap();
+    for observation in [
+        ModelEvent::PartStarted {
+            id: "accepted-part".into(),
+            text_kind: TextKind::Text,
+            provider_options: None,
+        },
+        ModelEvent::PartDelta {
+            id: "accepted-part".into(),
+            text: "accepted中😀".into(),
+            provider_options: None,
+        },
+    ] {
+        log.append(&event("a", observe("a", observation)))
+            .await
+            .unwrap();
+    }
+    let old = log
+        .append(&event(
+            "a",
+            observe(
+                "a",
+                ModelEvent::PartFinished {
+                    id: "accepted-part".into(),
+                    provider_options: None,
+                },
+            ),
+        ))
+        .await
+        .unwrap();
+    log.append(&event(
+        "a",
+        observe(
+            "a",
+            ModelEvent::Finished {
+                reason: maka_agent_facts::model::ModelFinishReason::Stop,
+                usage: ModelUsage::default(),
+                provider_options: None,
+            },
+        ),
+    ))
+    .await
+    .unwrap();
+    let later = log
+        .append(&event(
+            "a",
+            Fact::ModelCompleted {
+                step_id: "step-a".into(),
+                output: ModelStep {
+                    parts: vec![ModelPart::Text {
+                        text_kind: TextKind::Text,
+                        text: "accepted中😀".into(),
+                        provider_options: None,
+                    }],
+                    finish_reason: maka_agent_facts::model::ModelFinishReason::Stop,
+                    usage: ModelUsage::default(),
+                    provider_options: None,
+                    response_id: None,
+                    model: None,
+                    timestamp: None,
+                },
+            },
+        ))
+        .await
+        .unwrap();
+    // All canonical facts exist before the first preparation. Only disposable
+    // cache warmth changes in the three old-fence observations below.
+    let original = canonical(&log).await;
+    assert!(log.prepare_transcript("a", old, 32).await.unwrap());
+    let cold_old = snapshot(&log, old).await;
+    let after_cold = canonical(&log).await;
+    assert!(log.prepare_transcript("a", later, 32).await.unwrap());
+    let later_page = snapshot(&log, later).await;
+    let warm_old = snapshot(&log, old).await;
+    let after_warm = canonical(&log).await;
+    log.close().await.unwrap();
+    let reopened = EventLog::open(&path).await.unwrap();
+    // Read directly after true close/reopen; do not prepare/rebuild/repair again.
+    let reopened_old = snapshot(&reopened, old).await;
+    let after_reopen = canonical(&reopened).await;
+    reopened.close().await.unwrap();
+
+    assert_eq!(after_cold, original);
+    assert_eq!(after_warm, original);
+    assert_eq!(after_reopen, original);
+    assert_eq!(
+        later_page.1,
+        [
+            (Role::User, "你好".into()),
+            (Role::Assistant, "accepted中😀".into())
+        ]
+    );
+    assert_eq!(
+        cold_old.1,
+        [
+            (Role::User, "你好".into()),
+            (Role::Assistant, "accepted中😀".into())
+        ]
+    );
+    assert_eq!(
+        (&warm_old, &reopened_old),
+        (&cold_old, &cold_old),
+        "one frozen public history fence must not depend on later preparation or reopening"
+    );
+}

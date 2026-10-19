@@ -35,6 +35,8 @@ use rusqlite::Connection;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "transcript_index/accepted_observations.rs"]
+mod accepted_observations;
 #[path = "transcript_index/fixtures.rs"]
 mod fixtures;
 #[path = "transcript_index/history.rs"]

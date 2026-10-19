@@ -67,14 +67,28 @@ pub(super) fn batch(
                    AND (e.kind IN ('message_imported', 'invocation_opened', 'message_steered', 'model_completed',
                                 'model_interrupted', 'invocation_ended', 'context_checkpoint_recorded',
                                 'tool_dispatched', 'tool_rejected', 'tool_settled', 'executor_completed')
+                       OR (e.kind = 'model_observed'
+                           AND json_extract(e.event_json, '$.fact.event.kind') IN ('part_finished','source','tool_call','provider_tool_result')
+                           AND json_type(e.event_json, '$.fact.step_id') = 'text'
+                           AND EXISTS (SELECT 1 FROM runtime_events request
+                               JOIN runtime_events opening ON opening.invocation_id = request.invocation_id AND opening.kind = 'invocation_opened'
+                               WHERE request.kind = 'model_requested' AND request.invocation_id = e.invocation_id
+                                 AND request.sequence < e.sequence
+                                 AND request.operation_id = CAST(json_extract(e.event_json, '$.fact.step_id') AS TEXT)
+                                 AND json_extract(e.event_json, '$.fact.step_id') = request.operation_id
+                                 AND json_extract(request.event_json, '$.fact.purpose') = 'main'
+                                 AND json_extract(request.event_json, '$.fact.item_acceptance') = 1
+                                 AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message','continuation','handoff')))
                        OR (e.kind = 'executor_observed' AND json_extract(e.event_json, '$.fact.output.type') IN ('tool_start','tool_result')))";
     let sql = format!(
-                            "SELECT e.sequence AS sequence, e.invocation_id, e.operation_id, e.kind
+                            "SELECT e.sequence AS sequence, e.invocation_id,
+                             CASE WHEN e.kind = 'model_observed' THEN json_extract(e.event_json, '$.fact.step_id') ELSE e.operation_id END AS operation_id, e.kind
                              FROM runtime_events e
                              WHERE json_extract(e.event_json, '$.invocation.session_id') = ?1
                                AND e.sequence > ?2 AND e.sequence <= ?3 AND {eligible}
                              UNION ALL
-                             SELECT h.sequence AS sequence, e.invocation_id, e.operation_id, e.kind
+                             SELECT h.sequence AS sequence, e.invocation_id,
+                             CASE WHEN e.kind = 'model_observed' THEN json_extract(e.event_json, '$.fact.step_id') ELSE e.operation_id END AS operation_id, e.kind
                              FROM session_history_members h CROSS JOIN runtime_events e ON e.sequence = h.sequence
                              WHERE h.session_id = ?1 AND h.sequence > ?2 AND h.sequence <= ?3 AND {eligible}
                              ORDER BY sequence LIMIT ?4"
