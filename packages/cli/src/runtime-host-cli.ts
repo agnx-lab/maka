@@ -385,6 +385,18 @@ export type RuntimeHostCliCommand =
       expectedRootId: string;
     }
   | { kind: 'runtime-host-profile-remove'; id: string }
+  | {
+      kind: 'runtime-host-reverse';
+      action: 'init' | 'gateway' | 'configure' | 'disable' | 'status';
+      configPath?: string;
+      rootPath?: string;
+      directory?: string;
+      url?: string;
+      route?: string;
+      port?: number;
+      tlsCertificatePath?: string;
+      tlsPrivateKeyPath?: string;
+    }
   | RuntimeHostCliHelp
   | RuntimeHostCliError;
 
@@ -404,6 +416,7 @@ export function parseRuntimeHostCommand(
   if (argv[0] === 'local-update-apply') return parseLocalUpdateApply(argv.slice(1));
   if (argv[0] === 'local-update-activate') return parseLocalUpdateActivate(argv.slice(1));
   if (argv[0] === 'local-source-retire') return parseLocalSourceRetire(argv.slice(1));
+  if (argv[0] === 'reverse') return parseReverseCommand(argv.slice(1));
   if (argv[0] === 'serve') return parseServeCommand(argv.slice(1));
   if (argv[0] === 'setup') return parseSetupCommand(argv.slice(1));
   if (argv[0] === 'service') return parseServiceManagementCommand(argv.slice(1));
@@ -2594,4 +2607,53 @@ function optionValue(argv: string[], index: number, option: string): string | Ru
 
 function error(message: string): RuntimeHostCliError {
   return { kind: 'error', message, exitCode: 2 };
+}
+
+function parseReverseCommand(argv: string[]): RuntimeHostCliCommand {
+  const action = argv[0];
+  if (!['init', 'gateway', 'configure', 'disable', 'status'].includes(action ?? ''))
+    return error('reverse requires init, gateway, configure, disable or status');
+  const allowed: Record<string, string[]> = {
+    init: ['--directory', '--url', '--route', '--port'],
+    gateway: ['--config', '--tls-certificate', '--tls-private-key'],
+    configure: ['--root', '--config'],
+    disable: ['--root'],
+    status: ['--root'],
+  };
+  const values = new Map<string, string>();
+  for (let i = 1; i < argv.length; i += 2) {
+    const key = argv[i];
+    if (!allowed[action].includes(key) || values.has(key))
+      return error(`Unexpected or duplicate reverse option: ${key}`);
+    const value = optionValue(argv, i, key);
+    if (typeof value !== 'string') return value;
+    values.set(key, value);
+  }
+  const required =
+    action === 'init'
+      ? ['--directory', '--url', '--route']
+      : action === 'gateway'
+        ? ['--config']
+        : action === 'configure'
+          ? ['--root', '--config']
+          : ['--root'];
+  if (required.some((key) => !values.has(key)))
+    return error(`reverse ${action} requires ${required.join(', ')}`);
+  if (values.has('--tls-certificate') !== values.has('--tls-private-key'))
+    return error('TLS certificate and private key must be provided together');
+  const port = values.has('--port') ? Number(values.get('--port')) : undefined;
+  if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535))
+    return error('Invalid reverse gateway port');
+  return {
+    kind: 'runtime-host-reverse',
+    action: action as 'init' | 'gateway' | 'configure' | 'disable' | 'status',
+    configPath: values.get('--config'),
+    rootPath: values.get('--root'),
+    directory: values.get('--directory'),
+    url: values.get('--url'),
+    route: values.get('--route'),
+    port,
+    tlsCertificatePath: values.get('--tls-certificate'),
+    tlsPrivateKeyPath: values.get('--tls-private-key'),
+  };
 }

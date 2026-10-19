@@ -18,6 +18,19 @@
  */
 
 const SUBCOMMANDS = {
+  reverse: {
+    summary: 'Configure vendor-neutral reverse Host connections',
+    lines: (cliCommand: string) => [
+      `  ${cliCommand} runtime-host reverse init --directory <new-directory> --url <wss://gateway> --route <device-name> [--port 7444]`,
+      `  ${cliCommand} runtime-host reverse gateway --config <gateway.json> [--tls-certificate <pem> --tls-private-key <pem>]`,
+      `  ${cliCommand} runtime-host reverse configure --root <path> --config <connector.json>`,
+      `  ${cliCommand} runtime-host reverse status|disable --root <path>`,
+      '',
+      'Configure/disable take effect on the next Host start; they never restart a running Host.',
+      'The target checks its normal Host credential; gateway routing does not grant execution access.',
+      'Use TLS directly or any trusted WebSocket reverse proxy. No tunnel vendor is required.',
+    ],
+  },
   activate: {
     summary: 'Run one framed activation against a managed root',
     lines: (cliCommand: string) => [

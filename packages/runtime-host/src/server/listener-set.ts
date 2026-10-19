@@ -17,6 +17,10 @@
  * under the License.
  */
 
+import {
+  startReverseRuntimeHostListener,
+  type ReverseRuntimeHostOptions,
+} from './reverse-websocket-listener.js';
 import { startLocalIpcRuntimeHostListener } from './local-ipc-listener.js';
 import type { RuntimeHostMessageTransport } from '../transport/message-transport.js';
 import type { SignedPeerReachabilityLeaseV1 } from '../peer-reachability/index.js';
@@ -46,7 +50,11 @@ export interface RuntimeHostPeerListenerDescriptor {
   readonly reachability: SignedPeerReachabilityLeaseV1;
 }
 
-export type RuntimeHostListenerKind = 'local_ipc' | 'websocket' | 'libp2p_direct';
+export type RuntimeHostListenerKind =
+  | 'local_ipc'
+  | 'websocket'
+  | 'libp2p_direct'
+  | 'reverse_websocket';
 
 export interface RuntimeHostListenerSet {
   readonly listeners: readonly RuntimeHostListener[];
@@ -79,6 +87,7 @@ export async function startRuntimeHostAuthenticatedListenerSet(
   input: RuntimeHostListenerSetFactoryInput,
   options: {
     readonly websocket?: Omit<StartRuntimeHostWebSocketListenerOptions, 'accept' | 'isReady'>;
+    readonly reverse?: Omit<ReverseRuntimeHostOptions, 'accept' | 'isReady'>;
     readonly peer?: RuntimeHostPeerListenerEndpointOptions & {
       readonly accessAuthority: RuntimeHostAccessAuthority;
     };
@@ -92,6 +101,15 @@ export async function startRuntimeHostAuthenticatedListenerSet(
       additional.push(
         await startRuntimeHostWebSocketListener({
           ...options.websocket,
+          accept: input.accept,
+          isReady: input.isReady,
+        }),
+      );
+    }
+    if (options.reverse) {
+      additional.push(
+        startReverseRuntimeHostListener({
+          ...options.reverse,
           accept: input.accept,
           isReady: input.isReady,
         }),

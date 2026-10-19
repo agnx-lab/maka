@@ -65,3 +65,17 @@ export {
   type HostPluginPlatformFailure,
 } from './plugin-platform.js';
 export { HostPluginPlatformCoordinator } from './plugin-platform-coordinator.js';
+
+export {
+  startReverseRuntimeHostGateway,
+  reverseGatewaySchema,
+} from './reverse-websocket-gateway.js';
+export {
+  readReverseConnectionConfiguration,
+  writeReverseConnectionConfiguration,
+  removeReverseConnectionConfiguration,
+} from './reverse-connection-config.js';
+export {
+  reverseConnectionSchema,
+  reverseBaseUrl,
+} from '../transport/reverse-websocket-protocol.js';

@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { readReverseConnectionConfiguration } from './reverse-connection-config.js';
 import { resolveExistingStorageRoot } from '@maka/storage/root-authority';
 import {
   currentRuntimeHostProcessLaunch,
@@ -89,13 +90,15 @@ export async function startInteractiveRuntimeHostCandidate(
       const loadedKernel = await kernelModule;
       if (loadedKernel.kind === 'failed') throw loadedKernel.error;
       const websocket = managedConfig?.listeners.websocket;
+      const reverse = await readReverseConnectionConfiguration(owner.controlDirectory);
       // Keep this the last fallible step: once opened, the authority passes
       // straight to Kernel.start, which owns its cleanup.
-      const accessAuthority = websocket
-        ? await import('./access-authority.js').then(({ openRuntimeHostAccessAuthority }) =>
-            openRuntimeHostAccessAuthority(owner.controlDirectory),
-          )
-        : undefined;
+      const accessAuthority =
+        websocket || reverse
+          ? await import('./access-authority.js').then(({ openRuntimeHostAccessAuthority }) =>
+              openRuntimeHostAccessAuthority(owner.controlDirectory),
+            )
+          : undefined;
       const kernelOptions = {
         owner,
         lifecycleMode: 'ephemeral',
@@ -108,14 +111,24 @@ export async function startInteractiveRuntimeHostCandidate(
           ? { initialClientAdmission: options.initialClientAdmission }
           : {}),
         ...(accessAuthority ? { accessAuthority } : {}),
-        ...(websocket && accessAuthority
+        ...((websocket || reverse) && accessAuthority
           ? {
               listenerSetFactory: async (input) => {
                 const { startRuntimeHostAuthenticatedListenerSet } = await import(
                   './listener-set.js'
                 );
                 return startRuntimeHostAuthenticatedListenerSet(input, {
-                  websocket: { ...websocket, accessAuthority },
+                  ...(websocket ? { websocket: { ...websocket, accessAuthority } } : {}),
+                  ...(reverse
+                    ? {
+                        reverse: {
+                          configuration: reverse,
+                          accessAuthority,
+                          onStatus: (status: string) =>
+                            console.error(`[runtime-host] reverse connection: ${status}`),
+                        },
+                      }
+                    : {}),
                 });
               },
             }

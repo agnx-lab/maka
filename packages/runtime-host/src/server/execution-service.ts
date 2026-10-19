@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import { readReverseConnectionConfiguration } from './reverse-connection-config.js';
 import { resolveStorageRoot } from '@maka/storage/root-authority';
 import {
   createExecutionRuntimeHostCompositionSource,
@@ -145,6 +146,7 @@ export async function startExecutionRuntimeHostService(
         console.error('[runtime-host] Peer Mesh stopped; Direct peer remains available:', error);
       });
     }
+    const reverse = await readReverseConnectionConfiguration(owner.controlDirectory);
     const accessAuthority = await openRuntimeHostAccessAuthority(owner.controlDirectory);
     // Kernel owns the root from here, including retaining it until process
     // termination when startup or shutdown cleanup exceeds its deadline.
@@ -157,10 +159,20 @@ export async function startExecutionRuntimeHostService(
       composition,
       accessAuthority,
       ...(peerMesh ? { peerMesh: peerMesh.mesh } : {}),
-      ...(options.websocket || peerEndpointOwner
+      ...(options.websocket || peerEndpointOwner || reverse
         ? {
             listenerSetFactory: (input) =>
               startRuntimeHostAuthenticatedListenerSet(input, {
+                ...(reverse
+                  ? {
+                      reverse: {
+                        configuration: reverse,
+                        accessAuthority,
+                        onStatus: (status: string) =>
+                          console.error(`[runtime-host] reverse connection: ${status}`),
+                      },
+                    }
+                  : {}),
                 ...(options.websocket
                   ? { websocket: { ...options.websocket, accessAuthority } }
                   : {}),

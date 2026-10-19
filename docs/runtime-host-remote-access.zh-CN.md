@@ -250,3 +250,5 @@ Remote Client 不会自动升级或重启 Host、降级 transport、修改 Profi
   SSH operator channel。若 durable commit 的结果无法确定，Host 仍会主动 drain；managed service
   supervisor 会将其重新拉起。
 - 在 Host 上使用 `maka runtime-host access revoke --root /srv/maka --credential <credentialId>` 撤销 credential。
+
+反向接入：被控制的 Host 可以主动连接通用 WebSocket 网关，无需在该电脑安装 Tunnel。参见 [反向接入配置与恢复](runtime-host-reverse-access.md)。

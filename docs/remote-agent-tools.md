@@ -91,3 +91,5 @@ separately configured assistant conversations on different Hosts.
 Persistent state is `<Host control directory>/remote-tools/remote-tools.sqlite`
 (0600): context identities, call receipts, tool event traces and feedback outbox.
 The bridge does not copy model connection credentials into its catalog or context metadata. Exported tools still have their normal ability to read files allowed by the target boundary.
+
+For Hosts behind NAT, see [reverse WebSocket access](runtime-host-reverse-access.md). The executing Host dials a trusted gateway; existing Host profiles and tool semantics are retained.

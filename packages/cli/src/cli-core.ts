@@ -242,6 +242,10 @@ export async function runMakaCli(
         version,
       });
     }
+    case 'runtime-host-reverse': {
+      const { runRuntimeHostReverseCli } = await import('./runtime-host-reverse-command.js');
+      return runRuntimeHostReverseCli(command);
+    }
     case 'runtime-host-serve': {
       const { runRuntimeHostServiceCli } = await import('./runtime-host-service-command.js');
       if (command.managedDeployment) {

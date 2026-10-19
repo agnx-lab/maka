@@ -274,3 +274,5 @@ Remote Clients never auto-upgrade or restart the Host, downgrade the transport, 
   Desktop management uses the separately authenticated SSH operator channel. The Host may still
   drain itself after an indeterminate durable commit; a managed service supervisor restarts it.
 - Revoke a credential on the Host with `maka runtime-host access revoke --root /srv/maka --credential <credentialId>`.
+
+For Hosts behind NAT, see [reverse WebSocket access](runtime-host-reverse-access.md). The executing Host dials a trusted gateway; existing Host profiles and tool semantics are retained.
