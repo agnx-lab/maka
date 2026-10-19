@@ -20,6 +20,7 @@
 //! Worker callback lifecycle on the actual OwnedConnection runtime and lease.
 use super::*;
 use std::{
+    fs::File,
     sync::{atomic::AtomicUsize, mpsc as blocking},
     time::Duration,
 };
@@ -345,4 +346,182 @@ fn dropped_caller_runtime_keeps_callback_commit_and_real_close_owned() {
             .unwrap(),
         3
     );
+}
+
+struct ReaderCloseGate {
+    entered: Option<oneshot::Sender<()>>,
+    release: blocking::Receiver<()>,
+}
+
+impl Drop for ReaderCloseGate {
+    fn drop(&mut self) {
+        // This destructor runs when SQLite destroys the actual reader hook.
+        let _ = self.entered.take().unwrap().send(());
+        self.release.recv().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writer_panic_rejects_accepted_reader_writer_work_before_join() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("callback.sqlite");
+    let lock = directory.path().join("writer.lock");
+    let owner = owner(directory.path()).await;
+    let initial_capacity = owner.jobs.capacity();
+    let contender = File::open(&lock).unwrap();
+    let (writer_entered, writer_active) = oneshot::channel();
+    let (panic_now, panic_gate) = oneshot::channel();
+    let writer_owner = owner.clone();
+    let panicking_writer = tokio::spawn(async move {
+        writer_owner
+            .run::<()>(move |_| {
+                Box::pin(async move {
+                    writer_entered.send(()).unwrap();
+                    panic_gate.await.unwrap();
+                    panic!("injected original accepted writer operation panic");
+                })
+            })
+            .await
+    });
+    writer_active.await.unwrap();
+
+    let (accepted, reader_queued) = oneshot::channel();
+    let (close_entered, closing) = oneshot::channel();
+    let (close_release, close_gate) = blocking::channel();
+    let executed = Arc::new(AtomicUsize::new(0));
+    let writer_observed = Arc::new(AtomicUsize::new(0));
+    let read_owner = owner.clone();
+    let writer = owner.writer();
+    let reader_observed = writer_observed.clone();
+    let reader = tokio::spawn(async move {
+        read_owner
+            .read::<()>(move |connection| {
+                Box::pin(async move {
+                    let original: i64 = sqlx::query_scalar("SELECT value FROM facts")
+                        .fetch_one(&mut *connection)
+                        .await?;
+                    assert_eq!(original, 1);
+                    let close = ReaderCloseGate {
+                        entered: Some(close_entered),
+                        release: close_gate,
+                    };
+                    connection
+                        .lock_handle()
+                        .await?
+                        .set_progress_handler(1, move || {
+                            let _retained = &close;
+                            true
+                        });
+                    let mut pending = Box::pin(writer.run::<()>(move |connection| {
+                        Box::pin(async move {
+                            reader_observed.fetch_add(1, Ordering::SeqCst);
+                            let value: i64 = sqlx::query_scalar("SELECT value FROM facts")
+                                .fetch_one(connection)
+                                .await?;
+                            assert_eq!(value, 1);
+                            Ok(())
+                        })
+                    }));
+                    // No other writer can enqueue: the original writer is held
+                    // above and this test owns all ingress. One poll must accept
+                    // this command then wait for its reply, not its send capacity.
+                    assert_eq!(writer.jobs.capacity(), initial_capacity);
+                    assert!(futures_util::poll!(pending.as_mut()).is_pending());
+                    assert_eq!(writer.jobs.capacity(), initial_capacity - 1);
+                    accepted.send(()).unwrap();
+                    pending.await
+                })
+            })
+            .await
+    });
+    reader_queued.await.unwrap();
+    // A separate accepted canonical-write stand-in must also be discarded,
+    // rather than executed merely to let the reader finish during shutdown.
+    let queued_executed = executed.clone();
+    let mut canonical = Box::pin(owner.run::<()>(move |connection| {
+        Box::pin(async move {
+            queued_executed.fetch_add(1, Ordering::SeqCst);
+            sqlx::query("INSERT INTO facts VALUES(2)")
+                .execute(connection)
+                .await?;
+            Ok(())
+        })
+    }));
+    assert!(futures_util::poll!(canonical.as_mut()).is_pending());
+    assert_eq!(owner.jobs.capacity(), initial_capacity - 2);
+    assert_eq!(writer_observed.load(Ordering::SeqCst), 0);
+    assert_eq!(executed.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        contender.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    // An external sender can reserve capacity before closure and publish later.
+    let reserved = owner.jobs.clone().reserve_owned().await.unwrap();
+    panic_now.send(()).unwrap();
+    assert!(matches!(
+        panicking_writer.await.unwrap(),
+        Err(StoreError::OperationUnknown)
+    ));
+    owner.jobs.closed().await;
+    assert!(owner.close_receipt().now_or_never().is_none());
+    assert!(matches!(
+        contender.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    let (reply, rejected) = oneshot::channel::<()>();
+    let late_executed = executed.clone();
+    let sender = reserved.send(Command::Run(Box::new(move |_, _| {
+        Box::pin(async move {
+            late_executed.fetch_add(1, Ordering::SeqCst);
+            reply.send(()).unwrap();
+        })
+    })));
+    assert!(rejected.await.is_err());
+    assert_eq!(executed.load(Ordering::SeqCst), 0);
+
+    let closing_owner = owner.clone();
+    let shutdown = tokio::spawn(async move { closing_owner.shutdown().await });
+    // Closing a reader must reject its queued writer dependency first.
+    closing.await.unwrap();
+    assert_eq!(executed.load(Ordering::SeqCst), 0);
+    assert!(!shutdown.is_finished());
+    assert!(owner.close_receipt().now_or_never().is_none());
+    assert!(matches!(
+        contender.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    close_release.send(()).unwrap();
+    assert!(matches!(
+        reader.await.unwrap(),
+        Err(StoreError::OperationUnknown)
+    ));
+    assert!(matches!(canonical.await, Err(StoreError::OperationUnknown)));
+    assert_eq!(writer_observed.load(Ordering::SeqCst), 0);
+    shutdown.await.unwrap().unwrap();
+    owner.close_receipt().await.unwrap();
+    contender.try_lock().unwrap();
+    contender.unlock().unwrap();
+
+    let lease = Arc::new(crate::root::FileLease::acquire(&lock).unwrap());
+    let reopened = OwnedConnection::open(
+        SqliteConnectOptions::new().filename(&database),
+        ConnectionAuthority::Writer { lease, root: None },
+        |_| Box::pin(async { Ok(()) }),
+    )
+    .await
+    .unwrap();
+    let facts: Vec<i64> = reopened
+        .run(|connection| {
+            Box::pin(async move {
+                Ok(sqlx::query_scalar("SELECT value FROM facts ORDER BY rowid")
+                    .fetch_all(connection)
+                    .await?)
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(facts, [1]);
+    assert_eq!(executed.load(Ordering::SeqCst), 0);
+    reopened.shutdown().await.unwrap();
+    drop(sender);
 }

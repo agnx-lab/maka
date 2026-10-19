@@ -143,6 +143,7 @@ impl OwnedConnection {
         std::thread::Builder::new()
             .name("runtime-store-owner".into())
             .spawn(move || {
+                let mut queued_drop_panicked = false;
                 let mut result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -204,6 +205,14 @@ impl OwnedConnection {
                             }
                         }
                     }
+                    // Readers can await writer replies. Close admission, then reject
+                    // queued work, including sends holding an earlier capacity permit,
+                    // before joining readers. None also accounts for those permits.
+                    receiver.close();
+                    while let Some(command) = runtime.block_on(receiver.recv()) {
+                        queued_drop_panicked |=
+                            std::panic::catch_unwind(AssertUnwindSafe(|| drop(command))).is_err();
+                    }
                     // Close read ingress independently, then drain every accepted read
                     // before releasing the writer's original authority.
                     reader_stop.cancel();
@@ -229,7 +238,9 @@ impl OwnedConnection {
                 });
                 // Unexecuted accepted jobs still own their original payloads.
                 // Their destructors cannot unwind past this authority boundary.
-                if std::panic::catch_unwind(AssertUnwindSafe(|| drop(receiver))).is_err() {
+                if std::panic::catch_unwind(AssertUnwindSafe(|| drop(receiver))).is_err()
+                    || queued_drop_panicked
+                {
                     result = Err(StoreError::CloseFailed(format!(
                         "queued connection work destruction panicked; prior close: {result:?}"
                     )));
