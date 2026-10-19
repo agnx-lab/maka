@@ -313,3 +313,219 @@ async fn second_record_sql_failure_rolls_back_the_complete_import_and_allows_ret
     assert_eq!(log.prefix(16, 64 * 1024).await.unwrap().digest, digest);
     log.close().await.unwrap();
 }
+
+// Original four-record witness: preserve its distinct source IDs, record order,
+// normalized duplicate key, inputs and result instead of repairing the fixture.
+fn duplicate_calls() -> Vec<Record> {
+    [
+        Content::User {
+            text: "import literal".into(),
+        },
+        Content::ToolCall {
+            call_id: "same".into(),
+            name: "Read".into(),
+            input: None,
+        },
+        Content::ToolCall {
+            call_id: "same".into(),
+            name: "Read".into(),
+            input: None,
+        },
+        Content::ToolResult {
+            call_id: "same".into(),
+            output: json!({"literal":"result"}),
+            is_error: false,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, content)| Record {
+        source_message_id: format!("m{i}"),
+        source_turn_id: "turn".into(),
+        timestamp: Some(1),
+        content,
+    })
+    .collect()
+}
+
+fn import_state(db: &rusqlite::Connection) -> (Vec<(i64, Vec<u8>)>, String) {
+    let events = db
+        .prepare("SELECT sequence,CAST(event_json AS BLOB) FROM event_log ORDER BY sequence")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let publication = db.query_row(
+        "SELECT json_array(
+           (SELECT json_group_array(json_array(id,fingerprint,revision,created_at,updated_at,archived,configuration))
+              FROM (SELECT * FROM session_control ORDER BY id)),
+           (SELECT json_group_array(json_array(session_id,source_json,configuration,created_at,state,records,bytes,conversation))
+              FROM (SELECT * FROM session_imports ORDER BY session_id)),
+           (SELECT json_group_array(json_array(session_id,package_id,scope_id,fingerprint,managed,authority_session_id))
+              FROM (SELECT * FROM plugin_sessions ORDER BY session_id)),
+           (SELECT json_group_array(json_array(sequence,ordinal,session_id,message_at,preview,message_id))
+              FROM (SELECT * FROM catalog_messages ORDER BY sequence,ordinal)),
+           (SELECT json_group_array(json_array(singleton,sequence)) FROM catalog_message_watermark),
+           (SELECT json_group_array(json_array(singleton,revision)) FROM session_catalog_revision),
+           (SELECT json_group_array(json_array(session_id,has_unread,last_read_message_id))
+              FROM (SELECT * FROM session_read_state ORDER BY session_id)),
+           (SELECT seq FROM sqlite_sequence WHERE name='event_log'))",
+        [], |row| row.get(0),
+    ).unwrap();
+    (events, publication)
+}
+
+#[tokio::test]
+async fn duplicate_normalized_calls_reject_the_complete_new_import_atomically() {
+    for cross_turn in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("duplicate.sqlite");
+        let log = EventLog::open(&path).await.unwrap();
+        let db = rusqlite::Connection::open(&path).unwrap();
+        let source = Source {
+            adapter: "fixture".into(),
+            session_id: "foreign".into(),
+        };
+        let kept = log
+            .import_session(
+                &owner("kept"),
+                &source,
+                &json!({}),
+                vec![record(0, "retained control".into())],
+                10,
+            )
+            .await
+            .unwrap();
+        let before = import_state(&db);
+        assert_eq!(
+            before.0.len(),
+            1,
+            "the unchanged state proof has a real canonical control"
+        );
+        let prefix = log.prefix(16, 64 * 1024).await.unwrap();
+        let notices = log.subscribe_commits();
+        let high = *notices.borrow();
+        let claim = owner("duplicate-owned");
+        let mut records = duplicate_calls();
+        if cross_turn {
+            records[2].source_turn_id = "other-turn".into();
+        }
+        assert!(matches!(
+            log.import_session(&claim, &source, &json!({}), records, 20).await,
+            Err(StoreError::InvalidTransition(reason)) if reason == "duplicate imported tool call identity"
+        ));
+        assert_eq!(import_state(&db), before);
+        assert_eq!(*notices.borrow(), high);
+        assert!(!notices.has_changed().unwrap());
+        let after = log.prefix(16, 64 * 1024).await.unwrap();
+        assert_eq!(after.high_water, prefix.high_water);
+        assert_eq!(after.digest, prefix.digest);
+        assert!(
+            log.get_session::<Value>(&claim.session_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            log.session_creator(&claim.session_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            log.imported_sessions::<Value>("duplicate-", None, 16)
+                .await
+                .unwrap()
+                .0
+                .is_empty()
+        );
+        assert_eq!(log.get_session::<Value>("kept").await.unwrap(), Some(kept));
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        assert_eq!(import_state(&db), before);
+        assert!(
+            log.get_session::<Value>(&claim.session_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        log.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn import_retry_verifies_original_bytes_before_new_call_uniqueness() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("retry.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let source = Source {
+        adapter: "fixture".into(),
+        session_id: "foreign".into(),
+    };
+    let claim = owner("retry-owned");
+    let mut records = duplicate_calls();
+    let Content::ToolCall { call_id, .. } = &mut records[2].content else {
+        unreachable!()
+    };
+    *call_id = "other".into();
+    // A matching result, a call with no result, and an orphan result keep their
+    // existing import semantics; only repeated ToolCall keys are rejected.
+    records.push(Record {
+        source_message_id: "m4".into(),
+        source_turn_id: "turn".into(),
+        timestamp: Some(1),
+        content: Content::ToolResult {
+            call_id: "unmatched".into(),
+            output: json!({"orphan":true}),
+            is_error: false,
+        },
+    });
+    let first = log
+        .import_session(
+            &claim,
+            &source,
+            &json!({"name":"copy"}),
+            records.clone(),
+            20,
+        )
+        .await
+        .unwrap();
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    let before = import_state(&db);
+    let notices = log.subscribe_commits();
+    let high = *notices.borrow();
+    assert_eq!(
+        log.import_session(
+            &claim,
+            &source,
+            &json!({"name":"copy"}),
+            records.clone(),
+            99
+        )
+        .await
+        .unwrap(),
+        first
+    );
+    assert_eq!(import_state(&db), before);
+    assert_eq!(*notices.borrow(), high);
+    assert!(!notices.has_changed().unwrap());
+    // Same source identities/count, but this changed retry now introduces the
+    // duplicate normalized key. Original-byte replay must still win.
+    records[2].content = Content::ToolCall {
+        call_id: "same".into(),
+        name: "Read".into(),
+        input: None,
+    };
+    assert!(matches!(
+        log.import_session(&claim, &source, &json!({"name":"copy"}), records, 99)
+            .await,
+        Err(StoreError::EventConflict)
+    ));
+    assert_eq!(import_state(&db), before);
+    assert_eq!(*notices.borrow(), high);
+    assert!(!notices.has_changed().unwrap());
+    log.close().await.unwrap();
+}

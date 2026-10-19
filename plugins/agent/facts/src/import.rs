@@ -57,11 +57,15 @@ pub enum Content {
     },
     /// Foreign tool activity remains an observation, not a replayable tool call.
     ToolCall {
+        /// Adapter-normalized occurrence key, unique among ToolCall records in
+        /// the complete imported Session. Normalize reused foreign IDs first.
         call_id: String,
         name: String,
         input: Option<serde_json::Value>,
     },
     ToolResult {
+        /// Refers to the normalized call occurrence when present; unmatched
+        /// result keys are allowed.
         call_id: String,
         output: serde_json::Value,
         is_error: bool,

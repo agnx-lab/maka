@@ -128,6 +128,18 @@ impl EventLog {
                     UNION ALL SELECT 1 FROM event_log WHERE event_session=?1)"
             ).bind(&owner.session_id).fetch_one(&mut *tx).await?;
             if occupied { return Err(StoreError::SessionConflict); }
+            // Published retries above verify the original records before any new
+            // cross-record admission rule. Only a new complete import is checked.
+            {
+                let mut calls = std::collections::HashSet::new();
+                for record in &records {
+                    if let maka_agent_facts::import::Content::ToolCall { call_id, .. } = &record.content
+                        && !calls.insert(call_id.as_str())
+                    {
+                        return Err(invalid("duplicate imported tool call identity"));
+                    }
+                }
+            }
             origin::insert(&mut tx, &owner).await?;
             sqlx::query("INSERT INTO session_imports(session_id,source_json,configuration,created_at,state,records,bytes,conversation)
                 VALUES(?,?,?,?,'collecting',0,0,0)")
