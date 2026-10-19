@@ -65,12 +65,15 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> Result<(), 
         "INSERT INTO message_sources
          SELECT json_extract(event_json, '$.invocation.session_id'),
             json_extract(event_json, '$.fact.message.message_id'), event_id
-         FROM runtime_events WHERE kind = 'message_steered';
+         -- Match runtime_events while using the sparse steering identity index.
+         FROM event_log INDEXED BY message_steering_identity
+         WHERE kind = 'message_steered' AND invocation_id IS NOT NULL AND event_json IS NOT NULL;
          INSERT INTO message_sources
          SELECT json_extract(e.event_json, '$.invocation.session_id'),
             json_extract(s.value, '$.message_id'), e.event_id
          FROM runtime_events e, json_each(e.event_json, '$.fact.input.source_messages') s
-         WHERE e.kind = 'invocation_opened' AND json_extract(e.event_json, '$.fact.input.kind') = 'message';"
+         WHERE e.kind = 'invocation_opened' AND json_extract(e.event_json, '$.fact.input.kind') = 'message'
+         AND json_array_length(e.event_json, '$.fact.input.source_messages') > 0;"
     ).execute(&mut *tx).await?;
     tx.commit().await.map_err(StoreError::CommitUnknown)?;
     Ok(())
