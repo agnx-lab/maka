@@ -95,18 +95,10 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                 .is_empty()
         );
         let frozen = log
-            .run_prefix("session", "source", None, 100, 8 * 1024 * 1024)
+            .run_source("session", "source", None)
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            frozen
-                .events
-                .iter()
-                .map(|event| serde_json::to_vec(&event.event).unwrap().len())
-                .sum::<usize>()
-                < 8 * 1024 * 1024
-        );
         if already_claimed {
             let mut target = opening("unused", None);
             target.invocation = pause.intent.successor(&source.invocation);
@@ -116,11 +108,7 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             *input = InvocationInput::Handoff {
                 claim: Box::new(ContinuationClaim {
                     id: "claim".into(),
-                    source: RunBoundary {
-                        invocation: frozen.invocation.clone(),
-                        high_water: frozen.high_water,
-                        digest: frozen.digest.clone(),
-                    },
+                    source: frozen.boundary.clone(),
                     base: SessionBase {
                         high_water: before.source_evidence.high_water,
                         digest: before.source_evidence.digest,
@@ -190,13 +178,12 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             );
             assert!(matches!(outcome, InvocationOutcome::Cancelled { .. }));
             let prefix = log
-                .run_prefix("session", "next-run", None, 100, 8 * 1024 * 1024)
+                .run_source("session", "next-run", None)
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(
-                prefix.events.len(),
-                2,
+                prefix.boundary.high_water, 2,
                 "cancel requires neither model request nor tool dispatch"
             );
         }
@@ -205,12 +192,13 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             "the successor opening is the only handoff claim authority"
         );
         assert_eq!(
-            log.run_prefix("session", "source", None, 100, 8 * 1024 * 1024)
+            log.run_source("session", "source", None)
                 .await
                 .unwrap()
                 .unwrap()
+                .boundary
                 .digest,
-            frozen.digest
+            frozen.boundary.digest
         );
         let later = opening("later-turn", None);
         append(&log, &later).await;

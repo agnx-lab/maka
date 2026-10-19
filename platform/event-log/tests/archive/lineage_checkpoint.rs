@@ -99,20 +99,12 @@ async fn narrower_checkpoint_does_not_corrupt_later_whole_session_archives() {
     end(&log, "writer").await;
     // Verify that the existing narrower proof also remains readable after this archive.
     let boundary = log
-        .run_prefix("session", "child", None, 100, 65536)
+        .run_source("session", "child", None)
         .await
         .unwrap()
         .unwrap();
     let selected = log
-        .read_lineage_context(
-            &RunBoundary {
-                invocation: boundary.invocation,
-                high_water: boundary.high_water,
-                digest: boundary.digest,
-            },
-            100,
-            65536,
-        )
+        .read_lineage_context(&boundary.boundary, 100, 65536)
         .await
         .unwrap();
     assert_eq!(selected.baseline.unwrap().event_id, checkpoint.id);

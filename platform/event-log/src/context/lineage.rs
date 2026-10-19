@@ -68,23 +68,16 @@ impl EventLog {
                     .bind(&id)
                     .fetch_one(&mut *tx)
                     .await?;
-                    let prefix = crate::run_prefix::read(
+                    let evidence = crate::run_source::read(
                         &mut tx,
                         &invocation.session_id,
                         &invocation.run_id,
                         &id,
                         through,
-                        10_000,
-                        8 * 1024 * 1024,
                     )
                     .await?;
-                    if prefix.invocation != *invocation
-                        || prefix.high_water != source.high_water
-                        || prefix.digest != source.digest
-                        || !matches!(
-                            prefix.events.last().map(|e| &e.event.fact),
-                            Some(Fact::InvocationEnded { .. })
-                        )
+                    if evidence.boundary != source
+                        || !matches!(evidence.last.event.fact, Fact::InvocationEnded { .. })
                     {
                         return Err(invalid("lineage source is not its exact sealed boundary"));
                     }

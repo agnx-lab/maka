@@ -265,6 +265,13 @@ async fn session_binding_missing_payload_and_corrupt_raw_fail_closed() {
             .await
             .is_err()
     );
+    let source = log
+        .run_source("session", "run", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(source.boundary.high_water, 3);
+    assert_eq!(source.last.event, *outcome.event());
     let inspect = rusqlite::Connection::open(&path).unwrap();
     let original = outcome.raw_payload().unwrap();
     let mut corrupt = original.to_vec();
@@ -278,6 +285,16 @@ async fn session_binding_missing_payload_and_corrupt_raw_fail_closed() {
         .unwrap();
     // Prefix checks physical binding; selected hydration verifies content hashes.
     assert!(log.prefix(10, 8192).await.is_ok());
+    // Source evidence also checks physical binding without hydrating raw payloads.
+    assert_eq!(
+        log.run_source("session", "run", None)
+            .await
+            .unwrap()
+            .unwrap()
+            .boundary,
+        source.boundary
+    );
+
     assert!(
         log.resolve_tool_result("session", &outcome.event().id)
             .await
@@ -291,6 +308,7 @@ async fn session_binding_missing_payload_and_corrupt_raw_fail_closed() {
         )
         .unwrap();
     assert!(log.prefix(10, 8192).await.is_err());
+    assert!(log.run_source("session", "run", None).await.is_err());
     assert!(
         log.resolve_tool_result("session", &outcome.event().id)
             .await
@@ -303,6 +321,7 @@ async fn session_binding_missing_payload_and_corrupt_raw_fail_closed() {
         )
         .unwrap();
     assert!(log.prefix(10, 8192).await.is_err());
+    assert!(log.run_source("session", "run", None).await.is_err());
     assert!(
         log.invocation_recovery(&invocation(), 10, 8192)
             .await

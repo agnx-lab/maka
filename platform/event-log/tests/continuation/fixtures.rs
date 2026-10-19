@@ -96,23 +96,17 @@ pub(super) async fn claim(
     base: SessionBase,
 ) -> ContinuationClaim {
     let prefix = log
-        .run_prefix(
+        .run_source(
             &source.invocation.session_id,
             &source.invocation.run_id,
             None,
-            100,
-            65536,
         )
         .await
         .unwrap()
         .unwrap();
     ContinuationClaim {
         id: id.into(),
-        source: RunBoundary {
-            invocation: prefix.invocation,
-            high_water: prefix.high_water,
-            digest: prefix.digest,
-        },
+        source: prefix.boundary,
         base,
         // Fixture of engine-owned projection evidence; the store authenticates raw ancestry.
         replay: ReplayEvidence {

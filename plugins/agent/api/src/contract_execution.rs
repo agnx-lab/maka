@@ -200,7 +200,6 @@ pub enum ResumeParkReason {
     SourceMissing,
     SourceChanged,
     SourceNotResumable,
-    SourceUnreadable,
     AlreadyContinued,
     WorkspaceChanged,
     SafetyCheckFailed,

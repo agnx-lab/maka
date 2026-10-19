@@ -375,7 +375,7 @@ async fn verify_yielded(continuation: bool) {
                 .unwrap();
         }
         let prefix = log
-            .run_prefix("session", "source", None, 100, 128 * 1024)
+            .run_source("session", "source", None)
             .await
             .unwrap()
             .unwrap();
@@ -383,11 +383,7 @@ async fn verify_yielded(continuation: bool) {
             unreachable!()
         };
         request.work = maka_agent_engine::RunWork::Continuation {
-            source: maka_agent_facts::continuation::RunBoundary {
-                invocation: source,
-                high_water: prefix.high_water,
-                digest: prefix.digest,
-            },
+            source: prefix.boundary,
             tools,
         };
     }

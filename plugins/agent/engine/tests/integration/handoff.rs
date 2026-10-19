@@ -114,12 +114,10 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
                     log.append(&EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap()).await.unwrap();
                 }
             }
-            let prefix = log.run_prefix("session", &source.run_id, None, 100, 128 * 1024).await.unwrap().unwrap();
+            let prefix = log.run_source("session", &source.run_id, None).await.unwrap().unwrap();
             let maka_agent_engine::RunWork::Message { tools, .. } = run.work else { unreachable!() };
             run.work = maka_agent_engine::RunWork::Continuation {
-                source: maka_agent_facts::continuation::RunBoundary {
-                    invocation: source, high_water: prefix.high_water, digest: prefix.digest,
-                },tools, };
+                source: prefix.boundary,tools, };
         }
         let configuration = run.configuration.clone();
         let running = engine.start(run, CancellationToken::new()).await.unwrap();
@@ -168,12 +166,8 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
         let after = reopened.prefix(100, 128 * 1024).await.unwrap();
         assert_eq!(before.digest, after.digest);
         assert_eq!(after.project_invocation("invocation-first").terminal, Some(TerminalStatus::Paused));
-        let prefix = reopened.run_prefix("session", "run-first", None, 100, 128 * 1024).await.unwrap().unwrap();
-        let source = maka_agent_facts::continuation::RunBoundary {
-            invocation: prefix.invocation,
-            high_water: prefix.high_water,
-            digest: prefix.digest,
-        };
+        let prefix = reopened.run_source("session", "run-first", None).await.unwrap().unwrap();
+        let source = prefix.boundary;
         let resumed_engine = Engine::new(reopened.clone(), ModelExecutor::new(Duration::from_secs(5)).unwrap(),
             CodeExecutor::new(CellLimits::default()).unwrap());
         let successor = || {

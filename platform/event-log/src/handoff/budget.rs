@@ -18,9 +18,10 @@
  */
 
 use crate::StoreError;
+use maka_agent_facts::configuration::validation::MAX_SAFE_INTEGER;
 use maka_agent_facts::continuation::ContinuationClaim;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
+use maka_agent_facts::continuation::MAX_REPLAY_BYTES;
+use maka_agent_facts::continuation::MAX_REPLAY_EVENTS;
 use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::continuation::SessionBase;
 use maka_agent_facts::event::Fact;
@@ -37,18 +38,25 @@ pub(super) async fn check(
     pause: &HandoffPause,
 ) -> Result<(), StoreError> {
     let seal_bytes = envelope_bytes(seal)?;
-    crate::run_prefix::read(
+    let source = crate::run_source::read(
         tx,
         &seal.invocation.session_id,
         &seal.invocation.run_id,
         &seal.invocation.invocation_id,
         i64::MAX,
-        MAX_SOURCE_EVENTS - 1,
-        MAX_SOURCE_BYTES
-            .checked_sub(seal_bytes)
-            .ok_or(StoreError::PrefixTooLarge)?,
     )
     .await?;
+    if source.boundary.invocation != seal.invocation {
+        return Err(super::invalid("handoff source invocation changed"));
+    }
+    source
+        .boundary
+        .high_water
+        .checked_add(1)
+        .filter(|count| *count <= MAX_SAFE_INTEGER)
+        .ok_or_else(|| {
+            super::invalid("handoff source high-water exceeds the safe integer range")
+        })?;
     let Fact::InvocationOpened { configuration, .. } = &opening.fact else {
         return Err(super::invalid(
             "handoff budget requires its canonical opening",
@@ -88,10 +96,10 @@ pub(super) async fn check(
         },
     );
     let cancelled_bytes = envelope_bytes(&cancelled)?;
-    let bytes = MAX_SOURCE_BYTES
+    let bytes = MAX_REPLAY_BYTES
         .checked_sub(seal_bytes + envelope_bytes(&successor)? + cancelled_bytes)
         .ok_or(StoreError::PrefixTooLarge)?;
-    crate::context::read::check_handoff_capacity(tx, opening, MAX_SOURCE_EVENTS - 3, bytes).await
+    crate::context::read::check_handoff_capacity(tx, opening, MAX_REPLAY_EVENTS - 3, bytes).await
 }
 
 fn envelope_bytes(event: &RuntimeEvent) -> Result<usize, StoreError> {

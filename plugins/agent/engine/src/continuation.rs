@@ -19,8 +19,8 @@
 
 use crate::{Inner, RunError, RunInput, model_attempt};
 use maka_agent_facts::continuation::ContinuationClaim;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
+use maka_agent_facts::continuation::MAX_REPLAY_BYTES;
+use maka_agent_facts::continuation::MAX_REPLAY_EVENTS;
 use maka_agent_facts::continuation::REPLAY_VERSION;
 use maka_agent_facts::continuation::ReplayEvidence;
 use maka_agent_facts::continuation::RunBoundary;
@@ -86,22 +86,15 @@ pub(super) async fn inspect(
     }
     let prefix = inner
         .log
-        .run_prefix(
+        .run_source(
             &source.invocation.session_id,
             &source.invocation.run_id,
             None,
-            MAX_SOURCE_EVENTS,
-            MAX_SOURCE_BYTES,
         )
         .await?
         .ok_or_else(|| invalid("continuation source is missing"))?;
-    if prefix.invocation != source.invocation
-        || prefix.high_water != source.high_water
-        || prefix.digest != source.digest
-        || !matches!(
-            prefix.events.last().map(|s| &s.event.fact),
-            Some(Fact::InvocationEnded { .. })
-        )
+    if prefix.boundary != *source
+        || !matches!(&prefix.last.event.fact, Fact::InvocationEnded { .. })
     {
         return Err(invalid(
             "continuation source is not its exact sealed boundary",
@@ -110,12 +103,7 @@ pub(super) async fn inspect(
     let Fact::InvocationOpened {
         input: opening,
         configuration: Some(configuration),
-    } = &prefix
-        .events
-        .first()
-        .ok_or_else(|| invalid("continuation source is empty"))?
-        .event
-        .fact
+    } = &prefix.opening.event.fact
     else {
         return Err(invalid("continuation source has no observed configuration"));
     };
@@ -127,7 +115,7 @@ pub(super) async fn inspect(
     if let crate::RunWork::Handoff { pause, .. } = &input.work
         && (configuration.as_ref() != &input.configuration
             || !matches!(
-                &prefix.events.last().expect("checked nonempty source").event.fact,
+                &prefix.last.event.fact,
                 Fact::InvocationEnded {
                     outcome: maka_agent_facts::event::InvocationOutcome::HandoffPaused { pause: sealed }
                 } if sealed == pause.as_ref()
@@ -139,7 +127,7 @@ pub(super) async fn inspect(
         InvocationInput::Message { .. } => {
             let base = inner
                 .log
-                .context_before_run(&source.invocation, 10_000, 8 * 1024 * 1024)
+                .context_before_run(&source.invocation, MAX_REPLAY_EVENTS, MAX_REPLAY_BYTES)
                 .await?;
             SessionBase {
                 high_water: base.source_evidence.high_water,
@@ -153,7 +141,7 @@ pub(super) async fn inspect(
     };
     let context = inner
         .log
-        .read_lineage_context(source, 10_000, 8 * 1024 * 1024)
+        .read_lineage_context(source, MAX_REPLAY_EVENTS, MAX_REPLAY_BYTES)
         .await?;
     let prompt = model_attempt::prompt(
         inner,

@@ -19,40 +19,37 @@
 
 use crate::{EventLog, StoreError, sequence_number};
 use futures_util::TryStreamExt;
+use maka_agent_facts::configuration::validation::MAX_SAFE_INTEGER;
+use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::Fact;
-use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::RuntimeEvent;
 use maka_agent_facts::event::StoredEvent;
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, Row, SqliteConnection};
 
-/// One immutable physical Run segment, not a mutable Session history or a replay plan.
-/// `high_water` counts Run-local events (one-based), while StoredEvent.sequence
-/// remains the root ledger position. Neither number can stand in for the other.
+/// Canonical evidence for one physical Run cut, retaining only its endpoints.
+/// Boundary high-water counts Run-local events; endpoint sequences are root positions.
 #[derive(Debug)]
-pub struct RunPrefix {
-    pub invocation: Invocation,
-    pub high_water: u64,
-    pub digest: String,
-    pub events: Vec<StoredEvent>,
+pub struct RunSource {
+    pub boundary: RunBoundary,
+    pub opening: StoredEvent,
+    pub last: StoredEvent,
 }
 
 impl EventLog {
-    /// Resolve identity, exact Run-local cut, budgets and bytes in one SQL snapshot.
+    /// Authenticate identity, the exact Run-local cut and original bytes in one snapshot.
     /// A requested cut must exist; it is never silently clamped to the latest event.
     /// An unsealed prefix is readable evidence, not proof that resuming it is safe.
-    pub async fn run_prefix(
+    pub async fn run_source(
         &self,
         session: &str,
         run: &str,
         up_to: Option<u64>,
-        max_events: usize,
-        max_bytes: usize,
-    ) -> Result<Option<RunPrefix>, StoreError> {
+    ) -> Result<Option<RunSource>, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
         crate::sessions::validate_id(run)?;
-        if up_to.is_some_and(|n| n == 0 || n > 9_007_199_254_740_991) {
+        if up_to.is_some_and(|n| n == 0 || n > MAX_SAFE_INTEGER) {
             return Err(invalid("Run high-water is not a positive safe integer"));
         }
         let (session, run) = (session.to_owned(), run.to_owned());
@@ -83,18 +80,9 @@ impl EventLog {
                         .fetch_one(&mut *tx)
                         .await?
                     };
-                    let prefix = read(
-                        &mut tx,
-                        &session,
-                        &run,
-                        &invocation,
-                        through,
-                        max_events,
-                        max_bytes,
-                    )
-                    .await?;
+                    let source = read(&mut tx, &session, &run, &invocation, through).await?;
                     tx.commit().await?;
-                    Ok(Some(prefix))
+                    Ok(Some(source))
                 })
             })
             .await
@@ -107,23 +95,23 @@ pub(crate) async fn read(
     run: &str,
     invocation_id: &str,
     through: i64,
-    max_events: usize,
-    max_bytes: usize,
-) -> Result<RunPrefix, StoreError> {
-    let (count, bytes): (i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*), COALESCE(SUM(length(CAST(event_json AS BLOB))), 0)
-         FROM runtime_events WHERE invocation_id = ? AND sequence <= ?",
+) -> Result<RunSource, StoreError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM runtime_events WHERE invocation_id = ? AND sequence <= ?",
     )
     .bind(invocation_id)
     .bind(through)
     .fetch_one(&mut *connection)
     .await?;
     let high_water = sequence_number(count)?;
-    if high_water > max_events as u64 || sequence_number(bytes)? > max_bytes as u64 {
-        return Err(StoreError::PrefixTooLarge);
+    if high_water == 0 || high_water > MAX_SAFE_INTEGER {
+        return Err(invalid(
+            "Run source high-water is not a positive safe integer",
+        ));
     }
-    let mut invocation = None;
-    let mut events = Vec::new();
+    let mut opening: Option<StoredEvent> = None;
+    let mut last = None;
+    let mut observed = 0u64;
     let mut digest = Sha256::new();
     digest.update(b"maka.run-prefix.v1\0");
     digest.update(high_water.to_be_bytes());
@@ -140,7 +128,7 @@ pub(crate) async fn read(
         let json: &str = row.try_get(1)?;
         let event: RuntimeEvent = serde_json::from_str(json)?;
         crate::tool_payloads::verify_binding(&event, row.try_get(2)?)?;
-        match &invocation {
+        match &opening {
             None => {
                 if !matches!(event.fact, Fact::InvocationOpened { .. })
                     || event.invocation.session_id != session
@@ -152,10 +140,9 @@ pub(crate) async fn read(
                 let identity = serde_json::to_vec(&event.invocation)?;
                 digest.update((identity.len() as u64).to_be_bytes());
                 digest.update(identity);
-                invocation = Some(event.invocation.clone());
             }
-            Some(expected)
-                if *expected != event.invocation
+            Some(opening)
+                if opening.event.invocation != event.invocation
                     || matches!(event.fact, Fact::InvocationOpened { .. }) =>
             {
                 return Err(invalid("Run prefix identity changed"));
@@ -165,13 +152,32 @@ pub(crate) async fn read(
         digest.update(sequence.to_be_bytes());
         digest.update((json.len() as u64).to_be_bytes());
         digest.update(json.as_bytes());
-        events.push(StoredEvent { sequence, event });
+        let stored = StoredEvent { sequence, event };
+        if opening.is_none() {
+            opening = Some(StoredEvent {
+                sequence,
+                event: stored.event.clone(),
+            });
+        }
+        last = Some(stored);
+        observed = observed
+            .checked_add(1)
+            .ok_or_else(|| invalid("Run source event count overflow"))?;
     }
-    Ok(RunPrefix {
-        invocation: invocation.ok_or_else(|| invalid("Run prefix is empty"))?,
-        high_water,
-        digest: format!("sha256:{}", hex::encode(digest.finalize())),
-        events,
+    if observed != high_water {
+        return Err(invalid(
+            "Run source event count changed during authentication",
+        ));
+    }
+    let opening = opening.ok_or_else(|| invalid("Run source is empty"))?;
+    Ok(RunSource {
+        boundary: RunBoundary {
+            invocation: opening.event.invocation.clone(),
+            high_water,
+            digest: format!("sha256:{}", hex::encode(digest.finalize())),
+        },
+        opening,
+        last: last.ok_or_else(|| invalid("Run source is empty"))?,
     })
 }
 

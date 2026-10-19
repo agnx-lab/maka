@@ -663,18 +663,15 @@ async fn executor_service_javascript_uses_original_engine_and_read_only_restart(
             .unwrap()
             .unwrap();
         assert!(configuration.model.is_none());
-        let prefix = fixture
-            .store
-            .run_prefix(
-                &session,
-                observed["execution"]["runId"].as_str().unwrap(),
-                None,
-                32,
-                65536,
-            )
-            .await
-            .unwrap()
-            .unwrap();
+        let source = fixture.store.run_source(
+            &session, observed["execution"]["runId"].as_str().unwrap(), None,
+        ).await.unwrap().unwrap();
+        let mut prefix = fixture.store.session_events(
+            &session, 0, source.last.sequence, 512, 65536,
+        ).await.unwrap();
+        assert!(prefix.next_after.is_none());
+        prefix.events.retain(|row| row.event.invocation == source.boundary.invocation);
+        assert_eq!(prefix.events.len() as u64, source.boundary.high_water);
         assert!(prefix.events.iter().all(|row| !matches!(
             row.event.fact,
             maka_agent_facts::event::Fact::ModelRequested { .. }
@@ -876,12 +873,22 @@ async fn executor_service_progress_is_canonical_before_original_backend_finishes
         let run = live["execution"]["runId"].as_str().unwrap();
         loop {
             commits.borrow_and_update();
-            let prefix = fixture
+            let source = fixture
                 .store
-                .run_prefix(&session, run, None, 64, 65536)
+                .run_source(&session, run, None)
                 .await
                 .unwrap()
                 .unwrap();
+            let mut prefix = fixture
+                .store
+                .session_events(&session, 0, source.last.sequence, 512, 65536)
+                .await
+                .unwrap();
+            assert!(prefix.next_after.is_none());
+            prefix
+                .events
+                .retain(|row| row.event.invocation == source.boundary.invocation);
+            assert_eq!(prefix.events.len() as u64, source.boundary.high_water);
             let outputs = prefix
                 .events
                 .iter()
@@ -999,18 +1006,26 @@ async fn executor_service_invalid_progress_stops_original_request_without_false_
         fixture.drained().await;
         let observed = work(&fixture, &session, &accepted).await;
         assert_eq!(observed["execution"]["state"], "failed");
-        let prefix = fixture
+        let source = fixture
             .store
-            .run_prefix(
+            .run_source(
                 &session,
                 observed["execution"]["runId"].as_str().unwrap(),
                 None,
-                64,
-                65536,
             )
             .await
             .unwrap()
             .unwrap();
+        let mut prefix = fixture
+            .store
+            .session_events(&session, 0, source.last.sequence, 512, 65536)
+            .await
+            .unwrap();
+        assert!(prefix.next_after.is_none());
+        prefix
+            .events
+            .retain(|row| row.event.invocation == source.boundary.invocation);
+        assert_eq!(prefix.events.len() as u64, source.boundary.high_water);
         assert!(prefix.events.iter().all(|row| !matches!(
             &row.event.fact,
             maka_agent_facts::event::Fact::ExecutorCompleted { .. }

@@ -161,8 +161,8 @@ use maka_agent_facts::event::RuntimeEvent;
                     Fact::InvocationOpened { configuration:Some(Box::new(source.configuration.clone())), input:InvocationInput::Message {content:"continue".into(),request_fingerprint:None,source_messages:vec![]} },
                     Fact::InvocationEnded {outcome:InvocationOutcome::Cancelled {source:"user".into()}},
                 ] {log.append(&EventWrite::plain(RuntimeEvent::new(source.invocation.clone(),fact)).unwrap()).await.unwrap();}
-                let history=log.run_prefix("session",&source.invocation.run_id,None,100,128*1024).await.unwrap().unwrap();
-                let boundary=maka_agent_facts::continuation::RunBoundary {invocation:history.invocation,high_water:history.high_water,digest:history.digest};
+                let history=log.run_source("session",&source.invocation.run_id, None).await.unwrap().unwrap();
+                let boundary=history.boundary;
                 let mut resumed=input(&base,"resumed",ToolMode::Direct,catalog(false,effects.clone()));
                 resumed.configuration=source.configuration.clone();
                 resumed.request_fingerprint=Some(maka_agent_facts::artifact::content_digest(b"resume-fixture"));
@@ -202,7 +202,6 @@ use maka_agent_facts::event::RuntimeEvent;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn continuation_admission_rejects_changed_loading_before_claiming_the_source() {
-    use maka_agent_facts::continuation::RunBoundary;
     use maka_agent_facts::event::EventWrite;
     use maka_agent_facts::event::InvocationOutcome;
     use maka_agent_facts::event::RuntimeEvent;
@@ -270,7 +269,7 @@ async fn continuation_admission_rejects_changed_loading_before_claiming_the_sour
                 .unwrap();
             }
             let prefix = log
-                .run_prefix("session", &source.invocation.run_id, None, 100, 128 * 1024)
+                .run_source("session", &source.invocation.run_id, None)
                 .await
                 .unwrap()
                 .unwrap();
@@ -280,11 +279,7 @@ async fn continuation_admission_rejects_changed_loading_before_claiming_the_sour
                 b"resume-fixture",
             ));
             resumed.work = RunWork::Continuation {
-                source: RunBoundary {
-                    invocation: prefix.invocation,
-                    high_water: prefix.high_water,
-                    digest: prefix.digest,
-                },
+                source: prefix.boundary,
                 tools: catalog(false, effects.clone()),
             };
             let cold = engine

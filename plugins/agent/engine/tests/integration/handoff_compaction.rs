@@ -25,7 +25,6 @@ use crate::support::{
 use maka_agent_engine::RunWork;
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::context::ModelRequestContext;
-use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::execution::ModelBinding;
 use maka_agent_facts::execution::WorkspaceIdentity;
@@ -124,14 +123,14 @@ async fn handoff_preserves_conversation_replay_and_compacts_before_its_physical_
         assert_eq!(pause.execution.replay_base, None);
         running.wait().await.unwrap();
         engine.drain().await;
-        let prefix = log.run_prefix("session", "run-first", None, 100, 128 * 1024).await.unwrap().unwrap();
+        let prefix = log.run_source("session", "run-first", None).await.unwrap().unwrap();
         let mut successor = input(&base, "next", effect);
         let RunWork::Message { tools, .. } = successor.work else { unreachable!() };
         successor.invocation = pause.intent.successor(&source_invocation);
         successor.configuration = configuration;
         successor.context = context;
         successor.work = RunWork::Handoff {
-            source: RunBoundary { invocation: prefix.invocation, high_water: prefix.high_water, digest: prefix.digest },
+            source: prefix.boundary,
             pause: Box::new(pause), tools,
         };
         let resumed = fixture::engine(log.clone());

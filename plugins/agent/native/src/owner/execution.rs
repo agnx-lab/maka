@@ -18,9 +18,6 @@
  */
 
 use super::*;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
-use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_event_log::turns::{InvocationState, TurnBoundary};
@@ -215,36 +212,20 @@ impl Owner {
         }
         let prefix = match self
             .store
-            .run_prefix(
-                &input.session_id,
-                &boundary.invocation.run_id,
-                None,
-                MAX_SOURCE_EVENTS,
-                MAX_SOURCE_BYTES,
-            )
+            .run_source(&input.session_id, &boundary.invocation.run_id, None)
             .await
         {
             Ok(Some(prefix)) => prefix,
             Ok(None) => return Ok(parked(Reason::SourceMissing)),
-            Err(maka_event_log::StoreError::PrefixTooLarge) => {
-                return Ok(parked(Reason::SourceUnreadable));
-            }
             Err(_) => return Err("agent_execution_unavailable".into()),
         };
-        if prefix.invocation != boundary.invocation
-            || prefix.high_water != input.source_high_water
-            || !matches!(
-                prefix.events.last().map(|event| &event.event.fact),
-                Some(Fact::InvocationEnded { .. })
-            )
+        if prefix.boundary.invocation != boundary.invocation
+            || prefix.boundary.high_water != input.source_high_water
+            || !matches!(&prefix.last.event.fact, Fact::InvocationEnded { .. })
         {
             return Ok(parked(Reason::SourceChanged));
         }
-        let source_boundary = RunBoundary {
-            invocation: prefix.invocation,
-            high_water: prefix.high_water,
-            digest: prefix.digest,
-        };
+        let source_boundary = prefix.boundary;
         if self
             .store
             .continuation_for_source(&source_boundary)

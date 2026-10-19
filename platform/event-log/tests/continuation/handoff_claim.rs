@@ -241,15 +241,11 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
     log.check_handoff(&manual.invocation, &pause).await.unwrap();
     close(&log, &manual).await;
     let prefix = log
-        .run_prefix("session", &manual.invocation.run_id, None, 100, 65536)
+        .run_source("session", &manual.invocation.run_id, None)
         .await
         .unwrap()
         .unwrap();
-    let boundary = RunBoundary {
-        invocation: prefix.invocation,
-        high_water: prefix.high_water,
-        digest: prefix.digest,
-    };
+    let boundary = prefix.boundary;
     let before = log
         .read_lineage_context(&boundary, 100, 65536)
         .await

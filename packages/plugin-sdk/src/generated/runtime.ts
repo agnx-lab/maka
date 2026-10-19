@@ -1992,7 +1992,6 @@ export type AgentResumeParkReason =
   | 'source_missing'
   | 'source_changed'
   | 'source_not_resumable'
-  | 'source_unreadable'
   | 'already_continued'
   | 'workspace_changed'
   | 'safety_check_failed';

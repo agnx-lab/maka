@@ -18,8 +18,7 @@
  */
 
 use super::*;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
+use maka_agent_facts::continuation::MAX_REPLAY_BYTES;
 use maka_agent_facts::handoff::HandoffIntent;
 use maka_agent_facts::handoff::HandoffPause;
 use maka_agent_facts::model::ModelFinishReason;
@@ -64,11 +63,7 @@ async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capac
             ),
         )
         .await;
-        let prefix = log
-            .run_prefix("session", "root", None, 100, MAX_SOURCE_BYTES)
-            .await
-            .unwrap()
-            .unwrap();
+        let prefix = log.prefix(100, MAX_REPLAY_BYTES).await.unwrap();
         let existing_bytes: usize = prefix
             .events
             .iter()
@@ -137,7 +132,7 @@ async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capac
                 },
             },
         );
-        let remaining = MAX_SOURCE_BYTES
+        let remaining = MAX_REPLAY_BYTES
             - reserved_bytes
             - existing_bytes
             - serde_json::to_vec(&completed).unwrap().len();
@@ -162,26 +157,22 @@ async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capac
         seal.recorded_at = UNIX_EPOCH + Duration::new(100_000_000_000, 999_999_999);
         append(&log, &seal).await;
         let sealed = log
-            .run_prefix("session", "root", None, MAX_SOURCE_EVENTS, MAX_SOURCE_BYTES)
+            .run_source("session", "root", None)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(sealed.events.last().unwrap().event, seal);
+        assert_eq!(sealed.last.event, seal);
         assert_eq!(
-            sealed.high_water, 4,
-            "the pause remains claimable within the exact source budget"
+            sealed.boundary.high_water, 4,
+            "the pause remains claimable with successor replay capacity reserved"
         );
         let base = log
-            .context_before_run(&source.invocation, 100, MAX_SOURCE_BYTES)
+            .context_before_run(&source.invocation, 100, MAX_REPLAY_BYTES)
             .await
             .unwrap();
         let claim = ContinuationClaim {
             id: pause.intent.claim_id.clone(),
-            source: RunBoundary {
-                invocation: sealed.invocation,
-                high_water: sealed.high_water,
-                digest: sealed.digest,
-            },
+            source: sealed.boundary,
             base: SessionBase {
                 high_water: base.source_evidence.high_water,
                 digest: base.source_evidence.digest,

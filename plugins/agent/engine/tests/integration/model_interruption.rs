@@ -200,7 +200,6 @@ async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn continuation_claim_replays_only_its_lineage_and_retries_with_frozen_input() {
-    use maka_agent_facts::continuation::RunBoundary;
     use maka_agent_facts::event::EventWrite;
     use maka_agent_facts::event::LogScope;
     use maka_agent_facts::event::RuntimeEvent;
@@ -233,8 +232,8 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_with_frozen_inp
         ] {
             log.append(&EventWrite::plain(RuntimeEvent::new(source.invocation.clone(), fact)).unwrap()).await.unwrap();
         }
-        let prefix = log.run_prefix("session", &source.invocation.run_id, None, 100, 128 * 1024).await.unwrap().unwrap();
-        let boundary = RunBoundary { invocation: prefix.invocation, high_water: prefix.high_water, digest: prefix.digest };
+        let prefix = log.run_source("session", &source.invocation.run_id, None).await.unwrap().unwrap();
+        let boundary = prefix.boundary;
         for fact in [opening("unrelated later branch"), Fact::InvocationEnded { outcome: InvocationOutcome::Completed }] {
             log.append(&EventWrite::plain(RuntimeEvent::new(input(&base, "branch").invocation, fact)).unwrap()).await.unwrap();
         }

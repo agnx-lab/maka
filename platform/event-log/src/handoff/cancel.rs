@@ -19,9 +19,6 @@
 
 use crate::{EventLog, StoreError, turns::TurnBoundary};
 use maka_agent_facts::continuation::ContinuationClaim;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
-use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
@@ -67,22 +64,18 @@ pub(crate) async fn apply(
     source: &Invocation,
 ) -> Result<(TurnBoundary, Option<u64>), StoreError> {
     crate::recovery::require_local(tx, &source.invocation_id).await?;
-    let prefix = crate::run_prefix::read(
+    let evidence = crate::run_source::read(
         tx,
         &source.session_id,
         &source.run_id,
         &source.invocation_id,
         i64::MAX,
-        MAX_SOURCE_EVENTS,
-        MAX_SOURCE_BYTES,
     )
     .await?;
-    if prefix.invocation != *source {
+    if evidence.boundary.invocation != *source {
         return Err(super::invalid("handoff cancellation source changed"));
     }
-    let Some(seal) = prefix.events.last() else {
-        return Err(super::invalid("handoff cancellation source is missing"));
-    };
+    let seal = &evidence.last;
     let Fact::InvocationEnded {
         outcome: InvocationOutcome::HandoffPaused { pause },
     } = &seal.event.fact
@@ -97,7 +90,7 @@ pub(crate) async fn apply(
     if claimed {
         return Ok((super::owner(tx, source).await?, None));
     }
-    let opening = prefix.events.first().expect("checked nonempty prefix");
+    let opening = &evidence.opening;
     let Fact::InvocationOpened {
         input,
         configuration: Some(configuration),
@@ -125,11 +118,7 @@ pub(crate) async fn apply(
                 pause: Box::new(pause.clone()),
                 claim: Box::new(ContinuationClaim {
                     id: pause.intent.claim_id.clone(),
-                    source: RunBoundary {
-                        invocation: source.clone(),
-                        high_water: prefix.high_water,
-                        digest: prefix.digest,
-                    },
+                    source: evidence.boundary,
                     base,
                     replay: pause.execution.replay.clone(),
                 }),

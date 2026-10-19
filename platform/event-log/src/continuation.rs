@@ -21,8 +21,6 @@
 
 use crate::{EventLog, StoreError, sequence_number};
 use maka_agent_facts::continuation::MAX_ANCESTRY;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
 use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::InvocationInput;
@@ -161,30 +159,23 @@ pub(crate) async fn ancestors(
                 .bind(&id)
                 .fetch_one(&mut *connection)
                 .await?;
-        let prefix = crate::run_prefix::read(
+        let evidence = crate::run_source::read(
             connection,
             &source.invocation.session_id,
             &source.invocation.run_id,
             &id,
             through,
-            MAX_SOURCE_EVENTS,
-            MAX_SOURCE_BYTES,
         )
         .await?;
-        if prefix.invocation != source.invocation
-            || prefix.high_water != source.high_water
-            || prefix.digest != source.digest
-            || !matches!(
-                prefix.events.last().map(|e| &e.event.fact),
-                Some(Fact::InvocationEnded { .. })
-            )
+        if evidence.boundary != source
+            || !matches!(evidence.last.event.fact, Fact::InvocationEnded { .. })
         {
             return Err(invalid(
                 "continuation source is not its exact sealed boundary",
             ));
         }
-        result.push(prefix.invocation.clone());
-        let opening = &prefix.events[0];
+        result.push(evidence.boundary.invocation.clone());
+        let opening = &evidence.opening;
         let Fact::InvocationOpened {
             input,
             configuration,
@@ -205,7 +196,7 @@ pub(crate) async fn ancestors(
             InvocationInput::Message { .. } => {
                 crate::context::frozen::verify_base(
                     connection,
-                    &prefix.invocation,
+                    &evidence.boundary.invocation,
                     opening.sequence,
                     base,
                 )
@@ -215,7 +206,7 @@ pub(crate) async fn ancestors(
             InvocationInput::Continuation { claim: parent, .. }
             | InvocationInput::Handoff { claim: parent, .. } => {
                 input
-                    .validate_inheritance(&prefix.invocation)
+                    .validate_inheritance(&evidence.boundary.invocation)
                     .map_err(invalid)?;
                 if &parent.base != base {
                     return Err(invalid("continuation changed its inherited Session base"));

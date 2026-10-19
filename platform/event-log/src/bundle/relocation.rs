@@ -22,8 +22,6 @@ use crate::{
     context::{self, selection::Selection},
 };
 use maka_agent_facts::continuation::ContinuationClaim;
-use maka_agent_facts::continuation::MAX_SOURCE_BYTES;
-use maka_agent_facts::continuation::MAX_SOURCE_EVENTS;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::InvocationOutcome;
@@ -161,16 +159,15 @@ impl Positions {
             "SELECT sequence FROM runtime_events WHERE invocation_id=? ORDER BY sequence LIMIT 1 OFFSET ?",
         ).bind(&source.invocation_id).bind((claim.source.high_water - 1) as i64)
             .fetch_one(&mut *db).await?;
-        claim.source.digest = crate::run_prefix::read(
+        claim.source.digest = crate::run_source::read(
             db,
             &source.session_id,
             &source.run_id,
             &source.invocation_id,
             through,
-            MAX_SOURCE_EVENTS,
-            MAX_SOURCE_BYTES,
         )
         .await?
+        .boundary
         .digest;
         Ok(())
     }

@@ -21,7 +21,6 @@ use super::*;
 use maka_agent_facts::continuation::ContinuationClaim;
 use maka_agent_facts::continuation::REPLAY_VERSION;
 use maka_agent_facts::continuation::ReplayEvidence;
-use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::continuation::SessionBase;
 use maka_agent_facts::execution::BehaviorId;
 use maka_agent_facts::execution::CollaborationMode;
