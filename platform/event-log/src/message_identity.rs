@@ -112,6 +112,23 @@ pub(crate) async fn validate(
         Fact::ToolDispatched { operation_id, .. } | Fact::ToolRejected { operation_id, .. } => {
             reject_claim(tx, session, &tool_use_id(invocation, operation_id)).await?;
         }
+        Fact::ExecutorObserved {
+            output: maka_agent_facts::executor::Output::ToolStart { tool_call_id, .. },
+        } => {
+            reject_claim(tx, session, &tool_use_id(invocation, tool_call_id)).await?;
+        }
+        Fact::ExecutorCompleted { .. } | Fact::InvocationEnded { .. } => {
+            // The event is absent: this writer transaction contains exactly its
+            // preceding facts, including earlier writes in the same batch.
+            for index in 0..executor_pending(tx, invocation, i64::MAX).await? {
+                reject_claim(
+                    tx,
+                    session,
+                    &maka_agent_facts::tool_call::provider_result_id(&event.id, index),
+                )
+                .await?;
+            }
+        }
         Fact::ToolSettled { .. } => {
             reject_claim(
                 tx,
@@ -183,6 +200,20 @@ pub(crate) async fn validate_source_id(
         if used {
             return Err(conflict());
         }
+        let closing: Option<(String, i64)> = sqlx::query_as(
+            "SELECT invocation_id, sequence FROM session_history_events
+             WHERE owner_session_id = ? AND event_id = ?
+               AND kind IN ('executor_completed', 'invocation_ended')",
+        )
+        .bind(session)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((invocation, before)) = closing
+            && index < executor_pending(tx, &invocation, before).await?
+        {
+            return Err(conflict());
+        }
     }
     // Only this exact generated spelling can equal a tool ID. Ordinary
     // client UUIDs never scan tool facts; this is not a reserved prefix.
@@ -191,6 +222,10 @@ pub(crate) async fn validate_source_id(
                 " SELECT EXISTS(
                     SELECT 1 FROM session_history_events WHERE kind IN ('tool_dispatched', 'tool_rejected')
                     AND owner_session_id = ?1 AND maka_tool_use_id(invocation_id, operation_id) = ?2
+                    UNION ALL
+                    SELECT 1 FROM session_history_events WHERE kind = 'executor_observed'
+                    AND owner_session_id = ?1 AND json_extract(event_json, '$.fact.output.type') = 'tool_start'
+                    AND maka_tool_use_id(invocation_id, json_extract(event_json, '$.fact.output.toolCallId')) = ?2
                     UNION ALL
                     SELECT 1 FROM accepted_calls c JOIN session_history_events e ON e.event_id=c.event_id
                     WHERE e.owner_session_id=?1 AND maka_tool_use_id(c.invocation_id, c.step_id || ':' || json_extract(c.call,'$.id'))=?2)"
@@ -201,6 +236,55 @@ pub(crate) async fn validate_source_id(
     }
     Ok(())
 }
+/// Count the synthetic result slots closed at this historical boundary.
+/// A prior completion already drained the pending set. Only scalar current-
+/// executor evidence is selected without assembling presentation in Rust.
+/// Malformed observations retain their existing optional projection errors.
+async fn executor_pending(
+    tx: &mut SqliteConnection,
+    invocation: &str,
+    before: i64,
+) -> Result<usize, StoreError> {
+    let started: Option<i64> = sqlx::query_scalar(
+        "SELECT sequence FROM runtime_events AS started
+         WHERE invocation_id = ?1 AND kind = 'executor_started' AND sequence < ?2
+           AND NOT EXISTS(SELECT 1 FROM runtime_events AS completed
+             WHERE completed.invocation_id = started.invocation_id
+               AND completed.kind = 'executor_completed'
+               AND completed.sequence > started.sequence AND completed.sequence < ?2)",
+    )
+    .bind(invocation)
+    .bind(before)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(started) = started else {
+        return Ok(0);
+    };
+    // Keep the partial-index kind predicate for executor_tool_observations.
+    // Original JSON equality matches the pending tool ID, not a cast spelling.
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT json_extract(start.event_json, '$.fact.output.toolCallId'))
+         FROM runtime_events AS start
+         WHERE start.invocation_id = ?1
+           AND start.kind IN ('executor_observed', 'executor_completed')
+           AND start.sequence > ?2 AND start.sequence < ?3
+           AND json_extract(start.event_json, '$.fact.output.type') = 'tool_start'
+           AND NOT EXISTS(SELECT 1 FROM runtime_events AS result
+             WHERE result.invocation_id = start.invocation_id
+               AND result.kind IN ('executor_observed', 'executor_completed')
+               AND json_extract(result.event_json, '$.fact.output.toolCallId') =
+                   json_extract(start.event_json, '$.fact.output.toolCallId')
+               AND result.sequence > start.sequence AND result.sequence < ?3
+               AND json_extract(result.event_json, '$.fact.output.type') = 'tool_result')",
+    )
+    .bind(invocation)
+    .bind(started)
+    .bind(before)
+    .fetch_one(tx)
+    .await?;
+    usize::try_from(count).map_err(|_| StoreError::PrefixTooLarge)
+}
+
 async fn reject_claim(
     tx: &mut SqliteConnection,
     session: &str,
@@ -228,11 +312,51 @@ pub(crate) fn register(connection: &rusqlite::Connection) -> Result<(), StoreErr
         2,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| {
-            Ok(tool_use_id(
-                ctx.get_raw(0).as_str()?,
-                ctx.get_raw(1).as_str()?,
-            ))
+            Ok(ctx
+                .get_raw(0)
+                .as_str_or_null()?
+                .zip(ctx.get_raw(1).as_str_or_null()?)
+                .map(|(invocation, operation)| tool_use_id(invocation, operation)))
         },
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tool_identity_sql_preserves_text_null_and_wrong_type_semantics() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        super::register(&db).unwrap();
+        let value: String = db
+            .query_row(
+                "SELECT maka_tool_use_id('invocation', 'operation')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            value,
+            "tool_81c478783b57624325cf312c0a24b2bdd0d430109780498d16605e498f2ee58f"
+        );
+        for sql in [
+            "SELECT maka_tool_use_id(NULL, 'operation')",
+            "SELECT maka_tool_use_id('invocation', NULL)",
+            "SELECT maka_tool_use_id(NULL, NULL)",
+        ] {
+            let value: Option<String> = db.query_row(sql, [], |row| row.get(0)).unwrap();
+            assert_eq!(value, None);
+        }
+        for sql in [
+            "SELECT maka_tool_use_id(7, 'operation')",
+            "SELECT maka_tool_use_id('invocation', x'00')",
+            "SELECT maka_tool_use_id(NULL, 7)",
+        ] {
+            assert!(
+                db.query_row(sql, [], |row| row.get::<_, Option<String>>(0))
+                    .is_err(),
+                "wrong types must remain errors: {sql}"
+            );
+        }
+    }
 }
