@@ -339,3 +339,118 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     );
     log.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn message_owner_rejects_ambiguous_private_successors_without_repair_after_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ambiguous-successors.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "history-source", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
+    let mut source = opening("source", None);
+    let Fact::InvocationOpened {
+        input:
+            InvocationInput::Message {
+                content,
+                source_messages,
+                ..
+            },
+        ..
+    } = &mut source.fact
+    else {
+        unreachable!()
+    };
+    source_messages.push(maka_agent_facts::message::RootSourceMessage {
+        unprepared_content: content.clone(),
+        message: maka_agent_facts::input::DeliveredMessage {
+            origin: None,
+            message_id: "origin-message".into(),
+            submitted_content_digest: content.content_digest().unwrap(),
+            content: content.clone(),
+        },
+        submitted_placement: maka_agent_facts::message::Placement::NextTurn,
+        disposition: maka_agent_facts::message::MessageDisposition::TurnStarted,
+        submitted_intent: None,
+    });
+    append(&log, &source).await;
+    close(&log, &source).await;
+    let context = log
+        .context_before_run(&source.invocation, 100, 65536)
+        .await
+        .unwrap();
+    let original = claim(
+        &log,
+        "valid-claim",
+        &source,
+        SessionBase {
+            high_water: context.source_evidence.high_water,
+            digest: context.source_evidence.digest,
+        },
+    )
+    .await;
+    let successor = opening("successor", Some(original.clone()));
+    append(&log, &successor).await;
+    assert!(matches!(
+        log.message_execution("session", "origin-message")
+            .await
+            .unwrap(),
+        maka_event_log::message_resolution::MessageExecution::Owned(owner)
+            if owner.invocation == successor.invocation
+    ));
+
+    // Malformed private evidence, not a supported live dual admission: the
+    // distinct high-water and claim IDs preserve the schema's unique indexes.
+    let mut competing = original;
+    competing.id = "malformed-claim".into();
+    competing.source.high_water += 1;
+    let malformed = opening("malformed-successor", Some(competing));
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO event_log (event_id, invocation_id, kind, event_json)
+         VALUES (?1, ?2, 'invocation_opened', ?3)",
+        rusqlite::params![
+            malformed.id,
+            malformed.invocation.invocation_id,
+            serde_json::to_string(&malformed).unwrap(),
+        ],
+    )
+    .unwrap();
+    let raw = || {
+        let mut statement = db
+            .prepare("SELECT sequence, event_json FROM event_log ORDER BY sequence")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let raw_before = raw();
+    let canonical_before = serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap();
+    assert!(matches!(
+        log.message_execution("session", "origin-message").await,
+        Err(maka_event_log::StoreError::InvalidTransition(reason))
+            if reason == "Message owner has ambiguous continuations"
+    ));
+    assert_eq!(raw(), raw_before);
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        canonical_before
+    );
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert!(matches!(
+        log.message_execution("session", "origin-message").await,
+        Err(maka_event_log::StoreError::InvalidTransition(reason))
+            if reason == "Message owner has ambiguous continuations"
+    ));
+    assert_eq!(raw(), raw_before);
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        canonical_before
+    );
+    log.close().await.unwrap();
+}

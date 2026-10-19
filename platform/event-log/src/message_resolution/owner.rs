@@ -173,7 +173,9 @@ pub(crate) async fn lineage(
         }
         let successors: Vec<String> = sqlx::query_scalar(
             "SELECT event_json
-             FROM runtime_events WHERE kind = 'invocation_opened'
+             FROM event_log INDEXED BY continuation_source_boundary
+             WHERE invocation_id IS NOT NULL AND event_json IS NOT NULL
+             AND kind = 'invocation_opened'
              AND json_extract(event_json, '$.fact.input.kind') IN ('continuation', 'handoff')
              AND json_extract(event_json, '$.invocation.session_id') = ?
              AND json_extract(event_json, '$.fact.input.claim.source.invocation.run_id') = ?
