@@ -381,6 +381,210 @@ async fn copied_image_ownership_survives_transfer_without_importing_parent_catal
             .is_err()
     );
     destination.close().await.unwrap();
+    // Revision material belongs to the excluded editable input, even when
+    // preparation replaced its attachment with a different upload.
+    use maka_agent_facts::attachment::{AttachmentKind, AttachmentRef};
+    use maka_agent_facts::input::{DeliveredMessage, MessageInput};
+    use maka_agent_facts::message::{MessageDisposition, Placement, RootSourceMessage};
+    upload(&source, "editable-only").await;
+    upload(&source, "prepared-only").await;
+    let attachment = |id: &str| AttachmentRef {
+        kind: AttachmentKind::Image,
+        name: "image.gif".into(),
+        mime_type: "image/gif".into(),
+        bytes: GIF.len() as u64,
+        storage_ref: StorageRef::SessionFile {
+            session_id: "images".into(),
+            relative_path: id.into(),
+        },
+    };
+    let mut unprepared = MessageInput::from("original editable image");
+    unprepared.attachments = Some(vec![attachment("editable-only")]);
+    let mut prepared = MessageInput::from("prepared image");
+    prepared.attachments = Some(vec![attachment("prepared-only")]);
+    let editable = invocation("images", "editable-run");
+    let opening = RuntimeEvent::new(
+        editable.clone(),
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::Message {
+                content: prepared.clone(),
+                source_messages: vec![RootSourceMessage {
+                    message: DeliveredMessage {
+                        origin: None,
+                        message_id: "editable-message".into(),
+                        content: prepared,
+                        submitted_content_digest: unprepared.content_digest().unwrap(),
+                    },
+                    unprepared_content: unprepared,
+                    submitted_placement: Placement::CurrentTurn,
+                    disposition: MessageDisposition::TurnStarted,
+                    submitted_intent: None,
+                }],
+                request_fingerprint: None,
+            },
+        },
+    );
+    let source_sequence = source
+        .append(&EventWrite::plain(opening.clone()).unwrap())
+        .await
+        .unwrap();
+    end(&source, &editable).await;
+    let revision = source
+        .get_session::<Value>("images")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    source
+        .copy_session(
+            SessionCopy {
+                source_session_id: "images".into(),
+                target_session_id: "revision".into(),
+                expected_source_revision: revision,
+                purpose: CopyPurpose::Revision {
+                    turn_id: editable.turn_id.clone(),
+                },
+            },
+            &Value::Null,
+            2,
+        )
+        .await
+        .unwrap();
+    let bytes = export(&source, "revision").await;
+    let summary = bundle::inspect(bytes.as_slice()).await.unwrap();
+    let records = super::frames::records(&bytes, &summary.digest);
+    let revision_sources: Vec<_> = records
+        .iter()
+        .filter(|r| r["kind"] == "revision_source" && r["session"] == "revision")
+        .collect();
+    assert_eq!(revision_sources.len(), 1);
+    assert_eq!(revision_sources[0]["sequence"], source_sequence);
+    assert!(!records.iter().any(|r| r["kind"] == "member"
+        && r["session"] == "revision"
+        && r["sequence"] == source_sequence));
+    let mut retained: Vec<_> = records
+        .iter()
+        .filter(|r| r["kind"] == "history_artifact" && r["session"] == "revision")
+        .map(|r| r["source_artifact"].as_str().unwrap())
+        .collect();
+    retained.sort_unstable();
+    assert_eq!(retained, ["borrowed", "editable-only"]);
+    let artifacts: Vec<_> = records
+        .iter()
+        .filter(|r| r["kind"] == "blob" && r["resource"] == "artifact")
+        .collect();
+    assert_eq!(artifacts.len(), 2);
+    assert!(
+        artifacts
+            .iter()
+            .all(|r| r["metadata"]["sessionId"] == "revision")
+    );
+    let mut staged = StagedBundle::read(bytes.as_slice()).await.unwrap();
+    staged.validate_history().await.unwrap();
+    staged.close().await.unwrap();
+
+    let mut removed = 0;
+    let missing_mapping = super::frames::rewrite_records(&bytes, |record| {
+        if record["kind"] == "history_artifact"
+            && record["session"] == "revision"
+            && record["source_artifact"] == "editable-only"
+        {
+            removed += 1;
+            return false;
+        }
+        true
+    });
+    assert_eq!(removed, 1);
+    let mut staged = StagedBundle::read(missing_mapping.as_slice())
+        .await
+        .unwrap();
+    assert!(matches!(
+        staged.validate_history().await,
+        Err(bundle::BundleError::Store(maka_event_log::StoreError::InvalidTransition(reason)))
+            if reason == "bundle copied reference lacks its retained Artifact"
+    ));
+    staged.close().await.unwrap();
+
+    let path = dir.path().join("revision-destination.sqlite");
+    let mut destination = EventLog::open(&path).await.unwrap();
+    padding(&destination, "revision-padding", 9).await;
+    import(&destination, &bytes).await;
+    for reopened in [false, true] {
+        let prefix = destination.prefix(1000, 8 * 1024 * 1024).await.unwrap();
+        let relocated = prefix
+            .events
+            .iter()
+            .find(|e| e.event.id == opening.id)
+            .unwrap();
+        assert_ne!(relocated.sequence, source_sequence);
+        assert_eq!(relocated.event, opening);
+        let input = destination
+            .editable_message("revision", "editable-run", "editable-message")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(input.content.text, "original editable image");
+        let attachments = input.content.attachments.as_ref().unwrap();
+        assert_eq!(attachments.len(), 1);
+        let StorageRef::SessionFile {
+            session_id,
+            relative_path,
+        } = &attachments[0].storage_ref
+        else {
+            panic!("editable input lost its retained upload");
+        };
+        assert_eq!(session_id, "revision");
+        assert_eq!(
+            destination
+                .read_artifact_chunk("revision", relative_path, 0, 32768)
+                .await
+                .unwrap()
+                .unwrap()
+                .bytes,
+            GIF
+        );
+        assert!(
+            destination
+                .root_message("revision", "editable-message")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            destination
+                .get_session::<Value>("images")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            destination
+                .read_artifact_chunk("images", "editable-only", 0, 32768)
+                .await,
+            Err(maka_event_log::StoreError::SessionNotFound)
+        ));
+        let (through, rows) = self::rows(&destination, "revision", &i).await;
+        assert_eq!(
+            destination
+                .tool_image("revision", through, rows["borrowed"], 0, 32768)
+                .await
+                .unwrap()
+                .bytes,
+            GIF
+        );
+        let turns = destination
+            .navigation_turns("revision", through, None, 32)
+            .await
+            .unwrap();
+        assert_eq!(turns.contributions.len(), 1);
+        assert_eq!(turns.contributions[0].turn_id, "copy-run");
+        if !reopened {
+            destination.close().await.unwrap();
+            destination = EventLog::open(&path).await.unwrap();
+        }
+    }
+    destination.close().await.unwrap();
     source.close().await.unwrap();
 }
 

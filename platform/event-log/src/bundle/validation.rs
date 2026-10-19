@@ -91,7 +91,7 @@ async fn replay(
     let mut after = 0i64;
     loop {
         let row: Option<String> = sqlx::query_scalar(
-            "SELECT record_json FROM frames WHERE kind='event' AND source_sequence>? ORDER BY source_sequence LIMIT 1"
+            "SELECT record_json FROM frames INDEXED BY source_events WHERE kind='event' AND source_sequence>? ORDER BY source_sequence LIMIT 1"
         ).bind(after).fetch_optional(&mut *staged).await?;
         let Some(row) = row else {
             break;
