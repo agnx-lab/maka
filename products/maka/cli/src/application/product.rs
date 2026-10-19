@@ -51,7 +51,10 @@ struct Bundled {
     name: &'static str,
     files: &'static [(&'static str, &'static [u8])],
 }
+#[cfg(maka_embedded_product)]
 include!(concat!(env!("OUT_DIR"), "/product-assets.rs"));
+#[cfg(not(maka_embedded_product))]
+const DEVELOPMENT_BUNDLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../bundle/dist");
 
 #[derive(Clone, Copy, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

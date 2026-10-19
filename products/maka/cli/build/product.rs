@@ -51,18 +51,10 @@ pub fn bundle() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build/product.rs");
     println!("cargo:rustc-check-cfg=cfg(maka_embedded_product)");
-    let output = std::path::PathBuf::from(env::var_os("OUT_DIR").unwrap());
     if env::var("PROFILE").as_deref() != Ok("release") {
-        fs::write(
-            output.join("product-assets.rs"),
-            format!(
-                "const DEVELOPMENT_BUNDLE: &str = {:?};\n",
-                repo.join("products/maka/bundle/dist").to_str().unwrap()
-            ),
-        )
-        .unwrap();
         return;
     }
+    let output = std::path::PathBuf::from(env::var_os("OUT_DIR").unwrap());
     println!("cargo:rustc-cfg=maka_embedded_product");
     println!("cargo:rerun-if-env-changed=MAKA_JS_DEPS");
     let dependencies = env::var_os("MAKA_JS_DEPS")
