@@ -387,3 +387,130 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
     append(&log, &opening("next-turn", None)).await;
     log.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn handoff_rejects_ambiguous_private_logical_roots_without_repair_after_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("ambiguous-handoff-root.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let root = opening("root", None);
+    append(&log, &root).await;
+    let context = log
+        .context_before_run(&root.invocation, 100, 65536)
+        .await
+        .unwrap();
+    let pause = HandoffPause {
+        intent: HandoffIntent {
+            handoff_id: "handoff".into(),
+            host_epoch: "host".into(),
+            root_run_id: root.invocation.run_id.clone(),
+            successor_run_id: "successor-run".into(),
+            successor_invocation_id: "successor-invocation".into(),
+            claim_id: "successor-claim".into(),
+        },
+        execution: super::handoff::execution(),
+    };
+    append(
+        &log,
+        &RuntimeEvent::new(
+            root.invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::HandoffPaused {
+                    pause: pause.clone(),
+                },
+            },
+        ),
+    )
+    .await;
+    let inherited = claim(
+        &log,
+        &pause.intent.claim_id,
+        &root,
+        SessionBase {
+            high_water: context.source_evidence.high_water,
+            digest: context.source_evidence.digest,
+        },
+    )
+    .await;
+    let Fact::InvocationOpened { configuration, .. } = &root.fact else {
+        unreachable!()
+    };
+    let successor = RuntimeEvent::new(
+        pause.intent.successor(&root.invocation),
+        Fact::InvocationOpened {
+            configuration: configuration.clone(),
+            input: InvocationInput::Handoff {
+                claim: Box::new(inherited),
+                pause: Box::new(pause),
+            },
+        },
+    );
+    append(&log, &successor).await;
+    let physical = log
+        .run_boundary("session", &successor.invocation.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(physical.invocation, successor.invocation);
+    assert_eq!(physical.opening_event_id, successor.id);
+    assert_eq!(physical.root_invocation(), &root.invocation);
+    assert_eq!(physical.root_opening_event_id(), root.id);
+    assert!(matches!(
+        physical.root_input(),
+        InvocationInput::Message { .. }
+    ));
+
+    // Malformed private evidence, not a supported second admission. This root
+    // has no source Messages; distinct event/invocation IDs preserve uniqueness.
+    let mut duplicate = root.clone();
+    duplicate.id = "malformed-root-event".into();
+    duplicate.invocation.invocation_id = "malformed-root-invocation".into();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO event_log (event_id, invocation_id, kind, event_json)
+         VALUES (?1, ?2, 'invocation_opened', ?3)",
+        rusqlite::params![
+            duplicate.id,
+            duplicate.invocation.invocation_id,
+            serde_json::to_string(&duplicate).unwrap(),
+        ],
+    )
+    .unwrap();
+    let raw = || {
+        let mut statement = db
+            .prepare("SELECT sequence, event_json FROM event_log ORDER BY sequence")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let raw_before = raw();
+    let canonical_before = serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap();
+    assert!(matches!(
+        log.run_boundary("session", &successor.invocation.run_id).await,
+        Err(maka_event_log::StoreError::InvalidTransition(reason))
+            if reason == "handoff has no unique logical root"
+    ));
+    assert_eq!(raw(), raw_before);
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        canonical_before
+    );
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    assert!(matches!(
+        log.run_boundary("session", &successor.invocation.run_id).await,
+        Err(maka_event_log::StoreError::InvalidTransition(reason))
+            if reason == "handoff has no unique logical root"
+    ));
+    assert_eq!(raw(), raw_before);
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        canonical_before
+    );
+    log.close().await.unwrap();
+}
