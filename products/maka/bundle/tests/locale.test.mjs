@@ -81,10 +81,7 @@ test('terminal translations interpolate values and preserve unknown keys and pla
     '值 甲，{ $missing }',
   );
   assert.equal(terminal.translate('en', messages, 'unknown'), 'unknown');
-  assert.equal(
-    preferences.tuiText('en', 'language-auto', { language: 'zh-TW' }),
-    'Automatic (zh-TW)',
-  );
+  assert.equal(preferences.tuiText('en', 'settings-language-auto'), 'Auto (system language)');
 });
 
 test('closed runtime states resolve to translated feature messages', () => {
