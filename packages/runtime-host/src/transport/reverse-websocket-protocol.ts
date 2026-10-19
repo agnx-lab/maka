@@ -22,6 +22,24 @@ import { z } from 'zod';
 
 export const reverseRouteSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
 export const reverseTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/u);
+// Optional credentials for a deployment's access proxy; never override transport headers.
+const proxyHeadersSchema = z.record(z.string(), z.string()).refine((headers) => {
+  const entries = Object.entries(headers);
+  const names = entries.map(([name]) => name.toLowerCase());
+  return (
+    entries.length <= 16 &&
+    new Set(names).size === names.length &&
+    entries.reduce((size, [name, value]) => size + name.length + value.length, 0) <= 8192 &&
+    entries.every(
+      ([name, value]) =>
+        /^[A-Za-z0-9-]+$/u.test(name) &&
+        !/^(authorization|host|connection|upgrade|origin|cookie|content-length|transfer-encoding|proxy-authorization|sec-websocket-.*|x-maka-.*)$/iu.test(
+          name,
+        ) &&
+        /^[\x20-\x7e]*$/u.test(value),
+    )
+  );
+}, 'Invalid proxy headers');
 export const reverseConnectionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -38,6 +56,7 @@ export const reverseConnectionSchema = z
     }),
     route: reverseRouteSchema,
     token: reverseTokenSchema,
+    headers: proxyHeadersSchema.optional(),
   })
   .strict();
 export type ReverseConnectionConfiguration = z.infer<typeof reverseConnectionSchema>;

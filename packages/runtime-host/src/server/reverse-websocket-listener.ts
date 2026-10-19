@@ -71,7 +71,7 @@ export function startReverseRuntimeHostListener(
         let controlClosed!: Promise<number>;
         control = await openReverseSocket(
           endpoint,
-          { Authorization: `Bearer ${config.token}` },
+          { ...config.headers, Authorization: `Bearer ${config.token}` },
           generation.signal,
           (current) => {
             sockets.add(current);
@@ -109,6 +109,7 @@ export function startReverseRuntimeHostListener(
                     socket = await openReverseSocket(
                       `${config.url}/reverse/${config.route}/data`,
                       {
+                        ...config.headers,
                         Authorization: `Bearer ${config.token}`,
                         'X-Maka-Reverse-Ticket': message.ticket,
                       },

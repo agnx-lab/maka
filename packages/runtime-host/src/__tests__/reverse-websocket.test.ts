@@ -20,7 +20,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import net from 'node:net';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import { once } from 'node:events';
+import { startReverseRuntimeHostListener } from '../server/reverse-websocket-listener.js';
+import { LOCAL_OWNER_CONNECTION_AUTHORITY } from '../server/connection-authority.js';
 import {
   openReverseSocket,
   reverseConnectionSchema,
@@ -497,6 +500,7 @@ test('reverse config persists, rejects unsafe transport, and disables without to
     schemaVersion: 1,
     url: 'wss://example.com',
     route: 'laptop',
+    headers: { 'X-Proxy-Secret': 'test-secret' },
     token: randomBytes(32).toString('base64url'),
   };
   try {
@@ -512,6 +516,17 @@ test('reverse config persists, rejects unsafe transport, and disables without to
     ]) {
       assert.throws(() => reverseConnectionSchema.parse({ ...config, url }));
     }
+    for (const headers of [
+      { authorization: 'override' },
+      { Host: 'other' },
+      { Origin: 'other' },
+      { 'X-Maka-Reverse-Ticket': 'override' },
+      { 'Sec-WebSocket-Key': 'override' },
+      { 'X-Proxy': 'a\r\nb' },
+      { 'X-Proxy': 'a', 'x-proxy': 'b' },
+      { 'X-Proxy': 'a'.repeat(8193) },
+    ])
+      assert.equal(reverseConnectionSchema.safeParse({ ...config, headers }).success, false);
     if (process.platform !== 'win32') {
       await chmod(join(dir, 'reverse-connection.json'), 0o644);
       await assert.rejects(readReverseConnectionConfiguration(dir), /0600/);
@@ -724,6 +739,62 @@ test('reverse socket installs its reader before an immediate first protocol fram
     assert.deepEqual(await transport!.read(1000), { first: 'frame' });
   } finally {
     lifetime.abort();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('proxy credentials accompany both reverse control and data upgrades', async () => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const token = randomBytes(32).toString('base64url');
+  const ticket = randomBytes(32).toString('base64url');
+  const requests: { path?: string; proxy?: string; authorization?: string; ticket?: string }[] = [];
+  server.on('connection', (socket, request) => {
+    requests.push({
+      path: request.url,
+      proxy: request.headers['x-proxy-secret'] as string,
+      authorization: request.headers.authorization,
+      ticket: request.headers['x-maka-reverse-ticket'] as string,
+    });
+    if (request.url?.endsWith('/control'))
+      socket.send(JSON.stringify({ kind: 'open', ticket, credential: 'fixture' }));
+  });
+  let admitted = false;
+  const listener = startReverseRuntimeHostListener({
+    configuration: {
+      schemaVersion: 1,
+      url: `ws://127.0.0.1:${address.port}`,
+      route: 'test',
+      token,
+      headers: { 'X-Proxy-Secret': 'proxy-credential' },
+    },
+    accessAuthority: { authenticate: () => LOCAL_OWNER_CONNECTION_AUTHORITY },
+    isReady: () => true,
+    accept: () => {
+      admitted = true;
+    },
+  });
+  try {
+    await waitFor(() => admitted, { timeoutMs: 3000 });
+    assert.deepEqual(requests, [
+      {
+        path: '/reverse/test/control',
+        proxy: 'proxy-credential',
+        authorization: `Bearer ${token}`,
+        ticket: undefined,
+      },
+      {
+        path: '/reverse/test/data',
+        proxy: 'proxy-credential',
+        authorization: `Bearer ${token}`,
+        ticket,
+      },
+    ]);
+  } finally {
+    await listener.cleanup();
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

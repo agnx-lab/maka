@@ -36,6 +36,13 @@ require explicit `behindProxy: true`; use that only on an interface reachable
 solely by your trusted reverse proxy. Prefer direct TLS otherwise. Browser-based
 login redirects are not supported by the connector.
 
+For an access proxy requiring machine credentials, `connector.json` accepts an
+optional `headers` object of HTTP header names and string values. These are sent
+on both control and data connections, only to the configured origin (redirects
+are never followed). Transport/authentication headers cannot be overridden.
+Treat these values as secrets alongside the route token; status does not print
+them. This is a generic proxy integration, not a dependency on any provider.
+
 The initial setup uses built-in CLI commands and the existing manual Host UI;
 there is no new Desktop setup wizard. The gateway executable and executing Host must contain this feature. The
 controlling Desktop uses its existing TLS Host support and must satisfy the normal
