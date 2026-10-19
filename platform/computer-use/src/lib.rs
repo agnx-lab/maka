@@ -23,16 +23,24 @@
 //! pinned native implementation. Perception and driver administration are absent.
 
 mod activity;
+#[cfg(feature = "native-desktop")]
 mod browser;
 pub mod cursor;
 pub mod desktop;
+#[cfg(feature = "native-desktop")]
 mod driver;
+#[cfg(not(feature = "native-desktop"))]
+#[path = "bridge_driver.rs"]
+mod driver;
+#[cfg(feature = "native-desktop")]
 mod identity;
 pub mod language;
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-desktop", target_os = "macos"))]
 mod macos;
+#[cfg(feature = "native-desktop")]
 mod observation;
 pub mod protocol;
+#[cfg(feature = "native-desktop")]
 mod session;
 
 pub use desktop::Session;

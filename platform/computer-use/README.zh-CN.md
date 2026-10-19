@@ -39,8 +39,22 @@ const app = await cua.getApp("Calculator");
 
 浏览器提供方是显式配置的 CDP 连接，使用已有 profile。没有配置提供方时，可操作原生浏览器窗口。配置与平台方法见 API 说明；缺少提供方不会触发重启浏览器或开启调试。
 
+## 原生与 WSL 开发构建
+
+CLI 默认启用 Cargo feature `native-desktop`，包含 Linux、macOS 或 Windows 的本地驱动及游标渲染器。原生依赖在 macOS 上需要 Xcode Command Line Tools，在 Linux 上需要 X11 开发库。
+
+`just run` 在 WSL 中自动关闭该 feature，保留 Windows 桥接且无需编译 Linux 桌面驱动。可将 `MAKA_CUA_BUILD_MODE` 设置为 `auto`（默认）、`native` 或 `bridge`，显式选择开发构建。例如 `MAKA_CUA_BUILD_MODE=native just run` 会在 WSL 中编入 Linux 驱动。运行时仍由 `desktop` 配置选择目标；桥接构建拒绝 `local`，`auto` 需要在 WSL 中才能选择 Windows。
+
+源码构建需要由同一份源码、使用默认原生 feature 构建的 Windows `maka.exe`。在 Windows 上构建后，提供 WSL 可见的绝对路径：
+
+```sh
+MAKA_CUA_WINDOWS_EXECUTABLE=/mnt/c/path/to/maka.exe just run
+```
+
+直接使用 `cargo run -p maka-cli` 保留原生默认值。直接构建桥接版本可用 `cargo run --locked -p maka-cli --no-default-features -- ...`。Cargo 会合并所选包的 feature，若同时选择的其他包启用了 `native-desktop`，便会恢复原生依赖。`just build` 和发布打包保留完整原生产品；Linux 桌面 shell 自身仍需要 Linux GUI 开发库。
+
 ## 生命周期
 
 重置清除本 Session 的绑定，不关闭用户应用或标签页。导航、窗口变化和新观察可能使原输入目标失效。取消或超时后需要重置，结果不确定的动作不会自动重放。关闭流程等待已接受的原生工作完成清理。
 
-原生依赖在 macOS 上需要 Xcode Command Line Tools，在 Linux 上需要 X11 开发库。输入与捕获行为应在目标桌面验证；REPL 单元测试不能证明原生焦点或无障碍行为。
+输入与捕获行为应在目标桌面验证；REPL 单元测试不能证明原生焦点或无障碍行为。

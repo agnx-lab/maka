@@ -24,6 +24,10 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = ["native-desktop"]
+native-desktop = ["maka-computer-use/native-desktop"]
+
 [[bin]]
 name = "maka"
 path = "src/main.rs"

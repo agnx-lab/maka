@@ -20,6 +20,7 @@
 //! Invocation-owned copy for CUA documentation and recovery guidance.
 use maka_agent_facts::language::Language;
 
+#[cfg(feature = "native-desktop")]
 pub(crate) fn documentation(language: Language) -> &'static str {
     match language {
         Language::En => include_str!("api.md"),
@@ -57,6 +58,7 @@ pub fn closed(language: Language) -> &'static str {
         }
     }
 }
+#[cfg(feature = "native-desktop")]
 pub(crate) fn uncertain(language: Language) -> &'static str {
     match language {
         Language::En => {
@@ -67,6 +69,7 @@ pub(crate) fn uncertain(language: Language) -> &'static str {
     }
 }
 
+#[cfg(feature = "native-desktop")]
 pub(crate) fn inactive(language: Language) -> &'static str {
     match language {
         Language::En => "Computer Use session is inactive. Call cua_reset and rebind targets.",
@@ -74,6 +77,7 @@ pub(crate) fn inactive(language: Language) -> &'static str {
         Language::ZhTw => "Computer Use 工作階段已失效。請呼叫 cua_reset 並重新綁定目標。",
     }
 }
+#[cfg(feature = "native-desktop")]
 pub(crate) fn terminal(language: Language) -> &'static str {
     match language {
         Language::En => {
@@ -83,6 +87,7 @@ pub(crate) fn terminal(language: Language) -> &'static str {
         Language::ZhTw => "\n請呼叫 cua_reset 並重新綁定目標。此次被拒絕的操作未派發輸入。",
     }
 }
+#[cfg(feature = "native-desktop")]
 pub(crate) fn background_unavailable(language: Language) -> &'static str {
     match language {
         Language::En => {
@@ -99,6 +104,7 @@ pub(crate) fn background_unavailable(language: Language) -> &'static str {
 
 // CDP preserves the original error and uncertainty class; the accepted browser
 // dispatch owns this warning for every unknown outcome.
+#[cfg(feature = "native-desktop")]
 pub(crate) fn browser_unknown(language: Language) -> &'static str {
     match language {
         Language::En => "; repeating a mutation may duplicate its effects",

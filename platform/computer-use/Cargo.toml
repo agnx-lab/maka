@@ -22,40 +22,75 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+native-desktop = [
+    "dep:hex",
+    "dep:cua-driver-contract",
+    "dep:cua-driver-sdk",
+    "dep:cua-driver-core",
+    "dep:uuid",
+    "dep:libc",
+    "dep:base64",
+    "dep:cursor-overlay",
+    "dep:sha2",
+    "dep:tempfile",
+    "dep:platform-windows",
+    "dep:windows-sys",
+    "dep:platform-linux",
+    "dep:platform-macos",
+    "dep:core-foundation",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-app-kit",
+]
+
 [dependencies]
-hex.workspace = true
+hex = { workspace = true, optional = true }
 maka-agent-facts.workspace = true
 maka-capabilities.workspace = true
-cua-driver-contract.workspace = true
-cua-driver-sdk.workspace = true
-cua-driver-core = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6" }
-maka-js-runtime.workspace = true
+cua-driver-contract = { workspace = true, optional = true }
+cua-driver-sdk = { workspace = true, optional = true }
+cua-driver-core = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", optional = true }
 serde.workspace = true
 schemars.workspace = true
-uuid.workspace = true
-libc.workspace = true
+uuid = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 reqwest.workspace = true
-base64 = "0.22.1"
-cursor-overlay = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", features = ["theme-authoring"] }
-sha2.workspace = true
-tempfile.workspace = true
+base64 = { version = "0.22.1", optional = true }
+cursor-overlay = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", features = ["theme-authoring"], optional = true }
+sha2 = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "process"] }
 tokio-util.workspace = true
 
 [dev-dependencies]
+maka-js-runtime.workspace = true
 tiny-skia = { version = "0.11", features = ["png-format"] }
 
 [target.'cfg(windows)'.dependencies]
-platform-windows = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6" }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+platform-windows = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", optional = true }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-platform-linux = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6" }
+platform-linux = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-platform-macos = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6" }
-core-foundation = "0.10.1"
-objc2 = "0.6.4"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSString"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+platform-macos = { git = "https://github.com/maka-agent/cua", rev = "79c9b58a1b61f66ae966635c464e54cb2c8151d6", optional = true }
+core-foundation = { version = "0.10.1", optional = true }
+objc2 = { version = "0.6.4", optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSString"], optional = true }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"], optional = true }
+
+[[example]]
+name = "cursor-preview"
+required-features = ["native-desktop"]
+
+[[example]]
+name = "desktop-host"
+required-features = ["native-desktop"]
+
+[[test]]
+name = "repl_browser"
+required-features = ["native-desktop"]

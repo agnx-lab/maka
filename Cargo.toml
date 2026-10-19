@@ -134,7 +134,7 @@ maka-agent-native = { path = "plugins/agent/native" }
 maka-assistant = { path = "plugins/agent/assistant" }
 maka-background-health = { path = "platform/background-health" }
 maka-config = { path = "plugins/settings/store" }
-maka-computer-use = { path = "platform/computer-use" }
+maka-computer-use = { path = "platform/computer-use", default-features = false }
 maka-event-log = { path = "platform/event-log" }
 maka-external-agent = { path = "plugins/agent/acp-executor/engine" }
 maka-fs-tools = { path = "plugins/workspace/workspace-files/engine" }

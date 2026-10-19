@@ -69,16 +69,19 @@ async fn wsl_uses_windows_targets_input_cursors_and_session_cleanup() {
     assert!(
         matches!(a.configure(Desktop::Local, vec![], maka_agent_facts::language::Language::En), Err(maka_agent_facts::tools::ToolError::Failed(message)) if message.contains("reset Cua"))
     );
-    let mut local = Session::new(driver.clone());
-    local
-        .configure(
-            Desktop::Local,
-            vec![],
-            maka_agent_facts::language::Language::En,
-        )
-        .unwrap();
-    assert_eq!(local.platform(), "linux");
-    local.close().await.unwrap();
+    #[cfg(feature = "native-desktop")]
+    {
+        let mut local = Session::new(driver.clone());
+        local
+            .configure(
+                Desktop::Local,
+                vec![],
+                maka_agent_facts::language::Language::En,
+            )
+            .unwrap();
+        assert_eq!(local.platform(), "linux");
+        local.close().await.unwrap();
+    }
 
     let app = call(
         &mut a,
@@ -245,6 +248,7 @@ async fn closed_or_cancelled_session_cannot_start_native_work() {
     run.close().await.unwrap();
 }
 
+#[cfg(feature = "native-desktop")]
 #[tokio::test]
 #[ignore = "requires an interactive desktop; lists applications without sending input"]
 async fn native_application_observation_and_shutdown() {
@@ -292,7 +296,7 @@ async fn native_application_observation_and_shutdown() {
     assert!(result.is_array());
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-desktop", target_os = "macos"))]
 #[tokio::test]
 #[ignore = "requires a locked macOS desktop; verifies refusal without launching or controlling an app"]
 async fn locked_desktop_refuses_target_binding_before_app_resolution() {

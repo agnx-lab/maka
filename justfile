@@ -30,7 +30,7 @@ product:
 
 # Run the native CLI or TUI.
 run *args: product
-    cargo run --locked -p maka-cli -- "$@"
+    node scripts/rust/run-cli.mjs "$@"
 
 # Build the native CLI, desktop shell and authored app (--release / --target).
 build *args: product

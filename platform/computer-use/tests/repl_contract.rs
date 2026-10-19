@@ -126,6 +126,7 @@ async fn inventory_failures_remain_visible_and_auto_explicit_screenshot_output_i
     repl.close().await.unwrap();
 }
 
+#[cfg(feature = "native-desktop")]
 #[tokio::test]
 async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_selection() {
     let driver = Arc::new(tokio::sync::Mutex::new(maka_computer_use::Driver::default()));
@@ -170,10 +171,12 @@ async fn browser_discovery_distinguishes_no_configuration_from_an_unavailable_se
 
 // Each evaluation owns its language; the same REPL and native target owner can
 // serve differently captured invocations without changing persistent JS state.
+#[cfg(feature = "native-desktop")]
 struct LocalBridge {
     native: Arc<tokio::sync::Mutex<maka_computer_use::Session>>,
     language: maka_agent_facts::language::Language,
 }
+#[cfg(feature = "native-desktop")]
 impl ToolExecutor for LocalBridge {
     fn names(&self) -> Vec<String> {
         vec!["cua".into()]
@@ -196,6 +199,7 @@ impl ToolExecutor for LocalBridge {
     }
 }
 
+#[cfg(feature = "native-desktop")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persistent_repl_uses_each_evaluations_language_without_rewriting_user_output() {
     use maka_agent_facts::language::Language;
@@ -203,6 +207,15 @@ async fn persistent_repl_uses_each_evaluations_language_without_rewriting_user_o
     let native = Arc::new(tokio::sync::Mutex::new(maka_computer_use::Session::new(
         driver.clone(),
     )));
+    native
+        .lock()
+        .await
+        .configure(
+            maka_capabilities::computer::Desktop::Local,
+            vec![],
+            Language::En,
+        )
+        .unwrap();
     let repl = Repl::new(facade(), CellLimits::default());
     for (language, recovery) in [
         (Language::ZhCn, "重新绑定目标"),

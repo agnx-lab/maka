@@ -39,8 +39,22 @@ The `desktop` setting defaults to `auto`: the Windows host in WSL, otherwise the
 
 Browser providers are explicitly configured CDP connections to existing profiles. When no provider is configured, use a native browser window. Configuration and platform-specific methods are described by the API reference; a missing provider does not trigger a browser restart or enable debugging.
 
+## Native and WSL development builds
+
+The CLI enables the `native-desktop` Cargo feature by default. It includes the local driver and cursor renderer for Linux, macOS or Windows. Native dependencies require Xcode Command Line Tools on macOS and X11 development libraries on Linux.
+
+`just run` automatically omits this feature in WSL, keeping the Windows bridge without compiling the Linux desktop driver. Set `MAKA_CUA_BUILD_MODE` to `auto` (the default), `native` or `bridge` to select the development build explicitly. For example, `MAKA_CUA_BUILD_MODE=native just run` includes the Linux driver in WSL. The runtime `desktop` setting still selects the destination; a bridge build rejects `local`, and `auto` requires WSL to select Windows.
+
+Source builds need a Windows `maka.exe` built from the same source with its default native features. Build it on Windows and provide its absolute path as visible from WSL:
+
+```sh
+MAKA_CUA_WINDOWS_EXECUTABLE=/mnt/c/path/to/maka.exe just run
+```
+
+Plain `cargo run -p maka-cli` retains the native default. To build the bridge directly, use `cargo run --locked -p maka-cli --no-default-features -- ...`. Cargo features combine across selected packages, so another selected package enabling `native-desktop` restores native dependencies. `just build` and release packaging retain the full native product; the Linux desktop shell separately requires Linux GUI development libraries.
+
 ## Lifetime
 
 Reset clears this Session's bindings without closing user apps or tabs. Navigation, window changes and fresh observations can invalidate previous input targets. Cancellation or timeout requires a reset; an uncertain action is never replayed automatically. Shutdown waits for accepted native work to settle.
 
-Native dependencies require Xcode Command Line Tools on macOS and X11 development libraries on Linux. Verify input and capture behavior on the target desktop; a REPL unit test cannot establish native focus or accessibility behavior.
+Verify input and capture behavior on the target desktop; a REPL unit test cannot establish native focus or accessibility behavior.

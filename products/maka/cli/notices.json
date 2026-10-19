@@ -1,7 +1,7 @@
 {
   "inputs": {
     "Cargo.lock": "9d2ee639c0f682b6b5b91e36922fa8a0fdb647eba21f9eafcedc45d201cd96f9",
-    "Cargo.toml": "84dad9aaa98e01f9d194633a830d2c886c1e81de823436efc8057ad10a44f894",
+    "Cargo.toml": "a8de04fd6213b52cf187f9208c0f36bb15d8dab4d8ef8e7c482503d75c9b7e43",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
@@ -14,7 +14,7 @@
     "patches/zod+4.6.5.patch": "5a6cbff1b31ca2a5d2b7c006abb7b1002241dbf4ae42c315c27940201f52b081",
     "platform/background-health/Cargo.toml": "41e89dc7e43adf066306b03b3083cbd4163a5550f39d5be6669463d3c16c53a5",
     "platform/capabilities/Cargo.toml": "b6a0d3d90f3289fcc2f263fcad661df3d76ac2f5c953c07940f2b5c9c8afa5c8",
-    "platform/computer-use/Cargo.toml": "fc8a60fbb29acf1c9391a95dbca312203bf893fa28e873264ccf26226c22241f",
+    "platform/computer-use/Cargo.toml": "b3397d40d450aca20eb2a1ca0612e5eb565980b2b83b5557d20bd14ec9e58db5",
     "platform/computer-use/THIRD_PARTY_NOTICES": "709951ed2ee5c4b9ed933f375a37c5b15ec0efa2dea340dc0f289906d72a7bde",
     "platform/event-log/Cargo.toml": "ee5cf4bf860e3a6584101bf7421742ac490e30bd8e61ff5ddcab72b5efeabfd3",
     "platform/host-js/Cargo.toml": "ad83d0133b55b69298aeb65db408c6de4170bf1d55afb47f93b121992335a3b5",
@@ -393,7 +393,7 @@
     "products/maka/bundle/scripts/build.mjs": "db11d8cd6f29ef7ead087261848568da1ad3889a870a89f23fa969449d769d47",
     "products/maka/bundle/src/composition.ts": "a4ba3e1ede5e2a52d89fa98775e5e3ade4478844da8bf416fac3e2eaf3117e89",
     "products/maka/bundle/src/installation.ts": "f1819851114b4280252afcbd16ef82e08269901faeacc171120c5abff74be72e",
-    "products/maka/cli/Cargo.toml": "2a41d9dd434d08bb62cfe784e32b9e9facd41c58bbe9eb1b809b3fde3a2ed446",
+    "products/maka/cli/Cargo.toml": "4580d872cfcf525a7fa7b753a35f94d17cfe4da06fab7f2ac6fe6d1ef69de93f",
     "products/maka/cli/build.rs": "852960c81f7f6ee03e882eabfa07603bcb8727b98f22a3e6e2552e6e375668cd",
     "products/maka/cli/build/product.rs": "6302eefa7c818dbd73e75f7796d331542315b79032a62727fa43f53413c25766",
     "products/maka/desktop-shell/Cargo.toml": "3b5d668dea0bbdec2925a7449fd7f5a5cd7703cf0783e4cd9a74bd9800c5ac75",

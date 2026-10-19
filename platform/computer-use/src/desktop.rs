@@ -18,7 +18,9 @@
  */
 
 //! Select the desktop independently of the OS running the Agent.
-use crate::{Driver, protocol::Command, session};
+#[cfg(feature = "native-desktop")]
+use crate::session;
+use crate::{Driver, protocol::Command};
 use maka_agent_facts::{language::Language, tools::ToolError};
 use maka_capabilities::computer::BrowserConnection;
 use maka_capabilities::computer::Desktop;
@@ -74,6 +76,7 @@ pub struct Session {
     closed: bool,
 }
 enum Backend {
+    #[cfg(feature = "native-desktop")]
     Local(session::Session),
     Windows {
         id: Option<String>,
@@ -93,6 +96,7 @@ impl Session {
     /// Remote/unknown bindings use a generic action, never a guessed window name.
     pub fn activity(&self, command: &Command) -> maka_agent_facts::display::Text {
         let target = match (&self.backend, command) {
+            #[cfg(feature = "native-desktop")]
             (
                 Some(Backend::Local(local)),
                 Command::Observe { handle, .. } | Command::Action { handle, .. },
@@ -111,7 +115,7 @@ impl Session {
         if self.closed {
             return Err(failed("Computer Use Session is closed"));
         }
-        crate::browser::validate_connections(&browsers)?;
+        validate_connections(&browsers)?;
         let windows = use_windows(desktop, local_platform(), is_wsl())?;
         if let Some(backend) = &self.backend
             && windows != matches!(backend, Backend::Windows { .. })
@@ -124,17 +128,23 @@ impl Session {
                 Language::ZhTw => "桌面設定已變更；請先重設 Cua，再切換桌面",
             }));
         }
-        let backend = self.backend.get_or_insert_with(|| {
-            if windows {
+        if self.backend.is_none() {
+            self.backend = Some(if windows {
                 Backend::Windows {
                     id: None,
                     browsers: Vec::new(),
                 }
             } else {
-                Backend::Local(session::Session::new(self.driver.clone()))
-            }
-        });
-        match backend {
+                #[cfg(feature = "native-desktop")]
+                {
+                    Backend::Local(session::Session::new(self.driver.clone()))
+                }
+                #[cfg(not(feature = "native-desktop"))]
+                return Err(native_unavailable());
+            });
+        }
+        match self.backend.as_mut().unwrap() {
+            #[cfg(feature = "native-desktop")]
             Backend::Local(local) => local.configure_browsers(browsers, language),
             Backend::Windows {
                 browsers: current, ..
@@ -205,6 +215,7 @@ impl Session {
             self.configure(Desktop::Auto, Vec::new(), language)?;
         }
         match self.backend.as_mut().unwrap() {
+            #[cfg(feature = "native-desktop")]
             Backend::Local(local) => local.invoke(command, session, cancellation, language).await,
             Backend::Windows { id, browsers } => {
                 if id.as_deref().is_some_and(|id| id != session) {
@@ -234,6 +245,7 @@ impl Session {
     pub async fn close(&mut self) -> Result<(), ToolError> {
         self.closed = true;
         match &mut self.backend {
+            #[cfg(feature = "native-desktop")]
             Some(Backend::Local(local)) => local.close().await,
             Some(Backend::Windows { id: Some(id), .. }) => {
                 self.driver.lock().await.windows.release_session(id).await?;
@@ -243,6 +255,46 @@ impl Session {
             _ => Ok(()),
         }
     }
+}
+
+pub(crate) fn validate_connections(connections: &[BrowserConnection]) -> Result<(), ToolError> {
+    let mut ids = std::collections::HashSet::new();
+    if connections.len() > 8 {
+        return Err(failed("at most 8 browser providers may be configured"));
+    }
+    for connection in connections {
+        let url = reqwest::Url::parse(&connection.endpoint).map_err(failed)?;
+        let loopback = url.host_str().is_some_and(|host| {
+            host == "localhost"
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        });
+        if !loopback
+            || url.scheme() != "http"
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || url.path() != "/"
+        {
+            return Err(failed(
+                "browser endpoint must be a loopback HTTP origin, without credentials, path or query",
+            ));
+        }
+        if connection.id.is_empty() || !ids.insert(&connection.id) {
+            return Err(failed("browser IDs must be nonempty and unique"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "native-desktop"))]
+fn native_unavailable() -> ToolError {
+    failed(
+        "Local desktop support is not included in this build; build Maka with the native-desktop feature, or use the Windows desktop from WSL",
+    )
 }
 
 fn failed(error: impl std::fmt::Display) -> ToolError {
@@ -272,5 +324,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[cfg(not(feature = "native-desktop"))]
+    #[tokio::test]
+    async fn bridge_build_rejects_local_configuration_and_keeps_windows_available() {
+        let driver = Arc::new(Mutex::new(Driver::default()));
+        let mut session = Session::new(driver.clone());
+        let error = session
+            .configure(Desktop::Local, Vec::new(), Language::En)
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "tool failed: Local desktop support is not included in this build; build Maka with the native-desktop feature, or use the Windows desktop from WSL"
+        );
+        // Auto may select the Windows worker only in WSL. Elsewhere it must
+        // report the missing native capability during configuration too.
+        if !is_wsl() {
+            assert_eq!(
+                session
+                    .configure(Desktop::Auto, Vec::new(), Language::En)
+                    .unwrap_err()
+                    .to_string(),
+                error.to_string()
+            );
+        } else {
+            session
+                .configure(Desktop::Auto, Vec::new(), Language::En)
+                .unwrap();
+            assert_eq!(session.platform(), "windows");
+        }
+        session.close().await.unwrap();
+        driver.lock().await.close().await.unwrap();
     }
 }

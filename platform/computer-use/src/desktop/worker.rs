@@ -18,24 +18,32 @@
  */
 
 //! Private, parent-owned desktop worker. There is no listener or reconnect path.
-use super::{failed, local_platform};
-use crate::{Driver, protocol::Command, session::Session};
+use super::failed;
+#[cfg(feature = "native-desktop")]
+use super::local_platform;
+use crate::protocol::Command;
+#[cfg(feature = "native-desktop")]
+use crate::{Driver, session::Session};
 use maka_agent_facts::tools::ToolError;
 use maka_capabilities::computer::BrowserConnection;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+#[cfg(feature = "native-desktop")]
+use std::{collections::HashMap, sync::Arc};
 use std::{
-    collections::HashMap,
     io,
     path::PathBuf,
     process::{ExitCode, Stdio},
-    sync::Arc,
     time::Duration,
 };
+#[cfg(feature = "native-desktop")]
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout},
+    io::AsyncWrite,
     sync::{Mutex, mpsc},
+};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, ChildStdout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -296,10 +304,20 @@ pub fn bootstrap() -> Option<ExitCode> {
     let result = if std::env::args_os().len() != 2 {
         Err(io::Error::other("desktop worker takes no arguments"))
     } else {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .and_then(|runtime| runtime.block_on(serve_stdio()))
+        #[cfg(feature = "native-desktop")]
+        {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .and_then(|runtime| runtime.block_on(serve_stdio()))
+        }
+        #[cfg(not(feature = "native-desktop"))]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "native desktop support is not included in this build; rebuild with the native-desktop feature",
+            ))
+        }
     };
     Some(match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -310,6 +328,7 @@ pub fn bootstrap() -> Option<ExitCode> {
     })
 }
 
+#[cfg(feature = "native-desktop")]
 async fn serve_stdio() -> io::Result<()> {
     let (send, receive) = mpsc::channel(1);
     let disconnected = CancellationToken::new();
@@ -329,6 +348,7 @@ async fn serve_stdio() -> io::Result<()> {
     serve(receive, tokio::io::stdout(), disconnected, driver).await
 }
 
+#[cfg(feature = "native-desktop")]
 async fn serve(
     mut receive: mpsc::Receiver<Request>,
     mut output: impl AsyncWrite + Unpin,
@@ -439,6 +459,7 @@ fn encode(value: &impl Serialize) -> io::Result<Vec<u8>> {
     bytes[..4].copy_from_slice(&(size as u32).to_be_bytes());
     Ok(bytes)
 }
+#[cfg(feature = "native-desktop")]
 async fn write(output: &mut (impl AsyncWrite + Unpin), value: &impl Serialize) -> io::Result<()> {
     output.write_all(&encode(value)?).await?;
     output.flush().await
@@ -448,6 +469,7 @@ async fn read<R: AsyncRead + Unpin, T: DeserializeOwned>(input: &mut R) -> io::R
     input.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(Into::into)
 }
+#[cfg(any(feature = "native-desktop", test))]
 fn read_sync<T: DeserializeOwned>(input: &mut impl io::Read) -> io::Result<T> {
     let mut header = [0; 4];
     input.read_exact(&mut header)?;
@@ -470,6 +492,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn desktop_frames_preserve_invoke_language() {
+        use maka_agent_facts::language::Language;
+
+        for (language, tag) in [
+            (Language::ZhCn, "zh-CN"),
+            (Language::ZhTw, "zh-TW"),
+            (Language::En, "en"),
+        ] {
+            let request = Request::Invoke {
+                session: "same-session".into(),
+                browsers: Vec::new(),
+                command: Command::Documentation,
+                language,
+            };
+            let framed = encode(&request).unwrap();
+            let decoded: Request = read_sync(&mut framed.as_slice()).unwrap();
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                json!({
+                    "method": "invoke",
+                    "session": "same-session",
+                    "browsers": [],
+                    "command": { "method": "documentation" },
+                    "language": tag,
+                }),
+            );
+        }
+    }
+
+    #[cfg(feature = "native-desktop")]
     #[tokio::test]
     async fn desktop_sessions_own_targets_and_reset_independently() {
         let (send, receive) = mpsc::channel(1);
@@ -514,6 +567,7 @@ mod tests {
         task.await.unwrap().unwrap();
     }
 
+    #[cfg(feature = "native-desktop")]
     #[tokio::test]
     async fn desktop_transport_keeps_language_per_invoke_not_per_session() {
         use maka_agent_facts::language::Language;
@@ -557,6 +611,7 @@ mod tests {
         task.await.unwrap().unwrap();
     }
 
+    #[cfg(feature = "native-desktop")]
     #[tokio::test]
     async fn disconnected_desktop_discards_queued_work_and_closes_output() {
         let (send, receive) = mpsc::channel(1);
