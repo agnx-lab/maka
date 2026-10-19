@@ -19,7 +19,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectTasks, readFloatTasks, watchFloatTasks } from '../../renderer/features/personal-assistant/testing.js';
+import { visibleFloatTasks, projectTasks, readFloatTasks, watchFloatTasks } from '../../renderer/features/personal-assistant/testing.js';
 
 test('task list distinguishes execution, business waiting, queued and user input', () => {
   const items = [
@@ -78,4 +78,20 @@ test('polling never delivers in-flight results after disposal', async () => {
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(received, []);
   assert.equal(reads, 1);
+});
+
+
+test('default list excludes archived tasks, including paused tasks with stale runtime errors', () => {
+  const tasks = projectTasks({ items: [
+    { id: 'running', status: 'active', runtimeStatus: 'running' },
+    { id: 'waiting', status: 'waiting' },
+    { id: 'queued', status: 'active' },
+    { id: 'attention', status: 'active', runtimeStatus: 'waiting_for_user' },
+    { id: 'paused', status: 'paused', lastError: 'failed', runtimeError: 'offline', runtimeStatus: 'running' },
+    { id: 'completed', status: 'completed' },
+    { id: 'cancelled', status: 'cancelled' },
+  ] });
+  assert.equal(tasks.find(task => task.id === 'paused')?.phase, 'paused');
+  assert.deepEqual(visibleFloatTasks(tasks, false).map(task => task.id), ['attention', 'queued', 'running', 'waiting']);
+  assert.deepEqual(visibleFloatTasks(tasks, true), tasks);
 });

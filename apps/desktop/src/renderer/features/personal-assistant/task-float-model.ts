@@ -34,8 +34,8 @@ export function projectTasks(tasks: any, now = Date.now()): FloatTask[] {
   const items: FloatTask[] = (Array.isArray(tasks?.items) ? tasks.items : []).map((task: any) => {
     let phase: TaskPhase;
     if (task.status === 'completed' || task.status === 'cancelled') phase = task.status;
+    else if (task.status === 'paused') phase = 'paused';
     else if (task.runtimeError || task.runtimeStatus === 'waiting_for_user' || task.runtimeStatus === 'blocked') phase = 'attention';
-    else if (task.status === 'paused') phase = task.lastError ? 'attention' : 'paused';
     else if (timestamp(task.retryAt) > now) phase = 'queued';
     else if (task.runtimeStatus === 'running') phase = 'running';
     else if (task.status === 'waiting') phase = 'waiting';
@@ -51,4 +51,8 @@ export function projectTasks(tasks: any, now = Date.now()): FloatTask[] {
     items.push({ id: `pending:${pending.taskKey}`, title: text(pending.title), phase: pending.status === 'needs_recovery' ? 'attention' : 'queued', progress: text(pending.message), updatedAt: 0 });
   }
   return items.filter(task => task.id).sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+}
+
+export function visibleFloatTasks(tasks: FloatTask[], showArchived: boolean): FloatTask[] {
+  return showArchived ? tasks : tasks.filter(task => !['paused', 'completed', 'cancelled'].includes(task.phase));
 }

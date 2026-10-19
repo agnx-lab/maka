@@ -23,7 +23,7 @@ import { ChevronLeft, ChevronRight, Minus, ChevronDown, ArrowLeft } from '@maka/
 import { usePersonalAssistantServices } from './services.js';
 import { readFloatTasks, watchFloatTasks } from './task-float-source.js';
 import { taskFloatCopy } from './task-float-copy.js';
-import type { FloatTask } from './task-float-model.js';
+import { visibleFloatTasks, type FloatTask } from './task-float-model.js';
 
 export function PersonalAssistantTaskFloat({ sessionId }: { sessionId: string }) {
   const services = usePersonalAssistantServices();
@@ -32,21 +32,21 @@ export function PersonalAssistantTaskFloat({ sessionId }: { sessionId: string })
   const [tasks, setTasks] = useState<FloatTask[]>([]);
   const [offline, setOffline] = useState(false);
   const [expanded, setExpanded] = useState(true);
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => watchFloatTasks(() => readFloatTasks(services, sessionId), result => {
     setOffline(result === null);
     setTasks(result ?? []);
   }), [services, sessionId]);
-  const visibleTasks = showCompleted ? tasks : tasks.filter(task => task.phase !== 'completed');
+  const visibleTasks = visibleFloatTasks(tasks, showArchived);
   const pages = Math.max(1, Math.ceil(visibleTasks.length / 3));
   const currentPage = Math.min(page, pages - 1);
   const selected = visibleTasks.find(task => task.id === selectedId);
   const running = tasks.filter(task => task.phase === 'running').length;
   const waiting = tasks.filter(task => task.phase === 'waiting').length;
-  const other = tasks.filter(task => ['queued', 'attention', 'paused'].includes(task.phase));
-  const countText = offline ? copy.offline : `${running} ${copy.phase.running} · ${waiting} ${copy.phase.waiting}${other.length ? ` · ${other.length} ${copy.other}` : ''}`;
+  const other = tasks.filter(task => ['queued', 'attention'].includes(task.phase));
+  const countText = offline ? copy.offline : `${running} ${copy.phase.running} · ${waiting} ${copy.phase.waiting}${other.length ? ` · ${other.length} ${copy.phase.attention}` : ''}`;
   if (!tasks.length && !offline) return null;
   const time = (task: FloatTask) => task.updatedAt ? new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(task.updatedAt) : '—';
   return <aside className={`assistant-task-float${expanded ? '' : ' is-collapsed'}`} aria-label={copy.tasks}>
@@ -59,7 +59,7 @@ export function PersonalAssistantTaskFloat({ sessionId }: { sessionId: string })
           <span className={`assistant-task-progress is-${task.phase}`}><i aria-hidden="true" /><span title={`${copy.phase[task.phase]}${task.progress ? ` · ${task.progress}` : ''}`}><b>{copy.phase[task.phase]}</b>{task.progress ? ` · ${task.progress}` : ''}</span></span>
         </button>)}
       </div>
-      {!selected && <footer><button className="assistant-task-completed-toggle" aria-pressed={showCompleted} onClick={() => { setShowCompleted(!showCompleted); setPage(0); setSelectedId(null); }}>{showCompleted ? copy.hideCompleted : copy.showCompleted}</button><nav aria-label={copy.tasks}><button aria-label={copy.previous} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={13} /></button><span>{currentPage + 1}/{pages}</span><button aria-label={copy.next} disabled={currentPage >= pages - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={13} /></button></nav></footer>}
+      {!selected && <footer><button className="assistant-task-completed-toggle" aria-pressed={showArchived} onClick={() => { setShowArchived(!showArchived); setPage(0); setSelectedId(null); }}>{showArchived ? copy.hideArchived : copy.showArchived}</button><nav aria-label={copy.tasks}><button aria-label={copy.previous} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={13} /></button><span>{currentPage + 1}/{pages}</span><button aria-label={copy.next} disabled={currentPage >= pages - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={13} /></button></nav></footer>}
     </>}
   </aside>;
 }
