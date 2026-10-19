@@ -20,13 +20,13 @@ use crate::{
     StoreError,
     turns::{InvocationState, TurnBoundary},
 };
-use maka_agent_facts::continuation::MAX_ANCESTRY;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::RuntimeEvent;
 use sqlx::SqliteConnection;
+use std::collections::HashSet;
 
 async fn opening(tx: &mut SqliteConnection, id: &str) -> Result<Option<RuntimeEvent>, StoreError> {
     let json: Option<String> = sqlx::query_scalar(
@@ -52,7 +52,11 @@ pub(crate) async fn read(
     if current.invocation != *source {
         return Err(super::invalid("handoff owner identity changed"));
     }
-    for _ in 0..=MAX_ANCESTRY {
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(current.invocation.run_id.clone()) {
+            return Err(super::invalid("handoff owner cycle"));
+        }
         let boundary = crate::turns::project(tx, current).await?;
         let InvocationState::Ended {
             outcome: InvocationOutcome::HandoffPaused { pause },
@@ -95,5 +99,4 @@ pub(crate) async fn read(
         }
         current = next;
     }
-    Err(super::invalid("handoff owner exceeds ancestry limit"))
 }

@@ -18,7 +18,6 @@
  */
 
 use crate::{EventLog, StoreError, turns::TurnBoundary};
-use maka_agent_facts::continuation::MAX_ANCESTRY;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::RuntimeEvent;
@@ -155,7 +154,7 @@ pub(crate) async fn lineage(
 ) -> Result<TurnBoundary, StoreError> {
     let mut current = owner.clone();
     let mut seen = HashSet::new();
-    for _ in 0..=MAX_ANCESTRY {
+    loop {
         if !seen.insert(current.run_id.clone()) {
             return Err(invalid("Message owner continuation cycle"));
         }
@@ -222,7 +221,6 @@ pub(crate) async fn lineage(
         }
         current = successor.invocation;
     }
-    Err(invalid("Message owner continuation exceeds ancestry limit"))
 }
 
 fn invalid(reason: &str) -> StoreError {

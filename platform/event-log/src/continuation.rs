@@ -20,7 +20,6 @@
 //! Claims are canonical continuation openings, not a second admission ledger.
 
 use crate::{EventLog, StoreError, sequence_number};
-use maka_agent_facts::continuation::MAX_ANCESTRY;
 use maka_agent_facts::continuation::RunBoundary;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::InvocationInput;
@@ -140,7 +139,7 @@ pub(crate) async fn ancestors(
     let mut source = boundary.clone();
     let mut seen = HashSet::new();
     let mut result = Vec::new();
-    for _ in 0..MAX_ANCESTRY {
+    loop {
         if !seen.insert(source.invocation.run_id.clone()) {
             return Err(invalid("continuation lineage cycle"));
         }
@@ -216,7 +215,6 @@ pub(crate) async fn ancestors(
             _ => return Err(invalid("source has no resumable model opening")),
         }
     }
-    Err(invalid("continuation lineage exceeds capacity"))
 }
 
 fn invalid(reason: &str) -> StoreError {

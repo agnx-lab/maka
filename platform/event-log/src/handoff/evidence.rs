@@ -97,15 +97,8 @@ pub(crate) async fn validate(
         Some(&event.invocation.invocation_id),
     )
     .await?;
-    if let Some(claim) = input.inherited_claim()
-        && crate::continuation::ancestors(tx, &claim.source, &claim.base, workspace)
-            .await?
-            .len()
-            >= maka_agent_facts::continuation::MAX_ANCESTRY
-    {
-        return Err(invalid(
-            "handoff would exceed the continuation lineage capacity",
-        ));
+    if let Some(claim) = input.inherited_claim() {
+        crate::continuation::ancestors(tx, &claim.source, &claim.base, workspace).await?;
     }
     let root = match &opening.fact {
         Fact::InvocationOpened {

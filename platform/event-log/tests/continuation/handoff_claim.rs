@@ -280,11 +280,10 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
 }
 
 #[tokio::test]
-async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
+async fn workspace_refusal_and_deep_handoff_control_preserve_canonical_ownership() {
     let directory = tempfile::tempdir().unwrap();
-    let log = EventLog::open(&directory.path().join("eligibility.sqlite"))
-        .await
-        .unwrap();
+    let path = directory.path().join("eligibility.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
     let mut missing = opening("missing", None);
     if let Fact::InvocationOpened {
         configuration: Some(configuration),
@@ -327,7 +326,31 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
     );
     close(&log, &missing).await;
 
-    let root = opening("root", None);
+    let mut root = opening("root", None);
+    let Fact::InvocationOpened {
+        input:
+            InvocationInput::Message {
+                content,
+                source_messages,
+                ..
+            },
+        ..
+    } = &mut root.fact
+    else {
+        unreachable!()
+    };
+    source_messages.push(maka_agent_facts::message::RootSourceMessage {
+        unprepared_content: content.clone(),
+        message: maka_agent_facts::input::DeliveredMessage {
+            origin: None,
+            message_id: "deep-origin-message".into(),
+            submitted_content_digest: content.content_digest().unwrap(),
+            content: content.clone(),
+        },
+        submitted_placement: maka_agent_facts::message::Placement::CurrentTurn,
+        disposition: maka_agent_facts::message::MessageDisposition::TurnStarted,
+        submitted_intent: None,
+    });
     append(&log, &root).await;
     let context = log
         .context_before_run(&root.invocation, 100, 65536)
@@ -338,8 +361,8 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
         digest: context.source_evidence.digest,
     };
     pause.intent.root_run_id = root.invocation.run_id.clone();
-    let mut source = root;
-    for round in 0..=maka_agent_facts::continuation::MAX_ANCESTRY {
+    let mut source = root.clone();
+    for round in 0..66 {
         pause.intent.handoff_id = format!("handoff-{round}");
         pause.intent.successor_run_id = format!("run-{round}");
         pause.intent.successor_invocation_id = format!("invocation-{round}");
@@ -353,14 +376,6 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
             },
         ))
         .unwrap();
-        if round == maka_agent_facts::continuation::MAX_ANCESTRY {
-            assert!(log.check_handoff(&source.invocation, &pause).await.is_err());
-            assert!(
-                log.append(&seal).await.is_err(),
-                "do not strand an execution beyond the claim capacity"
-            );
-            break;
-        }
         log.check_handoff(&source.invocation, &pause).await.unwrap();
         log.append(&seal).await.unwrap();
         let inherited = claim(&log, &pause.intent.claim_id, &source, base.clone()).await;
@@ -379,9 +394,106 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
         );
         append(&log, &source).await;
     }
-    close(&log, &source).await;
+    assert_eq!(source.invocation.run_id, "run-65");
+    let before = serde_json::to_value(log.prefix(1000, 1024 * 1024).await.unwrap()).unwrap();
+    let owner = log.cancel_handoff(&root.invocation).await.unwrap();
+    assert_eq!(owner.invocation, source.invocation);
+    assert_eq!(owner.root_invocation(), &root.invocation);
+    assert!(matches!(
+        log.message_execution("session", "deep-origin-message").await.unwrap(),
+        maka_event_log::message_resolution::MessageExecution::Owned(owner)
+            if owner.invocation == source.invocation
+    ));
+    assert_eq!(
+        serde_json::to_value(log.prefix(1000, 1024 * 1024).await.unwrap()).unwrap(),
+        before
+    );
+
+    pause.intent.handoff_id = "deep-final-handoff".into();
+    pause.intent.successor_run_id = "deep-cancelled-run".into();
+    pause.intent.successor_invocation_id = "deep-cancelled-invocation".into();
+    pause.intent.claim_id = "deep-cancelled-claim".into();
+    log.check_handoff(&source.invocation, &pause).await.unwrap();
+    append(
+        &log,
+        &RuntimeEvent::new(
+            source.invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::HandoffPaused {
+                    pause: pause.clone(),
+                },
+            },
+        ),
+    )
+    .await;
+    let sealed = log
+        .run_source("session", "run-65", None)
+        .await
+        .unwrap()
+        .unwrap();
+    let sealed_prefix = log.prefix(1000, 1024 * 1024).await.unwrap();
+    let cancelled = log.cancel_handoff(&source.invocation).await.unwrap();
+    let after_cancel = log.prefix(1000, 1024 * 1024).await.unwrap();
+    assert_eq!(after_cancel.events.len(), sealed_prefix.events.len() + 2);
+    assert_eq!(
+        serde_json::to_value(&after_cancel.events[..sealed_prefix.events.len()]).unwrap(),
+        serde_json::to_value(&sealed_prefix.events).unwrap()
+    );
+    assert_eq!(
+        cancelled.invocation,
+        pause.intent.successor(&source.invocation)
+    );
+    assert!(matches!(
+        &cancelled.state,
+        maka_event_log::turns::InvocationState::Ended {
+            outcome: InvocationOutcome::Cancelled { source },
+            ..
+        } if source == "runtime_cancellation"
+    ));
+    let cancelled_source = log
+        .run_source("session", "deep-cancelled-run", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cancelled_source.boundary.high_water, 2);
+    let Fact::InvocationOpened {
+        input: InvocationInput::Handoff { claim, .. },
+        ..
+    } = &cancelled_source.opening.event.fact
+    else {
+        unreachable!()
+    };
+    assert_eq!(claim.source, sealed.boundary);
     append(&log, &opening("next-turn", None)).await;
-    log.close().await.unwrap();
+    let raw_proof = serde_json::to_value(log.prefix(1000, 1024 * 1024).await.unwrap()).unwrap();
+    let mut first_log = Some(log);
+    for _ in 0..2 {
+        let log = match first_log.take() {
+            Some(log) => log,
+            None => EventLog::open(&path).await.unwrap(),
+        };
+        let owner = log.cancel_handoff(&root.invocation).await.unwrap();
+        assert_eq!(owner.invocation, cancelled.invocation);
+        assert_eq!(owner.root_invocation(), &root.invocation);
+        assert!(
+            matches!(log.message_execution("session", "deep-origin-message").await.unwrap(),
+            maka_event_log::message_resolution::MessageExecution::Owned(owner)
+                if owner.invocation == cancelled.invocation)
+        );
+        assert_eq!(
+            log.run_source("session", "run-65", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .boundary,
+            sealed.boundary
+        );
+        assert_eq!(
+            serde_json::to_value(log.prefix(1000, 1024 * 1024).await.unwrap()).unwrap(),
+            raw_proof
+        );
+        log.close().await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -503,6 +615,166 @@ async fn handoff_rejects_ambiguous_private_logical_roots_without_repair_after_re
         Err(maka_event_log::StoreError::InvalidTransition(reason))
             if reason == "handoff has no unique logical root"
     ));
+    assert_eq!(raw(), raw_before);
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        canonical_before
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_handoff_owner_cycle_is_rejected_without_mutation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("owner-cycle.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let root = opening("root", None);
+    append(&log, &root).await;
+    let context = log
+        .context_before_run(&root.invocation, 100, 65536)
+        .await
+        .unwrap();
+    let base = SessionBase {
+        high_water: context.source_evidence.high_water,
+        digest: context.source_evidence.digest,
+    };
+    let mut source = root.clone();
+    let mut successors = Vec::new();
+    let mut root_seal = None;
+    for id in ["a", "b"] {
+        let pause = HandoffPause {
+            intent: HandoffIntent {
+                handoff_id: format!("handoff-{id}"),
+                host_epoch: "host".into(),
+                root_run_id: root.invocation.run_id.clone(),
+                successor_run_id: format!("run-{id}"),
+                successor_invocation_id: format!("invocation-{id}"),
+                claim_id: format!("claim-{id}"),
+            },
+            execution: super::handoff::execution(),
+        };
+        log.check_handoff(&source.invocation, &pause).await.unwrap();
+        let seal = RuntimeEvent::new(
+            source.invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::HandoffPaused {
+                    pause: pause.clone(),
+                },
+            },
+        );
+        append(&log, &seal).await;
+        if id == "a" {
+            root_seal = Some(seal);
+        }
+        let inherited = claim(&log, &pause.intent.claim_id, &source, base.clone()).await;
+        let Fact::InvocationOpened { configuration, .. } = &source.fact else {
+            unreachable!()
+        };
+        source = RuntimeEvent::new(
+            pause.intent.successor(&source.invocation),
+            Fact::InvocationOpened {
+                configuration: configuration.clone(),
+                input: InvocationInput::Handoff {
+                    claim: Box::new(inherited),
+                    pause: Box::new(pause),
+                },
+            },
+        );
+        append(&log, &source).await;
+        successors.push(source.clone());
+    }
+    let a = &successors[0];
+    let b = &successors[1];
+    let mut pause = HandoffPause {
+        intent: HandoffIntent {
+            handoff_id: "last-handoff".into(),
+            host_epoch: "host".into(),
+            root_run_id: root.invocation.run_id.clone(),
+            successor_run_id: "run-c".into(),
+            successor_invocation_id: "invocation-c".into(),
+            claim_id: "claim-c".into(),
+        },
+        execution: super::handoff::execution(),
+    };
+    log.check_handoff(&b.invocation, &pause).await.unwrap();
+    let mut last_seal = RuntimeEvent::new(
+        b.invocation.clone(),
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::HandoffPaused {
+                pause: pause.clone(),
+            },
+        },
+    );
+    append(&log, &last_seal).await;
+    let valid = log.cancel_handoff(&a.invocation).await.unwrap();
+    assert_eq!(valid.invocation, b.invocation);
+    assert!(matches!(
+        valid.state,
+        maka_event_log::turns::InvocationState::Ended {
+            outcome: InvocationOutcome::HandoffPaused { .. },
+            ..
+        }
+    ));
+
+    // Private malformed evidence: a -> b -> a, with a separate valid logical root.
+    // Detach root's old reservation of a first, preserving unique incoming
+    // reservations while retaining the original Message root for both projections.
+    let mut root_seal = root_seal.unwrap();
+    let Fact::InvocationEnded {
+        outcome: InvocationOutcome::HandoffPaused { pause: detached },
+    } = &mut root_seal.fact
+    else {
+        unreachable!()
+    };
+    detached.intent.successor_run_id = "run-d".into();
+    detached.intent.successor_invocation_id = "invocation-d".into();
+    detached.intent.claim_id = "claim-d".into();
+    // Keep exact local identities, typed pauses/claims and source counts so the
+    // forward owner reader reaches its repeated-Run guard instead of an edge error.
+    pause.intent.successor_run_id = a.invocation.run_id.clone();
+    pause.intent.successor_invocation_id = a.invocation.invocation_id.clone();
+    pause.intent.claim_id = "cycle-claim".into();
+    let inherited = claim(&log, "cycle-claim", b, base).await;
+    let mut changed_a = a.clone();
+    let Fact::InvocationOpened { input, .. } = &mut changed_a.fact else {
+        unreachable!()
+    };
+    *input = InvocationInput::Handoff {
+        claim: Box::new(inherited),
+        pause: Box::new(pause.clone()),
+    };
+    last_seal.fact = Fact::InvocationEnded {
+        outcome: InvocationOutcome::HandoffPaused { pause },
+    };
+    EventWrite::plain(root_seal.clone()).unwrap();
+    EventWrite::plain(changed_a.clone()).unwrap();
+    EventWrite::plain(last_seal.clone()).unwrap();
+    log.close().await.unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    for changed in [&root_seal, &changed_a, &last_seal] {
+        db.execute(
+            "UPDATE event_log SET event_json=?1 WHERE event_id=?2",
+            rusqlite::params![serde_json::to_string(changed).unwrap(), changed.id],
+        )
+        .unwrap();
+    }
+    let raw = || {
+        let mut statement = db
+            .prepare("SELECT sequence,event_json FROM event_log ORDER BY sequence")
+            .unwrap();
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let raw_before = raw();
+    let log = EventLog::open(&path).await.unwrap();
+    let canonical_before = serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap();
+    assert!(matches!(log.cancel_handoff(&a.invocation).await,
+        Err(maka_event_log::StoreError::InvalidTransition(reason)) if reason == "handoff owner cycle"));
     assert_eq!(raw(), raw_before);
     assert_eq!(
         serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
