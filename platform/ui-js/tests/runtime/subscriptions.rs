@@ -137,6 +137,7 @@ fn sequence(index: usize, stop: CancellationToken, mode: Mode) -> StreamFuture {
 #[derive(Clone, Copy)]
 enum Mode {
     Causal,
+    Ordered,
     Many,
     Open,
     Panic,
@@ -167,7 +168,8 @@ impl NativeComponent<()> for Parent {
         {
             match origin {
                 EventOrigin::Raw
-                    if *key == "inc" && !matches!(self.0, Mode::Panic | Mode::Open) =>
+                    if *key == "inc"
+                        && !matches!(self.0, Mode::Panic | Mode::Open | Mode::Ordered) =>
                 {
                     state["selector"] = json!(1);
                     state["cycle"] = json!(state["cycle"].as_u64().unwrap() + 1);
@@ -175,6 +177,21 @@ impl NativeComponent<()> for Parent {
                 EventOrigin::Component { .. } => state["selector"] = (*input).clone(),
                 EventOrigin::Action => state["feedback"] = (*input).clone(),
                 _ => {}
+            }
+            if matches!(self.0, Mode::Ordered) {
+                let event = match origin {
+                    EventOrigin::Raw => json!({"input":input}),
+                    EventOrigin::Action => json!({"feedback":input}),
+                    _ => unreachable!(),
+                };
+                state
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("delivered")
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()
+                    .unwrap()
+                    .push(event);
             }
         }
         let mut slots = Vec::new();
@@ -506,6 +523,103 @@ fn close(app: &mut Application, roots: &[Mount]) {
         app.close(&mount, Ok(())).unwrap();
     }
     app.shutdown().unwrap();
+}
+
+#[test]
+fn queued_native_and_physical_input_commit_before_ready_stream_feedback() {
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll, Waker},
+    };
+
+    let timer = timer();
+    let (mut app, starts) = fixture(Mode::Ordered, &timer);
+    let root = app.mount_launch(json!({})).unwrap();
+    app.defer_native_commit();
+    let deliver = |app: &mut Application| {
+        maka_ui_runtime::Application::deliver_action_results(app, &root, |_, _, _| Ok(false))
+            .unwrap()
+    };
+    let commit = |app: &mut Application| {
+        app.advance_ui().unwrap();
+        assert!(app.commit_ui(&root, |_, _| Ok(())).unwrap());
+    };
+    let (id, first) = run(&timer, start(&mut app, &root));
+    let successor = app.finish_task(id, first).unwrap().unwrap();
+    assert_eq!(deliver(&mut app), 1);
+
+    // Capture both inputs while the first stream transaction still owns its
+    // candidate. Their admission is not publication of either input.
+    let mut publication = app
+        .dispatch_observation(&root, 0, "inc", json!("native-first"))
+        .unwrap();
+    maka_ui_runtime::Application::dispatch(&mut app, &root, 0, "inc", json!("physical-second"))
+        .unwrap();
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(Pin::new(&mut publication).poll(&mut cx).is_pending());
+    commit(&mut app);
+    assert!(Pin::new(&mut publication).poll(&mut cx).is_pending());
+
+    // The commit ACK releases the next original service item. This is the
+    // foreground boundary where feedback used to bypass already queued input.
+    let (next_id, second) = run(&timer, successor);
+    assert_eq!(next_id, id);
+    let mut successor = app.finish_task(id, second).unwrap().unwrap();
+    assert_eq!(deliver(&mut app), 0);
+    assert_eq!(
+        app.frame(&root).unwrap().state["delivered"],
+        json!([{"feedback":{"status":"updated","value":0}}])
+    );
+    assert!(successor.future.as_mut().poll(&mut cx).is_pending());
+
+    commit(&mut app);
+    assert!(matches!(
+        Pin::new(&mut publication).poll(&mut cx),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(deliver(&mut app), 0);
+    commit(&mut app);
+    assert_eq!(
+        app.frame(&root).unwrap().state["delivered"],
+        json!([
+            {"feedback":{"status":"updated","value":0}},
+            {"input":"native-first"},
+            {"input":"physical-second"}
+        ])
+    );
+    assert!(
+        successor.future.as_mut().poll(&mut cx).is_pending(),
+        "input commits cannot acknowledge undelivered service feedback"
+    );
+
+    assert_eq!(deliver(&mut app), 1);
+    commit(&mut app);
+    loop {
+        let (next_id, completion) = run(&timer, successor);
+        assert_eq!(next_id, id);
+        let next = app.finish_task(id, completion).unwrap();
+        assert_eq!(deliver(&mut app), 1);
+        commit(&mut app);
+        match next {
+            Some(task) => successor = task,
+            None => break,
+        }
+    }
+    assert_eq!(
+        app.frame(&root).unwrap().state["delivered"],
+        json!([
+            {"feedback":{"status":"updated","value":0}},
+            {"input":"native-first"},
+            {"input":"physical-second"},
+            {"feedback":{"status":"updated","value":1}},
+            {"feedback":{"status":"updated","value":2}},
+            {"feedback":{"status":"succeeded","value":3}}
+        ])
+    );
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert_eq!(app.accepted_action_count(), 0);
+    close(&mut app, &[root]);
 }
 
 #[test]

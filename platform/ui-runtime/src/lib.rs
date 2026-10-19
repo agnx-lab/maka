@@ -727,7 +727,7 @@ impl<V: ?Sized + 'static> Application<V> {
     fn begin_invoke(
         &mut self,
         mount: &Mount,
-        call: ComponentCall<'_>,
+        call: &backend::Call,
         previous: Option<&NativeView<V>>,
     ) -> Result<PendingInvocation<V>> {
         let values = self.mount_values(mount)?;
@@ -740,8 +740,8 @@ impl<V: ?Sized + 'static> Application<V> {
                 InvocationResult::Script(
                     callbacks
                         .call(
-                            call,
-                            &values,
+                            call.clone(),
+                            values,
                             self.scene_compiler
                                 .as_ref()
                                 .expect("preflight compiler")
@@ -753,7 +753,12 @@ impl<V: ?Sized + 'static> Application<V> {
                 Some(realm.clone()),
             ),
             Component::Native(component) => (
-                InvocationResult::Native(component.start(call, previous, &values, &self.scheduler)),
+                InvocationResult::Native(component.start(
+                    call.as_native(),
+                    previous,
+                    &values,
+                    &self.scheduler,
+                )),
                 None,
             ),
         };
@@ -878,7 +883,7 @@ impl<V: ?Sized + 'static> Application<V> {
         &self.scheduler
     }
 
-    pub fn frame(&self, mount: &Mount) -> Result<&Frame<NativeView<V>>> {
+    pub fn frame(&self, mount: &Mount) -> Result<&Frame<NativeView<V>, Arc<Value>>> {
         self.views
             .get(&mount.id())
             .map(|view| &view.frame)

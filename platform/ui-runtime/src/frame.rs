@@ -58,9 +58,11 @@ impl<V> ComponentOutput<V> {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Frame<V = Value> {
+// Callback output uses owned JSON by default. The runtime retains immutable
+// state snapshots through a shared ownership type without changing the wire ABI.
+pub struct Frame<V = Value, S = Value> {
     pub revision: u64,
-    pub state: Value,
+    pub state: S,
     pub surface: Option<Surface>,
     pub view: V,
 }
@@ -131,6 +133,8 @@ impl<V> Frame<V> {
             subscriptions: Vec::new(),
         }
     }
+}
+impl<V, S> Frame<V, S> {
     pub fn validate_metadata(&self) -> Result<(), String> {
         if self.revision > 9_007_199_254_740_991
             || self
@@ -142,12 +146,20 @@ impl<V> Frame<V> {
         }
         Ok(())
     }
-    pub fn map_view<T>(self, map: impl FnOnce(V) -> T) -> Frame<T> {
+    pub fn map_view<T>(self, map: impl FnOnce(V) -> T) -> Frame<T, S> {
         Frame {
             revision: self.revision,
             state: self.state,
             surface: self.surface,
             view: map(self.view),
+        }
+    }
+    pub(crate) fn map_state<T>(self, map: impl FnOnce(S) -> T) -> Frame<V, T> {
+        Frame {
+            revision: self.revision,
+            state: map(self.state),
+            surface: self.surface,
+            view: self.view,
         }
     }
 }

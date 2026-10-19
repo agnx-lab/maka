@@ -328,6 +328,215 @@ enum MeasurementKey {
 }
 type MeasurementCache =
     std::collections::BTreeMap<(uuid::Uuid, MeasurementKey, u16, (u16, u16)), (u16, u32)>;
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SizeConstraints {
+    width: u16,
+    viewport: (u16, u16),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FlowConstraints {
+    width: u16,
+    // Responsive declarations are selected before reserving the scrollbar.
+    responsive_width: u16,
+    height: Option<u32>,
+    viewport: (u16, u16),
+}
+
+struct RetainedQuery<T> {
+    value: T,
+    used: bool,
+}
+
+/// Relative, immutable cell geometry only. Paint, targets and native admission
+/// are still rebuilt from the current owner and physical viewport on every frame.
+struct StackFlow {
+    indices: Vec<usize>,
+    flow: super::layout::Flow,
+}
+
+/// Owner-local memo for nodes actually owned by one immutable Node recipe.
+/// The weak recipe witness prevents node-address reuse from becoming a cache hit.
+/// Queries are allocated on demand and kept only while used in the current or
+/// preceding measurement pass; resizing cannot accumulate historical widths.
+#[derive(Default)]
+pub(super) struct RetainedMeasurements {
+    recipe: Option<std::rc::Weak<dyn super::Widget>>,
+    nodes: Box<[(usize, bool)]>,
+    pass: Option<std::time::Instant>,
+    sizes: std::collections::BTreeMap<(usize, SizeConstraints), RetainedQuery<(u16, u32)>>,
+    flows: std::collections::BTreeMap<
+        (usize, FlowConstraints),
+        RetainedQuery<std::sync::Arc<StackFlow>>,
+    >,
+    #[cfg(test)]
+    size_hits: usize,
+    #[cfg(test)]
+    flow_hits: usize,
+}
+
+impl RetainedMeasurements {
+    fn prepare(&mut self, recipe: &std::rc::Rc<dyn super::Widget>, pass: std::time::Instant) {
+        let witness = std::rc::Rc::downgrade(recipe);
+        if !self
+            .recipe
+            .as_ref()
+            .is_some_and(|previous| previous.ptr_eq(&witness))
+        {
+            *self = Self {
+                recipe: Some(witness),
+                ..Default::default()
+            };
+            // A native widget may construct temporary Nodes while measuring or
+            // painting. Only pre-index the recipe's declared immutable scene;
+            // temporary stack addresses under another Widget are never retained.
+            if let Some(root) = recipe.scene() {
+                let mut nodes = Vec::new();
+                Self::index(root, &mut nodes);
+                self.nodes = nodes.into_boxed_slice();
+                self.nodes.sort_unstable_by_key(|(address, _)| *address);
+            }
+        }
+        if self.pass != Some(pass) {
+            // Keep the previous actual working set available for this pass.
+            // A query unused for an entire pass retires at the next boundary.
+            self.sizes
+                .retain(|_, query| std::mem::replace(&mut query.used, false));
+            self.flows
+                .retain(|_, query| std::mem::replace(&mut query.used, false));
+            self.pass = Some(pass);
+        }
+    }
+
+    fn index(node: &Node, nodes: &mut Vec<(usize, bool)>) -> bool {
+        let (pure, flow) = match node {
+            Node::Component(_) => (false, false),
+            Node::AdaptivePane {
+                background,
+                content,
+                ..
+            } => {
+                Self::index(background, nodes);
+                Self::index(content, nodes);
+                (false, false)
+            }
+            Node::Dialog {
+                background,
+                content,
+                ..
+            }
+            | Node::ContextMenu {
+                background,
+                content,
+                ..
+            } => {
+                let pure = Self::index(background, nodes);
+                Self::index(content, nodes);
+                (pure, false)
+            }
+            Node::Item { content, .. } => (Self::index(content, nodes), false),
+            Node::Stack {
+                children, viewport, ..
+            } => {
+                let mut flow = true;
+                for child in children {
+                    let pure = Self::index(child, nodes);
+                    flow &= pure;
+                }
+                (*viewport || flow, flow)
+            }
+            Node::Text { .. } | Node::Rule { .. } | Node::Button { .. } | Node::Choice(_) => {
+                (true, false)
+            }
+        };
+        if pure {
+            nodes.push((node as *const Node as usize, flow));
+        }
+        pure
+    }
+
+    fn node(&self, node: &Node) -> Option<(usize, bool)> {
+        let address = node as *const Node as usize;
+        let index = self
+            .nodes
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()?;
+        Some(self.nodes[index])
+    }
+
+    fn size(&mut self, node: &Node, constraints: SizeConstraints) -> Option<(u16, u32)> {
+        let (address, _) = self.node(node)?;
+        let query = self.sizes.get_mut(&(address, constraints))?;
+        query.used = true;
+        let size = query.value;
+        #[cfg(test)]
+        {
+            self.size_hits += 1;
+        }
+        Some(size)
+    }
+
+    fn retain_size(&mut self, node: &Node, constraints: SizeConstraints, size: (u16, u32)) {
+        if let Some((address, _)) = self.node(node) {
+            self.sizes.insert(
+                (address, constraints),
+                RetainedQuery {
+                    value: size,
+                    used: true,
+                },
+            );
+        }
+    }
+
+    fn flow(
+        &mut self,
+        node: &Node,
+        constraints: FlowConstraints,
+    ) -> Option<std::sync::Arc<StackFlow>> {
+        let (address, true) = self.node(node)? else {
+            return None;
+        };
+        let query = self.flows.get_mut(&(address, constraints))?;
+        query.used = true;
+        let flow = query.value.clone();
+        #[cfg(test)]
+        {
+            self.flow_hits += 1;
+        }
+        Some(flow)
+    }
+
+    fn retain_flow(
+        &mut self,
+        node: &Node,
+        constraints: FlowConstraints,
+        flow: StackFlow,
+    ) -> std::sync::Arc<StackFlow> {
+        let flow = std::sync::Arc::new(flow);
+        if let Some((address, true)) = self.node(node) {
+            self.flows.insert(
+                (address, constraints),
+                RetainedQuery {
+                    value: flow.clone(),
+                    used: true,
+                },
+            );
+        }
+        flow
+    }
+
+    #[cfg(test)]
+    pub(super) fn stats(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.nodes.len(),
+            self.sizes.len(),
+            self.flows.len(),
+            self.size_hits,
+            self.flow_hits,
+        )
+    }
+}
+
 /// Derived, paint-local memoization. No entry survives the immutable render pass
 /// or participates in input/continuation/geometry admission.
 pub(super) struct Measurements {
@@ -1098,13 +1307,25 @@ impl Presenter {
             })?
         })
     }
-    fn visible_children<'a>(
+    fn with_retained_measurements<R>(
         &self,
         mount: &Mount,
-        children: &'a [Node],
-    ) -> maka_ui_runtime::Result<Vec<&'a Node>> {
+        pass: std::time::Instant,
+        use_memo: impl FnOnce(&mut RetainedMeasurements) -> R,
+    ) -> Option<R> {
+        let recipe = &self.application.frame(mount).ok()?.view.view;
+        let owner = self.resources.owners.get(&mount.id())?;
+        let mut memo = owner.measurements.borrow_mut();
+        memo.prepare(recipe, pass);
+        Some(use_memo(&mut memo))
+    }
+    fn visible_children(
+        &self,
+        mount: &Mount,
+        children: &[Node],
+    ) -> maka_ui_runtime::Result<Vec<usize>> {
         let mut visible = Vec::with_capacity(children.len());
-        for child in children {
+        for (index, child) in children.iter().enumerate() {
             let shown = match child {
                 Node::Component(slot) => self
                     .application
@@ -1114,10 +1335,80 @@ impl Presenter {
                 _ => child.visible(),
             };
             if shown {
-                visible.push(child);
+                visible.push(index);
             }
         }
         Ok(visible)
+    }
+    fn stack_flow(
+        &self,
+        mount: &Mount,
+        node: &Node,
+        width: u16,
+        responsive_width: u16,
+        height: Option<u32>,
+        measurements: MeasureContext<'_>,
+    ) -> maka_ui_runtime::Result<std::sync::Arc<StackFlow>> {
+        let constraints = FlowConstraints {
+            width,
+            responsive_width,
+            height,
+            viewport: (measurements.viewport.width, measurements.viewport.height),
+        };
+        if let Some(flow) = self
+            .with_retained_measurements(mount, measurements.time(), |memo| {
+                memo.flow(node, constraints)
+            })
+            .flatten()
+        {
+            return Ok(flow);
+        }
+        let Node::Stack {
+            direction,
+            wide,
+            gap,
+            children,
+            layout,
+            ..
+        } = node
+        else {
+            unreachable!("stack flow belongs to a stack node")
+        };
+        let indices = self.visible_children(mount, children)?;
+        let wide = wide
+            .as_ref()
+            .filter(|wide| responsive_width >= wide.min_width);
+        let layouts: Vec<_> = indices
+            .iter()
+            .map(|&index| {
+                self.node_layout(mount, &children[index], measurements)
+                    .map(|layout| {
+                        wide.and_then(|wide| wide.children.get(children[index].key()))
+                            .copied()
+                            .unwrap_or(layout)
+                    })
+            })
+            .collect::<maka_ui_runtime::Result<Vec<_>>>()?;
+        let flow = super::layout::measured(
+            wide.map_or(*direction, |wide| wide.direction),
+            width,
+            height,
+            *gap,
+            layout.wrap,
+            &layouts,
+            |index, width| self.measure(mount, &children[indices[index]], width, measurements),
+        )?;
+        let flow = StackFlow { indices, flow };
+        // Native owners exist before painting. Keeping the ordinary fallback
+        // also lets read-only standalone measurement work without an owner.
+        if let Some(owner) = self.resources.owners.get(&mount.id())
+            && let Ok(frame) = self.application.frame(mount)
+        {
+            let mut memo = owner.measurements.borrow_mut();
+            memo.prepare(&frame.view.view, measurements.time());
+            return Ok(memo.retain_flow(node, constraints, flow));
+        }
+        Ok(std::sync::Arc::new(flow))
     }
     pub(super) fn node_layout(
         &self,
@@ -1159,10 +1450,22 @@ impl Presenter {
             MeasurementKey::Node(node as *const Node as usize),
             width,
             || {
+                let constraints = SizeConstraints {
+                    width,
+                    viewport: (measurements.viewport.width, measurements.viewport.height),
+                };
+                if let Some(size) = self
+                    .with_retained_measurements(mount, measurements.time(), |memo| {
+                        memo.size(node, constraints)
+                    })
+                    .flatten()
+                {
+                    return Ok(size);
+                }
                 if !node.visible() {
                     return Ok((0, 0));
                 }
-                Ok(match node {
+                let size = match node {
                     Node::Dialog { background, .. } => {
                         self.measure(mount, background, width, measurements)?
                     }
@@ -1236,58 +1539,41 @@ impl Presenter {
                             .min(usize::from(width)) as u16,
                         1,
                     ),
-                    Node::Component(slot) => {
-                        return self.measure_mount(
-                            self.application.child_mount(mount, &slot.key)?,
-                            width,
-                            measurements,
-                        );
-                    }
+                    Node::Component(slot) => self.measure_mount(
+                        self.application.child_mount(mount, &slot.key)?,
+                        width,
+                        measurements,
+                    )?,
                     Node::Stack {
-                        direction,
-                        wide,
-                        gap,
                         padding,
                         border,
-                        children,
-                        layout,
                         viewport,
                         ..
                     } => {
                         let inset = (padding + u16::from(border.is_some())).saturating_mul(2);
                         if *viewport {
-                            return Ok((inset.min(width), u32::from(inset)));
+                            (inset.min(width), u32::from(inset))
+                        } else {
+                            let available = width.saturating_sub(inset);
+                            let flow = self.stack_flow(
+                                mount,
+                                node,
+                                available,
+                                available,
+                                None,
+                                measurements,
+                            )?;
+                            (
+                                flow.flow.size.0.saturating_add(inset).min(width),
+                                flow.flow.size.1.saturating_add(u32::from(inset)),
+                            )
                         }
-                        let available = width.saturating_sub(inset);
-                        let wide = wide.as_ref().filter(|wide| available >= wide.min_width);
-                        let children = self.visible_children(mount, children)?;
-                        let layouts: Vec<_> = children
-                            .iter()
-                            .map(|child| {
-                                self.node_layout(mount, child, measurements).map(|layout| {
-                                    wide.and_then(|wide| wide.children.get(child.key()))
-                                        .copied()
-                                        .unwrap_or(layout)
-                                })
-                            })
-                            .collect::<maka_ui_runtime::Result<Vec<_>>>()?;
-                        let flow = super::layout::measured(
-                            wide.map_or(*direction, |wide| wide.direction),
-                            available,
-                            None,
-                            *gap,
-                            layout.wrap,
-                            &layouts,
-                            |index, width| {
-                                self.measure(mount, children[index], width, measurements)
-                            },
-                        )?;
-                        (
-                            flow.size.0.saturating_add(inset).min(width),
-                            flow.size.1.saturating_add(u32::from(inset)),
-                        )
                     }
-                })
+                };
+                self.with_retained_measurements(mount, measurements.time(), |memo| {
+                    memo.retain_size(node, constraints, size)
+                });
+                Ok(size)
             },
         )
     }
@@ -1786,7 +2072,6 @@ impl Presenter {
                 scroll,
                 direction,
                 wide,
-                gap,
                 padding,
                 border,
                 background,
@@ -1823,44 +2108,35 @@ impl Presenter {
                     choices: pass.choices,
                     panes: pass.panes,
                 };
-                let children = self.visible_children(mount, children)?;
                 let wide = wide.as_ref().filter(|wide| inner.width >= wide.min_width);
                 let effective_scroll = wide.and_then(|wide| wide.scroll).unwrap_or(*scroll);
                 let scroll = &effective_scroll;
-                let layouts: Vec<_> = children
-                    .iter()
-                    .map(|child| {
-                        self.node_layout(mount, child, measurements).map(|layout| {
-                            wide.and_then(|wide| wide.children.get(child.key()))
-                                .copied()
-                                .unwrap_or(layout)
-                        })
-                    })
-                    .collect::<maka_ui_runtime::Result<Vec<_>>>()?;
                 let scrolling = *scroll != super::scene::ScrollPolicy::None;
                 let measure_flow = |width| {
-                    super::layout::measured(
-                        wide.map_or(*direction, |wide| wide.direction),
+                    self.stack_flow(
+                        mount,
+                        node,
                         width,
+                        inner.width,
                         if scrolling { None } else { Some(inner.height) },
-                        *gap,
-                        node.layout().wrap,
-                        &layouts,
-                        |index, width| self.measure(mount, children[index], width, measurements),
+                        measurements,
                     )
                 };
                 let mut flow = measure_flow(inner.width)?;
-                let scrollbar = scrolling && flow.size.1 > inner.height && inner.width > 1;
+                let scrollbar = scrolling && flow.flow.size.1 > inner.height && inner.width > 1;
                 let mut content_area = inner;
                 if scrollbar {
                     content_area.bounds.width -= 1;
                     flow = measure_flow(content_area.width)?;
                 }
                 let viewport = if scrolling {
-                    let identities: Vec<_> = children
+                    let identities: Vec<_> = flow
+                        .indices
                         .iter()
-                        .zip(&flow.children)
-                        .map(|(child, rect)| (child.key().to_owned(), rect.y as u32, rect.height))
+                        .zip(&flow.flow.children)
+                        .map(|(&index, rect)| {
+                            (children[index].key().to_owned(), rect.y as u32, rect.height)
+                        })
                         .collect();
                     let state = self.resources.owners[&mount.id()]
                         .state
@@ -1871,7 +2147,7 @@ impl Presenter {
                         *scroll,
                         wheel.as_ref(),
                         inner,
-                        flow.size.1,
+                        flow.flow.size.1,
                         &identities,
                     );
                     pass.viewports.push((key.clone(), viewport.clone()));
@@ -1935,7 +2211,8 @@ impl Presenter {
                         .as_ref()
                         .is_some_and(|(id, root)| *id == mount.id() && root == key)
                 });
-                for (child, relative) in children.into_iter().zip(flow.children) {
+                for (&index, relative) in flow.indices.iter().zip(&flow.flow.children) {
+                    let child = &children[index];
                     let previous_child = if reading_children {
                         scene
                             .scope

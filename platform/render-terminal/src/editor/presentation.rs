@@ -133,7 +133,7 @@ impl Editor {
     ) -> Geometry {
         let tokens = self.inline_token_ranges();
         let mut area = area;
-        let mut layout = self.make_layout(area.width);
+        let mut layout = self.retained_layout(area.width);
         let scrollbar = if !self.single_line
             && area.width > 1
             && area.height > 0
@@ -144,7 +144,7 @@ impl Editor {
                 area.visible(),
             );
             area.bounds.width -= 1;
-            layout = self.make_layout(area.width);
+            layout = self.retained_layout(area.width);
             Some(bar)
         } else {
             None
@@ -270,7 +270,7 @@ impl Editor {
         Geometry {
             revision: self.revision,
             selection: self.selection,
-            layout: Arc::new(layout),
+            layout,
             area,
             top,
             left,
@@ -339,6 +339,122 @@ mod tests {
         geometry.paint_scrollbar(&mut buffer, Style::default(), Style::default(), false);
         (geometry, buffer)
     }
+    #[test]
+    fn long_editor_reuses_both_scrollbar_widths_across_measure_paint_and_selection() {
+        let mut editor = Editor::default();
+        editor.insert(&"0123456789abcdef\n".repeat(1024));
+        editor.selection = Selection::default();
+        let area = Rect::new(0, 0, 12, 3);
+        assert_eq!(editor.rows(area.width), 2049);
+        let measured = editor.retained_layout(area.width);
+        let (first, buffer) = paint(&editor, area);
+        assert_eq!(first.area.width, 11);
+        assert_eq!(
+            (0..10).map(|x| buffer[(x, 0)].symbol()).collect::<String>(),
+            "0123456789"
+        );
+        assert_eq!(
+            (0..6).map(|x| buffer[(x, 1)].symbol()).collect::<String>(),
+            "abcdef"
+        );
+        editor.present_geometry(first.clone());
+        editor.key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(editor.selected_text(), "0");
+        let (second, _) = paint(&editor, area);
+        assert!(Arc::ptr_eq(&first.layout, &second.layout));
+        assert!(Arc::ptr_eq(&measured, &editor.retained_layout(area.width)));
+        assert_eq!(editor.rows(area.width), 2049);
+        assert_eq!(second.cursor_position(), Some(Position::new(1, 0)));
+        assert_eq!(editor.layout_cache.borrow().widths.len(), 2);
+    }
+
+    #[test]
+    fn resize_reuses_previous_width_but_edits_undo_and_restore_replace_content_geometry() {
+        let mut editor = Editor::default();
+        editor.insert("abcdefgh");
+        let wide = Rect::new(0, 0, 6, 4);
+        let (first, _) = paint(&editor, wide);
+        assert_eq!(first.cursor_position(), Some(Position::new(3, 1)));
+        editor.present_geometry(first.clone());
+        editor.key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(editor.selected_text(), "h");
+
+        let (narrow, buffer) = paint(&editor, Rect::new(0, 0, 4, 4));
+        assert_eq!(buffer[(0, 1)].symbol(), "d");
+        assert_eq!(narrow.cursor_position(), Some(Position::new(1, 2)));
+        editor.present_geometry(narrow);
+        let (wide_again, _) = paint(&editor, wide);
+        assert!(Arc::ptr_eq(&first.layout, &wide_again.layout));
+        assert_eq!(wide_again.cursor_position(), Some(Position::new(2, 1)));
+        editor.present_geometry(wide_again);
+
+        editor.insert("Z");
+        let (edited, buffer) = paint(&editor, wide);
+        assert!(!Arc::ptr_eq(&first.layout, &edited.layout));
+        assert_eq!(buffer[(2, 1)].symbol(), "Z");
+        assert_eq!(editor.text(), "abcdefgZ");
+        editor.undo(false);
+        let (undone, buffer) = paint(&editor, wide);
+        assert!(!Arc::ptr_eq(&edited.layout, &undone.layout));
+        assert_eq!(buffer[(2, 1)].symbol(), "h");
+        assert_eq!(editor.selected_text(), "h");
+
+        assert!(editor.restore("中🙂ab", 0, 0));
+        let (restored, buffer) = paint(&editor, wide);
+        assert!(!Arc::ptr_eq(&undone.layout, &restored.layout));
+        assert_eq!(buffer[(0, 0)].symbol(), "中");
+        assert_eq!(buffer[(2, 0)].symbol(), "🙂");
+        assert_eq!(restored.cursor_position(), Some(Position::new(0, 0)));
+    }
+
+    #[test]
+    fn inline_token_updates_refresh_paint_and_atomic_selection_without_reflow() {
+        let mut editor = Editor::default();
+        editor.insert("x /skill:foo z");
+        let area = Rect::new(0, 0, 30, 1);
+        let (plain, buffer) = paint(&editor, area);
+        assert!(
+            !buffer[(2, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+        editor.set_inline_tokens(&["/skill:foo".into()]);
+        let (token, buffer) = paint(&editor, area);
+        assert!(Arc::ptr_eq(&plain.layout, &token.layout));
+        assert_eq!(buffer[(2, 0)].symbol(), "/");
+        assert!(
+            buffer[(2, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+        editor.selection = Selection {
+            cursor: 7,
+            anchor: Some(6),
+            upstream: false,
+        };
+        assert_eq!(editor.selected_text(), "/skill:foo");
+        editor.set_inline_tokens(&[]);
+        assert_eq!(editor.selected_text(), "l");
+        let (without_token, buffer) = paint(&editor, area);
+        assert!(Arc::ptr_eq(&token.layout, &without_token.layout));
+        assert!(
+            !buffer[(2, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+
+        editor.set_inline_tokens(&["/skill:foo".into()]);
+        assert!(editor.restore("/skill:foo x", 2, 3));
+        assert_eq!(editor.selected_text(), "/skill:foo");
+        let (_, buffer) = paint(&editor, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "/");
+        assert!(
+            buffer[(0, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+    }
+
     #[test]
     fn overflow_track_reserves_cells_and_scrolls_without_changing_selection() {
         let mut editor = Editor::default();

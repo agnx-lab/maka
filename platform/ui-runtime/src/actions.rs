@@ -633,12 +633,12 @@ impl<V: ?Sized + 'static> Application<V> {
                 .validate(&source.input)
                 .map_err(|e| Error::Invalid(e.to_string()))?;
             match implementation {
-                Component::JavaScript { callbacks, .. } => callbacks.capture(CaptureCall {
-                    values: &values,
-                    state: &state,
-                    props: &props,
-                    method: &source.method,
-                    input: &source.input,
+                Component::JavaScript { callbacks, .. } => callbacks.capture(backend::Capture {
+                    values,
+                    state,
+                    props,
+                    method: source.method.clone(),
+                    input: source.input.clone(),
                 }),
                 Component::Native(component) => {
                     Ok(backend::Job::ready(component.capture(CaptureCall {
@@ -1146,7 +1146,9 @@ impl<V: ?Sized + 'static> Application<V> {
         root: &Mount,
         mut valid: impl FnMut(&CaptureTarget, &V, &ContinuationWitness) -> Result<bool>,
     ) -> Result<usize> {
-        if self.logical_pending() {
+        // A native commit may have just released the logical transaction while
+        // older physical input is still queued. Feedback cannot bypass it.
+        if self.ui_pending() {
             return Ok(0);
         }
         let mut count = 0;

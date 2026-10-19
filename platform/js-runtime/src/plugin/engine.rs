@@ -289,9 +289,9 @@ pub(super) fn call_bound_synchronous(
     runtime: &mut JsRuntime,
     callbacks: &Callbacks,
     method: &str,
-    args: &[Value],
+    args: &[&Value],
 ) -> Result<Value> {
-    let result = invoke_bound(runtime, callbacks, method, args, None)?;
+    let result = invoke_bound(runtime, callbacks, method, args.iter().copied(), None)?;
     value(runtime, result, None)
 }
 
@@ -307,11 +307,11 @@ pub(super) fn call_bound(
     Ok(Box::pin(async move { resolving.await.map_err(failed) }))
 }
 
-fn invoke_bound(
+fn invoke_bound<'a>(
     runtime: &mut JsRuntime,
     callbacks: &Callbacks,
     method: &str,
-    args: &[Value],
+    args: impl IntoIterator<Item = &'a Value>,
     context: Option<&Arc<super::request::Owner>>,
 ) -> Result<v8::Global<v8::Value>> {
     let factory = context.map(|_| {
@@ -332,7 +332,7 @@ fn invoke_bound(
         let function = v8::Local::new(scope, function);
         let receiver = v8::Local::new(scope, &callbacks.receiver);
         let mut args = args
-            .iter()
+            .into_iter()
             .map(|value| super::json::to_v8(scope, value).map_err(failed))
             .collect::<Result<Vec<_>>>()?;
         if let Some(context) = context {

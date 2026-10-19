@@ -20,6 +20,8 @@
 use super::*;
 use serde_json::Value;
 
+mod parity;
+
 #[test]
 #[ignore = "real default product, stopped PTY stdout and original model input"]
 fn default_product_input_continues_while_the_original_stdout_owner_is_blocked() {

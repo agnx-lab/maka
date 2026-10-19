@@ -141,8 +141,8 @@ impl<V: ?Sized + 'static> Application<V> {
     ) -> Result<usize> {
         let mut count = 0;
         loop {
-            let delivered = self.0.deliver_action_results(root, &mut valid)?;
             self.0.scheduler().clone().block_on(self.0.wait_idle())?;
+            let delivered = self.0.deliver_action_results(root, &mut valid)?;
             count += delivered;
             if delivered == 0 {
                 return Ok(count);

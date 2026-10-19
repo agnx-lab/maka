@@ -221,11 +221,13 @@ impl Foreground {
         })
     }
 
+    /// Encodes shared immutable snapshots directly, without rebuilding JSON
+    /// values merely to transfer invocation ownership to an execution worker.
     pub fn call_bound(
         &mut self,
         callbacks: &ForegroundCallbacks,
         method: &str,
-        args: &[Value],
+        args: &[&Value],
     ) -> Result<Value> {
         self.ready()?;
         if !Rc::ptr_eq(&callbacks.domain, &self.domain)

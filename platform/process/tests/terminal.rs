@@ -172,7 +172,7 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
     assert!(screen.write(&"x".repeat(65537)).is_err());
     assert_eq!(screen.snapshot().unwrap(), snapshot);
     for bytes in [
-        b"\x1b]52;c;"
+        b"\x1b]0;"
             .iter()
             .copied()
             .chain(std::iter::repeat_n(b'x', 65540))
@@ -215,4 +215,35 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
     assert!(snapshot.truncated);
     assert!(snapshot.screen.contains("current-frame"));
     assert!(snapshot.screen.len() + snapshot.scrollback.len() <= 2 * 1024 * 1024);
+}
+
+#[test]
+fn large_ignored_clipboard_strings_preserve_screen_replies_and_following_output() {
+    // A native 64 KiB clipboard copy has an 87 KiB base64 wire payload. It must
+    // not consume Screen's OSC accumulator: clipboard effects are not supported.
+    let decoded_bytes = 64 * 1024;
+    let encoded = "YWFh".repeat(decoded_bytes / 3) + "YQ==";
+    for ending in ["\x07", "\x1b\\", "\x18", "\x1a", "\x1b[31m"] {
+        let mut screen = Screen::new(TerminalSize::new(20, 3).unwrap());
+        screen.write("before").unwrap();
+        // Split the command prefix, including an ignored C0, across writes.
+        for prefix in ["\x1b", "]", "5", "\0", "2", ";", "c", ";"] {
+            assert_eq!(screen.write(prefix).unwrap(), "");
+        }
+        for chunk in encoded.as_bytes().chunks(8192) {
+            assert_eq!(
+                screen.write(std::str::from_utf8(chunk).unwrap()).unwrap(),
+                ""
+            );
+        }
+        for character in ending.chars() {
+            assert_eq!(
+                screen.write(character.encode_utf8(&mut [0; 4])).unwrap(),
+                ""
+            );
+        }
+        assert_eq!(screen.write("after\x1b[5n").unwrap(), "\x1b[0n");
+        assert_eq!(screen.snapshot().unwrap().screen, "beforeafter");
+        assert_eq!(screen.snapshot().unwrap().cursor.x, 11);
+    }
 }

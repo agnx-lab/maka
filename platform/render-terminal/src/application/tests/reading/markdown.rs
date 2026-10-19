@@ -269,6 +269,51 @@ fn standalone_markdown_uses_the_same_native_document_without_a_reading_wrapper()
     close(&mut presenter);
 }
 
+#[test]
+fn retained_markdown_layout_leaves_native_capacity_available_and_matches_rebuilt_output() {
+    use maka_ui_runtime::budget::{BudgetLimits, Kind};
+
+    let props = Rc::new(RefCell::new(
+        markdown("md", "# **Capacity**\n\n`code` 中")["props"].clone(),
+    ));
+    let (_runtime, mut presenter) = layout::native(
+        layout::View::StandaloneMarkdown(props),
+        Rc::new(Cell::new(true)),
+    );
+    let budget = presenter.resources.budget.clone();
+    let native_usage = budget.usage();
+    let cold = draw(&mut presenter, 24, 6);
+    assert_eq!(cold[(0, 0)].symbol(), "C");
+    assert!(cold[(0, 0)].modifier.contains(Modifier::BOLD));
+    assert_eq!(budget.usage(), native_usage);
+    let native_capacity = budget
+        .reserve(
+            Kind::Encoded,
+            BudgetLimits::default().encoded_bytes - native_usage.0,
+        )
+        .expect("retained Markdown must leave native admission available");
+    assert_eq!(draw(&mut presenter, 24, 6), cold);
+
+    let revision = presenter
+        .application
+        .frame(&presenter.root)
+        .unwrap()
+        .revision;
+    presenter
+        .application
+        .dispatch(&presenter.root, revision, "back", json!({"kind":"click"}))
+        .unwrap();
+    assert_eq!(draw(&mut presenter, 24, 6), cold);
+    all(&mut presenter);
+    assert_eq!(
+        copied(&mut presenter).unwrap(),
+        "Capacity\n\ncode 中".as_bytes()
+    );
+    close(&mut presenter);
+    drop(native_capacity);
+    assert_eq!(budget.usage(), (0, 0, 0));
+}
+
 fn diff(source: &str, rows: Value) -> Value {
     json!({"kind":"component","key":"diff","binding":"diff","member":0,"on":{},"props":{
         "content":{"kind":"annotated","source":source,"rows":rows},"ascii":false,"disabled":false,"focusOnPointer":true,
@@ -474,7 +519,7 @@ fn wheel_scrolling_reuses_text_layouts_with_a_scrollbar_and_after_resize() {
                 .clone()
         };
         let shared = |before: &Layout, after: &Layout| match (before, after) {
-            (Layout::Literal(a, _), Layout::Literal(b, _)) => Arc::ptr_eq(a, b),
+            (Layout::Literal(a), Layout::Literal(b)) => Arc::ptr_eq(a, b),
             (Layout::Markdown { lines: a, .. }, Layout::Markdown { lines: b, .. }) => {
                 Arc::ptr_eq(a, b)
             }

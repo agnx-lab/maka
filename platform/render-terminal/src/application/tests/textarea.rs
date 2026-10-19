@@ -565,37 +565,46 @@ fn terminal_row_limits_resize_the_original_editor_and_reject_inverted_ranges() {
     draw(&mut tui, 50, 40);
     assert_eq!(height(&tui), 4);
     assert_eq!(observation(&tui), original);
-    for fraction in [0.0, -0.5, 1.1] {
+    for (rows, expected) in [
+        (
+            json!({"min":1,"max":8,"maxViewportFraction":0.0}),
+            "invalid terminal textarea row range",
+        ),
+        (
+            json!({"min":1,"max":8,"maxViewportFraction":-0.5}),
+            "-0.5 is less than the minimum of 0",
+        ),
+        (
+            json!({"min":1,"max":8,"maxViewportFraction":1.1}),
+            "1.1 is greater than the maximum of 1",
+        ),
+        (
+            json!({"min":4,"max":3}),
+            "invalid terminal textarea row range",
+        ),
+    ] {
         let revision = tui.application.frame(&tui.root).unwrap().revision;
-        assert!(
-            tui.application
-                .dispatch(
-                    &tui.root.clone(),
-                    revision,
-                    "configure",
-                    json!({"terminalRows":{"min":1,"max":8,"maxViewportFraction":fraction}})
-                )
-                .is_ok()
-        );
-        assert!(tui.settle().is_err());
-        assert_eq!(tui.application.frame(&tui.root).unwrap().revision, revision);
-    }
-    let revision = tui.application.frame(&tui.root).unwrap().revision;
-    assert!(
-        tui.application
+        // Ready work may reject during dispatch; otherwise the same rejection
+        // arrives while settling. Neither path may publish the candidate.
+        let error = tui
+            .application
             .dispatch(
                 &tui.root.clone(),
                 revision,
                 "configure",
-                json!({"terminalRows":{"min":4,"max":3}})
+                json!({"terminalRows":rows}),
             )
-            .is_ok()
-    );
-    assert!(tui.settle().is_err());
-    assert_eq!(tui.application.frame(&tui.root).unwrap().revision, revision);
-    draw(&mut tui, 50, 40);
-    assert_eq!(height(&tui), 4);
-    assert_eq!(observation(&tui), original);
+            .and_then(|()| tui.settle())
+            .expect_err("invalid row configuration must be rejected");
+        assert!(
+            matches!(&error, Error::Invalid(reason) if reason == expected),
+            "unexpected rejection for {rows}: {error}"
+        );
+        assert_eq!(tui.application.frame(&tui.root).unwrap().revision, revision);
+        draw(&mut tui, 50, 40);
+        assert_eq!(height(&tui), 4);
+        assert_eq!(observation(&tui), original);
+    }
     close(&mut tui);
 }
 

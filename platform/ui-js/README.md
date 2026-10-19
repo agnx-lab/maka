@@ -25,4 +25,6 @@ Executes JavaScript component callbacks for `maka-ui-runtime`. `execution` confi
 
 The Rust UI owner validates and commits each resulting batch. A late result cannot revive a retired mount. Native input resources, exact mutation receipts and accepted execution cleanup stay with their original owners; moving execution to the worker does not acknowledge their completion.
 
+Invocation jobs retain shared immutable state and props instead of copying their JSON trees on the UI owner. Argument validation and encoding run on the worker and read those snapshots directly. JavaScript still receives independent JSON values, so guest mutations cannot modify the retained Rust snapshots.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

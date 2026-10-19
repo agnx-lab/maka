@@ -20,7 +20,7 @@
 //! Component execution backends return inert declarations and batches. The UI
 //! runtime alone owns input admission, transaction commit and native cleanup.
 use crate::{
-    ComponentCall, ComponentOutput, PrepareScene, PreparedScene, Result, abi, actions::CaptureCall,
+    ComponentCall, ComponentOutput, EventOrigin, PrepareScene, PreparedScene, Result, abi,
     actions::CapturePlan,
 };
 use serde_json::Value;
@@ -29,6 +29,7 @@ use std::{
     future::Future,
     pin::Pin,
     rc::Rc,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -71,14 +72,77 @@ pub trait Module: 'static {
     fn close(&self) -> Result<Job<()>>;
 }
 
+/// Immutable invocation snapshots. Queued work shares the original candidate or
+/// committed JSON; only the UI runtime decides which candidate becomes current.
+#[derive(Clone)]
+pub enum Call {
+    Mount {
+        props: Arc<Value>,
+    },
+    Update {
+        state: Arc<Value>,
+        props: Arc<Value>,
+    },
+    Event {
+        state: Arc<Value>,
+        props: Arc<Value>,
+        input: Arc<abi::ComponentInput>,
+    },
+}
+impl Call {
+    pub fn props(&self) -> &Arc<Value> {
+        match self {
+            Self::Mount { props } | Self::Update { props, .. } | Self::Event { props, .. } => props,
+        }
+    }
+    pub fn as_native(&self) -> ComponentCall<'_> {
+        match self {
+            Self::Mount { props } => ComponentCall::Mount { props },
+            Self::Update { state, props } => ComponentCall::Update { state, props },
+            Self::Event {
+                state,
+                props,
+                input,
+            } => {
+                let (key, event, origin) = match input.as_ref() {
+                    abi::ComponentInput::Raw { key, event } => (key, event, EventOrigin::Raw),
+                    abi::ComponentInput::Action { key, event } => (key, event, EventOrigin::Action),
+                    abi::ComponentInput::Component {
+                        key,
+                        child,
+                        name,
+                        event,
+                    } => (key, event, EventOrigin::Component { child, name }),
+                };
+                ComponentCall::Event {
+                    state,
+                    props,
+                    key,
+                    input: event,
+                    origin,
+                }
+            }
+        }
+    }
+}
+
+/// A capture retains the exact same immutable state as its invoking transaction.
+pub struct Capture {
+    pub values: abi::ValueBindings,
+    pub state: Arc<Value>,
+    pub props: Arc<Value>,
+    pub method: String,
+    pub input: Value,
+}
+
 /// Captured callbacks retain their original receiver and realm. Returned batches
 /// contain no native resource authority and cannot commit effects themselves.
 pub trait Component: 'static {
     fn call(
         &self,
-        call: ComponentCall<'_>,
-        values: &abi::ValueBindings,
+        call: Call,
+        values: abi::ValueBindings,
         prepare: std::sync::Arc<PrepareScene>,
     ) -> Result<Job<ComponentOutput<PreparedScene>>>;
-    fn capture(&self, call: CaptureCall<'_>) -> Result<Job<CapturePlan>>;
+    fn capture(&self, call: Capture) -> Result<Job<CapturePlan>>;
 }

@@ -29,6 +29,8 @@ mod layout;
 mod reading;
 #[path = "tests/reconciliation.rs"]
 mod reconciliation;
+#[path = "tests/retained.rs"]
+mod retained;
 #[path = "tests/rows.rs"]
 mod rows;
 #[path = "tests/terminal.rs"]
@@ -150,8 +152,8 @@ fn independent_terminal_owners_keep_state_and_paint_never_calls_guest() {
     let second = draw(&mut tui, 30, 12);
     assert_eq!(first, second);
     assert_eq!(
-        tui.application.frame(&tui.root).unwrap().state,
-        json!({"count":0,"revision":0})
+        tui.application.frame(&tui.root).unwrap().state.as_ref(),
+        &json!({"count":0,"revision":0})
     );
     tui.input_settled(key(KeyCode::Enter)).unwrap();
     assert_eq!(tui.application.frame(&tui.root).unwrap().state["count"], 1);
@@ -172,8 +174,8 @@ fn independent_terminal_owners_keep_state_and_paint_never_calls_guest() {
     assert!(tui.can_shutdown());
     tui.shutdown_settled().unwrap();
     assert_eq!(
-        independent.frame(&mount).unwrap().state,
-        json!({"count":0,"revision":0})
+        independent.frame(&mount).unwrap().state.as_ref(),
+        &json!({"count":0,"revision":0})
     );
     independent.close(&mount, Ok(())).unwrap();
     runtime
@@ -1057,8 +1059,8 @@ fn synchronous_click_rejection_keeps_focus_on_the_original_painted_target() {
     assert!(matches!(error, Error::Invalid(reason) if reason == "synchronous click rejected"));
     assert_eq!(calls.get(), 1);
     assert_eq!(
-        tui.application.frame(&tui.root).unwrap().state,
-        json!({"revision":0})
+        tui.application.frame(&tui.root).unwrap().state.as_ref(),
+        &json!({"revision":0})
     );
     assert_eq!(tui.application.frame(&tui.root).unwrap().revision, 0);
     assert!(

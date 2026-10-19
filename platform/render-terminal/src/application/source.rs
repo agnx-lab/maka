@@ -214,13 +214,7 @@ impl Widget for Recipe {
         doc.standalone = None;
     }
     fn measure(&self, slots: &Slots<'_>, width: u16) -> maka_ui_runtime::Result<(u16, u32)> {
-        Ok(self
-            .layout(
-                width,
-                &slots.presenter.resources.budget,
-                slots.measurements.time(),
-            )?
-            .1)
+        Ok(self.layout(width, slots.measurements.time())?.1)
     }
     fn paint(
         &self,
@@ -248,12 +242,8 @@ impl Widget for Recipe {
         }
         let doc = document.borrow();
         let scope = parent.clone().or_else(|| SelectionScope::active(&document));
-        let (layout, _) = self.layout(
-            area.width,
-            &slots.presenter.resources.budget,
-            slots.measurements.time(),
-        )?;
-        let super::selection::Layout::Literal(literal_layout, _) = &layout else {
+        let (layout, _) = self.layout(area.width, slots.measurements.time())?;
+        let super::selection::Layout::Literal(literal_layout) = &layout else {
             unreachable!()
         };
         if let Some(offset) = reveal.map(|reveal| reveal.offset) {
@@ -428,15 +418,14 @@ impl Recipe {
     fn layout(
         &self,
         width: u16,
-        budget: &maka_ui_runtime::budget::NativeBudget,
         frame: std::time::Instant,
     ) -> maka_ui_runtime::Result<(super::selection::Layout, (u16, u32))> {
         let mut cached = self.3.borrow_mut();
         if cached.frame != Some(frame) {
             // Retain the widths used by the preceding paint pass. A scroll bar,
             // intrinsic sizing and nested wrappers can all probe different widths.
-            // Widths abandoned after resize disappear on the next pass; every
-            // retained row allocation remains charged to the aggregate budget.
+            // Widths abandoned after resize disappear on the next pass. This
+            // derived working set cannot consume native resource admission.
             cached
                 .layouts
                 .retain_mut(|entry| std::mem::replace(&mut entry.used, false));
@@ -446,19 +435,17 @@ impl Recipe {
             entry.used = true;
             return Ok((entry.layout.clone(), entry.size));
         }
-        let mut layout = match &self.1 {
+        let layout = match &self.1 {
             Some(document) => super::selection::Layout::markdown(document, width)?,
             None => Layout::literal(&self.0.source, width).into(),
         };
         let size = Self::measured(&layout, width);
-        if layout.retain(budget) {
-            cached.layouts.push(CachedLayout {
-                width,
-                layout: layout.clone(),
-                size,
-                used: true,
-            });
-        }
+        cached.layouts.push(CachedLayout {
+            width,
+            layout: layout.clone(),
+            size,
+            used: true,
+        });
         Ok((layout, size))
     }
 
@@ -473,7 +460,7 @@ impl Recipe {
                     .min(usize::from(width)) as u16,
                 lines.len() as u32,
             ),
-            super::selection::Layout::Literal(layout, _) => (
+            super::selection::Layout::Literal(layout) => (
                 layout
                     .rows
                     .iter()
@@ -512,11 +499,7 @@ impl Recipe {
         if area.width == 0 || area.is_empty() && reveal.is_none() {
             return Ok(());
         }
-        let (layout, _) = self.layout(
-            area.width,
-            &slots.presenter.resources.budget,
-            slots.measurements.time(),
-        )?;
+        let (layout, _) = self.layout(area.width, slots.measurements.time())?;
         if let Some(offset) = reveal {
             let row = area.y + layout.cursor(offset, false).0 as i64;
             let visible = area.visible();

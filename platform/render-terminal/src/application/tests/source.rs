@@ -107,32 +107,52 @@ fn literal_source_displays_safely_and_copies_every_original_control_and_utf8_byt
             .clone()
     };
     let original = geometry(&presenter);
-    let budget = presenter.resources.budget.clone();
-    let retained = budget.usage();
     draw(&mut presenter, 40, 8);
     let repeated = geometry(&presenter);
-    let super::super::selection::Layout::Literal(first, _) = &original else {
+    let super::super::selection::Layout::Literal(first) = &original else {
         panic!("literal geometry")
     };
-    let super::super::selection::Layout::Literal(second, _) = &repeated else {
+    let super::super::selection::Layout::Literal(second) = &repeated else {
         panic!("literal geometry")
     };
     assert!(std::sync::Arc::ptr_eq(first, second));
-    assert_eq!(budget.usage(), retained);
     draw(&mut presenter, 20, 8);
     let resized = geometry(&presenter);
-    let super::super::selection::Layout::Literal(next, _) = &resized else {
+    let super::super::selection::Layout::Literal(next) = &resized else {
         panic!("literal geometry")
     };
     assert!(!std::sync::Arc::ptr_eq(first, next));
     select_all(&mut presenter);
     assert_eq!(copied(&mut presenter).unwrap(), source.as_bytes());
     close(&mut presenter);
-    assert!(
-        budget.usage().0 > 0,
-        "original shared geometry still owns its bytes"
-    );
-    drop((original, repeated, resized));
+}
+
+#[test]
+fn retained_source_layout_leaves_native_capacity_available_and_matches_rebuilt_output() {
+    use maka_ui_runtime::budget::{BudgetLimits, Kind};
+
+    let source = "Literal **text** 中😀\nsecond line";
+    let (_runtime, mut presenter, _) = native(source);
+    let budget = presenter.resources.budget.clone();
+    let native_usage = budget.usage();
+    let cold = draw(&mut presenter, 24, 5);
+    assert_eq!(cold[(0, 0)].symbol(), "L");
+    assert_eq!(budget.usage(), native_usage);
+    let native_capacity = budget
+        .reserve(
+            Kind::Encoded,
+            BudgetLimits::default().encoded_bytes - native_usage.0,
+        )
+        .expect("retained text must leave native admission available");
+    assert_eq!(draw(&mut presenter, 24, 5), cold);
+
+    // A new immutable recipe starts cold while keeping the original document owner.
+    refresh(&mut presenter);
+    assert_eq!(draw(&mut presenter, 24, 5), cold);
+    select_all(&mut presenter);
+    assert_eq!(copied(&mut presenter).unwrap(), source.as_bytes());
+    close(&mut presenter);
+    drop(native_capacity);
     assert_eq!(budget.usage(), (0, 0, 0));
 }
 #[test]

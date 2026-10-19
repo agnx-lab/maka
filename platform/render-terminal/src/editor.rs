@@ -24,7 +24,12 @@ pub(crate) mod layout;
 mod presentation;
 pub(crate) use presentation::Geometry;
 
-use std::{collections::VecDeque, ops::Range, sync::Arc};
+use std::{
+    cell::{RefCell, RefMut},
+    collections::VecDeque,
+    ops::Range,
+    sync::Arc,
+};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
@@ -72,6 +77,15 @@ impl Edit {
     }
 }
 
+/// Geometry belongs to content and width, independently of selection and paint.
+/// Keep both widths an overflowing editor probes before reserving its scrollbar.
+#[derive(Default)]
+struct LayoutCache {
+    basis: (u64, bool, bool),
+    widths: Vec<Arc<Layout>>,
+    tokens: Option<Arc<[Range<usize>]>>,
+}
+
 pub struct Editor {
     revision: u64,
     byte_limit: usize,
@@ -83,6 +97,7 @@ pub struct Editor {
     redo: Vec<Edit>,
     history_bytes: usize,
     layout: Arc<Layout>,
+    layout_cache: RefCell<LayoutCache>,
     area: Option<Placement>,
     top: usize,
     preferred_column: Option<usize>,
@@ -96,6 +111,7 @@ pub struct Editor {
 
 impl Default for Editor {
     fn default() -> Self {
+        let layout = Arc::new(Layout::new("", 1));
         Self {
             revision: 0,
             byte_limit: MAX_TEXT_BYTES,
@@ -106,7 +122,11 @@ impl Default for Editor {
             undo: VecDeque::new(),
             redo: Vec::new(),
             history_bytes: 0,
-            layout: Arc::new(Layout::new("", 1)),
+            layout: layout.clone(),
+            layout_cache: RefCell::new(LayoutCache {
+                widths: vec![layout],
+                ..Default::default()
+            }),
             area: None,
             top: 0,
             preferred_column: None,
@@ -137,13 +157,20 @@ impl Editor {
     pub(crate) fn set_inline_tokens(&mut self, literals: &[String]) {
         if self.inline_tokens != literals {
             self.inline_tokens = literals.to_vec();
+            self.layout_cache.get_mut().tokens = None;
         }
     }
-    fn inline_token_ranges(&self) -> Vec<Range<usize>> {
-        maka_ui_runtime::textarea::inline_token_ranges(&self.text, &self.inline_tokens)
+    fn inline_token_ranges(&self) -> Arc<[Range<usize>]> {
+        self.cached_layouts()
+            .tokens
+            .get_or_insert_with(|| {
+                maka_ui_runtime::textarea::inline_token_ranges(&self.text, &self.inline_tokens)
+                    .into()
+            })
+            .clone()
     }
     fn atomic_range(&self, mut range: Range<usize>) -> Range<usize> {
-        for token in self.inline_token_ranges() {
+        for token in self.inline_token_ranges().iter() {
             if range.is_empty() {
                 if token.start < range.start && range.start < token.end {
                     return token.end..token.end;
@@ -162,6 +189,31 @@ impl Editor {
         } else {
             Layout::new(&self.text, width)
         }
+    }
+    fn cached_layouts(&self) -> RefMut<'_, LayoutCache> {
+        let mut cache = self.layout_cache.borrow_mut();
+        let basis = (self.revision, self.single_line, self.masked);
+        if cache.basis != basis {
+            *cache = LayoutCache {
+                basis,
+                ..Default::default()
+            };
+        }
+        cache
+    }
+    fn retained_layout(&self, width: u16) -> Arc<Layout> {
+        let mut cache = self.cached_layouts();
+        if let Some(index) = cache.widths.iter().position(|layout| layout.width == width) {
+            let layout = cache.widths.remove(index);
+            cache.widths.push(layout.clone());
+            return layout;
+        }
+        let layout = Arc::new(self.make_layout(width));
+        if cache.widths.len() == 2 {
+            cache.widths.remove(0);
+        }
+        cache.widths.push(layout.clone());
+        layout
     }
     pub(crate) fn secret(&self) -> bool {
         self.single_line && self.masked
@@ -247,14 +299,9 @@ impl Editor {
         self.history_bytes = 0;
     }
 
-    /// Rows the text wraps to at `width`, leaving the cached layout alone.
+    /// Rows the text wraps to at `width`, without changing admitted input geometry.
     pub fn rows(&self, width: u16) -> u16 {
-        let rows = if self.layout.width == width {
-            self.layout.rows.len()
-        } else {
-            self.make_layout(width).rows.len()
-        };
-        rows.max(1) as u16
+        self.retained_layout(width).rows.len().max(1) as u16
     }
 
     pub fn invalidate_geometry(&mut self) {
@@ -289,7 +336,7 @@ impl Editor {
     }
 
     fn reflow(&mut self) {
-        self.layout = Arc::new(self.make_layout(self.layout.width));
+        self.layout = self.retained_layout(self.layout.width);
     }
 
     fn reveal_cursor(&mut self) {

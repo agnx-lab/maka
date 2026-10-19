@@ -286,8 +286,8 @@ impl maka_ui_runtime::backend::Module for GatedModule {
 impl maka_ui_runtime::backend::Component for GatedComponent {
     fn call(
         &self,
-        call: maka_ui_runtime::ComponentCall<'_>,
-        values: &maka_ui_runtime::abi::ValueBindings,
+        call: maka_ui_runtime::backend::Call,
+        values: maka_ui_runtime::abi::ValueBindings,
         prepare: std::sync::Arc<maka_ui_runtime::PrepareScene>,
     ) -> maka_ui_runtime::Result<
         maka_ui_runtime::backend::Job<
@@ -306,7 +306,7 @@ impl maka_ui_runtime::backend::Component for GatedComponent {
     }
     fn capture(
         &self,
-        call: maka_ui_runtime::actions::CaptureCall<'_>,
+        call: maka_ui_runtime::backend::Capture,
     ) -> maka_ui_runtime::Result<maka_ui_runtime::backend::Job<maka_ui_runtime::actions::CapturePlan>>
     {
         self.0.capture(call)

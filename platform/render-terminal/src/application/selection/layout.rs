@@ -32,16 +32,15 @@ use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone)]
 pub(in crate::application) enum Layout {
-    Literal(Arc<Literal>, Option<Arc<maka_ui_runtime::budget::Permit>>),
+    Literal(Arc<Literal>),
     Markdown {
         lines: Arc<[VisualLine]>,
         text: Arc<str>,
-        allocation: Option<Arc<maka_ui_runtime::budget::Permit>>,
     },
 }
 impl From<Literal> for Layout {
     fn from(value: Literal) -> Self {
-        Self::Literal(Arc::new(value), None)
+        Self::Literal(Arc::new(value))
     }
 }
 impl Layout {
@@ -55,58 +54,12 @@ impl Layout {
         Ok(Self::Markdown {
             lines: cursor.lines().to_vec().into(),
             text: document.shared_text(),
-            allocation: None,
         })
-    }
-    /// Charge only newly retained visual storage. The permit follows the same
-    /// shared rows through pending and published geometry, independently of memo eviction.
-    pub fn retain(&mut self, budget: &maka_ui_runtime::budget::NativeBudget) -> bool {
-        use std::mem::size_of;
-        let (bytes, allocation) = match self {
-            Self::Literal(layout, allocation) => (
-                size_of::<Literal>()
-                    + layout.rows.capacity() * size_of::<crate::editor::layout::Row>()
-                    + layout.boundaries.capacity() * size_of::<usize>()
-                    + layout
-                        .rows
-                        .iter()
-                        .map(|row| row.cells.capacity() * size_of::<crate::editor::layout::Cell>())
-                        .sum::<usize>(),
-                allocation,
-            ),
-            Self::Markdown {
-                lines, allocation, ..
-            } => (
-                lines.len() * size_of::<VisualLine>()
-                    + lines
-                        .iter()
-                        .map(|line| {
-                            line.line.spans.capacity() * size_of::<ratatui::text::Span<'static>>()
-                                + line
-                                    .line
-                                    .spans
-                                    .iter()
-                                    .map(|span| match &span.content {
-                                        std::borrow::Cow::Owned(text) => text.capacity(),
-                                        _ => 0,
-                                    })
-                                    .sum::<usize>()
-                                + line.mapping.capacity() * size_of::<crate::markdown::SourceSpan>()
-                        })
-                        .sum::<usize>(),
-                allocation,
-            ),
-        };
-        let Ok(permit) = budget.reserve(maka_ui_runtime::budget::Kind::Encoded, bytes) else {
-            return false;
-        };
-        *allocation = Some(Arc::new(permit));
-        true
     }
 
     pub fn cursor(&self, byte: usize, trailing: bool) -> (usize, usize) {
         let Self::Markdown { lines, .. } = self else {
-            let Self::Literal(layout, _) = self else {
+            let Self::Literal(layout) = self else {
                 unreachable!()
             };
             return layout.cursor(byte, trailing);
@@ -148,7 +101,7 @@ impl Layout {
     }
     pub fn byte_at(&self, row: usize, column: usize) -> usize {
         match self {
-            Self::Literal(layout, _) => layout.byte_at(row, column),
+            Self::Literal(layout) => layout.byte_at(row, column),
             Self::Markdown { lines, .. } => {
                 let row = row.min(lines.len().saturating_sub(1));
                 let visual = lines
@@ -204,7 +157,7 @@ impl Layout {
     }
     pub fn pointer(&self, area: Placement, top: usize, point: Position) -> (usize, bool) {
         match self {
-            Self::Literal(layout, _) => layout.pointer(area, top, point),
+            Self::Literal(layout) => layout.pointer(area, top, point),
             Self::Markdown { .. } => {
                 let visible = area.visible();
                 let row = top
@@ -220,7 +173,7 @@ impl Layout {
     }
     pub fn adjacent_row(&self, row: usize, forward: bool) -> Option<usize> {
         let count = match self {
-            Self::Literal(layout, _) => layout.rows.len(),
+            Self::Literal(layout) => layout.rows.len(),
             Self::Markdown { lines, .. } => lines.len(),
         };
         let readable = |row: &usize| match self {
@@ -235,7 +188,7 @@ impl Layout {
     }
     pub fn edge_row(&self, first: bool) -> usize {
         match self {
-            Self::Literal(layout, _) => {
+            Self::Literal(layout) => {
                 if first {
                     0
                 } else {
@@ -252,7 +205,7 @@ impl Layout {
     }
     pub fn previous(&self, byte: usize) -> usize {
         match self {
-            Self::Literal(layout, _) => layout.previous(byte),
+            Self::Literal(layout) => layout.previous(byte),
             Self::Markdown { text, .. } => text
                 .grapheme_indices(true)
                 .map(|(offset, _)| offset)
@@ -263,7 +216,7 @@ impl Layout {
     }
     pub fn next(&self, byte: usize) -> usize {
         match self {
-            Self::Literal(layout, _) => layout.next(byte),
+            Self::Literal(layout) => layout.next(byte),
             Self::Markdown { text, .. } => text
                 .grapheme_indices(true)
                 .map(|(offset, _)| offset)
@@ -276,7 +229,7 @@ impl Layout {
     }
     pub fn row_end(&self, row: usize) -> usize {
         match self {
-            Self::Literal(layout, _) => layout.rows[row.min(layout.rows.len() - 1)].end,
+            Self::Literal(layout) => layout.rows[row.min(layout.rows.len() - 1)].end,
             Self::Markdown { .. } => self.byte_at(row, usize::MAX),
         }
     }

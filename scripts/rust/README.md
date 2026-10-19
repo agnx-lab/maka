@@ -55,6 +55,46 @@ reopens. It waits for the home screen and verifies the command palette before
 quitting. The output directory retains raw terminal output, failures, and timing
 medians/ranges. Keep build profiles equal and run without competing builds.
 
+For TUI behavior and responsiveness on Linux/WSL, retain the before/after CLI
+executables as `/tmp/maka-before` and `/tmp/maka-after`. Use the existing debug
+profile and identical features for both; do not change optimization levels.
+Debug binaries load product assets from their original checkout. Build one frozen
+bundle from the before revision and use that same checked bundle for both CLIs;
+`--bundle` selects the ordinary `MAKA_PRODUCT_BUNDLE` override, retaining product
+fingerprint validation. Build the shared fixture, then set `$INTEGRATION` to the
+test executable Cargo reports:
+
+```sh
+cargo test -p maka-cli --no-default-features --test integration --no-run
+# From the frozen before checkout:
+node products/maka/bundle/scripts/build.mjs --output /tmp/maka-product-bundle
+python3 scripts/rust/benchmark-tui-parity.py --fixture "$INTEGRATION" \
+  --baseline /tmp/maka-before --candidate /tmp/maka-after \
+  --bundle /tmp/maka-product-bundle \
+  --runs 5 --output /tmp/maka-tui-parity
+python3 scripts/rust/benchmark-tui-parity.py --fixture "$INTEGRATION" \
+  --baseline /tmp/maka-before --candidate /tmp/maka-after --case concurrent \
+  --bundle /tmp/maka-product-bundle \
+  --runs 5 --output /tmp/maka-tui-concurrent
+```
+
+The regular case compares complete VT text frames, visible cursors and terminal
+modes after typing, scrolling, resize and command-palette actions. The concurrent
+case verifies input and scrolling during sustained streaming and compares its
+stable final frame. Both verify full copied content. Raw frames, ANSI, explicit
+animation/elapsed-label exclusions, failures and timing ranges are retained.
+First-visible latency is separate from `observation_ms`: CPU and ANSI bytes cover
+the complete observation window, including follow-up redraws. CPU covers only the
+UI process and its threads, excluding the Host and fixture; concurrent totals
+overlap its individual input samples and must not be summed.
+Linux memory metrics record checkpoint `ui_rss_bytes` (VmRSS) and process-wide
+`ui_peak_rss_bytes` (VmHWM) since startup through that checkpoint; these byte
+values exclude the Host/fixture, are null elsewhere, and must not be summed.
+Renderer Buffer and
+geometry tests separately check colors and hit rectangles. Timeout cleanup uses
+registered process identities and Host roots, with evidence in `cleanup.json`;
+it requires Linux `/proc`. Run without competing builds.
+
 Long-task comparisons use retained release test executables from both revisions,
 with the same benchmark fixtures. Build `maka-event-log --test archive` and
 `maka-agent-engine --test integration` using `cargo test --release --no-run`, then run:

@@ -50,6 +50,34 @@ fn realm() -> Foreground {
     .unwrap()
 }
 
+#[test]
+fn borrowed_foreground_arguments_preserve_json_snapshot_isolation() {
+    let mut realm = realm();
+    let module = realm
+        .load(
+            "snapshot.mjs",
+            "export const panel = { event(state, input, props) { state.items[0] = input.value; return {state, label:props.label}; } };",
+        )
+        .unwrap();
+    let callbacks = realm
+        .capture(&module, &["panel".into()], &["event"])
+        .unwrap();
+    let state = json!({"items":[7],"exact":9_007_199_254_740_991u64});
+    let props = json!({"label":"shared"});
+    for value in [8, 9] {
+        let input = json!({"value":value});
+        assert_eq!(
+            realm
+                .call_bound(&callbacks, "event", &[&state, &input, &props])
+                .unwrap(),
+            json!({"state":{"items":[value],"exact":9_007_199_254_740_991u64},"label":"shared"})
+        );
+        assert_eq!(state["items"], json!([7]));
+        assert_eq!(props, json!({"label":"shared"}));
+    }
+    realm.close(&module).unwrap();
+}
+
 fn call(
     realm: &mut Foreground,
     module: &ForegroundModule,

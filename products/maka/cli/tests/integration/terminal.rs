@@ -44,6 +44,7 @@ struct Pty {
     screen: Screen,
     pending: Vec<u8>,
     output: Vec<u8>,
+    output_bytes: u64,
     frames: frames::Frames,
     read_size: usize,
     enhanced_keyboard: bool,
@@ -129,7 +130,9 @@ impl Pty {
                 -1
             );
         }
-        let mut command = Command::new(env!("CARGO_BIN_EXE_maka"));
+        let binary = std::env::var_os("MAKA_TUI_PROBE_BINARY")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_maka").into());
+        let mut command = Command::new(binary);
         command
             .args(args)
             .env("TERM", "xterm-256color")
@@ -149,6 +152,31 @@ impl Pty {
             });
         }
         let child = command.spawn().unwrap();
+        if let Some(directory) = std::env::var_os("MAKA_TUI_PARITY_EVIDENCE") {
+            let root = args
+                .windows(2)
+                .find(|pair| pair[0] == "--root")
+                .map(|pair| pair[1]);
+            let start_ticks = std::fs::read_to_string(format!("/proc/{}/stat", child.id()))
+                .ok()
+                .and_then(|stat| {
+                    let tail = &stat[stat.rfind(')')? + 1..];
+                    tail.split_whitespace().nth(19)?.parse::<u64>().ok()
+                });
+            let owner = serde_json::json!({
+                "ui_pid": child.id(), "start_ticks": start_ticks,
+                "binary": command.get_program().to_string_lossy(),
+                "ui_root": root,
+                "host_root": root.map(|root| std::path::Path::new(root).join("host")),
+            });
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut owners = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(std::path::Path::new(&directory).join("owners.jsonl"))
+                .unwrap();
+            writeln!(owners, "{owner}").unwrap();
+        }
         Self {
             child,
             master: Some(master),
@@ -156,6 +184,7 @@ impl Pty {
             screen: Screen::new(TerminalSize::new(120, 40).unwrap()),
             pending: Vec::new(),
             output: Vec::new(),
+            output_bytes: 0,
             frames: frames::Frames::default(),
             read_size: 8192,
             enhanced_keyboard,
@@ -217,6 +246,7 @@ impl Pty {
             .read(&mut buffer[..self.read_size])
             .unwrap();
         self.frames.feed(&buffer[..length]);
+        self.output_bytes += length as u64;
         self.output.extend_from_slice(&buffer[..length]);
         if self.enhanced_keyboard {
             // The Host screen intentionally does not advertise CSI-u input.

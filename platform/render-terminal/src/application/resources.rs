@@ -28,6 +28,7 @@ use std::{
 pub(super) struct Owner {
     pub identity: Rc<()>,
     pub recipe: Rc<dyn Widget>,
+    pub(super) measurements: std::cell::RefCell<paint::RetainedMeasurements>,
     pub state: Box<dyn Any>,
     pub(super) resources: std::sync::Arc<maka_capabilities::call::Resources>,
     kind: TypeId,
@@ -145,6 +146,7 @@ impl Resources {
                             identity: Rc::new(()),
                             kind: recipe.as_ref().type_id(),
                             recipe,
+                            measurements: Default::default(),
                             state,
                             resources,
                             revision: None,
@@ -217,6 +219,7 @@ impl Resources {
                         entry.insert(Owner {
                             identity: Rc::new(()),
                             recipe: recipe.clone(),
+                            measurements: Default::default(),
                             state,
                             resources,
                             kind,
@@ -238,6 +241,9 @@ impl Resources {
             }
             let owner = self.owners.get_mut(&mount.id()).unwrap();
             self.redraw |= owner.revision != Some(frame.revision);
+            if !Rc::ptr_eq(&owner.recipe, &recipe) {
+                *owner.measurements.get_mut() = Default::default();
+            }
             owner.recipe = recipe;
             if catch_unwind(AssertUnwindSafe(|| {
                 owner.recipe.prepare_focus(

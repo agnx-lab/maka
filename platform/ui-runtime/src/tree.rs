@@ -55,8 +55,8 @@ struct Notification {
 
 pub(super) struct Mounted<V: ?Sized> {
     mount: Mount,
-    pub frame: Frame<NativeView<V>>,
-    pub props: Value,
+    pub frame: Frame<NativeView<V>, Arc<Value>>,
+    pub props: Arc<Value>,
     pub children: BTreeMap<String, Child>,
     pub(super) subscriptions: BTreeMap<String, actions::subscriptions::Demand>,
 }
@@ -73,52 +73,11 @@ pub(super) struct Feedback {
 }
 struct Call {
     mount: Mount,
-    kind: CallKind,
-    props: Value,
+    request: backend::Call,
     subscription: Option<Subscription>,
     depth: usize,
     basis: Option<(u64, Option<Surface>)>,
     root: bool,
-}
-enum CallKind {
-    Mount,
-    Update {
-        state: Value,
-    },
-    Event {
-        state: Value,
-        input: abi::ComponentInput,
-    },
-}
-impl Call {
-    fn component_call(&self) -> ComponentCall<'_> {
-        match &self.kind {
-            CallKind::Mount => ComponentCall::Mount { props: &self.props },
-            CallKind::Update { state } => ComponentCall::Update {
-                state,
-                props: &self.props,
-            },
-            CallKind::Event { state, input } => {
-                let (key, event, origin) = match input {
-                    abi::ComponentInput::Raw { key, event } => (key, event, EventOrigin::Raw),
-                    abi::ComponentInput::Action { key, event } => (key, event, EventOrigin::Action),
-                    abi::ComponentInput::Component {
-                        key,
-                        child,
-                        name,
-                        event,
-                    } => (key, event, EventOrigin::Component { child, name }),
-                };
-                ComponentCall::Event {
-                    state,
-                    props: &self.props,
-                    key,
-                    input: event,
-                    origin,
-                }
-            }
-        }
-    }
 }
 struct FinishStage<V: ?Sized> {
     mount: Mount,
@@ -135,7 +94,7 @@ pub struct Candidate<'a, V: ?Sized> {
     changed: &'a BTreeMap<Uuid, Mounted<V>>,
 }
 impl<'a, V: ?Sized> Candidate<'a, V> {
-    pub fn changed(&self) -> impl Iterator<Item = (&Mount, &Frame<NativeView<V>>)> {
+    pub fn changed(&self) -> impl Iterator<Item = (&Mount, &Frame<NativeView<V>, Arc<Value>>)> {
         self.changed.values().map(|view| (&view.mount, &view.frame))
     }
 }
@@ -331,8 +290,9 @@ impl<V: ?Sized + 'static> Application<V> {
         }
         update.calls.push_back(Call {
             mount: mount.clone(),
-            kind: CallKind::Mount,
-            props,
+            request: backend::Call::Mount {
+                props: Arc::new(props),
+            },
             subscription: None,
             depth: 0,
             basis: None,
@@ -455,19 +415,18 @@ impl<V: ?Sized + 'static> Application<V> {
             .views
             .get(&mount.id())
             .ok_or_else(|| Error::Invalid("mount has no committed frame".into()))?;
-        let kind = CallKind::Event {
+        let request = backend::Call::Event {
             state: current.frame.state.clone(),
-            input: event,
+            props: current.props.clone(),
+            input: Arc::new(event),
         };
-        let props = current.props.clone();
         let revision = current.frame.revision;
         let surface = current.frame.surface.clone();
         let depth = self.mount_depth(mount)?;
         let subscription = self.subscription(mount, &update)?;
         update.calls.push_back(Call {
             mount: mount.clone(),
-            kind,
-            props,
+            request,
             subscription,
             depth,
             basis: Some((revision, surface)),
@@ -546,7 +505,7 @@ impl<V: ?Sized + 'static> Application<V> {
                     }
                     self.stage(
                         &call.mount,
-                        call.props,
+                        call.request.props().clone(),
                         invocation,
                         call.subscription,
                         call.depth,
@@ -565,7 +524,7 @@ impl<V: ?Sized + 'static> Application<V> {
                         None => None,
                     };
                     let pending =
-                        self.begin_invoke(&call.mount, call.component_call(), previous.as_ref())?;
+                        self.begin_invoke(&call.mount, &call.request, previous.as_ref())?;
                     update.pending = Some((call, pending));
                     continue;
                 }
@@ -702,7 +661,7 @@ impl<V: ?Sized + 'static> Application<V> {
 
     /// Startup may read only its original prepared declaration to create the
     /// platform surface. No input or painting can use it before commit_ui.
-    pub fn prepared_frame(&self, mount: &Mount) -> Result<&Frame<NativeView<V>>> {
+    pub fn prepared_frame(&self, mount: &Mount) -> Result<&Frame<NativeView<V>, Arc<Value>>> {
         self.ui_update
             .as_ref()
             .filter(|update| update.ready)
@@ -920,7 +879,7 @@ impl<V: ?Sized + 'static> Application<V> {
     fn stage(
         &mut self,
         mount: &Mount,
-        props: Value,
+        props: Arc<Value>,
         invocation: Invocation<V>,
         subscription: Option<Subscription>,
         depth: usize,
@@ -961,7 +920,7 @@ impl<V: ?Sized + 'static> Application<V> {
             }
         }
         update.emit(mount, subscription, output.events)?;
-        let frame = output.frame;
+        let frame = output.frame.map_state(Arc::new);
         let mut previous = update
             .changed
             .get(&mount.id())
@@ -987,18 +946,18 @@ impl<V: ?Sized + 'static> Application<V> {
             let child_mount = if let Some(old) = retained {
                 self.check_subscription(&old.mount, reference.on)?;
                 let child = self.current(&old.mount, update)?;
-                if child.props != *reference.props {
+                if child.props.as_ref() != reference.props {
                     let revision = child.frame.revision;
                     let surface = child.frame.surface.clone();
-                    let kind = CallKind::Update {
+                    let request = backend::Call::Update {
                         state: child.frame.state.clone(),
+                        props: Arc::new(reference.props.clone()),
                     };
                     self.check_props(&old.mount, reference.props)?;
                     update.step(depth + 1)?;
                     update.calls.push_back(Call {
                         mount: old.mount.clone(),
-                        kind,
-                        props: reference.props.clone(),
+                        request,
                         subscription,
                         depth: depth + 1,
                         basis: Some((revision, surface)),
@@ -1022,8 +981,9 @@ impl<V: ?Sized + 'static> Application<V> {
                 update.step(depth + 1)?;
                 update.calls.push_back(Call {
                     mount: child.clone(),
-                    kind: CallKind::Mount,
-                    props: reference.props.clone(),
+                    request: backend::Call::Mount {
+                        props: Arc::new(reference.props.clone()),
+                    },
                     subscription,
                     depth: depth + 1,
                     basis: None,
@@ -1165,25 +1125,24 @@ impl<V: ?Sized + 'static> Application<V> {
             }) {
                 continue;
             }
-            let kind = CallKind::Event {
+            let request = backend::Call::Event {
                 state: current.frame.state.clone(),
-                input: abi::ComponentInput::Component {
+                props: current.props.clone(),
+                input: Arc::new(abi::ComponentInput::Component {
                     key: route.handler.clone(),
                     child: route.slot.clone(),
                     name: notification.event.name,
                     event: notification.event.value,
-                },
+                }),
             };
             let revision = current.frame.revision;
-            let props = current.props.clone();
             let surface = current.frame.surface.clone();
             let depth = self.mount_depth(&route.parent)?;
             let subscription = self.subscription(&route.parent, update)?;
             update.step(depth)?;
             update.calls.push_back(Call {
                 mount: route.parent,
-                kind,
-                props,
+                request,
                 subscription,
                 depth,
                 basis: Some((revision, surface)),

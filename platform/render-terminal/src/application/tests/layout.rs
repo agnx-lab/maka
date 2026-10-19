@@ -27,6 +27,7 @@ use ratatui::style::{Color, Modifier};
 use std::{any::Any, cell::Cell, collections::BTreeMap, rc::Rc};
 
 pub(super) enum View {
+    Native(Rc<dyn Widget>),
     Scene(Value),
     ChangingScene(Rc<std::cell::RefCell<Value>>),
     SourceScene(Rc<std::cell::RefCell<Value>>),
@@ -111,6 +112,11 @@ impl NativeComponent<dyn Widget> for Root {
             }
         };
         let mut view = match &self.view {
+            View::Native(widget) => NativeView::<dyn Widget>::new(
+                widget.clone(),
+                BTreeMap::from([("back".into(), json!(true))]),
+                vec![],
+            )?,
             View::Scene(source) => super::super::scene::compile(source)?,
             View::ChangingScene(source)
             | View::SourceScene(source)

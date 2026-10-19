@@ -31,6 +31,19 @@ fn ready(
     Application,
     maka_plugin_core::runtime::Mount,
 ) {
+    ready_with_registry(
+        handler,
+        support::scene::registry::<()>(PresentationTarget::Tui),
+    )
+}
+fn ready_with_registry(
+    handler: &str,
+    native: maka_ui_runtime::NativeRegistry<()>,
+) -> (
+    tokio::runtime::Runtime,
+    Application,
+    maka_plugin_core::runtime::Mount,
+) {
     let scheduler = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_time()
@@ -45,7 +58,7 @@ fn ready(
             synchronous_slice: Duration::from_millis(500),
             ..Default::default()
         }),
-        support::scene::registry::<()>(PresentationTarget::Tui),
+        native,
         Default::default(),
     )
     .unwrap();
@@ -90,6 +103,94 @@ fn slow_guest_keeps_owner_available_and_only_prepared_commit_publishes_state() {
             }
         }
     });
+}
+
+#[test]
+fn large_shared_state_survives_candidate_rejection_and_retired_worker_completion() {
+    use std::sync::{Arc, Condvar, Mutex};
+
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let preparing = gate.clone();
+    let native = support::scene::registry::<()>(PresentationTarget::Tui)
+        .with_scene_compiler(
+            support::scene::language(PresentationTarget::Tui),
+            move |source| {
+                let (locked, changed) = &*preparing;
+                let mut held = locked.lock().unwrap();
+                while *held {
+                    held = changed.wait(held).unwrap();
+                }
+                support::scene::prepare(source)
+            },
+            support::scene::finish::<()>,
+        )
+        .unwrap();
+    let (scheduler, mut app, mount) = ready_with_registry(
+        "return frame({...state,count:state.count+1,revision:state.revision+1,payload:event.event.payload??state.payload});",
+        native,
+    );
+    let payload = "shared-state-".repeat(100_000);
+    app.dispatch(&mount, 0, "inc", json!({"payload":payload}))
+        .unwrap();
+    scheduler.block_on(app.wait_idle()).unwrap();
+    let committed = app.frame(&mount).unwrap().state.clone();
+    assert_eq!(committed["count"], 4);
+    assert_eq!(committed["payload"].as_str().unwrap().len(), 1_300_000);
+
+    app.defer_native_commit();
+    *gate.0.lock().unwrap() = true;
+    app.dispatch(&mount, 1, "inc", json!({})).unwrap();
+    // The actual accepted invocation retains this allocation in addition to
+    // the committed frame and this observer. State size does not add a copy.
+    assert!(Arc::strong_count(&committed) >= 3);
+    *gate.0.lock().unwrap() = false;
+    gate.1.notify_all();
+    scheduler.block_on(app.wait_prepared(&mount)).unwrap();
+    assert_eq!(app.prepared_frame(&mount).unwrap().state["count"], 5);
+    app.commit_ui(&mount, |_, _| {
+        Err(maka_ui_runtime::Error::Invalid(
+            "reject shared candidate".into(),
+        ))
+    })
+    .unwrap_err();
+    assert!(Arc::ptr_eq(&committed, &app.frame(&mount).unwrap().state));
+    assert_eq!(app.frame(&mount).unwrap().revision, 1);
+    assert_eq!(committed["count"], 4);
+
+    app.dispatch(&mount, 1, "inc", json!({})).unwrap();
+    scheduler.block_on(app.wait_prepared(&mount)).unwrap();
+    app.commit_ui(&mount, |_, _| Ok(())).unwrap();
+    assert_eq!(app.frame(&mount).unwrap().state["count"], 5);
+    assert_eq!(
+        app.frame(&mount).unwrap().state["payload"],
+        committed["payload"]
+    );
+
+    let retained = Arc::downgrade(&app.frame(&mount).unwrap().state);
+    *gate.0.lock().unwrap() = true;
+    app.dispatch(&mount, 2, "inc", json!({})).unwrap();
+    app.close(&mount, Ok(())).unwrap();
+    assert!(
+        retained.upgrade().is_some(),
+        "accepted work still owns its input"
+    );
+    *gate.0.lock().unwrap() = false;
+    gate.1.notify_all();
+    assert!(scheduler.block_on(app.wait_idle()).is_err());
+    assert!(
+        retained.upgrade().is_none(),
+        "settled work releases its input"
+    );
+    scheduler.block_on(std::future::poll_fn(|cx| {
+        app.set_waker(cx.waker().clone());
+        match app.shutdown() {
+            Ok(()) => std::task::Poll::Ready(()),
+            Err(maka_ui_runtime::Error::Core(maka_plugin_core::Error::CleanupPending)) => {
+                std::task::Poll::Pending
+            }
+            Err(error) => panic!("{error}"),
+        }
+    }));
 }
 #[test]
 fn retired_mount_waits_for_actual_guest_completion_and_rejects_late_candidate() {

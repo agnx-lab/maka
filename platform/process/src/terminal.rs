@@ -84,11 +84,15 @@ impl Screen {
             let end = text.floor_char_boundary(256.min(text.len()));
             let chunk = &text.as_bytes()[..end];
             text = &text[end..];
-            if self.strings.feed(chunk).is_err() {
-                self.failed = true;
-                return Err(ScreenError("terminal string exceeds 64 KiB"));
-            }
-            self.parser.advance(&mut self.state, chunk);
+            let mut filtered = [0; 256];
+            let length = match self.strings.feed(chunk, &mut filtered) {
+                Ok(length) => length,
+                Err(()) => {
+                    self.failed = true;
+                    return Err(ScreenError("terminal string exceeds 64 KiB"));
+                }
+            };
+            self.parser.advance(&mut self.state, &filtered[..length]);
             // We have no renderer to batch. Flush synchronized output at the
             // parser cut so replies and persisted state never wait for repaint.
             self.parser.stop_sync(&mut self.state);
@@ -179,22 +183,56 @@ impl Dimensions for Size {
 }
 
 /// Bound upstream's OSC accumulator across arbitrary native read boundaries.
-/// Other escape strings have no unbounded storage in vte.
+/// Clipboard requests have no effect in this headless Screen, so discard their
+/// payload as it arrives instead of accumulating base64 just to ignore it later.
+/// Other OSC strings retain their original budget and vte handling.
 #[derive(Default)]
 struct StringLimit {
     escaped: bool,
-    osc: Option<usize>,
+    osc: Option<OscString>,
+    clipboard: bool,
+}
+struct OscString {
+    length: usize,
+    clipboard_prefix: Option<usize>,
 }
 impl StringLimit {
-    fn feed(&mut self, bytes: &[u8]) -> Result<(), ()> {
+    fn feed(&mut self, bytes: &[u8], filtered: &mut [u8]) -> Result<usize, ()> {
+        let mut written = 0;
         for &byte in bytes {
-            if let Some(length) = &mut self.osc {
+            let mut forwarded = byte;
+            if self.clipboard {
+                match byte {
+                    7 => {
+                        self.clipboard = false;
+                        continue;
+                    }
+                    0x18 | 0x1a | 0x1b => {
+                        self.clipboard = false;
+                        self.escaped = byte == 0x1b;
+                    }
+                    _ => continue,
+                }
+            } else if let Some(osc) = &mut self.osc {
                 if matches!(byte, 7 | 0x18 | 0x1a | 0x1b) {
                     self.osc = None;
                     self.escaped = byte == 0x1b;
                 } else {
-                    *length += 1;
-                    if *length > MAX_WRITE {
+                    osc.length += 1;
+                    // vte ignores these C0 bytes inside an OSC, including in
+                    // the command number. Match its significant-byte prefix.
+                    if !matches!(byte, 0..=6 | 8..=0x17 | 0x19 | 0x1c..=0x1f) {
+                        osc.clipboard_prefix = osc
+                            .clipboard_prefix
+                            .and_then(|index| (byte == b"52;"[index]).then_some(index + 1));
+                    }
+                    if osc.clipboard_prefix == Some(3) {
+                        self.osc = None;
+                        self.clipboard = true;
+                        // End the upstream's tiny partial OSC before discarding
+                        // subsequent bytes. CAN has no visible or reply effect.
+                        forwarded = 0x18;
+                    } else if osc.length > MAX_WRITE {
                         return Err(());
                     }
                 }
@@ -203,15 +241,20 @@ impl StringLimit {
             } else if self.escaped {
                 match byte {
                     b']' => {
-                        self.osc = Some(0);
+                        self.osc = Some(OscString {
+                            length: 0,
+                            clipboard_prefix: Some(0),
+                        });
                         self.escaped = false;
                     }
                     0..=0x17 | 0x19 | 0x1c..=0x1f => {}
                     _ => self.escaped = false,
                 }
             }
+            filtered[written] = forwarded;
+            written += 1;
         }
-        Ok(())
+        Ok(written)
     }
 }
 

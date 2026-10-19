@@ -20,10 +20,9 @@
 //! Background JavaScript execution. The original UI owner alone admits input,
 //! commits candidate batches and settles native resources and mutation receipts.
 use maka_js_runtime::plugin::{Foreground, ForegroundCallbacks, ForegroundModule, Limits};
-use maka_ui_runtime::actions::{CaptureCall, CapturePlan};
+use maka_ui_runtime::actions::CapturePlan;
 use maka_ui_runtime::{
-    ComponentCall, ComponentOutput, Error, EventOrigin, ExecutionOptions, PrepareScene,
-    PreparedScene, Result, abi, backend,
+    ComponentOutput, Error, ExecutionOptions, PrepareScene, PreparedScene, Result, abi, backend,
 };
 use serde_json::{Value, json};
 use std::{
@@ -305,13 +304,15 @@ impl Component {
     fn execute<T: Send + 'static>(
         &self,
         method: &'static str,
-        args: Vec<Value>,
+        arguments: impl FnOnce() -> Result<Vec<Arc<Value>>> + Send + 'static,
         decode: impl FnOnce(Value) -> Result<T> + Send + 'static,
     ) -> Result<backend::Job<T>> {
-        delivery(&args)?;
         let (realm, id, namespace) = (self.realm, self.module, self.namespace.clone());
         self.worker.submit(move |state| {
             state.with_vm(realm, |vm| {
+                let args = arguments()?;
+                let args: Vec<_> = args.iter().map(AsRef::as_ref).collect();
+                delivery(args.iter().copied())?;
                 let callbacks = vm
                     .modules
                     .get(&id)
@@ -326,72 +327,62 @@ impl Component {
 impl backend::Component for Component {
     fn call(
         &self,
-        call: ComponentCall<'_>,
-        values: &abi::ValueBindings,
+        call: backend::Call,
+        values: abi::ValueBindings,
         prepare: Arc<PrepareScene>,
     ) -> Result<backend::Job<ComponentOutput<PreparedScene>>> {
-        let (method, mut args) = match call {
-            ComponentCall::Mount { props } => ("mount", vec![props.clone()]),
-            ComponentCall::Update { state, props } => {
-                ("update", vec![state.clone(), props.clone()])
-            }
-            ComponentCall::Event {
-                state,
-                props,
-                key,
-                input,
-                origin,
-            } => {
-                let event = match origin {
-                    EventOrigin::Raw => abi::ComponentInput::Raw {
-                        key: key.into(),
-                        event: input.clone(),
-                    },
-                    EventOrigin::Action => abi::ComponentInput::Action {
-                        key: key.into(),
-                        event: input.clone(),
-                    },
-                    EventOrigin::Component { child, name } => abi::ComponentInput::Component {
-                        key: key.into(),
-                        child: child.into(),
-                        name: name.into(),
-                        event: input.clone(),
-                    },
-                };
-                (
-                    "event",
-                    vec![
-                        state.clone(),
-                        serde_json::to_value(event).map_err(invalid)?,
-                        props.clone(),
-                    ],
-                )
-            }
+        let method = match &call {
+            backend::Call::Mount { .. } => "mount",
+            backend::Call::Update { .. } => "update",
+            backend::Call::Event { .. } => "event",
         };
-        args.push(serde_json::to_value(values).map_err(invalid)?);
-        self.execute(method, args, move |value| {
-            // Validate number precision before compiler code observes the result.
-            maka_plugin_core::json::exact_numbers(&value).map_err(Error::Invalid)?;
-            let output = component_output(value)?;
-            let view = prepare(&output.frame.view)?;
-            Ok(output.map_view(|_| view))
-        })
+        self.execute(
+            method,
+            move || {
+                let mut args = match call {
+                    backend::Call::Mount { props } => vec![props],
+                    backend::Call::Update { state, props } => vec![state, props],
+                    backend::Call::Event {
+                        state,
+                        props,
+                        input,
+                    } => {
+                        vec![
+                            state,
+                            Arc::new(serde_json::to_value(input.as_ref()).map_err(invalid)?),
+                            props,
+                        ]
+                    }
+                };
+                args.push(Arc::new(serde_json::to_value(values).map_err(invalid)?));
+                Ok(args)
+            },
+            move |value| {
+                // Validate number precision before compiler code observes the result.
+                maka_plugin_core::json::exact_numbers(&value).map_err(Error::Invalid)?;
+                let output = component_output(value)?;
+                let view = prepare(&output.frame.view)?;
+                Ok(output.map_view(|_| view))
+            },
+        )
     }
-    fn capture(&self, call: CaptureCall<'_>) -> Result<backend::Job<CapturePlan>> {
+    fn capture(&self, call: backend::Capture) -> Result<backend::Job<CapturePlan>> {
         self.execute(
             "capture",
-            vec![
-                call.state.clone(),
-                call.props.clone(),
-                json!(call.method),
-                call.input.clone(),
-                serde_json::to_value(call.values).map_err(invalid)?,
-            ],
+            move || {
+                Ok(vec![
+                    call.state,
+                    call.props,
+                    Arc::new(json!(call.method)),
+                    Arc::new(call.input),
+                    Arc::new(serde_json::to_value(call.values).map_err(invalid)?),
+                ])
+            },
             |value| serde_json::from_value(value).map_err(invalid),
         )
     }
 }
-fn delivery(args: &[Value]) -> Result<()> {
+fn delivery<'a>(args: impl IntoIterator<Item = &'a Value>) -> Result<()> {
     for value in args {
         maka_plugin_core::json::exact_numbers(value).map_err(Error::Invalid)?;
     }

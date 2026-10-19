@@ -113,7 +113,7 @@ fn packaged_product_component_schemas_compile_independently_for_terminal_present
                     "commands":[{"id":"settings", "label":"Settings", "hint":"", "disabled":false}]});
                 let mounted: maka_ui_runtime::ComponentOutput = serde_json::from_value(
                     realm
-                        .call_bound(&callbacks, "mount", &[props.clone(), json!({})])
+                        .call_bound(&callbacks, "mount", &[&props, &json!({})])
                         .unwrap(),
                 )
                 .unwrap();
@@ -125,10 +125,10 @@ fn packaged_product_component_schemas_compile_independently_for_terminal_present
                             &callbacks,
                             "event",
                             &[
-                                mounted.frame.state,
-                                json!({"kind":"raw", "key":"close", "event":null}),
-                                props,
-                                json!({}),
+                                &mounted.frame.state,
+                                &json!({"kind":"raw", "key":"close", "event":null}),
+                                &props,
+                                &json!({}),
                             ],
                         )
                         .unwrap(),
