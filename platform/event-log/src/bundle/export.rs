@@ -82,12 +82,16 @@ impl EventLog {
 
 async fn require_idle(db: &mut SqliteConnection, inventory: &Inventory) -> Result<(), StoreError> {
     for session in &inventory.sessions {
+        if crate::sessions::has_active_invocation(db, &session.id).await? {
+            return Err(StoreError::SessionBusy);
+        }
         let busy: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM local_runtime_events o WHERE o.kind='invocation_opened' AND o.event_session=?1
-             AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))
-             OR EXISTS(SELECT 1 FROM message_admissions WHERE session_id=?1)
-             OR EXISTS(SELECT 1 FROM session_processes WHERE session_id=?1 AND cleaned=0)"
-        ).bind(&session.id).fetch_one(&mut *db).await?;
+            "SELECT EXISTS(SELECT 1 FROM message_admissions WHERE session_id=?1)
+             OR EXISTS(SELECT 1 FROM session_processes WHERE session_id=?1 AND cleaned=0)",
+        )
+        .bind(&session.id)
+        .fetch_one(&mut *db)
+        .await?;
         if busy {
             return Err(StoreError::SessionBusy);
         }

@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use maka_agent_facts::event::CommitError;
 use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
@@ -191,6 +192,157 @@ pub(super) async fn roundtrip(bytes: &[u8]) {
         .unwrap(),
         receipt
     );
+    let imported = log.prefix(1024, 8 * 1024 * 1024).await.unwrap();
+    let imported_bytes = serde_json::to_vec(&imported.events).unwrap();
+    let foreign = imported
+        .events
+        .iter()
+        .find(|stored| {
+            stored.event.invocation.session_id != "destination"
+                && matches!(stored.event.fact, Fact::InvocationOpened { .. })
+        })
+        .unwrap()
+        .event
+        .invocation
+        .clone();
+    assert!(matches!(
+        log.append(
+            &EventWrite::plain(RuntimeEvent::new(
+                foreign,
+                Fact::InvocationEnded {
+                    outcome: InvocationOutcome::Completed,
+                }
+            ))
+            .unwrap()
+        )
+        .await,
+        Err(CommitError::Rejected(reason))
+            if reason == "imported invocation is historical evidence, not locally accepted work"
+    ));
+    let opening_a = local_event(
+        &root,
+        "local-a",
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::Code {
+                source: "first local invocation".into(),
+            },
+        },
+    );
+    let opening_b = local_event(
+        &root,
+        "local-b",
+        Fact::InvocationOpened {
+            configuration: None,
+            input: InvocationInput::Code {
+                source: "second local invocation".into(),
+            },
+        },
+    );
+    let sequence_a = log.append(&opening_a).await.unwrap();
+    let active_prefix = log.prefix(1024, 8 * 1024 * 1024).await.unwrap();
+    log.close().await.unwrap();
+
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&log.prefix(1024, 8 * 1024 * 1024).await.unwrap()).unwrap(),
+        serde_json::to_vec(&active_prefix).unwrap()
+    );
+    assert_eq!(log.append(&opening_a).await.unwrap(), sequence_a);
+    assert!(matches!(
+        log.append(&opening_b).await,
+        Err(CommitError::Rejected(reason))
+            if reason == "invalid event transition: session already has an unsealed invocation"
+    ));
+    assert!(matches!(
+        log.set_session_archived::<Value>(&root, true, 4).await,
+        Err(StoreError::SessionBusy)
+    ));
+    log.append(&local_event(
+        &root,
+        "local-a",
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    ))
+    .await
+    .unwrap();
+    let sealed_prefix = log.prefix(1024, 8 * 1024 * 1024).await.unwrap();
+    log.close().await.unwrap();
+
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&log.prefix(1024, 8 * 1024 * 1024).await.unwrap()).unwrap(),
+        serde_json::to_vec(&sealed_prefix).unwrap()
+    );
+    log.append(&opening_b).await.unwrap();
+    let before_replay = log.prefix(1024, 8 * 1024 * 1024).await.unwrap();
+    assert_eq!(
+        log.import_bundle(
+            StagedBundle::read(bytes).await.unwrap(),
+            &binding,
+            bindings.clone()
+        )
+        .await
+        .unwrap(),
+        receipt
+    );
+    assert_eq!(
+        serde_json::to_vec(&log.prefix(1024, 8 * 1024 * 1024).await.unwrap()).unwrap(),
+        serde_json::to_vec(&before_replay).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_vec(&before_replay.events[..imported.events.len()]).unwrap(),
+        imported_bytes
+    );
+    log.append(&local_event(
+        &root,
+        "local-b",
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    ))
+    .await
+    .unwrap();
+
+    // A new publication cannot append imported history after a canonical local owner.
+    let collision = EventLog::open(&dir.path().join("collision.sqlite"))
+        .await
+        .unwrap();
+    collision
+        .create_session(&root, "local-owner", &json!({}), 1)
+        .await
+        .unwrap();
+    collision
+        .append(&local_event(
+            &root,
+            "collision-local",
+            Fact::InvocationOpened {
+                configuration: None,
+                input: InvocationInput::Code {
+                    source: "existing local owner".into(),
+                },
+            },
+        ))
+        .await
+        .unwrap();
+    let before_collision = collision.prefix(10, 16_384).await.unwrap();
+    assert!(matches!(
+        collision
+            .import_bundle(
+                StagedBundle::read(bytes).await.unwrap(),
+                &binding,
+                bindings.clone()
+            )
+            .await,
+        Err(BundleError::Store(StoreError::SessionConflict))
+    ));
+    assert_eq!(
+        serde_json::to_vec(&collision.prefix(10, 16_384).await.unwrap()).unwrap(),
+        serde_json::to_vec(&before_collision).unwrap()
+    );
+    collision.close().await.unwrap();
+
     let source = log.get_session::<Value>(&root).await.unwrap().unwrap();
     log.copy_session(
         SessionCopy {
@@ -271,4 +423,17 @@ async fn collect(log: &EventLog) {
         }
     }
     panic!("fixture material did not converge");
+}
+
+fn local_event(session: &str, id: &str, fact: Fact) -> EventWrite {
+    EventWrite::plain(RuntimeEvent::new(
+        Invocation {
+            session_id: session.into(),
+            turn_id: id.into(),
+            run_id: id.into(),
+            invocation_id: id.into(),
+        },
+        fact,
+    ))
+    .unwrap()
 }

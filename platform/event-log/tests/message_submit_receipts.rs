@@ -134,6 +134,24 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
     // the raw API remains restricted to an unsealed Run.
     let late = admission(&owner, "late", Disposition::Followup);
     assert!(log.admit_message(late.clone()).await.is_err());
+    let queue_before_mismatch = log.message_queue("session").await.unwrap();
+    for field in ["turn", "run"] {
+        let mut mismatch = admission(&owner, "mismatched-owner", Disposition::Followup);
+        match field {
+            "turn" => mismatch.invocation.turn_id = "another-turn".into(),
+            "run" => mismatch.invocation.run_id = "another-run".into(),
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            log.admit_queued_message("epoch", updated.revision, mismatch)
+                .await,
+            Err(StoreError::InvalidTransition(_))
+        ));
+        assert_eq!(
+            log.message_queue("session").await.unwrap(),
+            queue_before_mismatch
+        );
+    }
     let late_receipt = log
         .admit_queued_message("epoch", updated.revision, late.clone())
         .await

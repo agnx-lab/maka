@@ -65,14 +65,7 @@ impl EventLog {
         if let Some(expected) = expected && expected != record.revision {
             return Ok(SessionMutation::RevisionConflict { expected, actual: record.revision });
         }
-        let active: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM local_runtime_events AS opening
-             WHERE opening.kind = 'invocation_opened'
-             AND json_extract(opening.event_json, '$.invocation.session_id') = ?
-             AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal
-                 WHERE terminal.invocation_id = opening.invocation_id AND terminal.kind = 'invocation_ended'))",
-        ).bind(&id).fetch_one(&mut *tx).await?;
-        if active {
+        if super::has_active_invocation(&mut tx, &id).await? {
             return Err(StoreError::SessionBusy);
         }
         if record.archived == archived {

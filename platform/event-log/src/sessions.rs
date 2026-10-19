@@ -39,8 +39,8 @@ pub use removal::{
 };
 pub(crate) mod read_state;
 pub(crate) use activity::{initialize_execution, project_execution, register_functions};
-pub(crate) use execution::advance_revision;
 pub use execution::{CatalogMessage, SessionExecution, SessionExecutionState};
+pub(crate) use execution::{advance_revision, has_active_invocation};
 pub use metadata::SessionMutation;
 pub use read_state::SessionReadState;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

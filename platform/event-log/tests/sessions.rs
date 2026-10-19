@@ -22,7 +22,7 @@ use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::RuntimeEvent;
-use maka_event_log::{EventLog, StoreError};
+use maka_event_log::{EventLog, StoreError, sessions::SessionMutation};
 use serde_json::{Value, json};
 
 #[tokio::test]
@@ -193,25 +193,53 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
         run_id: "run".into(),
         invocation_id: "invocation".into(),
     };
-    log.append(
-        &EventWrite::plain(
-            (RuntimeEvent::new(
-                invocation.clone(),
-                Fact::InvocationOpened {
-                    configuration: None,
-                    input: maka_agent_facts::input::InvocationInput::Message {
-                        source_messages: Vec::new(),
-                        content: "".into(),
-                        request_fingerprint: None,
-                    },
-                },
-            ))
-            .clone(),
-        )
-        .unwrap(),
-    )
-    .await
+    let opening = EventWrite::plain(RuntimeEvent::new(
+        invocation.clone(),
+        Fact::InvocationOpened {
+            configuration: None,
+            input: maka_agent_facts::input::InvocationInput::Message {
+                source_messages: Vec::new(),
+                content: "".into(),
+                request_fingerprint: None,
+            },
+        },
+    ))
     .unwrap();
+    let successor = Invocation {
+        session_id: "a".into(),
+        turn_id: "successor-turn".into(),
+        run_id: "successor-run".into(),
+        invocation_id: "successor-invocation".into(),
+    };
+    let next_opening = EventWrite::plain(RuntimeEvent::new(
+        successor.clone(),
+        opening.event().fact.clone(),
+    ))
+    .unwrap();
+    let before = serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap();
+    assert!(
+        log.append_batch(&[opening.clone(), next_opening.clone()])
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap(),
+        before
+    );
+    let first_sequence = log.append(&opening).await.unwrap();
+    assert!(matches!(
+        log.change_session_archived::<Value>("a", Some(0), true, 2)
+            .await
+            .unwrap(),
+        SessionMutation::RevisionConflict {
+            expected: 0,
+            actual: 2
+        }
+    ));
+    assert!(matches!(
+        log.set_session_archived::<Value>("a", false, 2).await,
+        Err(StoreError::SessionBusy)
+    ));
     assert!(matches!(
         log.set_session_archived::<Value>("a", true, 2).await,
         Err(StoreError::SessionBusy)
@@ -222,16 +250,37 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
             .unwrap()
             .archived
     );
+    let ending = EventWrite::plain(RuntimeEvent::new(
+        invocation,
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    ))
+    .unwrap();
+    let before = serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap();
+    assert!(
+        log.append_batch(&[next_opening.clone(), ending.clone()])
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::to_vec(&log.prefix(10, 16_384).await.unwrap()).unwrap(),
+        before
+    );
+    let sequences = log.append_batch(&[ending, next_opening]).await.unwrap();
+    assert_eq!(sequences, vec![first_sequence + 1, first_sequence + 2]);
+    assert_eq!(log.append(&opening).await.unwrap(), first_sequence);
+    assert!(matches!(
+        log.set_session_archived::<Value>("a", true, 2).await,
+        Err(StoreError::SessionBusy)
+    ));
     log.append(
-        &EventWrite::plain(
-            (RuntimeEvent::new(
-                invocation,
-                Fact::InvocationEnded {
-                    outcome: InvocationOutcome::Completed,
-                },
-            ))
-            .clone(),
-        )
+        &EventWrite::plain(RuntimeEvent::new(
+            successor,
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Completed,
+            },
+        ))
         .unwrap(),
     )
     .await

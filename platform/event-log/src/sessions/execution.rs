@@ -44,6 +44,31 @@ pub enum SessionExecutionState {
     },
 }
 
+pub(crate) async fn has_active_invocation(
+    connection: &mut SqliteConnection,
+    session: &str,
+) -> Result<bool, StoreError> {
+    // Local openings are admitted serially; bundle imports precede all local openings.
+    // Thus only the latest canonical opening can own active local execution.
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM (
+            SELECT invocation_id FROM event_log INDEXED BY catalog_message_facts
+            WHERE invocation_id IS NOT NULL AND event_json IS NOT NULL
+            AND kind IN ('invocation_opened', 'model_completed') AND kind = 'invocation_opened'
+            AND json_extract(event_json, '$.invocation.session_id') = ?
+            ORDER BY sequence DESC LIMIT 1
+         ) AS opening
+         WHERE NOT EXISTS(SELECT 1 FROM imported_invocations i
+            WHERE i.invocation_id = opening.invocation_id)
+         AND NOT EXISTS(SELECT 1 FROM runtime_events terminal
+            WHERE terminal.invocation_id = opening.invocation_id
+            AND terminal.kind = 'invocation_ended'))",
+    )
+    .bind(session)
+    .fetch_one(connection)
+    .await?)
+}
+
 pub(super) async fn read(
     connection: &mut SqliteConnection,
     id: &str,

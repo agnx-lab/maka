@@ -242,14 +242,9 @@ impl EventLog {
                     "cannot admit an archived session".into(),
                 ));
             }
-            let active: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM local_runtime_events AS opening
-                     WHERE opening.kind = 'invocation_opened'
-                     AND json_extract(opening.event_json, '$.invocation.session_id') = ?
-                     AND NOT EXISTS(SELECT 1 FROM runtime_events AS terminal
-                         WHERE terminal.invocation_id = opening.invocation_id AND terminal.kind = 'invocation_ended'))",
-                ).bind(&event.invocation.session_id).fetch_one(&mut *transaction).await?;
-            if active {
+            if crate::sessions::has_active_invocation(transaction, &event.invocation.session_id)
+                .await?
+            {
                 return Err(StoreError::InvalidTransition(
                     "session already has an unsealed invocation".into(),
                 ));

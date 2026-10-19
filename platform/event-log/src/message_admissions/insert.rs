@@ -75,12 +75,17 @@ pub(crate) async fn insert(
         return Err(StoreError::SessionBusy);
     }
     let active: Option<String> = sqlx::query_scalar(
-        "SELECT json_extract(o.event_json, '$.invocation') FROM local_runtime_events o
-         WHERE o.kind = 'invocation_opened'
-         AND json_extract(o.event_json, '$.invocation.session_id') = ?
+        "SELECT json_extract(o.event_json, '$.invocation') FROM (
+            SELECT invocation_id, event_json FROM event_log INDEXED BY catalog_message_facts
+            WHERE invocation_id IS NOT NULL AND event_json IS NOT NULL
+            AND kind IN ('invocation_opened', 'model_completed') AND kind = 'invocation_opened'
+            AND json_extract(event_json, '$.invocation.session_id') = ?1
+            ORDER BY sequence DESC LIMIT 1
+         ) AS o
+         WHERE NOT EXISTS(SELECT 1 FROM imported_invocations i
+            WHERE i.invocation_id = o.invocation_id)
          AND (?2 OR NOT EXISTS(SELECT 1 FROM runtime_events t
-            WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended'))
-         ORDER BY o.sequence DESC LIMIT 1",
+            WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended'))",
     )
     .bind(session)
     .bind(matches!(owner, Owner::Current))
