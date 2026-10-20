@@ -939,7 +939,7 @@ export function Conversation(props: ConversationProps) {
       toolActivity().length === 0,
     error,
     notice,
-    recoverable: () => draftReady() && (!receiptsKnown() || unresolved().length > 0),
+    recoverable: () => !sending() && draftReady() && (!receiptsKnown() || unresolved().length > 0),
     recovering: () => recovering() || sending(),
     unconfirmed: () =>
       unresolved()

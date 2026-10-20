@@ -38,14 +38,14 @@ fn shortcut(view: &mut AppView, key: char) {
     )));
 }
 
-async fn wait_session_search(view: &mut AppView) {
+async fn wait_focused_input(view: &mut AppView, label: &str) {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             support::tick(view);
             if view
                 .accessibility_snapshot()
                 .iter()
-                .any(|node| node.focused && node.label == "Search session titles")
+                .any(|node| node.focused && node.label == label)
             {
                 break;
             }
@@ -53,12 +53,12 @@ async fn wait_session_search(view: &mut AppView) {
         }
     })
     .await
-    .expect("Ctrl+O did not focus the native session-title Input");
+    .unwrap_or_else(|_| panic!("the native Input {label:?} did not receive focus"));
 }
 
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
     if placeholder == "Search sessions…" {
-        wait_session_search(view).await;
+        wait_focused_input(view, "Search session titles").await;
     } else {
         wait_view(view, |screen| {
             screen.contains(placeholder) && screen.contains("Enter selects · Esc closes")
@@ -116,7 +116,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("› Sessions")).await;
         support::click_text(&mut view, "› Sessions");
         wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("› NSH real Agent") && !screen.contains("Loading…")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         support::click_text(&mut view, "› NSH real Agent");
         wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Enter sends")).await;
         view.handle_event(Event::Paste("Draft A stays in its own conversation".into()));
@@ -221,7 +221,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // JS focus mirror, and Enter must still activate that exact Button.
         shortcut(&mut view, 'o');
         wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Hide")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Choose workspace scope"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
@@ -236,12 +236,12 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // Buttons that never emitted an application focus callback.
         view.resize(80, 24);
         let transferred = wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Close · Esc") && !screen.contains("Hide")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         evidence("workbench-focused-browser-transfers-to-dialog", &transferred);
         support::evidence_cells("workbench-focused-browser-transfers-to-dialog", &view);
         view.resize(120, 40);
         wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Hide") && !screen.contains("Close · Esc")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         for _ in 0..2 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
@@ -252,7 +252,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.resize(80, 24);
         shortcut(&mut view, 'o');
         let narrow_browser = wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Close · Esc")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         evidence("workbench-narrow-session-dialog", &narrow_browser);
         support::evidence_cells("workbench-narrow-session-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
@@ -305,7 +305,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert!(!first_page["sessions"].as_array().unwrap().iter().any(|session| session["id"] == target_id));
         shortcut(&mut view, 'o');
         wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Enter selects · Esc closes")).await;
-        wait_session_search(&mut view).await;
+        wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Paste("Browser page".into()));
         let first_title = first_page["sessions"][0]["title"].as_str().unwrap();
         wait_view(&mut view, |screen| screen.contains(&format!("› {first_title}")) && !screen.contains("Loading…")).await;
@@ -397,13 +397,7 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         support::evidence_cells("resident-composer-cold-start", &view);
 
         support::click_text(&mut view, "Choose composer workspace");
-        select_palette(
-            &mut view,
-            "Search workspaces…",
-            root_name,
-            &format!("› {root_name}"),
-        )
-        .await;
+        select_palette(&mut view, "Search workspaces…", root_name, root_name).await;
         wait_view(&mut view, |screen| {
             screen.contains("Search models…") && screen.contains("Enter selects")
         })
@@ -521,11 +515,14 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         shortcut(&mut view, 'o');
         select_palette(&mut view, "Search sessions…", "NSH real", "NSH real Agent").await;
         wait_view(&mut view, |screen| {
-            screen.contains("NSH real Agent")
+            screen
+                .lines()
+                .any(|line| line.contains("MAKA") && line.contains("NSH real Agent"))
                 && screen.contains("Enter sends")
                 && !screen.contains("Close · Esc")
         })
         .await;
+        wait_focused_input(&mut view, "Message composer").await;
         assert_ne!(
             view.surface().focused(),
             Some(editor),
@@ -1030,7 +1027,9 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        // Host idle may precede the completed-turn seat in this native List.
+        // Observe that final layout before choosing the source button's coordinates.
+        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && screen.contains("Enter sends") && screen.contains("› Completed")).await;
         evidence("rich-response-complete", &complete);
         wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "[Source]");

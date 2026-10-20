@@ -52,6 +52,7 @@ export function Palette(props: {
   const note = signal('');
   let alive = true;
   let generation = 0;
+  let removeSearchKeys = () => {};
   let page: any = null;
   let choices: any[] = [];
   const chooseModel = ({
@@ -74,6 +75,7 @@ export function Palette(props: {
   cleanup(() => {
     alive = false;
     generation += 1;
+    removeSearchKeys();
   });
   const matches = computed(() => {
     const needle = query().toLowerCase().trim();
@@ -101,9 +103,6 @@ export function Palette(props: {
     if (!entry) return;
     entry.run();
   };
-  keymap.bind('up', () => move(-1), { when: 'always', repeat: true });
-  keymap.bind('down', () => move(1), { when: 'always', repeat: true });
-  keymap.bind('enter', activate, { when: 'always' });
   const load = async (search: string, more = false) => {
     const reading = ++generation;
     const minimum = more ? matches().length + count() : count();
@@ -221,6 +220,15 @@ export function Palette(props: {
           </Button>
         </View>
         <Input
+          ref={(node) => {
+            removeSearchKeys();
+            const unbind = [
+              keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
+              keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
+              keymap.bind('enter', activate, { when: 'always', within: node }),
+            ];
+            removeSearchKeys = () => unbind.forEach((remove) => remove());
+          }}
           testID="palette-search"
           autoFocus
           value={query()}

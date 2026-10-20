@@ -33,9 +33,9 @@ cargo run -p maka-terminal-shell -- --root /path/to/root
 
 The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. `--root` selects the business Host Root; the default product normally uses `~/.maka/application/host`.
 
-Without `--session`, Home shows conversations from the current browser scope and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
+Without `--session`, the centered composer offers **Choose workspace** before editing. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
 
-From Home, creating a conversation opens **Workspaces**: choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation then opens **Models** so you can choose a configured connection and model before sending. Use the existing client to configure connections if none are available.
+Choose **Choose workspace** or press Ctrl+N to open **Workspaces**, then choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation then opens **Models** so you can choose a configured connection and model before sending. Use the existing client to configure connections if none are available.
 
 **Sessions** uses a collapsible sidebar when the terminal has room for both it and the conversation; smaller windows use a dialog. Open either with the header's browse button or Ctrl+O. Drag the divider or use **Narrower** / **Wider** to adjust the sidebar. Choose **All workspaces**, the current session's exact workspace, or a project. A project's **+** creates in its Host-authorized directory; **New in current workspace** follows the open conversation. An isolated worktree is not necessarily part of its parent project.
 
@@ -70,7 +70,7 @@ Grouped activity has independent native scrolling, capped at half the reading vi
 
 Assistant responses format headings, emphasis, lists, quotes and code. **Source** switches to the exact selectable text. Partial history stays literal until its opening is loaded. Responses larger than 256 KiB remain complete selectable source to bound formatting work; this does not limit messages or content retained by the Host.
 
-**Todo** displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
+**Todo** sits above the composer and displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 
 The activity header follows the latest thinking, streamed tool arguments or running tool. A request waiting for your response takes priority. Long titles shorten at complete Unicode characters, and title updates preserve your position in the activity reader.
 
