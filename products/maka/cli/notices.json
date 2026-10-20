@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "Cargo.lock": "21187ad5bd48796cebb371495f9af27d96bdb74438a872287ef9be46ede72c6c",
-    "Cargo.toml": "e686306591091b920a14eecb3b4cba7fb54b52f57026ea46d9183de302777fb8",
+    "Cargo.lock": "b143cfcb0dc1e0f023b1a64754fb981c94378199b80d14ee647cd0be0c7990c9",
+    "Cargo.toml": "c9438bba3dba1686810d3a52d96569c27406ee8d13cc4c208a49db497e86c15d",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
-    "packages/plugin-sdk/src/contracts.ts": "85d2437c9d96542f82d79f84d0eabd530c7de2c0945974473893371314cd7275",
-    "packages/plugin-sdk/src/generated/runtime.ts": "602593ad3932606adcc20db31770ab43b61d23f33defa8db26bb218611cf44a4",
+    "packages/plugin-sdk/src/contracts.ts": "53457028d8362de32b3983d01e16958fedc143d33ef6654fc706a842307a5e32",
+    "packages/plugin-sdk/src/generated/runtime.ts": "5eb51ec0afff4988bc68e5a65ea9a39656cc3cbccc996e7ec6c121bba8a5d1f6",
     "packages/plugin-sdk/src/index.ts": "e33226c48bc54fbf377a604ead3b28ea448f50c287582804dab1e6e1059a6f71",
     "packages/plugin-sdk/src/native.ts": "6a826e012f5b7887c88ea295d5826b29939ae2ff0ff722db7b4124e37fc49749",
     "packages/plugin-sdk/src/ui.ts": "d669d2c5c70fc61aae3c0582f586950bf9cea863ee72b48af673e57c30c1b0b9",
