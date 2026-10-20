@@ -275,6 +275,40 @@ mod tests {
     }
 
     #[test]
+    fn painted_quads_follow_only_referenced_nested_clip_groups() {
+        let mut scene = Scene::default();
+        let mut outer = shape();
+        outer.bounds.origin = at(10., 20.);
+        let mut inner = outer;
+        inner.bounds.origin = at(17., 27.);
+        inner.bounds.size = size(ScaledPixels(48.), ScaledPixels(48.));
+        let bounds = Bounds::new(at(23., 31.), size(ScaledPixels(12.), ScaledPixels(15.)));
+        let target = Quad {
+            bounds,
+            content_mask: crate::ContentMask { bounds },
+            corner_radii: Corners::all(ScaledPixels(3.)),
+            ..Default::default()
+        };
+        record(&mut scene, ClipOperation::Begin(outer));
+        record(&mut scene, ClipOperation::Begin(inner));
+        scene.insert_primitive(target);
+        record(&mut scene, ClipOperation::End);
+        record(&mut scene, ClipOperation::End);
+        scene.finish();
+
+        let quads = crate::fast::rounded_clip_scene::painted_quads(&scene);
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].bounds, bounds);
+        assert_eq!(quads[0].content_mask, target.content_mask);
+        assert_eq!(quads[0].corner_radii, Corners::all(ScaledPixels(3.)));
+
+        scene.polychrome_sprites.clear();
+        assert!(!scene.layers.frames.is_empty());
+        assert!(!scene.paint_operations.is_empty());
+        assert!(crate::fast::rounded_clip_scene::painted_quads(&scene).is_empty());
+    }
+
+    #[test]
     fn rounded_clip_preserves_original_geometry_under_rectangular_cropping() {
         let mut shape = shape();
         shape.bounds.size.height = ScaledPixels(200.);

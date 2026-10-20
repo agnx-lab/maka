@@ -19,6 +19,29 @@ use crate::{
 const CLIP_TEXTURE_BASE: u32 = 0xF100_0000;
 const GEOMETRY_KEY: LayerKey = LayerKey(u32::MAX);
 
+/// Observe the final drawable graph using the renderers' clip-group references.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn painted_quads(scene: &Scene) -> Vec<crate::Quad> {
+    let mut quads = scene.quads.clone();
+    for sprite in &scene.polychrome_sprites {
+        let index = sprite.tile.texture_id.index;
+        if index < CLIP_TEXTURE_BASE {
+            continue;
+        }
+        let key = LayerKey(index - CLIP_TEXTURE_BASE + 0x0100_0000);
+        if let Some(child) = scene
+            .layers
+            .frames
+            .iter()
+            .find(|frame| frame.key == key && frame.tile_size == 0)
+            .and_then(|frame| frame.content.scene())
+        {
+            quads.extend(painted_quads(child));
+        }
+    }
+    quads
+}
+
 /// Materialize private paint scopes as existing, renderer-readable layer
 /// objects. Preserve the original operation stream for retained paint ranges.
 pub(crate) fn compile(scene: &mut Scene) {
