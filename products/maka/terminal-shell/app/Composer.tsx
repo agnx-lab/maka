@@ -104,7 +104,7 @@ export function Composer(props: {
           </If>
           <If when={props.session()?.workspace()}>
             <Text numberOfLines={1} style={{ color: C.muted }}>
-              ▾ {props.session()?.workspace().split('/').filter(Boolean).at(-1)}
+              Workspace · {props.session()?.workspace().split('/').filter(Boolean).at(-1)}
             </Text>
           </If>
         </View>

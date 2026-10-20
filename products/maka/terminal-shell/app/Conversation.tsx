@@ -45,7 +45,6 @@ export type ConversationHandle = ComposerSession & {
   flushDraft(): Promise<boolean>;
   focus(): void;
   jumpLatest(turnId: string | null): void;
-  stop(invocationId: string | null): Promise<void>;
   refresh(): Promise<any>;
   focusHistory(): void;
   focusActivity(turnId: string | null): void;
