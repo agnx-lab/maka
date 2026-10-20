@@ -4273,9 +4273,6 @@ export type GitDiff =
       kind: 'binary';
     }
   | {
-      kind: 'too_large';
-    }
-  | {
       kind: 'unchanged';
     }
   | {

@@ -53,7 +53,6 @@ const KINDS = {
 /** What a diff that is not text says, by its kind; null is a folder that stopped being a repository. */
 const DIFF_NOTES = {
   binary: 'diffBinary',
-  too_large: 'diffTooLarge',
   unchanged: 'diffUnchanged',
   unsupported: 'diffUnsupported',
 };

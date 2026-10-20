@@ -125,7 +125,6 @@ pub(super) fn capture(binding: &Binding, cancel: Arc<AtomicBool>) -> io::Result<
             before.as_ref(),
             after.as_ref(),
             repo.object_hash(),
-            LIMIT,
         )?;
         if patch.len() > LIMIT {
             return Err(invalid(

@@ -43,7 +43,6 @@ mod tests;
 const MAX_ENTRIES: usize = 100_000;
 const MAX_METADATA: usize = 50 * 1024 * 1024;
 const MAX_CONTROL: usize = 256 * 1024;
-const MAX_DIFF_INPUT: usize = 1024 * 1024;
 const MAX_OUTPUT: usize = 512 * 1024;
 
 #[derive(
@@ -86,7 +85,6 @@ pub struct GitStatus {
 pub enum GitDiff {
     Text { patch: String },
     Binary,
-    TooLarge,
     Unchanged,
     Unsupported,
 }

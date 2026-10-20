@@ -213,6 +213,128 @@ async fn git_status_and_diff_read_current_workspace_without_mutating_index() {
 }
 
 #[tokio::test]
+async fn git_diff_returns_complete_large_utf8_comparisons_without_mutating_repository() {
+    let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let session = f.create("Large Git comparisons").await;
+    repository(&f.workspace);
+    let tracked = "large-tracked.txt";
+    let untracked = "large-new.txt";
+    let base: String = (0..65_537)
+        .map(|line| format!("row-{line:08} 中文😀 payload\n"))
+        .collect();
+    let staged = base.replace("row-00032768 中文😀 payload", "staged 中文😀 change");
+    let working = staged.replace("row-00049152 中文😀 payload", "worktree 中文😀 change");
+    let added: String = (0..25_000)
+        .map(|line| format!("new-row-{line:08} 中文😀\n"))
+        .collect();
+    std::fs::write(f.workspace.join(tracked), &base).unwrap();
+    git(&f.workspace, &["add", tracked]);
+    git(&f.workspace, &["commit", "--quiet", "-m", "large base"]);
+    std::fs::write(f.workspace.join(tracked), &staged).unwrap();
+    git(&f.workspace, &["add", tracked]);
+    std::fs::write(f.workspace.join(tracked), &working).unwrap();
+    std::fs::write(f.workspace.join(untracked), &added).unwrap();
+    let preserved = [
+        ".git/HEAD",
+        ".git/refs/heads/main",
+        ".git/index",
+        tracked,
+        untracked,
+    ]
+    .into_iter()
+    .map(|name| {
+        let file = f.workspace.join(name);
+        let bytes = std::fs::read(&file).unwrap();
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        (file, bytes, modified)
+    })
+    .collect::<Vec<_>>();
+    let mut results = Vec::new();
+    for (area, name) in [
+        ("staged", tracked),
+        ("worktree", tracked),
+        ("untracked", untracked),
+    ] {
+        results.push(
+            f.query(
+                "gitDiff",
+                json!({"sessionId":session,"area":area,"path":path(name)}),
+            )
+            .await,
+        );
+    }
+    // Await both real runtime owners before asserting the expected baseline refusals.
+    let app_shutdown = f.app.shutdown().await;
+    let config_shutdown = f.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    for (file, bytes, modified) in preserved {
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            bytes,
+            "query changed {}",
+            file.display()
+        );
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            modified,
+            "query touched {}",
+            file.display()
+        );
+    }
+    assert!(!f.workspace.join(".git/index.lock").exists());
+    assert!(base.len() > 1024 * 1024 && staged.len() > 1024 * 1024 && working.len() > 1024 * 1024);
+    assert!(added.len() > 512 * 1024 && added.len() < 1024 * 1024);
+    let results = results
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("public Host gitDiff queries must return full values");
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result["kind"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!("text"); 3],
+        "large staged, worktree and untracked comparisons must all be text"
+    );
+    assert_eq!(
+        changed_lines(&results[0]),
+        ["-row-00032768 中文😀 payload", "+staged 中文😀 change"]
+    );
+    assert_eq!(
+        changed_lines(&results[1]),
+        ["-row-00049152 中文😀 payload", "+worktree 中文😀 change"]
+    );
+    assert!(results[2]["patch"].as_str().unwrap().len() > 512 * 1024);
+    assert!(serde_json::to_vec(&results[2]).unwrap().len() > 512 * 1024);
+    for (result, name, before, expected) in [
+        (&results[0], tracked, Some(base.as_str()), staged.as_str()),
+        (
+            &results[1],
+            tracked,
+            Some(staged.as_str()),
+            working.as_str(),
+        ),
+        (&results[2], untracked, None, added.as_str()),
+    ] {
+        // Real Git independently checks every hunk, header path and original line;
+        // exact destination bytes detect truncation anywhere in the returned patch.
+        let oracle = tempfile::tempdir().unwrap();
+        if let Some(before) = before {
+            std::fs::write(oracle.path().join(name), before).unwrap();
+        }
+        let patch = oracle.path().join("input.patch");
+        std::fs::write(&patch, result["patch"].as_str().unwrap()).unwrap();
+        git(oracle.path(), &["apply", "--", patch.to_str().unwrap()]);
+        assert_eq!(
+            std::fs::read(oracle.path().join(name)).unwrap(),
+            expected.as_bytes(),
+            "complete patch for {name}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn git_queries_keep_unborn_binary_results_within_session_and_method_grants() {
     tokio::time::timeout(Duration::from_secs(45), async {
         let f = Fixture::new("http://127.0.0.1:1/v1", None).await;

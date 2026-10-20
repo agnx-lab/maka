@@ -18,7 +18,7 @@
  */
 
 use super::*;
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, path::PathBuf, process::Command, time::SystemTime};
 
 struct Fixture {
     _temp: tempfile::TempDir,
@@ -71,6 +71,9 @@ fn cancel() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
 }
 fn git(root: &Path, args: &[&str]) {
+    git_stdout(root, args);
+}
+fn git_stdout(root: &Path, args: &[&str]) -> Vec<u8> {
     let output = Command::new("git")
         .current_dir(root)
         .env_remove("GIT_DIR")
@@ -89,6 +92,7 @@ fn git(root: &Path, args: &[&str]) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    output.stdout
 }
 fn entries(status: GitStatus) -> Vec<(GitArea, Vec<u8>, GitChangeKind)> {
     status
@@ -201,20 +205,209 @@ fn unborn_repository_uses_empty_head_and_prunes_ignored_dependency_tree() {
     );
 }
 
+struct ReadOnlySnapshot {
+    index: Vec<u8>,
+    index_modified: SystemTime,
+    head: Vec<u8>,
+    files: Vec<(String, Vec<u8>, SystemTime)>,
+}
+impl ReadOnlySnapshot {
+    fn capture(f: &Fixture, names: &[&str]) -> Self {
+        let index = f.root.join(".git/index");
+        Self {
+            index: fs::read(&index).unwrap(),
+            index_modified: fs::metadata(&index).unwrap().modified().unwrap(),
+            head: git_stdout(&f.root, &["rev-parse", "HEAD"]),
+            files: names
+                .iter()
+                .map(|name| {
+                    let path = f.root.join(name);
+                    (
+                        (*name).to_owned(),
+                        fs::read(&path).unwrap(),
+                        fs::metadata(&path).unwrap().modified().unwrap(),
+                    )
+                })
+                .collect(),
+        }
+    }
+    fn assert_unchanged(&self, f: &Fixture) {
+        let index = f.root.join(".git/index");
+        assert_eq!(fs::read(&index).unwrap(), self.index);
+        assert_eq!(
+            fs::metadata(&index).unwrap().modified().unwrap(),
+            self.index_modified
+        );
+        assert_eq!(git_stdout(&f.root, &["rev-parse", "HEAD"]), self.head);
+        for (name, bytes, modified) in &self.files {
+            let path = f.root.join(name);
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                *bytes,
+                "worktree bytes changed: {name}"
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().modified().unwrap(),
+                *modified,
+                "worktree mtime changed: {name}"
+            );
+        }
+    }
+}
+
+fn assert_patch_reconstructs(
+    diff: GitDiff,
+    name: &str,
+    before: Option<&[u8]>,
+    expected: &[u8],
+) -> String {
+    let GitDiff::Text { patch } = diff else {
+        panic!("expected complete text patch, got {diff:?}")
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("apply");
+    fs::create_dir(&root).unwrap();
+    git(&root, &["init", "--quiet"]);
+    if let Some(before) = before {
+        fs::write(root.join(name), before).unwrap();
+    }
+    let patch_file = temp.path().join("preview.patch");
+    fs::write(&patch_file, &patch).unwrap();
+    git(
+        &root,
+        &["apply", "--whitespace=nowarn", patch_file.to_str().unwrap()],
+    );
+    assert_eq!(fs::read(root.join(name)).unwrap(), expected);
+    patch
+}
+
 #[test]
-fn binary_and_oversize_previews_do_not_return_partial_text() {
+fn binary_previews_do_not_return_partial_text() {
     let f = Fixture::new();
     fs::write(f.root.join("binary"), [0, 255, 10]).unwrap();
-    fs::write(f.root.join("large"), vec![b'x'; MAX_DIFF_INPUT + 1]).unwrap();
     assert_eq!(f.diff(GitArea::Untracked, b"binary"), GitDiff::Binary);
-    assert_eq!(f.diff(GitArea::Untracked, b"large"), GitDiff::TooLarge);
-    // The raw patch fits; JSON escaping alone crosses the public byte budget.
-    fs::write(f.root.join("quotes"), "\"".repeat(MAX_OUTPUT / 2 + 10)).unwrap();
-    assert_eq!(f.diff(GitArea::Untracked, b"quotes"), GitDiff::TooLarge);
-    fs::write(f.root.join("many-lines"), "old\n".repeat(100_000)).unwrap();
+    let mut large_binary = vec![b'x'; 1_100_000];
+    large_binary[0] = 0;
+    large_binary[1_099_999] = 255;
+    fs::write(f.root.join("large-binary"), &large_binary).unwrap();
+    assert_eq!(f.diff(GitArea::Untracked, b"large-binary"), GitDiff::Binary);
+    assert_eq!(fs::read(f.root.join("large-binary")).unwrap(), large_binary);
+}
+
+#[test]
+fn large_staged_and_worktree_images_keep_distinct_small_changes() {
+    let f = Fixture::new();
+    let prefix = "unchanged configuration: 零一二三四五六七八九\n".repeat(24_000);
+    let head = format!("{prefix}selected = head\n");
+    let staged = format!("{prefix}selected = staged\n");
+    let working = format!("{prefix}selected = working\n");
+    fs::write(f.root.join("config.txt"), &head).unwrap();
     f.commit();
-    fs::write(f.root.join("many-lines"), "new\n".repeat(100_000)).unwrap();
-    assert_eq!(f.diff(GitArea::Worktree, b"many-lines"), GitDiff::TooLarge);
+    let equal_snapshot = ReadOnlySnapshot::capture(&f, &["config.txt"]);
+    assert_eq!(f.diff(GitArea::Staged, b"config.txt"), GitDiff::Unchanged);
+    assert_eq!(f.diff(GitArea::Worktree, b"config.txt"), GitDiff::Unchanged);
+    equal_snapshot.assert_unchanged(&f);
+    fs::write(f.root.join("config.txt"), &staged).unwrap();
+    git(&f.root, &["add", "config.txt"]);
+    fs::write(f.root.join("config.txt"), &working).unwrap();
+    let snapshot = ReadOnlySnapshot::capture(&f, &["config.txt"]);
+    assert_patch_reconstructs(
+        f.diff(GitArea::Staged, b"config.txt"),
+        "config.txt",
+        Some(head.as_bytes()),
+        staged.as_bytes(),
+    );
+    assert_patch_reconstructs(
+        f.diff(GitArea::Worktree, b"config.txt"),
+        "config.txt",
+        Some(staged.as_bytes()),
+        working.as_bytes(),
+    );
+    snapshot.assert_unchanged(&f);
+}
+
+#[test]
+fn large_untracked_text_returns_complete_applicable_patch() {
+    let f = Fixture::new();
+    fs::write(f.root.join("anchor"), "committed anchor\n").unwrap();
+    f.commit();
+    let content = "configuration: 零一二三四五六七八九\n".repeat(30_000);
+    fs::write(f.root.join("large.txt"), &content).unwrap();
+    let snapshot = ReadOnlySnapshot::capture(&f, &["anchor", "large.txt"]);
+    assert_patch_reconstructs(
+        f.diff(GitArea::Untracked, b"large.txt"),
+        "large.txt",
+        None,
+        content.as_bytes(),
+    );
+    snapshot.assert_unchanged(&f);
+}
+
+#[test]
+fn json_escaping_does_not_discard_a_complete_text_patch() {
+    let f = Fixture::new();
+    fs::write(f.root.join("anchor"), "committed anchor\n").unwrap();
+    f.commit();
+    let content = "\"".repeat(262_154);
+    fs::write(f.root.join("quotes"), &content).unwrap();
+    let snapshot = ReadOnlySnapshot::capture(&f, &["anchor", "quotes"]);
+    let result = f.diff(GitArea::Untracked, b"quotes");
+    let serialized_bytes = serde_json::to_vec(&result).unwrap().len();
+    let patch = assert_patch_reconstructs(result, "quotes", None, content.as_bytes());
+    assert!(
+        patch.len() < 512 * 1024,
+        "raw patch fits the former output budget"
+    );
+    assert!(
+        serialized_bytes > 512 * 1024,
+        "JSON escaping alone crosses the former output budget"
+    );
+    snapshot.assert_unchanged(&f);
+}
+
+#[test]
+fn many_changed_lines_return_complete_applicable_patch() {
+    let f = Fixture::new();
+    let before = "old\n".repeat(100_000);
+    let after = "new\n".repeat(100_000);
+    fs::write(f.root.join("many-lines"), &before).unwrap();
+    f.commit();
+    fs::write(f.root.join("many-lines"), &after).unwrap();
+    let snapshot = ReadOnlySnapshot::capture(&f, &["many-lines"]);
+    let patch = assert_patch_reconstructs(
+        f.diff(GitArea::Worktree, b"many-lines"),
+        "many-lines",
+        Some(before.as_bytes()),
+        after.as_bytes(),
+    );
+    assert!(
+        patch.len() > 512 * 1024,
+        "the full changed-line patch crosses the former output budget"
+    );
+    snapshot.assert_unchanged(&f);
+}
+
+#[test]
+fn large_unselected_tracked_file_does_not_block_small_comparison() {
+    let f = Fixture::new();
+    fs::write(f.root.join("small"), "before\n").unwrap();
+    fs::write(f.root.join("large"), "tracked prefix\n").unwrap();
+    f.commit();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(f.root.join("large"))
+        .unwrap()
+        .set_len(50 * 1024 * 1024 + 1)
+        .unwrap();
+    fs::write(f.root.join("small"), "after\n").unwrap();
+    let snapshot = ReadOnlySnapshot::capture(&f, &["small", "large"]);
+    assert_patch_reconstructs(
+        f.diff(GitArea::Worktree, b"small"),
+        "small",
+        Some(b"before\n"),
+        b"after\n",
+    );
+    snapshot.assert_unchanged(&f);
 }
 
 #[test]

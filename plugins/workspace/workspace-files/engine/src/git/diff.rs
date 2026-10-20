@@ -24,18 +24,8 @@ use gix::index::entry::Mode;
 use std::io::Read;
 
 pub(super) fn read(repo: &Repository, area: GitArea, name: &[u8]) -> io::Result<GitDiff> {
-    let result = images(repo, area, name);
-    let (before, after) = match result {
-        Ok(Some(images)) => images,
-        Ok(None) => return Ok(GitDiff::Unsupported),
-        Err(e)
-            if e.get_ref()
-                .and_then(|e| e.downcast_ref::<Failure>())
-                .is_some_and(|e| e.0 == "git_too_large") =>
-        {
-            return Ok(GitDiff::TooLarge);
-        }
-        Err(e) => return Err(e),
+    let Some((before, after)) = images(repo, area, name)? else {
+        return Ok(GitDiff::Unsupported);
     };
     if before.as_ref().map(|i| (i.mode, &i.bytes)) == after.as_ref().map(|i| (i.mode, &i.bytes)) {
         return Ok(GitDiff::Unchanged);
@@ -49,27 +39,17 @@ pub(super) fn read(repo: &Repository, area: GitArea, name: &[u8]) -> io::Result<
     }
     interrupted(&repo.cancel)?;
     let mut patch = Vec::new();
-    if image::append(
+    image::append(
         &mut patch,
         name,
         before.as_ref(),
         after.as_ref(),
         repo.repo.object_hash(),
-        MAX_OUTPUT,
-    )
-    .is_err()
-        || patch.len() > MAX_OUTPUT
-    {
-        return Ok(GitDiff::TooLarge);
-    }
+    )?;
     interrupted(&repo.cancel)?;
-    let result = GitDiff::Text {
+    Ok(GitDiff::Text {
         patch: String::from_utf8(patch).map_err(|_| failure("git_unsupported"))?,
-    };
-    if serde_json::to_vec(&result).map_err(io::Error::other)?.len() > MAX_OUTPUT {
-        return Ok(GitDiff::TooLarge);
-    }
-    Ok(result)
+    })
 }
 fn images(
     repo: &Repository,
@@ -153,13 +133,7 @@ fn untracked(repo: &Repository, name: &[u8]) -> io::Result<bool> {
 }
 fn object(repo: &Repository, id: gix::hash::ObjectId, mode: u32) -> io::Result<Image> {
     interrupted(&repo.cancel)?;
-    if repo.repo.find_header(id).map_err(io::Error::other)?.size() > MAX_DIFF_INPUT as u64 {
-        return Err(failure("git_too_large"));
-    }
     let object = repo.repo.find_blob(id).map_err(io::Error::other)?;
-    if object.data.len() > MAX_DIFF_INPUT {
-        return Err(failure("git_too_large"));
-    }
     Ok(Image {
         mode,
         bytes: object.data.to_vec(),
@@ -192,9 +166,6 @@ fn working(repo: &Repository, name: &[u8], indexed: Option<Mode>) -> io::Result<
     };
     if meta.file_type().is_symlink() {
         let bytes = gix::path::into_bstr(parent.read_link_contents(leaf)?).to_vec();
-        if bytes.len() > MAX_DIFF_INPUT {
-            return Err(failure("git_too_large"));
-        }
         return Ok(Some(Image {
             mode: Mode::SYMLINK.bits(),
             bytes,
@@ -207,26 +178,18 @@ fn working(repo: &Repository, name: &[u8], indexed: Option<Mode>) -> io::Result<
         return Err(failure("git_unsupported"));
     }
     repo.check(&repo.root.join(relative.as_ref()))?;
-    if meta.len() > MAX_DIFF_INPUT as u64 {
-        return Err(failure("git_too_large"));
-    }
-    let file = parent.open_with(leaf, crate::workspace::options().read(true))?;
+    let mut file = parent.open_with(leaf, crate::workspace::options().read(true))?;
     let mut bytes = Vec::new();
     let symlink_file = indexed == Some(Mode::SYMLINK)
         && repo.repo.config_snapshot().boolean("core.symlinks") == Some(false);
     if symlink_file {
-        file.take(MAX_DIFF_INPUT as u64 + 1)
-            .read_to_end(&mut bytes)?;
+        file.read_to_end(&mut bytes)?;
     } else {
         let (mut pipeline, _) = repo.repo.filter_pipeline(None).map_err(io::Error::other)?;
         pipeline
             .convert_to_git(file, &relative, &repo.index)
             .map_err(io::Error::other)?
-            .take(MAX_DIFF_INPUT as u64 + 1)
             .read_to_end(&mut bytes)?;
-    }
-    if bytes.len() > MAX_DIFF_INPUT {
-        return Err(failure("git_too_large"));
     }
     let mut mode = if symlink_file {
         Mode::SYMLINK

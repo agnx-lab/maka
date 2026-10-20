@@ -12363,17 +12363,6 @@ export const contracts = {
                     properties: {
                       kind: {
                         type: 'string',
-                        const: 'too_large',
-                      },
-                    },
-                    required: ['kind'],
-                    additionalProperties: false,
-                  },
-                  {
-                    type: 'object',
-                    properties: {
-                      kind: {
-                        type: 'string',
                         const: 'unchanged',
                       },
                     },

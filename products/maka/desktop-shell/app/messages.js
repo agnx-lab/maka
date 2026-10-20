@@ -1507,11 +1507,6 @@ export const MESSAGES = {
     '再次讀取差異失敗，下方內容可能已過時：{value}',
   ],
   diffBinary: ['Binary file', '二进制文件', '二進位檔案'],
-  diffTooLarge: [
-    'This diff is too large to show',
-    '这个差异太大，无法显示',
-    '這個差異太大，無法顯示',
-  ],
   diffUnchanged: ['No differences', '没有差异', '沒有差異'],
   diffUnsupported: ['This change cannot be shown', '无法显示这个改动', '無法顯示這個變更'],
   diffNotRepository: [

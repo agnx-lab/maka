@@ -238,19 +238,6 @@ impl Walker<'_> {
                         )
                         .is_some())
             {
-                if self
-                    .repo
-                    .index
-                    .entry_by_path_icase(
-                        name_bytes.as_bstr(),
-                        self.case == Case::Fold,
-                        &self.lookup,
-                    )
-                    .is_some()
-                    && child.metadata()?.len() > MAX_METADATA as u64
-                {
-                    return Err(failure("git_too_large"));
-                }
                 self.repo.check(&self.repo.root.join(&relative_child))?;
             }
         }
