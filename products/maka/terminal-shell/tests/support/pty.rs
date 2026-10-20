@@ -41,6 +41,13 @@ pub struct Pty {
     screen: Screen,
     pending: Vec<u8>,
     output: Vec<u8>,
+    sixel: Option<SixelReplies>,
+}
+
+#[derive(Default)]
+struct SixelReplies {
+    attributes: bool,
+    cells: bool,
 }
 
 impl Pty {
@@ -107,7 +114,34 @@ impl Pty {
             screen: Screen::new(TerminalSize::new(120, 40).unwrap()),
             pending: vec![],
             output: vec![],
+            sixel: None,
         }
+    }
+    /// Simulate a Sixel terminal, answering only queries the binary actually emits.
+    /// Its cell-size reply includes Ctrl+P to exercise mixed keyboard input.
+    /// This selects emulator behavior; it does not configure the application.
+    pub fn spawn_sixel(root: &Path, session: Option<&str>) -> Self {
+        let mut terminal = Self::spawn(root, session);
+        terminal.sixel = Some(SixelReplies::default());
+        terminal
+    }
+    pub fn wire(&self) -> &[u8] {
+        &self.output
+    }
+    pub fn resize(&mut self, columns: u16, rows: u16) {
+        self.screen
+            .resize(TerminalSize::new(columns, rows).unwrap())
+            .unwrap();
+        let size = libc::winsize {
+            ws_row: rows,
+            ws_col: columns,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        assert_eq!(
+            unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) },
+            0
+        );
     }
     pub fn send(&mut self, bytes: &[u8]) {
         self.master.write_all(bytes).unwrap();
@@ -161,13 +195,51 @@ impl Pty {
             Err(error) if error.error_len().is_none() => error.valid_up_to(),
             Err(error) => panic!("invalid terminal UTF-8: {error}"),
         };
-        let reply = self
+        let mut reply = self
             .screen
             .write(std::str::from_utf8(&self.pending[..end]).unwrap())
             .unwrap();
         self.pending.drain(..end);
+        if let Some(sixel) = &mut self.sixel {
+            if !sixel.attributes && self.output.windows(3).any(|bytes| bytes == b"\x1b[c") {
+                // Screen's ordinary terminal response must not win the first-DA1
+                // race and incorrectly advertise this simulated terminal as text-only.
+                assert_eq!(reply.matches("\x1b[?6c").count(), 1);
+                reply = reply.replace("\x1b[?6c", "\x1b[?62;1;4;22c");
+                sixel.attributes = true;
+            }
+            if !sixel.cells && self.output.windows(5).any(|bytes| bytes == b"\x1b[16t") {
+                reply.push_str("\x1b[6;17;9t");
+                // A real key in the same OS input write must survive reply demux.
+                reply.push('\x10');
+                sixel.cells = true;
+            }
+        }
         if !reply.is_empty() {
             self.send(reply.as_bytes());
+        }
+    }
+    pub async fn wait_for_wire(&mut self, expected: &[u8], after: usize) {
+        let started = Instant::now();
+        loop {
+            self.read();
+            if completed_presentation(&self.output)
+                && self.output[after..]
+                    .windows(expected.len())
+                    .any(|bytes| bytes == expected)
+            {
+                return;
+            }
+            assert!(
+                self.child.try_wait().unwrap().is_none(),
+                "production terminal exited before wire sequence {expected:?}"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "production terminal never emitted {expected:?}:\n{}",
+                self.snapshot()
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
     }
     pub async fn wait_for(&mut self, expected: &str) -> String {

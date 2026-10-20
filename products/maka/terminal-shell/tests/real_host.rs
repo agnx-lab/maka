@@ -1165,6 +1165,94 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
     }).await.expect("real Host tool image workflow timed out");
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_and_input() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    const SIXEL: &[u8] = b"\x1bP9;1;0q\"1;1;";
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::registered_images().await;
+        let client = fixture.client().await;
+        let path = fixture.directory.path().join("workspace/graphics-scene.png");
+        let pixels: Vec<u8> = (0..64 * 48).flat_map(|index| {
+            if index % 64 < 21 { [255, 64, 32, 255] }
+            else if index % 64 < 42 { [32, 220, 96, 255] }
+            else { [64, 128, 255, 255] }
+        }).collect();
+        let mut bytes = Vec::new();
+        png::PngEncoder::new_with_quality(&mut bytes, png::CompressionType::Uncompressed, png::FilterType::NoFilter)
+            .write_image(&pixels, 64, 48, ExtendedColorType::Rgba8).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Read the graphics image", "model":fixture.selection})).await;
+        fixture.next_request().await.tool("Read", json!({"path":"graphics-scene.png"})).await;
+        let mut request = fixture.next_request().await;
+        let image_url = request.body["messages"].as_array().unwrap().iter()
+            .filter_map(|message| message["content"].as_array()).flatten()
+            .find(|part| part["type"] == "image_url").expect("real Read must reach the provider")["image_url"]["url"].as_str().unwrap();
+        assert_eq!(STANDARD.decode(image_url.strip_prefix("data:image/png;base64,").unwrap()).unwrap(), bytes);
+        std::fs::write(&path, b"the original image is no longer a PNG").unwrap();
+
+        // Only the simulated terminal's response changes. The actual binary
+        // must first emit DA1 + CSI 16t and choose Sixel through its sole reader.
+        let mut terminal = support::pty::Pty::spawn_sixel(&fixture.directory.path().join("host"), Some(&fixture.session));
+        // The emulator appends this ordinary Ctrl+P to its cell-size reply.
+        terminal.wait_for("Search commands…").await;
+        terminal.wait_for("Enter selects · Esc closes").await;
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Close · Esc").await;
+        terminal.wait_for("Enter sends").await;
+        // Complete late metadata interleaved between two literal paste events
+        // must stay out of the durable editor without swallowing either paste.
+        terminal.send("\x1b[200~GRAPHICS_INPUT_你\x1b[201~\x1b[?62;4c\x1b[6;17;9t\x1b[200~好_PRESERVED\x1b[201~".as_bytes());
+        terminal.wait_for("GRAPHICS_INPUT_你好_PRESERVED").await;
+        support::wait_draft(&client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+        terminal.send(b"\x1b[1;3B");
+        terminal.wait_for("> Read").await;
+        let image_start = terminal.wire().len();
+        terminal.click_text("> Read");
+        terminal.wait_for("Open image · 64 × 48").await;
+        terminal.wait_for_wire(SIXEL, image_start).await;
+        let native_wire = &terminal.wire()[image_start..];
+        assert!(native_wire.contains(&b'#'), "Sixel must carry the real image palette");
+        assert!(native_wire.windows(2).any(|bytes| bytes == b"\x1b\\"), "native DCS must be complete before presenting its frame");
+        evidence("production-sixel-native-wire", std::str::from_utf8(native_wire).unwrap());
+        evidence("production-sixel-real-image", &terminal.snapshot());
+
+        terminal.resize(80, 24);
+        // This old wide-only control disappearing proves the resized UI frame
+        // has passed any old native frame already queued before SIGWINCH.
+        terminal.wait_for_absent("Search sessions…").await;
+        let narrow = terminal.wait_for("Open image · 64 × 48").await;
+        let has_image_cells = |screen: &str| screen.chars().any(|character| matches!(character,
+            '▀' | '▄' | '█' | '▌' | '▐' | '▘' | '▝' | '▖' | '▗' | '▚' | '▞' | '▙' | '▛' | '▜' | '▟'));
+        assert!(has_image_cells(&narrow), "resize must paint the actual image through Unicode");
+        let after_resize = terminal.wire().len();
+        terminal.send(b"\x1b[?62;4c\x1b[6;17;9t");
+        terminal.resize(120, 40);
+        terminal.wait_for("Search sessions…").await;
+        let wide = terminal.wait_for("Open image · 64 × 48").await;
+        assert!(has_image_cells(&wide));
+        assert!(!terminal.wire()[after_resize..].windows(SIXEL.len()).any(|bytes| bytes == SIXEL), "late replies must not restore native images after resize");
+        assert_eq!(terminal.wire().windows(3).filter(|bytes| *bytes == b"\x1b[c").count(), 1, "resize must not issue an unidentifiable second DA1 query");
+        assert_eq!(terminal.wire().windows(5).filter(|bytes| *bytes == b"\x1b[16t").count(), 1);
+        support::wait_draft(&client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
+        evidence("production-sixel-resize-wire", std::str::from_utf8(&terminal.wire()[after_resize..]).unwrap());
+        evidence("production-sixel-resize-unicode", &wide);
+        request.delta("GRAPHICS_RUN_CONTINUES_AFTER_RESIZE").await;
+        terminal.send(b"\x1b[F");
+        terminal.wait_for("GRAPHICS_RUN_CONTINUES_AFTER_RESIZE").await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "metadata, resize and draft input must not send or stop the real turn");
+        terminal.send(b"\x11");
+        terminal.finish().await;
+        client.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("production Sixel negotiation and resize workflow timed out");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_later_draft() {
     tokio::time::timeout(Duration::from_secs(90), async {
