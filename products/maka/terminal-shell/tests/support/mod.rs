@@ -534,8 +534,17 @@ impl ModelRequest {
         self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"reasoning_content":text},"finish_reason":null}]})).await;
     }
 
+    pub async fn tool_prefix(&mut self, name: &str, input: &str) {
+        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"nsh-native-todo-call","type":"function","function":{"name":name,"arguments":input}}]},"finish_reason":null}]})).await;
+    }
+
+    pub async fn tool_suffix(mut self, input: &str) {
+        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":input}}]},"finish_reason":null}]})).await;
+        self.finish_with_reason("tool_calls").await;
+    }
+
     pub async fn tool(mut self, name: &str, input: Value) {
-        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"nsh-native-todo-call","type":"function","function":{"name":name,"arguments":input.to_string()}}]},"finish_reason":null}]})).await;
+        self.tool_prefix(name, &input.to_string()).await;
         self.finish_with_reason("tool_calls").await;
     }
 

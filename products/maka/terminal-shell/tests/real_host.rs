@@ -124,6 +124,10 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         request.delta("REAL_WORKBENCH_RUN_TO_STOP").await;
         wait_view(&mut view, |screen| screen.matches("REAL_WORKBENCH_RUN_TO_STOP").count() == 2).await;
         support::evidence_cells("workbench-streaming", &view);
+        request.tool_prefix("todo_write", "{\"todos\":[").await;
+        let preparing = wait_view(&mut view, |screen| screen.contains("Preparing tool · todo_write · {\"todos\":[")).await;
+        evidence("workbench-tool-input-before-stop", &preparing);
+        support::evidence_cells("workbench-tool-input-before-stop", &view);
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         let invocation = observed["run"]["invocationId"].as_str().filter(|id| !id.is_empty()).unwrap();
         shortcut(&mut view, 'p');
@@ -142,6 +146,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         }).await.expect("the UI did not cancel its original execution");
         drop(request);
         fixture.idle(&client, &created_id).await;
+        let stopped = wait_view(&mut view, |screen| screen.contains("Stopped") && screen.contains("Enter sends") && !screen.contains("Preparing tool") && !screen.contains("Running tool")).await;
+        evidence("workbench-stopped-clears-tool-input", &stopped);
+        support::evidence_cells("workbench-stopped-clears-tool-input", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         assert_eq!(client.load_draft("agent", &fixture.session, EDITOR).await.unwrap().unwrap().text, "Draft A stays in its own conversation");
         drop(view);
@@ -289,10 +296,28 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             {"content":"NATIVE_TODO_PENDING","status":"pending"}
         ]);
         assert!(request.body["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "todo_write"));
-        request.tool("todo_write", json!({"todos":todos.clone()})).await;
+        let tool_input = json!({"todos":todos.clone()});
+        let arguments = tool_input.to_string();
+        let prefix = "{\"todos\":[";
+        let suffix = arguments.strip_prefix(prefix).unwrap();
+        request.tool_prefix("todo_write", prefix).await;
+        // The held SSE cannot finish its call until the actual native header
+        // paints the original argument prefix, without moving the source reader.
+        let preparing = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(header_row).is_some_and(|line| line.contains("Preparing tool · todo_write") && line.contains(prefix))).await;
+        let pending = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let pending_history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":pending["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        assert!(pending_history["chunks"].as_array().unwrap().iter().all(|chunk| chunk["tool"]["call"]["name"] != "todo_write"), "an unfinished argument prefix must not become a canonical tool call");
+        evidence("activity-preparing-tool-input", &preparing);
+        support::evidence_cells("activity-preparing-tool-input", &view);
+        request.tool_suffix(suffix).await;
         // A real tool result causes exactly one additional model HTTP request.
         let mut request = fixture.next_request().await;
         wait_view(&mut view, |screen| screen.contains("⌃ Working…") && !screen.contains("Running tool")).await;
+        let complete_call = request.body["messages"].as_array().unwrap().iter()
+            .filter_map(|message| message["tool_calls"].as_array()).flatten()
+            .find(|call| call["id"] == "nsh-native-todo-call").unwrap();
+        assert_eq!(complete_call["function"]["name"], "todo_write");
+        assert_eq!(serde_json::from_str::<Value>(complete_call["function"]["arguments"].as_str().unwrap()).unwrap(), tool_input);
         let tool_result = request.body["messages"].as_array().unwrap().iter().find(|message| message["role"] == "tool" && message["tool_call_id"] == "nsh-native-todo-call").unwrap();
         assert_eq!(tool_result["content"], "1. [completed] \"NATIVE_TODO_DONE\"\n2. [in_progress] \"NATIVE_TODO_ACTIVE\"\n3. [pending] \"NATIVE_TODO_PENDING\"");
         let checklist = client.query("agent", "checklist", json!({"sessionId":fixture.session,"offset":0})).await.unwrap();
