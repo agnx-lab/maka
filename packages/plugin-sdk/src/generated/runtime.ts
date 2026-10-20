@@ -4444,6 +4444,10 @@ export type AgentDeliveryFact =
     }
   | {
       stepId: string;
+      /**
+       * The model/executor completed; this says nothing about tool business success.
+       */
+      completed: boolean;
       kind: 'step_ended';
     }
   | {
@@ -4465,10 +4469,72 @@ export type AgentDeliveryFact =
       kind: 'part_finished';
     }
   | {
+      toolUseId: string;
+      stepId: string;
+      name: string;
+      providerExecuted: boolean;
+      kind: 'tool_input_started';
+    }
+  | {
+      toolUseId: string;
+      text: string;
+      kind: 'tool_input_delta';
+    }
+  | {
+      toolUseId: string;
+      stepId: string;
+      name: string;
+      providerExecuted: boolean;
+      kind: 'tool_input_ready';
+    }
+  | {
+      toolUseId: string;
+      name: string;
+      title?: DisplayText | null;
+      kind: 'tool_dispatched';
+    }
+  | {
+      toolUseId: string;
+      kind: 'tool_rejected';
+    }
+  | {
+      toolUseId: string;
+      settlement: ToolSettlement;
+      kind: 'tool_settled';
+    }
+  | {
+      toolUseId: string;
+      isError: boolean;
+      kind: 'provider_tool_result';
+    }
+  | {
+      toolUseId: string;
+      name: string;
+      kind: 'executor_tool_start';
+    }
+  | {
+      toolUseId: string;
+      /**
+       * The most recent at most 2048 codepoints of reported progress, not the complete result.
+       */
+      text: string;
+      kind: 'executor_tool_progress';
+    }
+  | {
+      toolUseId: string;
+      isError: boolean;
+      kind: 'executor_tool_result';
+    }
+  | {
       failed: boolean;
       kind: 'ended';
     };
 export type AgentContentKind = 'text' | 'thinking';
+/**
+ * Recorded Host settlement for presentation; returned is not business success.
+ * Foreign/provider results do not establish this Host evidence.
+ */
+export type ToolSettlement = 'returned' | 'failed' | 'unknown' | 'rejected';
 export type AgentRunState = 'admitted' | 'running' | 'waiting_for_user';
 export type AgentDiagnosticPosition =
   | {
@@ -4687,11 +4753,6 @@ export type HistoryTurnOutcome = 'completed' | 'failed' | 'aborted';
  * Tool body JSON contributes string values, never its keys.
  */
 export type Role = 'compaction' | 'failure' | 'user' | 'assistant' | 'tool_call' | 'tool_result';
-/**
- * Recorded Host settlement for presentation; returned is not business success.
- * Foreign/provider results do not establish this Host evidence.
- */
-export type ToolSettlement = 'returned' | 'failed' | 'unknown' | 'rejected';
 export type AgentHistoryPage = {
   through: number;
   chunks: AgentHistoryChunk[];
@@ -10017,6 +10078,10 @@ export interface AgentObservation {
   through: number;
   run?: AgentRun | null;
   parts: AgentPart[];
+  /**
+   * Replay starts for active tool display, read at the same fence as the run.
+   */
+  toolSeeds: AgentToolSeed[];
 }
 /**
  * Display-only readings from the latest completed main-model request.
@@ -10048,6 +10113,10 @@ export interface AgentPart {
   stepId: string;
   partId: string;
   textKind: AgentContentKind;
+}
+export interface AgentToolSeed {
+  toolUseId: string;
+  startSequence: number;
 }
 export interface AgentDiagnostics {
   sessionId: string;

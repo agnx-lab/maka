@@ -17840,9 +17840,17 @@ export const contracts = {
                   $ref: '#/$defs/AgentPart',
                 },
               },
+              toolSeeds: {
+                description:
+                  'Replay starts for active tool display, read at the same fence as the run.',
+                type: 'array',
+                items: {
+                  $ref: '#/$defs/AgentToolSeed',
+                },
+              },
             },
             additionalProperties: false,
-            required: ['session', 'through', 'parts'],
+            required: ['session', 'through', 'parts', 'toolSeeds'],
             $defs: {
               AgentSession: {
                 type: 'object',
@@ -18261,6 +18269,21 @@ export const contracts = {
               AgentContentKind: {
                 type: 'string',
                 enum: ['text', 'thinking'],
+              },
+              AgentToolSeed: {
+                type: 'object',
+                properties: {
+                  toolUseId: {
+                    type: 'string',
+                  },
+                  startSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                },
+                additionalProperties: false,
+                required: ['toolUseId', 'startSequence'],
               },
             },
           },
@@ -25845,13 +25868,18 @@ export const contracts = {
                       stepId: {
                         type: 'string',
                       },
+                      completed: {
+                        description:
+                          'The model/executor completed; this says nothing about tool business success.',
+                        type: 'boolean',
+                      },
                       kind: {
                         type: 'string',
                         const: 'step_ended',
                       },
                     },
                     additionalProperties: false,
-                    required: ['kind', 'stepId'],
+                    required: ['kind', 'stepId', 'completed'],
                   },
                   {
                     type: 'object',
@@ -25914,6 +25942,205 @@ export const contracts = {
                     required: ['kind', 'stepId', 'partId'],
                   },
                   {
+                    description:
+                      'Model input observations are display-only; they cannot authorize a tool effect.',
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      stepId: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                      providerExecuted: {
+                        type: 'boolean',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_input_started',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'stepId', 'name', 'providerExecuted'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      text: {
+                        type: 'string',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_input_delta',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'text'],
+                  },
+                  {
+                    description:
+                      'Complete model input was observed, not authorization to execute it.',
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      stepId: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                      providerExecuted: {
+                        type: 'boolean',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_input_ready',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'stepId', 'name', 'providerExecuted'],
+                  },
+                  {
+                    description:
+                      'Original Host admission, not a claim that the effect is currently using CPU.',
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                      title: {
+                        anyOf: [
+                          {
+                            $ref: '#/$defs/DisplayText',
+                          },
+                          {
+                            type: 'null',
+                          },
+                        ],
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_dispatched',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'name'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_rejected',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      settlement: {
+                        $ref: '#/$defs/ToolSettlement',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'tool_settled',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'settlement'],
+                  },
+                  {
+                    description:
+                      'Provider-reported completion, distinct from a Host effect settlement.',
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      isError: {
+                        type: 'boolean',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'provider_tool_result',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'isError'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      name: {
+                        type: 'string',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'executor_tool_start',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'name'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      text: {
+                        description:
+                          'The most recent at most 2048 codepoints of reported progress, not the complete result.',
+                        type: 'string',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'executor_tool_progress',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'text'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      toolUseId: {
+                        type: 'string',
+                      },
+                      isError: {
+                        type: 'boolean',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'executor_tool_result',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'toolUseId', 'isError'],
+                  },
+                  {
                     type: 'object',
                     properties: {
                       failed: {
@@ -25932,6 +26159,31 @@ export const contracts = {
               AgentContentKind: {
                 type: 'string',
                 enum: ['text', 'thinking'],
+              },
+              DisplayText: {
+                description:
+                  'Presentation text is distinct from the stable identity used for navigation.',
+                type: 'object',
+                properties: {
+                  fallback: {
+                    type: 'string',
+                  },
+                  translations: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'string',
+                    },
+                    default: {},
+                  },
+                },
+                additionalProperties: false,
+                required: ['fallback'],
+              },
+              ToolSettlement: {
+                description:
+                  'Recorded Host settlement for presentation; returned is not business success.\nForeign/provider results do not establish this Host evidence.',
+                type: 'string',
+                enum: ['returned', 'failed', 'unknown', 'rejected'],
               },
               AgentQueue: {
                 type: 'object',
