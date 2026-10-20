@@ -221,7 +221,7 @@ pub async fn query_excluding(
         }
         let mut names: Vec<_> = root
             .directory
-            .directory_names(&selection.segments, 4096)
+            .directory_names(&selection.segments)
             .map_err(|_| "agent_directory_unavailable")?
             .into_iter()
             .filter(|name| {

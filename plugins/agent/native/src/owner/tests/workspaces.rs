@@ -58,7 +58,7 @@ pub(super) async fn publish_with_policy(
 }
 
 #[tokio::test]
-async fn published_directories_are_readonly_bounded_and_create_only_observed_workspaces() {
+async fn published_directories_are_readonly_paged_and_create_only_observed_workspaces() {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     for index in 0..36 {
         std::fs::create_dir(fixture.workspace.join(format!("dir-{index:02}"))).unwrap();
@@ -89,6 +89,15 @@ async fn published_directories_are_readonly_bounded_and_create_only_observed_wor
         .unwrap();
     assert_eq!(tail["children"].as_array().unwrap().len(), 4);
     assert!(tail["after"].is_null());
+    for (children, indices) in [(&page["children"], 0..32), (&tail["children"], 32..36)] {
+        let expected: Vec<_> = indices.map(|index| {
+            let name = format!("dir-{index:02}");
+            let (path, identity) = maka_fs_tools::directory::capture(&fixture.workspace.join(&name)).unwrap();
+            json!({"name":name,"path":maka_fs_tools::workspace::project::host_path(&path).unwrap(),
+                "selection":{"rootId":"root-1","segments":[name],"directoryIdentity":identity}})
+        }).collect();
+        assert_eq!(*children, json!(expected));
+    }
     assert!(!fixture.workspace.join(MARKER_FILE).exists());
     for (field, value) in [
         ("rootId", json!("unknown")),
@@ -124,18 +133,60 @@ async fn published_directories_are_readonly_bounded_and_create_only_observed_wor
     for index in 0..4097 {
         std::fs::write(fixture.workspace.join(format!("file-{index}")), []).unwrap();
     }
-    assert!(
-        fixture
+    let completed = async {
+        let repeated = fixture
             .query(
                 "directories",
                 json!({"kind":"children","selection":selection,"after":null})
             )
-            .await
-            .is_err()
+            .await?;
+        let remaining = fixture.query("directories", json!({"kind":"children","selection":selection,"after":repeated["after"]})).await?;
+        let query_markers: Vec<_> = (0..36).map(|index| fixture.workspace.join(format!("dir-{index:02}")).join(MARKER_FILE).exists()).collect();
+        let created = fixture.mutation(2, "create", json!({"title":"Paged child","labels":[],"workspace":{"kind":"directory","selection":remaining["children"][0]["selection"]}}), Uuid::new_v4()).await?;
+        Ok::<_, String>((repeated, remaining, query_markers, created))
+    }.await;
+    fixture.drained().await;
+    let app_shutdown = fixture.app.shutdown().await;
+    let config_shutdown = fixture.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    let (repeated, remaining, query_markers, created) =
+        completed.expect("ordinary files must not prevent completed child directory pages");
+    assert_eq!(repeated, page);
+    assert_eq!(remaining, tail);
+    assert_eq!(
+        query_markers,
+        (0..36).map(|index| index == 3).collect::<Vec<_>>()
+    );
+    assert_eq!(created["kind"], "created");
+    assert_eq!(
+        created["session"]["workspace"]["path"],
+        tail["children"][0]["path"]
+    );
+    assert_eq!(
+        created["session"]["workspace"]["directoryIdentity"],
+        tail["children"][0]["selection"]["directoryIdentity"]
+    );
+    assert_eq!(
+        created["session"]["workspace"]["identity"],
+        json!(maka_fs_tools::workspace::read_identity(&fixture.workspace.join("dir-32")).unwrap())
     );
     assert!(!fixture.workspace.join(MARKER_FILE).exists());
-    fixture.app.shutdown().await.unwrap();
-    fixture.config.shutdown().await.unwrap();
+    for index in 0..36 {
+        assert_eq!(
+            fixture
+                .workspace
+                .join(format!("dir-{index:02}"))
+                .join(MARKER_FILE)
+                .exists(),
+            index == 3 || index == 32
+        );
+    }
+    for index in 0..4097 {
+        let path = fixture.workspace.join(format!("file-{index}"));
+        assert!(std::fs::metadata(&path).unwrap().is_file());
+        assert_eq!(std::fs::read(path).unwrap(), Vec::<u8>::new());
+    }
 }
 
 #[tokio::test]

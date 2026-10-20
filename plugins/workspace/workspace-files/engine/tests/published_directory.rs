@@ -21,17 +21,13 @@ use maka_fs_tools::workspace::directory::PublishedDirectory;
 use std::fs;
 
 #[test]
-fn published_directory_preserves_root_identity_containment_and_scan_budget() {
+fn published_directory_preserves_root_identity_containment_and_complete_listing() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("published");
     fs::create_dir_all(path.join("inside")).unwrap();
     fs::write(path.join("plain-file"), "not a directory").unwrap();
     let root = PublishedDirectory::open(&path).unwrap();
-    assert_eq!(root.directory_names(&[], 2).unwrap(), ["inside"]);
-    assert!(
-        root.directory_names(&[], 1).is_err(),
-        "non-directory entries also consume the scan budget"
-    );
+    assert_eq!(root.directory_names(&[]).unwrap(), ["inside"]);
     assert_eq!(
         root.resolve(&["inside".into()]).unwrap(),
         path.join("inside").canonicalize().unwrap()
@@ -46,7 +42,7 @@ fn published_directory_preserves_root_identity_containment_and_scan_budget() {
         std::os::unix::fs::symlink(&outside, path.join("escape")).unwrap();
         std::os::unix::fs::symlink(path.join("inside"), path.join("alias")).unwrap();
         assert!(root.resolve(&["escape".into()]).is_err());
-        assert_eq!(root.directory_names(&[], 4).unwrap(), ["alias", "inside"]);
+        assert_eq!(root.directory_names(&[]).unwrap(), ["alias", "inside"]);
         assert_eq!(
             root.resolve(&["alias".into()]).unwrap(),
             path.join("inside").canonicalize().unwrap()
@@ -62,7 +58,7 @@ fn published_directory_preserves_root_identity_containment_and_scan_budget() {
             Some(32)
         );
         root.validate(&path).unwrap();
-        assert_eq!(root.directory_names(&[], 2).unwrap(), ["inside"]);
+        assert_eq!(root.directory_names(&[]).unwrap(), ["inside"]);
         drop(root);
         fs::rename(&path, &moved).unwrap();
     }
@@ -74,7 +70,7 @@ fn published_directory_preserves_root_identity_containment_and_scan_budget() {
             root.resolve(&[]).is_err(),
             "path reuse does not republish a new root"
         );
-        assert!(root.directory_names(&[], 10).is_err());
+        assert!(root.directory_names(&[]).is_err());
         assert!(root.validate(&path).is_err());
     }
 }
