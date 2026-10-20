@@ -38,6 +38,7 @@ export type Row = {
   invocationId?: string;
   stepId?: string;
   sequence?: number;
+  startSequence?: number;
   closedAt?: number | null;
 };
 

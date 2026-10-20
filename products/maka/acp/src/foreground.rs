@@ -280,6 +280,7 @@ impl Foreground {
                     | DeliveryFact::ProviderToolResult { .. }
                     | DeliveryFact::ExecutorToolStart { .. }
                     | DeliveryFact::ExecutorToolResult { .. }
+                    | DeliveryFact::StepEnded { .. }
                     | DeliveryFact::Ended { .. } => {
                         catchup = true;
                     }

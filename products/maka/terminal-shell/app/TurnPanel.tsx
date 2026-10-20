@@ -40,6 +40,10 @@ export type TurnItem = {
   completed: boolean;
 };
 export type TranscriptItem = TurnItem | { kind: 'message'; key: string; row: Row };
+export type LiveActivity = {
+  kind: 'working' | 'thinking' | 'response' | 'waiting';
+  detail: string;
+};
 export type TurnViewState = {
   expanded: ReturnType<typeof signal<{ open: boolean; completed: boolean } | null>>;
   offset: AnimatedValue;
@@ -149,6 +153,12 @@ function ActivityLog(props: {
                     sessionId={props.sessionId}
                     through={props.through}
                     previewImage={props.previewImage}
+                    onExpand={(key) => {
+                      if (!alive || !ownList) return;
+                      const index = rowKeys().indexOf(key);
+                      if (index >= 0)
+                        ownList.scrollToIndex({ index, viewPosition: 0, animated: false });
+                    }}
                   />
                 );
               }}
@@ -171,6 +181,7 @@ export function TurnPanel(props: {
   through: () => number;
   viewport: () => { width: number; height: number };
   trajectory: () => boolean;
+  activity: () => LiveActivity;
   reveal: () => void;
   previewImage(image: ImagePreview): void;
 }) {
@@ -219,7 +230,7 @@ export function TurnPanel(props: {
     const seconds = Math.floor((end - startedAt()) / 1000);
     return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   };
-  const summary = () => {
+  const desiredTitle = computed(() => {
     if (!active())
       return outcome() === 'completed'
         ? 'Completed'
@@ -228,13 +239,35 @@ export function TurnPanel(props: {
           : outcome() === 'aborted'
             ? 'Stopped'
             : 'Activity';
+    const activity = props.activity();
+    if (activity.kind === 'waiting') return 'Waiting for your response';
     const tool = props.toolActivity();
     if (tool) return toolActivitySummary(tool);
-    const latest = props.turn().rows.findLast((row) => !row.tool);
-    if (!latest) return 'Working…';
-    const tail = latest.text.slice(-512).trimEnd().split('\n').at(-1)?.trim() ?? '';
-    return `${latest.role === 'thinking' ? 'Analyzing the request' : 'Writing response'}${tail ? ` · ${tail.slice(-240)}` : ''}`;
-  };
+    if (activity.kind === 'response') return 'Writing response';
+    if (activity.kind !== 'thinking') return 'Working…';
+    return `Analyzing the request${activity.detail ? ` · ${activity.detail}` : ''}`;
+  });
+  let presentedTitle = desiredTitle();
+  let presentedAt = Date.now();
+  const stableTitle = signal(presentedTitle);
+  effect(() => {
+    const desired = desiredTitle();
+    const running = active();
+    if (desired === presentedTitle) return;
+    const remaining = running ? 150 - (Date.now() - presentedAt) : 0;
+    const commit = () => {
+      presentedTitle = desiredTitle();
+      presentedAt = Date.now();
+      stableTitle.set(presentedTitle);
+    };
+    if (remaining <= 0) commit();
+    else {
+      // New deltas keep the same deadline; a busy stream cannot postpone the title forever.
+      const timer = setTimeout(commit, remaining);
+      cleanup(() => clearTimeout(timer));
+    }
+  });
+  const summary = () => (active() ? stableTitle() : desiredTitle());
   return (
     <View style={{ paddingVertical: 16, gap: 0 }}>
       <Button
@@ -254,6 +287,7 @@ export function TurnPanel(props: {
       >
         <Text
           numberOfLines={1}
+          ellipsizeMode="tail"
           style={{
             flex: 1,
             color: outcome() === 'failed' ? C.danger : active() ? C.secondary : C.muted,

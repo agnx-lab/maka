@@ -30,7 +30,7 @@ import type { Row, Position, Subscription } from './history';
 import { Checklist } from './Checklist';
 import { MessageRow } from './MessageRow';
 import { TurnPanel } from './TurnPanel';
-import type { TranscriptItem, TurnItem, TurnViewState } from './TurnPanel';
+import type { LiveActivity, TranscriptItem, TurnItem, TurnViewState } from './TurnPanel';
 import type { ImagePreview } from './ToolImage';
 import { latestToolActivity, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
@@ -64,6 +64,14 @@ type BackendIdentity = {
   modelId: string;
   thinkingLevel: string | null;
 } | null;
+type LivePart = {
+  invocationId: string | null;
+  stepId: string;
+  partId: string;
+  messageId: string;
+  field: 'thinking' | 'body';
+  startSequence: number;
+};
 function receiptMessage(reply: any): string {
   const receipt = reply?.receipt;
   if (receipt?.kind === 'recorded' && receipt.outcome?.kind === 'returned') {
@@ -81,6 +89,7 @@ export function Conversation(props: ConversationProps) {
   const rows = signal<Row[]>([]);
   const live = signal<Row[]>([]);
   const toolActivity = signal<ToolActivity[]>([]);
+  const parts = signal<LivePart[]>([]);
   const pendingMessages = signal<Row[]>([]);
   const title = signal(sessionId);
   const run = signal('Loading session…');
@@ -123,6 +132,27 @@ export function Conversation(props: ConversationProps) {
     }
     return state;
   };
+  const activity = computed<LiveActivity>(() => {
+    if (run() === 'waiting_for_user') return { kind: 'waiting', detail: '' };
+    let latest: { part: LivePart; row: Row; sequence: number } | undefined;
+    for (const part of parts()) {
+      if (part.invocationId !== invocation()) continue;
+      const matches = (row: Row) => row.messageId === part.messageId && row.field === part.field;
+      const row = live().find(matches) ?? rows().find(matches);
+      if (!row || row.closedAt != null) continue;
+      const sequence = Math.max(part.startSequence, row.sequence ?? 0);
+      if (!latest || sequence > latest.sequence) latest = { part, row, sequence };
+    }
+    if (!latest) return { kind: 'working', detail: '' };
+    if (latest.part.field === 'body') return { kind: 'response', detail: '' };
+    const paragraph = latest.row.text
+      .split(/\r?\n[\t ]*\r?\n/)
+      .findLast((paragraph) => paragraph.trim() !== '');
+    return {
+      kind: 'thinking',
+      detail: (paragraph ?? '').replaceAll('**', '').replace(/\s+/g, ' ').trim(),
+    };
+  });
   const display = computed<TranscriptItem[]>(() => {
     const pairedRows: Row[] = [];
     const paired = new Map<string, number>();
@@ -203,7 +233,6 @@ export function Conversation(props: ConversationProps) {
   let latestKnown = 0;
   let watchLast = 0;
   let runThrough = 0;
-  let parts: any[] = [];
   let followTask: Promise<void> | null = null;
   let followAgain = false;
   let draftRevision = 0;
@@ -343,10 +372,13 @@ export function Conversation(props: ConversationProps) {
     return followTask;
   };
 
-  const openParts = (started: any[]) => {
-    const same = (a: any, b: any) =>
+  const openParts = (started: LivePart[]) => {
+    const same = (a: LivePart, b: LivePart) =>
       a.invocationId === b.invocationId && a.stepId === b.stepId && a.partId === b.partId;
-    parts = [...parts.filter((part) => !started.some((other) => same(part, other))), ...started];
+    parts.set([
+      ...parts().filter((part) => !started.some((other) => same(part, other))),
+      ...started,
+    ]);
   };
   const closeLive = (sequence: number, invocationId: string, stepId?: string) => {
     live.set(
@@ -390,6 +422,7 @@ export function Conversation(props: ConversationProps) {
               partId: textKind,
               messageId: fact.messageId,
               field: field(textKind),
+              startSequence: event.sequence,
             })),
           );
           changed = true;
@@ -402,11 +435,12 @@ export function Conversation(props: ConversationProps) {
               partId: fact.partId,
               messageId: fact.messageId,
               field: field(fact.textKind),
+              startSequence: event.sequence,
             },
           ]);
           break;
         case 'delta': {
-          const part = parts.find(
+          const part = parts().find(
             (part) =>
               part.invocationId === event.invocationId &&
               part.stepId === fact.stepId &&
@@ -417,6 +451,7 @@ export function Conversation(props: ConversationProps) {
           const previous = live().find((row) => row.key === key);
           const next = {
             ...part,
+            invocationId: part.invocationId ?? undefined,
             key,
             role: part.field === 'thinking' ? 'thinking' : 'assistant',
             turnId: event.turnId,
@@ -430,25 +465,29 @@ export function Conversation(props: ConversationProps) {
           break;
         }
         case 'part_finished':
-          parts = parts.filter(
-            (part) =>
-              part.invocationId !== event.invocationId ||
-              part.stepId !== fact.stepId ||
-              part.partId !== fact.partId,
+          parts.set(
+            parts().filter(
+              (part) =>
+                part.invocationId !== event.invocationId ||
+                part.stepId !== fact.stepId ||
+                part.partId !== fact.partId,
+            ),
           );
           changed = true;
           break;
         case 'step_ended':
           closeLive(event.sequence, event.invocationId, fact.stepId);
-          parts = parts.filter(
-            (part) => part.invocationId !== event.invocationId || part.stepId !== fact.stepId,
+          parts.set(
+            parts().filter(
+              (part) => part.invocationId !== event.invocationId || part.stepId !== fact.stepId,
+            ),
           );
           changed = true;
           break;
         case 'ended':
           requestMetadata(rows().find((row) => row.turnId === event.turnId));
           closeLive(event.sequence, event.invocationId);
-          parts = parts.filter((part) => part.invocationId !== event.invocationId);
+          parts.set(parts().filter((part) => part.invocationId !== event.invocationId));
           if (event.sequence > runThrough) {
             run.set(fact.failed ? 'Failed' : 'Idle');
             invocation.set(null);
@@ -478,11 +517,13 @@ export function Conversation(props: ConversationProps) {
   const openTranscript = async () => {
     const observed = await observe();
     if (!alive) return;
-    parts = observed.parts.map((part: any) => ({
-      ...part,
-      invocationId: observed.run?.invocationId ?? null,
-      field: part.textKind === 'thinking' ? 'thinking' : 'body',
-    }));
+    parts.set(
+      observed.parts.map((part: any) => ({
+        ...part,
+        invocationId: observed.run?.invocationId ?? null,
+        field: part.textKind === 'thinking' ? 'thinking' : 'body',
+      })),
+    );
     const after = Math.min(
       observed.through,
       ...observed.parts.map((part: any) => part.startSequence - 1),
@@ -1020,6 +1061,7 @@ export function Conversation(props: ConversationProps) {
                           })
                         }
                         trajectory={() => reading() === 'trajectory'}
+                        activity={activity}
                         viewport={readingSize}
                       />
                     </If>

@@ -1108,7 +1108,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1128,7 +1128,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -10188,8 +10188,10 @@ dependencies = [
 name = "maka-terminal-shell"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "crossterm",
+ "image",
  "libc",
  "maka-agent-api",
  "maka-agent-facts",
@@ -10198,11 +10200,13 @@ dependencies = [
  "maka-capabilities",
  "maka-config",
  "maka-event-log",
+ "maka-files-native",
  "maka-host-runtime",
  "maka-packages",
  "maka-plugin-core",
  "maka-process",
  "maka-settings-native",
+ "maka-workspace-api",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
@@ -10947,7 +10951,7 @@ dependencies = [
 [[package]]
 name = "nsh-base"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "nsh-core",
  "serde_json",
@@ -10956,7 +10960,7 @@ dependencies = [
 [[package]]
 name = "nsh-bundler"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "anyhow",
  "dunce",
@@ -10980,7 +10984,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "cap-std",
  "futures-util",
@@ -11001,7 +11005,7 @@ dependencies = [
 [[package]]
 name = "nsh-engine"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -11018,7 +11022,7 @@ dependencies = [
 [[package]]
 name = "nsh-js"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -11039,7 +11043,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -11051,7 +11055,7 @@ dependencies = [
 [[package]]
 name = "nsh-package"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -11066,7 +11070,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tui"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=bcc50bc17f80368f583b1ddfe45dd44b6d77d20f#bcc50bc17f80368f583b1ddfe45dd44b6d77d20f"
+source = "git+https://github.com/M4n5ter/nsh?rev=70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e#70f88f1d5dd8f4f4a9ab40e076d1685aa5760c8e"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -13358,7 +13362,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -19100,7 +19104,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
