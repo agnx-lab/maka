@@ -1220,17 +1220,29 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         evidence("production-sixel-native-wire", std::str::from_utf8(native_wire).unwrap());
         evidence("production-sixel-real-image", &terminal.snapshot());
 
-        terminal.resize(80, 24);
-        // This old wide-only control disappearing proves the resized UI frame
-        // has passed any old native frame already queued before SIGWINCH.
+        let before_resize = terminal.wire().len();
+        terminal.resize(80, 40);
+        terminal.wait_for_wire(b"\x1b[?2026l", before_resize).await;
+        // Keep height unchanged: Screen's local resize cannot scroll away the
+        // old left sidebar. New complete output must remove this control.
         terminal.wait_for_absent("Search sessions…").await;
         let narrow = terminal.wait_for("Open image · 64 × 48").await;
-        let has_image_cells = |screen: &str| screen.chars().any(|character| matches!(character,
-            '▀' | '▄' | '█' | '▌' | '▐' | '▘' | '▝' | '▖' | '▗' | '▚' | '▞' | '▙' | '▛' | '▜' | '▟'));
+        let has_image_cells = |screen: &str| {
+            let lines: Vec<_> = screen.lines().collect();
+            let (row, label) = lines.iter().enumerate().find(|(_, line)| line.contains("Open image · 64 × 48")).unwrap();
+            let column = ratatui::text::Line::from(&label[..label.find("Open image").unwrap()]).width();
+            // The fixture's broad uniform stripe interiors prefer half blocks.
+            // Inspect only the 40-cell image box below its label; scrollbar ▐
+            // elsewhere in the conversation cannot stand in for missing pixels.
+            lines.iter().skip(row + 1).take(14).any(|line|
+                line.chars().skip(column).take(40).filter(|character| *character == '▀').count() >= 8)
+        };
         assert!(has_image_cells(&narrow), "resize must paint the actual image through Unicode");
         let after_resize = terminal.wire().len();
         terminal.send(b"\x1b[?62;4c\x1b[6;17;9t");
+        let before_wide = terminal.wire().len();
         terminal.resize(120, 40);
+        terminal.wait_for_wire(b"\x1b[?2026l", before_wide).await;
         terminal.wait_for("Search sessions…").await;
         let wide = terminal.wait_for("Open image · 64 × 48").await;
         assert!(has_image_cells(&wide));
