@@ -417,6 +417,10 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         terminal.click_text("Close · Esc");
         terminal.wait_for("Open image · 192 × 128").await;
         request.delta("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
+        terminal.wait_for("Writing response").await;
+        // Closing the preview preserves its opener's reading position. Use
+        // native activity scrolling to reveal the new response below the image.
+        terminal.send(b"\x1b[F");
         terminal.wait_for("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;

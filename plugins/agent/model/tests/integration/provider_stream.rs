@@ -493,9 +493,9 @@ async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
             let mut rejected_call = false;
             while let Some(event) = stream.next().await {
                 let event = event.expect("SDK must pass the malformed identity to model acceptance").event;
-                let is_call = matches!(&event, ModelEvent::ToolCall(_));
+                let is_identity_start = matches!(&event, ModelEvent::ToolInputStarted { .. });
                 if builder.push(event).is_err() {
-                    assert!(is_call, "reject the tool identity at its first acceptance boundary");
+                    assert!(is_identity_start, "reject the malformed identity before admitting its argument preview");
                     rejected_call = true;
                     break;
                 }
