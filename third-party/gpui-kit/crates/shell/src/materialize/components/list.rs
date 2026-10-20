@@ -55,10 +55,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Element, ElementId, Empty, Entity, FollowMode, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, ListAlignment, ListOffset, ListState, Pixels,
-    Refineable as _, SharedString, StyleRefinement, Styled as _, UniformListScrollHandle, Window,
-    list as gpui_list, px, uniform_list,
+    AnyElement, App, DefiniteLength, Edges, Element, ElementId, Empty, Entity, FollowMode,
+    GlobalElementId, InspectorElementId, IntoElement, LayoutId, ListAlignment, ListOffset,
+    ListState, Pixels, Refineable as _, SharedString, StyleRefinement, Styled as _,
+    UniformListScrollHandle, Window, list as gpui_list, px, uniform_list,
 };
 
 use crate::{
@@ -87,7 +87,7 @@ use crate::{
 const LIST_OVERDRAW: gpui::Pixels = px(160.);
 
 /// The retained side of a `list`: GPUI's measurements, the count they were
-/// taken for, the item the viewport started at when it was last laid out, and
+/// taken for, the item the viewport started at when it was last laid out,
 /// whether GPUI was told to follow the tail, and the visible range and count
 /// last reported to the script.
 struct MeasuredItems {
@@ -242,8 +242,11 @@ pub(in crate::materialize) fn list(
             })
             .size_full();
             list.style().refine(&refinement);
+            let mut padding = Edges::<DefiniteLength>::default();
+            padding.refine(&refinement.padding);
             KeyedList {
                 list: list.into_any_element(),
+                padding,
                 retained,
                 item_count,
                 get_key,
@@ -270,6 +273,7 @@ pub(in crate::materialize) fn list(
 /// refinement the script gave the list is what sizes it.
 struct KeyedList {
     list: AnyElement,
+    padding: Edges<DefiniteLength>,
     retained: Entity<MeasuredItems>,
     item_count: usize,
     get_key: CallbackId,
@@ -402,7 +406,11 @@ impl KeyedList {
             }
             return;
         };
-        let shown = (visible_range(&retained.state), self.item_count);
+        let padding = self.padding.to_pixels(
+            retained.state.viewport_bounds().size.into(),
+            window.rem_size(),
+        );
+        let shown = (visible_range(&retained.state, padding), self.item_count);
         if retained.reported.as_ref() == Some(&shown) {
             return;
         }
@@ -420,15 +428,21 @@ impl KeyedList {
 
 /// The items a list's viewport shows after its last layout: from the item at
 /// the top to the last one whose top edge is above the viewport's bottom.
-fn visible_range(state: &ListState) -> Range<usize> {
+fn visible_range(state: &ListState, padding: Edges<Pixels>) -> Range<usize> {
     let count = state.item_count();
     let start = state.logical_scroll_top().item_ix.min(count);
-    let bottom = state.viewport_bounds().bottom();
+    let viewport = state.viewport_bounds();
+    // GPUI does not prepaint any rows when padding fills the viewport.
+    if viewport.size.height <= padding.top + padding.bottom {
+        return start..start;
+    }
+    let bottom = viewport.bottom();
     let mut end = start;
     while end < count
         && state
             .bounds_for_item(end)
-            .is_some_and(|bounds| bounds.top() < bottom)
+            // GPUI's item bounds omit the padding added during prepaint.
+            .is_some_and(|bounds| bounds.top() + padding.top < bottom)
     {
         end += 1;
     }

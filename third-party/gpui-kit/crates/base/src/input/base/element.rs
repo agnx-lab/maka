@@ -118,6 +118,8 @@ fn compose_decoration_collections<'a>(
 struct EditorScrollbarLayout {
     bounds: Bounds<Pixels>,
     scroll_size: Size<Pixels>,
+    // Excludes editor padding from scroll range while the track still includes it.
+    scroll_viewport_size: Size<Pixels>,
 }
 
 /// What the unwrapped width of the longest line depends on. While it holds,
@@ -174,21 +176,24 @@ impl EditorScrollbarLayout {
             paddings.left + line_number_width - LINE_NUMBER_RIGHT_MARGIN
         };
 
-        Self {
-            bounds: Bounds::new(
-                point(
-                    input_bounds.origin.x + left,
-                    input_bounds.origin.y - paddings.top,
-                ),
-                size(
-                    input_bounds.size.width - left + paddings.right,
-                    input_bounds.size.height + paddings.top + paddings.bottom,
-                ),
+        let bounds = Bounds::new(
+            point(
+                input_bounds.origin.x + left,
+                input_bounds.origin.y - paddings.top,
             ),
+            size(
+                input_bounds.size.width - left + paddings.right,
+                input_bounds.size.height + paddings.top + paddings.bottom,
+            ),
+        );
+
+        Self {
+            bounds,
             scroll_size: size(
                 scroll_size.width - left + paddings.right + RIGHT_MARGIN,
                 scroll_size.height,
             ),
+            scroll_viewport_size: size(bounds.size.width, input_bounds.size.height),
         }
     }
 }
@@ -263,6 +268,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
             Scrollbar::vertical(&scroll_handle)
         }
         .viewport_bounds(snapshot.layout.bounds)
+        .scroll_viewport_size(snapshot.layout.scroll_viewport_size)
         .scroll_size(snapshot.layout.scroll_size);
         if let Some(theme) = &state.scrollbar_theme {
             scrollbar = scrollbar.theme(theme.clone());
@@ -406,6 +412,24 @@ pub(super) fn cursor_surrounding_padding(
     raw.min(viewport_half)
 }
 
+/// Reveal the whole visual row without changing the usual edge clearance.
+/// Reserve the row's height below its insertion position before allocating
+/// top padding. A viewport shorter than a row can only align its start.
+pub(super) fn reveal_row(
+    offset: Pixels,
+    row_top: Pixels,
+    line_height: Pixels,
+    viewport_height: Pixels,
+    edge_padding: Pixels,
+) -> Pixels {
+    let row_height = line_height.min(viewport_height);
+    let bottom = edge_padding.max(row_height).min(viewport_height);
+    let top = edge_padding.min(viewport_height - bottom);
+    offset
+        .clamp(top - row_top, viewport_height - bottom - row_top)
+        .min(px(0.))
+}
+
 /// Pixel height of the empty area below the last line in the editor's
 /// scrollable region. Backs [`InputBaseState::scroll_beyond_last_line`].
 ///
@@ -455,6 +479,23 @@ impl<M: InputModeKind> TextElement<M> {
     }
 
     fn paint_mouse_listeners(&mut self, hitbox: &Hitbox, window: &mut Window, _: &mut App) {
+        // Text with room to scroll keeps the wheel from the scroll areas
+        // around it; its own listener scrolls it in the bubble phase.
+        window.on_mouse_event({
+            let state = self.state.clone();
+            let hitbox = hitbox.id;
+            move |event: &gpui::ScrollWheelEvent, phase, window, cx| {
+                if phase.capture()
+                    && hitbox.should_handle_scroll(window)
+                    && state
+                        .read(cx)
+                        .takes_scroll(event.delta.pixel_delta(window.line_height()))
+                {
+                    crate::scroll_bounce::claim_scroll(hitbox, cx);
+                }
+            }
+        });
+
         // Every touch is offered as a drag first; that is how a tap's mouse
         // events are later told apart from a mouse's.
         window.on_mouse_event(move |event: &TouchDragEvent, phase, _, cx| {
@@ -526,9 +567,9 @@ impl<M: InputModeKind> TextElement<M> {
         last_layout: &LastLayout,
         bounds: &mut Bounds<Pixels>,
         scroll_size: Size<Pixels>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut App,
-    ) -> (Vec<CursorRenderInfo>, Point<Pixels>, Option<usize>) {
+    ) -> (Vec<CursorRenderInfo>, Point<Pixels>, Option<usize>, bool) {
         let state = self.state.read(cx);
 
         let line_height = last_layout.line_height;
@@ -539,6 +580,7 @@ impl<M: InputModeKind> TextElement<M> {
         let active_id = state.active_selection().id;
         let mut scroll_offset = state.scroll_handle.offset();
         let mut current_row = None;
+        let mut resize_reveal_owned = false;
         let mut cursor_infos: Vec<CursorRenderInfo> = Vec::with_capacity(state.selections.len());
 
         // Padding kept between the cursor and the viewport's top/bottom
@@ -549,6 +591,35 @@ impl<M: InputModeKind> TextElement<M> {
             viewport_visible_lines(bounds.size.height, line_height),
             line_height,
         );
+
+        // Keep a visible, focused caret visible when its viewport reflows, but
+        // do not undo deliberate scrolling away from an unchanged selection.
+        let resized = state.last_bounds.is_some_and(|old| old.size != bounds.size)
+            || state
+                .last_layout
+                .as_ref()
+                .is_some_and(|old| old.line_height != line_height);
+        let reveal_on_resize = resized
+            && state.deferred_scroll_offset.is_none()
+            && state.focus_handle.is_focused(window)
+            && state.prepaint_caret_geometry.is_some_and(|old| {
+                // An unshaped caret has provisional x until the notified
+                // repaint. Consecutive resize frames retain ownership only
+                // while no intervening scroll changed the viewport.
+                if old.resize_reveal_owned {
+                    return old.scroll_offset() == scroll_offset;
+                }
+                let caret = old.cursor_bounds();
+                let viewport = old.input_bounds();
+                let top = caret.top() + scroll_offset.y;
+                // Cached x already contains its painted scroll; account only
+                // for a wheel offset change since that geometry was produced.
+                let left = caret.left() + scroll_offset.x - old.scroll_offset().x;
+                top >= viewport.top()
+                    && top + caret.size.height <= viewport.bottom()
+                    && left >= viewport.left()
+                    && left + caret.size.width <= viewport.right()
+            });
 
         // Resolve a cursor or selection endpoint to a content-space position.
         let visible_buffer_lines = &last_layout.visible_buffer_lines;
@@ -565,7 +636,13 @@ impl<M: InputModeKind> TextElement<M> {
                     return line_origin + pos;
                 }
             }
-            line_origin
+            if state.masked {
+                return line_origin;
+            }
+            point(
+                px(0.),
+                line_height * state.display_map.offset_to_display_row(offset, affinity),
+            )
         };
 
         let cursor_height = 0.85 * line_height;
@@ -612,50 +689,43 @@ impl<M: InputModeKind> TextElement<M> {
 
                 let selection_changed = state.last_selected_range != Some(selected_range);
                 let auto_scrolling = state.auto_scroll.is_active();
-                if selection_changed && !is_selected_all {
-                    // For Right alignment use 0 margin: cursor is clamped to bounds separately,
-                    // so we never scroll the text for cursor-at-edge, avoiding a first-click jump.
-                    let safety_margin = match last_layout.text_align {
-                        TextAlign::Left => RIGHT_MARGIN,
-                        TextAlign::Right => px(0.),
-                        TextAlign::Center => CURSOR_WIDTH,
-                    };
-
-                    scroll_offset.x = if scroll_offset.x + cursor_pos.x
-                        > (bounds.size.width - line_number_width - safety_margin)
-                    {
-                        // cursor is out of right
-                        bounds.size.width - line_number_width - safety_margin - cursor_pos.x
-                    } else if scroll_offset.x + cursor_pos.x < px(0.) {
-                        // cursor is out of left
-                        -cursor_pos.x
-                    } else {
-                        scroll_offset.x
-                    };
+                if (selection_changed || reveal_on_resize) && !is_selected_all {
+                    // Resize-follow owns only vertical visibility. An unshaped
+                    // target has no reliable x; retain the existing x offset.
+                    if selection_changed {
+                        // Right-aligned carets are clamped instead of scrolling.
+                        let safety_margin = match last_layout.text_align {
+                            TextAlign::Left => RIGHT_MARGIN,
+                            TextAlign::Right => px(0.),
+                            TextAlign::Center => CURSOR_WIDTH,
+                        };
+                        scroll_offset.x = if scroll_offset.x + cursor_pos.x
+                            > (bounds.size.width - line_number_width - safety_margin)
+                        {
+                            bounds.size.width - line_number_width - safety_margin - cursor_pos.x
+                        } else if scroll_offset.x + cursor_pos.x < px(0.) {
+                            -cursor_pos.x
+                        } else {
+                            scroll_offset.x
+                        };
+                    }
 
                     // Vertical cursor-follow is suppressed while auto-scroll manages the y axis,
                     // to prevent fighting the background scroll task.
                     if !auto_scrolling {
-                        // Scroll straight to the caret's line. This runs only on
-                        // the frame the selection changed, so a one-line step
-                        // would leave a far-off caret (e.g. after typing at the
-                        // end of a long paste) outside the viewport.
-                        scroll_offset.y = if scroll_offset.y + cursor_pos.y
-                            > bounds.size.height - top_bottom_margin
-                        {
-                            // cursor is out of bottom
-                            bounds.size.height - top_bottom_margin - cursor_pos.y
-                        } else if scroll_offset.y + cursor_pos.y < top_bottom_margin {
-                            // cursor is out of top
-                            (top_bottom_margin - cursor_pos.y).min(px(0.))
-                        } else {
-                            scroll_offset.y
-                        };
+                        scroll_offset.y = reveal_row(
+                            scroll_offset.y,
+                            cursor_pos.y,
+                            line_height,
+                            bounds.size.height,
+                            top_bottom_margin,
+                        );
+                        resize_reveal_owned = reveal_on_resize;
                     }
 
                     // For selection to move scroll
                     if selection.reversed {
-                        if scroll_offset.x + cursor_start.x < px(0.) {
+                        if selection_changed && scroll_offset.x + cursor_start.x < px(0.) {
                             // selection start is out of left
                             scroll_offset.x = -cursor_start.x;
                         }
@@ -666,7 +736,7 @@ impl<M: InputModeKind> TextElement<M> {
                     } else {
                         // TODO: Consider to remove this part,
                         // maybe is not necessary (But selection_reversed is needed).
-                        if scroll_offset.x + cursor_end.x <= px(0.) {
+                        if selection_changed && scroll_offset.x + cursor_end.x <= px(0.) {
                             // selection end is out of left
                             scroll_offset.x = -cursor_end.x;
                         }
@@ -714,7 +784,12 @@ impl<M: InputModeKind> TextElement<M> {
 
         bounds.origin = bounds.origin + scroll_offset;
 
-        (cursor_infos, scroll_offset, current_row)
+        (
+            cursor_infos,
+            scroll_offset,
+            current_row,
+            resize_reveal_owned,
+        )
     }
 
     /// Layout the match range to a Path.
@@ -2327,6 +2402,17 @@ impl PrepaintState {
     }
 }
 
+/// Align a caret to whole device pixels.
+///
+/// Text positions are fractional, and a one-pixel caret at a fractional x is
+/// spread over two device pixels by antialiasing, which draws it faint and
+/// thin. Rounding its edges to the device grid keeps every caret crisp.
+fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bounds<Pixels> {
+    let x = (bounds.origin.x * scale_factor).round() / scale_factor;
+    let width = (bounds.size.width * scale_factor).round().max(px(1.)) / scale_factor;
+    Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
+}
+
 impl<M: InputModeKind> IntoElement for TextElement<M> {
     type Element = Self;
 
@@ -2522,7 +2608,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window.text_system().layout_width(font_id, text_size, ' ')
         };
 
-        self.state.update(cx, |state, cx| {
+        // Text stretched past an end is drawn that far from where it scrolled
+        // to, inside the frame that clips it, and springs back over the next
+        // frames. Scrolling and everything measured from it stay exact.
+        let mut stretch = self.state.update(cx, |state, cx| {
             if state
                 .selecting
                 .as_ref()
@@ -2532,6 +2621,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             }
             state.display_map.set_font(font, text_size, cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
+            if cx.reduce_motion() {
+                state.overscroll.reset();
+            } else if state.overscroll.step(cx.background_executor().now()) {
+                window.request_animation_frame();
+            }
+            state.overscroll.offset()
         });
 
         let state = self.state.read(cx);
@@ -2857,8 +2952,18 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // regardless of horizontal scroll position.
         let input_bounds = bounds;
         let original_x = bounds.origin.x;
+        // Resolved content and viewport sizes can change during a gesture.
+        // A non-scrolling input must not retain a drag that will no longer
+        // receive its Ended packet through the overscroll path.
+        if scroll_size.height <= input_bounds.size.height {
+            self.state.update(cx, |state, _| state.overscroll.reset());
+            stretch = 0.;
+        }
+        // Keep viewport geometry for scrollbars and hitboxes fixed; only
+        // text, its carets, selections, and gutter contents are displaced.
+        bounds.origin.y += px(stretch);
 
-        let (cursor_infos, cursor_scroll_offset, current_row) =
+        let (cursor_infos, cursor_scroll_offset, current_row, resize_reveal_owned) =
             self.layout_cursors(&last_layout, &mut bounds, scroll_size, window, cx);
         // Completion/code-action menus position at the active caret.
         last_layout.cursor_bounds = cursor_infos
@@ -2888,7 +2993,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 input_bounds.size.width,
                 last_layout.text_align,
             );
-            PrepaintCaretGeometry::new(cursor_bounds, line_height, input_bounds, scroll_offset)
+            let mut geometry =
+                PrepaintCaretGeometry::new(cursor_bounds, line_height, input_bounds, scroll_offset);
+            geometry.resize_reveal_owned = resize_reveal_owned;
+            geometry
         });
         self.state.update(cx, |state, _| {
             state.prepaint_caret_geometry = caret_geometry;
@@ -3251,7 +3359,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // Paint blinking cursors (shared blink state for all carets)
         if focused && show_cursor {
             for cursor_info in prepaint.cursor_infos_with_scroll() {
-                window.paint_quad(fill(cursor_info.bounds, editor_style.caret));
+                window.paint_quad(fill(
+                    snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
+                    editor_style.caret,
+                ));
             }
         }
 
@@ -3665,10 +3776,113 @@ mod tests {
 
     struct TextareaHarness(Entity<crate::input::TextareaState>);
 
+    #[gpui::test]
+    fn scroll_bounce_keeps_the_scrollbar_viewport_fixed(cx: &mut TestAppContext) {
+        let text = (0..60)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let viewport = editor
+                .read(cx)
+                .editor_scrollbar_snapshot
+                .get()
+                .unwrap()
+                .layout
+                .bounds;
+            let text_origin = editor.read(cx).last_bounds.unwrap().origin;
+            editor.update(cx, |state, cx| {
+                state.set_scroll_bounce(true, cx);
+                state.on_scroll_wheel(
+                    &gpui::ScrollWheelEvent {
+                        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(60.))),
+                        touch_phase: gpui::TouchPhase::Started,
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let stretch = state.overscroll.offset();
+            assert!(stretch > 0.);
+            assert_eq!(
+                state.editor_scrollbar_snapshot.get().unwrap().layout.bounds,
+                viewport
+            );
+            assert_eq!(
+                state.last_bounds.unwrap().origin.y,
+                text_origin.y + px(stretch)
+            );
+        });
+    }
+
     impl Render for TextareaHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().size_full().child(self.0.clone())
         }
+    }
+
+    /// A textarea 100 px down a taller bouncing scroll area.
+    struct NestedTextarea(Entity<crate::input::TextareaState>, gpui::ScrollHandle);
+    use gpui::StatefulInteractiveElement as _;
+
+    impl Render for NestedTextarea {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            crate::ScrollBounce::new(
+                "outer",
+                &self.1,
+                div()
+                    .id("outer-viewport")
+                    .w(px(240.))
+                    .h(px(300.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.1)
+                    .child(div().h(px(100.)))
+                    .child(div().h(px(120.)).child(self.0.clone()))
+                    .child(div().h(px(600.))),
+            )
+            .enabled(true)
+        }
+    }
+
+    #[gpui::test]
+    fn a_textarea_keeps_its_scroll_from_the_area_around_it(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let text = (1..=40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let outer = gpui::ScrollHandle::new();
+        let mut textarea = None;
+        let window = cx.open_window(size(px(240.), px(400.)), |window, cx| {
+            let state =
+                cx.new(|cx| crate::input::TextareaState::new(window, cx).default_value(text));
+            textarea = Some(state.clone());
+            NestedTextarea(state, outer.clone())
+        });
+        let textarea = textarea.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let swipe = |cx: &mut VisualTestContext, y: f32| {
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: point(px(100.), px(y)),
+                delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
+                touch_phase: gpui::TouchPhase::Moved,
+                ..Default::default()
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        };
+        swipe(&mut cx, 160.);
+        let scrolled = cx.update(|_, cx| textarea.read(cx).scroll_handle.offset().y);
+        assert!(scrolled < px(0.), "the textarea scrolls");
+        assert_eq!(outer.offset().y, px(0.), "the area around it does not");
+        swipe(&mut cx, 40.);
+        assert_eq!(outer.offset().y, px(-40.), "outside the textarea it does");
     }
 
     #[gpui::test]
@@ -3853,7 +4067,7 @@ mod tests {
             let scroll_size = input_bounds.size;
             let element = TextElement::new(editor.clone());
             let mut bounds = input_bounds;
-            let (baseline, _, _) =
+            let (baseline, _, _, _) =
                 element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
 
             // Both a stale offset after deletion and a deferred scroll target must
@@ -3864,7 +4078,7 @@ mod tests {
                     state.deferred_scroll_offset = deferred;
                 });
                 let mut bounds = input_bounds;
-                let (carets, offset, _) =
+                let (carets, offset, _, _) =
                     element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
                 assert_eq!(offset.x, px(0.));
                 assert_eq!(bounds.origin.x, input_bounds.origin.x);
@@ -3907,7 +4121,7 @@ mod tests {
                         state.deferred_scroll_offset = Some(point(minimum, px(0.)));
                     });
                     let mut bounds = input_bounds;
-                    let (expected, _, _) =
+                    let (expected, _, _, _) =
                         element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
 
                     for target in [minimum - px(100.), px(100.)] {
@@ -3915,7 +4129,7 @@ mod tests {
                             state.deferred_scroll_offset = Some(point(target, px(0.)));
                         });
                         let mut bounds = input_bounds;
-                        let (carets, offset, _) =
+                        let (carets, offset, _, _) =
                             element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
                         let expected_offset = if target < minimum { minimum } else { px(0.) };
                         assert_eq!(offset.x, expected_offset);
@@ -3966,13 +4180,13 @@ mod tests {
                     state.deferred_scroll_offset = None;
                 });
                 let mut bounds = input_bounds;
-                let (baseline, _, _) =
+                let (baseline, _, _, _) =
                     element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
                 editor.update(cx, |state, _| {
                     state.deferred_scroll_offset = Some(point(px(-60.), px(0.)));
                 });
                 let mut bounds = input_bounds;
-                let (carets, offset, _) =
+                let (carets, offset, _, _) =
                     element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
                 assert_eq!(offset.x, px(-60.));
                 assert_eq!(carets.len(), 3);
@@ -4472,6 +4686,7 @@ mod tests {
             Bounds::new(point(px(51.), px(18.)), size(px(262.), px(87.)))
         );
         assert_eq!(layout.scroll_size, size(px(972.), px(200.)));
+        assert_eq!(layout.scroll_viewport_size, size(px(262.), px(80.)));
 
         let layout_without_gutter =
             EditorScrollbarLayout::new(input_bounds, px(0.), size(px(500.), px(120.)), paddings);
@@ -4481,6 +4696,10 @@ mod tests {
             Bounds::new(point(px(10.), px(18.)), size(px(303.), px(87.)))
         );
         assert_eq!(layout_without_gutter.scroll_size, size(px(513.), px(120.)));
+        assert_eq!(
+            layout_without_gutter.scroll_viewport_size,
+            size(px(303.), px(80.))
+        );
     }
 
     #[test]
@@ -4881,100 +5100,41 @@ mod tests {
     }
 
     #[test]
-    fn test_cursor_surrounding_padding_auto_grow() {
-        // Auto-grow inputs always pad by one line, regardless of any
-        // override or visible-lines count.
+    fn row_reveal_contains_the_whole_row_and_has_a_stable_offset() {
         let line_height = px(20.);
-        for override_lines in [None, Some(0), Some(3), Some(99)] {
-            for visible_lines in [0_usize, 1, 8, 64] {
-                assert_eq!(
-                    cursor_surrounding_padding(true, override_lines, visible_lines, line_height,),
-                    line_height,
-                );
+        let row_top = px(1000.);
+        for viewport_height in [px(20.), px(30.), px(600.)] {
+            for auto_grow in [false, true] {
+                for surrounding in [None, Some(0), Some(50)] {
+                    let padding = cursor_surrounding_padding(
+                        auto_grow,
+                        surrounding,
+                        viewport_visible_lines(viewport_height, line_height),
+                        line_height,
+                    );
+                    for previous in [px(-1500.), px(-1000.), px(0.)] {
+                        let offset =
+                            reveal_row(previous, row_top, line_height, viewport_height, padding);
+                        assert!(row_top + offset >= px(0.));
+                        assert!(row_top + offset + line_height <= viewport_height);
+                        assert_eq!(
+                            reveal_row(offset, row_top, line_height, viewport_height, padding),
+                            offset,
+                            "unchanged caret must not oscillate",
+                        );
+                    }
+                }
             }
         }
     }
 
     #[test]
-    fn test_cursor_surrounding_padding_default() {
-        // `None`: historical heuristic — `BOTTOM_MARGIN_ROWS` for normal
-        // viewports, falls back to one line on small viewports (less
-        // than `BOTTOM_MARGIN_ROWS × 8` rows tall).
-        let line_height = px(20.);
-
-        // Small viewport → 1-line fallback.
-        let small = BOTTOM_MARGIN_ROWS * 8 - 1;
+    fn undersized_row_reveal_aligns_the_start_without_oscillating() {
+        let offset = reveal_row(px(0.), px(80.), px(20.), px(10.), px(60.));
+        assert_eq!(px(80.) + offset, px(0.));
         assert_eq!(
-            cursor_surrounding_padding(false, None, small, line_height),
-            line_height,
-        );
-
-        // Boundary at `BOTTOM_MARGIN_ROWS × 8` flips to the full margin.
-        let boundary = BOTTOM_MARGIN_ROWS * 8;
-        assert_eq!(
-            cursor_surrounding_padding(false, None, boundary, line_height),
-            BOTTOM_MARGIN_ROWS * line_height,
-        );
-
-        // Comfortably-large viewport.
-        assert_eq!(
-            cursor_surrounding_padding(false, None, 100, line_height),
-            BOTTOM_MARGIN_ROWS * line_height,
-        );
-    }
-
-    #[test]
-    fn test_cursor_surrounding_padding_explicit() {
-        // `Some(n)`: exactly `n × line_height` when the viewport has
-        // room for it; saturated against half the viewport when it
-        // doesn't.
-        let line_height = px(20.);
-
-        for lines in [0_usize, 1, 2, 5, 50] {
-            let raw = lines as f32 * line_height;
-            for visible_lines in [0_usize, 1, 8, 100] {
-                let viewport_half = (visible_lines as f32 * line_height).half();
-                assert_eq!(
-                    cursor_surrounding_padding(false, Some(lines), visible_lines, line_height,),
-                    raw.min(viewport_half),
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_cursor_surrounding_padding_saturates_against_viewport() {
-        // An aggressive override on a small viewport must not produce a
-        // padding larger than half the visible region — otherwise the
-        // bottom-edge auto-scroll-into-view threshold sinks below the
-        // top-edge threshold and the per-frame scroll adjustment loses
-        // a stable fixed point.
-        let line_height = px(20.);
-
-        // Override much larger than viewport → clamped to half.
-        let visible_lines = 10;
-        let viewport_half = (visible_lines as f32 * line_height).half();
-        assert_eq!(
-            cursor_surrounding_padding(false, Some(50), visible_lines, line_height),
-            viewport_half,
-        );
-
-        // Override that fits → returned unchanged.
-        let visible_lines = 40;
-        assert_eq!(
-            cursor_surrounding_padding(false, Some(3), visible_lines, line_height),
-            3.0 * line_height,
-        );
-
-        // Default heuristic still saturates if BOTTOM_MARGIN_ROWS would
-        // exceed the half-viewport bound (only possible at extreme
-        // sizes — kept for defensive completeness).
-        let visible_lines = BOTTOM_MARGIN_ROWS * 8;
-        let half = (visible_lines as f32 * line_height).half();
-        let raw = BOTTOM_MARGIN_ROWS * line_height;
-        assert_eq!(
-            cursor_surrounding_padding(false, None, visible_lines, line_height),
-            raw.min(half),
+            reveal_row(offset, px(80.), px(20.), px(10.), px(60.)),
+            offset
         );
     }
 }

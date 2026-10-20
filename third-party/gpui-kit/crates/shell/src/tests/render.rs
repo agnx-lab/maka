@@ -797,7 +797,7 @@ fn descriptor_drives_runtime_and_typescript(cx: &mut TestAppContext) {
         declarations
             .contains("import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";")
     );
-    assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement }"));
+    assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement; new: (id: string) => TestBoxElement }"));
     assert!(declarations.contains("tone(value: string): TestBoxElement;"));
     assert!(declarations.contains("A test component."));
     assert!(declarations.contains("Sets the visual tone."));
@@ -4058,6 +4058,115 @@ export default class Styled extends View {
         tree.contains(":active(.opacity"),
         "active not recorded: {tree}"
     );
+}
+
+#[gpui::test]
+fn bg_takes_a_background_and_shadow_takes_css_records(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+
+    let source = r##"
+import { View, div, Background } from "gpui-kit";
+
+const gold = Background.linear_gradient(180, Background.stop("#f7da74", 0), Background.stop("#fdcd12", 1));
+
+export default class Surface extends View {
+  render() {
+    return div()
+      .rounded(10)
+      .bg(gold)
+      .shadow([
+        { spread: 1, color: "#0d0d0f" },
+        { y: 1, color: "#ffffff10", inset: true },
+        { y: 1, blur: 2, color: "#00000066" },
+      ])
+      .hover((el) => el.bg(gold.opacity(0.8)).shadow([]));
+  }
+}
+"##;
+
+    let view_type = runtime.load_source("surface", source).expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let object = context
+        .update(|window, cx| runtime.instantiate(&view_type, window, cx))
+        .expect("instantiate");
+
+    let tree = context.update(|window, cx| {
+        runtime
+            .render_to_spec(&object, None, window, cx)
+            .expect("render")
+    });
+
+    assert!(
+        tree.contains(r##".bg[Background(BackgroundSpec { kind: LinearGradient { angle: 180.0, from: ("#f7da74", 0.0), to: ("#fdcd12", 1.0)"##),
+        "gradient not recorded: {tree}"
+    );
+    assert!(
+        tree.contains(r##"ShadowSpec { x: 0.0, y: 1.0, blur: 0.0, spread: 0.0, color: "#ffffff10", inset: true }"##),
+        "inset shadow not recorded: {tree}"
+    );
+    assert!(tree.contains(r##"color: "#00000066""##), "{tree}");
+    assert!(
+        tree.contains(":hover(.bg[Background("),
+        "hover bg not recorded: {tree}"
+    );
+    assert!(
+        tree.contains(".shadow[Shadows([])]"),
+        "hover shadow not recorded: {tree}"
+    );
+}
+
+#[gpui::test]
+fn structured_paint_arguments_fail_where_they_were_written(cx: &mut TestAppContext) {
+    for (body, expected) in [
+        (
+            r##"div().shadow({ y: 1, color: "#000" })"##,
+            "wrap a single one in [ ]",
+        ),
+        (
+            r##"div().shadow([{ offsetY: 1, color: "#000" }])"##,
+            "shadow 0: unknown field `offsetY`",
+        ),
+        (
+            r##"div().shadow([{ y: 1 }])"##,
+            "shadow 0: `color` is required",
+        ),
+        (
+            r##"div().shadow([{ blur: -2, color: "#000" }])"##,
+            "shadow 0: `blur` must be a finite, non-negative number",
+        ),
+        (
+            r##"div().shadow([{ color: "#000", inset: "yes" }])"##,
+            "`inset` must be a boolean",
+        ),
+        (
+            r##"div().shadow([{ color: "#000" }, { color: "black" }])"##,
+            "shadow 1: `black` is not a color value",
+        ),
+        (
+            r##"div().bg(Background.linear_gradient(90, "gold", "#000"))"##,
+            "`gold` is not a color value",
+        ),
+        (r##"div().p([4])"##, "`p` does not take an array"),
+        (
+            r##"div().border_color(Background.solid("#000"))"##,
+            "got a Background",
+        ),
+    ] {
+        let source = format!(
+            r#"
+import {{ View, div, Background }} from "gpui-kit";
+export default class Broken extends View {{
+  render() {{ return {body}; }}
+}}
+"#,
+        );
+        let message = render_error(cx, "broken.js", &source);
+        assert!(message.contains(expected), "`{body}`: {message}");
+    }
 }
 
 #[gpui::test]
@@ -8468,6 +8577,73 @@ export default class Surface extends View {
     );
 }
 
+/// A pinch reaches the element under it with GPUI's zoom delta and phase, so a
+/// script can zoom a viewport the way it would with the wheel.
+#[gpui::test]
+fn a_script_hears_a_pinch_over_its_element(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+
+export default class Map extends View {
+  init(_props, _cx) {
+    this.zoom = 1;
+    this.phase = "none";
+  }
+
+  render(_cx) {
+    return div()
+      .id("map")
+      .w(300)
+      .h(200)
+      .on_pinch((event, cx) => {
+        this.zoom *= 1 + event.delta;
+        this.phase = `${event.phase}@${event.local_position.x}`;
+        cx.notify();
+      })
+      .child(`zoom=${this.zoom.toFixed(2)} ${this.phase}`);
+  }
+}
+"#;
+    let view_type = runtime.load_source("pinch", source).expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("root view")
+        .read_with(&context, |root, _| root.0.clone());
+
+    context.simulate_event(gpui::PinchEvent {
+        position: point(px(40.), px(30.)),
+        delta: 0.5,
+        phase: gpui::TouchPhase::Moved,
+        ..Default::default()
+    });
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("zoom=1.50 moved@40"),
+        "a pinch must reach the handler with its delta, phase and local position: {tree}"
+    );
+}
+
 /// Input reaches base's own controls, not just a plain element.
 ///
 /// `Button.new("save").on_key_down(...)` is a reasonable thing to write and for
@@ -9844,6 +10020,32 @@ export default class Toolbar extends View {
     );
 }
 
+/// A thrown value that is not an Error has no message or stack of its own, so
+/// the report has to say what was thrown rather than dump the engine's value.
+#[gpui::test]
+fn a_thrown_non_error_value_is_reported_in_words(cx: &mut TestAppContext) {
+    for (thrown, expected) in [
+        ("null", "A script threw null instead of an Error."),
+        ("undefined", "A script threw undefined instead of an Error."),
+        (
+            "{ code: 7 }",
+            r#"A script threw {"code":7} instead of an Error."#,
+        ),
+        ("\"plain text\"", "plain text"),
+    ] {
+        let source = format!(
+            r#"
+import {{ View }} from "gpui-kit";
+export default class Thrower extends View {{
+  render() {{ throw {thrown}; }}
+}}
+"#,
+        );
+        let message = render_error(cx, "thrower.js", &source);
+        assert_eq!(message.lines().next(), Some(expected), "{message}");
+    }
+}
+
 /// Renders `source` once and returns the message it failed with.
 fn render_error(cx: &mut TestAppContext, name: &str, source: &str) -> String {
     cx.update(|cx| crate::init(cx));
@@ -10285,25 +10487,39 @@ fn a_virtual_lists_handlers_do_not_accumulate_while_it_is_scrolled(cx: &mut Test
     );
 }
 
+/// `row.on_click(...)` is the way anyone writes a clickable row, so a row may
+/// register its own handler. It lives in a callback generation of the batch
+/// that described it, released when the frame that drew the row is replaced —
+/// so scrolling, which describes new rows on every frame, holds the count to
+/// one screenful rather than letting it grow with every frame drawn.
 #[gpui::test]
-fn a_row_cannot_register_a_handler_of_its_own(cx: &mut TestAppContext) {
-    let (_runtime, _window, view, mut context) = mount_virtual_list(
+fn a_row_registers_its_own_handler_without_accumulating(cx: &mut TestAppContext) {
+    let (runtime, _window, view, mut context) = mount_virtual_list(
         cx,
-        "try { row.on_click(() => {}); } catch (error) { this.refused = String(error.message); }",
+        "const at = index; row.on_click((_event, cx) => { this.refused = `row${at}`; cx.notify(); });",
     );
 
+    context.simulate_click(point(px(150.), px(50.)), Modifiers::default());
+    context.update(|window, cx| window.draw(cx).clear(cx));
     let tree = redraw_and_read(&mut context, &view);
     assert!(
-        tree.contains("refused"),
-        "the view reports what the row was told: {tree}"
+        tree.contains("refused row2"),
+        "the click must reach the handler the third row registered: {tree}"
     );
-    let refused = tree
-        .split("refused ")
-        .nth(1)
-        .unwrap_or_else(|| panic!("no refusal in: {tree}"));
     assert!(
-        refused.contains("on_item_click"),
-        "the refusal must name what to use instead: {refused}"
+        tree.contains("clicked 2"),
+        "and the list's own on_item_click still fires: {tree}"
+    );
+
+    let settled = runtime.live_callbacks();
+    for step in 0..20 {
+        scroll_by(&mut context, if step % 2 == 0 { -60. } else { 40. });
+    }
+    let scrolled = runtime.live_callbacks();
+    assert!(
+        scrolled <= settled + 2,
+        "row handlers must be released with the frame that drew them: {settled} before \
+         scrolling, {scrolled} after"
     );
 }
 
@@ -11497,6 +11713,59 @@ fn a_list_reports_its_visible_range_however_it_changed(cx: &mut TestAppContext) 
         start > 5 && end - start == 10 && count == 101,
         "a jump on the scrollbar must be reported: {start}..{end} of {count}"
     );
+}
+
+/// Tail following and after-frame reports share the same retained list state.
+#[gpui::test]
+fn a_list_reports_its_visible_range_while_following_its_tail(cx: &mut TestAppContext) {
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").with_follow_mode(\"tail\").on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+    assert_eq!(reported_visible_range(&mut context, &view), (90, 100, 100));
+
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (91, 101, 101));
+
+    scroll_by(&mut context, 60.);
+    let reading = reported_visible_range(&mut context, &view);
+    assert!(reading.1 < reading.2, "scrolling up pauses following");
+    click_at(&mut context, 220.);
+    assert_eq!(
+        reported_visible_range(&mut context, &view),
+        (reading.0, reading.1, 102),
+    );
+
+    scroll_by(&mut context, -1000.);
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (93, 103, 103));
+}
+
+#[gpui::test]
+fn a_list_reports_only_items_visible_after_its_padding(cx: &mut TestAppContext) {
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").pt(20).on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+
+    // The tenth row starts exactly at the bottom, below the top padding.
+    assert_eq!(reported_visible_range(&mut context, &view), (0, 9, 100));
+    scroll_by(&mut context, -100.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 14, 100));
+
+    // A row that intersects the bottom edge must still be reported.
+    scroll_by(&mut context, -10.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 15, 100));
+
+    // GPUI paints no items when padding consumes the whole viewport.
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").pt(100).pb(100).on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+    assert_eq!(reported_visible_range(&mut context, &view), (0, 0, 100));
 }
 
 /// The case the report exists for: a chat that loads a page of older items

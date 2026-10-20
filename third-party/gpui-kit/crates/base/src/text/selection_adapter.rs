@@ -14,7 +14,10 @@ use gpui::{
     App, Bounds, EntityId, FocusHandle, Hitbox, HitboxId, Pixels, Point, WeakEntity, Window,
 };
 
-use super::TextViewState;
+use super::{
+    TextViewState, inline::InlineSelectionProjection,
+    inline_object::InlineObjectSelectionProjection, node::CustomBlockSelectionProjection,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CachedBlockEndpoint {
@@ -88,10 +91,12 @@ impl VirtualBlockSelection {
 
 struct InlineContribution {
     origin: Point<Pixels>,
+    translation: Point<Pixels>,
     // Unclipped original geometry; retained movement never accumulates here.
     text_bounds: Vec<Bounds<Pixels>>,
     run: Option<TextSelectionRun>,
     selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+    copy_projection: Option<CopyProjection>,
 }
 
 /// TextView's renderer-specific bridge to base-owned window selection.
@@ -106,6 +111,28 @@ pub(super) struct TextViewSelectionAdapter {
     /// frame, where the touch handles go.
     selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
     layout_revision: Option<usize>,
+}
+
+pub(super) enum CopyProjection {
+    Text(InlineSelectionProjection),
+    InlineObject(InlineObjectSelectionProjection),
+    CustomBlock(CustomBlockSelectionProjection),
+}
+
+impl CopyProjection {
+    fn reset(&self) {
+        if let Self::Text(projection) = self {
+            projection.reset();
+        }
+    }
+
+    fn project(&self, start: Point<Pixels>, end: Point<Pixels>) {
+        match self {
+            Self::Text(projection) => projection.project(start, end),
+            Self::InlineObject(projection) => projection.project(start, end),
+            Self::CustomBlock(projection) => projection.project(start, end),
+        }
+    }
 }
 
 impl TextViewSelectionAdapter {
@@ -174,11 +201,42 @@ impl TextViewSelectionAdapter {
                     return String::new();
                 };
                 let state = view.read(cx);
-                if !state.selectable {
+                if !state.selectable || !state.has_current_copy_document() {
                     return String::new();
                 }
+                // Read the handle itself: event subscribers may not have run
+                // yet when input and Copy arrive in the same App update.
+                let mut current = VirtualBlockSelection::default();
+                current.update(state.selection_adapter.selection.snapshot(cx), selection_id);
+                let previous = blocks_for_copy.borrow();
+                let range_changed = current.anchor != previous.anchor
+                    || current.cursor != previous.cursor
+                    || current.coverage != previous.coverage;
+                drop(previous);
+                // Gesture snapshots are current before paint. Refresh the rich
+                // document's byte ranges from its retained native layouts
+                // before its existing Plain/Source serializer reads them.
+                if !state.has_view_selection()
+                    && (!state.preserve_inline_selection || range_changed)
+                {
+                    if let Some((start, end)) = state.selection_points(cx) {
+                        // Only represented source states are refreshed.
+                        // Offscreen AST selections retain their logical ends.
+                        for report in state.selection_adapter.contributions.values() {
+                            if let Some(projection) = &report.copy_projection {
+                                projection.reset();
+                            }
+                        }
+                        for report in state.selection_adapter.contributions.values() {
+                            if let Some(projection) = &report.copy_projection {
+                                projection
+                                    .project(start - report.translation, end - report.translation);
+                            }
+                        }
+                    }
+                }
                 let last = state.parsed_content.document.blocks.len().saturating_sub(1);
-                let blocks = blocks_for_copy.borrow().block_range(selection_id, last);
+                let blocks = current.block_range(selection_id, last);
                 state.selected_text_in(blocks)
             },
             cx,
@@ -241,6 +299,12 @@ impl TextViewSelectionAdapter {
         self.selection.clone()
     }
 
+    pub(super) fn clear_copy_projections(&mut self) {
+        for report in self.contributions.values_mut() {
+            report.copy_projection = None;
+        }
+    }
+
     pub(super) fn admission(&self, cx: &App) -> std::sync::Weak<()> {
         self.selection.admission(cx)
     }
@@ -255,14 +319,17 @@ impl TextViewSelectionAdapter {
         text_bounds: Vec<Bounds<Pixels>>,
         run: Option<TextSelectionRun>,
         selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+        copy_projection: Option<CopyProjection>,
     ) {
         self.contributions.insert(
             hitbox.id,
             InlineContribution {
                 origin: hitbox.bounds.origin,
+                translation: Point::default(),
                 text_bounds,
                 run,
                 selection_edges,
+                copy_projection,
             },
         );
     }
@@ -275,11 +342,12 @@ impl TextViewSelectionAdapter {
         self.selection_edges = None;
         let mut live = HashSet::new();
         for (order, hitbox) in window.prepainted_hitboxes().iter().enumerate() {
-            let Some(report) = self.contributions.get(&hitbox.id) else {
+            let Some(report) = self.contributions.get_mut(&hitbox.id) else {
                 continue;
             };
             live.insert(hitbox.id);
             let delta = hitbox.bounds.origin - report.origin;
+            report.translation = delta;
             let mask = hitbox.content_mask.bounds;
             for bounds in &report.text_bounds {
                 let visible = Bounds::new(bounds.origin + delta, bounds.size).intersect(&mask);
@@ -362,5 +430,12 @@ impl TextViewSelectionAdapter {
     #[cfg(test)]
     pub(super) fn text_bounds(&self) -> Vec<Bounds<Pixels>> {
         self.text_bounds.clone()
+    }
+
+    #[cfg(test)]
+    pub(super) fn first_text_position(&self, index: usize) -> Point<Pixels> {
+        let layout = self.text_runs.first().unwrap().layout();
+        layout.position_for_index(index).unwrap()
+            + gpui::point(Pixels::ZERO, layout.line_height() / 2.)
     }
 }

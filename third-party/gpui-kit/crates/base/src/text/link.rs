@@ -35,6 +35,44 @@ use super::{
     state::{ParsedContent, TextViewState},
 };
 
+pub(super) type EditorLinkHandler =
+    dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
+
+/// Rendering has exactly one activation authority. A retired TextView never
+/// falls through to the external editor's default URL handling.
+#[derive(Clone, Default)]
+pub(crate) enum LinkSource {
+    #[default]
+    None,
+    TextView(WeakEntity<TextViewState>),
+    ExternalEditor(Option<Arc<EditorLinkHandler>>),
+}
+
+impl LinkSource {
+    pub(super) fn text_view(&self) -> Option<&WeakEntity<TextViewState>> {
+        match self {
+            Self::TextView(view) => Some(view),
+            Self::None | Self::ExternalEditor(_) => None,
+        }
+    }
+}
+
+pub(super) struct Fragment {
+    mark: LinkMark,
+    label: SharedString,
+    bounds: Bounds<Pixels>,
+}
+
+impl Fragment {
+    pub(super) fn new(mark: LinkMark, label: SharedString, bounds: Bounds<Pixels>) -> Self {
+        Self {
+            mark,
+            label,
+            bounds,
+        }
+    }
+}
+
 struct LinkOwner {
     mark: LinkMark,
     label: SharedString,
@@ -170,48 +208,132 @@ impl Links {
 }
 
 /// Per successful paragraph prepaint. It does not escape into document/window state.
-pub(super) type Fragments = Rc<std::cell::RefCell<Vec<(LinkOccurrence, Bounds<Pixels>)>>>;
+pub(super) type Fragments = Rc<std::cell::RefCell<Vec<Fragment>>>;
+
+#[derive(Clone)]
+enum Activation {
+    TextView {
+        view: WeakEntity<TextViewState>,
+        id: LinkOccurrence,
+        lease: Weak<()>,
+    },
+    ExternalEditor {
+        url: SharedString,
+        handler: Option<Arc<EditorLinkHandler>>,
+    },
+}
+
+impl Activation {
+    fn admitted(&self, cx: &App) -> bool {
+        match self {
+            Self::TextView { view, id, lease } => admitted(view, *id, lease, cx),
+            Self::ExternalEditor { .. } => true,
+        }
+    }
+
+    fn activate(&self, event: &ClickEvent, window: &mut Window, cx: &mut App) {
+        match self {
+            Self::TextView { view, id, lease } => activate(view, *id, lease, event, window, cx),
+            Self::ExternalEditor { url, handler } => {
+                if let Some(handler) = handler {
+                    handler(url, event, window, cx);
+                } else if activates(event) && !window.default_prevented() {
+                    cx.open_url(url);
+                }
+            }
+        }
+    }
+}
 
 pub(super) fn targets(
-    fragments: Vec<(LinkOccurrence, Bounds<Pixels>)>,
-    view: &Option<WeakEntity<TextViewState>>,
+    fragments: Vec<Fragment>,
+    source: &LinkSource,
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<AnyElement> {
-    let Some(view) = view.as_ref().and_then(WeakEntity::upgrade) else {
+    if matches!(source, LinkSource::None) {
         return Vec::new();
-    };
-    let mut groups: Vec<(LinkOccurrence, Vec<Bounds<Pixels>>)> = Vec::new();
-    for (id, bounds) in fragments {
+    }
+    let mut groups: Vec<(LinkMark, String, Vec<Bounds<Pixels>>)> = Vec::new();
+    for Fragment {
+        mark,
+        label,
+        bounds,
+    } in fragments
+    {
         if bounds.size.width <= Pixels::ZERO || bounds.size.height <= Pixels::ZERO {
             continue;
         }
-        if let Some((_, regions)) = groups.iter_mut().find(|(key, _)| *key == id) {
+        let Some(id) = mark.occurrence else { continue };
+        if let Some((_, text, regions)) = groups
+            .iter_mut()
+            .find(|(mark, _, _)| mark.occurrence == Some(id))
+        {
+            text.push_str(&label);
             regions.push(bounds);
         } else {
-            groups.push((id, vec![bounds]));
+            groups.push((mark, label.to_string(), vec![bounds]));
         }
     }
     let mut result = Vec::new();
-    for (id, regions) in groups {
-        let prepared = view.update(cx, |state, _| {
-            if !state.interaction_enabled || state.parsed_error.is_some() {
-                return None;
+    for (mark, label, regions) in groups {
+        let id = mark.occurrence.unwrap();
+        let (target_id, focus, activation, label, url, color) = match source {
+            LinkSource::None => unreachable!(),
+            LinkSource::TextView(weak) => {
+                let Some(view) = weak.upgrade() else { continue };
+                let prepared = view.update(cx, |state, _| {
+                    if !state.interaction_enabled || state.parsed_error.is_some() {
+                        return None;
+                    }
+                    let color = state.text_view_style.link();
+                    let owner = state.links.0.get_mut(&id)?;
+                    let lease = Rc::downgrade(owner.lease.get_or_insert_with(|| Rc::new(())));
+                    owner.focus = owner.focus.clone().tab_stop(true);
+                    Some((
+                        owner.focus.clone(),
+                        lease,
+                        owner.label.clone(),
+                        owner.mark.url.clone(),
+                        color,
+                    ))
+                });
+                let Some((focus, lease, label, url, color)) = prepared else {
+                    continue;
+                };
+                (
+                    SharedString::from(format!("link/{id:?}")),
+                    focus,
+                    Activation::TextView {
+                        view: weak.clone(),
+                        id,
+                        lease,
+                    },
+                    label,
+                    url,
+                    color,
+                )
             }
-            let color = state.text_view_style.link();
-            let owner = state.links.0.get_mut(&id)?;
-            let lease = Rc::downgrade(owner.lease.get_or_insert_with(|| Rc::new(())));
-            owner.focus = owner.focus.clone().tab_stop(true);
-            Some((
-                owner.focus.clone(),
-                lease,
-                owner.label.clone(),
-                owner.mark.url.clone(),
-                color,
-            ))
-        });
-        let Some((focus, lease, label, url, color)) = prepared else {
-            continue;
+            LinkSource::ExternalEditor(handler) => {
+                let target_id = SharedString::from(format!("editor-link/{id:?}/{}", mark.url));
+                let focus = window
+                    .use_keyed_state(target_id.clone(), cx, |_, cx| {
+                        cx.focus_handle().tab_stop(true)
+                    })
+                    .read(cx)
+                    .clone();
+                (
+                    target_id,
+                    focus,
+                    Activation::ExternalEditor {
+                        url: mark.url.clone(),
+                        handler: handler.clone(),
+                    },
+                    SharedString::from(label),
+                    mark.url,
+                    window.text_style().color,
+                )
+            }
         };
         let bounds = regions.iter().copied().reduce(|a, b| a.union(&b)).unwrap();
         let regions: Arc<[Bounds<Pixels>]> = regions
@@ -219,20 +341,14 @@ pub(super) fn targets(
             .map(|r| Bounds::new(r.origin - bounds.origin, r.size))
             .collect::<Vec<_>>()
             .into();
-        let weak = view.downgrade();
-        let mouse_view = weak.clone();
-        let mouse_lease = lease.clone();
-        let key_view = weak.clone();
-        let key_lease = lease.clone();
-        let click_view = weak.clone();
-        let click_lease = lease.clone();
-        let aux_view = weak.clone();
-        let aux_lease = lease.clone();
-        let focus_view = weak.clone();
-        let focus_lease = lease.clone();
+        let mouse_activation = activation.clone();
+        let key_activation = activation.clone();
+        let click_activation = activation.clone();
+        let aux_activation = activation.clone();
+        let focus_activation = activation.clone();
         let ax_focus = focus.clone();
         let element = div()
-            .id(SharedString::from(format!("link/{id:?}")))
+            .id(target_id)
             .w(bounds.size.width)
             .h(bounds.size.height)
             .hitbox_regions(regions.clone())
@@ -242,33 +358,27 @@ pub(super) fn targets(
             .aria_label(if label.is_empty() { url } else { label })
             .cursor_pointer()
             .on_a11y_action(gpui::accesskit::Action::Focus, move |_, window, cx| {
-                if admitted(&focus_view, id, &focus_lease, cx) {
+                if focus_activation.admitted(cx) {
                     window.focus(&ax_focus, cx);
                 }
             })
             .capture_any_mouse_down(move |_, window, cx| {
-                if !admitted(&mouse_view, id, &mouse_lease, cx) {
+                if !mouse_activation.admitted(cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 }
             })
             .capture_key_down(move |_, window, cx| {
-                if !admitted(&key_view, id, &key_lease, cx) {
+                if !key_activation.admitted(cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 }
             })
-            .on_click(move |event, window, cx| {
-                activate(&click_view, id, &click_lease, event, window, cx)
-            })
-            .on_aux_click(move |event, window, cx| {
-                activate(&aux_view, id, &aux_lease, event, window, cx)
-            });
+            .on_click(move |event, window, cx| click_activation.activate(event, window, cx))
+            .on_aux_click(move |event, window, cx| aux_activation.activate(event, window, cx));
         let mut target = LinkTarget {
             element,
-            view: weak,
-            id,
-            lease,
+            activation,
             focus,
             regions,
             color,
@@ -334,26 +444,27 @@ fn activate(
     if decision.stop_propagation {
         cx.stop_propagation();
     }
-    let activates = match event {
+    if activates(event) && !window.default_prevented() && admitted(view, id, lease, cx) {
+        crate::TextSelection::end(window, cx);
+        cx.open_url(&url);
+    }
+}
+
+fn activates(event: &ClickEvent) -> bool {
+    match event {
         ClickEvent::Mouse(click) => matches!(
             click.up.button,
             gpui::MouseButton::Left | gpui::MouseButton::Middle
         ),
         ClickEvent::Touch(click) => !click.long_press,
         ClickEvent::Keyboard(_) | ClickEvent::Accessibility(_) => true,
-    };
-    if activates && !window.default_prevented() && admitted(view, id, lease, cx) {
-        crate::TextSelection::end(window, cx);
-        cx.open_url(&url);
     }
 }
 
 /// Delegates all native stages; only records the weak locator of its actual Div state.
 struct LinkTarget {
     element: Stateful<Div>,
-    view: WeakEntity<TextViewState>,
-    id: LinkOccurrence,
-    lease: Weak<()>,
+    activation: Activation,
     focus: FocusHandle,
     regions: Arc<[Bounds<Pixels>]>,
     color: gpui::Hsla,
@@ -395,10 +506,12 @@ impl Element for LinkTarget {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let layout = self.element.request_layout(id, inspector, window, cx);
         let click = self.element.interactivity().click_handle(id, window);
-        if let Some(view) = self.view.upgrade() {
+        if let Activation::TextView { view, id, lease } = &self.activation
+            && let Some(view) = view.upgrade()
+        {
             view.update(cx, |state, _| {
-                if state.links.admits(self.id, &self.lease) {
-                    state.links.0.get_mut(&self.id).unwrap().click = click;
+                if state.links.admits(*id, lease) {
+                    state.links.0.get_mut(id).unwrap().click = click;
                 }
             });
         }
@@ -430,7 +543,7 @@ impl Element for LinkTarget {
             .paint(id, inspector, bounds, layout, prepaint, window, cx);
         if self.focus.is_focused(window)
             && window.last_input_was_keyboard()
-            && admitted(&self.view, self.id, &self.lease, cx)
+            && self.activation.admitted(cx)
         {
             for region in self.regions.iter() {
                 window.paint_quad(gpui::quad(
@@ -573,6 +686,174 @@ mod tests {
             prefer_character_input: false,
         });
         cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    }
+
+    #[gpui::test]
+    fn external_editor_links_use_native_fragments_and_their_explicit_source(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::text::editor_host::{FlowPosition, RenderContext};
+        use crate::text::node::{ImageNode, InlineNode, TextMark};
+
+        struct Host {
+            blocks: Vec<BlockNode>,
+            context: RenderContext,
+        }
+        impl Render for Host {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let blocks: Vec<_> = self.blocks.iter().collect();
+                div().w(px(180.)).children(
+                    blocks
+                        .iter()
+                        .enumerate()
+                        .map(|(ix, block)| {
+                            block.render_with_id(
+                                ix,
+                                FlowPosition::at(&blocks, ix, ix + 1 == blocks.len()),
+                                &self.context,
+                                window,
+                                cx,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<SharedString>::new()));
+        let mouse_positions = Arc::new(std::sync::Mutex::new(None));
+        let (host, cx) = cx.add_window_view({
+            let calls = calls.clone();
+            let mouse_positions = mouse_positions.clone();
+            move |_, cx| {
+                let text = "a hand-built code link wrapping across several native fragments";
+                let mut paragraph = Paragraph::default();
+                paragraph.push(InlineNode::new(text).marks(vec![(
+                    0..text.len(),
+                    TextMark::default().code().link(LinkMark {
+                        url: "https://external.test".into(),
+                        ..Default::default()
+                    }),
+                )]));
+                let mut image_and_text = Paragraph::default();
+                image_and_text.push(InlineNode::image(ImageNode {
+                    url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3C/svg%3E".into(),
+                    link: Some(LinkMark { url: "https://image.test".into(), ..Default::default() }),
+                    alt: Some("image".into()),
+                    width: Some(px(20.).into()),
+                    height: Some(px(20.).into()),
+                    ..Default::default()
+                }));
+                image_and_text.push(InlineNode::new("text").marks(vec![(
+                    0..4, TextMark::default().link(LinkMark { url: "https://external.test".into(), ..Default::default() }),
+                )]));
+                let blocks = vec![BlockNode::Paragraph(paragraph), BlockNode::Paragraph(image_and_text)];
+                Host {
+                    blocks,
+                    context: RenderContext::from_app(cx).on_link_click(move |url, event, _, _| {
+                        calls.lock().unwrap().push(url.clone());
+                        if let ClickEvent::Mouse(click) = event {
+                            *mouse_positions.lock().unwrap() =
+                                Some((click.down.position, click.up.position));
+                        }
+                    }),
+                }
+            }
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        enable_ax(cx);
+        let links = tree_links(cx);
+        assert_eq!(
+            links.len(),
+            3,
+            "hand-built image/text and same-URL occurrences remain distinct"
+        );
+        assert_eq!(
+            links[0].1.label(),
+            Some("a hand-built code link wrapping across several native fragments")
+        );
+        let rect = links[0].1.bounds().unwrap();
+        let scale = cx.update(|window, _| window.scale_factor());
+        assert!(
+            rect.height() / scale as f64 > 40.,
+            "the first link must actually wrap"
+        );
+        let first = position(&links[0].1, cx);
+        let last = point(first.x, px(rect.y1 as f32 / scale - 5.));
+        cx.simulate_mouse_down(first, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(last, MouseButton::Left, Modifiers::default());
+        assert_eq!(*mouse_positions.lock().unwrap(), Some((first, last)));
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            1,
+            "one cross-fragment native click"
+        );
+        ax(cx, links[0].0, gpui::accesskit::Action::Focus);
+        key(cx, "enter");
+        ax(cx, links[0].0, gpui::accesskit::Action::Click);
+        assert_eq!(calls.lock().unwrap().len(), 3);
+        assert_eq!(
+            cx.opened_url(),
+            None,
+            "a host handler replaces default opening"
+        );
+
+        ax(cx, links[1].0, gpui::accesskit::Action::Click);
+        ax(cx, links[2].0, gpui::accesskit::Action::Click);
+        assert_eq!(
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(AsRef::<str>::as_ref)
+                .collect::<Vec<_>>(),
+            [
+                "https://external.test",
+                "https://external.test",
+                "https://external.test",
+                "https://image.test",
+                "https://external.test",
+            ]
+        );
+
+        host.update(cx, |host, cx| {
+            host.context = RenderContext::new(host.context.style().clone());
+            host.blocks = crate::text::editor_host::parse_markdown(
+                "[default](https://default.test)",
+                Default::default(),
+            )
+            .unwrap();
+            cx.notify();
+        });
+        draw(cx);
+        let default_link = tree_links(cx)[0].0;
+        ax(cx, default_link, gpui::accesskit::Action::Click);
+        assert_eq!(cx.opened_url().as_deref(), Some("https://default.test"));
+        assert_eq!(calls.lock().unwrap().len(), 5);
+
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| TextViewState::markdown("retired", cx));
+            let retired = state.downgrade();
+            drop(state);
+            for source in [LinkSource::None, LinkSource::TextView(retired)] {
+                let mark = LinkMark {
+                    occurrence: Some(LinkOccurrence::ExternalEditor {
+                        start: 0,
+                        ordinal: 0,
+                    }),
+                    url: "https://must-not-open.test".into(),
+                    ..Default::default()
+                };
+                let fragment = Fragment::new(
+                    mark,
+                    "retired".into(),
+                    Bounds::new(point(px(0.), px(0.)), size(px(50.), px(20.))),
+                );
+                assert!(targets(vec![fragment], &source, window, cx).is_empty());
+            }
+        });
     }
 
     #[gpui::test]
