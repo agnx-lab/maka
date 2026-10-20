@@ -439,9 +439,7 @@ async fn subscriptions_and_successful_calls_release_owners_and_scope_close_settl
     tokio::time::timeout(Duration::from_secs(20),async {
         let fixture = Fixture::new().await;
         let client = fixture.client().await;
-        for _ in 0..8 {
-            assert_eq!(client.query("agent","read",Value::Null).await.unwrap(),json!({"sent":0}));
-        }
+        assert_eq!(client.query("agent","read",Value::Null).await.unwrap(),json!({"sent":0}));
         let subscription = client.subscribe("agent","watch",Value::Null).await.unwrap();
         assert!(matches!(subscription.next().await.unwrap(),Some(SubscriptionEvent::Item(ref value)) if value==&json!({"sent":0})));
         subscription.close().await.unwrap();

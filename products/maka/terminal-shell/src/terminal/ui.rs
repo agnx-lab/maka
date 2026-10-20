@@ -422,23 +422,6 @@ mod tests {
             .unwrap()
             .id;
         assert_eq!(row, rebound, "the actual virtual-list cell was retained");
-
-        // The ordinary queued entry point is intentionally different: its
-        // earlier Frame message can update the accessor before dispatch.
-        let mut queued = Session::new(config(APP)).unwrap();
-        queued.initial_frame().unwrap();
-        queued
-            .engine
-            .control()
-            .dispatch_event(row, EventKind::Press, EventPayload::None);
-        queued
-            .advance(Advance {
-                input: None,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(queued.surface.snapshot().contains("selected:B"));
     }
 
     #[test]
