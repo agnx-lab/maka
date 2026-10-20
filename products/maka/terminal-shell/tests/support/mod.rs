@@ -27,7 +27,7 @@ use maka_host_runtime::{
     application::{
         NativeRegistry,
         host::{Client as HostClient, Host, discovery::Registration},
-        transport::{Grant, HostEndpoint, wire},
+        transport::{Grant, HostEndpoint, NativeGrant, wire},
     },
     ipc::{self, LocalListener},
 };
@@ -146,7 +146,7 @@ impl Fixture {
             maka_workspace_api::files::IMPLEMENTATION,
             empty.clone(),
             json!({}),
-            json!({"Files":{"contract":files_contract,"availability":"required"}}),
+            json!({"files":{"contract":files_contract,"availability":"required"}}),
         );
         let settings = package(
             "test.nsh.settings",
@@ -181,7 +181,7 @@ impl Fixture {
         };
         let deployment = Uuid::new_v4();
         let mut plan = json!({"environment":{"location":"host"},"instances":{
-            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":if images { json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}]) } else { json!([]) },"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), if images { json!({"files":[{"kind":"instance","path":["files"],"export":"Files"}]}) } else { json!({}) }),
+            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":if images { json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}]) } else { json!([]) },"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), if images { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
             "settings":node(&settings, 2, json!({}), json!({})),
             "receipts":node(&receipts, 3, json!({}), json!({})),
             "gateway":node(&gateway, 4, json!({}), json!({
@@ -252,7 +252,18 @@ impl Fixture {
                 ),
                 ("receipts".into(), endpoint("receipts", &["read"], true)),
             ]),
-            vec![],
+            if images {
+                vec![NativeGrant {
+                    origin: InstanceId(vec![Uuid::from_u128(1)]),
+                    consumer: InstanceId(vec![Uuid::from_u128(1)]),
+                    provider: InstanceId(vec![Uuid::from_u128(5)]),
+                    export: maka_workspace_api::files::EXPORT.into(),
+                    methods: ["readImage".into()].into_iter().collect(),
+                    recovery: false,
+                }]
+            } else {
+                vec![]
+            },
         )
         .await
         .unwrap();

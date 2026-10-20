@@ -147,6 +147,12 @@ function ActivityLog(props: {
                     sessionId={props.sessionId}
                     through={props.through}
                     previewImage={props.previewImage}
+                    onExpand={(key) => {
+                      if (!alive || !ownList) return;
+                      const index = rowKeys().indexOf(key);
+                      if (index >= 0)
+                        ownList.scrollToIndex({ index, viewPosition: 0, animated: false });
+                    }}
                   />
                 );
               }}

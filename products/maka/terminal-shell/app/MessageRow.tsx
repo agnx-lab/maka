@@ -247,12 +247,14 @@ export function MessageRow({
   through,
   viewState,
   previewImage,
+  onExpand,
 }: {
   item: () => Row;
   sessionId: string;
   through: () => number;
   viewState?: MessageViewState;
   previewImage(image: ImagePreview): void;
+  onExpand?(key: string): void;
 }) {
   return (
     <Each of={[item()]} key={messageKey}>
@@ -266,7 +268,9 @@ export function MessageRow({
           if (ownsRow(action)) sourceMode.set(action.value);
         };
         const setExpanded = (action: MessageRowToggle) => {
-          if (ownsRow(action)) expanded.set(action.value);
+          if (!ownsRow(action)) return;
+          expanded.set(action.value);
+          if (action.value) onExpand?.(action.key);
         };
         const text = computed(() => row().text);
         const blocks = computed(() =>

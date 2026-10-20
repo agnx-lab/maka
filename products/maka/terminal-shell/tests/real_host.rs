@@ -329,7 +329,7 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let mut request = fixture.next_request().await;
         let image_url = request.body["messages"].as_array().unwrap().iter()
             .filter_map(|message| message["content"].as_array()).flatten()
-            .find(|part| part["type"] == "image_url").unwrap()["image_url"]["url"].as_str().unwrap();
+            .find(|part| part["type"] == "image_url").unwrap_or_else(|| panic!("missing actual image in model request: {}", request.body["messages"]))["image_url"]["url"].as_str().unwrap();
         assert_eq!(STANDARD.decode(image_url.strip_prefix("data:image/png;base64,").unwrap()).unwrap(), bytes);
         // The live Read tool has settled. Neither viewer may reopen its original file.
         std::fs::write(&path, b"the workspace image was replaced").unwrap();

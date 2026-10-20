@@ -64,6 +64,8 @@ Earlier messages load automatically as you scroll up, preserving your reading po
 
 **Todo** displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 
+Expand a tool result containing an image to see its thumbnail, then activate **Open image** for a larger preview. Escape or **Close** returns to the conversation and restores focus without stopping the run. Both views use the original image retained by the Host, even if its workspace file changes. Images currently render as colored Unicode half blocks; unsupported image formats show an error in the result.
+
 Open a pending request to review its original details:
 
 - Tool approval supports **Allow** or **Deny** for that call. Read all original arguments before allowing.
