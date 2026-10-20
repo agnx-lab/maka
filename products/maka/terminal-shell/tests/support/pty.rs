@@ -31,19 +31,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[path = "../../../cli/tests/integration/terminal/frames.rs"]
-mod frames;
-
 /// The production binary owns this actual terminal; Screen only interprets its ANSI.
 pub struct Pty {
     child: Child,
     master: File,
-    slave: File,
+    // Retain the slave while draining output after the child exits.
+    _slave: File,
     original: libc::termios,
     screen: Screen,
     pending: Vec<u8>,
     output: Vec<u8>,
-    frames: frames::Frames,
 }
 
 impl Pty {
@@ -105,12 +102,11 @@ impl Pty {
         Self {
             child,
             master,
-            slave,
+            _slave: slave,
             original,
             screen: Screen::new(TerminalSize::new(120, 40).unwrap()),
             pending: vec![],
             output: vec![],
-            frames: frames::Frames::default(),
         }
     }
     pub fn send(&mut self, bytes: &[u8]) {
@@ -121,8 +117,8 @@ impl Pty {
     }
     pub fn click_text(&mut self, label: &str) {
         assert!(
-            self.frames.ready(),
-            "PTY click on {label:?} preceded a complete synchronized frame"
+            completed_presentation(&self.output),
+            "cannot locate a physical click in an incomplete synchronized frame"
         );
         let screen = self.snapshot();
         let (row, line) = screen
@@ -158,7 +154,6 @@ impl Pty {
         }
         let mut bytes = [0; 8192];
         let length = self.master.read(&mut bytes).unwrap();
-        self.frames.feed(&bytes[..length]);
         self.output.extend_from_slice(&bytes[..length]);
         self.pending.extend_from_slice(&bytes[..length]);
         let end = match std::str::from_utf8(&self.pending) {
@@ -180,7 +175,7 @@ impl Pty {
         loop {
             self.read();
             let screen = self.screen.text_preview(128 * 1024).screen;
-            if self.frames.ready() && screen.contains(expected) {
+            if completed_presentation(&self.output) && screen.contains(expected) {
                 return screen;
             }
             assert!(
@@ -219,8 +214,10 @@ impl Pty {
             "production binary left the alternate screen active"
         );
         let mut current = unsafe { std::mem::zeroed::<libc::termios>() };
+        // The child session's hangup makes the slave's terminal attributes
+        // unavailable on macOS. The master retains the actual terminal state.
         assert_eq!(
-            unsafe { libc::tcgetattr(self.slave.as_raw_fd(), &mut current) },
+            unsafe { libc::tcgetattr(self.master.as_raw_fd(), &mut current) },
             0
         );
         assert_eq!(
@@ -251,4 +248,42 @@ impl Drop for Pty {
             let _ = self.child.wait();
         }
     }
+}
+
+// Screen persists parser state without a renderer and deliberately flushes
+// synchronized updates at parser cuts. A physical terminal instead presents
+// the frame at its closing marker; text from a partial PTY read is not ready
+// for coordinate-based input.
+fn completed_presentation(output: &[u8]) -> bool {
+    const BEGIN: &[u8] = b"\x1b[?2026h";
+    const END: &[u8] = b"\x1b[?2026l";
+    let begin = output
+        .windows(BEGIN.len())
+        .rposition(|bytes| bytes == BEGIN);
+    let end = output.windows(END.len()).rposition(|bytes| bytes == END);
+    matches!((begin, end), (Some(begin), Some(end)) if end > begin)
+        && !(1..BEGIN.len()).any(|length| output.ends_with(&BEGIN[..length]))
+}
+
+#[test]
+fn physical_input_waits_for_a_complete_synchronized_presentation() {
+    let first = b"\x1b[?2026hClose\x1b[?2026l";
+    for cut in 0..first.len() {
+        assert!(!completed_presentation(&first[..cut]), "first cut {cut}");
+    }
+    assert!(completed_presentation(first));
+
+    let mut output = first.to_vec();
+    let second = "\x1b[?2026h关闭 · Esc\x1b[?2026l".as_bytes();
+    for (index, byte) in second.iter().enumerate() {
+        output.push(*byte);
+        assert_eq!(
+            completed_presentation(&output),
+            index + 1 == second.len(),
+            "second cut {}",
+            index + 1
+        );
+    }
+    output.extend_from_slice(b"\x1b[?25h");
+    assert!(completed_presentation(&output));
 }

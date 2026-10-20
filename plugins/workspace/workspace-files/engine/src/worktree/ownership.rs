@@ -85,7 +85,6 @@ pub(super) fn verify(directory: &Path, binding: &Binding) -> io::Result<()> {
     let dir = Dir::open_ambient_dir(directory, ambient_authority())?;
     let mut bytes = Vec::new();
     dir.open_with(OWNER, options().read(true))?
-        .take(16 * 1024 + 1)
         .read_to_end(&mut bytes)?;
     let owner: Binding = serde_json::from_slice(&bytes)?;
     if owner != *binding {

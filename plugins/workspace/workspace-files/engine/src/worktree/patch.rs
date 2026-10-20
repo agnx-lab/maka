@@ -29,8 +29,6 @@ use std::{
 };
 
 use crate::git::image::{self as format, Image};
-const LIMIT: usize = 50 * 1024 * 1024;
-const MAX_PATHS: usize = 100_000;
 
 pub(super) fn capture(binding: &Binding, cancel: Arc<AtomicBool>) -> io::Result<Vec<u8>> {
     let repo = git::discover(&binding.directory)?;
@@ -81,23 +79,14 @@ pub(super) fn capture(binding: &Binding, cancel: Arc<AtomicBool>) -> io::Result<
         {
             present.insert(entry.rela_path.to_vec());
         }
-        if present.len() > MAX_PATHS {
-            return Err(invalid("worktree contains too many paths"));
-        }
     }
     let paths: BTreeSet<_> = old.keys().chain(present.iter()).cloned().collect();
-    if paths.len() > MAX_PATHS {
-        return Err(invalid("worktree contains too many paths"));
-    }
     let mut patch = Vec::new();
     for name in paths {
         interrupted(&cancel)?;
         let before = old
             .get(&name)
-            .map(|entry| {
-                if repo.find_header(entry.id).map_err(io::Error::other)?.size() > LIMIT as u64 {
-                    return Err(invalid("worktree blob exceeds 50 MiB"));
-                }
+            .map(|entry| -> io::Result<_> {
                 let object = repo.find_object(entry.id).map_err(io::Error::other)?;
                 Ok(Image {
                     mode: entry.mode.bits(),
@@ -126,11 +115,6 @@ pub(super) fn capture(binding: &Binding, cancel: Arc<AtomicBool>) -> io::Result<
             after.as_ref(),
             repo.object_hash(),
         )?;
-        if patch.len() > LIMIT {
-            return Err(invalid(
-                "worktree patch exceeds 50 MiB; no partial patch published",
-            ));
-        }
     }
     interrupted(&cancel)?;
     if repo.head_id().map_err(io::Error::other)? != head_before
@@ -185,25 +169,18 @@ fn read_image(
     if !meta.is_file() {
         return Err(invalid("worktree contains a special file"));
     }
-    if meta.len() > LIMIT as u64 {
-        return Err(invalid("worktree file exceeds 50 MiB"));
-    }
     let directory = cap_std::fs::Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
-    let file = directory.open_with(relative, crate::workspace::options().read(true))?;
+    let mut file = directory.open_with(relative, crate::workspace::options().read(true))?;
     let mut bytes = Vec::new();
     let symlink_file = indexed == Some(Mode::SYMLINK)
         && repo.config_snapshot().boolean("core.symlinks") == Some(false);
     if symlink_file {
-        file.take(LIMIT as u64 + 1).read_to_end(&mut bytes)?;
+        file.read_to_end(&mut bytes)?;
     } else {
         filters
             .convert_to_git(file, relative, index)
             .map_err(io::Error::other)?
-            .take(LIMIT as u64 + 1)
             .read_to_end(&mut bytes)?;
-    }
-    if bytes.len() > LIMIT {
-        return Err(invalid("filtered worktree file exceeds 50 MiB"));
     }
     let mut mode = indexed.unwrap_or(Mode::FILE);
     if !symlink_file {
