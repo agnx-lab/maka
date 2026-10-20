@@ -270,12 +270,16 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         support::evidence_cells("activity-mouse-wheel", &view);
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-        wait_view(&mut view, &at_source_start).await;
+        // Alt+Down explicitly reveals the group. Freeze its settled pose before
+        // streaming; the earlier mouse-wheel assertions retain their own anchor.
+        let cadence_source_top = wait_view(&mut view, &at_source_start).await;
+        let cadence_header_row = cadence_source_top.lines().position(|line| line.contains("Analyzing the request")).expect("the navigated activity header must be visible above its source");
+        let cadence_source_row = cadence_source_top.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")).expect("the navigated original source must be visible");
 
         // Rapid paragraphs must update during the stream, at a bounded cadence,
         // while the expanded source and its reader anchor stay put.
         let cadence = std::time::Instant::now();
-        let mut titles = vec![(Duration::ZERO, source_top.lines().nth(header_row).unwrap().trim().to_owned())];
+        let mut titles = vec![(Duration::ZERO, cadence_source_top.lines().nth(cadence_header_row).unwrap().trim().to_owned())];
         let mut paragraph = 0;
         while cadence.elapsed() < Duration::from_millis(650) {
             paragraph += 1;
@@ -285,7 +289,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 support::tick(&mut view);
                 let screen = view.snapshot();
                 assert!(at_source_start(&screen), "a title update moved the source reader:\n{screen}");
-                let title = screen.lines().nth(header_row).unwrap().trim().to_owned();
+                assert_eq!(screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row), "a title update moved the original source row:\n{screen}");
+                let title = screen.lines().nth(cadence_header_row).unwrap().trim().to_owned();
                 assert!(title.contains("Analyzing the request"), "the fixed activity header moved:\n{screen}");
                 if title != titles.last().unwrap().1 {
                     titles.push((cadence.elapsed(), title));
@@ -295,8 +300,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         }
         assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}");
         let latest = format!("TITLE_{paragraph:02} 规划 e\u{301}");
-        let settled_title = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(header_row).is_some_and(|line| line.contains(&latest))).await;
-        let last = settled_title.lines().nth(header_row).unwrap().trim().to_owned();
+        let settled_title = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(cadence_header_row).is_some_and(|line| line.contains(&latest))).await;
+        let last = settled_title.lines().nth(cadence_header_row).unwrap().trim().to_owned();
         assert!(last.ends_with('…') && !last.ends_with("e…"), "the long title must ellipsize without splitting a combining grapheme: {last}");
         if last != titles.last().unwrap().1 {
             titles.push((cadence.elapsed(), last));
@@ -326,7 +331,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // A reply closes only this contiguous process segment. The same native
         // source reader stays at its original row while later work gets a group.
         let cut = wait_view(&mut view, |screen| at_source_start(screen) && screen.contains("1 thought") && screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
-        assert_eq!(cut.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(source_row));
+        assert_eq!(cut.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row));
         evidence("intermediate-response-cuts-process-group", &cut);
         support::evidence_cells("intermediate-response-cuts-process-group", &view);
         request.tool_prefix("todo_write", prefix).await;
