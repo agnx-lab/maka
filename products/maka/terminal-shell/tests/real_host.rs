@@ -207,11 +207,11 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("NSH user send, exactly once")));
         let thinking = std::iter::once("NATIVE_THINK_SOURCE_FIRST".to_owned())
             .chain((1..63).map(|index| format!("NATIVE_THINK_SOURCE_{index:02}")))
-            .chain(["NATIVE_THINK_SOURCE_LAST".to_owned(), "NATIVE_ACTIVITY_HEADER_TAIL_INITIAL".to_owned()])
+            .chain(["NATIVE_THINK_SOURCE_LAST".to_owned(), "\nNATIVE_ACTIVITY_HEADER_TAIL_INITIAL".to_owned()])
             .collect::<Vec<_>>()
             .join("\n");
         request.thinking(&thinking).await;
-        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST")).await;
+        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL")).await;
         support::click_text(&mut view, "◇ Think · NATIVE_THINK_SOURCE_FIRST");
         // Either end of the actual expanded source must paint before keyboard scrolling.
         wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_01") || screen.contains("NATIVE_THINK_SOURCE_62")).await;
@@ -243,7 +243,42 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         wait_view(&mut view, &at_source_start).await;
 
-        request.thinking("\nNATIVE_ACTIVITY_HEADER_TAIL_APPENDED").await;
+        // Rapid paragraphs must update during the stream, at a bounded cadence,
+        // while the expanded source and its reader anchor stay put.
+        let cadence = std::time::Instant::now();
+        let mut titles = vec![(Duration::ZERO, source_top.lines().nth(header_row).unwrap().trim().to_owned())];
+        let mut paragraph = 0;
+        while cadence.elapsed() < Duration::from_millis(650) {
+            paragraph += 1;
+            request.thinking(&format!("\n\nTITLE_{paragraph:02} 规划 e\u{301} {}", "界e\u{301}".repeat(48))).await;
+            for _ in 0..4 {
+                view.poll().unwrap();
+                view.tick(cadence.elapsed().as_secs_f64()).unwrap();
+                let screen = view.snapshot();
+                assert!(at_source_start(&screen), "a title update moved the source reader:\n{screen}");
+                let title = screen.lines().nth(header_row).unwrap().trim().to_owned();
+                assert!(title.contains("Analyzing the request"), "the fixed activity header moved:\n{screen}");
+                if title != titles.last().unwrap().1 {
+                    titles.push((cadence.elapsed(), title));
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+        assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}");
+        let latest = format!("TITLE_{paragraph:02} 规划 e\u{301}");
+        let settled_title = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(header_row).is_some_and(|line| line.contains(&latest))).await;
+        let last = settled_title.lines().nth(header_row).unwrap().trim().to_owned();
+        assert!(last.ends_with('…') && !last.ends_with("e…"), "the long title must ellipsize without splitting a combining grapheme: {last}");
+        if last != titles.last().unwrap().1 {
+            titles.push((cadence.elapsed(), last));
+        }
+        // An interval-wide bound avoids confusing poll scheduling with the JS
+        // presentation timestamp, while still catching a title for every delta.
+        assert!(titles.len() <= cadence.elapsed().as_millis() as usize / 150 + 2, "the header changed faster than its minimum lifetime: {titles:?}");
+        evidence("activity-title-cadence", &titles.iter().map(|(at, title)| format!("{}ms {title}", at.as_millis())).collect::<Vec<_>>().join("\n"));
+        support::evidence_cells("activity-title-unicode", &view);
+
+        request.thinking("\n\nNATIVE_ACTIVITY_HEADER_TAIL_APPENDED").await;
         let anchored = wait_view(&mut view, |screen| at_source_start(screen) && screen.matches("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED").count() == 1).await;
         evidence("activity-append-keeps-source-top", &anchored);
         support::evidence_cells("activity-append-keeps-source-top", &view);
@@ -257,6 +292,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         request.tool("todo_write", json!({"todos":todos.clone()})).await;
         // A real tool result causes exactly one additional model HTTP request.
         let mut request = fixture.next_request().await;
+        wait_view(&mut view, |screen| screen.contains("⌃ Working…") && !screen.contains("Running tool")).await;
         let tool_result = request.body["messages"].as_array().unwrap().iter().find(|message| message["role"] == "tool" && message["tool_call_id"] == "nsh-native-todo-call").unwrap();
         assert_eq!(tool_result["content"], "1. [completed] \"NATIVE_TODO_DONE\"\n2. [in_progress] \"NATIVE_TODO_ACTIVE\"\n3. [pending] \"NATIVE_TODO_PENDING\"");
         let checklist = client.query("agent", "checklist", json!({"sessionId":fixture.session,"offset":0})).await.unwrap();
@@ -276,7 +312,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         support::evidence_cells("real-tool-and-checklist", &view);
 
         request.delta("REAL_PROVIDER_STREAM_VISIBLE").await;
-        let streaming = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE")).await;
+        let streaming = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE") && screen.contains("Writing response")).await;
         evidence("streaming", &streaming);
         request.delta(" and committed.").await;
         request.finish().await;
