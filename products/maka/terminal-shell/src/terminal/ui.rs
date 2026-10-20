@@ -124,7 +124,7 @@ struct Session {
 }
 
 impl Session {
-    fn new(config: EngineConfig) -> Result<Self, String> {
+    fn new(mut config: EngineConfig) -> Result<Self, String> {
         let metrics = CellMetrics::default();
         let columns = (config.viewport.width / metrics.width()).round() as u16;
         let rows = (config.viewport.height / metrics.height()).round() as u16;
@@ -136,6 +136,10 @@ impl Session {
         };
         surface.set_access(access);
         surface.set_host_services_enabled(true);
+        let assets = config
+            .assets
+            .get_or_insert_with(|| Arc::new(crate::ApplicationAssets));
+        surface.set_assets(Some(assets.clone()));
         let sink = Sink::default();
         let engine = LocalEngine::start(config, TerminalTextEngine::new(metrics), sink.clone())
             .ok_or("NSH UI engine failed to start")?;
@@ -452,6 +456,65 @@ mod tests {
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
         config
+    }
+
+    #[test]
+    fn packaged_images_load_and_paint_through_the_production_session() {
+        use nsh_engine::Assets as _;
+
+        assert_eq!(
+            crate::ApplicationAssets.read("asset:/missing.png"),
+            Err("Unknown bundled asset: asset:/missing.png".into())
+        );
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, insert, append } from "nsh:rt";
+            const status = signal("loading");
+            mount(() => {
+                const root = element("view");
+                const image = element("image");
+                prop(image, "src", "asset:/assets/maka.png");
+                prop(image, "style", { width: 64, height: 64, flexShrink: 0 });
+                prop(image, "onLoad", e => status.set("loaded:" + e.width + "x" + e.height));
+                prop(image, "onError", e => status.set("failed:" + e.message));
+                const label = element("text");
+                insert(label, () => status());
+                append(root, image);
+                append(root, label);
+                return root;
+            });
+        "#,
+        ))
+        .unwrap();
+        let mut bytes = session.initial_frame().unwrap().bytes.unwrap_or_default();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let frame = session
+                .advance(Advance {
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            bytes.extend(frame.bytes.unwrap_or_default());
+            let screen = session.surface.snapshot();
+            assert!(!screen.contains("failed:"), "{screen}");
+            if screen.contains("loaded:1024x1024") {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "packaged image did not load:\n{screen}"
+            );
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(
+            bytes
+                .windows("▀".len())
+                .any(|bytes| bytes == "▀".as_bytes()),
+            "the real output frame must paint the image's Unicode fallback"
+        );
     }
 
     const APP: &str = r#"

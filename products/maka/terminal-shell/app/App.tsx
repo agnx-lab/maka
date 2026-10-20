@@ -18,6 +18,7 @@
  */
 
 import { cleanup, effect, mount, signal, Text, View } from 'nsh';
+import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
@@ -28,6 +29,7 @@ import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
 import type { PaletteEntry, PaletteKind } from './Palette';
 import { InteractionPanel } from './InteractionPanel';
+import logo from './assets/maka.png';
 
 type Overlay =
   | { kind: PaletteKind; sessionId: string | null }
@@ -43,6 +45,13 @@ function App() {
   const controls = signal<any[]>([]);
   const controlsKnown = signal(false);
   const recovering = signal(false);
+  const showHomeLogo = () => windowSize().height >= 336;
+  const homeRecentLimit = () => {
+    // Header, padding, controls and gaps take 16 rows; the logo adds five.
+    // Each recent entry takes two text rows and its following gap.
+    const available = Math.floor(windowSize().height / 16) - (showHomeLogo() ? 21 : 16);
+    return Math.max(0, Math.min(5, Math.floor(available / 3)));
+  };
   let handle: ConversationHandle | null = null;
   let alive = true;
   let controlRead = 0;
@@ -285,18 +294,19 @@ function App() {
               justifyContent: 'center',
             }}
           >
+            <If when={showHomeLogo()}>
+              <Image
+                src={logo}
+                resizeMode="contain"
+                style={{ width: 64, height: 64, flexShrink: 0 }}
+              />
+            </If>
             <Text style={{ color: C.accent, fontWeight: '700' }}>Make something remarkable.</Text>
             <Text style={{ color: C.muted }}>A quiet place for ambitious work.</Text>
             <Button onPress={newConversation} style={{ paddingVertical: 16 }}>
               <Text style={{ color: C.text }}>+ New conversation · Ctrl+N</Text>
             </Button>
-            <Each
-              of={recent().slice(
-                0,
-                Math.max(1, Math.min(5, Math.floor(windowSize().height / 16) - 18)),
-              )}
-              key={(session) => session.id}
-            >
+            <Each of={recent().slice(0, homeRecentLimit())} key={(session) => session.id}>
               {(session) => (
                 <Button
                   disabled={switching()}

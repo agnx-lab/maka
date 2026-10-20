@@ -31,4 +31,20 @@ fn main() {
     .expect("bundle terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
     std::fs::write(output.join("app.js"), module.code).expect("write terminal application");
+    let app = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("package directory"),
+    )
+    .join("app");
+    let mut assets = String::from("&[\n");
+    for path in module.assets {
+        let source = app.join(&path);
+        println!("cargo:rerun-if-changed={}", source.display());
+        assets.push_str(&format!(
+            "({:?}, include_bytes!({:?}).as_slice()),\n",
+            format!("asset:/{}", path.to_string_lossy().replace('\\', "/")),
+            source,
+        ));
+    }
+    assets.push_str("]\n");
+    std::fs::write(output.join("assets.rs"), assets).expect("write terminal assets");
 }
