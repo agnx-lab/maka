@@ -52,8 +52,7 @@ import {
 import {
   LANGUAGE_CHOICES,
   LANGUAGE_NAMES,
-  languagePreference,
-  setLanguagePreference,
+  applyLanguage,
   onLanguageChange,
   t,
   tn,
@@ -95,6 +94,8 @@ export class Settings {
     this.open = false;
     /** The page shown: "general", "models", "connections", "subagents" or "archived". */
     this.page = 'general';
+    /** The Host's confirmed assistant preferences, including their shared revision. */
+    this.preferences = null;
     /** The connection catalog's revision, which every catalog change names. */
     this.revision = null;
     this.defaultTarget = null;
@@ -175,7 +176,7 @@ export class Settings {
     this.error = null;
     this.hooks.changed();
     try {
-      await this.loadConnections();
+      await Promise.all([this.loadPreferences(), this.loadConnections()]);
       await Promise.all([this.loadStatuses(), this.loadDescriptors(), this.loadModels()]);
     } catch (error) {
       this.fail(t('settingsFailed', { value: error.message }));
@@ -183,6 +184,38 @@ export class Settings {
       this.loading = false;
       this.hooks.changed();
     }
+  }
+
+  async loadPreferences() {
+    const snapshot = await query('settings', 'assistantPreferences', {});
+    // A delayed startup/open read must not undo a newer confirmed save.
+    if (this.preferences === null || snapshot.revision >= this.preferences.revision) {
+      this.preferences = snapshot;
+      applyLanguage(snapshot.resolvedLanguage);
+      this.hooks.changed();
+    }
+  }
+
+  setLanguage(preference) {
+    if (this.preferences === null) return;
+    return this.run(
+      t('savingLanguage'),
+      (value) => t('settingsFailed', { value }),
+      async () => {
+        const result = await operation('settings', 'updateAssistantPreferences', {
+          expectedRevision: this.preferences.revision,
+          mutation: { kind: 'language', preference },
+        });
+        if (result.kind === 'revision_conflict') {
+          await this.loadPreferences();
+          throw new Error(t('languageChanged'));
+        }
+        if (result.kind !== 'committed') throw new Error(t('languageRejected'));
+        // The receipt contains a revision, not a resolved language. Read the
+        // actual snapshot, including any newer edit, before changing the UI.
+        await this.loadPreferences();
+      },
+    );
   }
 
   /** Reads every page of the connection catalog at one revision. */
@@ -1028,28 +1061,29 @@ export function group(title, description, end, rows, cx) {
 
 /**
  * The General page, as the native client's: the language, then the
- * appearance, each a list of choices with the current one checked. Both
- * apply at once and are kept on this computer.
+ * appearance, each a list of choices with the current one checked. Language
+ * belongs to the connected Host; appearance is kept on this computer.
  */
 function generalSection(settings, cx) {
   return [
     group(
       t('settingsLanguage'),
-      t('settingsLanguageDetail'),
+      t('settingsLanguageDetail') +
+        (settings.preferences?.language === null
+          ? `\n${t('languageInherited', { value: LANGUAGE_NAMES[settings.preferences.resolvedLanguage] })}`
+          : ''),
       null,
       [
         choiceList(
           'language',
           LANGUAGE_CHOICES.map((value) => [
             value,
-            value === 'system' ? t('languageSystem') : LANGUAGE_NAMES[value],
+            value === 'auto' ? t('languageSystem') : LANGUAGE_NAMES[value],
           ]),
-          languagePreference(),
-          (value) => {
-            setLanguagePreference(value);
-            settings.hooks.changed();
-          },
+          settings.preferences?.language ?? null,
+          (value) => settings.setLanguage(value),
           cx,
+          settings.preferences === null || settings.loading || settings.busy !== null,
         ),
       ],
       cx,
@@ -1076,7 +1110,7 @@ function generalSection(settings, cx) {
 }
 
 /** Choices of which one holds: a round mark, filled and checked for the current one, and its label. */
-function choiceList(id, choices, current, choose, cx) {
+function choiceList(id, choices, current, choose, cx, disabled = false) {
   const m = palette(cx);
   return v_flex()
     .py(4)
@@ -1084,6 +1118,7 @@ function choiceList(id, choices, current, choose, cx) {
       choices.map(([value, label]) => {
         const selected = value === current;
         return typeset(Button.new(`${id}-${value}`), 'body')
+          .disabled(disabled)
           .h(36)
           .gap(10)
           .items_center()

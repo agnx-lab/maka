@@ -25,6 +25,8 @@
 
 The transcript follows new output while at the end. Scrolling up pauses following; returning to the end or sending a message accepted by the Host resumes it. Rejected sends leave the reading position alone.
 
+Language is shared with the connected Host's assistant preferences. The app reads it at startup and whenever Settings opens, and applies a change after the Host confirms it and returns the saved preferences. Automatic language follows the Host's system; an unset preference follows its configured default. Already accepted work retains its captured language. Conflicts and failed saves are shown without automatically retrying the mutation. Appearance remains local to the app.
+
 Build from the repository root:
 
 ```sh

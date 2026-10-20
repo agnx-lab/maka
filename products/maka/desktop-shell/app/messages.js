@@ -1046,13 +1046,25 @@ export const MESSAGES = {
   addConnection: ['Add connection', '添加连接', '新增連線'],
 
   // Settings: General (settings.js)
-  settingsLanguage: ['Interface language', '界面语言', '介面語言'],
+  settingsLanguage: ['Language', '语言', '語言'],
   settingsLanguageDetail: [
-    'Choose the language used by Maka. Changes apply immediately and persist after restart.',
-    '选择 Maka 界面的显示语言。切换后立即生效，重启后保持。',
-    '選擇 Maka 介面的顯示語言。切換後立即生效，重新啟動後仍會保留。',
+    'Saved in the connected Host for the interface and new work. Accepted work keeps its language.',
+    '保存到当前连接的 Host，用于界面和新任务。已受理的任务保持原语言。',
+    '儲存到目前連線的 Host，用於介面與新任務。已受理的任務保留原語言。',
   ],
-  languageSystem: ['Follow system', '跟随系统', '自動（跟隨系統）'],
+  languageSystem: ['Follow Host system', '跟随 Host 系统', '跟隨 Host 系統'],
+  languageInherited: ['Host default: {value}', 'Host 默认：{value}', 'Host 預設：{value}'],
+  savingLanguage: ['Saving language…', '正在保存语言…', '正在儲存語言…'],
+  languageChanged: [
+    'Preferences changed elsewhere. The current language was reloaded; choose again to save.',
+    '设置已在其他位置更改。已重新读取当前语言，请重新选择后保存。',
+    '設定已在其他位置變更。已重新讀取目前語言，請重新選擇後儲存。',
+  ],
+  languageRejected: [
+    'The Host rejected the language change.',
+    'Host 拒绝了语言更改。',
+    'Host 拒絕了語言變更。',
+  ],
   settingsAppearance: ['Theme', '主题', '主題'],
   settingsAppearanceDetail: [
     'Follow the system appearance, or stay on light or dark.',

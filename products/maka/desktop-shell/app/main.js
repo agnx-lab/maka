@@ -266,6 +266,11 @@ export default class MakaDesktop extends View {
     log('start');
     cx.bind_keys(SHORTCUTS);
     this.rootFocus.focus();
+    try {
+      await this.settings.loadPreferences();
+    } catch (error) {
+      this.settings.fail(t('settingsFailed', { value: error.message }));
+    }
     this.composer.loadModel();
     this.directories.loadRoots();
     cx.spawn(async (cx) => this.catalog.run(cx));

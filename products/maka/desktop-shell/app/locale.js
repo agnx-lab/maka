@@ -18,11 +18,9 @@
  */
 
 // The language the desktop speaks: English, Simplified Chinese or
-// Traditional Chinese, the three the TUI and the native client have. Unless
-// the user picks one in Settings it follows the one the system asks for
-// (`maka-locale`), mapped as the TUI maps a tag
-// (plugins/shared/locale.ts `languageIndex`). The choice is kept in this
-// application's localStorage. Words come from messages.js through `t`.
+// Traditional Chinese, the three the TUI and the native client have. Settings
+// applies the connected Host's resolved language. The local system language
+// is only used while that first read is pending. Words come from messages.js.
 
 import { system } from 'maka-locale';
 import { MESSAGES } from './messages.js';
@@ -31,10 +29,8 @@ import { MESSAGES } from './messages.js';
 export const LANGUAGES = ['en', 'zh-CN', 'zh-TW'];
 /** What each language is called, in itself, as a language menu lists it. */
 export const LANGUAGE_NAMES = { en: 'English', 'zh-CN': '简体中文', 'zh-TW': '繁體中文' };
-/** The choices Settings offers: follow the system, or one of LANGUAGES. */
-export const LANGUAGE_CHOICES = ['system', ...LANGUAGES];
-
-const STORAGE_KEY = 'maka.language';
+/** The Host's saved choices: its system language, or one of LANGUAGES. */
+export const LANGUAGE_CHOICES = ['auto', ...LANGUAGES];
 
 /** Which of LANGUAGES a BCP 47 tag means. */
 export function languageOf(tag) {
@@ -43,46 +39,22 @@ export function languageOf(tag) {
   return lower.includes('hant') || /^zh-(tw|hk|mo)/.test(lower) ? 'zh-TW' : 'zh-CN';
 }
 
-function stored() {
-  try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    return LANGUAGE_CHOICES.includes(value) ? value : 'system';
-  } catch {
-    return 'system';
-  }
-}
-
-let preference = stored();
-let current = resolve(preference);
+let current = languageOf(system());
 const listeners = new Set();
-
-function resolve(choice) {
-  return choice === 'system' ? languageOf(system()) : choice;
-}
 
 /** The language in use. */
 export function language() {
   return current;
 }
 
-/** The choice in Settings: 'system' or one of LANGUAGES. */
-export function languagePreference() {
-  return preference;
-}
-
 /**
- * Keeps the choice and switches to the language it means. Listeners run at
- * once, inside the caller's event, so they may update retained state such
- * as a field's placeholder; the caller redraws.
+ * Projects a confirmed Host language into labels and retained placeholders.
+ * Preference persistence and automatic-language resolution belong to the Host.
  */
-export function setLanguagePreference(next) {
-  if (!LANGUAGE_CHOICES.includes(next) || next === preference) return;
-  preference = next;
-  localStorage.setItem(STORAGE_KEY, next);
-  const language = resolve(next);
-  if (language === current) return;
-  current = language;
-  for (const listener of listeners) listener(language);
+export function applyLanguage(next) {
+  if (next === current) return;
+  current = next;
+  for (const listener of listeners) listener(next);
 }
 
 /** Calls `listener(language)` after each switch; answers a function that stops it. */
