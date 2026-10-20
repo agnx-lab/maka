@@ -225,6 +225,14 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         .find(|chunk| chunk.text == "final authoritative answer")
         .expect("actual executor answer");
     assert!(chunks.iter().all(|chunk| chunk.model.is_none()));
+    assert_eq!(
+        chunks
+            .iter()
+            .filter(|chunk| chunk.final_output)
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["final authoritative answer"],
+    );
     let source = log
         .history_source(
             "session",

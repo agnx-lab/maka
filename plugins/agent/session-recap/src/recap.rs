@@ -525,6 +525,7 @@ mod tests {
                 Ok(history::Page::Ready {
                     through: 7,
                     chunks: vec![history::Chunk {
+                        final_output: false,
                         model: None,
                         origin: None,
                         compaction: None,

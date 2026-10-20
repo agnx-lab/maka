@@ -2152,7 +2152,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         HistoryField, HistoryModel, SourceField, SourcePosition,
     };
     use maka_event_log::sessions::{SessionCopy, SessionRetirement};
-    type Expected = BTreeMap<String, (HistoryField, String, HistoryModel)>;
+    type Expected = BTreeMap<String, (HistoryField, String, HistoryModel, bool)>;
     async fn step(
         log: &EventLog,
         invocation: &Invocation,
@@ -2160,13 +2160,35 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         requested: &str,
         reported: Option<&str>,
         parts: &[(TextKind, &str)],
+        item_acceptance: bool,
     ) -> (u64, Expected) {
         let write = |fact| EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap();
         let mut request = request(id);
-        let Fact::ModelRequested { model_id, .. } = &mut request else {
+        let Fact::ModelRequested {
+            model_id,
+            item_acceptance: acceptance,
+            ..
+        } = &mut request
+        else {
             unreachable!()
         };
         *model_id = requested.into();
+        *acceptance = item_acceptance;
+        if item_acceptance {
+            let source = log.prefix(256, 1024 * 1024).await.unwrap();
+            let Fact::ModelRequested {
+                source_scope,
+                source_high_water,
+                source_digest,
+                ..
+            } = &mut request
+            else {
+                unreachable!()
+            };
+            *source_scope = source.scope;
+            *source_high_water = source.high_water;
+            *source_digest = source.digest;
+        }
         log.append(&write(request)).await.unwrap();
         let metadata = HistoryModel::Native {
             requested_model_id: requested.into(),
@@ -2195,6 +2217,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                     },
                     (*text).into(),
                     metadata.clone(),
+                    false,
                 ),
             );
             log.append(&start).await.unwrap();
@@ -2217,6 +2240,19 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                 provider_options: None,
             });
         }
+        let source = maka_agent_facts::model::ModelSource::Url {
+            id: format!("source-{id}"),
+            url: "https://example.com/evidence".into(),
+            title: Some("Evidence".into()),
+            provider_options: None,
+        };
+        let citation = write(Fact::ModelObserved {
+            step_id: format!("step-{id}"),
+            event: ModelEvent::Source(source.clone()),
+        });
+        let citation_event = citation.event().id.clone();
+        log.append(&citation).await.unwrap();
+        accepted.push(ModelPart::Source { source });
         log.append(&write(Fact::ModelObserved {
             step_id: format!("step-{id}"),
             event: ModelEvent::ResponseMetadata {
@@ -2237,21 +2273,33 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         }))
         .await
         .unwrap();
-        let through = log
-            .append(&write(Fact::ModelCompleted {
-                step_id: format!("step-{id}"),
-                output: ModelStep {
-                    parts: accepted,
-                    finish_reason: maka_agent_facts::model::ModelFinishReason::Stop,
-                    usage: ModelUsage::default(),
-                    provider_options: None,
-                    response_id: None,
-                    model: reported.map(str::to_owned),
-                    timestamp: None,
-                },
-            }))
-            .await
-            .unwrap();
+        let completion = write(Fact::ModelCompleted {
+            step_id: format!("step-{id}"),
+            output: ModelStep {
+                parts: accepted,
+                finish_reason: maka_agent_facts::model::ModelFinishReason::Stop,
+                usage: ModelUsage::default(),
+                provider_options: None,
+                response_id: None,
+                model: reported.map(str::to_owned),
+                timestamp: None,
+            },
+        });
+        let citation_id = if item_acceptance {
+            citation_event
+        } else {
+            completion.event().id.clone()
+        };
+        expected.insert(
+            format!("{citation_id}:source:{}", parts.len()),
+            (
+                HistoryField::Body,
+                "Source: Evidence\nhttps://example.com/evidence".into(),
+                metadata,
+                false,
+            ),
+        );
+        let through = log.append(&completion).await.unwrap();
         (through, expected)
     }
     async fn read(log: &EventLog, session: &str, through: u64, expected: &Expected) {
@@ -2278,9 +2326,11 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                 for chunk in chunks {
                     if chunk.role != Role::Assistant {
                         assert!(chunk.model.is_none());
+                        assert!(!chunk.final_output);
                         continue;
                     }
-                    let (field, text, model) = &expected[&chunk.message_id];
+                    let (field, text, model, final_output) = &expected[&chunk.message_id];
+                    assert_eq!(chunk.final_output, *final_output, "{}", chunk.message_id);
                     assert_eq!(chunk.field, *field);
                     assert_eq!(chunk.model.as_ref(), Some(model));
                     let assembled = actual.entry(chunk.message_id.clone()).or_default();
@@ -2330,7 +2380,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                 actual,
                 expected
                     .iter()
-                    .map(|(id, (_, text, _))| (id.clone(), text.clone()))
+                    .map(|(id, (_, text, _, _))| (id.clone(), text.clone()))
                     .collect()
             );
         }
@@ -2360,6 +2410,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         "requested-alias",
         Some("reported-concrete"),
         &[(TextKind::Thinking, &thinking), (TextKind::Text, &body)],
+        false,
     )
     .await;
     let (_, second_expected) = step(
@@ -2369,6 +2420,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         "second-request",
         None,
         &[(TextKind::Text, "second step without reported identity")],
+        false,
     )
     .await;
     let copied_fence = log
@@ -2411,13 +2463,21 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         ..first
     };
     log.append(&write(&successor, opening())).await.unwrap();
-    let (_, successor_expected) = step(
+    let (unfinished_fence, successor_expected) = step(
         &log,
         &successor,
         "three",
         "resumed-request",
         Some("resumed-reported"),
-        &[(TextKind::Text, "same turn, distinct physical invocation")],
+        &[
+            (
+                TextKind::Thinking,
+                "Final reasoning remains in the activity panel",
+            ),
+            (TextKind::Text, "First final body part"),
+            (TextKind::Text, "Second final body part"),
+        ],
+        true,
     )
     .await;
     let through = log
@@ -2429,9 +2489,18 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         ))
         .await
         .unwrap();
+    let mut unfinished_expected = copied_expected.clone();
+    unfinished_expected.extend(successor_expected.clone());
     let mut all_expected = copied_expected.clone();
-    all_expected.extend(successor_expected);
+    all_expected.extend(
+        successor_expected
+            .into_iter()
+            .map(|(id, (field, text, model, _))| {
+                (id, (field, text, model, field == HistoryField::Body))
+            }),
+    );
     read(&log, "models", first_fence, &first_expected).await;
+    read(&log, "models", unfinished_fence, &unfinished_expected).await;
     read(&log, "models", through, &all_expected).await;
     read(&log, "model-copy", through, &copied_expected).await;
     let revision = log
@@ -2440,6 +2509,22 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
         .unwrap()
         .unwrap()
         .revision;
+    log.copy_session(
+        SessionCopy {
+            source_session_id: "models".into(),
+            target_session_id: "completed-copy".into(),
+            expected_source_revision: revision,
+            purpose: maka_agent_facts::session::CopyPurpose::Branch {
+                turn_id: None,
+                side_conversation: false,
+            },
+        },
+        &serde_json::json!({}),
+        3,
+    )
+    .await
+    .unwrap();
+    read(&log, "completed-copy", through, &all_expected).await;
     log.begin_session_removal("models", revision).await.unwrap();
     assert_eq!(
         log.finish_session_retirement("models").await.unwrap(),
@@ -2452,6 +2537,7 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
     log.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
     read(&reopened, "model-copy", copied_fence, &copied_expected).await;
+    read(&reopened, "completed-copy", through, &all_expected).await;
     reopened.close().await.unwrap();
 }
 

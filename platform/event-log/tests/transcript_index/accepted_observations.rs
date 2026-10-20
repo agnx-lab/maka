@@ -238,6 +238,38 @@ async fn accepted_kinds_publish_at_observation_and_unaccepted_kinds_wait_for_sea
             assert_eq!(page(&reopened, unaccepted).await, unaccepted_page);
             assert_eq!(canonical_bytes(&db), canonical);
             drop(db);
+            let before_terminal = page(&reopened, later).await;
+            let through = end(
+                &reopened,
+                "a",
+                if interrupted {
+                    InvocationOutcome::Failed {
+                        class: "provider".into(),
+                        message: None,
+                        model_failure: None,
+                    }
+                } else {
+                    InvocationOutcome::Completed
+                },
+            )
+            .await;
+            let completed = page(&reopened, through).await;
+            let final_text: Vec<_> = completed["chunks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|chunk| chunk["finalOutput"] == true)
+                .map(|chunk| chunk["text"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                final_text,
+                if interrupted {
+                    vec![]
+                } else {
+                    vec!["accepted中😀", "Source: Ref\nhttps://example.test/ref"]
+                }
+            );
+            assert_eq!(page(&reopened, later).await, before_terminal);
             reopened.close().await.unwrap();
         }
     }

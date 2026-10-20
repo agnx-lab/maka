@@ -124,6 +124,7 @@ mod tests {
             "!"
         );
         let mut chunk = HistoryChunk {
+            final_output: false,
             model: None,
             origin: None,
             compaction: None,
@@ -177,6 +178,7 @@ mod tests {
     fn missing_history_fragment_is_rejected() {
         let mut projection = Projection::default();
         let chunk = HistoryChunk {
+            final_output: false,
             model: None,
             origin: None,
             compaction: None,
@@ -202,6 +204,7 @@ mod tests {
     fn attachment_only_user_message_keeps_safe_descriptions_during_replay() {
         let mut projection = Projection::default();
         let chunk = HistoryChunk {
+            final_output: false,
             model: None,
             origin: Some(maka_agent_facts::message::MessageOrigin::WorkhubTask {
                 task_id: "task-original".into(),
@@ -253,6 +256,7 @@ mod tests {
     fn diagnostic_history_replays_as_marked_text_without_tool_metadata() {
         let mut projection = Projection::default();
         let mut chunk = HistoryChunk {
+            final_output: false,
             model: None,
             origin: None,
             compaction: None,

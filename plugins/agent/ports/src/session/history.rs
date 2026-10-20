@@ -401,6 +401,11 @@ pub struct HistorySource {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Chunk {
+    /// This body belongs to the final output of a successfully completed native
+    /// Turn at the page's fence. Includes every text part and source citation;
+    /// absence does not establish liveness or identify an imported final answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub final_output: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<HistoryModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

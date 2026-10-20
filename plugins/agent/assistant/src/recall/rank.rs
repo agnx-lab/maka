@@ -254,6 +254,7 @@ mod tests {
                 session,
                 0,
                 Chunk {
+                    final_output: false,
                     model: None,
                     origin: None,
                     field: Default::default(),

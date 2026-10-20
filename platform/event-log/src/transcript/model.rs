@@ -17,11 +17,22 @@
  * under the License.
  */
 
-//! Scalar canonical evidence for the model that produced an assistant row.
+//! Scalar canonical evidence for an assistant row's model and output producer.
 use crate::StoreError;
 use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::HistoryModel;
 use sqlx::{Row, SqliteConnection};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Producer {
+    Model { invocation: String, step: String },
+    Executor { invocation: String },
+}
+
+pub(super) struct Metadata {
+    pub model: Option<HistoryModel>,
+    pub producer: Option<Producer>,
+}
 
 // Drive each lookup from the canonical sequence/operation/step index. Membership
 // validates each candidate; the history UNION must not drive a whole-session scan.
@@ -62,7 +73,7 @@ pub(super) async fn resolve(
     session: &str,
     position: RowPosition,
     through: i64,
-) -> Result<Option<HistoryModel>, StoreError> {
+) -> Result<Metadata, StoreError> {
     let producer_sequence = super::read::sql_position(position)?.0;
     let producer = sqlx::query(PRODUCER)
         .bind(session)
@@ -85,10 +96,16 @@ pub(super) async fn resolve(
         if content != "assistant" {
             return Err(invalid());
         }
-        return Ok(model.map(|model_id| HistoryModel::Imported { model_id }));
+        return Ok(Metadata {
+            model: model.map(|model_id| HistoryModel::Imported { model_id }),
+            producer: None,
+        });
     }
     if matches!(kind.as_str(), "executor_observed" | "executor_completed") {
-        return Ok(None);
+        return Ok(Metadata {
+            model: None,
+            producer: (kind == "executor_completed").then_some(Producer::Executor { invocation }),
+        });
     }
     let step: Option<String> = if kind == "invocation_ended" {
         let executor: bool = sqlx::query_scalar(EXECUTOR)
@@ -98,7 +115,10 @@ pub(super) async fn resolve(
             .fetch_one(&mut *tx)
             .await?;
         if executor {
-            return Ok(None);
+            return Ok(Metadata {
+                model: None,
+                producer: None,
+            });
         }
         // Resolve the unfinished step at the actual sealing fact, never from a
         // later public fence that may contain unrelated model steps.
@@ -140,10 +160,14 @@ pub(super) async fn resolve(
         .chain(completed)
         .max_by_key(|(sequence, _)| *sequence)
         .map(|(_, model)| model);
-    Ok(Some(HistoryModel::Native {
-        requested_model_id,
-        reported_model_id,
-    }))
+    Ok(Metadata {
+        model: Some(HistoryModel::Native {
+            requested_model_id,
+            reported_model_id,
+        }),
+        producer: matches!(kind.as_str(), "model_observed" | "model_completed")
+            .then_some(Producer::Model { invocation, step }),
+    })
 }
 fn invalid() -> StoreError {
     StoreError::InvalidTransition("invalid canonical history model evidence".into())

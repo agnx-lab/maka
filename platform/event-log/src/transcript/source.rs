@@ -274,7 +274,7 @@ impl EventLog {
                         None
                     };
                     let model = if role == SourceRole::Assistant {
-                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?
+                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?.model
                     } else { None };
                     let source = HistorySource {
                         model,
