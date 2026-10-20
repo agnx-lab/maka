@@ -26,7 +26,7 @@ Connects a foreground UI to independently owned Host deployments over local IPC.
 Trusted local applications can use one public entry point with an explicit `startup::Request` selecting the Root, deployment and endpoint grants:
 
 ```rust
-let mut client = maka_transport::startup::connect(&maka_executable, request).await?;
+let mut client = maka_host_runtime::application::host::startup::connect(&maka_executable, request).await?;
 // Use the authenticated Client's catalogue and calls.
 client.close().await?;
 ```

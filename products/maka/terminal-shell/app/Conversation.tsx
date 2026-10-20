@@ -608,7 +608,7 @@ export function Conversation(props: ConversationProps) {
     if (!alive || !text.trim()) return;
     if (sendBlockedReason()) {
       notice.set(
-        'This Enter did not send a message. Your draft is kept; check the status below before trying again.',
+        'This message was not sent. Your draft is kept; check the status below before trying again.',
       );
       return;
     }
@@ -623,7 +623,7 @@ export function Conversation(props: ConversationProps) {
       if (!alive) return;
       if (savingFailed()) throw new Error('The draft could not be saved; it has not been sent.');
       if (editEpoch !== epoch)
-        throw new Error('The draft changed before confirmation. Press Enter again to send it.');
+        throw new Error('The draft changed before confirmation. Send again to confirm it.');
       // The native journal consumes only this exact revision. New edits keep
       // saving while confirmation waits and never inherit this send attempt.
       receiptsKnown.set(false);
@@ -1012,6 +1012,18 @@ export function Conversation(props: ConversationProps) {
                 <Text style={{ color: C.background }}>{stopping() ? '…' : '■'}</Text>
               </View>
             </If>
+            <View
+              onPress={() => {
+                void send(draft());
+              }}
+              style={{
+                backgroundColor: sendBlockedReason() || !draft().trim() ? C.line : C.accent,
+                paddingHorizontal: 8,
+                borderRadius: 8,
+              }}
+            >
+              <Text style={{ color: C.background }}>Send</Text>
+            </View>
           </View>
         </View>
         <Text style={{ color: sendBlockedReason() ? C.warning : C.muted, paddingVertical: 0 }}>

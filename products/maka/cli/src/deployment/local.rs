@@ -38,7 +38,7 @@ pub async fn connect(path: PathBuf) -> Result<Connection, HostError> {
 }
 
 pub async fn connect_application(
-    request: &maka_transport::startup::Request,
+    request: &maka_host_runtime::application::host::startup::Request,
 ) -> Result<Connection, HostError> {
     request.validate()?;
     crate::operation::without_progress(connect_inner(request.root.clone(), Some(request))).await
@@ -46,7 +46,7 @@ pub async fn connect_application(
 
 async fn connect_inner(
     path: PathBuf,
-    selection: Option<&maka_transport::startup::Request>,
+    selection: Option<&maka_host_runtime::application::host::startup::Request>,
 ) -> Result<Connection, HostError> {
     let mut child = None;
     let result = tokio::time::timeout(Duration::from_secs(30), async {
@@ -190,7 +190,7 @@ async fn connect_inner(
 async fn prepare_application(
     path: &std::path::Path,
     root_id: &str,
-    selection: Option<&maka_transport::startup::Request>,
+    selection: Option<&maka_host_runtime::application::host::startup::Request>,
 ) -> Result<(), HostError> {
     let Some(selection) = selection else {
         return Ok(());
@@ -234,7 +234,7 @@ async fn release(child: &mut Child) -> Result<(), HostError> {
 async fn live(
     path: &std::path::Path,
     expected_root: &str,
-    selection: Option<&maka_transport::startup::Request>,
+    selection: Option<&maka_host_runtime::application::host::startup::Request>,
 ) -> Result<Option<Connection>, HostError> {
     // A candidate has not published discovery until database initialization is
     // complete. Do not inspect its transient SQLite startup files as a live root.

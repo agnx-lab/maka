@@ -19,23 +19,21 @@
 
 # Maka NSH terminal shell
 
-An experimental keyboard-first Agent workbench built with NSH, connecting to an existing Maka Host Root.
+An experimental Agent workbench built with NSH, supporting mouse and keyboard interaction and connecting to or starting a Maka Host Root.
 
 ## Start
 
-Start the Host in another terminal if it is not running:
+From the workspace root, build the product bundle and sibling native launcher, then start the shell:
 
 ```sh
-cargo run -p maka-cli --bin maka -- host serve --root /path/to/root
-```
-
-Then launch the shell from the workspace root:
-
-```sh
+npm run build --workspace @maka-agent/product
+cargo build -p maka-cli --bin maka
 cargo run -p maka-terminal-shell -- --root /path/to/root
 ```
 
-Without `--session`, Home shows recent conversations and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`; the shell does not start it automatically.
+The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. `--root` selects the business Host Root; the default product normally uses `~/.maka/application/host`.
+
+Without `--session`, Home shows recent conversations and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
 
 From Home, creating a conversation opens **Workspaces**: choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation then opens **Models** so you can choose a configured connection and model before sending. Use the existing client to configure connections if none are available.
 

@@ -18,15 +18,16 @@
  */
 
 //! Discover and admit local callers while the trusted CLI owns Host startup.
-use crate::{HostEndpoint, Result};
-use maka_event_log::root::RootNamespaces;
-use maka_host_runtime::application::{
-    host::{
-        Client,
-        discovery::{self, Discovery},
-    },
-    transport::{NativeGrant, wire},
+use super::{
+    Client,
+    discovery::{self, Discovery},
 };
+use crate::application::{
+    Result,
+    transport::{HostEndpoint, NativeGrant, wire},
+};
+use crate::ipc;
+use maka_event_log::root::RootNamespaces;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -38,6 +39,15 @@ use tokio::process::{Child, ChildStdin, Command};
 use uuid::Uuid;
 
 pub const REQUEST_LIMIT: usize = 512 * 1024;
+
+/// Whether a State Root ID has its canonical lowercase hexadecimal representation.
+pub fn valid_root_id(root_id: &str) -> bool {
+    root_id.len() == 64
+        && root_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -54,7 +64,7 @@ impl Request {
             || self
                 .state_domain
                 .as_ref()
-                .is_some_and(|domain| !crate::connections::valid_domain(domain))
+                .is_some_and(|domain| !valid_root_id(domain))
             || self.endpoints.is_empty()
             || self.endpoints.len() > 128
             || self.native.len() > 128
@@ -84,13 +94,45 @@ pub struct Ready {
 /// uses the current account's Root namespaces and never installs or repairs it.
 /// Endpoint/native selections prepare startup; a live Host retains its published
 /// catalogue and grants.
-/// Close the returned Client to detach; quit requests idle Host shutdown.
+/// Close the returned Client to detach without cancelling accepted work.
 /// Reconnecting never retries an unconfirmed mutation or confirms its cleanup.
 pub async fn connect(executable: &Path, request: Request) -> Result<Client> {
+    connect_target(executable, Target::Configured(&request)).await
+}
+
+/// Connect to a Root's live Host, or ask the trusted CLI to initialize/start it
+/// under the existing deployment policy. The Root path must be absolute.
+pub async fn connect_root(executable: &Path, root: &Path) -> Result<Client> {
+    connect_target(executable, Target::Root(root)).await
+}
+
+#[derive(Clone, Copy)]
+enum Target<'a> {
+    Configured(&'a Request),
+    Root(&'a Path),
+}
+
+impl<'a> Target<'a> {
+    fn root(self) -> &'a Path {
+        match self {
+            Self::Configured(request) => &request.root,
+            Self::Root(root) => root,
+        }
+    }
+
+    fn request(self) -> Option<&'a Request> {
+        match self {
+            Self::Configured(request) => Some(request),
+            Self::Root(_) => None,
+        }
+    }
+}
+
+async fn connect_target(executable: &Path, target: Target<'_>) -> Result<Client> {
     tokio::time::timeout(Duration::from_secs(40), async {
         let namespaces =
             RootNamespaces::for_current_account().map_err(|error| error.to_string())?;
-        let prepared = prepare(executable, &request, &namespaces).await?;
+        let prepared = prepare_target(executable, target, &namespaces).await?;
         let client = Client::connect(
             &prepared.discovery.endpoint,
             Some(prepared.discovery.host_epoch),
@@ -106,35 +148,53 @@ pub async fn connect(executable: &Path, request: Request) -> Result<Client> {
     .map_err(|_| "local Host connection/startup deadline elapsed".to_owned())?
 }
 
-pub(super) struct Prepared {
-    pub(super) discovery: Discovery,
+pub struct Prepared {
+    discovery: Discovery,
     _startup: Option<Anchor>,
 }
 
+impl Prepared {
+    pub fn discovery(&self) -> &Discovery {
+        &self.discovery
+    }
+}
+
 /// Retains startup residency until the caller's actual session is admitted.
-pub(super) async fn prepare(
+pub async fn prepare(
     executable: &Path,
     request: &Request,
     namespaces: &RootNamespaces,
 ) -> Result<Prepared> {
-    request.validate()?;
-    wire::encode_bounded(request, REQUEST_LIMIT)?;
+    prepare_target(executable, Target::Configured(request), namespaces).await
+}
+
+async fn prepare_target(
+    executable: &Path,
+    target: Target<'_>,
+    namespaces: &RootNamespaces,
+) -> Result<Prepared> {
+    if let Some(request) = target.request() {
+        request.validate()?;
+        wire::encode_bounded(request, REQUEST_LIMIT)?;
+    } else if !target.root().is_absolute() {
+        return Err("local Host startup root must be absolute".into());
+    }
     if !executable.is_absolute() {
         return Err("local Host startup executable must be absolute".into());
     }
     let mut startup = None;
-    let mut discovered = match discover(&request.root, namespaces).await {
+    let mut discovered = match discover(target.root(), namespaces).await {
         Ok(discovered) => discovered,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            startup = Some(launch(executable, request).await?);
-            discover(&request.root, namespaces)
+            startup = Some(launch(executable, target).await?);
+            discover(target.root(), namespaces)
                 .await
                 .map_err(|error| error.to_string())?
         }
         Err(error) => return Err(error.to_string()),
     };
-    check_selection(&discovered, request)?;
-    let stream = match maka_host_runtime::ipc::connect(&discovered.endpoint).await {
+    check_selection(&discovered, target)?;
+    let stream = match ipc::connect(&discovered.endpoint).await {
         Ok(stream) => stream,
         Err(error)
             if startup.is_none()
@@ -145,12 +205,12 @@ pub(super) async fn prepare(
                     )
                 }) =>
         {
-            startup = Some(launch(executable, request).await?);
-            discovered = discover(&request.root, namespaces)
+            startup = Some(launch(executable, target).await?);
+            discovered = discover(target.root(), namespaces)
                 .await
                 .map_err(|error| error.to_string())?;
-            check_selection(&discovered, request)?;
-            maka_host_runtime::ipc::connect(&discovered.endpoint)
+            check_selection(&discovered, target)?;
+            ipc::connect(&discovered.endpoint)
                 .await
                 .map_err(|error| error.to_string())?
         }
@@ -171,12 +231,13 @@ pub(super) async fn prepare(
     })
 }
 
-fn check_selection(discovered: &Discovery, request: &Request) -> Result<()> {
-    if discovered.source.deployment != request.deployment
+fn check_selection(discovered: &Discovery, target: Target<'_>) -> Result<()> {
+    if let Some(request) = target.request()
+        && (discovered.source.deployment != request.deployment
         || request
             .state_domain
             .as_ref()
-            .is_some_and(|expected| *expected != discovered.root_id)
+            .is_some_and(|expected| *expected != discovered.root_id))
     {
         return Err("discovered Host differs from its configured deployment or State Root".into());
     }
@@ -196,9 +257,13 @@ struct Anchor {
     _child: Child,
     _input: ChildStdin,
 }
-async fn launch(executable: &Path, request: &Request) -> Result<(Anchor, Ready)> {
-    let mut child = Command::new(executable)
-        .args(["host", "ensure"])
+async fn launch(executable: &Path, target: Target<'_>) -> Result<(Anchor, Ready)> {
+    let mut command = Command::new(executable);
+    command.args(["host", "ensure"]);
+    if let Target::Root(root) = target {
+        command.arg("--root").arg(root);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -206,13 +271,15 @@ async fn launch(executable: &Path, request: &Request) -> Result<(Anchor, Ready)>
         .map_err(|error| format!("local Host startup helper: {error}"))?;
     let mut input = child.stdin.take().expect("piped startup input");
     let output = child.stdout.take().expect("piped startup output");
-    wire::write_bounded(&mut input, request, REQUEST_LIMIT).await?;
+    if let Some(request) = target.request() {
+        wire::write_bounded(&mut input, request, REQUEST_LIMIT).await?;
+    }
     let ready: Ready = wire::Reader::new(output).read_bounded(4096).await?;
-    if !crate::connections::valid_domain(&ready.root_id)
+    if !valid_root_id(&ready.root_id)
         || ready.epoch.is_nil()
-        || request
-            .state_domain
-            .as_ref()
+        || target
+            .request()
+            .and_then(|request| request.state_domain.as_ref())
             .is_some_and(|expected| *expected != ready.root_id)
     {
         return Err("local Host startup returned a foreign identity".into());

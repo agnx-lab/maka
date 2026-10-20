@@ -22,14 +22,19 @@ use maka_host_runtime::{
     HostError,
     application::{host::discovery, transport::wire},
 };
-use maka_transport::startup::{REQUEST_LIMIT, Ready, Request};
+use maka_host_runtime::application::host::startup::{REQUEST_LIMIT, Ready, Request};
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
 /// Internal startup coordination for trusted TUI/Desktop launchers.
 #[derive(Args)]
-pub(crate) struct Ensure {}
+pub(crate) struct Ensure {
+    /// Reopen or initialize a business Root without an authored application selection.
+    #[arg(long)]
+    root: Option<PathBuf>,
+}
 impl Ensure {
     pub(crate) async fn run(self) -> Result<(), HostError> {
         let maka_transport::stdio::Stdio {
@@ -38,23 +43,39 @@ impl Ensure {
             output_done,
         } = maka_transport::stdio::Stdio::open()?;
         let mut input = wire::Reader::new(input);
-        let request: Request =
-            tokio::time::timeout(Duration::from_secs(5), input.read_bounded(REQUEST_LIMIT))
-                .await??;
-        request.validate()?;
+        let request: Option<Request> = if self.root.is_some() {
+            None
+        } else {
+            let request: Request =
+                tokio::time::timeout(Duration::from_secs(5), input.read_bounded(REQUEST_LIMIT))
+                    .await??;
+            request.validate()?;
+            Some(request)
+        };
+        let root = match (&self.root, &request) {
+            (Some(root), None) if root.is_absolute() => root,
+            (None, Some(request)) => &request.root,
+            _ => return Err("local Host startup root must be absolute".into()),
+        };
         let stop = CancellationToken::new();
         let _signals = crate::signals::watch(stop.clone())?;
         let client = tokio::select! {
-            result = crate::deployment::connect_application(&request) => result?,
+            result = async {
+                match &request {
+                    Some(request) => crate::deployment::connect_application(request).await,
+                    None => crate::deployment::connect_local(root.clone()).await,
+                }
+            } => result?,
             _ = stop.cancelled() => return Ok(()),
             byte = input.inner.read_u8() => {
                 if byte.is_ok() { return Err("unexpected Host startup owner input".into()); }
                 return Ok(());
             }
         };
-        let registered = discovery::read(&request.root)?;
-        if registered.source.deployment != request.deployment
+        let registered = discovery::read(root)?;
+        if request.as_ref().is_some_and(|request| registered.source.deployment != request.deployment)
             || registered.host_epoch != client.epoch()
+            || &registered.source != client.source()
         {
             return Err("application Host changed during startup admission".into());
         }

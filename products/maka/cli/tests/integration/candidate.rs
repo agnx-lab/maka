@@ -444,6 +444,23 @@ impl CandidateFixture {
         }
     }
 
+    pub fn adopt_existing(root: PathBuf) -> Self {
+        let namespaces = RootNamespaces::for_current_account().unwrap();
+        let location = maka_event_log::root::resolve(&root).unwrap();
+        Self {
+            child: None,
+            root,
+            root_id: location.root_id().to_owned(),
+            registration: namespaces
+                .control
+                .join(location.root_id())
+                .join("registration.json"),
+            lock: namespaces
+                .ownership
+                .join(format!("{}.lock", location.root_id())),
+        }
+    }
+
     pub fn wait_for_registration(&mut self) -> Value {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {

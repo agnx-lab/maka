@@ -19,23 +19,21 @@
 
 # Maka NSH 终端界面
 
-使用 NSH 构建的实验性键盘优先 Agent 工作台，连接已有 Maka Host Root。
+使用 NSH 构建的实验性 Agent 工作台，支持鼠标与键盘操作，连接或启动 Maka Host Root。
 
 ## 启动
 
-如果 Host 尚未运行，在另一个终端启动：
+在仓库根目录构建产品包及同目录的原生启动器，再启动界面：
 
 ```sh
-cargo run -p maka-cli --bin maka -- host serve --root /path/to/root
-```
-
-随后在工作区根目录启动界面：
-
-```sh
+npm run build --workspace @maka-agent/product
+cargo build -p maka-cli --bin maka
 cargo run -p maka-terminal-shell -- --root /path/to/root
 ```
 
-省略 `--session` 时，首页显示最近会话和 **New conversation**。添加 `--session SESSION_ID` 可直接打开已有会话。Host 必须提供 `agent`、`settings` 和 `receipts`；终端界面不会自动启动 Host。
+终端先发现并验证指定 Root 的在线 Host；没有在线 Host 时，使用同目录的 `maka` 原生启动器按既有部署配置启动。无需另开终端运行 `host serve`。启动器不会从 `PATH` 查找。`--root` 指定业务 Host Root；默认产品的业务 Root 通常为 `~/.maka/application/host`。
+
+省略 `--session` 时，首页显示最近会话和 **New conversation**。添加 `--session SESSION_ID` 可直接打开已有会话。Host 必须提供 `agent`、`settings` 和 `receipts`。退出终端只关闭自己的连接，Host 按既有生命周期和空闲策略退出。
 
 在首页新建会话会打开 **Workspaces**，可选择 Host 发布的目录。在已有会话中新建时，复用该会话已获授权的工作区。创建完成后打开 **Models**，先选择已配置的连接和模型，再发送消息。如果没有可用连接，请在现有客户端中配置。
 

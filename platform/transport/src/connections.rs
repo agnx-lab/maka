@@ -26,7 +26,10 @@ use futures_util::{
     future::{BoxFuture, join_all},
 };
 use maka_event_log::{EventLog, root::RootNamespaces};
-use maka_host_runtime::application::host::Client;
+use maka_host_runtime::application::host::{
+    Client,
+    startup::{self, valid_root_id},
+};
 use maka_plugin_core::{
     composition::{ExecutionLocation, InstanceId, PresentationTarget},
     deployment::{DeploymentRef, RemoteObservation},
@@ -77,12 +80,6 @@ pub enum HostLocation {
 }
 
 pub use maka_host_runtime::application::transport::Grant;
-pub(crate) fn valid_domain(domain: &str) -> bool {
-    domain.len() == 64
-        && domain
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
 impl Configuration {
     pub fn read(path: &Path) -> Result<Self> {
         let mut bytes = Vec::new();
@@ -118,7 +115,7 @@ impl Configuration {
                 state_domain: Some(domain),
                 ..
             } = &host.location
-                && !valid_domain(domain)
+                && !valid_root_id(domain)
             {
                 return Err("invalid Host State Root identity".into());
             }
@@ -400,23 +397,23 @@ impl Connections {
         let HostLocation::Public { state_domain, .. } = &configuration.location else {
             unreachable!()
         };
-        let request = crate::startup::Request {
+        let request = startup::Request {
             root,
             state_domain: state_domain.clone(),
             deployment: configuration.deployment,
             endpoints: configuration.endpoints.clone(),
             native: configuration.native.clone(),
         };
-        let prepared = crate::startup::prepare(&self.helper, &request, &self.namespaces).await?;
+        let prepared = startup::prepare(&self.helper, &request, &self.namespaces).await?;
         let client = Client::connect_peer(
-            &prepared.discovery.endpoint,
-            Some(prepared.discovery.host_epoch),
+            &prepared.discovery().endpoint,
+            Some(prepared.discovery().host_epoch),
             source.clone(),
             consumers.clone(),
             configuration.endpoints.clone(),
         )
         .await?;
-        if client.source() != &prepared.discovery.source {
+        if client.source() != &prepared.discovery().source {
             return Err("local Host source changed during admission".into());
         }
         let catalogue = client.catalogue().clone();

@@ -22,7 +22,7 @@
 use clap::Parser;
 use maka_app_client::{Client, Journal};
 use maka_event_log::root;
-use maka_host_runtime::application::host::{Client as HostClient, discovery};
+use maka_host_runtime::application::host::startup;
 use maka_plugin_core::operation::receipt_reader_contract;
 use maka_terminal_shell::{APPLICATION, bindings::Bindings, terminal};
 use nsh_core::{
@@ -47,7 +47,7 @@ use std::{
     about = "Maka terminal application using NSH"
 )]
 struct Args {
-    /// Existing business Host Root selected by the native launcher.
+    /// Business Host Root to connect to or start through the native launcher.
     #[arg(long)]
     root: PathBuf,
     /// Existing Agent session to display initially; otherwise open the session picker.
@@ -103,23 +103,21 @@ impl Args {
         }
         let stop = Arc::new(AtomicBool::new(false));
         // Install before opening any Host session or entering terminal modes.
-        let _signals = Signals::watch(stop.clone()).map_err(|error| error.to_string())?;
-        let location = root::resolve(&self.root).map_err(|error| error.to_string())?;
-        let registered =
-            discovery::read(location.canonical_path()).map_err(|error| error.to_string())?;
-        let status = HostClient::status(&registered.endpoint, Some(registered.host_epoch)).await?;
-        registered
-            .verify(&status)
-            .map_err(|error| error.to_string())?;
+        let mut signals = Signals::watch(stop.clone()).map_err(|error| error.to_string())?;
+        let path = std::path::absolute(&self.root).map_err(|error| error.to_string())?;
+        let launcher = std::env::current_exe()
+            .map_err(|error| error.to_string())?
+            .with_file_name(if cfg!(windows) { "maka.exe" } else { "maka" });
+        let mut native = tokio::select! {
+            result = startup::connect_root(&launcher, &path) => result?,
+            _ = &mut signals.0 => return Ok(()),
+        };
         if stop.load(Ordering::Acquire) {
-            return Ok(());
+            return native.close().await;
         }
-        let mut native =
-            HostClient::connect(&registered.endpoint, Some(registered.host_epoch)).await?;
         let prepare = async {
-            if native.source() != &registered.source
-                || native.source().state_domain != location.root_id()
-            {
+            let location = root::resolve(&path).map_err(|error| error.to_string())?;
+            if native.source().state_domain != location.root_id() {
                 return Err("application Host changed during terminal startup admission".to_owned());
             }
             if native.catalogue().describe("receipts")?.contract != receipt_reader_contract() {

@@ -241,7 +241,9 @@ export function Palette(props: {
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: C.accent, fontWeight: '700' }}>{label()}</Text>
-            <Text style={{ color: C.muted }}>Esc</Text>
+            <View onPress={props.close}>
+              <Text style={{ color: C.muted }}>Close · Esc</Text>
+            </View>
           </View>
           <Input
             testID="palette-search"

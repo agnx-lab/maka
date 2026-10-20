@@ -19,7 +19,6 @@
 
 //! Trusted local connections between separate UI and Host deployment owners.
 mod connections;
-pub mod startup;
 pub mod stdio;
 pub mod transport;
 mod updates;

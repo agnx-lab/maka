@@ -118,7 +118,7 @@ pub(super) async fn save_product(
 /// Bind an explicitly committed generic Host without reauthoring its source.
 pub(crate) async fn select_committed_host(
     store: &EventLog,
-    request: &maka_transport::startup::Request,
+    request: &maka_host_runtime::application::host::startup::Request,
 ) -> Result<(), HostError> {
     if let Some(record) = store.application_launch().await? {
         let _: Selection = serde_json::from_value(record.configuration)?;

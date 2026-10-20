@@ -21,7 +21,7 @@ use super::*;
 use crate::local_fixture as support;
 use maka_host_runtime::application::transport::{Grant, HostEndpoint, Reply};
 use maka_plugin_core::operation::{OperationCleanup, OperationOutcome, OperationReply, Receipt};
-use maka_transport::startup::{self, Request};
+use maka_host_runtime::application::host::startup::{self, Request};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 use uuid::Uuid;
@@ -41,6 +41,66 @@ async fn query(client: &Client, endpoint: &str, method: &str, input: Value) -> V
         } => value,
         other => panic!("query must complete with confirmed cleanup: {other:?}"),
     }
+}
+
+#[test]
+fn root_startup_initializes_an_empty_root_reuses_its_host_and_preserves_another_client() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            assert!(!root.exists());
+            // Bind cleanup first so accepted clients detach before it retires
+            // this fresh Root, including when an assertion unwinds.
+            let (fixture, mut first) = {
+                let first = startup::connect_root(Path::new(env!("CARGO_BIN_EXE_maka")), &root)
+                    .await
+                    .unwrap();
+                (CandidateFixture::adopt_existing(root.clone()), first)
+            };
+            let found = discovery::read(&root).unwrap();
+            found
+                .verify(
+                    &Client::status(&found.endpoint, Some(first.epoch()))
+                        .await
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(first.source().state_domain, fixture.root_id);
+            let list = json!({"filter":"all","position":{"kind":"start"}});
+            let catalog = query(&first, "agent", "list", list.clone()).await;
+            assert_eq!(catalog["sessions"], json!([]));
+            assert_eq!(catalog["needsYouCount"], json!(0));
+            assert_eq!(catalog.get("before"), Some(&Value::Null));
+            assert_eq!(catalog.get("after"), Some(&Value::Null));
+
+            let missing_helper = directory.path().join("never-created-startup-helper");
+            let mut second = startup::connect_root(&missing_helper, &root).await.unwrap();
+            assert_eq!(second.epoch(), first.epoch());
+            assert_eq!(second.source(), first.source());
+            first.close().await.unwrap();
+            assert_eq!(query(&second, "agent", "list", list).await, catalog);
+            second.close().await.unwrap();
+
+            let fresh = directory.path().join("must-not-be-created");
+            let error = startup::connect_root(&missing_helper, &fresh)
+                .await
+                .err()
+                .expect("missing trusted helper must fail instead of falling back to PATH");
+            assert!(error.starts_with("local Host startup helper:"), "{error}");
+            assert!(!fresh.exists());
+            assert_eq!(
+                startup::connect_root(&missing_helper, Path::new("relative-root"))
+                    .await
+                    .err()
+                    .unwrap(),
+                "local Host startup root must be absolute"
+            );
+        })
+        .await
+        .unwrap();
+    });
 }
 
 #[test]

@@ -26,7 +26,7 @@
 可信本地应用可使用一个公开入口，通过显式 `startup::Request` 选择 Root、部署及端点权限：
 
 ```rust
-let mut client = maka_transport::startup::connect(&maka_executable, request).await?;
+let mut client = maka_host_runtime::application::host::startup::connect(&maka_executable, request).await?;
 // 使用已认证 Client 的目录和调用接口。
 client.close().await?;
 ```
