@@ -405,7 +405,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         </View>
       </If>
       <Text numberOfLines={1} style={{ color: C.muted }}>
-        Title search · case sensitive
+        Titles · match case
       </Text>
       <Text numberOfLines={1} style={{ color: C.muted }}>
         Enter selects · Esc closes

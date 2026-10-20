@@ -167,14 +167,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // handling. Native Tab into a browser Button scopes Escape without a
         // JS focus mirror, and Enter must still activate that exact Button.
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && screen.contains("Hide")).await;
+        wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Hide")).await;
         wait_session_search(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Choose workspace scope"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Choose a workspace below")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && !screen.contains("Choose a workspace below")).await;
+        wait_view(&mut view, |screen| screen.contains("Titles · match case") && !screen.contains("Choose a workspace below")).await;
         for _ in 0..2 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
@@ -182,12 +182,12 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // The resize decision uses native subtree focus, including Tabbed
         // Buttons that never emitted an application focus callback.
         view.resize(80, 24);
-        let transferred = wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && screen.contains("Close · Esc") && !screen.contains("Hide")).await;
+        let transferred = wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Close · Esc") && !screen.contains("Hide")).await;
         wait_session_search(&mut view).await;
         evidence("workbench-focused-browser-transfers-to-dialog", &transferred);
         support::evidence_cells("workbench-focused-browser-transfers-to-dialog", &view);
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && screen.contains("Hide") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Hide") && !screen.contains("Close · Esc")).await;
         wait_session_search(&mut view).await;
         for _ in 0..2 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
@@ -198,7 +198,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
 
         view.resize(80, 24);
         shortcut(&mut view, 'o');
-        let narrow_browser = wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && screen.contains("Close · Esc")).await;
+        let narrow_browser = wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Close · Esc")).await;
         wait_session_search(&mut view).await;
         evidence("workbench-narrow-session-dialog", &narrow_browser);
         support::evidence_cells("workbench-narrow-session-dialog", &view);
@@ -251,7 +251,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let target_id = target["id"].as_str().unwrap();
         assert!(!first_page["sessions"].as_array().unwrap().iter().any(|session| session["id"] == target_id));
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Title search · case sensitive") && screen.contains("Enter selects · Esc closes")).await;
+        wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Enter selects · Esc closes")).await;
         wait_session_search(&mut view).await;
         view.handle_event(Event::Paste("Browser page".into()));
         wait_view(&mut view, |screen| screen.contains("Browser page") && !screen.contains("Loading…")).await;
