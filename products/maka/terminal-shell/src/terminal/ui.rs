@@ -691,12 +691,20 @@ mod tests {
         // Sixel must fall back before committing Ratatui's previous buffer.
         // These opaque marker bytes stay in FrameWriter; the test never writes stdout.
         let prepare = |session: &mut Session| {
-            session.terminal.clear().unwrap();
+            // A fresh fixed terminal resets both diff buffers without calling
+            // Terminal::clear, whose cursor query would read the real stdin.
+            session.terminal = Terminal::with_options(
+                CrosstermBackend::new(FrameWriter::default()),
+                TerminalOptions {
+                    viewport: Viewport::Fixed(session.area),
+                },
+            )
+            .unwrap();
             session
                 .terminal
                 .backend_mut()
                 .writer_mut()
-                .write_all(b"PREFIX")
+                .write_all(b"\x1b[2JPREFIX")
                 .unwrap();
             session.terminal.backend().writer().0.clone()
         };
