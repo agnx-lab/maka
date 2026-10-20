@@ -33,7 +33,7 @@ export type PaletteEntry = {
   hint?: string;
   run(): void;
 };
-export type PaletteKind = 'commands' | 'sessions' | 'models' | 'workspaces';
+export type PaletteKind = 'commands' | 'models' | 'workspaces';
 
 export function Palette(props: {
   kind: PaletteKind;
@@ -41,7 +41,6 @@ export function Palette(props: {
   instance: number;
   commands: PaletteEntry[];
   close(instance: number): boolean;
-  selectSession(id: string, expectedSessionId: string | null): Promise<void>;
   create(workspace: any): Promise<void>;
   chooseModel(id: string, choice: any): Promise<void>;
 }) {
@@ -54,19 +53,7 @@ export function Palette(props: {
   let alive = true;
   let generation = 0;
   let page: any = null;
-  let sessions: any[] = [];
   let choices: any[] = [];
-  const selectSession = ({
-    instance,
-    sessionId,
-    expectedSessionId,
-  }: {
-    instance: number;
-    sessionId: string;
-    expectedSessionId: string | null;
-  }) => {
-    if (props.close(instance)) void props.selectSession(sessionId, expectedSessionId);
-  };
   const chooseModel = ({
     instance,
     sessionId,
@@ -91,7 +78,7 @@ export function Palette(props: {
   const matches = computed(() => {
     const needle = query().toLowerCase().trim();
     const available = props.kind === 'commands' ? props.commands : entries();
-    // Settings performs model search; sessions are filtered within the loaded pages.
+    // Settings performs model search; workspace roots and commands filter locally.
     return props.kind === 'models'
       ? available
       : available.filter((entry) =>
@@ -128,43 +115,7 @@ export function Palette(props: {
       choices = [];
     }
     try {
-      if (props.kind === 'sessions') {
-        do {
-          const result = await host.query('agent', 'list', {
-            filter: 'all',
-            position: more
-              ? { kind: 'after', revision: page.revision, cursor: page.after }
-              : { kind: 'start' },
-          });
-          if (!alive || reading !== generation) return;
-          page = result;
-          sessions = more ? [...sessions, ...result.sessions] : result.sessions;
-          const unique = [...new Map(sessions.map((session) => [session.id, session])).values()];
-          entries.set(
-            unique
-              .filter((session) => !session.archived)
-              .sort((a, b) => b.updatedAt - a.updatedAt)
-              .map((session) => ({
-                id: session.id,
-                title: session.title || 'Untitled conversation',
-                detail: `${session.workspace.path} · ${session.id}`,
-                hint: session.id === props.sessionId ? 'current' : session.activity,
-                run: inputAction(selectSession, {
-                  instance: props.instance,
-                  sessionId: session.id,
-                  expectedSessionId: props.sessionId,
-                }),
-              })),
-          );
-          note.set('Type to search conversations');
-          more = true;
-        } while (
-          page.after &&
-          matches().length < (query() === search ? minimum : count()) &&
-          alive &&
-          reading === generation
-        );
-      } else if (props.kind === 'models') {
+      if (props.kind === 'models') {
         do {
           const result = await host.query(
             'settings',
@@ -229,29 +180,15 @@ export function Palette(props: {
   };
   const loadMore = () => {
     if (!alive || loading()) return;
-    if ((props.kind === 'sessions' && page?.after) || (props.kind === 'models' && page?.next))
-      void load(query(), true);
+    if (props.kind === 'models' && page?.next) void load(query(), true);
   };
   if (props.kind === 'models')
     effect(() => {
       void load(query());
     });
   else if (props.kind !== 'commands') void load('');
-  if (props.kind === 'sessions') {
-    effect(() => {
-      query();
-      count();
-      // A local search can filter out an entire page, leaving no native row
-      // from which onEndReached could fire. Fill the visible results instead.
-      void Promise.resolve().then(() => {
-        if (alive && matches().length < count()) loadMore();
-      });
-    });
-  }
   const label = () =>
-    ({ commands: 'Commands', sessions: 'Sessions', models: 'Models', workspaces: 'Workspaces' })[
-      props.kind
-    ];
+    ({ commands: 'Commands', models: 'Models', workspaces: 'Workspaces' })[props.kind];
   return (
     <Dialog
       animation="none"

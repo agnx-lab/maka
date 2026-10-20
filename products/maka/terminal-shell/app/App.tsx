@@ -18,12 +18,12 @@
  */
 
 import { cleanup, effect, inputAction, mount, signal, Text, View } from 'nsh';
-import { Image } from 'nsh/image';
-import { Button } from 'nsh/base';
+import type { YNode } from 'nsh';
+import { Button, Dialog } from 'nsh/base';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
-import { windowSize } from 'nsh/device';
-import { C, Header } from './ui';
+import { C } from './ui';
+import { Home } from './Home';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
@@ -31,19 +31,24 @@ import type { PaletteEntry, PaletteKind } from './Palette';
 import { InteractionPanel } from './InteractionPanel';
 import { ImageViewer, type ImagePreview } from './ToolImage';
 import { createPresentationSettings } from './presentation';
-import logo from './assets/maka.png';
+import { createBrowsing } from './browsing';
+import type { BrowserWorkspace } from './browsing';
+import { Workbench, canDockBrowser } from './Workbench';
+import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 
 type Overlay = { instance: number } & (
-  | { kind: PaletteKind; sessionId: string | null }
+  | { kind: PaletteKind | 'sessions'; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
   | { kind: 'image'; sessionId: string; image: ImagePreview }
 );
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
   const presentation = createPresentationSettings();
+  const browsing = createBrowsing();
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
-  const recent = signal<any[]>([]);
+  const sidebarExpanded = signal(true);
+  const browserFocus = signal(false);
   const error = signal('');
   const status = signal('');
   const switching = signal(false);
@@ -51,14 +56,8 @@ function App() {
   const controls = signal<any[]>([]);
   const controlsKnown = signal(false);
   const recovering = signal(false);
-  const showHomeLogo = () => windowSize().height >= 336;
-  const homeRecentLimit = () => {
-    // Header, padding, controls and gaps take 16 rows; the logo adds five.
-    // Each recent entry takes two text rows and its following gap.
-    const available = Math.floor(windowSize().height / 16) - (showHomeLogo() ? 21 : 16);
-    return Math.max(0, Math.min(5, Math.floor(available / 3)));
-  };
   let handle: ConversationHandle | null = null;
+  let browserRoot: YNode | undefined;
   let alive = true;
   let controlRead = 0;
   let overlayInstance = 0;
@@ -75,15 +74,6 @@ function App() {
       controls.set(originals);
       controlsKnown.set(true);
     }
-  };
-  const loadRecent = async () => {
-    const page = await host.query('agent', 'list', { filter: 'all', position: { kind: 'start' } });
-    if (alive)
-      recent.set(
-        page.sessions
-          .filter((session: any) => !session.archived)
-          .sort((a: any, b: any) => b.updatedAt - a.updatedAt),
-      );
   };
   const switchSession = async (id: string, expectedSessionId = selected()) => {
     if (!alive || selected() !== expectedSessionId || selected() === id || switching()) return;
@@ -137,16 +127,31 @@ function App() {
   };
   const closeOverlay = (instance: number) => {
     if (!alive || overlay()?.instance !== instance) return false;
+    if (overlay()?.kind === 'sessions') browserFocus.set(false);
     overlay.set(null);
     return true;
   };
-  const open = ({ kind, sessionId }: { kind: PaletteKind; sessionId: string | null }) => {
+  const open = ({
+    kind,
+    sessionId,
+  }: {
+    kind: PaletteKind | 'sessions';
+    sessionId: string | null;
+  }) => {
     if (!alive || selected() !== sessionId) return;
+    if (kind === 'sessions' && canDockBrowser()) {
+      status.set('');
+      overlay.set(null);
+      sidebarExpanded.set(true);
+      browserFocus.set(true);
+      return;
+    }
     if (kind === 'models' && sessionId === null) {
       status.set('Open or create a conversation before choosing its model.');
       return;
     }
     status.set('');
+    browserFocus.set(kind === 'sessions');
     overlay.set({ kind, sessionId, instance: ++overlayInstance });
   };
   const chooseModel = async (sessionId: string, choice: any) => {
@@ -173,7 +178,8 @@ function App() {
       report(reason);
     }
   };
-  const create = async (workspace: any) => {
+  const create = async (workspace: BrowserWorkspace, expectedSessionId = selected()) => {
+    if (!alive || selected() !== expectedSessionId) return;
     try {
       error.set('');
       const result = await control('create', {
@@ -185,20 +191,20 @@ function App() {
       if (!alive) return;
       if (result.kind !== 'created')
         throw new Error(`Conversation creation rejected: ${result.reason ?? result.kind}`);
-      await switchSession(result.session.id);
+      await switchSession(result.session.id, expectedSessionId);
       if (selected() === result.session.id) open({ kind: 'models', sessionId: result.session.id });
-      await loadRecent();
+      await browsing.refresh();
     } catch (reason) {
       report(reason);
     }
   };
   const newConversation = (sessionId: string | null) => {
     if (!alive || selected() !== sessionId) return;
-    if (sessionId) void create({ kind: 'session', sessionId });
+    if (sessionId) void create({ kind: 'session', sessionId }, sessionId);
     else open({ kind: 'workspaces', sessionId });
   };
   const stop = () => {
-    if (handle) void handle.stop(handle.invocation()).catch(report);
+    if (!overlay() && handle) void handle.stop(handle.invocation()).catch(report);
   };
   const closeCommand = (context: CommandContext) =>
     alive &&
@@ -307,9 +313,6 @@ function App() {
     },
     { when: 'always' },
   );
-  effect(() => {
-    if (!overlay()) keymap.bind('escape', stop, { when: 'always' });
-  });
   const recoverControls = async () => {
     if (recovering()) return;
     recovering.set(true);
@@ -332,7 +335,7 @@ function App() {
         }
       }
       await handle?.refresh();
-      await loadRecent();
+      await browsing.refresh();
       status.set('Original actions checked.');
     } catch (reason) {
       report(reason);
@@ -349,15 +352,14 @@ function App() {
       report(reason);
     }
   };
-  const selectRecent = ({ sessionId }: { sessionId: string }) => {
-    if (selected() === null) void switchSession(sessionId);
-  };
   const openInteraction = ({ sessionId, requestId }: { sessionId: string; requestId: string }) => {
     if (!alive || selected() !== sessionId) return;
+    browserFocus.set(false);
     overlay.set({ kind: 'interaction', sessionId, requestId, instance: ++overlayInstance });
   };
   const previewImage = (image: ImagePreview) => {
     if (!alive || selected() !== image.source.sessionId || overlay()) return;
+    browserFocus.set(false);
     overlay.set({
       kind: 'image',
       sessionId: image.source.sessionId,
@@ -365,81 +367,95 @@ function App() {
       instance: ++overlayInstance,
     });
   };
-  void loadRecent().catch(report);
+  const closeSidebar = () => {
+    if (!alive || overlay()) return;
+    sidebarExpanded.set(false);
+    browserFocus.set(false);
+    handle?.focus();
+  };
+  const selectBrowsed = async (id: string, origin: string | null) => {
+    const current = overlay();
+    const instance = current?.kind === 'sessions' ? current.instance : null;
+    await switchSession(id, origin);
+    if (!alive || selected() !== id) return;
+    if (instance !== null) closeOverlay(instance);
+    browserFocus.set(false);
+    handle?.focus();
+  };
+  const browserProps: WorkspaceBrowserProps = {
+    browsing,
+    selected,
+    switching: () => switching() || busy(),
+    focusRequest: browserFocus,
+    focusHandled: () => browserFocus.set(false),
+    attach: (node) => {
+      // Retain the identity across conditional unmount. Resize reads the
+      // native focus path from before that presentation change.
+      browserRoot = node;
+    },
+    close: closeSidebar,
+    selectSession: selectBrowsed,
+    create,
+    newConversation,
+  };
+  let wasDocked = canDockBrowser();
+  effect(() => {
+    const docked = canDockBrowser();
+    const current = overlay();
+    if (docked && current?.kind === 'sessions') {
+      closeOverlay(current.instance);
+      sidebarExpanded.set(true);
+      browserFocus.set(true);
+    } else if (
+      !docked &&
+      wasDocked &&
+      current === null &&
+      browserRoot &&
+      keymap.focusedWithin(browserRoot)
+    ) {
+      open({ kind: 'sessions', sessionId: selected() });
+    }
+    wasDocked = docked;
+  });
   void refreshControls().catch(report);
   return (
     <View style={{ flex: 1, backgroundColor: C.background }}>
-      <If when={selected() === null}>
-        <View style={{ flex: 1 }}>
-          <Header
-            title="Your terminal, amplified."
+      <Workbench
+        expanded={() => sidebarExpanded() && overlay()?.kind !== 'sessions'}
+        browser={browserProps}
+        stop={stop}
+      >
+        <If when={selected() === null}>
+          <Home
+            browsing={browsing}
+            switching={switching}
             commands={inputAction(open, { kind: 'commands', sessionId: null })}
+            browse={inputAction(open, { kind: 'sessions', sessionId: null })}
+            newConversation={inputAction(newConversation, null)}
+            selectSession={selectBrowsed}
           />
-          <View
-            style={{
-              flex: 1,
-              width: '100%',
-              maxWidth: 800,
-              alignSelf: 'center',
-              padding: 32,
-              gap: 16,
-              justifyContent: 'center',
-            }}
-          >
-            <If when={showHomeLogo()}>
-              <Image
-                src={logo}
-                resizeMode="contain"
-                style={{ width: 64, height: 64, flexShrink: 0 }}
-              />
-            </If>
-            <Text style={{ color: C.accent, fontWeight: '700' }}>Make something remarkable.</Text>
-            <Text style={{ color: C.muted }}>A quiet place for ambitious work.</Text>
-            <Button onPress={inputAction(newConversation, null)} style={{ paddingVertical: 16 }}>
-              <Text style={{ color: C.text }}>+ New conversation · Ctrl+N</Text>
-            </Button>
-            <Each of={recent().slice(0, homeRecentLimit())} key={(session) => session.id}>
-              {(session) => (
-                <Button
-                  disabled={switching()}
-                  onPress={inputAction(selectRecent, { sessionId: session().id })}
-                  style={{ paddingVertical: 0 }}
-                >
-                  <Text numberOfLines={1} style={{ color: C.text }}>
-                    {session().title || 'Untitled conversation'}
-                  </Text>
-                  <Text numberOfLines={1} style={{ color: C.muted }}>
-                    {session().workspace.path}
-                  </Text>
-                </Button>
-              )}
-            </Each>
-            <Button onPress={inputAction(open, { kind: 'sessions', sessionId: null })}>
-              <Text style={{ color: C.muted }}>All conversations · Ctrl+O</Text>
-            </Button>
-            <Text style={{ color: C.muted }}>Ctrl+P commands · Ctrl+Q exits</Text>
-          </View>
-        </View>
-      </If>
-      <Each of={selected() ? [selected()!] : []} key={(id: string) => id}>
-        {(id) => (
-          <Conversation
-            client={host.session(id())}
-            presentation={presentation}
-            control={control}
-            commands={inputAction(open, { kind: 'commands', sessionId: id() })}
-            models={inputAction(open, { kind: 'models', sessionId: id() })}
-            interaction={openInteraction}
-            previewImage={previewImage}
-            attach={(next) => {
-              handle = next;
-            }}
-            detach={(previous) => {
-              if (handle === previous) handle = null;
-            }}
-          />
-        )}
-      </Each>
+        </If>
+        <Each of={selected() ? [selected()!] : []} key={(id: string) => id}>
+          {(id) => (
+            <Conversation
+              client={host.session(id())}
+              presentation={presentation}
+              control={control}
+              commands={inputAction(open, { kind: 'commands', sessionId: id() })}
+              models={inputAction(open, { kind: 'models', sessionId: id() })}
+              browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
+              interaction={openInteraction}
+              previewImage={previewImage}
+              attach={(next) => {
+                handle = next;
+              }}
+              detach={(previous) => {
+                if (handle === previous) handle = null;
+              }}
+            />
+          )}
+        </Each>
+      </Workbench>
       <If
         when={error() || status() || switching() || busy() || !controlsKnown() || controls().length}
       >
@@ -496,6 +512,37 @@ function App() {
                 close={close}
               />
             );
+          if (current.kind === 'sessions')
+            return (
+              <Dialog
+                animation="none"
+                onOpenChange={() => closeOverlay(current.instance)}
+                style={{
+                  flex: 1,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  padding: 16,
+                  backgroundColor: '#00000099',
+                }}
+              >
+                <View
+                  style={{
+                    width: '100%',
+                    maxWidth: 640,
+                    height: '100%',
+                    maxHeight: 640,
+                    backgroundColor: C.surface,
+                    padding: 8,
+                  }}
+                >
+                  <WorkspaceBrowser
+                    {...browserProps}
+                    docked={false}
+                    close={() => closeOverlay(current.instance)}
+                  />
+                </View>
+              </Dialog>
+            );
           return (
             <Palette
               kind={current.kind}
@@ -503,8 +550,7 @@ function App() {
               instance={current.instance}
               commands={commands({ instance: current.instance, sessionId: current.sessionId })}
               close={closeOverlay}
-              selectSession={switchSession}
-              create={create}
+              create={(workspace) => create(workspace, current.sessionId)}
               chooseModel={chooseModel}
             />
           );

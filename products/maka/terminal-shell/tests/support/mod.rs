@@ -768,7 +768,10 @@ pub fn evidence_cells(name: &str, view: &AppView) {
     let Some(directory) = std::env::var_os("MAKA_NSH_EVIDENCE") else {
         return;
     };
-    let (columns, rows) = evidence_size();
+    let viewport = view.surface().viewport();
+    let metrics = view.surface().metrics();
+    let columns = (viewport.width.0 / metrics.width().0).round() as u16;
+    let rows = (viewport.height.0 / metrics.height().0).round() as u16;
     let area = Rect::new(0, 0, columns, rows);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     view.render(area, &mut buffer);
@@ -784,7 +787,7 @@ pub fn evidence_cells(name: &str, view: &AppView) {
     let directory = PathBuf::from(directory);
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join(format!("{name}-{columns}x{rows}.cells.json")), serde_json::to_vec(&json!({
-        "source":"NSH AppView::render / Ratatui Buffer","columns":columns,"rows":rows,"cellWidth":8,"cellHeight":16,"cells":cells
+        "source":"NSH AppView::render / Ratatui Buffer","columns":columns,"rows":rows,"cellWidth":metrics.width().0,"cellHeight":metrics.height().0,"cells":cells
     })).unwrap()).unwrap();
 }
 

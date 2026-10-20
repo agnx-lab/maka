@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { Text, View } from 'nsh';
+import { signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 
@@ -40,9 +40,12 @@ export function Header(props: {
   status?: string;
   active?: boolean;
   commands(): void;
+  browse?(): void;
 }) {
+  const width = signal(windowSize().width);
   return (
     <View
+      onLayout={(frame) => width.set(frame.width)}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -62,10 +65,20 @@ export function Header(props: {
       >
         <Text style={{ color: C.accent, fontWeight: '700' }}>MAKA</Text>
       </Button>
+      <If when={props.browse}>
+        <Button
+          onPress={props.browse}
+          accessibilityLabel="Browse sessions"
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
+        >
+          <Text style={{ color: C.accent }}>☰</Text>
+        </Button>
+      </If>
       <Text numberOfLines={1} style={{ color: C.text, flex: 1 }}>
         {props.title}
       </Text>
-      <If when={windowSize().width >= 880 && props.workspace}>
+      <If when={width() >= 880 && props.workspace}>
         <Text numberOfLines={1} style={{ color: C.muted, maxWidth: 240 }}>
           {props.workspace?.split('/').filter(Boolean).at(-1)}
         </Text>

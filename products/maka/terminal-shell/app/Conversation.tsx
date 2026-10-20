@@ -22,7 +22,6 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { AnimatedValue } from 'nsh/animated';
-import { windowSize } from 'nsh/device';
 import { host } from 'maka/host';
 import { C, Header } from './ui';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
@@ -59,6 +58,7 @@ type ConversationProps = {
   control: Control;
   models(): void;
   commands(): void;
+  browse(): void;
   interaction(target: { sessionId: string; requestId: string }): void;
   previewImage(image: ImagePreview): void;
   attach(handle: ConversationHandle): void;
@@ -1056,6 +1056,7 @@ export function Conversation(props: ConversationProps) {
         status={stopping() ? 'Stopping…' : run()}
         active={invocation() !== null}
         commands={props.commands}
+        browse={props.browse}
       />
       <View
         style={{
@@ -1418,7 +1419,7 @@ export function Conversation(props: ConversationProps) {
         </View>
         <Text style={{ color: sendBlockedReason() ? C.warning : C.muted, paddingVertical: 0 }}>
           {sendBlockedReason() ||
-            (windowSize().width < 720
+            (readingSize().width < 720
               ? 'Enter sends · Shift+Enter newline · Ctrl+P commands'
               : 'Enter sends · Shift+Enter newline · Ctrl+P commands · Ctrl+Q exits')}
         </Text>

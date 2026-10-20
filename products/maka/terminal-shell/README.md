@@ -33,9 +33,11 @@ cargo run -p maka-terminal-shell -- --root /path/to/root
 
 The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. `--root` selects the business Host Root; the default product normally uses `~/.maka/application/host`.
 
-Without `--session`, Home shows recent conversations and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
+Without `--session`, Home shows conversations from the current browser scope and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
 
 From Home, creating a conversation opens **Workspaces**: choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation then opens **Models** so you can choose a configured connection and model before sending. Use the existing client to configure connections if none are available.
+
+**Sessions** uses a collapsible sidebar when the terminal has room for both it and the conversation; smaller windows use a dialog. Open either with the header's browse button or Ctrl+O. Drag the divider or use **Narrower** / **Wider** to adjust the sidebar. Choose **All workspaces**, the current session's exact workspace, or a project. A project's **+** creates in its Host-authorized directory; **New in current workspace** follows the open conversation. An isolated worktree is not necessarily part of its parent project.
 
 ## Keyboard
 
@@ -50,13 +52,13 @@ From Home, creating a conversation opens **Workspaces**: choose a directory publ
 | Alt+↓ | Open and focus the latest process group (or its flat rows) |
 | Enter | Send from the composer, or activate a selected palette entry |
 | Shift+Enter | Insert a newline in the composer |
-| Esc | Close the current overlay; otherwise request Stop for the current run |
+| Esc | Close the current overlay or focused browser; from the conversation, request Stop |
 | Ctrl+C | Copy selected text through the terminal's OSC 52 support |
 | Ctrl+Q | Quit |
 
 Model selection uses **Ctrl+G** because classic terminals encode Ctrl+M as the same carriage return as Enter. Paste through your terminal's paste command.
 
-In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches by title, workspace or ID; Models searches the Host's model catalog. Both load more results as you scroll or move down. Escape closes the palette without choosing.
+In a palette or the Sessions search field, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches titles within the chosen scope, using a case-sensitive literal substring of at most 128 Unicode characters. The Host applies this search before paging; it does not search conversation contents, paths or IDs. Models searches the Host's model catalog. Results load automatically as you scroll or move down. Escape closes navigation without choosing.
 
 ## Conversation and requests
 
