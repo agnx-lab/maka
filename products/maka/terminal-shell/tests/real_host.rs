@@ -370,7 +370,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             // NATIVE_TODO labels so the pointer always hits transcript content.
             let text = screen
                 .lines()
-                .find(|line| {
+                .find_map(|line| {
                     [
                         "History ",
                         "NATIVE_THINK_SOURCE_",
@@ -383,10 +383,9 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                         "> todo_write",
                         "Completed",
                     ]
-                    .iter()
-                    .any(|marker| line.contains(*marker))
+                    .into_iter()
+                    .find(|marker| line.contains(*marker))
                 })
-                .map(str::trim)
                 .expect("the viewport must contain painted fixture transcript text");
             support::scroll_text(view, text, MouseEventKind::ScrollUp);
             tokio::time::sleep(Duration::from_millis(5)).await;
