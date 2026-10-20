@@ -564,11 +564,15 @@ impl ReplyGate {
                                 let up=async move {let mut reader=wire::Reader::new(down_read); while let Ok(value)=reader.read::<Value>().await {
                                     if value["endpoint"]=="agent" && value["method"]==method {mark.store(true,Ordering::SeqCst);}
                                     if wire::write(&mut up_write,&value).await.is_err(){break;}
-                                }};
+                                }
+                                let _ = up_write.shutdown().await;
+                                };
                                 let down=async move {let mut reader=wire::Reader::new(up_read); while let Ok(value)=reader.read::<Value>().await {
                                     if selected.load(Ordering::SeqCst) && value["kind"]==reply && armed.swap(false,Ordering::SeqCst) {held.notify_one();release.notified().await;}
                                     if wire::write(&mut down_write,&value).await.is_err(){break;}
-                                }};
+                                }
+                                let _ = down_write.shutdown().await;
+                                };
                                 tokio::join!(up,down);
                             });
                         }
