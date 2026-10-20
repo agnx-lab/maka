@@ -6127,7 +6127,6 @@ mod tests {
                 .child(canvas(
                     |_, _, _| {},
                     move |_, _, window, _| {
-                        let nested_ax = nested_ax.clone();
                         window.on_mouse_event(move |_: &MouseUpEvent, phase, window, cx| {
                             if phase.capture() {
                                 let request = nested_ax.borrow_mut().take();
@@ -6276,8 +6275,7 @@ mod tests {
         focus_and_draw(&mut cx, window, &focus_a);
         let request = a11y_click_request(&mut cx, window, "b");
         cx.update_window(window, |root, _, cx| {
-            root.clone()
-                .downcast::<KeyboardActivationTest>()
+            root.downcast::<KeyboardActivationTest>()
                 .unwrap()
                 .update(cx, |view, _| {
                     *view.nested_ax.borrow_mut() = Some(request);

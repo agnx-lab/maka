@@ -257,7 +257,7 @@ fn nested_deferred_priority_preserves_causal_paint_through_reuse_and_rebuild(
                         .filter_map(|operation| match operation {
                             crate::scene::PaintOperation::Primitive(
                                 crate::scene::Primitive::Quad(quad),
-                            ) => Some(quad.background.clone()),
+                            ) => Some(quad.background),
                             _ => None,
                         })
                         .filter(|background| expected.contains(background))
