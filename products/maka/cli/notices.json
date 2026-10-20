@@ -1,7 +1,7 @@
 {
   "inputs": {
-    "Cargo.lock": "1fde5223e28cb8b962f45731df472a6f7b7e2608636dc8c9f6922d0e2f470edc",
-    "Cargo.toml": "47f9d2fdb4e0dd1817a93f45c0a9f6f791b6e7c117e79417d5bbcabb1c6577c0",
+    "Cargo.lock": "4fc8da2fa5859c12f85168708ff89d697dc62cbd9c60f2f6366ed01d1558f514",
+    "Cargo.toml": "1fc8ed5d123aa0bb23c8541cc5929200f8afd71449bc5186678847bb7470be24",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
