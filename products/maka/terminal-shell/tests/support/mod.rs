@@ -242,6 +242,8 @@ impl Fixture {
                         "agent",
                         &[
                             "list",
+                            "catalog",
+                            "projects",
                             "directories",
                             "create",
                             "selectBackend",

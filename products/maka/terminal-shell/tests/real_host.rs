@@ -19,7 +19,9 @@
 
 mod support;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use maka_plugin_core::operation::{OperationOutcome, Receipt};
 use nsh_platform_tui::AppView;
 use serde_json::{Value, json};
@@ -40,12 +42,18 @@ async fn wait_session_search(view: &mut AppView) {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             support::tick(view);
-            if view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Search session titles") {
+            if view
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.focused && node.label == "Search session titles")
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    }).await.expect("Ctrl+O did not focus the native session-title Input");
+    })
+    .await
+    .expect("Ctrl+O did not focus the native session-title Input");
 }
 
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
@@ -96,6 +104,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("› Sessions")).await;
         support::click_text(&mut view, "› Sessions");
         wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("› NSH real Agent") && !screen.contains("Loading…")).await;
+        wait_session_search(&mut view).await;
         support::click_text(&mut view, "› NSH real Agent");
         wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Enter sends")).await;
         view.handle_event(Event::Paste("Draft A stays in its own conversation".into()));
@@ -117,6 +126,38 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         evidence("workbench-wide-preserves-editor", &wide);
         support::evidence_cells("workbench-wide-preserves-editor", &view);
 
+        // Drag the real native divider in both directions without leaving the
+        // editor or changing its draft. A viewport resize does not exercise it.
+        for delta in [4_i16, -4] {
+            let nodes = view.accessibility_snapshot();
+            let divider = nodes.iter().find(|node| node.label == "Resize session browser").unwrap().frame;
+            let editor = nodes.iter().find(|node| node.id == composer).unwrap().frame;
+            let column = (divider.origin.x.0 / 8.0).round() as u16;
+            let target = (column as i16 + delta) as u16;
+            for (kind, column) in [
+                (MouseEventKind::Down(MouseButton::Left), column),
+                (MouseEventKind::Drag(MouseButton::Left), target),
+                (MouseEventKind::Up(MouseButton::Left), target),
+            ] {
+                view.handle_event(Event::Mouse(MouseEvent {kind,column,row:1,modifiers:KeyModifiers::NONE}));
+            }
+            tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    support::tick(&mut view);
+                    if view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser" && node.frame.origin.x.0 == divider.origin.x.0 + f32::from(delta) * 8.0) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }).await.expect("the physical browser divider drag did not resize the center");
+            assert_eq!(view.surface().focused(), Some(composer), "divider drag moved editor focus");
+            assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Draft A stays in its own conversation"));
+            let resized = view.accessibility_snapshot().into_iter().find(|node| node.id == composer).unwrap().frame;
+            assert_eq!(resized.origin.x.0, editor.origin.x.0 + f32::from(delta) * 8.0);
+            assert_eq!(resized.size.width.0, editor.size.width.0 - f32::from(delta) * 8.0);
+        }
+        support::wait_draft(&client, &fixture.session, "Draft A stays in its own conversation").await;
+
         shortcut(&mut view, 'p');
         select_palette(&mut view, "Search commands…", "New con", "New conversation").await;
         wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Enter selects")).await;
@@ -132,7 +173,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Paste("model-alt".into()));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt") && screen.contains("Enter sends") && !screen.contains("Search models…")).await;
+        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Close · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}));
         view.handle_event(Event::Paste("Message B uses the selected model".into()));
