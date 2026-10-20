@@ -20,12 +20,12 @@
 // One session's transcript: history paging, live updates, and the list that
 // draws it.
 //
-// Rows. A canonical row is one transcript row and field from `agent.history`
-// (key `<sourceSequence>/<itemIndex>/<field>`); the fragments a page boundary split it into are
-// joined back into one row. A live row holds the `delta` text of a part that
-// history does not have yet (key `live/<messageId>/<field>`), and a pending
-// row is a sent message the history has not recorded yet (key
-// `pending/<messageId>`). Row objects are never edited, and each update
+// Rows. A canonical row is one transcript row and field from `agent.history`;
+// the fragments a page boundary split it into are joined back into one row.
+// A live row holds a part's `delta` text, and a pending row is a sent message
+// history has not recorded yet. All three use `<messageId>/<field>` as their
+// display key, so recording a message preserves its reading position.
+// Row objects are never edited, and each update
 // replaces `rows`, `live` or `pending` with a new array, so a render can hand
 // the list one consistent snapshot without copying anything.
 //
@@ -77,7 +77,7 @@ const FORK_BUTTON = 24;
 const FIELD_ORDER = { thinking: 0, body: 1 };
 
 function rowKey(chunk) {
-  return `${rowPositionKey(chunk.position)}/${chunk.field}`;
+  return `${chunk.messageId}/${chunk.field}`;
 }
 
 function textOf(fragments) {
@@ -118,7 +118,7 @@ function withFragment(row, chunk) {
     tool: chunk.tool ?? row.tool,
     timing: chunk.timing ?? row.timing,
     origin: chunk.origin ?? row.origin,
-    attachments: chunk.attachments ?? row.attachments,
+    attachments: chunk.offset === 0 ? (chunk.attachments ?? []) : row.attachments,
     fragments,
     text: textOf(fragments),
   };
@@ -643,7 +643,7 @@ export class Transcript {
   appendLive(part, text, sequence) {
     const covered = `${part.messageId}/${part.field}`;
     if (text === '' || this.covered.has(covered)) return;
-    const key = `live/${covered}`;
+    const key = covered;
     const index = this.live.findIndex((row) => row.key === key);
     if (index < 0) {
       const row = {
@@ -718,27 +718,26 @@ export class Transcript {
         this.stats.follows += 1;
         const fence = this.latestKnown;
         let position = this.afterPosition();
-        let through = 0;
+        const chunks = [];
         for (;;) {
           const { page } = await readHistory(this.historyInput(fence, position), this.endpoint);
-          through = page.through;
           if (this.closed) return;
-          if (this.rows.length === 0 && this.before === null && position.kind === 'tail') {
-            this.olderFence = page.through;
-            this.before = page.before;
-          }
-          this.append(page.chunks);
-          this.after = page.after;
+          chunks.push(...page.chunks);
           if (page.after === null) break;
           position = { kind: 'after', cursor: page.after };
         }
-        // History through `through` is read to its end. Text it now holds, and
+        // Publish the whole pass together: a partial field must not replace
+        // live text or suppress its deltas while the next page is pending.
+        // Merge into the current rows, including any intervening older page.
+        this.append(chunks);
+        this.after = null;
+        // History through `fence` is read to its end. Text it now holds, and
         // text whose step closed by then without reaching history, is no longer
         // live (results.ts history case).
         this.live = this.live.filter(
           (row) =>
             !this.covered.has(row.covered) &&
-            (row.sequence > through || row.closedAt === null || row.closedAt > through),
+            (row.sequence > fence || row.closedAt === null || row.closedAt > fence),
         );
         this.pending = this.pending.filter((row) => !this.covered.has(row.covered));
         this.hooks.changed();
@@ -753,7 +752,7 @@ export class Transcript {
   afterPosition() {
     if (this.after !== null) return { kind: 'after', cursor: this.after };
     const last = this.rows.at(-1);
-    if (!last) return { kind: 'tail' };
+    if (!last) return { kind: 'start' };
     const fragment = last.fragments[last.fragments.length - 1];
     return {
       kind: 'after',
@@ -1055,7 +1054,7 @@ export class Transcript {
     if (this.covered.has(covered)) return;
     this.pending = [
       ...this.pending,
-      { key: `pending/${messageId}`, role: 'user', covered, pending: true, text, attachments },
+      { key: covered, role: 'user', covered, pending: true, text, attachments },
     ];
   }
 }
