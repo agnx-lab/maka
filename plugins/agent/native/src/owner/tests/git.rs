@@ -179,37 +179,169 @@ async fn git_status_and_diff_read_current_workspace_without_mutating_index() {
             f.config.shutdown().await.unwrap();
         }
         let status = observed.expect("Agent gitStatus must read the selected Session repository");
-        assert_eq!(status["truncated"], false);
         let mut entries = status["entries"].as_array().unwrap().clone();
-        entries.sort_by_key(|entry| (entry["area"].as_str().unwrap().to_owned(), entry["path"].to_string()));
-        assert_eq!(entries, vec![
-            json!({"area":"staged","path":{"bytesBase64":"dHJhY2tlZC50eHQ="},"kind":"modified"}),
-            json!({"area":"untracked","path":{"bytesBase64":"bmV3LnR4dA=="},"kind":"added"}),
-            json!({"area":"worktree","path":{"bytesBase64":"dHJhY2tlZC50eHQ="},"kind":"modified"}),
-        ]);
+        entries.sort_by_key(|entry| {
+            (
+                entry["area"].as_str().unwrap().to_owned(),
+                entry["path"].to_string(),
+            )
+        });
+        let mut status = status;
+        status["entries"] = json!(entries);
+        let head = std::fs::read_to_string(f.workspace.join(".git/refs/heads/main")).unwrap();
+        assert_eq!(
+            status,
+            json!({"head":head.trim(),"entries":[
+                {"area":"staged","path":{"bytesBase64":"dHJhY2tlZC50eHQ="},"kind":"modified"},
+                {"area":"untracked","path":{"bytesBase64":"bmV3LnR4dA=="},"kind":"added"},
+                {"area":"worktree","path":{"bytesBase64":"dHJhY2tlZC50eHQ="},"kind":"modified"},
+            ]})
+        );
         for (area, name, expected) in [
             ("staged", "tracked.txt", vec!["-base", "+staged"]),
             ("worktree", "tracked.txt", vec!["-staged", "+worktree"]),
             ("untracked", "new.txt", vec!["+new file"]),
         ] {
-            let diff = f.query("gitDiff", json!({"sessionId":session,"area":area,"path":path(name)})).await.unwrap();
+            let diff = f
+                .query(
+                    "gitDiff",
+                    json!({"sessionId":session,"area":area,"path":path(name)}),
+                )
+                .await
+                .unwrap();
             assert_eq!(changed_lines(&diff), expected, "{area}");
         }
         std::fs::write(f.workspace.join("tracked.txt"), "later edit\n").unwrap();
-        let fresh = f.query("gitDiff", json!({"sessionId":session,"area":"worktree","path":path("tracked.txt")})).await.unwrap();
+        let fresh = f
+            .query(
+                "gitDiff",
+                json!({"sessionId":session,"area":"worktree","path":path("tracked.txt")}),
+            )
+            .await
+            .unwrap();
         assert_eq!(changed_lines(&fresh), vec!["-staged", "+later edit"]);
         std::fs::remove_file(f.workspace.join("new.txt")).unwrap();
-        let fresh_status = f.query("gitStatus", json!({"sessionId":session})).await.unwrap();
-        let mut areas: Vec<_> = fresh_status["entries"].as_array().unwrap().iter().map(|entry| entry["area"].as_str().unwrap()).collect();
+        let fresh_status = f
+            .query("gitStatus", json!({"sessionId":session}))
+            .await
+            .unwrap();
+        let mut areas: Vec<_> = fresh_status["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["area"].as_str().unwrap())
+            .collect();
         areas.sort();
         assert_eq!(areas, ["staged", "worktree"]);
         assert_eq!(std::fs::read(&index).unwrap(), index_bytes);
-        assert_eq!(std::fs::metadata(&index).unwrap().modified().unwrap(), index_modified);
+        assert_eq!(
+            std::fs::metadata(&index).unwrap().modified().unwrap(),
+            index_modified
+        );
         assert!(!f.workspace.join(".git/index.lock").exists());
-        assert_eq!(std::fs::read_to_string(f.workspace.join("tracked.txt")).unwrap(), "later edit\n");
+        assert_eq!(
+            std::fs::read_to_string(f.workspace.join("tracked.txt")).unwrap(),
+            "later edit\n"
+        );
         f.app.shutdown().await.unwrap();
         f.config.shutdown().await.unwrap();
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn git_status_returns_every_literal_entry_through_public_host_without_mutating_repository() {
+    let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let session = f.create("Complete Git status").await;
+    repository(&f.workspace);
+    let staged = "staged-change.txt";
+    let worktree = "worktree-change.txt";
+    std::fs::write(f.workspace.join(staged), "staged base\n").unwrap();
+    std::fs::write(f.workspace.join(worktree), "worktree base\n").unwrap();
+    git(&f.workspace, &["add", staged, worktree]);
+    git(&f.workspace, &["commit", "--quiet", "-m", "status base"]);
+    std::fs::write(f.workspace.join(staged), "staged current\n").unwrap();
+    git(&f.workspace, &["add", staged]);
+    std::fs::write(f.workspace.join(worktree), "worktree current\n").unwrap();
+    let names = (0..1_800)
+        .map(|number| format!("literal-{number:04}-{}-中文.txt", "x".repeat(190)))
+        .collect::<Vec<_>>();
+    for name in &names {
+        std::fs::write(f.workspace.join(name), "literal untracked contents\n").unwrap();
+    }
+    let head = std::fs::read_to_string(f.workspace.join(".git/refs/heads/main")).unwrap();
+    let mut expected_entries = vec![
+        json!({"area":"staged","path":path(staged),"kind":"modified"}),
+        json!({"area":"worktree","path":path(worktree),"kind":"modified"}),
+    ];
+    expected_entries.extend(
+        names
+            .iter()
+            .map(|name| json!({"area":"untracked","path":path(name),"kind":"added"})),
+    );
+    let expected = json!({"head":head.trim(),"entries":expected_entries});
+    let preserved = [
+        ".git/HEAD",
+        ".git/refs/heads/main",
+        ".git/index",
+        staged,
+        worktree,
+    ]
+    .into_iter()
+    .chain(names.iter().map(String::as_str))
+    .map(|name| {
+        let file = f.workspace.join(name);
+        let bytes = std::fs::read(&file).unwrap();
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        (file, bytes, modified)
+    })
+    .collect::<Vec<_>>();
+    let observed = f.query("gitStatus", json!({"sessionId":session})).await;
+    // Retain the query outcome and close both real Host owners before any RED assertion.
+    let app_shutdown = f.app.shutdown().await;
+    let config_shutdown = f.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    for (file, bytes, modified) in preserved {
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            bytes,
+            "query changed {}",
+            file.display()
+        );
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            modified,
+            "query touched {}",
+            file.display()
+        );
+    }
+    assert!(!f.workspace.join(".git/index.lock").exists());
+    assert!(serde_json::to_vec(&expected).unwrap().len() > 512 * 1024);
+    let status = observed.expect("public Host gitStatus must deliver every repository entry");
+    assert_eq!(status["head"], head.trim());
+    assert_eq!(
+        status["entries"].as_array().unwrap().len(),
+        1_802,
+        "public Host gitStatus must not return a bounded prefix"
+    );
+    for (number, (actual, expected)) in status["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected["entries"].as_array().unwrap())
+        .enumerate()
+    {
+        assert_eq!(
+            actual, expected,
+            "complete public Host status entry {number}"
+        );
+    }
+    assert!(
+        status == expected,
+        "complete public Host gitStatus must have exactly the expected head/entries shape"
+    );
 }
 
 #[tokio::test]
@@ -344,7 +476,7 @@ async fn git_queries_keep_unborn_binary_results_within_session_and_method_grants
         repository(&f.workspace);
         std::fs::write(f.workspace.join("binary.dat"), b"before\0after").unwrap();
         git(&f.workspace, &["add", "binary.dat"]);
-        let expected = json!({"head":null,"entries":[{"area":"staged","path":{"bytesBase64":"YmluYXJ5LmRhdA=="},"kind":"added"}],"truncated":false});
+        let expected = json!({"head":null,"entries":[{"area":"staged","path":{"bytesBase64":"YmluYXJ5LmRhdA=="},"kind":"added"}]});
         assert_eq!(f.query("gitStatus", json!({"sessionId":session})).await.unwrap(), expected);
         let input = json!({"sessionId":session,"area":"staged","path":path("binary.dat")});
         assert_eq!(f.query("gitDiff", input.clone()).await.unwrap(), json!({"kind":"binary"}));

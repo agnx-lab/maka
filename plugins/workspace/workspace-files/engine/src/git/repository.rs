@@ -79,7 +79,7 @@ impl Repository {
         let git_dir = if metadata.is_dir() {
             entry.clone()
         } else if metadata.is_file() {
-            let bytes = bounded(&entry, MAX_CONTROL)?;
+            let bytes = read_file(&entry)?;
             let path = bytes
                 .strip_prefix(b"gitdir: ")
                 .ok_or_else(|| failure("git_unsupported"))?;
@@ -99,7 +99,7 @@ impl Repository {
             .map(dunce::canonicalize)
             .transpose()?;
         guard_metadata(&git_dir, &private_root, private_admin.as_deref())?;
-        let common_dir = match optional(&git_dir.join("commondir"), MAX_CONTROL)? {
+        let common_dir = match optional(&git_dir.join("commondir"))? {
             Some(bytes) => {
                 let path = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
                 let path = path.strip_suffix(b"\r").unwrap_or(path);
@@ -152,11 +152,8 @@ impl Repository {
         {
             return Err(failure("git_unsupported"));
         }
-        let index_before = optional(&repo.index_path(), MAX_METADATA)?;
+        let index_before = optional(&repo.index_path())?;
         let index = repo.index_or_empty().map_err(io::Error::other)?;
-        if index.entries().len() > MAX_ENTRIES {
-            return Err(failure("git_too_large"));
-        }
         for entry in index.entries() {
             interrupted(&cancel)?;
             if entry.mode == Mode::COMMIT
@@ -179,9 +176,6 @@ impl Repository {
             .map_err(io::Error::other)?
             .detach();
         let baseline = repo.index_from_tree(&tree).map_err(io::Error::other)?;
-        if baseline.entries().len() > MAX_ENTRIES {
-            return Err(failure("git_too_large"));
-        }
         if baseline
             .entries()
             .iter()
@@ -224,9 +218,7 @@ impl Repository {
             .map_err(io::Error::other)?
             .id()
             .map(|id| id.detach().to_string());
-        if self.head != head
-            || self.index_before != optional(&self.repo.index_path(), MAX_METADATA)?
-        {
+        if self.head != head || self.index_before != optional(&self.repo.index_path())? {
             return Err(failure("git_changed"));
         }
         Ok(())
@@ -314,33 +306,19 @@ impl Repository {
         }
         entries.sort();
         entries.dedup();
-        let mut result = GitStatus {
+        Ok(GitStatus {
             head: self.head.clone(),
-            entries: Vec::new(),
-            truncated: true,
-        };
-        let mut size = serde_json::to_vec(&result).map_err(io::Error::other)?.len();
-        for (area, name, kind) in entries {
-            let entry = GitStatusEntry {
-                area,
-                path: WorkspacePath::from_bytes(&name)?,
-                kind,
-            };
-            let bytes = serde_json::to_vec(&entry).map_err(io::Error::other)?.len()
-                + usize::from(!result.entries.is_empty());
-            if size + bytes > MAX_OUTPUT {
-                return Ok(result);
-            }
-            size += bytes;
-            result.entries.push(entry);
-        }
-        result.truncated = false;
-        // false is one byte longer than true.
-        if size + 1 > MAX_OUTPUT {
-            result.entries.pop();
-            result.truncated = true;
-        }
-        Ok(result)
+            entries: entries
+                .into_iter()
+                .map(|(area, name, kind)| {
+                    Ok(GitStatusEntry {
+                        area,
+                        path: WorkspacePath::from_bytes(&name)?,
+                        kind,
+                    })
+                })
+                .collect::<io::Result<_>>()?,
+        })
     }
 }
 
@@ -355,32 +333,24 @@ pub(super) fn guard_metadata(
     }
     Ok(())
 }
-pub(super) fn optional(path: &Path, limit: usize) -> io::Result<Option<Vec<u8>>> {
+pub(super) fn optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
-            bounded(path, limit).map(Some)
-        }
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => read_file(path).map(Some),
         Ok(_) => Err(failure("git_unsupported")),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }
 }
-pub(super) fn bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+pub(super) fn read_file(path: &Path) -> io::Result<Vec<u8>> {
     let parent = Dir::open_ambient_dir(
         path.parent().ok_or_else(|| failure("git_unsupported"))?,
         ambient_authority(),
     )?;
     let mut bytes = Vec::new();
-    let file = parent.open_with(
+    let mut file = parent.open_with(
         path.file_name().ok_or_else(|| failure("git_unsupported"))?,
         crate::workspace::options().read(true),
     )?;
-    if file.metadata()?.len() > limit as u64 {
-        return Err(failure("git_too_large"));
-    }
-    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(failure("git_too_large"));
-    }
+    file.read_to_end(&mut bytes)?;
     Ok(bytes)
 }

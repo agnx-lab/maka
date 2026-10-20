@@ -40,11 +40,6 @@ mod scan;
 #[cfg(test)]
 mod tests;
 
-const MAX_ENTRIES: usize = 100_000;
-const MAX_METADATA: usize = 50 * 1024 * 1024;
-const MAX_CONTROL: usize = 256 * 1024;
-const MAX_OUTPUT: usize = 512 * 1024;
-
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -78,7 +73,6 @@ pub struct GitStatus {
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<String>")]
     pub head: Option<String>,
     pub entries: Vec<GitStatusEntry>,
-    pub truncated: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

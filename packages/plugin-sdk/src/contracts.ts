@@ -12426,12 +12426,9 @@ export const contracts = {
                       $ref: '#/$defs/GitStatusEntry',
                     },
                   },
-                  truncated: {
-                    type: 'boolean',
-                  },
                 },
                 additionalProperties: false,
-                required: ['head', 'entries', 'truncated'],
+                required: ['head', 'entries'],
               },
               GitStatusEntry: {
                 type: 'object',

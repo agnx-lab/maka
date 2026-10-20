@@ -9895,7 +9895,6 @@ export interface GitStatusEntry {
 export interface GitStatus {
   head: string | null;
   entries: GitStatusEntry[];
-  truncated: boolean;
 }
 export interface AgentGitDiffRead {
   sessionId: string;

@@ -1489,11 +1489,6 @@ export const MESSAGES = {
   changesNoCommits: ['No commits yet', '还没有提交', '還沒有提交'],
   changesFilesOne: ['{count} file changed', '{count} 个文件有改动', '{count} 個檔案有變更'],
   changesFilesOther: ['{count} files changed', '{count} 个文件有改动', '{count} 個檔案有變更'],
-  changesTruncated: [
-    'Only the first {count} changes are listed',
-    '仅列出前 {count} 项改动',
-    '僅列出前 {count} 項變更',
-  ],
   diffUnstaged: ['Unstaged', '未暂存', '未暫存'],
   diffBack: ['Back to the list (Esc)', '返回列表（Esc）', '返回列表（Esc）'],
   diffPrevious: ['Previous file ([)', '上一个文件（[）', '上一個檔案（[）'],

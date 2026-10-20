@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::repository::{Repository, bounded, guard_metadata, optional};
+use super::repository::{Repository, guard_metadata, optional, read_file};
 use super::*;
 use cap_fs_ext::DirExt;
 use cap_std::fs::Dir;
@@ -36,7 +36,6 @@ pub(super) fn metadata(
     admin: Option<&Path>,
     cancel: &AtomicBool,
 ) -> io::Result<()> {
-    let mut count = 0;
     let mut roots = vec![git];
     if common != git {
         roots.push(common);
@@ -53,22 +52,11 @@ pub(super) fn metadata(
             "objects",
             "info",
         ] {
-            metadata_entry(
-                &root.join(name),
-                private,
-                admin,
-                cancel,
-                &mut count,
-                name == "objects",
-            )?;
+            metadata_entry(&root.join(name), private, admin, cancel, name == "objects")?;
         }
         // gix expands split-index links through these immutable sibling files.
         for entry in fs::read_dir(root)? {
             interrupted(cancel)?;
-            count += 1;
-            if count > MAX_ENTRIES {
-                return Err(failure("git_too_large"));
-            }
             let entry = entry?;
             if entry
                 .file_name()
@@ -76,7 +64,7 @@ pub(super) fn metadata(
                 .get(..12)
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"sharedindex."))
             {
-                metadata_entry(&entry.path(), private, admin, cancel, &mut count, false)?;
+                metadata_entry(&entry.path(), private, admin, cancel, false)?;
             }
         }
     }
@@ -87,7 +75,6 @@ fn metadata_entry(
     private: &Path,
     admin: Option<&Path>,
     cancel: &AtomicBool,
-    count: &mut usize,
     object_store: bool,
 ) -> io::Result<()> {
     interrupted(cancel)?;
@@ -96,24 +83,19 @@ fn metadata_entry(
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    *count += 1;
-    if *count > MAX_ENTRIES {
-        return Err(failure("git_too_large"));
-    }
     if meta.file_type().is_symlink() || (!meta.is_dir() && !meta.is_file()) {
         return Err(failure("git_unsupported"));
     }
     guard_metadata(path, private, admin)?;
     if meta.is_dir() {
         for child in fs::read_dir(path)? {
-            metadata_entry(&child?.path(), private, admin, cancel, count, object_store)?;
+            metadata_entry(&child?.path(), private, admin, cancel, object_store)?;
         }
-    } else if object_store && path.file_name().is_some_and(|name| name == "alternates") {
-        if !bounded(path, MAX_CONTROL)?.is_empty() {
-            return Err(failure("git_unsupported"));
-        }
-    } else if !object_store && meta.len() > MAX_METADATA as u64 {
-        return Err(failure("git_too_large"));
+    } else if object_store
+        && path.file_name().is_some_and(|name| name == "alternates")
+        && !read_file(path)?.is_empty()
+    {
+        return Err(failure("git_unsupported"));
     }
     Ok(())
 }
@@ -121,7 +103,7 @@ fn metadata_entry(
 pub(super) fn workspace(repo: &Repository) -> io::Result<()> {
     let mut ignores = Search::default();
     let exclude = repo.repo.common_dir().join("info/exclude");
-    if let Some(bytes) = optional(&exclude, MAX_CONTROL)? {
+    if let Some(bytes) = optional(&exclude)? {
         ignores.add_patterns_buffer(&bytes, &exclude, None, Default::default());
     }
     let fs = repo.repo.filesystem_options().map_err(io::Error::other)?;
@@ -141,8 +123,6 @@ pub(super) fn workspace(repo: &Repository) -> io::Result<()> {
         } else {
             Case::Sensitive
         },
-        visited: 0,
-        control_bytes: 0,
     };
     walker.visit(&repo.directory, Path::new(""), false)
 }
@@ -153,8 +133,6 @@ struct Walker<'a> {
     precompose_unicode: bool,
     pattern_root: PathBuf,
     case: Case,
-    visited: usize,
-    control_bytes: usize,
 }
 impl Walker<'_> {
     fn visit(
@@ -179,10 +157,6 @@ impl Walker<'_> {
         self.control(directory, relative, ".gitattributes")?;
         for child in directory.entries()? {
             interrupted(&self.repo.cancel)?;
-            self.visited += 1;
-            if self.visited > MAX_ENTRIES {
-                return Err(failure("git_too_large"));
-            }
             let child = child?;
             let name = child.file_name();
             if name.as_encoded_bytes().eq_ignore_ascii_case(b".git") {
@@ -255,25 +229,16 @@ impl Walker<'_> {
         }
         .into_owned())
     }
-    fn control(
-        &mut self,
-        directory: &Dir,
-        relative: &Path,
-        name: &str,
-    ) -> io::Result<Option<Vec<u8>>> {
+    fn control(&self, directory: &Dir, relative: &Path, name: &str) -> io::Result<Option<Vec<u8>>> {
         let bytes = match directory.symlink_metadata(name) {
             Ok(meta) => {
                 if !meta.is_file() || meta.file_type().is_symlink() {
                     return Err(failure("git_unsupported"));
                 }
-                if meta.len() > MAX_CONTROL as u64 {
-                    return Err(failure("git_too_large"));
-                }
                 self.repo.check(&self.repo.root.join(relative).join(name))?;
                 let mut bytes = Vec::new();
                 directory
                     .open_with(name, crate::workspace::options().read(true))?
-                    .take(MAX_CONTROL as u64 + 1)
                     .read_to_end(&mut bytes)?;
                 bytes
             }
@@ -299,16 +264,6 @@ impl Walker<'_> {
                 {
                     return Err(failure("git_unsupported"));
                 }
-                if self
-                    .repo
-                    .repo
-                    .find_header(entry.id)
-                    .map_err(io::Error::other)?
-                    .size()
-                    > MAX_CONTROL as u64
-                {
-                    return Err(failure("git_too_large"));
-                }
                 self.repo
                     .repo
                     .find_object(entry.id)
@@ -318,10 +273,6 @@ impl Walker<'_> {
             }
             Err(e) => return Err(e),
         };
-        self.control_bytes += bytes.len();
-        if bytes.len() > MAX_CONTROL || self.control_bytes > MAX_METADATA {
-            return Err(failure("git_too_large"));
-        }
         Ok(Some(bytes))
     }
 }

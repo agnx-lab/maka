@@ -223,7 +223,6 @@ async fn independent_public_agent_client_reads_git_changes_after_reconnect() {
         assert_eq!(status, json!({
             "head":null,
             "entries":[{"area":"staged","path":{"bytesBase64":"dHJhY2tlZC50eHQ="},"kind":"added"}],
-            "truncated":false,
         }));
 
         fixture.native.close().await.unwrap();
