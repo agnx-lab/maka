@@ -362,3 +362,12 @@ https://github.com/launchbadge/sqlx at revision
 003b698e99e024f3621b8043a2426fde5b741171. Original license texts,
 finite source hashes and the establish/configure ownership seam are in
 third-party/sqlx-sqlite/{LICENSE-APACHE,LICENSE-MIT,upstream.json,SOURCE.md}.
+
+Termina terminal input source (adapted, MIT OR MPL-2.0)
+
+third-party/termina contains Termina 0.4.0 from
+https://github.com/helix-editor/termina at revision
+7be7389fd3509d508a66a7e887aa9935e037b801, used under its MIT license option.
+Original MIT and MPL license texts, the Crossterm and TermWiz MIT notices,
+finite source hashes and the bounded CSI input modifications are preserved in
+third-party/termina/{LICENSE-MIT,LICENSE-MPL,README.md,upstream.json,SOURCE.md}.

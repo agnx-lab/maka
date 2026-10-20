@@ -1,0 +1,35 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing,
+  software distributed under the License is distributed on an
+  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied.  See the License for the
+  specific language governing permissions and limitations
+  under the License.
+-->
+
+# Termina bounded terminal input
+
+Sources are copied from [Termina 0.4.0, revision 7be7389fd3509d508a66a7e887aa9935e037b801](https://github.com/helix-editor/termina/tree/7be7389fd3509d508a66a7e887aa9935e037b801), with the reviewed local patch `32a7a905ab1c72b51463a93e96852d957b1c8448`. `upstream.json` records the finite original inventory and SHA-256 hashes before that patch. The repository's existing LF normalization applies to the copied sources; original hashes refer to upstream bytes. All production sources, embedded tests, examples, benchmark, Windows documentation and the original manifest are retained; upstream CI, development-shell files and lockfile are omitted.
+
+The original MIT and MPL texts are preserved. Maka uses the MIT alternative offered by the upstream README. Keep that README: it also contains the original Crossterm (Timon, 2019) and TermWiz (Wez Furlong, 2018) MIT notices.
+
+The bounded local changes are:
+
+- Preserve primary DA terminal type and numeric attributes in `Csi::PrimaryDeviceAttributes`, and decode strictly decimal, nonzero `CSI 6;height;width t` cell pixels using the existing window-response type.
+- Let the embedding reader set a pending-byte limit; the default remains unlimited. Checks happen before each byte is retained, including bracketed-paste framing. Completed events in the same OS read do not accumulate against this limit.
+- Bound incomplete `CSI ?` metadata to 256 bytes and 100 milliseconds, advancing deadlines through the existing Unix and Windows input sources even without more input. Numeric CSI key prefixes do not receive a fragment deadline. Input resource/timeout failures remain sticky and return through `Parser::parse` and the same reader; rejected tails are never replayed as keys. Existing malformed-sequence handling is otherwise retained.
+- Enter Unix raw mode without flushing queued input. Allow Windows embedding owners to disable the existing discard-input-on-drop policy before starting their reader. Original mode/codepage restoration remains in the same terminal owner.
+
+The local tests cover split replies mixed with Unicode/mouse/paste, strict parameters, a complete 64KiB paste, per-sequence limits, sticky rejection and deadline handling without delaying ordinary numeric key prefixes. Examples, documentation and the benchmark handle the fallible parser API.
+
+Maka's terminal shell owns the single OS reader and terminal mode guard; its existing Output worker owns terminal writes. This package does not add another reader, writer or capability-selection framework. The application selects Sixel only after its bounded startup negotiation; unknown capabilities keep Unicode. No Kitty/APC or iTerm2 support is added by this patch.

@@ -16,7 +16,7 @@
 # under the License.
 
 [workspace]
-exclude = ["third-party/gpui-fast", "third-party/async-io", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto"]
+exclude = ["third-party/gpui-fast", "third-party/async-io", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
 default-members = ["products/maka/cli"]
 members = [
     "plugins/agent/facts",
@@ -191,6 +191,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 sys-locale = "0.3.2"
+termina = { path = "third-party/termina" }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.dev]
