@@ -217,6 +217,7 @@ impl Session {
         if let Some((columns, rows)) = command.resize {
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
+            self.engine.set_focus_path_now(&self.surface.focus_path());
             self.environment.window = self.surface.viewport();
             let control = self.engine.control();
             control.resize(self.environment.window);
@@ -376,6 +377,7 @@ impl Session {
         presented_input: bool,
         lease: Option<&PressLease>,
     ) -> Result<bool, String> {
+        self.engine.set_focus_path_now(&self.surface.focus_path());
         let mut invokes_application = false;
         let control = self.engine.control();
         for event in events {

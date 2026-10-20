@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, effect, signal, View } from 'nsh';
+import { cleanup, effect, signal, View, type JSX } from 'nsh';
 import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
 import { C } from './ui';

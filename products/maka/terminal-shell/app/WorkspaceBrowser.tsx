@@ -309,7 +309,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                                 workspace: {
                                   kind: 'project',
                                   project: project()!.reference,
-                                  selection: project()!.selection,
+                                  selection: project()!.selection!,
                                 },
                                 origin: props.selected(),
                               })
