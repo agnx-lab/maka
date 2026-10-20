@@ -1170,7 +1170,7 @@ unicode-vo@0.1.0 (MIT/Apache-2.0); authors declared by package: Evgeniy Reizner 
 unicode-width@0.2.2 (MIT OR Apache-2.0); authors declared by package: kwantam <kwantam@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>
 unicode-xid@0.2.6 (MIT OR Apache-2.0); authors declared by package: erick.tryzelaar <erick.tryzelaar@gmail.com>, kwantam <kwantam@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>
 url@2.5.8 (MIT OR Apache-2.0); authors declared by package: The rust-url developers
-uuid@1.26.1 (Apache-2.0 OR MIT); authors declared by package: Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>
+uuid@1.27.0 (Apache-2.0 OR MIT); authors declared by package: Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>
 vcpkg@0.2.15 (MIT/Apache-2.0); authors declared by package: Jim McGrath <jimmc2@gmail.com>
 version_check@0.9.5 (MIT/Apache-2.0); authors declared by package: Sergio Benitez <sb@sergio.bz>
 wait-timeout@0.2.1 (MIT/Apache-2.0); authors declared by package: Alex Crichton <alex@alexcrichton.com>
@@ -1450,7 +1450,7 @@ https://crates.io/api/v1/crates/unicode-vo/0.1.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/unicode-width/0.2.2/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/unicode-xid/0.2.6/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/url/2.5.8/download :: LICENSE-APACHE
-https://crates.io/api/v1/crates/uuid/1.26.1/download :: LICENSE-APACHE
+https://crates.io/api/v1/crates/uuid/1.27.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/vcpkg/0.2.15/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/version_check/0.9.5/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/wait-timeout/0.2.1/download :: LICENSE-APACHE
@@ -3944,6 +3944,7 @@ llrt_zlib@0.9.0-beta (Apache-2.0)
 lru-slab@0.1.2 (MIT OR Apache-2.0 OR Zlib); authors declared by package: Benjamin Saunders <ben.e.saunders@gmail.com>
 nohash-hasher@0.2.0 (Apache-2.0 OR MIT); authors declared by package: Parity Technologies <admin@parity.io>
 ntapi@0.4.3 (Apache-2.0 OR MIT); authors declared by package: MSxDOS <melcodos@gmail.com>
+numtoa@0.2.4 (MIT OR Apache-2.0); authors declared by package: Michael Aaron Murphy <mmstickman@gmail.com>
 opentelemetry-http@0.32.0 (Apache-2.0)
 opentelemetry-otlp@0.32.0 (Apache-2.0)
 opentelemetry-proto@0.32.0 (Apache-2.0)
@@ -4013,6 +4014,7 @@ https://crates.io/api/v1/crates/kurbo/0.13.1/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/lru-slab/0.1.2/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/nohash-hasher/0.2.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/ntapi/0.4.3/download :: LICENSE-APACHE
+https://crates.io/api/v1/crates/numtoa/0.2.4/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/opentelemetry-proto/0.32.0/download :: src/proto/opentelemetry-proto/LICENSE
 https://crates.io/api/v1/crates/polycool/0.4.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/quinn-proto/0.11.17/download :: LICENSE-APACHE
@@ -8106,6 +8108,7 @@ DEALINGS IN THE SOFTWARE.
 cbindgen@0.28.0 (MPL-2.0); authors declared by package: Emilio Cobos Álvarez <emilio@crisal.io>, Jeff Muizelaar <jmuizelaar@mozilla.com>, Kartikaya Gupta <kats@mozilla.com>, Ryan Hunt <rhunt@eqrion.net>
 cooked-waker@5.0.0 (MPL-2.0); authors declared by package: Nathan West <Lucretiel@gmail.com>
 dtoa-short@0.3.5 (MPL-2.0); authors declared by package: Xidorn Quan <me@upsuper.org>
+termina@0.3.3 (MIT OR MPL-2.0); authors declared by package: Michael Davis <mcarsondavis@gmail.com>
 uniffi@0.31.0 (MPL-2.0)
 uniffi_bindgen@0.31.0 (MPL-2.0)
 uniffi_core@0.31.0 (MPL-2.0)
@@ -8118,6 +8121,7 @@ uniffi_udl@0.31.0 (MPL-2.0)
 https://crates.io/api/v1/crates/cbindgen/0.28.0/download :: LICENSE
 https://crates.io/api/v1/crates/cooked-waker/5.0.0/download :: LICENSE
 https://crates.io/api/v1/crates/dtoa-short/0.3.5/download :: LICENSE
+https://crates.io/api/v1/crates/termina/0.3.3/download :: LICENSE-MPL
 https://raw.githubusercontent.com/mozilla/uniffi-rs/309762f55db3f0548194a9ceba3027fa64b18a93/LICENSE
 
 Mozilla Public License Version 2.0
@@ -21057,6 +21061,8 @@ icu_normalizer_data@2.3.0 (Unicode-3.0); authors declared by package: The ICU4X 
 icu_properties@2.3.0 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
 icu_properties_data@2.3.0 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
 icu_provider@2.3.1 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
+icu_segmenter@2.3.0 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
+icu_segmenter_data@2.3.0 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
 ixdtf@0.6.6 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
 litemap@0.8.3 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
 potential_utf@0.1.6 (Unicode-3.0); authors declared by package: The ICU4X Project Developers
@@ -21083,6 +21089,8 @@ https://crates.io/api/v1/crates/icu_normalizer_data/2.3.0/download :: LICENSE
 https://crates.io/api/v1/crates/icu_properties/2.3.0/download :: LICENSE
 https://crates.io/api/v1/crates/icu_properties_data/2.3.0/download :: LICENSE
 https://crates.io/api/v1/crates/icu_provider/2.3.1/download :: LICENSE
+https://crates.io/api/v1/crates/icu_segmenter/2.3.0/download :: LICENSE
+https://crates.io/api/v1/crates/icu_segmenter_data/2.3.0/download :: LICENSE
 https://crates.io/api/v1/crates/ixdtf/0.6.6/download :: LICENSE
 https://crates.io/api/v1/crates/litemap/0.8.3/download :: LICENSE
 https://crates.io/api/v1/crates/potential_utf/0.1.6/download :: LICENSE
@@ -25996,6 +26004,35 @@ SOFTWARE.
 
 ================================================================================
 
+nu-ansi-term@0.50.3 (MIT); authors declared by package: ogham@bsago.me, Ryan Scheel (Havvy) <ryan.havvy@gmail.com>, Josh Triplett <josh@joshtriplett.org>, The Nushell Project Developers
+
+https://crates.io/api/v1/crates/nu-ansi-term/0.50.3/download :: LICENSE
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Benjamin Sago
+Copyright (c) 2021-2022 The Nushell Project Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
 num-cmp@0.1.0 (MIT/Apache-2.0); authors declared by package: Kang Seonghoon <public+git@mearie.org>
 
 https://crates.io/api/v1/crates/num-cmp/0.1.0/download :: LICENSE.txt
@@ -26631,6 +26668,34 @@ num_threads@0.1.7 (MIT OR Apache-2.0); authors declared by package: Jacob Pratt 
 https://crates.io/api/v1/crates/num_threads/0.1.7/download :: LICENSE-MIT
 
 Copyright (c) 2021 Jacob Pratt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+numtoa@0.2.4 (MIT OR Apache-2.0); authors declared by package: Michael Aaron Murphy <mmstickman@gmail.com>
+
+https://crates.io/api/v1/crates/numtoa/0.2.4/download :: LICENSE-MIT
+
+MIT License
+
+Copyright (c) 2017 Michael Aaron Murphy <mmstickman@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29542,13 +29607,17 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ratatui-core@0.1.2 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
 ratatui-crossterm@0.1.2 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
+ratatui-termina@0.1.0 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
+ratatui-termion@0.1.2 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
 ratatui-widgets@0.3.2 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
 ratatui@0.30.2 (MIT); authors declared by package: Florian Dehau <work@fdehau.com>, The Ratatui Developers
 
 https://crates.io/api/v1/crates/ratatui-core/0.1.2/download :: LICENSE
 https://crates.io/api/v1/crates/ratatui-crossterm/0.1.2/download :: LICENSE
+https://crates.io/api/v1/crates/ratatui-termion/0.1.2/download :: LICENSE
 https://crates.io/api/v1/crates/ratatui-widgets/0.3.2/download :: LICENSE
 https://crates.io/api/v1/crates/ratatui/0.30.2/download :: LICENSE
+https://raw.githubusercontent.com/ratatui/ratatui/e665c36cb14752a61cd777fbd06dbef8474f2add/LICENSE
 
 The MIT License (MIT)
 
@@ -34757,6 +34826,60 @@ SOFTWARE.
 
 ================================================================================
 
+termina@0.3.3 (MIT OR MPL-2.0); authors declared by package: Michael Davis <mcarsondavis@gmail.com>
+
+https://crates.io/api/v1/crates/termina/0.3.3/download :: LICENSE-MIT
+
+Copyright (c) 2025 Michael Davis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+
+termion@4.0.6 (MIT); authors declared by package: ticki <Ticki@users.noreply.github.com>, gycos <alexandre.bury@gmail.com>, IGI-111 <igi-111@protonmail.com>, Jeremy Soller <jackpot51@gmail.com>
+
+https://crates.io/api/v1/crates/termion/4.0.6/download :: LICENSE
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Ticki
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
 textwrap@0.16.4 (MIT)
 
 https://crates.io/api/v1/crates/textwrap/0.16.4/download :: LICENSE
@@ -35192,6 +35315,7 @@ tokio-native-tls@0.3.1 (MIT); authors declared by package: Tokio Contributors <t
 tracing-attributes@0.1.31 (MIT); authors declared by package: Tokio Contributors <team@tokio.rs>, Eliza Weisman <eliza@buoyant.io>, David Barsky <dbarsky@amazon.com>
 tracing-core@0.1.36 (MIT); authors declared by package: Tokio Contributors <team@tokio.rs>
 tracing-log@0.2.0 (MIT); authors declared by package: Tokio Contributors <team@tokio.rs>
+tracing-serde@0.2.0 (MIT); authors declared by package: Tokio Contributors <team@tokio.rs>
 tracing-subscriber@0.3.23 (MIT); authors declared by package: Eliza Weisman <eliza@buoyant.io>, David Barsky <me@davidbarsky.com>, Tokio Contributors <team@tokio.rs>
 tracing@0.1.44 (MIT); authors declared by package: Eliza Weisman <eliza@buoyant.io>, Tokio Contributors <team@tokio.rs>
 
@@ -35199,6 +35323,7 @@ https://crates.io/api/v1/crates/tokio-native-tls/0.3.1/download :: LICENSE
 https://crates.io/api/v1/crates/tracing-attributes/0.1.31/download :: LICENSE
 https://crates.io/api/v1/crates/tracing-core/0.1.36/download :: LICENSE
 https://crates.io/api/v1/crates/tracing-log/0.2.0/download :: LICENSE
+https://crates.io/api/v1/crates/tracing-serde/0.2.0/download :: LICENSE
 https://crates.io/api/v1/crates/tracing-subscriber/0.3.23/download :: LICENSE
 https://crates.io/api/v1/crates/tracing/0.1.44/download :: LICENSE
 
@@ -36855,9 +36980,9 @@ licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
 
 ================================================================================
 
-uuid@1.26.1 (Apache-2.0 OR MIT); authors declared by package: Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>
+uuid@1.27.0 (Apache-2.0 OR MIT); authors declared by package: Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>
 
-https://crates.io/api/v1/crates/uuid/1.26.1/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/uuid/1.27.0/download :: LICENSE-MIT
 
 Copyright (c) 2014 The Rust Project Developers
 Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon

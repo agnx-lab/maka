@@ -1784,20 +1784,38 @@ async fn application_close_cancels_bursts_of_partial_open_frames() {
     let mut listener = maka_host_runtime::ipc::LocalListener::bind(&path).unwrap();
     let mut clients = Vec::new();
     let mut observers = Vec::new();
+    let mut reads = Vec::new();
     for _ in 0..48 {
         let mut client = maka_host_runtime::ipc::connect(&path).await.unwrap();
         let accepted = listener.accept().await.unwrap();
         let (reader, writer) = tokio::io::split(accepted);
+        let (read, observed) = tokio::sync::oneshot::channel();
+        let mut read = Some(read);
+        let reader = tokio_util::io::InspectReader::new(reader, move |bytes| {
+            if !bytes.is_empty()
+                && let Some(read) = read.take()
+            {
+                let _ = read.send(());
+            }
+        });
+        reads.push(observed);
         observers.push(f.server.serve(reader, writer, f.peer.clone()).unwrap());
         // Leave a real physical header incomplete. No Scope/Open is admitted.
         client.write_all(&[0]).await.unwrap();
         clients.push(client);
     }
     drop(listener);
-    tokio::time::timeout(std::time::Duration::from_secs(2), f.server.close())
-        .await
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        // Closing with unread socket bytes can reset the peer. Observe actual
+        // partial-header reads before asserting that cancellation produces EOF.
+        for read in reads {
+            read.await.unwrap();
+        }
+        f.server.close().await
+    })
+    .await
+    .unwrap()
+    .unwrap();
     for observer in observers {
         assert!(observer.await.is_err());
     }

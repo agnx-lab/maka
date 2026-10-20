@@ -117,6 +117,7 @@ impl EventLog {
         let session = session.to_owned();
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin().await?;
+            let mut final_outputs = std::collections::HashMap::new();
             super::directory::check_read(&mut tx, &session, fence).await?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)"
@@ -276,10 +277,18 @@ impl EventLog {
                         ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         Some(maka_agent_ports::session::history::Compaction { duration_ms: sequence_number(duration)? })
                     } else { None };
-                    let model = if role == Role::Assistant {
-                        super::model::resolve(&mut tx, &session, locator, sql_number(through)?).await?
-                    } else { None };
-                    let chunk = Chunk { field, timing, compaction, origin: row.origin, model,
+                    let (model, final_output) = if role == Role::Assistant {
+                        let output = match final_outputs.entry(row.turn.clone()) {
+                            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                                super::final_output::resolve(&mut tx, &session, &row.turn, through_sql).await?),
+                        };
+                        let metadata = super::model::resolve(&mut tx, &session, locator, through_sql).await?;
+                        let final_output = field == HistoryField::Body && row.total > 0 && metadata.producer.as_ref().is_some_and(|producer|
+                            output.as_ref() == Some(producer));
+                        (metadata.model, final_output)
+                    } else { (None, false) };
+                    let chunk = Chunk { field, timing, compaction, origin: row.origin, model, final_output,
                         message_id: row.message, turn_id: row.turn, timestamp: row.timestamp, role,
                         position: locator, offset: start, total_bytes: row.total, text: text.to_owned(), attachments, tool,
                     };

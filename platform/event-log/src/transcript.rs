@@ -25,6 +25,7 @@ mod bodycache;
 pub(crate) mod directory;
 mod emit;
 mod evidence;
+mod final_output;
 mod history;
 mod image;
 mod model;

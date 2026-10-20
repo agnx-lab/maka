@@ -21,7 +21,7 @@ use crate::Policy;
 use base64::Engine;
 use maka_sandbox::Destination;
 use rustls_platform_verifier::BuilderVerifierExt;
-use std::{io, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -85,14 +85,18 @@ async fn connect_inner(policy: &Policy, destination: &Destination) -> io::Result
     let mut stream: Tunnel = match proxy.scheme() {
         "http" => Box::new(tcp),
         "https" => {
-            let config = rustls::ClientConfig::builder()
-                .with_platform_verifier()
-                .map_err(io::Error::other)?
-                .with_no_client_auth();
+            let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .map_err(io::Error::other)?
+            .with_platform_verifier()
+            .map_err(io::Error::other)?
+            .with_no_client_auth();
             let name = rustls::pki_types::ServerName::try_from(host.to_owned())
                 .map_err(io::Error::other)?;
             Box::new(
-                TlsConnector::from(std::sync::Arc::new(config))
+                TlsConnector::from(Arc::new(config))
                     .connect(name, tcp)
                     .await?,
             )

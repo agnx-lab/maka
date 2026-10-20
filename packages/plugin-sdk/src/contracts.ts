@@ -13118,6 +13118,11 @@ export const contracts = {
               AgentHistoryChunk: {
                 type: 'object',
                 properties: {
+                  finalOutput: {
+                    description:
+                      "Part of the successfully completed native Turn's final output at `through`.\nIncludes all body parts and source citations; never a Thinking field.",
+                    type: 'boolean',
+                  },
                   model: {
                     anyOf: [
                       {

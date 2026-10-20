@@ -34,6 +34,7 @@ use tokio_rustls::{
     TlsAcceptor,
     rustls::{
         ServerConfig,
+        crypto::aws_lc_rs,
         pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
     },
 };
@@ -53,7 +54,9 @@ trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
 fn acceptor() -> TlsAcceptor {
-    let config = ServerConfig::builder()
+    let config = ServerConfig::builder_with_provider(Arc::new(aws_lc_rs::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
         .with_no_client_auth()
         .with_single_cert(
             vec![CertificateDer::from_pem_slice(CERT).unwrap()],

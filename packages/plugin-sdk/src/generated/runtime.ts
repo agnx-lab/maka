@@ -10125,6 +10125,11 @@ export interface AgentQueueMutation {
   edit: AgentQueueAction;
 }
 export interface AgentHistoryChunk {
+  /**
+   * Part of the successfully completed native Turn's final output at `through`.
+   * Includes all body parts and source citations; never a Thinking field.
+   */
+  finalOutput?: boolean;
   model?: HistoryModel | null;
   origin?: MessageOrigin | null;
   compaction?: HistoryCompaction | null;
