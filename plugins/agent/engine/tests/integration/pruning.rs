@@ -148,7 +148,9 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
             // this case verifies a genuinely failed summary, not terminal abort.
             let mut commits = observed.subscribe_commits();
             loop {
-                let prefix = observed.prefix(200, 16 * 1024 * 1024).await.unwrap();
+                // Forty calls also retain their input start/delta/end observations;
+                // together with dispatch, settlement and archive facts they exceed 200.
+                let prefix = observed.prefix(512, 16 * 1024 * 1024).await.unwrap();
                 let summary_steps: Vec<_> = prefix
                     .events
                     .iter()
@@ -199,7 +201,7 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
             }
             assert!(!messages.contains("partial-summary-must-not-replay"));
             assert_eq!(messages.contains("summary-marker"), interrupted);
-            let prefix = observed.prefix(200, 16 * 1024 * 1024).await.unwrap();
+            let prefix = observed.prefix(512, 16 * 1024 * 1024).await.unwrap();
             let archives: Vec<_> = prefix
                 .events
                 .iter()
@@ -256,7 +258,7 @@ async fn settled_results_are_pruned_before_context_limits_and_survive_failed_sum
         worker.drain().await;
         server.await.unwrap();
         assert_eq!(count.load(Ordering::SeqCst), call_count);
-        let prefix = log.prefix(200, 16 * 1024 * 1024).await.unwrap();
+        let prefix = log.prefix(512, 16 * 1024 * 1024).await.unwrap();
         assert_eq!(
             prefix
                 .events
