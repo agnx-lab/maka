@@ -10773,12 +10773,12 @@ dependencies = [
 [[package]]
 name = "nsh-animation"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 
 [[package]]
 name = "nsh-bundler"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "dunce",
  "log",
@@ -10791,7 +10791,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "log",
  "nsh-animation",
@@ -10806,7 +10806,7 @@ dependencies = [
 [[package]]
 name = "nsh-engine"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -10824,7 +10824,7 @@ dependencies = [
 [[package]]
 name = "nsh-js"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "libc",
  "log",
@@ -10841,7 +10841,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -10853,7 +10853,7 @@ dependencies = [
 [[package]]
 name = "nsh-package"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -10868,7 +10868,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tui"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -10901,7 +10901,7 @@ dependencies = [
 [[package]]
 name = "nsh-ui-mobile"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3#dba786d07dcb79c5d599b3e5eaf2110d99bd6fd3"
+source = "git+https://github.com/M4n5ter/nsh?rev=552253cd8ec10169d0e25e9129cf3c188354d0ef#552253cd8ec10169d0e25e9129cf3c188354d0ef"
 dependencies = [
  "nsh-core",
  "serde_json",
