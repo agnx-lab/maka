@@ -650,25 +650,32 @@ pub async fn focus_activity(view: &mut AppView) {
     });
 }
 
-pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> String {
-    let started = Instant::now();
-    loop {
-        view.poll().unwrap();
-        tick(view);
-        assert!(
-            view.last_error().is_none(),
-            "NSH app error: {:?}",
-            view.last_error()
-        );
-        let snapshot = view.snapshot();
-        if predicate(&snapshot) {
-            return snapshot;
+#[track_caller]
+pub fn wait_view(
+    view: &mut AppView,
+    predicate: impl Fn(&str) -> bool,
+) -> impl std::future::Future<Output = String> {
+    let caller = std::panic::Location::caller();
+    async move {
+        let started = Instant::now();
+        loop {
+            view.poll().unwrap();
+            tick(view);
+            assert!(
+                view.last_error().is_none(),
+                "NSH app error at {caller}: {:?}",
+                view.last_error()
+            );
+            let snapshot = view.snapshot();
+            if predicate(&snapshot) {
+                return snapshot;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "expected real UI state did not appear at {caller}:\n{snapshot}"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(20),
-            "expected real UI state did not appear:\n{snapshot}"
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
 

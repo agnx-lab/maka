@@ -528,6 +528,30 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_source() {
     use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
+    #[track_caller]
+    fn wait_mode_layout(view: &mut AppView) -> impl std::future::Future<Output = ()> {
+        let caller = std::panic::Location::caller();
+        async move {
+            let started = std::time::Instant::now();
+            loop {
+                support::tick(view);
+                assert!(
+                    view.last_error().is_none(),
+                    "NSH app error at {caller}: {:?}",
+                    view.last_error()
+                );
+                if !view.surface().animating() {
+                    return;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(20),
+                    "Markdown mode layout did not settle at {caller}:\n{}",
+                    view.snapshot()
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    }
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
@@ -574,9 +598,13 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         fixture.idle(&client, &fixture.session).await;
         let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
         evidence("rich-response-complete", &complete);
+        wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "[Source]");
         let original = wait_view(&mut view, |screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && screen.contains("[Formatted]")).await;
         evidence("rich-response-original-source", &original);
+        // Source has a different native height. Observe the original text
+        // first, then let its scroll/layout motion finish before one click.
+        wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "[Formatted]");
         wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
@@ -596,6 +624,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         request.delta(&source).await;
         let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
         evidence("rich-response-over-formatting-budget", &over_budget);
+        wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "[Source]");
         wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Formatted]") && !screen.contains("Formatting unavailable")).await;
         request.finish().await;
