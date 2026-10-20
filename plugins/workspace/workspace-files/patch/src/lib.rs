@@ -1,10 +1,10 @@
 // Portions adapted from OpenAI Codex under the Apache License 2.0.
 // Copyright 2025 OpenAI. See SOURCE.md and the repository LICENSE/NOTICE.
-// Maka modifications: pure bounded APIs, no filesystem/execution integration,
-// restricted patch grammar and explicit preparation limits. SOURCE.md records
+// Maka modifications: pure preparation APIs, no filesystem/execution integration,
+// restricted patch grammar and preserved line endings. SOURCE.md records
 // the exact upstream files/revisions and file-specific changes.
 
-//! Pure, bounded patch preparation. Paths carry no filesystem authority.
+//! Pure patch preparation. Paths carry no filesystem authority.
 mod parser;
 mod seek_sequence;
 mod text_file;
@@ -12,12 +12,6 @@ mod update;
 
 use std::path::PathBuf;
 use thiserror::Error;
-
-/// Maximum bytes in a patch, source file, or prepared result.
-pub const MAX_BYTES: usize = 1024 * 1024;
-const MAX_LINES: usize = 32_768;
-const MAX_OPERATIONS: usize = 128;
-const MAX_MATCH_WORK: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum PatchError {
@@ -27,8 +21,6 @@ pub enum PatchError {
     InvalidHunkError { message: String, line_number: usize },
     #[error("{0}")]
     ComputeReplacements(String),
-    #[error("patch preparation exceeds {0} limit")]
-    Limit(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,31 +57,10 @@ impl UpdateChunk {
     }
 }
 
-fn check_input(text: &str) -> Result<(), PatchError> {
-    if text.len() > MAX_BYTES {
-        return Err(PatchError::Limit("bytes"));
-    }
-    // SourceFile recognizes lone CR as well as LF/CRLF. Count the same
-    // logical lines without allocating the parsed source before admission.
-    let lines = text
-        .bytes()
-        .enumerate()
-        .filter(|(index, byte)| {
-            *byte == b'\n' || (*byte == b'\r' && text.as_bytes().get(index + 1) != Some(&b'\n'))
-        })
-        .count()
-        + usize::from(!text.is_empty() && !text.ends_with(['\r', '\n']));
-    if lines > MAX_LINES {
-        return Err(PatchError::Limit("lines"));
-    }
-    Ok(())
-}
-
 /// Parse the client-executed Codex envelope. Move, shell wrappers, environment
 /// directives and empty operations are unsupported. Operations retain source
 /// order; callers must independently authorize and settle each mutation.
 pub fn parse_patch(patch: &str) -> Result<Vec<PatchOperation>, PatchError> {
-    check_input(patch)?;
     let lines: Vec<_> = patch.trim().lines().collect();
     if lines.len() < 2
         || lines[0].trim() != "*** Begin Patch"
@@ -103,9 +74,6 @@ pub fn parse_patch(patch: &str) -> Result<Vec<PatchOperation>, PatchError> {
     let mut line_number = 2;
     let mut operations = Vec::new();
     while !remaining.is_empty() {
-        if operations.len() >= MAX_OPERATIONS {
-            return Err(PatchError::Limit("operations"));
-        }
         let (operation, consumed) = parser::parse_one_hunk(remaining, line_number)?;
         let path = match &operation {
             PatchOperation::Add { path, content } => {
@@ -136,7 +104,6 @@ pub fn parse_patch(patch: &str) -> Result<Vec<PatchOperation>, PatchError> {
 /// Parse a structured OpenAI update diff using a fixed virtual path. A diff
 /// cannot inject another operation or replace the virtual target.
 pub fn parse_update(diff: &str) -> Result<Vec<UpdateChunk>, PatchError> {
-    check_input(diff)?;
     let diff = diff
         .strip_suffix("\r\n")
         .or_else(|| diff.strip_suffix('\n'))
@@ -159,7 +126,6 @@ pub fn parse_update(diff: &str) -> Result<Vec<UpdateChunk>, PatchError> {
 /// Parse a structured OpenAI create diff. Unlike an envelope Add, this joins
 /// added lines without forcing a final newline (the SDK's native contract).
 pub fn parse_create(diff: &str) -> Result<String, PatchError> {
-    check_input(diff)?;
     let patch = format!(
         "*** Begin Patch\n*** Add File: maka-virtual-create\n{}\n*** End Patch",
         diff.strip_suffix("\r\n")
@@ -184,42 +150,13 @@ pub fn parse_create(diff: &str) -> Result<String, PatchError> {
 /// Apply fuzzy chunks to a snapshot, preserving original context and mixed
 /// line endings. Insertions use the first source line ending (LF if absent).
 /// Like upstream, updates give an unterminated final line a line ending.
-/// Matching is not linear: conservative work limits bound adversarial inputs.
+/// Matching retains upstream's multiple search passes and nonlinear worst case.
 pub fn apply_update(source: &str, chunks: &[UpdateChunk]) -> Result<String, PatchError> {
-    check_input(source)?;
     if chunks.is_empty() {
         return Err(PatchError::InvalidPatchError("empty update".into()));
     }
-    if chunks.len() > MAX_LINES {
-        return Err(PatchError::Limit("chunks"));
-    }
     let mut source_file = text_file::SourceFile::parse(source);
     let lines = source_file.line_texts();
-    let mut pattern_bytes = 0usize;
-    let mut pattern_lines = 0usize;
-    let mut inserted_bytes = 0usize;
-    for chunk in chunks {
-        pattern_lines = pattern_lines
-            .saturating_add(chunk.old_lines.len() + usize::from(chunk.change_context.is_some()));
-        pattern_bytes =
-            pattern_bytes.saturating_add(chunk.change_context.as_ref().map_or(0, |s| s.len() + 1));
-        for line in &chunk.old_lines {
-            pattern_bytes = pattern_bytes.saturating_add(line.len() + 1);
-        }
-        for line in &chunk.new_lines {
-            inserted_bytes = inserted_bytes.saturating_add(line.len() + 2);
-        }
-    }
-    let work = lines
-        .len()
-        .saturating_mul(pattern_bytes)
-        .saturating_add(source.len().saturating_mul(pattern_lines));
-    if work > MAX_MATCH_WORK {
-        return Err(PatchError::Limit("matching work"));
-    }
-    if inserted_bytes > MAX_BYTES {
-        return Err(PatchError::Limit("inserted bytes"));
-    }
     let replacements = update::compute_replacements(&lines, "snapshot", chunks)?;
     let mut previous_end = 0usize;
     for (start, length, _) in &replacements {
@@ -231,9 +168,5 @@ pub fn apply_update(source: &str, chunks: &[UpdateChunk]) -> Result<String, Patc
         previous_end = start + length;
     }
     source_file.apply_replacements(&replacements);
-    let result = source_file.into_contents();
-    if result.len() > MAX_BYTES {
-        return Err(PatchError::Limit("output bytes"));
-    }
-    Ok(result)
+    Ok(source_file.into_contents())
 }

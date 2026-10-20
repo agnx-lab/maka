@@ -307,6 +307,227 @@ async fn native_files_reuse_actual_read_search_write_edit_and_patch_executors() 
 }
 
 #[tokio::test]
+async fn native_code_mode_mutations_admit_large_utf8_inputs_and_preserve_original_receipts() {
+    use maka_agent_facts::event::{Fact, LogScope};
+    use maka_agent_facts::tool_call::ToolOrigin;
+    use maka_agent_facts::tool_output::ToolOutput;
+    use maka_plugin_core::operation::{OperationCleanup, OperationOutcome, Receipt};
+
+    let source = (0..65_537)
+        .map(|line| format!("row-{line:08} 中文😀"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Exceed both UTF-8 byte limits and JSON Schema character limits.
+    assert!(source.chars().count() > 1024 * 1024);
+    assert!(source.len() > 1024 * 1024);
+    for method in ["write", "edit", "applyPatch"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut setup = service_tools::Setup::files(method).named(method);
+        setup.nestable = true;
+        let f = Fixture::with_services(
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+            None,
+            None,
+            Some(setup),
+        )
+        .await;
+        selection::edit(&f, |changes| {
+            changes.model_overrides = Patch::Set(BTreeMap::from([(
+                "fixture-model".into(),
+                ModelOverride {
+                    code_mode: Some(true),
+                    apply_patch: Some(method == "applyPatch"),
+                    ..Default::default()
+                },
+            )]));
+        })
+        .await;
+        let session = f.create("Large native Code Mode mutations").await;
+        let target = f.workspace.join("large.txt");
+        if method == "edit" {
+            std::fs::write(&target, "seed").unwrap();
+        }
+        let large_input = match method {
+            "write" => json!({"path":"large.txt","content":source}),
+            "edit" => json!({"path":"large.txt","old_string":"seed","new_string":source}),
+            _ => {
+                json!({"callId":"large-original","operation":{"type":"create_file","path":"large.txt",
+                "diff":format!("+{}", source.replace('\n', "\n+"))}})
+            }
+        };
+        let tiny_input = match method {
+            "edit" => Some(
+                json!({"path":"large.txt","old_string":"row-00032768 中文😀","new_string":"updated 中文😀"}),
+            ),
+            "applyPatch" => Some(
+                json!({"callId":"tiny-original","operation":{"type":"update_file","path":"large.txt",
+                "diff":"@@\n-row-00032768 中文😀\n+updated 中文😀"}}),
+            ),
+            _ => None,
+        };
+        let mut inputs = vec![large_input];
+        if let Some(input) = tiny_input {
+            inputs.push(input);
+        }
+        for (index, input) in inputs.iter().enumerate() {
+            let expected_value = match method {
+                "write" => json!({"kind":"file_write","path":target,"bytes":source.len()}),
+                "edit" => json!({"ok":true,"path":target,"replacements":1,"matchedVia":"exact",
+                    "startLine":if index == 0 { 1 } else { 32_769 },
+                    "endLine":if index == 0 { 1 } else { 32_769 }}),
+                _ => json!({"status":"completed"}),
+            };
+            let expected_result = json!({"kind":"completed","value":expected_value});
+            // Construct the large argument inside modelCode, so this tests the nested tool's
+            // actual schema admission rather than the outer exec source-size policy.
+            let argument = if index == 0 {
+                match method {
+                    "write" => "{path:'large.txt',content:source}".to_string(),
+                    "edit" => "{path:'large.txt',old_string:'seed',new_string:source}".to_string(),
+                    _ => "{callId:'large-original',operation:{type:'create_file',path:'large.txt',diff:'+'+source.replaceAll('\\n','\\n+')}}".to_string(),
+                }
+            } else {
+                input.to_string()
+            };
+            let marker = format!("K98 {method} {index} confirmed");
+            let result_check = match method {
+                "write" => format!(
+                    "result.value.kind !== 'file_write' || result.value.bytes !== {}",
+                    source.len()
+                ),
+                "edit" => {
+                    "result.value.replacements !== 1 || result.value.matchedVia !== 'exact'".into()
+                }
+                _ => "result.value.status !== 'completed'".into(),
+            };
+            let code = format!(
+                "const source = Array.from({{length:65537}}, (_, i) => 'row-'+String(i).padStart(8,'0')+' 中文😀').join('\\n'); const result = await tools.{method}({argument}); if (result.kind !== 'completed' || {result_check}) throw Error(JSON.stringify(result)); text('{marker}');"
+            );
+            f.send(&session).await.unwrap();
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let prompt = request(&mut socket).await;
+            assert!(
+                prompt["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|tool| tool["function"]["name"] == "exec")
+            );
+            service_tools::named_tool_response(&mut socket, "exec", json!({"code":code})).await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let observed = request(&mut socket).await;
+            let model_result = observed["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "tool")
+                .unwrap()["content"]
+                .as_str()
+                .unwrap();
+            response(&mut socket).await;
+            f.drained().await;
+            assert!(
+                model_result.contains(&marker),
+                "model did not observe the successful business result: {model_result}"
+            );
+            let bytes = std::fs::read(&target).unwrap();
+            let prefix = f
+                .store
+                .scoped_prefix(
+                    LogScope::Session {
+                        id: session.clone(),
+                    },
+                    256,
+                    16 * 1024 * 1024,
+                )
+                .await
+                .unwrap();
+            let operations = prefix
+                .events
+                .iter()
+                .filter_map(|event| match &event.event.fact {
+                    Fact::ToolDispatched {
+                        operation_id,
+                        name,
+                        input: recorded,
+                        call,
+                        presentation,
+                        ..
+                    } if name == method => Some((operation_id, recorded, call, presentation)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let (operation, recorded, call, presentation) = operations[index];
+            let settled = prefix
+                .events
+                .iter()
+                .find(|event| {
+                    matches!(&event.event.fact,
+                Fact::ToolSettled { operation_id, .. } if operation_id == operation)
+                })
+                .unwrap();
+            let receipt = f
+                .store
+                .resolve_tool_result(&session, &settled.event.id)
+                .await
+                .unwrap();
+            assert_eq!(
+                recorded, input,
+                "durable arguments must retain the exact original model invocation"
+            );
+            let ToolOrigin::CodeMode {
+                parent_operation_id,
+                parent_tool_call_id,
+            } = &call.origin
+            else {
+                panic!("native mutation lost its original Code Mode parent: {call:?}")
+            };
+            assert!(prefix.events.iter().any(|event| matches!(&event.event.fact,
+                Fact::ToolDispatched { operation_id, name, call, .. }
+                if operation_id == parent_operation_id && name == "code_cell"
+                    && &call.tool_call_id == parent_tool_call_id
+                    && matches!(&call.origin, ToolOrigin::CodeCell { parent_tool_call_id, .. }
+                        if parent_tool_call_id == "counter-call"))));
+            assert_eq!(
+                presentation.as_deref(),
+                Some(format!("maka.workspace.Files@1/{method}").as_str())
+            );
+            let ToolOutput::Operation(reply) = receipt else {
+                panic!("native receipt was replaced: {receipt:?}")
+            };
+            assert_eq!(reply.reference.method, method);
+            assert_eq!(
+                reply.receipt,
+                Receipt::Recorded {
+                    outcome: OperationOutcome::Returned {
+                        value: expected_result
+                    },
+                    cleanup: OperationCleanup::Confirmed,
+                }
+            );
+            let mut expected = if index == 0 {
+                source.clone()
+            } else {
+                source.replace("row-00032768 中文😀", "updated 中文😀")
+            };
+            if method == "applyPatch" && index == 1 {
+                expected.push('\n');
+            }
+            assert_eq!(bytes, expected.as_bytes());
+        }
+        assert!(
+            f.store
+                .pending_interactions(&session)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        close(&f).await;
+    }
+}
+
+#[tokio::test]
 async fn native_file_permission_decisions_recover_first_winner_and_obey_turn_scope() {
     tokio::time::timeout(Duration::from_secs(90), async {
         for scope in [None, Some("once"), Some("turn"), Some("session")] {

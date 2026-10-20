@@ -46,7 +46,6 @@ pub struct CellLimits {
     pub timeout: Duration,
     pub max_source_bytes: usize,
     /// Maximum serialized cell envelope, including diagnostics and call summaries.
-    /// Also bounds individual tool inputs and outputs.
     pub max_value_bytes: usize,
     pub max_tool_calls: usize,
     /// V8 heap limit only; not an OS memory limit or a process sandbox.

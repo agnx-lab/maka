@@ -63,21 +63,17 @@ ending (LF for empty sources), and an unterminated final line gains an ending.
 Structured OpenAI create diffs remove the single newline forced by envelope Add
 parsing, matching the SDK's join-without-forced-newline behavior.
 
-Patch/source/result size is limited to 1 MiB, input line count to 32,768 and
-envelope operations to 128. Update work rejects inputs whose conservative
-source-by-pattern estimate exceeds 64 MiB of comparison work units; this is
-a conservative admission heuristic, not a linear-time claim or a precise CPU
-budget. Multiple fuzzy passes and Unicode normalization retain upstream's
-nonlinear worst case. Transient prepared buffers can exceed the output limit
-by a bounded amount before final length validation. Opaque chunk fields and
-an overlap/range check protect reconstruction indices.
+Preparation retains complete source, patch and result strings and parsed lines
+in memory. Multiple fuzzy passes and Unicode normalization retain upstream's
+nonlinear worst case. Opaque chunk fields and an overlap/range check protect
+reconstruction indices.
 
 ## Validation
 
 The integration corpus covers exact and fuzzy matches, context preservation,
 multiple chunks, EOF, mixed CRLF/LF/CR endings, unterminated sources, Add/Delete,
 Move rejection, ordered repeated paths, malformed syntax, structured-diff operation
-injection, and resource limits. The extraction is not a full current Codex parser:
+injection, large content and ordered operation batches. The extraction is not a full current Codex parser:
 multi-environment and streaming grammar are explicitly outside the contract.
 
 An external probe also compared eight LF/exact/fuzzy/EOF cases against the

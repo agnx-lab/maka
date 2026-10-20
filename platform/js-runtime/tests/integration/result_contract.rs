@@ -34,7 +34,7 @@ async fn enforces_tool_call_and_serialized_value_limits() {
     let result = engine
         .execute(
             "await tools.echo({}); return await tools.echo({});".into(),
-            Arc::new(Echo),
+            Arc::new(Echo::default()),
             CancellationToken::new(),
         )
         .await;
@@ -45,7 +45,7 @@ async fn enforces_tool_call_and_serialized_value_limits() {
     let result = engine
         .execute(
             "return 'x'.repeat(300);".into(),
-            Arc::new(Echo),
+            Arc::new(Echo::default()),
             CancellationToken::new(),
         )
         .await;
@@ -59,20 +59,32 @@ async fn enforces_tool_call_and_serialized_value_limits() {
             ..
         })
     ));
-    let result = engine
-        .execute(
-            "return await tools.echo({text:'x'.repeat(300)});".into(),
-            Arc::new(Echo),
-            CancellationToken::new(),
-        )
-        .await;
-    assert!(serde_json::to_vec(result.as_ref().unwrap()).unwrap().len() <= 160);
-    assert!(
-        matches!(result, Ok(CellResult::Failure { error: CellDiagnostic { kind: CellDiagnosticKind::LimitExceeded, message }, tool_calls }) if message.contains("input byte limit") && tool_calls.is_empty())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_tool_roundtrips_large_utf8_values_with_a_small_cell_result() {
+    let limits = CellLimits::default();
+    let expected_input = json!({"text":"中文😀\n".repeat(200_000),"tag":"original-large-echo"});
+    assert!(serde_json::to_vec(&expected_input).unwrap().len() > limits.max_value_bytes);
+    let engine = CodeExecutor::new(limits).unwrap();
+    let result = engine.execute(
+        "const text = '中文😀\\n'.repeat(200000); const result = await tools.echo({text,tag:'original-large-echo'}); if (result.text !== text || result.tag !== 'original-large-echo' || Object.keys(result).length !== 2) throw Error('original tool output changed'); return {units:result.text.length,tag:result.tag};".into(),
+        Arc::new(Echo { expected_input: Some(expected_input) }),
+        CancellationToken::new(),
+    ).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(result).unwrap(),
+        json!({
+            "ok":true,"value":{"units":1_000_000,"tag":"original-large-echo"},
+            "toolCalls":[{"index":1,"name":"echo"}]
+        })
     );
 }
 
-struct Echo;
+#[derive(Default)]
+struct Echo {
+    expected_input: Option<serde_json::Value>,
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execution_budget_interrupts_loops_and_accumulates_across_tool_waits() {
     let engine = CodeExecutor::new(CellLimits {
@@ -87,7 +99,7 @@ async fn execution_budget_interrupts_loops_and_accumulates_across_tool_waits() {
     ].into_iter().enumerate() {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            engine.execute(source.into(), Arc::new(Echo), CancellationToken::new()),
+            engine.execute(source.into(), Arc::new(Echo::default()), CancellationToken::new()),
         ).await.expect("V8 execution must be interruptible").unwrap();
         let CellResult::Failure { error, tool_calls } = result else { panic!("{result:?}") };
         assert_eq!(error.kind, CellDiagnosticKind::LimitExceeded);
@@ -96,7 +108,11 @@ async fn execution_budget_interrupts_loops_and_accumulates_across_tool_waits() {
     assert_eq!(
         serde_json::to_value(
             engine
-                .execute("return 7;".into(), Arc::new(Echo), CancellationToken::new())
+                .execute(
+                    "return 7;".into(),
+                    Arc::new(Echo::default()),
+                    CancellationToken::new()
+                )
                 .await
                 .unwrap()
         )
@@ -184,7 +200,7 @@ async fn cancellation_precedes_source_limit() {
     cancel.cancel();
     assert!(matches!(
         engine
-            .execute("return 7;".into(), Arc::new(Echo), cancel)
+            .execute("return 7;".into(), Arc::new(Echo::default()), cancel)
             .await,
         Err(CellAbort::Cancelled)
     ));
@@ -199,6 +215,12 @@ impl maka_agent_facts::tools::ToolExecutor for Echo {
         input: serde_json::Value,
         _: CancellationToken,
     ) -> maka_agent_facts::tools::ToolFuture {
+        if let Some(expected) = &self.expected_input {
+            assert_eq!(
+                &input, expected,
+                "the tool must receive the exact original large input"
+            );
+        }
         Box::pin(async move { Ok(input) })
     }
 }
@@ -207,7 +229,11 @@ async fn exact_envelopes_and_structured_diagnostics() {
     let engine = CodeExecutor::new(CellLimits::default()).unwrap();
     for source in ["", "return null;"] {
         let value = engine
-            .execute(source.into(), Arc::new(Echo), CancellationToken::new())
+            .execute(
+                source.into(),
+                Arc::new(Echo::default()),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -225,7 +251,11 @@ async fn exact_envelopes_and_structured_diagnostics() {
         ),
     ] {
         let value = engine
-            .execute(source.into(), Arc::new(Echo), CancellationToken::new())
+            .execute(
+                source.into(),
+                Arc::new(Echo::default()),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         let value = serde_json::to_value(value).unwrap();
@@ -259,7 +289,11 @@ async fn summary_and_large_error_fit_the_whole_envelope() {
         "await tools.echo({}); await tools.echo({});",
     ] {
         let value = engine
-            .execute(source.into(), Arc::new(Echo), CancellationToken::new())
+            .execute(
+                source.into(),
+                Arc::new(Echo::default()),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
         let encoded = serde_json::to_vec(&value).unwrap();

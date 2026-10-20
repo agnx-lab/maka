@@ -99,7 +99,7 @@ async fn exact_literal_replacement_preserves_inode_and_reports_original_line_spa
 }
 
 #[tokio::test]
-async fn invalid_ambiguous_missing_and_oversized_edits_leave_bytes_intact() {
+async fn invalid_ambiguous_and_missing_edits_leave_bytes_intact() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let executor = executor(&root);
@@ -124,10 +124,6 @@ async fn invalid_ambiguous_missing_and_oversized_edits_leave_bytes_intact() {
         (
             vec![0xff, b'x'],
             json!({"path":"text","old_string":"x","new_string":"two"}),
-        ),
-        (
-            b"xy".to_vec(),
-            json!({"path":"text","old_string":"x","new_string":"z".repeat(1024 * 1024)}),
         ),
         (
             vec![b'x'; 1024 * 1024 + 1],
@@ -183,4 +179,121 @@ async fn invalid_ambiguous_missing_and_oversized_edits_leave_bytes_intact() {
         .is_err()
     );
     assert_eq!(fs::read(&path).unwrap(), b"one");
+}
+
+#[tokio::test]
+async fn exact_edit_large_utf8_source_preserves_bytes_inode_and_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    #[cfg(windows)]
+    let root = std::path::PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+    let executor = executor(&root);
+    let prefix = "unchanged configuration value: 零一二三四五六七八九\n".repeat(20_000);
+    let path = root.join("text");
+    fs::write(&path, format!("{prefix}target = old\ntrailer\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    }
+    fs::hard_link(&path, root.join("alias")).unwrap();
+    let before = File::from_std(fs::File::open(&path).unwrap())
+        .metadata()
+        .unwrap();
+    assert_eq!(
+        edit(
+            &executor,
+            json!({"path":"text","old_string":"target = old","new_string":"target = 新"})
+        )
+        .await
+        .unwrap(),
+        json!({"ok":true,"path":path,"replacements":1,"matchedVia":"exact","startLine":20_001,"endLine":20_001})
+    );
+    assert_eq!(
+        fs::read(root.join("alias")).unwrap(),
+        format!("{prefix}target = 新\ntrailer\n").as_bytes()
+    );
+    let after = File::from_std(fs::File::open(&path).unwrap())
+        .metadata()
+        .unwrap();
+    assert_eq!(
+        (before.dev(), before.ino(), before.permissions()),
+        (after.dev(), after.ino(), after.permissions())
+    );
+}
+
+#[tokio::test]
+async fn exact_edit_accepts_large_old_and_new_strings_and_output_growth() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    #[cfg(windows)]
+    let root = std::path::PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+    let executor = executor(&root);
+    let path = root.join("text");
+    let large = "configuration value: 零一二三四五六七八九; ".repeat(24_000);
+    for (source, old, new, expected) in [
+        (
+            format!("before:{large}:after"),
+            large.clone(),
+            "small".into(),
+            "before:small:after".into(),
+        ),
+        (
+            "before:small:after".into(),
+            "small".into(),
+            large.clone(),
+            format!("before:{large}:after"),
+        ),
+        (
+            format!("{}target", "p".repeat(600_000)),
+            "target".into(),
+            "新".repeat(200_000),
+            format!("{}{}", "p".repeat(600_000), "新".repeat(200_000)),
+        ),
+    ] {
+        fs::write(&path, source).unwrap();
+        assert_eq!(
+            edit(
+                &executor,
+                json!({"path":"text","old_string":old,"new_string":new})
+            )
+            .await
+            .unwrap(),
+            json!({"ok":true,"path":path,"replacements":1,"matchedVia":"exact","startLine":1,"endLine":1})
+        );
+        assert_eq!(fs::read(&path).unwrap(), expected.as_bytes());
+    }
+}
+
+#[tokio::test]
+async fn fuzzy_edit_accepts_large_utf16_source_and_many_lines() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    #[cfg(windows)]
+    let root = std::path::PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+    let executor = executor(&root);
+    let path = root.join("text");
+    for (line, count) in [
+        (
+            "unchanged configuration value: 零一二三四五六七八九\n",
+            30_000,
+        ),
+        ("padding\n", 50_001),
+    ] {
+        let prefix = line.repeat(count);
+        fs::write(&path, format!("{prefix}  target value  \ntrailer\n")).unwrap();
+        assert_eq!(
+            edit(
+                &executor,
+                json!({"path":"text","old_string":"target value\n","new_string":"updated 新\n"})
+            )
+            .await
+            .unwrap(),
+            json!({"ok":true,"path":path,"replacements":1,"matchedVia":"line-trimmed","startLine":count+1,"endLine":count+1})
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            format!("{prefix}updated 新\ntrailer\n").as_bytes()
+        );
+    }
 }

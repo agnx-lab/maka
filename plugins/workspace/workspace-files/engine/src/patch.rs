@@ -19,7 +19,7 @@
 
 use crate::{
     failed,
-    mutation::{MAX_CONTENT, MAX_PATH, Mutation},
+    mutation::{MAX_PATH, Mutation},
     scoped::Authority,
     write::WriteCoordinator,
 };
@@ -51,14 +51,12 @@ enum NativeOperation {
     Create {
         #[schemars(length(min = 1, max = MAX_PATH))]
         path: String,
-        #[schemars(length(max = MAX_CONTENT))]
         diff: String,
     },
     #[serde(rename = "update_file")]
     Update {
         #[schemars(length(min = 1, max = MAX_PATH))]
         path: String,
-        #[schemars(length(max = MAX_CONTENT))]
         diff: String,
     },
     #[serde(rename = "delete_file")]
@@ -260,9 +258,6 @@ fn apply_one(
         }
         PatchOperation::Add { content, .. } => {
             target.require_missing()?;
-            if content.len() > MAX_CONTENT {
-                return Err(failed("patch content exceeds 1 MiB"));
-            }
             Mutation::complete_write(output_path.clone(), content)
         }
         PatchOperation::Update { chunks, .. } => {
