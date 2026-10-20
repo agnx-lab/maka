@@ -125,6 +125,56 @@ impl Parser {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::KeyCode;
+
+    fn key_record(byte: u8) -> Console::INPUT_RECORD {
+        Console::INPUT_RECORD {
+            EventType: Console::KEY_EVENT as u16,
+            Event: Console::INPUT_RECORD_0 {
+                KeyEvent: Console::KEY_EVENT_RECORD {
+                    bKeyDown: 1,
+                    wRepeatCount: 1,
+                    wVirtualKeyCode: 0,
+                    wVirtualScanCode: 0,
+                    uChar: Console::KEY_EVENT_RECORD_0 {
+                        AsciiChar: byte as i8,
+                    },
+                    dwControlKeyState: 0,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn vte_records_propagate_sticky_budget_errors_without_replaying_tail() {
+        let mut parser = Parser::with_mode(InputReaderMode::Vte);
+        parser.set_max_pending_bytes(8).unwrap();
+        let records: Vec<_> = b"a\x1b[6;2;0000~z"
+            .iter()
+            .copied()
+            .map(key_record)
+            .collect();
+
+        assert_eq!(
+            parser.decode_input_records(&records).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('a').into())));
+        assert_eq!(parser.pop(), None);
+        assert_eq!(
+            parser
+                .decode_input_records(&[key_record(b'z')])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(parser.pop(), None);
+    }
+}
+
 #[cfg(feature = "windows-legacy")]
 pub(crate) mod legacy {
     use std::{io, ptr};

@@ -34,4 +34,6 @@ The bounded local changes are:
 
 The local tests cover split replies mixed with Unicode/mouse/paste, strict parameters, a complete 64KiB paste, per-sequence limits, sticky rejection and deadline handling without delaying ordinary numeric key prefixes. Examples, documentation and the benchmark handle the fallible parser API.
 
+After patch `32a7a905ab1c72b51463a93e96852d957b1c8448`, Maka adds a Windows-only console-record regression for completed-key preservation, sticky budget errors and rejected-tail isolation.
+
 Maka's terminal shell owns the single OS reader and terminal mode guard; its existing Output worker owns terminal writes. This package does not add another reader, writer or capability-selection framework. The application selects Sixel only after its bounded startup negotiation; unknown capabilities keep Unicode. No Kitty/APC or iTerm2 support is added by this patch.
