@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "ecf10f2ed4466309e64ee10d1199f78fa9c90434865dc51c7d47c5446726b148",
+    "Cargo.lock": "21187ad5bd48796cebb371495f9af27d96bdb74438a872287ef9be46ede72c6c",
     "Cargo.toml": "e686306591091b920a14eecb3b4cba7fb54b52f57026ea46d9183de302777fb8",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
@@ -467,7 +467,7 @@
     "products/maka/desktop-shell/app/workbar.js": "a59d515945e6c6634ed5f446129e36a23b4de93154443eb30d2b3471d516e9cb",
     "products/maka/desktop-shell/app/workhub.js": "cd1555c73ee9f25ccbfba4ea375ed2bd67787d63f30500035da30ace40258b88",
     "products/maka/native/Cargo.toml": "4a3c69dfe3d7e5773316dbd0f703ec376cbaef0a7b9915fce395b8460c633d76",
-    "products/maka/terminal-shell/Cargo.toml": "1eb8fc3d5150915d4fc020c72ceb7f1a179dca0e6cf39a8a14b3ef40d4443e94",
+    "products/maka/terminal-shell/Cargo.toml": "ace9b3a817c5635f7b5240d2c6ec21eff18d80dae481097d96984562033e52ed",
     "scripts/apply-dependency-patches.mjs": "67e548835b0de28e3753be559abb5cb2efbe94a46d72e0b756c23f944896d4bd",
     "scripts/plugins/build.mjs": "7dc0e6c33d047aa628f7e1d4acbfabef8803760f580403e49e4f0c2c06321152",
     "scripts/plugins/product-version.mjs": "6942998c02fbb47d67e4f89175b5615822f846094eedb2feab32c945d07f2449",
