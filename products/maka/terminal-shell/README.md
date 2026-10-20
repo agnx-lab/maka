@@ -19,26 +19,64 @@
 
 # Maka NSH terminal shell
 
-An experimental first-party NSH application over public Maka Host services. The native executable selects one existing Root; JavaScript receives that connected client and creates immutable scopes for its Agent sessions. The Host must expose the `agent`, `settings` and `receipts` endpoints.
+An experimental keyboard-first Agent workbench built with NSH, connecting to an existing Maka Host Root.
 
-For a Root whose Host is not running, start the existing service entrypoint in a separate terminal:
+## Start
+
+Start the Host in another terminal if it is not running:
 
 ```sh
 cargo run -p maka-cli --bin maka -- host serve --root /path/to/root
 ```
 
-Then run the independent shell from the workspace root:
+Then launch the shell from the workspace root:
 
 ```sh
 cargo run -p maka-terminal-shell -- --root /path/to/root
 ```
 
-Use `--session SESSION_ID` to open an existing session initially. Without it, the shell opens its session picker.
+Without `--session`, Home shows recent conversations and **New conversation**. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`; the shell does not start it automatically.
 
-The executable verifies root-bound discovery and the live Host epoch. The durable client journal is `<root>/clients/terminal.sqlite`; drafts and operation receipts are scoped by their original Host and provider identities. The existing product and release launchers remain unchanged.
+From Home, creating a conversation opens **Workspaces**: choose a directory published by the Host. Within a conversation, a new conversation reuses its authorized workspace. Creation then opens **Models** so you can choose a configured connection and model before sending. Use the existing client to configure connections if none are available.
 
-The trusted application compiled into this executable uses NSH's standalone resource policy. It retains the 4 MiB interpreter stack limit but removes the previous 1 GiB heap cap, 10-second load budget, 2-second call budget, and operation, canvas and node quotas. This policy applies to the bundled first-party application; an untrusted embedded application needs explicit resource limits.
+## Keyboard
 
-Ctrl+Q requests exit independently of JavaScript and terminal output. SIGTERM does the same on Unix. The shell attempts terminal restoration, then closes its Host requests and native tasks; incomplete restoration or cleanup returns an error.
+| Key | Action |
+| --- | --- |
+| Ctrl+P | Open **Commands** |
+| Ctrl+O | Open **Sessions** |
+| Ctrl+G | Open **Models** for the current conversation |
+| Ctrl+N | Create a conversation |
+| Ctrl+L | Jump to the latest messages; in Sessions or Models, load the next page when available |
+| Alt+↑ | Focus the conversation for scrolling |
+| Alt+↓ | Expand and focus the latest turn's activity panel |
+| Enter | Send from the composer, or activate a selected palette entry |
+| Shift+Enter | Insert a newline in the composer |
+| Esc | Close the current overlay; otherwise request Stop for the current run |
+| Ctrl+C | Copy selected text through the terminal's OSC 52 support |
+| Ctrl+Q | Quit |
 
-Draft recovery starts at the latest acknowledged saved revision. Text typed after that revision can be lost on close. A send uses the exact saved revision; ambiguous results remain available for receipt recovery rather than sending the same operation again.
+Model selection uses **Ctrl+G** because classic terminals encode Ctrl+M as the same carriage return as Enter. Paste through your terminal's paste command.
+
+In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches the loaded pages by title, workspace or ID; Models searches the Host's model catalog. Escape closes the palette without choosing.
+
+## Conversation and requests
+
+Each turn has its own bounded native activity panel with independent scrolling. It follows new activity near the bottom; scrolling up keeps your reading position. Completed turns collapse by default, with their final answer outside the panel. Activate a turn header to expand or collapse it. Completion and final-answer placement use the Host's recorded turn metadata, so an individual model response finishing does not prematurely close an ongoing turn.
+
+**Todo** displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
+
+Open a pending request to review its original details:
+
+- Tool approval supports **Allow** or **Deny** for that call. Read all original arguments before allowing.
+- Additional permissions support **Allow** or **Deny**, with the available call, turn or session scope.
+- Questions support the listed choices, **Other answer** and an explicit **Skip**.
+- Forms support explicit **Decline** or **Cancel request**. Fill full forms and handle capability requests in the existing client; those editors are not available here.
+
+Use Tab to move between request controls and Enter to activate. For approvals, permissions and questions, Ctrl+Enter allows or submits answers; Ctrl+R refreshes the recorded status. Escape only closes the request view and leaves an unanswered request pending. The displayed recorded outcome is authoritative if another client answered first.
+
+## Saved state and scope
+
+Drafts and operation receipts persist in `<root>/clients/terminal.sqlite`. Each session keeps its own draft, and recovery uses the original Host and operation. Switching conversations saves the current draft first. Recovery starts from the latest acknowledged draft revision; newer unsaved input can be lost on close. A send uses that saved revision. Use the original-operation recovery action for an uncertain result, rather than submitting a duplicate.
+
+The executable verifies the selected Root and live Host epoch. Ctrl+Q, and SIGTERM on Unix, request shutdown independently of JavaScript and terminal output. Shutdown attempts terminal restoration and closes owned Host requests and tasks; incomplete cleanup returns an error.
