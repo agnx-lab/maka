@@ -578,7 +578,8 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let result = history["chunks"].as_array().unwrap().iter()
             .find(|chunk| chunk["tool"]["result"]["image"] == true).unwrap()["tool"]["result"]["position"].clone();
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
-        terminal.wait_for("Details · Standard").await;
+        terminal.wait_for("Enter sends").await;
+        terminal.wait_for("› Working…").await;
         terminal.send(b"\x1b[1;3B");
         terminal.wait_for("> Read").await;
         terminal.click_text("> Read");
