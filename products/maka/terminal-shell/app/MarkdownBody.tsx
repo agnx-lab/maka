@@ -140,71 +140,82 @@ export function MarkdownBody(props: { row: () => Row }) {
 
 function MarkdownBlockView(props: { block: () => MarkdownBlock }) {
   const block = props.block;
+  const container = () =>
+    block().kind === 'code' || block().marker !== '' || block().quote > 0 || block().indent > 0;
   const inset = () =>
     Math.min((block().indent + Math.max(0, block().quote - 1)) * 16, windowSize().width / 4);
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        gap: 8,
-        paddingLeft: inset(),
-        borderLeftWidth: block().quote > 0 ? 8 : 0,
-        borderLeftColor: C.line,
-      }}
-    >
-      <If when={block().marker}>
-        <Text style={{ color: C.muted, flexShrink: 0 }}>{block().marker}</Text>
-      </If>
-      <View style={{ flex: 1, minWidth: 0 }}>
+    <If when={container()} else={<MarkdownBlockContent block={block} />}>
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: 8,
+          paddingLeft: inset(),
+          borderLeftWidth: block().quote > 0 ? 8 : 0,
+          borderLeftColor: C.line,
+        }}
+      >
+        <If when={block().marker}>
+          <Text style={{ color: C.muted, flexShrink: 0 }}>{block().marker}</Text>
+        </If>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <MarkdownBlockContent block={block} />
+        </View>
+      </View>
+    </If>
+  );
+}
+
+function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
+  const block = props.block;
+  return (
+    <If
+      when={block().kind === 'code'}
+      else={
         <If
-          when={block().kind === 'code'}
+          when={block().kind === 'paragraph' || block().kind === 'heading'}
           else={
-            <If
-              when={block().kind === 'paragraph' || block().kind === 'heading'}
-              else={
-                <Text selectable style={{ color: block().kind === 'rule' ? C.muted : C.text }}>
-                  {block().kind === 'rule' ? '───' : block().text}
-                </Text>
-              }
-            >
-              <Text
-                selectable
-                style={{
-                  color: block().quote > 0 ? C.secondary : C.text,
-                  fontSize: 16,
-                  lineHeight: 16,
-                  fontWeight: block().kind === 'heading' ? '700' : '400',
-                }}
-              >
-                <Each of={block().runs} key={(run) => run.key}>
-                  {(run) => (
-                    <Text
-                      style={{
-                        fontWeight: run().strong ? '700' : undefined,
-                        fontStyle: run().emphasis ? 'italic' : undefined,
-                        textDecorationLine: run().strike ? 'line-through' : undefined,
-                        color: run().code ? C.accentHover : undefined,
-                        backgroundColor: run().code ? C.surface : undefined,
-                      }}
-                    >
-                      {run().text}
-                    </Text>
-                  )}
-                </Each>
-              </Text>
-            </If>
+            <Text selectable style={{ color: block().kind === 'rule' ? C.muted : C.text }}>
+              {block().kind === 'rule' ? '───' : block().text}
+            </Text>
           }
         >
-          <View style={{ backgroundColor: C.surface, paddingHorizontal: 8, paddingVertical: 16 }}>
-            <Text style={{ color: C.muted }}>{block().language || 'code'}</Text>
-            <Scroll horizontal>
-              <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                {block().text}
-              </Text>
-            </Scroll>
-          </View>
+          <Text
+            selectable
+            style={{
+              color: block().quote > 0 ? C.secondary : C.text,
+              fontSize: 16,
+              lineHeight: 16,
+              fontWeight: block().kind === 'heading' ? '700' : '400',
+            }}
+          >
+            <Each of={block().runs} key={(run) => run.key}>
+              {(run) => (
+                <Text
+                  style={{
+                    fontWeight: run().strong ? '700' : undefined,
+                    fontStyle: run().emphasis ? 'italic' : undefined,
+                    textDecorationLine: run().strike ? 'line-through' : undefined,
+                    color: run().code ? C.accentHover : undefined,
+                    backgroundColor: run().code ? C.surface : undefined,
+                  }}
+                >
+                  {run().text}
+                </Text>
+              )}
+            </Each>
+          </Text>
         </If>
+      }
+    >
+      <View style={{ backgroundColor: C.surface, paddingHorizontal: 8, paddingVertical: 16 }}>
+        <Text style={{ color: C.muted }}>{block().language || 'code'}</Text>
+        <Scroll horizontal>
+          <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+            {block().text}
+          </Text>
+        </Scroll>
       </View>
-    </View>
+    </If>
   );
 }
