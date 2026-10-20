@@ -80,15 +80,11 @@ impl PublishedDirectory {
         Ok(path)
     }
 
-    /// Count every entry toward the scan budget, including files and broken links.
     /// Names use UTF-16 order because they also act as client continuation cursors.
-    pub fn directory_names(&self, segments: &[String], limit: usize) -> io::Result<Vec<String>> {
+    pub fn directory_names(&self, segments: &[String]) -> io::Result<Vec<String>> {
         let directory = Workspace::capture(&self.resolve(segments)?)?;
         let mut names = Vec::new();
-        for (index, entry) in directory.dir.entries()?.enumerate() {
-            if index >= limit {
-                return Err(invalid("project directory contains too many entries"));
-            }
+        for entry in directory.dir.entries()? {
             let entry = entry?;
             let kind = entry.file_type()?;
             if !kind.is_dir() && !kind.is_symlink() {
