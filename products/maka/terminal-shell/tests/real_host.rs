@@ -295,7 +295,8 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view(&mut view, |screen| screen.contains("Titles · match case") && screen.contains("Enter selects · Esc closes")).await;
         wait_session_search(&mut view).await;
         view.handle_event(Event::Paste("Browser page".into()));
-        wait_view(&mut view, |screen| screen.contains("Browser page") && !screen.contains("Loading…")).await;
+        let first_title = first_page["sessions"][0]["title"].as_str().unwrap();
+        wait_view(&mut view, |screen| screen.contains(&format!("› {first_title}")) && !screen.contains("Loading…")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 support::tick(&mut view);
