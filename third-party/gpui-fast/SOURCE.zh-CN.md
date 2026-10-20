@@ -81,3 +81,7 @@ Window 可根据原 ClickInputState interruption 创建不可 clone 的 InputGes
 三方整合保留 Maka 原物理输入来源、实际发布的 IME-handler 槽位、选区上下文、定时器取消及原生清理回执。上游字段身份和 handler 恢复通知接入同一既有 owner。原生定时器补丁保留显式 async-io 依赖；profiler 计数器改用稳定的 `AtomicUsize::try_update` 替代弃用别名，保持原内存顺序和 checked subtraction。
 
 测试接口 `Window::painted_quads` 按渲染器实际引用路径读取最终 scene 的 rounded-clip 子组，保留 quad 原坐标与几何；保留的绘制操作和未引用的图层 frame 不作为已呈现输出。Kit 原表格四角断言不变。
+
+## 一次滚轮手势只滚动一个容器（2026-10-20）
+
+Maka 自己的改动。滚动容器嵌在另一个滚动容器里时（例如对话列表里的工具输出框），在它上面的一次滚轮或触控板手势（或一次触摸拖动）会让两者一起滚动，因为指针下每个 `Div` 和 `List` 的滚动监听器都会处理每个滚轮事件。现在 `Window` 持有一个 `ScrollLatch`（`crates/gpui/src/gestures.rs`）：指针下沿手势方向（增量较大的那一轴）真正滚动了的最内层容器取得这次手势，直到手势结束，滚到尽头也不放手。它外层的容器（监听器在它之后运行）把这次手势的事件留给它，滚动中移到指针下的容器也不接手。滚不动的容器让事件继续向外传，所以框已在尽头时，下一次手势交给页面，与浏览器的滚动链一致；vendored GPUI Kit 的 `ScrollableMask` 在边缘把事件交给外层容器的行为也保持不变。手势在以下情况结束：收到 `TouchPhase::Started` 事件、滚轮事件位置改变、或取得手势的容器 300 毫秒内没有处理它的事件。以 `TouchPhase::Started` 开始的手势，要在收到 `TouchPhase::Ended` 之后才会因停顿而结束，因为手指可能停在触控板上。事件仍会继续传播，滚动条等其他滚轮监听器照常收到。用滚轮另一轴滚动单轴容器的情况不参与，行为不变。`Div` 的滚轮监听器现在按本帧布局的范围钳制偏移（prepaint 原本就会这样钳制）。改动在 `gestures.rs`、`window.rs`、`elements/div.rs` 和 `elements/list.rs`，测试为 `elements/div.rs` 中九个、`elements/list.rs` 中两个。GPUI Kit 0.8.0（[#3500](https://github.com/longbridge/gpui-kit/pull/3500)）给自身滚动区域定的规则不同：指针下最内层的区域在捕获阶段取得每个事件（到尽头也是）并停止传播。固定版本升到 0.8.0 或更新时重新评估这项改动。
