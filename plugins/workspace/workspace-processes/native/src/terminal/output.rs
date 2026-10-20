@@ -19,6 +19,7 @@
 
 use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
+use maka_agent_facts::terminal::TerminalSize;
 use maka_host_runtime::shell::PtyStreamEvent;
 
 impl Processes {
@@ -35,12 +36,13 @@ impl Processes {
         if !record.output.is_pty() {
             return Err(failed("Only a PTY has raw terminal output"));
         }
+        let max_bytes = output_bytes()?;
         let mut stream = match self.resources.get(&input.target.session_id, &record.id) {
             Some(handle) => handle.output(input.after).map_err(failed)?,
             None => None,
         };
         let mut event = match &mut stream {
-            Some(stream) => project(stream.read().await.map_err(failed)?),
+            Some(stream) => project(stream.read(max_bytes).await.map_err(failed)?),
             None => OutputEvent::Unavailable {
                 reason: OutputUnavailable::NotRetained,
             },
@@ -52,7 +54,7 @@ impl Processes {
                 OutputEvent::Closed { .. } | OutputEvent::Unavailable { .. }
             );
             let value = completed(event)?;
-            maka_plugin_core::json::check_delivery(&value, 48 * 1024).map_err(failed)?;
+            maka_plugin_core::json::exact_numbers(&value).map_err(failed)?;
             if !watch {
                 if context.scope().cancellation.is_cancelled() {
                     return Err(failed("Process operation cancelled"));
@@ -83,9 +85,27 @@ impl Processes {
             }
             // Once filesystem work starts, settle it before cancellation can
             // complete this original Host call. Only the wait above is raced.
-            event = project(stream.read().await.map_err(failed)?);
+            event = project(stream.read(max_bytes).await.map_err(failed)?);
         }
     }
+}
+
+/// Fill the existing Item envelope, including base64 expansion. The maximum
+/// cursor and u16 geometry reserve their full decimal widths for every resize.
+/// Derive overhead from the real serialized variant, not a second byte policy.
+fn output_bytes() -> Result<usize, ToolError> {
+    let size = TerminalSize::new(2, 1).expect("minimum terminal size");
+    let mut envelope = completed(OutputEvent::Data {
+        sequence: MAX_SEQUENCE,
+        initial_size: size,
+        size,
+        data_base64: String::new(),
+    })?;
+    for field in ["initialSize", "size"] {
+        envelope["value"][field] = serde_json::json!({"cols": u16::MAX, "rows": u16::MAX});
+    }
+    let overhead = serde_json::to_vec(&envelope).map_err(failed)?.len();
+    Ok((maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES - overhead) / 4 * 3)
 }
 
 fn project(event: PtyStreamEvent) -> OutputEvent {

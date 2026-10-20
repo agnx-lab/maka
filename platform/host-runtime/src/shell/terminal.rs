@@ -248,7 +248,7 @@ mod tests {
         let mut stream = output.stream(0).unwrap();
         let mut raw = Vec::new();
         while let super::super::output::PtyStreamEvent::Data { bytes, .. } =
-            stream.read().await.unwrap()
+            stream.read(16 * 1024).await.unwrap()
         {
             raw.extend_from_slice(&bytes);
         }
@@ -281,7 +281,7 @@ mod tests {
         expected.extend_from_slice(b"final-drain\xff");
         let mut stream = output.stream(0).unwrap();
         let mut raw = Vec::new();
-        while let PtyStreamEvent::Data { bytes, .. } = stream.read().await.unwrap() {
+        while let PtyStreamEvent::Data { bytes, .. } = stream.read(16 * 1024).await.unwrap() {
             raw.extend_from_slice(&bytes);
         }
         assert_eq!(raw, expected);

@@ -46,7 +46,9 @@ pub struct Target {
     #[serde(rename = "ref")]
     pub reference: String,
 }
-/// Cursor belongs to this original target's ordered Data/Resize stream.
+/// Exclusive cursor in this original target's native Data/Resize log. A Data
+/// delivery can combine adjacent records; its sequence is the last consumed
+/// native record. Any original cursor remains valid, including inside a batch.
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "TerminalOutputRequest")]
@@ -77,7 +79,7 @@ pub enum OutputEvent {
         sequence: u64,
         size: TerminalSize,
         initial_size: TerminalSize,
-        #[schemars(length(min = 1, max = 21848))]
+        #[schemars(length(min = 1))]
         data_base64: String,
     },
     Resize {

@@ -212,10 +212,17 @@ impl PtyStream {
         }
     }
     /// Once started, callers await this read before settling their original call.
+    /// Coalesce adjacent Data up to the caller's byte budget. The sequence is
+    /// the last original record consumed; every Resize remains a separate event.
     /// Only a successfully read Data/Resize advances the cursor.
-    pub async fn read(&mut self) -> Result<PtyStreamEvent> {
+    pub async fn read(&mut self, max_bytes: usize) -> Result<PtyStreamEvent> {
+        if max_bytes < DATA_BYTES {
+            return Err(ShellError::Rejected(
+                "PTY replay budget is smaller than a native chunk",
+            ));
+        }
         let initial_size = self.output.0.initial_size;
-        {
+        let through = {
             let state = self.output.0.state.lock().unwrap();
             if self.after == state.sequence {
                 if let Some(error) = &state.failure {
@@ -235,41 +242,72 @@ impl PtyStream {
                     }
                 });
             }
-        }
-        let sequence = self.after + 1;
+            state.sequence
+        };
+        let after = self.after;
         let output = self.output.clone();
-        let event = tokio::task::spawn_blocking(move || -> Result<PtyStreamEvent> {
-            let mut index = [0; INDEX_BYTES as usize];
-            read_exact_at(
-                &output.0.files.index,
-                &mut index,
-                (sequence - 1) * INDEX_BYTES,
-            )?;
-            let offset = u64::from_le_bytes(index[..8].try_into().unwrap());
-            let length = u32::from_le_bytes(index[8..12].try_into().unwrap()) as usize;
-            let size = TerminalSize::new(
-                u16::from_le_bytes(index[12..14].try_into().unwrap()),
-                u16::from_le_bytes(index[14..].try_into().unwrap()),
-            )
-            .map_err(|_| io::Error::other("invalid PTY replay size"))?;
-            if length > DATA_BYTES {
-                return Err(io::Error::other("invalid PTY replay length").into());
+        let (sequence, event) = tokio::task::spawn_blocking(move || -> Result<_> {
+            // Reuse the native I/O granularity for index reads. No per-record
+            // tasks or syscalls, and no reads beyond the committed high-water.
+            let mut index = [0; DATA_BYTES];
+            let mut sequence = after;
+            let mut start = None;
+            let mut length = 0;
+            'records: while sequence < through && length < max_bytes {
+                let count = (through - sequence).min((DATA_BYTES as u64) / INDEX_BYTES);
+                let block = &mut index[..(count * INDEX_BYTES) as usize];
+                read_exact_at(&output.0.files.index, block, sequence * INDEX_BYTES)?;
+                for entry in block.as_chunks::<{ INDEX_BYTES as usize }>().0 {
+                    let offset = u64::from_le_bytes(entry[..8].try_into().unwrap());
+                    let bytes = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+                    let size = TerminalSize::new(
+                        u16::from_le_bytes(entry[12..14].try_into().unwrap()),
+                        u16::from_le_bytes(entry[14..].try_into().unwrap()),
+                    )
+                    .map_err(|_| io::Error::other("invalid PTY replay size"))?;
+                    if bytes > DATA_BYTES {
+                        return Err(io::Error::other("invalid PTY replay length").into());
+                    }
+                    if bytes == 0 {
+                        if sequence == after {
+                            return Ok((
+                                sequence + 1,
+                                PtyStreamEvent::Resize {
+                                    sequence: sequence + 1,
+                                    initial_size,
+                                    size,
+                                },
+                            ));
+                        }
+                        break 'records;
+                    }
+                    if bytes > max_bytes - length {
+                        break 'records;
+                    }
+                    let (first_offset, first_size) = *start.get_or_insert((offset, size));
+                    if size != first_size || first_offset.checked_add(length as u64) != Some(offset)
+                    {
+                        return Err(io::Error::other("invalid PTY replay continuation").into());
+                    }
+                    sequence += 1;
+                    length += bytes;
+                    if length == max_bytes {
+                        break 'records;
+                    }
+                }
             }
-            if length == 0 {
-                return Ok(PtyStreamEvent::Resize {
+            let (offset, size) = start.expect("nonempty committed data fits the delivery budget");
+            let mut bytes = vec![0; length];
+            read_exact_at(&output.0.files.payload, &mut bytes, offset)?;
+            Ok((
+                sequence,
+                PtyStreamEvent::Data {
                     sequence,
                     initial_size,
                     size,
-                });
-            }
-            let mut bytes = vec![0; length];
-            read_exact_at(&output.0.files.payload, &mut bytes, offset)?;
-            Ok(PtyStreamEvent::Data {
-                sequence,
-                initial_size,
-                size,
-                bytes: bytes.into(),
-            })
+                    bytes: bytes.into(),
+                },
+            ))
         })
         .await
         .map_err(|_| ShellError::Rejected("PTY replay reader failed"))??;
@@ -335,6 +373,7 @@ mod tests {
         let output = output();
         let mut first = output.stream(0).unwrap();
         let bytes: Vec<u8> = (0..2 * 1024 * 1024 + 37).map(|index| index as u8).collect();
+        let bytes_len = bytes.len();
         output.publish(&bytes).unwrap();
         let cut = 7;
         let mut second = output.stream(cut).unwrap();
@@ -345,17 +384,20 @@ mod tests {
             let mut actual = Vec::new();
             let mut after = start;
             loop {
-                match stream.read().await.unwrap() {
+                match stream.read(3 * DATA_BYTES).await.unwrap() {
                     PtyStreamEvent::Data {
                         sequence,
                         initial_size,
                         size: at,
                         bytes,
                     } => {
-                        assert_eq!(sequence, after + 1);
+                        assert_eq!(
+                            sequence,
+                            (after + 3).min(bytes_len.div_ceil(DATA_BYTES) as u64)
+                        );
                         assert_eq!(initial_size, size());
                         assert_eq!(at, size());
-                        assert!(bytes.len() <= DATA_BYTES);
+                        assert!(bytes.len() <= 3 * DATA_BYTES);
                         actual.extend_from_slice(&bytes);
                         after = sequence;
                     }
@@ -373,7 +415,7 @@ mod tests {
             }
             assert_eq!(actual, bytes[start as usize * DATA_BYTES..]);
             assert!(matches!(
-                stream.read().await.unwrap(),
+                stream.read(DATA_BYTES).await.unwrap(),
                 PtyStreamEvent::Closed { .. }
             ));
         }
@@ -390,7 +432,7 @@ mod tests {
         let output = output();
         let mut stream = output.stream(0).unwrap();
         assert_eq!(
-            stream.read().await.unwrap(),
+            stream.read(DATA_BYTES).await.unwrap(),
             PtyStreamEvent::Pending {
                 after: 0,
                 initial_size: size(),
@@ -408,7 +450,7 @@ mod tests {
         }
         output.resize(resized).unwrap();
         assert_eq!(
-            stream.read().await.unwrap(),
+            stream.read(DATA_BYTES).await.unwrap(),
             PtyStreamEvent::Resize {
                 sequence: 1,
                 initial_size: size(),
@@ -417,20 +459,25 @@ mod tests {
         );
         output.publish(b"\xff\0\x1b[31m\xe4").unwrap();
         output.publish(b"\xb8\xad\xe2\x82").unwrap();
-        for (sequence, bytes) in [
-            (2, &b"\xff\0\x1b[31m\xe4"[..]),
-            (3, &b"\xb8\xad\xe2\x82"[..]),
-        ] {
-            assert_eq!(
-                stream.read().await.unwrap(),
-                PtyStreamEvent::Data {
-                    sequence,
-                    initial_size: size(),
-                    size: resized,
-                    bytes: Arc::from(bytes)
-                }
-            );
-        }
+        assert_eq!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 3,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&b"\xff\0\x1b[31m\xe4\xb8\xad\xe2\x82"[..])
+            }
+        );
+        // A cursor inside a previously delivered batch keeps its original meaning.
+        assert_eq!(
+            output.stream(2).unwrap().read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 3,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&b"\xb8\xad\xe2\x82"[..])
+            }
+        );
         assert!(output.stream(4).is_err());
         {
             let ready = stream.ready();
@@ -440,7 +487,7 @@ mod tests {
             ready.await;
         }
         assert_eq!(
-            stream.read().await.unwrap(),
+            stream.read(DATA_BYTES).await.unwrap(),
             PtyStreamEvent::Closed {
                 after: 3,
                 initial_size: size(),
@@ -449,6 +496,77 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn tiny_records_cross_index_blocks_without_crossing_resize_or_delivery_bounds() {
+        let output = output();
+        let prefix: Vec<u8> = (0..1100).map(|n| n as u8).collect();
+        for byte in &prefix {
+            output.publish(std::slice::from_ref(byte)).unwrap();
+        }
+        let resized = TerminalSize::new(100, 40).unwrap();
+        output.resize(resized).unwrap();
+        let tail = vec![b'x'; 2 * DATA_BYTES + 17];
+        output.publish(&tail).unwrap();
+        let mut stream = output.stream(0).unwrap();
+        assert_eq!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 1100,
+                initial_size: size(),
+                size: size(),
+                bytes: prefix.into(),
+            }
+        );
+        assert_eq!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Resize {
+                sequence: 1101,
+                initial_size: size(),
+                size: resized,
+            }
+        );
+        assert_eq!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 1102,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&tail[..DATA_BYTES]),
+            }
+        );
+        assert_eq!(
+            stream.read(2 * DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 1104,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&tail[DATA_BYTES..]),
+            }
+        );
+        assert_eq!(
+            output.stream(1103).unwrap().read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 1104,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&tail[2 * DATA_BYTES..]),
+            }
+        );
+        assert!(matches!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Pending { after: 1104, .. }
+        ));
+        output.publish(b"live").unwrap();
+        assert_eq!(
+            stream.read(DATA_BYTES).await.unwrap(),
+            PtyStreamEvent::Data {
+                sequence: 1105,
+                initial_size: size(),
+                size: resized,
+                bytes: Arc::from(&b"live"[..]),
+            }
+        );
+    }
     #[tokio::test]
     async fn real_write_failure_keeps_published_prefix_and_fails_its_tail_after_close() {
         use std::io::Write;
@@ -466,13 +584,16 @@ mod tests {
         output.close();
         let PtyStreamEvent::Data {
             bytes, sequence, ..
-        } = stream.read().await.unwrap()
+        } = stream.read(DATA_BYTES).await.unwrap()
         else {
             panic!("prefix");
         };
         assert_eq!(sequence, 1);
         assert_eq!(&*bytes, b"original-prefix");
-        assert!(matches!(stream.read().await, Err(ShellError::Replay(_))));
+        assert!(matches!(
+            stream.read(DATA_BYTES).await,
+            Err(ShellError::Replay(_))
+        ));
         assert_eq!(stream.after, 1);
         assert!(output.resize(TerminalSize::new(100, 40).unwrap()).is_err());
     }
@@ -490,7 +611,7 @@ mod tests {
             let mut stream = output.stream(0).unwrap();
             output.close();
             assert!(
-                matches!(stream.read().await,Err(ShellError::Io(error)) if error.kind()==io::ErrorKind::UnexpectedEof)
+                matches!(stream.read(DATA_BYTES).await,Err(ShellError::Io(error)) if error.kind()==io::ErrorKind::UnexpectedEof)
             );
             assert_eq!(stream.after, 0);
         }

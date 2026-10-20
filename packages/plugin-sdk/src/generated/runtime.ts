@@ -9915,7 +9915,9 @@ export interface TerminalTarget {
   ref: string;
 }
 /**
- * Cursor belongs to this original target's ordered Data/Resize stream.
+ * Exclusive cursor in this original target's native Data/Resize log. A Data
+ * delivery can combine adjacent records; its sequence is the last consumed
+ * native record. Any original cursor remains valid, including inside a batch.
  */
 export interface TerminalOutputRequest {
   target: TerminalTarget;

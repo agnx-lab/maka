@@ -38852,7 +38852,8 @@ export const contracts = {
               },
             },
             required: ['target'],
-            description: "Cursor belongs to this original target's ordered Data/Resize stream.",
+            description:
+              "Exclusive cursor in this original target's native Data/Resize log. A Data\ndelivery can combine adjacent records; its sequence is the last consumed\nnative record. Any original cursor remains valid, including inside a batch.",
             title: 'TerminalOutputRequest',
             $schema: 'https://json-schema.org/draft/2020-12/schema',
             $defs: {
@@ -38926,7 +38927,6 @@ export const contracts = {
                       dataBase64: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 21848,
                       },
                       kind: {
                         type: 'string',
@@ -40564,7 +40564,8 @@ export const contracts = {
               },
             },
             required: ['target'],
-            description: "Cursor belongs to this original target's ordered Data/Resize stream.",
+            description:
+              "Exclusive cursor in this original target's native Data/Resize log. A Data\ndelivery can combine adjacent records; its sequence is the last consumed\nnative record. Any original cursor remains valid, including inside a batch.",
             title: 'TerminalOutputRequest',
             $schema: 'https://json-schema.org/draft/2020-12/schema',
             $defs: {
@@ -40638,7 +40639,6 @@ export const contracts = {
                       dataBase64: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 21848,
                       },
                       kind: {
                         type: 'string',

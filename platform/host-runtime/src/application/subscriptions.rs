@@ -22,7 +22,6 @@ use std::sync::Mutex;
 use tokio_util::sync::DropGuard;
 
 const ITEMS: usize = 16;
-const ITEM_BYTES: usize = 64 * 1024;
 
 /// A request-local reader. Demand cancellation and executor cleanup are distinct.
 /// Read through EOF to drain successful output; completion cancels undrained work.
@@ -110,7 +109,7 @@ impl Emitter {
                 if self.0.closed.is_cancelled() || self.0.stop.is_cancelled() {
                     return Err("Host subscription is closed".into());
                 }
-                check_json_limit(&value, ITEM_BYTES)?;
+                check_json_limit(&value, maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES)?;
                 self.0.output.validate(&value).map_err(|e| e.to_string())?;
                 Ok(permit)
             });

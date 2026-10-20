@@ -322,7 +322,10 @@ fn output_request(target: &Value, after: u64) -> Value {
 }
 fn output_event(value: Value) -> Value {
     assert_eq!(value["kind"], "completed", "{value}");
-    assert!(serde_json::to_vec(&value).unwrap().len() <= 48 * 1024);
+    assert!(
+        serde_json::to_vec(&value).unwrap().len()
+            <= maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES
+    );
     value["value"].clone()
 }
 async fn output_read(f: &Fixture, target: &Value, after: u64) -> Value {
@@ -332,9 +335,8 @@ fn output_data(event: &Value, after: &mut u64, size: &Value) -> Vec<u8> {
     use base64::Engine;
     assert_eq!(event["kind"], "data", "{event}");
     let sequence = event["sequence"].as_u64().unwrap();
-    assert_eq!(
-        sequence,
-        *after + 1,
+    assert!(
+        sequence > *after,
         "raw events must advance in original order: {event}"
     );
     assert_eq!(&event["size"], size);
@@ -342,7 +344,7 @@ fn output_data(event: &Value, after: &mut u64, size: &Value) -> Vec<u8> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(event["dataBase64"].as_str().unwrap())
         .unwrap();
-    assert!(!bytes.is_empty() && bytes.len() <= 16 * 1024);
+    assert!(!bytes.is_empty());
     bytes
 }
 async fn output_through(
@@ -401,6 +403,9 @@ dd bs=1 count=1 of=/dev/null 2>/dev/null
 printf '\270\255\033[0m'
 stty size
 printf '\036SECOND\037'
+dd bs=1 count=1 of=/dev/null 2>/dev/null
+dd if=/dev/zero bs=65536 count=32 2>/dev/null
+printf '\036BACKLOG_END\037'
 dd bs=1 count=1 of=/dev/null 2>/dev/null
 printf '\342\202'
 "#).unwrap();
@@ -469,6 +474,29 @@ printf '\342\202'
         assert_eq!(output_event(resumed.recv().await.unwrap()), json!({"kind":"pending","after":after,"size":final_size,"initialSize":original_size}), "the final observer must be attached before releasing the child");
         let ack = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":13,"actions":[{"type":"text","text":"y"}]}), Uuid::new_v4()).await;
         assert_eq!(ack["kind"], "completed", "{ack}");
+        let backlog_start = after;
+        let mut backlog = Vec::new();
+        output_through(&mut resumed, &mut after, &mut backlog, b"\x1eBACKLOG_END\x1f", &final_size).await;
+        let mut expected_backlog = vec![0; 2 * 1024 * 1024];
+        expected_backlog.extend_from_slice(b"\x1eBACKLOG_END\x1f");
+        assert_eq!(backlog, expected_backlog);
+        // The shell is now waiting for ACK: this public query sees a fixed
+        // backlog and must deliver beyond the old 16 KiB service cut.
+        let mut replay_after = backlog_start;
+        let batch = output_read(&f, &target, replay_after).await;
+        let first_batch = output_data(&batch, &mut replay_after, &final_size);
+        assert!(first_batch.len() > 16 * 1024);
+        assert_eq!(first_batch, expected_backlog[..first_batch.len()]);
+        let mut replayed = first_batch;
+        while replay_after < after {
+            let batch = output_read(&f, &target, replay_after).await;
+            replayed.extend(output_data(&batch, &mut replay_after, &final_size));
+        }
+        assert_eq!(replay_after, after);
+        assert_eq!(replayed, expected_backlog);
+        actual.extend_from_slice(&backlog);
+        let ack = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":14,"actions":[{"type":"text","text":"z"}]}), Uuid::new_v4()).await;
+        assert_eq!(ack["kind"], "completed", "{ack}");
         loop {
             let event = output_event(resumed.recv().await.unwrap());
             match event["kind"].as_str().unwrap() {
@@ -485,6 +513,7 @@ printf '\342\202'
         resumed.completion().await.cleanup.unwrap();
         let mut expected = prefix.to_vec();
         expected.extend_from_slice(middle);
+        expected.extend_from_slice(&expected_backlog);
         expected.extend_from_slice(b"\xe2\x82");
         assert_eq!(actual, expected, "raw bytes must retain ff, NUL, ANSI and both split and incomplete UTF8");
         let mut screen = subscribe(&f, &owner, "watch", target.clone()).await;
