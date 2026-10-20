@@ -222,10 +222,16 @@ export function TurnPanel(props: {
           if (open) props.reveal();
         }}
         style={{ height: 16, flexDirection: 'row' }}
+        hoverStyle={{ backgroundColor: C.surface }}
+        focusStyle={{ backgroundColor: C.raised }}
+        activeStyle={{ backgroundColor: C.line }}
       >
         <Text
           numberOfLines={1}
-          style={{ flex: 1, color: outcome() === 'failed' ? C.danger : C.muted }}
+          style={{
+            flex: 1,
+            color: outcome() === 'failed' ? C.danger : active() ? C.secondary : C.muted,
+          }}
         >
           {props.turn().rows.length ? (expanded() ? '⌃ ' : '› ') : '✓ '}
           {summary()}
@@ -246,7 +252,7 @@ export function TurnPanel(props: {
           style={{
             color: active() ? C.accent : C.muted,
             borderTopWidth: 16,
-            borderTopColor: C.line,
+            borderTopColor: C.surface,
           }}
         >
           {active() ? 'Working' : outcome() === 'completed' ? 'Worked' : 'Activity'}

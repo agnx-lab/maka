@@ -815,10 +815,17 @@ export function Conversation(props: ConversationProps) {
           paddingHorizontal: 16,
           gap: 24,
           borderBottomWidth: 16,
-          borderBottomColor: C.line,
+          borderBottomColor: C.surface,
         }}
       >
-        <Button role="tab" selected={reading() === 'chat'} onPress={() => reading.set('chat')}>
+        <Button
+          role="tab"
+          selected={reading() === 'chat'}
+          onPress={() => reading.set('chat')}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
+          activeStyle={{ backgroundColor: C.line }}
+        >
           <Text
             style={{
               color: reading() === 'chat' ? C.accent : C.muted,
@@ -832,6 +839,9 @@ export function Conversation(props: ConversationProps) {
           role="tab"
           selected={reading() === 'trajectory'}
           onPress={() => reading.set('trajectory')}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
+          activeStyle={{ backgroundColor: C.line }}
         >
           <Text
             style={{
@@ -973,7 +983,7 @@ export function Conversation(props: ConversationProps) {
         <Checklist sessionId={sessionId} />
         <View
           style={{
-            backgroundColor: C.surface,
+            backgroundColor: C.raised,
             borderRadius: 16,
             paddingHorizontal: 16,
             paddingVertical: 16,
@@ -1003,14 +1013,20 @@ export function Conversation(props: ConversationProps) {
             }}
           />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <Button onPress={props.commands} accessibilityLabel="Open commands">
-              <Text style={{ color: C.muted }}>+</Text>
+            <Button
+              onPress={props.commands}
+              accessibilityLabel="Open commands"
+              hoverStyle={{ backgroundColor: C.line }}
+              focusStyle={{ backgroundColor: C.line }}
+              activeStyle={{ backgroundColor: C.surface }}
+            >
+              <Text style={{ color: C.secondary }}>+</Text>
             </Button>
-            <Text style={{ color: C.muted }}>{permissions()}</Text>
+            <Text style={{ color: C.secondary }}>{permissions()}</Text>
             <Button onPress={props.models} style={{ flex: 1, alignItems: 'flex-end' }}>
               <Text
                 numberOfLines={1}
-                style={{ color: backend()?.kind === 'model' ? C.muted : C.warning }}
+                style={{ color: backend()?.kind === 'model' ? C.secondary : C.warning }}
               >
                 {backend()?.kind === 'model' ? backend().modelId : 'Choose a model'} · Ctrl+G
               </Text>
@@ -1023,8 +1039,14 @@ export function Conversation(props: ConversationProps) {
                   void stop();
                 }}
                 style={{ backgroundColor: C.accent, paddingHorizontal: 8, borderRadius: 8 }}
+                hoverStyle={{ backgroundColor: C.accentHover }}
+                focusStyle={{ backgroundColor: C.accentHover }}
+                activeStyle={{ backgroundColor: C.accent }}
+                disabledStyle={{ backgroundColor: C.line }}
               >
-                <Text style={{ color: C.background }}>{stopping() ? '…' : '■'}</Text>
+                <Text style={{ color: stopping() ? C.muted : C.background }}>
+                  {stopping() ? '…' : '■'}
+                </Text>
               </Button>
             </If>
             <Button
@@ -1034,12 +1056,22 @@ export function Conversation(props: ConversationProps) {
                 void send(draft());
               }}
               style={{
-                backgroundColor: sendBlockedReason() || !draft().trim() ? C.line : C.accent,
+                backgroundColor: C.accent,
                 paddingHorizontal: 8,
                 borderRadius: 8,
               }}
+              hoverStyle={{ backgroundColor: C.accentHover }}
+              focusStyle={{ backgroundColor: C.accentHover }}
+              activeStyle={{ backgroundColor: C.accent }}
+              disabledStyle={{ backgroundColor: C.line }}
             >
-              <Text style={{ color: C.background }}>Send</Text>
+              <Text
+                style={{
+                  color: sendBlockedReason() || !draft().trim() ? C.muted : C.background,
+                }}
+              >
+                Send
+              </Text>
             </Button>
           </View>
         </View>

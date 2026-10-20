@@ -22,14 +22,17 @@ import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 
 export const C = {
-  background: '#121212',
-  surface: '#262628',
-  text: '#d7d7da',
-  muted: '#929298',
-  accent: '#7b9cf2',
+  background: '#151517',
+  surface: '#232324',
+  raised: '#2c2c2e',
+  text: '#f9fafb',
+  secondary: '#cfd3d6',
+  muted: '#adb2b8',
+  accent: '#7aaaff',
+  accentHover: '#b7c8fe',
   warning: '#e7b86b',
   danger: '#f48a8a',
-  line: '#303033',
+  line: '#353638',
 };
 export function Header(props: {
   title: string;
@@ -50,7 +53,13 @@ export function Header(props: {
         borderBottomColor: C.line,
       }}
     >
-      <Button onPress={props.commands} accessibilityLabel="Open commands">
+      <Button
+        onPress={props.commands}
+        accessibilityLabel="Open commands"
+        hoverStyle={{ backgroundColor: C.surface }}
+        focusStyle={{ backgroundColor: C.raised }}
+        activeStyle={{ backgroundColor: C.line }}
+      >
         <Text style={{ color: C.accent, fontWeight: '700' }}>MAKA</Text>
       </Button>
       <Text numberOfLines={1} style={{ color: C.text, flex: 1 }}>

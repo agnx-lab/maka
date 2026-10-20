@@ -118,9 +118,12 @@ export function Checklist(props: { sessionId: string }) {
         <Button
           selected={expanded()}
           onPress={() => expanded.set(!expanded())}
-          style={{ height: 16, paddingHorizontal: 8, flexDirection: 'row', gap: 8 }}
+          style={{ height: 16, paddingHorizontal: 16, flexDirection: 'row', gap: 8 }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+          activeStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ color: C.accent }}>
+          <Text style={{ color: C.text }}>
             {expanded() ? '▾' : '▸'} Todo {snapshot()!.completed}/{snapshot()!.total}
           </Text>
           <Text numberOfLines={1} style={{ flex: 1, color: C.muted }}>
@@ -149,8 +152,8 @@ export function Checklist(props: { sessionId: string }) {
                 numberOfLines={1}
                 style={{
                   height: 16,
-                  paddingHorizontal: 8,
-                  color: item().status === 'in_progress' ? C.accent : C.muted,
+                  paddingHorizontal: 16,
+                  color: item().status === 'in_progress' ? C.accent : C.secondary,
                 }}
               >
                 {marker(item())} {item().content}
@@ -158,7 +161,7 @@ export function Checklist(props: { sessionId: string }) {
             )}
           </List>
           <If when={error()}>
-            <Text numberOfLines={1} style={{ paddingHorizontal: 8, color: C.danger }}>
+            <Text numberOfLines={1} style={{ paddingHorizontal: 16, color: C.danger }}>
               {error()}
             </Text>
           </If>
