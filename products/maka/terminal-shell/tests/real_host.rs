@@ -334,11 +334,12 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert_eq!(cut.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row));
         evidence("intermediate-response-cuts-process-group", &cut);
         support::evidence_cells("intermediate-response-cuts-process-group", &view);
+        // Leave the old source reader explicitly, then select the new segment
+        // only after its actual preparation has reached the UI projection.
+        shortcut(&mut view, 'l');
         request.tool_prefix("todo_write", prefix).await;
-        // Navigation selects the new source-backed segment. It cannot finish
-        // its call until the actual native header paints the exact prefix.
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
         let preparing = wait_view(&mut view, |screen| screen.contains("Preparing tool · todo_write") && screen.contains(prefix)).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
         let pending = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let pending_history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":pending["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         assert!(pending_history["chunks"].as_array().unwrap().iter().all(|chunk| chunk["tool"]["call"]["name"] != "todo_write"), "an unfinished argument prefix must not become a canonical tool call");
@@ -363,7 +364,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert_eq!(checklist["current"], todos[1]);
         assert!(checklist["nextOffset"].is_null());
         wait_view(&mut view, |screen| screen.contains("▸ Todo 1/3")).await;
-        // The activity List still owns native focus from the source-anchor step.
+        // The canonical tool segment now owns a different native activity List.
+        support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.matches("> todo_write").count() == 1).await;
         support::click_text(&mut view, "▸ Todo 1/3");
