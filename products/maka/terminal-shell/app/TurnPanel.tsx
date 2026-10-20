@@ -167,8 +167,7 @@ function ActivityLog(props: {
     const pending = pendingReveal();
     if (
       pending &&
-      (!props.group().rowIds.includes(pending.rowId) ||
-        !props.rowState(pending.rowId).expanded())
+      (!props.group().rowIds.includes(pending.rowId) || !props.rowState(pending.rowId).expanded())
     )
       pendingReveal.set(null);
   });
