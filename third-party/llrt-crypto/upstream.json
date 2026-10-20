@@ -36,17 +36,11 @@
     "src/subtle/verify.rs": "50b94c3f7476085fa15dfee704c1ae86b45746a715ce31fee0a8a3568562e3a5",
     "src/subtle/wrapping.rs": "438a0b83ff2309e3c040bb3d4d875b8bdd847f338455323427eeb1d1b07b2db6"
   },
-  "root_files": [
-    "LICENSE",
-    "NOTICE",
-    "README.md"
-  ],
+  "root_files": ["LICENSE", "NOTICE", "README.md"],
   "backports": [
     {
       "revision": "a684efb8994d433a00c949fe698f982f8f613f90",
-      "files": [
-        "src/provider/rust/mod.rs"
-      ]
+      "files": ["src/provider/rust/mod.rs"]
     }
   ]
 }
