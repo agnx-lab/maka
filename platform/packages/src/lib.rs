@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn application_packages_validate_variants_and_allow_pure_composition() {
         let declaration = json!({
-            "entries": {"desktop": {
+            "entries": {"tui": {
                 "implementation": {"kind":"javascript", "module":"desktop.mjs", "realm":"dedicated"},
                 "configuration": {"type":"object"}, "imports": {}, "exports": {}
             }}
