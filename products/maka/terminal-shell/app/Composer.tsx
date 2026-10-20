@@ -34,7 +34,7 @@ export type BackendIdentity = {
 export type SendAction = { owner: string; text: string; backend: BackendIdentity };
 
 // These are the immutable session controller's original reads and actions.
-// The persistent native editor owns no second draft or model selection.
+// The resident composer owns no second draft or model selection.
 export type ComposerSession = {
   sessionId: string;
   draft(): string;

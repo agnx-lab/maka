@@ -544,14 +544,13 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
             view.surface().input_context().unwrap().text.as_deref(),
             Some("")
         );
-        assert_eq!(
+        assert!(
             client
                 .load_draft("agent", &fixture.session, EDITOR)
                 .await
                 .unwrap()
-                .unwrap()
-                .text,
-            ""
+                .is_none(),
+            "native undo in an untouched session must not write a draft"
         );
         assert_eq!(
             client
