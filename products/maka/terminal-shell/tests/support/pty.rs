@@ -171,11 +171,17 @@ impl Pty {
         }
     }
     pub async fn wait_for(&mut self, expected: &str) -> String {
+        self.wait_for_visibility(expected, true).await
+    }
+    pub async fn wait_for_absent(&mut self, expected: &str) -> String {
+        self.wait_for_visibility(expected, false).await
+    }
+    async fn wait_for_visibility(&mut self, expected: &str, visible: bool) -> String {
         let started = Instant::now();
         loop {
             self.read();
             let screen = self.screen.text_preview(128 * 1024).screen;
-            if completed_presentation(&self.output) && screen.contains(expected) {
+            if completed_presentation(&self.output) && screen.contains(expected) == visible {
                 return screen;
             }
             assert!(
@@ -185,7 +191,8 @@ impl Pty {
             );
             assert!(
                 started.elapsed() < Duration::from_secs(20),
-                "production terminal never showed {expected:?}:\n{screen}"
+                "production terminal never {} {expected:?}:\n{screen}",
+                if visible { "showed" } else { "removed" }
             );
             tokio::time::sleep(Duration::from_millis(2)).await;
         }

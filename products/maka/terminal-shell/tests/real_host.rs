@@ -1017,13 +1017,17 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         terminal.wait_for("Search commands…").await;
         terminal.wait_for("Enter selects · Esc closes").await;
         terminal.click_text("Close");
+        terminal.wait_for_absent("Close · Esc").await;
         terminal.wait_for("Make something remarkable.").await;
         terminal.send(b"\x10");
         terminal.wait_for("Search commands…").await;
         terminal.paste("Sess");
+        terminal.wait_for("╭Sess ").await;
         terminal.send(b"\r");
+        terminal.wait_for_absent("Close · Esc").await;
         terminal.wait_for("Search sessions…").await;
         terminal.paste("NSH real");
+        terminal.wait_for("╭NSH real ").await;
         terminal.wait_for("› NSH real Agent").await;
         terminal.send(b"\r");
         let mut held = Box::pin(gate.held.notified());
