@@ -141,11 +141,15 @@ async fn desktop_shell_owns_its_child_and_preserves_the_selected_host_and_other_
             original_source
         );
         // Signal the launcher, not the Host or the independently connected client.
+        // Keep wait() from closing stdin and racing SIGTERM with shell EOF.
+        let second_stdin = second.stdin.take().unwrap();
         assert_eq!(
             unsafe { libc::kill(second.id().unwrap() as i32, libc::SIGTERM) },
             0
         );
-        assert!(second.wait().await.unwrap().success());
+        let status = second.wait().await.unwrap();
+        drop(second_stdin);
+        assert!(status.success(), "{status}");
         assert_eq!(
             unsafe { libc::kill(shell_pid, 0) },
             -1,
