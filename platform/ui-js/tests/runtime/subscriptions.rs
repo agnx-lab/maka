@@ -44,7 +44,7 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-fn service_contract() -> Contract {
+fn service_contract(mode: Mode) -> Contract {
     Contract {
         name: "test.Stream".into(),
         version: 1,
@@ -57,7 +57,11 @@ fn service_contract() -> Contract {
                         progress: None,
                         mode: MethodMode::Subscription,
                         input: json!({}),
-                        output: json!({"type":"integer"}),
+                        output: if matches!(mode, Mode::WideItem | Mode::WideJavaScript) {
+                            json!({"type":"string"})
+                        } else {
+                            json!({"type":"integer"})
+                        },
                         resources: BTreeMap::new(),
                     },
                 ),
@@ -116,7 +120,11 @@ fn sequence(index: usize, stop: CancellationToken, mode: Mode) -> StreamFuture {
     Box::pin(async move {
         if stop.is_cancelled() || index == 3 {
             return StreamCompletion::Finished(ServiceCompletion {
-                result: Ok(json!(3)),
+                result: Ok(if matches!(mode, Mode::WideItem | Mode::WideJavaScript) {
+                    json!("done")
+                } else {
+                    json!(3)
+                }),
                 cleanup: if matches!(mode, Mode::FailedCleanup) {
                     Err("actual cleanup unknown".into())
                 } else {
@@ -127,7 +135,7 @@ fn sequence(index: usize, stop: CancellationToken, mode: Mode) -> StreamFuture {
         StreamCompletion::Item {
             value: match mode {
                 Mode::BadItem => json!("wrong schema"),
-                Mode::WideItem => json!("x".repeat(64 * 1024)),
+                Mode::WideItem | Mode::WideJavaScript => wide_item(index),
                 _ => json!(index),
             },
             next: sequence(index + 1, stop, mode),
@@ -143,7 +151,11 @@ enum Mode {
     Panic,
     BadItem,
     WideItem,
+    WideJavaScript,
     FailedCleanup,
+}
+fn wide_item(index: usize) -> Value {
+    json!(format!("{index}:{}:尾", "中🙂\"\\\n\0".repeat(8192)))
 }
 struct Parent(Mode);
 impl NativeComponent<()> for Parent {
@@ -389,17 +401,25 @@ fn fixture_data(
         .declaration()
         .clone();
     let entry = declaration.entries.get_mut(&EntryTarget::Tui).unwrap();
-    entry.scene = None;
-    entry.implementation = Implementation::Native {
-        implementation: "test.parent".into(),
-    };
+    let javascript = matches!(mode, Mode::WideJavaScript);
+    if javascript {
+        entry.implementation = Implementation::JavaScript {
+            module: "index.mjs".into(),
+            realm: maka_plugin_core::package::Realm::Dedicated,
+        };
+    } else {
+        entry.scene = None;
+        entry.implementation = Implementation::Native {
+            implementation: "test.parent".into(),
+        };
+    }
     let parent_contract = entry.exports["App"].contract.clone();
     let child_contract = component_contract(
         "test.Child",
         BTreeMap::from([("change".into(), json!({"type":"integer"}))]),
     );
     for (name, contract) in [
-        ("stream", service_contract()),
+        ("stream", service_contract(mode)),
         ("child", child_contract.clone()),
     ] {
         entry.imports.insert(
@@ -410,10 +430,15 @@ fn fixture_data(
             },
         );
     }
-    let package = support::package("native.parent", declaration, None);
+    let source = javascript.then(|| format!(r#"
+        export function activate() {{ return {{App:{{contract:{},kind:'component',component:['app']}}}}; }}
+        function frame(state) {{ return {{actions:[],events:[],subscriptions:[{{key:'feed0',binding:'stream',member:0,method:'read',input:0,resources:{{}}}}],frame:{{revision:state.revision,state,surface:{{kind:'terminal',binding:'surface'}},view:{{kind:'text',key:'root',text:'stream',color:16777215}}}}}}; }}
+        export const app = {{mount(){{return frame({{revision:0}});}},event(state,event){{return frame({{revision:state.revision+1,feedback:event.event}});}},update(state){{return frame({{...state,revision:state.revision+1}});}}}};
+    "#, serde_json::to_string(&parent_contract).unwrap()));
+    let package = support::package("native.parent", declaration, source);
     input.instances.get_mut("app").unwrap().package = package.application_ref().into();
     packages.push(package);
-    let service = native_package("native.stream", "test.stream", service_contract());
+    let service = native_package("native.stream", "test.stream", service_contract(mode));
     let child = native_package("native.child", "test.child", child_contract.clone());
     for (name, key, package) in [("stream", 3, &service), ("child", 4, &child)] {
         input
@@ -458,7 +483,7 @@ fn fixture_data(
             Ok(BTreeMap::from([(
                 "Export".into(),
                 NativeExport {
-                    contract: service_contract(),
+                    contract: service_contract(mode),
                     value: NativeCapability::Service(Arc::new(Sequence(observed.clone(), mode))),
                 },
             )]))
@@ -858,37 +883,67 @@ fn mutation_factory_panic_cancels_stream_waiting_ack_and_preserves_failed_prepar
 }
 
 #[test]
-fn invalid_native_items_stop_before_feedback_and_complete_original_source() {
-    for (mode, message) in [(Mode::BadItem, "integer"), (Mode::WideItem, "64 KiB")] {
+fn large_native_items_reach_native_and_javascript_components_exactly() {
+    for mode in [Mode::WideItem, Mode::WideJavaScript] {
         let timer = timer();
         let (mut app, starts) = fixture(mode, &timer);
         let root = app.mount_launch(json!({})).unwrap();
-        let (id, item) = run(&timer, start(&mut app, &root));
-        let successor = app.finish_task(id, item).unwrap().unwrap();
+        let mut task = start(&mut app, &root);
+        for index in 0..3 {
+            let (id, item) = run(&timer, task);
+            task = app.finish_task(id, item).unwrap().unwrap();
+            assert_eq!(
+                app.deliver_action_results(&root, |_, _, _| Ok(false))
+                    .unwrap(),
+                1
+            );
+            assert!(
+                app.frame(&root).unwrap().state["feedback"]
+                    == json!({"status":"updated","value":wide_item(index)}),
+                "original component item {index} changed"
+            );
+        }
+        finish(&timer, &mut app, &root, task);
         assert_eq!(
-            app.deliver_action_results(&root, |_, _, _| Ok(false))
-                .unwrap(),
-            0,
-            "invalid item must never enter the component"
+            app.frame(&root).unwrap().state["feedback"],
+            json!({"status":"succeeded","value":"done"})
         );
-        let (_, actual) = run(&timer, successor);
-        assert!(matches!(
-            &actual,
-            TaskCompletion::Subscription(StreamCompletion::Finished(_))
-        ));
-        assert!(app.finish_task(id, actual).unwrap().is_none());
-        assert_eq!(
-            app.deliver_action_results(&root, |_, _, _| Ok(false))
-                .unwrap(),
-            1
-        );
-        let feedback = &app.frame(&root).unwrap().state["feedback"];
-        assert_eq!(feedback["status"], "failed");
-        assert!(feedback["reason"].as_str().unwrap().contains(message));
         assert_eq!(starts.load(Ordering::SeqCst), 1);
         assert_eq!(app.accepted_action_count(), 0);
         close(&mut app, &[root]);
     }
+}
+
+#[test]
+fn invalid_native_items_stop_before_feedback_and_complete_original_source() {
+    let timer = timer();
+    let (mut app, starts) = fixture(Mode::BadItem, &timer);
+    let root = app.mount_launch(json!({})).unwrap();
+    let (id, item) = run(&timer, start(&mut app, &root));
+    let successor = app.finish_task(id, item).unwrap().unwrap();
+    assert_eq!(
+        app.deliver_action_results(&root, |_, _, _| Ok(false))
+            .unwrap(),
+        0,
+        "invalid item must never enter the component"
+    );
+    let (_, actual) = run(&timer, successor);
+    assert!(matches!(
+        &actual,
+        TaskCompletion::Subscription(StreamCompletion::Finished(_))
+    ));
+    assert!(app.finish_task(id, actual).unwrap().is_none());
+    assert_eq!(
+        app.deliver_action_results(&root, |_, _, _| Ok(false))
+            .unwrap(),
+        1
+    );
+    let feedback = &app.frame(&root).unwrap().state["feedback"];
+    assert_eq!(feedback["status"], "failed");
+    assert!(feedback["reason"].as_str().unwrap().contains("integer"));
+    assert_eq!(starts.load(Ordering::SeqCst), 1);
+    assert_eq!(app.accepted_action_count(), 0);
+    close(&mut app, &[root]);
 }
 #[test]
 fn completed_stream_with_failed_cleanup_preserves_work_until_actual_confirmation() {

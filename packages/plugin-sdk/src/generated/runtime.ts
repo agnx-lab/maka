@@ -4666,7 +4666,6 @@ export type AgentQueueAction =
   | {
       /**
        * @minItems 1
-       * @maxItems 64
        */
       messageIds: [string, ...string[]];
       kind: 'reorder';
@@ -10107,9 +10106,6 @@ export interface AgentHistoryPrompt {
 }
 export interface AgentQueue {
   revision: number;
-  /**
-   * @maxItems 64
-   */
   entries: AgentQueueEntry[];
 }
 export interface AgentQueueEntry {

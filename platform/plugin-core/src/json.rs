@@ -20,11 +20,6 @@
 //! Bounded JSON envelopes shared by native and JavaScript plugin boundaries.
 use serde_json::Value;
 
-/// Maximum encoded subscription Item. The Host's 16-slot accepted queue and
-/// 16 pending emit reservations each retain at most 1 MiB of encoded values.
-/// This bounds outstanding delivery, never the stream's lifetime output.
-pub const SUBSCRIPTION_ITEM_BYTES: usize = 64 * 1024;
-
 /// Reject integer rounding before a value crosses an application boundary.
 pub fn check_delivery(value: &Value, limit: usize) -> Result<usize, String> {
     let size = value_size(value, limit)?;

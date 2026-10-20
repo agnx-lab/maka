@@ -969,7 +969,6 @@ pub enum DeliveryPage {
 #[schemars(rename = "AgentQueue")]
 pub struct Queue {
     pub revision: u64,
-    #[schemars(length(max = 64))]
     pub entries: Vec<QueueEntry>,
 }
 #[derive(Serialize, JsonSchema, Deserialize)]
@@ -1057,7 +1056,7 @@ pub enum QueueAction {
         message: String,
     },
     Reorder {
-        #[schemars(length(min = 1, max = 64))]
+        #[schemars(length(min = 1))]
         message_ids: Vec<String>,
     },
 }

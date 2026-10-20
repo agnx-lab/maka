@@ -98,7 +98,7 @@ impl Emitter {
     }
 
     pub(super) fn emit(&self, value: Value) -> BoxFuture<'static, Result<()>> {
-        // Reserve before serialization/validation, including unpolled futures.
+        // Reserve before validation, including unpolled futures.
         let reserved = self
             .0
             .pending
@@ -109,7 +109,6 @@ impl Emitter {
                 if self.0.closed.is_cancelled() || self.0.stop.is_cancelled() {
                     return Err("Host subscription is closed".into());
                 }
-                check_json_limit(&value, maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES)?;
                 self.0.output.validate(&value).map_err(|e| e.to_string())?;
                 Ok(permit)
             });

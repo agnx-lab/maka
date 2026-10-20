@@ -106,9 +106,7 @@ pub(crate) async fn apply(
             entry.source.validate().map_err(invalid)?;
         }
         QueueEdit::Reorder { message_ids } => {
-            if message_ids.len() > 64
-                || message_ids.iter().collect::<HashSet<_>>().len() != message_ids.len()
-            {
+            if message_ids.iter().collect::<HashSet<_>>().len() != message_ids.len() {
                 return Err(invalid("invalid message reorder identities"));
             }
             let lane = message_ids
@@ -152,13 +150,6 @@ pub(crate) async fn apply(
     }
     let changed = queue.entries != original;
     if changed {
-        let bytes = queue.entries.iter().try_fold(0usize, |sum, entry| {
-            let bytes = serde_json::to_vec(entry)?.len();
-            Ok::<_, StoreError>(sum.saturating_add(bytes))
-        })?;
-        if bytes > 8 * 1024 * 1024 {
-            return Err(StoreError::PrefixTooLarge);
-        }
         for entry in &retracted {
             sqlx::query("INSERT INTO message_cancellations(session_id, message_id, cancellation_id) VALUES (?, ?, ?)")
                 .bind(session).bind(&entry.source.message.message_id)

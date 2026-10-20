@@ -90,7 +90,7 @@ impl Processes {
     }
 }
 
-/// Fill the existing Item envelope, including base64 expansion. The maximum
+/// Fill a terminal delivery chunk, including base64 expansion. The maximum
 /// cursor and u16 geometry reserve their full decimal widths for every resize.
 /// Derive overhead from the real serialized variant, not a second byte policy.
 fn output_bytes() -> Result<usize, ToolError> {
@@ -105,7 +105,7 @@ fn output_bytes() -> Result<usize, ToolError> {
         envelope["value"][field] = serde_json::json!({"cols": u16::MAX, "rows": u16::MAX});
     }
     let overhead = serde_json::to_vec(&envelope).map_err(failed)?.len();
-    Ok((maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES - overhead) / 4 * 3)
+    Ok((DELIVERY_CHUNK_BYTES - overhead) / 4 * 3)
 }
 
 fn project(event: PtyStreamEvent) -> OutputEvent {

@@ -80,6 +80,10 @@ async fn native_stream(
     (app, client, binding, issuer)
 }
 
+fn wide_item(index: usize) -> Value {
+    json!(format!("{index}:{}:尾", "中🙂\"\\\n\0".repeat(8192)))
+}
+
 #[tokio::test]
 async fn javascript_streams_ordered_items_and_final_result_in_both_realms() {
     tokio::time::timeout(Duration::from_secs(20), async {
@@ -101,11 +105,14 @@ async fn javascript_streams_ordered_items_and_final_result_in_both_realms() {
             app.ready().await.unwrap();
             let client=app.client();
             let binding=client.bind(client.activation(&id(2)).unwrap(),"echo".into()).await.unwrap().remove(0);
-            let mut stream=client.subscribe(binding,"echo".into(),json!("item"),scope(&issuer,true),Attachments::new().into()).await.unwrap();
-            for i in 0..35 { assert_eq!(stream.recv().await,Some(json!(format!("item:{i}")))); }
+            let mut stream=client.subscribe(binding,"echo".into(),wide_item(0),scope(&issuer,true),Attachments::new().into()).await.unwrap();
+            for i in 0..35 {
+                let expected = json!(format!("{}:{i}", wide_item(0).as_str().unwrap()));
+                assert!(stream.recv().await == Some(expected), "original JavaScript item {i} changed");
+            }
             assert_eq!(stream.recv().await,None);
             let completion=stream.completion().await;
-            assert_eq!(completion.result.unwrap(),json!("item:done"));
+            assert!(completion.result.unwrap() == json!(format!("{}:done", wide_item(0).as_str().unwrap())), "original JavaScript terminal result changed");
             completion.cleanup.unwrap();
             app.shutdown().await.unwrap();
         }
@@ -248,12 +255,12 @@ async fn retained_context_cannot_publish_after_producer_end_or_block_eof() {
 }
 
 #[tokio::test]
-async fn item_schema_json_budget_and_unpolled_pending_emits_are_bounded() {
+async fn large_items_preserve_schema_and_unpolled_pending_emit_bounds() {
     tokio::time::timeout(Duration::from_secs(15), async {
         let (app, client, binding, issuer) = native_stream(|_, context| {
             Box::pin(async move {
                 assert!(context.emit(json!(false)).await.is_err());
-                assert!(context.emit(json!("x".repeat(64 * 1024))).await.is_err());
+                context.emit(wide_item(0)).await?;
                 let mut pending = Vec::new();
                 for i in 0..16 {
                     pending.push(context.emit(json!(format!("item:{i}"))));
@@ -282,6 +289,10 @@ async fn item_schema_json_budget_and_unpolled_pending_emits_are_bounded() {
             )
             .await
             .unwrap();
+        assert!(
+            stream.recv().await == Some(wide_item(0)),
+            "original native item changed"
+        );
         for i in 0..16 {
             assert_eq!(stream.recv().await, Some(json!(format!("item:{i}"))));
         }

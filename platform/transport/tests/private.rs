@@ -54,6 +54,78 @@ struct Fixture {
     server: Arc<Server>,
     peer: Arc<maka_transport::transport::Peers>,
 }
+// This progress fixture uses the same contract at the caller, gateway and provider.
+fn wide_progress_contract() -> maka_plugin_core::contract::Contract {
+    let mut contract = support::business();
+    let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else {
+        unreachable!()
+    };
+    methods.get_mut("write").unwrap().progress = Some(serde_json::json!({
+        "type":"object","properties":{"step":{"type":"string"}},
+        "required":["step"],"additionalProperties":false
+    }));
+    contract
+}
+fn wide_progress() -> serde_json::Value {
+    serde_json::json!({"step":format!("原始:{}:尾", "中🙂\"\\\n\0".repeat(8192))})
+}
+fn replace_progress_contract(
+    input: &mut maka_plugin_core::composition::Input,
+    packages: &mut [maka_packages::Package],
+) {
+    let contract = wide_progress_contract();
+    for package in packages {
+        let original = package.application_ref();
+        let mut declaration = package
+            .manifest()
+            .application
+            .as_ref()
+            .unwrap()
+            .declaration()
+            .clone();
+        let mut changed = false;
+        for entry in declaration.entries.values_mut() {
+            for import in entry.imports.values_mut() {
+                if import.contract.name == contract.name {
+                    import.contract = contract.clone();
+                    changed = true;
+                }
+            }
+            for export in entry.exports.values_mut() {
+                if export.contract.name == contract.name {
+                    export.contract = contract.clone();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let mut files = package.files().clone();
+            if package.manifest().id == "local.ui" {
+                // Keep the original progress in state, without rendering its entire
+                // payload into the unrelated terminal Text node.
+                let source = String::from_utf8(files.remove("index.mjs").unwrap()).unwrap();
+                let display =
+                    "JSON.stringify(state.outcome?.reply?.receipt??state.outcome??'Ready')";
+                assert!(source.contains(display));
+                files.insert("index.mjs".into(), source.replace(display,
+                    "(state.outcome?.status==='updated'?'Progress received':JSON.stringify(state.outcome?.reply?.receipt??state.outcome??'Ready'))").into_bytes());
+            }
+            files.insert(
+                maka_packages::MANIFEST_FILE.into(),
+                serde_json::to_vec(&serde_json::json!({
+                    "schemaVersion":1,"id":package.manifest().id,"application":declaration
+                }))
+                .unwrap(),
+            );
+            *package = maka_packages::Package::new(files).unwrap();
+            for node in input.instances.values_mut() {
+                if node.package == original.clone().into() {
+                    node.package = package.application_ref().into();
+                }
+            }
+        }
+    }
+}
 impl Fixture {
     async fn new() -> Self {
         Self::with_gate(None).await
@@ -76,7 +148,16 @@ impl Fixture {
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
         let owner = Arc::new(RootOwner::create(&caller_root, &namespaces).unwrap());
         let caller = Arc::new(EventLog::for_root(owner).await.unwrap());
-        let (input, packages, observations) = support::ui(PresentationTarget::Tui);
+        let wide_progress = gate.as_ref().is_some_and(|gate| gate.progress);
+        let (mut input, mut packages, mut observations) = support::ui(PresentationTarget::Tui);
+        if wide_progress {
+            replace_progress_contract(&mut input, &mut packages);
+            for observation in &mut observations {
+                if observation.declaration.contract.name == support::business().name {
+                    observation.declaration.contract = wide_progress_contract();
+                }
+            }
+        }
         let source = caller
             .commit_application(Uuid::new_v4(), 0, input, observations, packages)
             .await
@@ -117,7 +198,11 @@ impl Fixture {
                                 exports: Ok(BTreeMap::from([(
                                     "Counter".into(),
                                     maka_plugin_core::runtime::Published {
-                                        contract: support::business(),
+                                        contract: if wide_progress {
+                                            wide_progress_contract()
+                                        } else {
+                                            support::business()
+                                        },
                                         value: gate.clone()
                                             as Arc<dyn maka_host_runtime::application::Handler>,
                                     },
@@ -128,6 +213,9 @@ impl Fixture {
                     }),
                 )
                 .unwrap();
+        }
+        if wide_progress {
+            replace_progress_contract(&mut input, &mut packages);
         }
         store
             .commit_application(deployment, 0, input, vec![], packages)
@@ -417,7 +505,7 @@ impl maka_host_runtime::application::Handler for Gate {
         Box::pin(async move {
             if method == "write" {
                 if progress {
-                    context.emit(serde_json::json!({"step":1})).await?;
+                    context.emit(wide_progress()).await?;
                 }
                 stop.cancelled().await;
                 cancelled.notify_one();
@@ -2096,20 +2184,31 @@ async fn checked_ui_mutation_progress_cancel_waits_for_original_completion_and_r
         let mut task = ui.start_task(&root).unwrap().unwrap();
         loop {
             let completed = task.future.await;
+            let progress = matches!(
+                &completed,
+                maka_ui_runtime::actions::TaskCompletion::MutationProgress { .. }
+            );
             task = ui
                 .finish_task(task.id, completed)
                 .unwrap()
                 .expect("operation still running");
-            ui.deliver_action_results(&root, |_, _, _| Ok(false))
+            let delivered = ui
+                .deliver_action_results(&root, |_, _, _| Ok(false))
                 .unwrap();
+            if progress {
+                assert_eq!(
+                    delivered, 1,
+                    "original mutation progress must enter the component"
+                );
+            }
             ui.wait_idle().await.unwrap();
             if ui.frame(&root).unwrap().state["outcome"]["status"] == "updated" {
                 break;
             }
         }
-        assert_eq!(
-            ui.frame(&root).unwrap().state["outcome"]["value"],
-            serde_json::json!({"step":1})
+        assert!(
+            ui.frame(&root).unwrap().state["outcome"]["value"] == wide_progress(),
+            "original Unicode mutation progress changed"
         );
         assert_eq!(ui.accepted_action_count(), 1);
         let id = task.id;

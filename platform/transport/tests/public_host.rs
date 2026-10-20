@@ -113,6 +113,119 @@ async fn public_ipc_persists_original_gateway_intent_and_retires_original_owner(
     }).await.unwrap();
 }
 
+struct IpcSubscription {
+    value: Value,
+}
+impl maka_host_runtime::application::Handler for IpcSubscription {
+    fn call(
+        &self,
+        _: String,
+        _: Value,
+        context: maka_host_runtime::application::Context,
+    ) -> futures_util::future::BoxFuture<'static, Result<Value, String>> {
+        let value = self.value.clone();
+        Box::pin(async move {
+            context.emit(value).await?;
+            Ok(Value::Null)
+        })
+    }
+}
+impl maka_host_runtime::application::NativeOwner for IpcSubscription {
+    fn prepare_retirement(
+        &self,
+    ) -> Option<Box<dyn maka_host_runtime::application::NativeRetirement>> {
+        Some(Box::new(()))
+    }
+    fn close(&self) -> futures_util::future::BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let expected = serde_json::json!({"text": "中🙂\"\\\n\0".repeat(8192), "tail": "尾"});
+        let encoded = serde_json::to_vec(&expected).unwrap();
+        assert!(encoded.len() > 64 * 1024);
+        assert!(encoded.len() < 1024 * 1024);
+        let directory = tempfile::tempdir().unwrap();
+        maka_event_log::root::private_directory(directory.path()).unwrap();
+        let namespaces = RootNamespaces {
+            ownership: directory.path().join("owners"),
+            control: directory.path().join("control"),
+        };
+        let root = directory.path().join("root");
+        let store = Arc::new(EventLog::for_root(Arc::new(RootOwner::create(&root, &namespaces).unwrap())).await.unwrap());
+        let deployment = Uuid::new_v4();
+        let (mut input, mut packages) = support::host();
+        let mut contract = support::business();
+        let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else { unreachable!() };
+        methods.get_mut("read").unwrap().mode = maka_plugin_core::contract::MethodMode::Subscription;
+        methods.get_mut("read").unwrap().output = serde_json::json!({"type":["object","null"], "properties":{"text":{"type":"string"},"tail":{"type":"string"}},"required":["text","tail"],"additionalProperties":false});
+        for package in &mut packages {
+            let name = package.manifest().id.clone();
+            if name != "local.business" && name != "local.gateway" { continue; }
+            let mut declaration = package.manifest().application.as_ref().unwrap().declaration().clone();
+            let entry = declaration.entries.get_mut(&maka_plugin_core::package::EntryTarget::Host).unwrap();
+            if name == "local.business" {
+                entry.implementation = maka_plugin_core::package::Implementation::Native { implementation: "public.subscription".into() };
+                entry.exports.get_mut("Counter").unwrap().contract = contract.clone();
+            } else {
+                entry.imports.get_mut("business").unwrap().contract = contract.clone();
+            }
+            *package = support::counter::package(&name, declaration, None);
+            input.instances.get_mut(if name == "local.business" { "business" } else { "gateway" }).unwrap().package = package.application_ref().into();
+        }
+        let provider = Arc::new(IpcSubscription { value: expected.clone() });
+        let mut native = NativeRegistry::default();
+        native.insert("public.subscription".into(), Arc::new(move |_, _| {
+            let provider = provider.clone();
+            let contract = contract.clone();
+            Box::pin(async move {
+                maka_host_runtime::application::NativeActivation {
+                    exports: Ok(BTreeMap::from([("Counter".into(), maka_plugin_core::runtime::Published { contract, value: provider.clone() as Arc<dyn maka_host_runtime::application::Handler> })])),
+                    owner: provider,
+                }
+            })
+        })).unwrap();
+        store.commit_application(deployment, 0, input, vec![], packages).await.unwrap();
+        let host = Host::open(store.clone(), deployment, native, Some(maka_host_js::factory(Default::default())), BTreeMap::from([
+            ("business".into(), HostEndpoint { consumer: support::identity(13), import: "business".into(), grant: Grant { methods: ["read".into()].into(), recovery: false } }),
+        ]), vec![]).await.unwrap();
+        #[cfg(unix)]
+        let address = directory.path().join("host.sock");
+        #[cfg(windows)]
+        let address = std::path::PathBuf::from(format!(r"\\.\pipe\maka-public-test-{}", Uuid::new_v4()));
+        let listener = LocalListener::bind(&address).unwrap();
+        let serving = tokio::spawn({ let host = host.clone(); async move { host.serve_local(listener, CancellationToken::new()).await } });
+        let mut client = Client::connect(&address, Some(host.epoch())).await.unwrap();
+        let mut call = client.call("business", "read".into(), Value::Null, Default::default()).await.unwrap();
+        call.start().await.unwrap();
+        let subscribed = call.receive().await.unwrap();
+        let item = call.pull().await.unwrap();
+        match &item {
+            Reply::Item { value } => eprintln!("IPC subscription item encoded_bytes={} original_equal={}", serde_json::to_vec(value).unwrap().len(), value == &expected),
+            Reply::Finished { result, cleanup } => eprintln!("IPC subscription finished before item: error={:?} cleanup={cleanup:?}", result.as_ref().err()),
+            _ => eprintln!("IPC subscription returned an unexpected reply before item"),
+        }
+        let completion = if matches!(item, Reply::Item { .. }) { Some(call.pull().await.unwrap()) } else { None };
+        call.close().await.unwrap();
+        let cleanup_confirmed = call.cleanup_confirmed();
+        client.close().await.unwrap();
+        assert!(Client::retire(&address, host.epoch()).await.unwrap());
+        serving.await.unwrap().unwrap();
+        drop((call, client, host, store));
+        drop(RootOwner::open(&root, &namespaces).unwrap());
+        assert!(matches!(subscribed, Reply::Subscribed));
+        match item {
+            Reply::Item { value } => assert!(value == expected, "large subscription original differs after IPC"),
+            _ => panic!("large subscription original did not cross IPC; see short reply metadata above"),
+        }
+        assert!(matches!(completion, Some(Reply::Finished { result: Ok(Value::Null), cleanup: Ok(()) })));
+        assert!(cleanup_confirmed);
+    }).await.unwrap();
+}
+
 struct Blocked {
     entered: Arc<tokio::sync::Semaphore>,
     cancelled: Arc<tokio::sync::Semaphore>,

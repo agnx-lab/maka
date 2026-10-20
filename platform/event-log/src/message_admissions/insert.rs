@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{MAX_PENDING_BYTES, PendingMessageAdmission, invalid, read};
+use super::{PendingMessageAdmission, invalid, read};
 use crate::StoreError;
 use maka_agent_facts::event::Invocation;
 use maka_agent_facts::message::MessageDisposition;
@@ -112,17 +112,18 @@ pub(crate) async fn insert(
     if other_owner {
         return Err(invalid("pending Session belongs to another dispatcher"));
     }
-    let (count, bytes, position): (i64, i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*), COALESCE(SUM(length(CAST(record_json AS BLOB))),0), COALESCE(MAX(position),0)
-         FROM message_admissions WHERE session_id = ?"
-    ).bind(session).fetch_one(&mut *tx).await?;
-    if count >= 64 || bytes + encoded.len() as i64 > MAX_PENDING_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
+    let (pending, position): (bool, i64) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM message_admissions WHERE session_id = ?1),
+                COALESCE(MAX(position),0)
+         FROM message_admissions WHERE session_id = ?1",
+    )
+    .bind(session)
+    .fetch_one(&mut *tx)
+    .await?;
     let position = position
         .checked_add(1)
         .ok_or_else(|| invalid("message queue position exhausted"))?;
-    if admission.source.disposition == MessageDisposition::TurnStarted && count != 0 {
+    if admission.source.disposition == MessageDisposition::TurnStarted && pending {
         return Err(StoreError::SessionBusy);
     }
     sqlx::query("INSERT INTO message_admissions (session_id, message_id, position, record_json) VALUES (?, ?, ?, ?)")

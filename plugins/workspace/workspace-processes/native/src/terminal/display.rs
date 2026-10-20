@@ -22,7 +22,6 @@ use maka_agent_facts::{
     shell_run::ShellOutput,
     terminal::display::{Buffer, Part, Row, RowPart},
 };
-use maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES;
 use std::collections::VecDeque;
 
 impl Processes {
@@ -66,11 +65,10 @@ impl Processes {
             (Buffer::LastAlternate, alternate),
         ] {
             for (row, runs) in rows.iter().enumerate() {
-                for part in fragments(buffer, row as u32, runs, SUBSCRIPTION_ITEM_BYTES - overhead)?
-                {
+                for part in fragments(buffer, row as u32, runs, DELIVERY_CHUNK_BYTES - overhead)? {
                     let length = serde_json::to_vec(&part).map_err(failed)?.len();
                     let separator = usize::from(!parts.is_empty());
-                    if bytes + separator + length > SUBSCRIPTION_ITEM_BYTES {
+                    if bytes + separator + length > DELIVERY_CHUNK_BYTES {
                         self.display_emit(
                             &target,
                             Part::Rows {
@@ -212,7 +210,7 @@ mod tests {
                 Buffer::Screen,
                 row as u32,
                 runs,
-                SUBSCRIPTION_ITEM_BYTES - overhead,
+                DELIVERY_CHUNK_BYTES - overhead,
             )
             .unwrap()
             {
@@ -224,7 +222,7 @@ mod tests {
                     .unwrap(),
                 )
                 .unwrap();
-                assert!(encoded.len() <= SUBSCRIPTION_ITEM_BYTES);
+                assert!(encoded.len() <= DELIVERY_CHUNK_BYTES);
                 assembly.rows(parts).unwrap();
                 count += 1;
             }

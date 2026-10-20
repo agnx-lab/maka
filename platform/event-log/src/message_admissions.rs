@@ -31,7 +31,6 @@ pub(crate) mod insert;
 mod receipts;
 pub use receipts::MessageSubmitReceipt;
 
-const MAX_PENDING_BYTES: i64 = 8 * 1024 * 1024;
 /// Dispatcher-owned, non-secret prerequisites for accepted work. The store
 /// preserves this value; only the named dispatcher interprets its typed basis.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,12 +199,6 @@ pub(super) async fn pending(
     tx: &mut SqliteConnection,
     session: &str,
 ) -> Result<Vec<PendingMessageAdmission>, StoreError> {
-    let (count, bytes): (i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*), COALESCE(SUM(length(CAST(record_json AS BLOB))),0) FROM message_admissions WHERE session_id = ?"
-    ).bind(session).fetch_one(&mut *tx).await?;
-    if count > 64 || bytes > MAX_PENDING_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT message_id, record_json FROM message_admissions WHERE session_id = ? ORDER BY position, message_id"
     ).bind(session).fetch_all(tx).await?;

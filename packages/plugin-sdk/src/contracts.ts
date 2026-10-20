@@ -10490,7 +10490,6 @@ export const contracts = {
                           type: 'string',
                         },
                         minItems: 1,
-                        maxItems: 64,
                       },
                       kind: {
                         type: 'string',
@@ -19681,7 +19680,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/AgentQueueEntry',
                 },
-                maxItems: 64,
               },
             },
             additionalProperties: false,
@@ -25957,7 +25955,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/AgentQueueEntry',
                     },
-                    maxItems: 64,
                   },
                 },
                 additionalProperties: false,

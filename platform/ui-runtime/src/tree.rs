@@ -23,11 +23,6 @@ use std::{
     time::Instant,
 };
 
-/// Measure stream payloads without allocating a serialized copy.
-pub(super) fn serialized_bytes(value: &Value) -> Result<usize> {
-    maka_plugin_core::json::value_size(value, usize::MAX).map_err(Error::Invalid)
-}
-
 #[derive(Clone)]
 pub(super) struct Child {
     binding: String,

@@ -413,20 +413,18 @@ impl<V: ?Sized + 'static> Application<V> {
             .as_ref()
             .filter(|_| !running.completed)
             .ok_or_else(|| Error::Invalid("progress requires an active mutation".into()))?;
-        let valid = tree::serialized_bytes(&value).and_then(|bytes| {
-            if bytes > 64 * 1024 {
-                return Err(Error::Invalid("mutation progress exceeds 64 KiB".into()));
-            }
-            let Export::Service { methods, .. } = running.execution.value() else {
-                unreachable!()
-            };
-            methods[&running.method]
-                .progress
-                .as_ref()
-                .ok_or_else(|| Error::Invalid("mutation has no progress declaration".into()))?
-                .validate(&value)
-                .map_err(|e| Error::Invalid(e.to_string()))
-        });
+        let Export::Service { methods, .. } = running.execution.value() else {
+            unreachable!()
+        };
+        let valid = methods[&running.method]
+            .progress
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("mutation has no progress declaration".into()))
+            .and_then(|progress| {
+                progress
+                    .validate(&value)
+                    .map_err(|e| Error::Invalid(e.to_string()))
+            });
         let consumer = running.consumer.clone();
         let key = running.key.clone();
         let wanted = self.update_wanted(&consumer, &key, id);

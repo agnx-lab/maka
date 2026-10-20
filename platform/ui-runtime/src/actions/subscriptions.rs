@@ -138,18 +138,13 @@ impl<V: ?Sized + 'static> Application<V> {
                     ));
                 }
                 let wanted = self.subscription_wanted(&running.consumer, &running.key, id);
-                let valid = tree::serialized_bytes(&value).and_then(|bytes| {
-                    if bytes > maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES {
-                        return Err(Error::Invalid("subscription item exceeds 64 KiB".into()));
-                    }
-                    let Export::Service { methods, .. } = running.execution.value() else {
-                        unreachable!()
-                    };
-                    methods[&running.method]
-                        .output
-                        .validate(&value)
-                        .map_err(|e| Error::Invalid(e.to_string()))
-                });
+                let Export::Service { methods, .. } = running.execution.value() else {
+                    unreachable!()
+                };
+                let valid = methods[&running.method]
+                    .output
+                    .validate(&value)
+                    .map_err(|e| Error::Invalid(e.to_string()));
                 let consumer = running.consumer.clone();
                 let key = running.key.clone();
                 if let Err(error) = valid {

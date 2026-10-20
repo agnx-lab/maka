@@ -38,6 +38,10 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+// Terminal delivery work batches continue until all output has been delivered.
+// This is not a Host item contract or a limit on the total retained output.
+const DELIVERY_CHUNK_BYTES: usize = 64 * 1024;
+
 pub(super) struct Service(pub(super) Arc<Processes>);
 impl Handler for Service {
     fn call(

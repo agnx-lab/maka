@@ -763,7 +763,7 @@ impl Handler for Agent {
                             let queue = owner.queue(&input.session_id).await?;
                             queue_revision = Some(queue.revision);
                             let update = encode(DeliveryPage::Queue { queue })?;
-                            maka_plugin_core::json::check_delivery(&update, 48 * 1024)
+                            maka_plugin_core::json::exact_numbers(&update)
                                 .map_err(|_| "agent_queue_unavailable")?;
                             context.emit(update).await?;
                         }

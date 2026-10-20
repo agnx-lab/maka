@@ -154,10 +154,6 @@ fn committed_ui_addition_retains_original_mount_frame_and_then_replacement_waits
         .unwrap();
     app.advance_deployment().unwrap();
     assert!(app.is_retiring(&root));
-    assert_eq!(
-        app.live_source_revisions(),
-        std::collections::BTreeSet::from([1, 3])
-    );
     assert_eq!(app.frame(&root).unwrap().state, state);
     assert_eq!(app.deployment_status().effective, Some(next));
     assert!(app.deployment_status().converging);

@@ -322,10 +322,6 @@ fn output_request(target: &Value, after: u64) -> Value {
 }
 fn output_event(value: Value) -> Value {
     assert_eq!(value["kind"], "completed", "{value}");
-    assert!(
-        serde_json::to_vec(&value).unwrap().len()
-            <= maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES
-    );
     value["value"].clone()
 }
 async fn output_read(f: &Fixture, target: &Value, after: u64) -> Value {
@@ -658,10 +654,6 @@ async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyo
         let mut stream = subscribe(f, owner, "readDisplay", target.clone()).await;
         let mut assembly = None;
         while let Some(item) = stream.recv().await {
-            assert!(
-                serde_json::to_vec(&item).unwrap().len()
-                    <= maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES
-            );
             assert_eq!(item["kind"], "completed", "{item}");
             match serde_json::from_value::<Part>(item["value"].clone()).unwrap() {
                 Part::Begin {
