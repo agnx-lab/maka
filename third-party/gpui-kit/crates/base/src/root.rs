@@ -449,9 +449,9 @@ mod tests {
             window.draw(cx).clear(cx);
         });
 
-        cx.dispatch_keystrokes("tab");
+        cx.simulate_keystrokes("tab");
         assert_trapped_focus(cx, &container, &controls[0]);
-        cx.dispatch_keystrokes("tab");
+        cx.simulate_keystrokes("tab");
         assert_trapped_focus(cx, &container, &controls[1]);
         assert_eq!(background_focuses.get(), 0);
     }
@@ -464,9 +464,9 @@ mod tests {
             window.draw(cx).clear(cx);
         });
 
-        cx.dispatch_keystrokes("shift-tab");
+        cx.simulate_keystrokes("shift-tab");
         assert_trapped_focus(cx, &container, &controls[1]);
-        cx.dispatch_keystrokes("shift-tab");
+        cx.simulate_keystrokes("shift-tab");
         assert_trapped_focus(cx, &container, &controls[0]);
         assert_eq!(background_focuses.get(), 0);
     }
@@ -479,9 +479,9 @@ mod tests {
             window.draw(cx).clear(cx);
         });
 
-        cx.dispatch_keystrokes("tab");
+        cx.simulate_keystrokes("tab");
         assert_trapped_focus(cx, &container, &container);
-        cx.dispatch_keystrokes("shift-tab");
+        cx.simulate_keystrokes("shift-tab");
         assert_trapped_focus(cx, &container, &container);
         assert_eq!(background_focuses.get(), 0);
     }
@@ -497,12 +497,12 @@ mod tests {
         // receive native focus notifications when a background control is used.
         assert_eq!(background_focuses.get(), 1);
 
-        cx.dispatch_keystrokes("tab");
+        cx.simulate_keystrokes("tab");
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
             assert_eq!(window.focused(cx), Some(background[1].clone()));
         });
-        cx.dispatch_keystrokes("shift-tab");
+        cx.simulate_keystrokes("shift-tab");
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
             assert_eq!(window.focused(cx), Some(background[0].clone()));
@@ -793,9 +793,9 @@ mod tests {
                     controls[index][1].focus(window, cx);
                     window.draw(cx).clear(cx);
                 });
-                cx.dispatch_keystrokes("tab");
+                cx.simulate_keystrokes("tab");
                 assert_trapped_focus(cx, &containers[index], &controls[index][0]);
-                cx.dispatch_keystrokes("shift-tab");
+                cx.simulate_keystrokes("shift-tab");
                 assert_trapped_focus(cx, &containers[index], &controls[index][1]);
             }
         }
