@@ -8600,6 +8600,7 @@ dependencies = [
  "maka-assistant",
  "maka-capabilities",
  "maka-computer-native",
+ "maka-computer-use",
  "maka-config",
  "maka-event-log",
  "maka-external-agent",
