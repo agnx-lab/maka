@@ -6448,6 +6448,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
 
+bit-set@0.10.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
 bit-set@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
 bit-set@0.9.1 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
 bit-vec@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
@@ -6462,6 +6463,7 @@ minimal-lexical@0.2.1 (MIT/Apache-2.0); authors declared by package: Alex Huszag
 presser@0.3.1 (MIT OR Apache-2.0); authors declared by package: Embark <opensource@embark-studios.com>, Gray Olson <gray@grayolson.com
 qoi@0.4.1 (MIT/Apache-2.0); authors declared by package: Ivan Smirnov <rust@ivan.smirnov.ie>
 
+https://crates.io/api/v1/crates/bit-set/0.10.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/bit-set/0.8.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/bit-set/0.9.1/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/bit-vec/0.8.0/download :: LICENSE-APACHE
@@ -6680,15 +6682,13 @@ limitations under the License.
 
 ================================================================================
 
-bit-set@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
-bit-vec@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
-bit-vec@0.9.1 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
+bit-set@0.10.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
+bit-set@0.9.1 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
 
-https://crates.io/api/v1/crates/bit-set/0.8.0/download :: LICENSE-MIT
-https://crates.io/api/v1/crates/bit-vec/0.8.0/download :: LICENSE-MIT
-https://crates.io/api/v1/crates/bit-vec/0.9.1/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/bit-set/0.10.0/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/bit-set/0.9.1/download :: LICENSE-MIT
 
-Copyright (c) 2023 The Rust Project Developers
+Copyright (c) 2026 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -6716,11 +6716,15 @@ DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-bit-set@0.9.1 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
+bit-set@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
+bit-vec@0.8.0 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
+bit-vec@0.9.1 (Apache-2.0 OR MIT); authors declared by package: Alexis Beingessner <a.beingessner@gmail.com>
 
-https://crates.io/api/v1/crates/bit-set/0.9.1/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/bit-set/0.8.0/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/bit-vec/0.8.0/download :: LICENSE-MIT
+https://crates.io/api/v1/crates/bit-vec/0.9.1/download :: LICENSE-MIT
 
-Copyright (c) 2026 The Rust Project Developers
+Copyright (c) 2023 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -15377,7 +15381,9 @@ image@0.25.10 (MIT OR Apache-2.0); authors declared by package: The image-rs Dev
 linebender_resource_handle@0.1.1 (Apache-2.0 OR MIT)
 miniz_oxide@0.8.9 (MIT OR Zlib OR Apache-2.0); authors declared by package: Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com
 miniz_oxide@0.9.1 (MIT OR Zlib OR Apache-2.0); authors declared by package: Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com
+naga-types@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 naga@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+naga@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 num-conv@0.2.2 (MIT OR Apache-2.0); authors declared by package: Jacob Pratt <jacob@jhpratt.dev>
 pin-project-internal@1.1.13 (Apache-2.0 OR MIT)
 pin-project-lite@0.2.17 (Apache-2.0 OR MIT)
@@ -15392,11 +15398,17 @@ time-macros@0.2.32 (MIT OR Apache-2.0); authors declared by package: Jacob Pratt
 time@0.3.55 (MIT OR Apache-2.0); authors declared by package: Jacob Pratt <open-source@jhpratt.dev>, Time contributors
 usvg@0.46.0 (Apache-2.0 OR MIT)
 wgpu-core-deps-windows-linux-android@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-core-deps-windows-linux-android@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-core@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-core@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-hal@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-hal@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-naga-bridge@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-naga-bridge@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-types@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-types@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 widestring@1.2.1 (MIT OR Apache-2.0)
 
 https://crates.io/api/v1/crates/fdeflate/0.3.7/download :: LICENSE-APACHE
@@ -15458,7 +15470,9 @@ https://crates.io/api/v1/crates/image/0.25.10/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/linebender_resource_handle/0.1.1/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/miniz_oxide/0.8.9/download :: LICENSE-APACHE.md
 https://crates.io/api/v1/crates/miniz_oxide/0.9.1/download :: LICENSE-APACHE.md
+https://crates.io/api/v1/crates/naga-types/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/naga/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/naga/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/num-conv/0.2.2/download :: LICENSE-Apache
 https://crates.io/api/v1/crates/pin-project-internal/1.1.13/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/pin-project-lite/0.2.17/download :: LICENSE-APACHE
@@ -15473,11 +15487,17 @@ https://crates.io/api/v1/crates/time-macros/0.2.32/download :: LICENSE-Apache
 https://crates.io/api/v1/crates/time/0.3.55/download :: LICENSE-Apache
 https://crates.io/api/v1/crates/usvg/0.46.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/wgpu-core-deps-windows-linux-android/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu-core-deps-windows-linux-android/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu-core/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu-core/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu-hal/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu-hal/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu-naga-bridge/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu-naga-bridge/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu-types/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu-types/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu/29.0.4/download :: LICENSE.APACHE
+https://crates.io/api/v1/crates/wgpu/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/widestring/1.2.1/download :: LICENSE-APACHE
 https://github.com/image-rs/image-webp#08b57d473c90148dd4b37a075df365afc3dfcc2b (adapted; third-party/image-webp) :: LICENSE-APACHE
 
@@ -18379,29 +18399,29 @@ END OF TERMS AND CONDITIONS
 
 ================================================================================
 
-gpui-fast-apple@0.1.7 (Apache-2.0); authors declared by package: Longbridge
-gpui-fast-linux@0.1.7 (Apache-2.0)
-gpui-fast-macos@0.1.7 (Apache-2.0)
-gpui-fast-macros@0.1.7 (Apache-2.0); authors declared by package: Longbridge
-gpui-fast-platform@0.1.7 (Apache-2.0); authors declared by package: Longbridge
-gpui-fast-wgpu@0.1.7 (Apache-2.0); authors declared by package: Longbridge
-gpui-fast-windows@0.1.7 (Apache-2.0)
-gpui-fast@0.1.7 (Apache-2.0); authors declared by package: Nathan Sobo <nathan@zed.dev>
+gpui-fast-apple@0.1.10 (Apache-2.0); authors declared by package: Longbridge
+gpui-fast-linux@0.1.10 (Apache-2.0)
+gpui-fast-macos@0.1.10 (Apache-2.0)
+gpui-fast-macros@0.1.10 (Apache-2.0); authors declared by package: Longbridge
+gpui-fast-platform@0.1.10 (Apache-2.0); authors declared by package: Longbridge
+gpui-fast-wgpu@0.1.10 (Apache-2.0); authors declared by package: Longbridge
+gpui-fast-windows@0.1.10 (Apache-2.0)
+gpui-fast@0.1.10 (Apache-2.0); authors declared by package: Nathan Sobo <nathan@zed.dev>
 gpui-pre-scheduler@0.3.9 (Apache-2.0)
 
-https://crates.io/api/v1/crates/gpui-fast-apple/0.1.7/download :: LICENSE
-https://crates.io/api/v1/crates/gpui-fast-macros/0.1.7/download :: LICENSE
-https://crates.io/api/v1/crates/gpui-fast-platform/0.1.7/download :: LICENSE
-https://crates.io/api/v1/crates/gpui-fast-wgpu/0.1.7/download :: LICENSE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui) :: ../../LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui) :: LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_linux) :: ../../LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_linux) :: LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_macos) :: ../../LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_macos) :: LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_windows) :: ../../LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/gpui_windows) :: LICENSE-APACHE
-https://github.com/longbridge/gpui-fast#371769f1ff378bc0bd886440e0f97fc94aaeae5d (adapted; third-party/gpui-fast/crates/scheduler) :: ../../LICENSE-APACHE
+https://crates.io/api/v1/crates/gpui-fast-apple/0.1.10/download :: LICENSE
+https://crates.io/api/v1/crates/gpui-fast-macros/0.1.10/download :: LICENSE
+https://crates.io/api/v1/crates/gpui-fast-platform/0.1.10/download :: LICENSE
+https://crates.io/api/v1/crates/gpui-fast-wgpu/0.1.10/download :: LICENSE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui) :: ../../LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui) :: LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_linux) :: ../../LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_linux) :: LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_macos) :: ../../LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_macos) :: LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_windows) :: ../../LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/gpui_windows) :: LICENSE-APACHE
+https://github.com/longbridge/gpui-fast#b836dd970b26830f2124b7cf91b0e19018fd12da (adapted; third-party/gpui-fast/crates/scheduler) :: ../../LICENSE-APACHE
 
 Copyright 2022 - 2025 Zed Industries, Inc.
 Copyright 2026 Longbridge.
@@ -24646,21 +24666,37 @@ MIT License
 
 ================================================================================
 
+naga-types@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 naga@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+naga@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-core-deps-windows-linux-android@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-core-deps-windows-linux-android@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-core@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-core@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-hal@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-hal@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-naga-bridge@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-naga-bridge@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu-types@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu-types@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 wgpu@29.0.4 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
+wgpu@30.0.1 (MIT OR Apache-2.0); authors declared by package: gfx-rs developers
 
+https://crates.io/api/v1/crates/naga-types/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/naga/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/naga/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu-core-deps-windows-linux-android/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu-core-deps-windows-linux-android/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu-core/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu-core/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu-hal/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu-hal/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu-naga-bridge/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu-naga-bridge/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu-types/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu-types/30.0.1/download :: LICENSE.MIT
 https://crates.io/api/v1/crates/wgpu/29.0.4/download :: LICENSE.MIT
+https://crates.io/api/v1/crates/wgpu/30.0.1/download :: LICENSE.MIT
 
 MIT License
 
