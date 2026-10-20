@@ -119,7 +119,10 @@ export function Checklist(props: { sessionId: string }) {
   });
   return (
     <If when={snapshot()?.enabled && snapshot()!.total > 0}>
-      <View style={{ backgroundColor: C.surface, borderRadius: 8 }}>
+      <View
+        accessibilityLabel="Conversation todo dock"
+        style={{ backgroundColor: C.surface, borderRadius: 8 }}
+      >
         <Button
           selected={expanded()}
           onPress={inputAction(setExpanded, { sessionId, open: !expanded() })}

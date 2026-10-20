@@ -22,8 +22,8 @@ import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
-import { C } from './ui';
-import { Home } from './Home';
+import { C, Header } from './ui';
+import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
@@ -56,7 +56,9 @@ function App() {
   const controls = signal<any[]>([]);
   const controlsKnown = signal(false);
   const recovering = signal(false);
-  let handle: ConversationHandle | null = null;
+  const handle = signal<ConversationHandle | null>(null);
+  let editor: YNode | undefined;
+  const focusComposer = () => editor?.focus();
   let browserRoot: YNode | undefined;
   let alive = true;
   let controlRead = 0;
@@ -79,7 +81,7 @@ function App() {
     if (!alive || selected() !== expectedSessionId || selected() === id || switching()) return;
     switching.set(true);
     try {
-      if (handle && !(await handle.flushDraft())) return;
+      if (handle() && !(await handle()!.flushDraft())) return;
       if (alive) {
         overlay.set(null);
         selected.set(id);
@@ -170,8 +172,8 @@ function App() {
       if (result.kind !== 'committed')
         throw new Error(`Model selection rejected: ${result.reason ?? result.kind}`);
       if (selected() === sessionId) {
-        await handle?.refresh();
-        handle?.focus();
+        await handle()?.refresh();
+        handle()?.focus();
       }
       status.set('');
     } catch (reason) {
@@ -204,12 +206,12 @@ function App() {
     else open({ kind: 'workspaces', sessionId });
   };
   const stop = () => {
-    if (!overlay() && handle) void handle.stop(handle.invocation()).catch(report);
+    if (!overlay() && handle()) void handle()!.stop(handle()!.invocation()).catch(report);
   };
   const closeCommand = (context: CommandContext) =>
     alive &&
     selected() === context.sessionId &&
-    (context.sessionId === null || handle?.sessionId === context.sessionId) &&
+    (context.sessionId === null || handle()?.sessionId === context.sessionId) &&
     closeOverlay(context.instance);
   const commandSessions = (context: CommandContext) => {
     if (closeCommand(context)) open({ kind: 'sessions', sessionId: context.sessionId });
@@ -221,16 +223,16 @@ function App() {
     if (closeCommand(context)) open({ kind: 'models', sessionId: context.sessionId });
   };
   const commandLatest = (context: CommandContext & { turnId: string | null }) => {
-    if (closeCommand(context)) handle?.jumpLatest(context.turnId);
+    if (closeCommand(context)) handle()?.jumpLatest(context.turnId);
   };
   const commandHistory = (context: CommandContext) => {
-    if (closeCommand(context)) handle?.focusHistory();
+    if (closeCommand(context)) handle()?.focusHistory();
   };
   const commandActivity = (context: CommandContext & { turnId: string | null }) => {
-    if (closeCommand(context)) handle?.focusActivity(context.turnId);
+    if (closeCommand(context)) handle()?.focusActivity(context.turnId);
   };
   const commandStop = (context: CommandContext & { invocationId: string | null }) => {
-    if (closeCommand(context)) void handle?.stop(context.invocationId).catch(report);
+    if (closeCommand(context)) void handle()?.stop(context.invocationId).catch(report);
   };
   const commands = (context: CommandContext): PaletteEntry[] => [
     {
@@ -261,7 +263,7 @@ function App() {
       run: inputAction(commandLatest, {
         instance: context.instance,
         sessionId: context.sessionId,
-        turnId: handle?.sessionId === context.sessionId ? handle.activeTurn() : null,
+        turnId: handle()?.sessionId === context.sessionId ? handle()!.activeTurn() : null,
       }),
     },
     {
@@ -279,7 +281,7 @@ function App() {
       run: inputAction(commandActivity, {
         instance: context.instance,
         sessionId: context.sessionId,
-        turnId: handle?.sessionId === context.sessionId ? handle.activityTurn() : null,
+        turnId: handle()?.sessionId === context.sessionId ? handle()!.activityTurn() : null,
       }),
     },
     {
@@ -290,7 +292,7 @@ function App() {
       run: inputAction(commandStop, {
         instance: context.instance,
         sessionId: context.sessionId,
-        invocationId: handle?.sessionId === context.sessionId ? handle.invocation() : null,
+        invocationId: handle()?.sessionId === context.sessionId ? handle()!.invocation() : null,
       }),
     },
   ];
@@ -301,15 +303,15 @@ function App() {
   keymap.bind(
     'mod+l',
     () => {
-      if (handle) handle.jumpLatest(handle.activeTurn());
+      if (handle()) handle()!.jumpLatest(handle()!.activeTurn());
     },
     { when: 'always' },
   );
-  keymap.bind('alt+up', () => handle?.focusHistory(), { when: 'always' });
+  keymap.bind('alt+up', () => handle()?.focusHistory(), { when: 'always' });
   keymap.bind(
     'alt+down',
     () => {
-      if (handle) handle.focusActivity(handle.activityTurn());
+      if (handle()) handle()!.focusActivity(handle()!.activityTurn());
     },
     { when: 'always' },
   );
@@ -334,7 +336,7 @@ function App() {
           report(reason);
         }
       }
-      await handle?.refresh();
+      await handle()?.refresh();
       await browsing.refresh();
       status.set('Original actions checked.');
     } catch (reason) {
@@ -371,7 +373,7 @@ function App() {
     if (!alive || overlay()) return;
     sidebarExpanded.set(false);
     browserFocus.set(false);
-    handle?.focus();
+    handle()?.focus();
   };
   const selectBrowsed = async (id: string, origin: string | null) => {
     const current = overlay();
@@ -380,7 +382,7 @@ function App() {
     if (!alive || selected() !== id) return;
     if (instance !== null) closeOverlay(instance);
     browserFocus.set(false);
-    handle?.focus();
+    handle()?.focus();
   };
   const browserProps: WorkspaceBrowserProps = {
     browsing,
@@ -426,14 +428,13 @@ function App() {
         stop={stop}
       >
         <If when={selected() === null}>
-          <Home
-            browsing={browsing}
-            switching={switching}
-            commands={inputAction(open, { kind: 'commands', sessionId: null })}
-            browse={inputAction(open, { kind: 'sessions', sessionId: null })}
-            newConversation={inputAction(newConversation, null)}
-            selectSession={selectBrowsed}
-          />
+          <View>
+            <Header
+              title="Your terminal, amplified."
+              commands={inputAction(open, { kind: 'commands', sessionId: null })}
+              browse={inputAction(open, { kind: 'sessions', sessionId: null })}
+            />
+          </View>
         </If>
         <Each of={selected() ? [selected()!] : []} key={(id: string) => id}>
           {(id) => (
@@ -442,19 +443,28 @@ function App() {
               presentation={presentation}
               control={control}
               commands={inputAction(open, { kind: 'commands', sessionId: id() })}
-              models={inputAction(open, { kind: 'models', sessionId: id() })}
               browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
               interaction={openInteraction}
               previewImage={previewImage}
+              focusComposer={focusComposer}
               attach={(next) => {
-                handle = next;
+                handle.set(next);
               }}
               detach={(previous) => {
-                if (handle === previous) handle = null;
+                if (handle() === previous) handle.set(null);
               }}
             />
           )}
         </Each>
+        <Composer
+          session={handle}
+          attach={(node) => {
+            editor = node;
+          }}
+          commands={({ sessionId }) => open({ kind: 'commands', sessionId })}
+          models={({ sessionId }) => open({ kind: 'models', sessionId })}
+          chooseWorkspace={inputAction(open, { kind: 'workspaces', sessionId: null })}
+        />
       </Workbench>
       <If
         when={error() || status() || switching() || busy() || !controlsKnown() || controls().length}

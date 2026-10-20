@@ -364,6 +364,215 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut fixture = Fixture::open().await;
+        let client = fixture.client().await;
+        let roots = client
+            .query("agent", "directories", json!({"kind":"roots"}))
+            .await
+            .unwrap();
+        let root = &roots["roots"][0];
+        let root_name = root["name"].as_str().unwrap();
+        let (mut view, bindings) = fixture.view(client.clone(), None);
+        wait_view(&mut view, |screen| {
+            screen.contains("Make something remarkable.")
+                && screen.contains("Choose a workspace to begin…")
+        })
+        .await;
+        assert_eq!(
+            view.accessibility_snapshot()
+                .iter()
+                .filter(|node| node.label == "Message composer")
+                .count(),
+            1
+        );
+        support::click_text(&mut view, "Message composer");
+        view.handle_event(Event::Paste("COLD_INPUT_MUST_STAY_INERT".into()));
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some("")
+        );
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        support::evidence_cells("resident-composer-cold-start", &view);
+
+        support::click_text(&mut view, "Choose composer workspace");
+        select_palette(
+            &mut view,
+            "Search workspaces…",
+            root_name,
+            &format!("› {root_name}"),
+        )
+        .await;
+        wait_view(&mut view, |screen| {
+            screen.contains("Search models…") && screen.contains("Enter selects")
+        })
+        .await;
+        assert!(
+            !view
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.focused && node.label == "Message composer"),
+            "the new resident editor must not steal an open model Dialog's focus"
+        );
+        let catalog = client
+            .query(
+                "agent",
+                "list",
+                json!({"filter":"all","position":{"kind":"start"}}),
+            )
+            .await
+            .unwrap();
+        let sessions = catalog["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        let created = sessions
+            .iter()
+            .find(|session| session["id"] != fixture.session)
+            .unwrap();
+        let created_id = created["id"].as_str().unwrap().to_owned();
+        assert_eq!(created["workspace"]["path"], root["path"]);
+        select_palette(
+            &mut view,
+            "Search models…",
+            "model-alt",
+            "fixture-model-alt",
+        )
+        .await;
+        wait_view(&mut view, |screen| {
+            screen.contains("fixture-model-alt · Ctrl+G")
+                && screen.contains("Enter sends")
+                && !screen.contains("Close · Esc")
+        })
+        .await;
+        let editor = view.surface().focused().unwrap();
+        assert!(
+            view.accessibility_snapshot()
+                .iter()
+                .any(|node| node.id == editor && node.label == "Message composer")
+        );
+        view.handle_event(Event::Paste("RESIDENT_FIRST_MESSAGE".into()));
+        support::wait_draft(&client, &created_id, "RESIDENT_FIRST_MESSAGE").await;
+
+        // Opening and cancelling a model choice cannot replace this editor,
+        // discard its draft, or move a native caret that is inside the text.
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+        let selection = view.surface().input_context().unwrap().selection;
+        shortcut(&mut view, 'g');
+        wait_view(&mut view, |screen| {
+            screen.contains("Search models…") && screen.contains("Enter selects")
+        })
+        .await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| {
+            screen.contains("RESIDENT_FIRST_MESSAGE") && !screen.contains("Close · Esc")
+        })
+        .await;
+        assert_eq!(view.surface().focused(), Some(editor));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        let mut request = fixture.next_request().await;
+        assert_eq!(request.body["model"], "fixture-model-alt");
+        assert_eq!(
+            request.body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|message| message["role"] == "user"
+                    && message["content"]
+                        .to_string()
+                        .contains("RESIDENT_FIRST_MESSAGE"))
+                .count(),
+            1
+        );
+        request.delta("RESIDENT_FIRST_ANSWER").await;
+        request.finish().await;
+        fixture.idle(&client, &created_id).await;
+        wait_view(&mut view, |screen| {
+            screen.contains("RESIDENT_FIRST_ANSWER")
+                && screen.contains("Enter sends")
+                && !screen.contains("Make something remarkable.")
+        })
+        .await;
+        assert!(
+            view.accessibility_snapshot()
+                .iter()
+                .any(|node| node.id == editor && node.label == "Message composer"),
+            "hero-to-history must keep the same native editor"
+        );
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        support::evidence_cells("resident-composer-first-answer", &view);
+
+        // Equal draft strings still have different native editing owners.
+        // Leave a real undo entry behind while the source draft is empty.
+        support::click_text(&mut view, "Message composer");
+        view.handle_event(Event::Paste("PREVIOUS_SESSION_UNDO_MUST_NOT_ESCAPE".into()));
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('a'),
+            KeyModifiers::CONTROL,
+        )));
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Backspace,
+            KeyModifiers::NONE,
+        )));
+        support::wait_draft(&client, &created_id, "").await;
+        shortcut(&mut view, 'o');
+        select_palette(&mut view, "Search sessions…", "NSH real", "NSH real Agent").await;
+        wait_view(&mut view, |screen| {
+            screen.contains("NSH real Agent")
+                && screen.contains("Enter sends")
+                && !screen.contains("Close · Esc")
+        })
+        .await;
+        assert_ne!(
+            view.surface().focused(),
+            Some(editor),
+            "a different session must own a fresh native undo history"
+        );
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some("")
+        );
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL,
+        )));
+        support::tick(&mut view);
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            client
+                .load_draft("agent", &fixture.session, EDITOR)
+                .await
+                .unwrap()
+                .unwrap()
+                .text,
+            ""
+        );
+        assert_eq!(
+            client
+                .load_draft("agent", &created_id, EDITOR)
+                .await
+                .unwrap()
+                .unwrap()
+                .text,
+            ""
+        );
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        support::evidence_cells("resident-composer-session-undo-isolation", &view);
+        drop(view);
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    })
+    .await
+    .expect("the resident composer workflow timed out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
     // Later phases browse the outer history explicitly. Hit visible transcript
     // text with the existing physical wheel helper, never the focused List.
@@ -612,6 +821,12 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert_eq!(checklist["current"], todos[1]);
         assert!(checklist["nextOffset"].is_null());
         wait_view(&mut view, |screen| screen.contains("▸ Todo 1/3")).await;
+        let nodes = view.accessibility_snapshot();
+        let dock = nodes.iter().find(|node| node.label == "Conversation todo dock").unwrap().frame;
+        let composer = nodes.iter().find(|node| node.label == "Conversation composer").unwrap().frame;
+        assert_eq!(dock.origin.x.0, composer.origin.x.0);
+        assert_eq!(dock.size.width.0, composer.size.width.0);
+        assert!(dock.origin.y.0 + dock.size.height.0 <= composer.origin.y.0, "Todo must dock immediately above the resident composer");
         // The canonical tool segment now owns a different native activity List.
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));

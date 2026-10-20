@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { batch, cleanup, computed, effect, Input, inputAction, signal, Text, View } from 'nsh';
+import { batch, cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -26,7 +26,7 @@ import { host } from 'maka/host';
 import { C, Header } from './ui';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
 import type { Row, Position, Subscription } from './history';
-import { Checklist } from './Checklist';
+import type { ComposerSession, BackendIdentity, SendAction } from './Composer';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
@@ -39,9 +39,7 @@ import { latestToolActivity, toolActivitySummary, updateToolActivity } from './t
 import type { ToolActivity } from './toolActivity';
 
 export type Control = (method: string, input: any) => Promise<any>;
-export type ConversationHandle = {
-  sessionId: string;
-  invocation(): string | null;
+export type ConversationHandle = ComposerSession & {
   activeTurn(): string | null;
   activityTurn(): string | null;
   flushDraft(): Promise<boolean>;
@@ -56,19 +54,14 @@ type ConversationProps = {
   client: any;
   presentation: PresentationSettings;
   control: Control;
-  models(): void;
   commands(): void;
   browse(): void;
   interaction(target: { sessionId: string; requestId: string }): void;
   previewImage(image: ImagePreview): void;
   attach(handle: ConversationHandle): void;
   detach(handle: ConversationHandle): void;
+  focusComposer(): void;
 };
-type BackendIdentity = {
-  connectionId: string;
-  modelId: string;
-  thinkingLevel: string | null;
-} | null;
 type LivePart = {
   invocationId: string | null;
   stepId: string;
@@ -106,7 +99,6 @@ export function Conversation(props: ConversationProps) {
   const runTurn = signal<string | null>(null);
   const backend = signal<any>(null);
   const interactions = signal<any>({ revision: -1, entries: [] });
-  let editor: YNode | undefined;
   const error = signal('');
   const ready = signal(false);
   const before = signal<any>(null);
@@ -921,15 +913,7 @@ export function Conversation(props: ConversationProps) {
   const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
     if (alive && owner === sessionId) reading.set(mode);
   };
-  const sendRendered = ({
-    owner,
-    text,
-    backend: expectedBackend,
-  }: {
-    owner: string;
-    text: string;
-    backend: BackendIdentity;
-  }) => {
+  const sendRendered = ({ owner, text, backend: expectedBackend }: SendAction) => {
     if (
       !alive ||
       owner !== sessionId ||
@@ -941,6 +925,36 @@ export function Conversation(props: ConversationProps) {
   };
   const ownHandle: ConversationHandle = {
     sessionId,
+    draft,
+    editable: () => draftReady() && !savingFailed(),
+    blockedReason: sendBlockedReason,
+    backend: () => backendIdentity(backend()),
+    permissions,
+    workspace,
+    empty: () =>
+      ready() &&
+      invocation() === null &&
+      rows().length === 0 &&
+      live().length === 0 &&
+      pendingMessages().length === 0 &&
+      toolActivity().length === 0,
+    error,
+    notice,
+    recoverable: () => draftReady() && (!receiptsKnown() || unresolved().length > 0),
+    recovering: () => recovering() || sending(),
+    unconfirmed: () =>
+      unresolved()
+        .filter((original) => !original.reference)
+        .map((original) => original.id),
+    stopping,
+    metrics: () => metricText(metrics()),
+    changeDraft,
+    submit(event) {
+      void send(event.text);
+    },
+    sendRendered,
+    recover,
+    abandon,
     invocation,
     activeTurn: runTurn,
     activityTurn: () => {
@@ -956,7 +970,7 @@ export function Conversation(props: ConversationProps) {
       return !savingFailed();
     },
     focus() {
-      editor?.focus();
+      props.focusComposer();
     },
     focusHistory() {
       list?.focus();
@@ -1005,7 +1019,7 @@ export function Conversation(props: ConversationProps) {
       if (group?.kind === 'process')
         groupStates.get(group.key)?.list?.scrollToEnd({ animated: false });
       list?.scrollToEnd({ animated: false });
-      editor?.focus();
+      props.focusComposer();
     },
     stop,
     refresh: observe,
@@ -1049,7 +1063,7 @@ export function Conversation(props: ConversationProps) {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.background }}>
+    <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
       <Header
         title={title()}
         workspace={workspace()}
@@ -1060,6 +1074,7 @@ export function Conversation(props: ConversationProps) {
       />
       <View
         style={{
+          display: ownHandle.empty() ? 'none' : 'flex',
           flexDirection: 'row',
           flexWrap: 'wrap',
           paddingHorizontal: 16,
@@ -1106,6 +1121,7 @@ export function Conversation(props: ConversationProps) {
       </View>
       <View
         style={{
+          display: ownHandle.empty() ? 'none' : 'flex',
           flex: 1,
           minHeight: 0,
           width: '100%',
@@ -1138,16 +1154,7 @@ export function Conversation(props: ConversationProps) {
               if (event.y <= 32) void loadOlder();
             }}
             empty={
-              <View style={{ paddingVertical: 32, gap: 16 }}>
-                <Text style={{ color: C.text, fontWeight: '700' }}>
-                  {ready() ? 'What shall we build?' : 'Loading session history…'}
-                </Text>
-                <Text style={{ color: C.muted }}>
-                  {ready()
-                    ? 'Bring a question, a hard bug, or your next big idea.'
-                    : 'Your saved draft will be ready in a moment.'}
-                </Text>
-              </View>
+              <Text style={{ color: C.muted, paddingVertical: 32 }}>Loading session history…</Text>
             }
           >
             {(key) => (
@@ -1283,150 +1290,6 @@ export function Conversation(props: ConversationProps) {
               ! Your input is needed · Open request ({interactions().entries.length})
             </Text>
           </Button>
-        </If>
-        <If when={error()}>
-          <Text selectable style={{ color: C.danger }}>
-            {error()}
-          </Text>
-        </If>
-        <If when={notice()}>
-          <Text style={{ color: C.muted }}>{notice()}</Text>
-        </If>
-        <If when={draftReady() && (!receiptsKnown() || unresolved().length > 0)}>
-          <Button
-            disabled={recovering() || sending()}
-            onPress={inputAction(recover, null)}
-            style={{ paddingVertical: 16 }}
-          >
-            <Text style={{ color: C.warning }}>
-              {recovering() ? 'Reading original receipts…' : 'Recover original send receipt'}
-            </Text>
-          </Button>
-        </If>
-        <Each of={unresolved()} key={(original) => original.id}>
-          {(original) => {
-            const operationId = original().id;
-            return (
-              <If when={!original().reference}>
-                <Button
-                  disabled={recovering() || sending()}
-                  onPress={inputAction(abandon, operationId)}
-                  style={{ paddingVertical: 16 }}
-                >
-                  <Text style={{ color: C.warning }}>
-                    Abandon unconfirmed send · {operationId.slice(0, 8)}
-                  </Text>
-                </Button>
-              </If>
-            );
-          }}
-        </Each>
-
-        <Checklist sessionId={sessionId} />
-        <View
-          style={{
-            backgroundColor: C.raised,
-            borderRadius: 16,
-            paddingHorizontal: 16,
-            paddingVertical: 16,
-            gap: 16,
-          }}
-        >
-          <Input
-            ref={editor}
-            testID="message"
-            autoFocus
-            multiline
-            submitBehavior="submit"
-            value={draft()}
-            readonly={!draftReady() || savingFailed()}
-            onChange={changeDraft}
-            onSubmit={(event) => {
-              void send(event.text);
-            }}
-            placeholder="Message or run a task…"
-            style={{
-              minHeight: 16,
-              maxHeight: 80,
-              color: C.text,
-              placeholderColor: C.muted,
-              fontSize: 16,
-              lineHeight: 16,
-            }}
-          />
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <Button
-              onPress={props.commands}
-              accessibilityLabel="Open commands"
-              hoverStyle={{ backgroundColor: C.line }}
-              focusStyle={{ backgroundColor: C.line }}
-              activeStyle={{ backgroundColor: C.surface }}
-            >
-              <Text style={{ color: C.secondary }}>+</Text>
-            </Button>
-            <Text style={{ color: C.secondary }}>{permissions()}</Text>
-            <Button onPress={props.models} style={{ flex: 1, alignItems: 'flex-end' }}>
-              <Text
-                numberOfLines={1}
-                style={{ color: backend()?.kind === 'model' ? C.secondary : C.warning }}
-              >
-                {backend()?.kind === 'model' ? backend().modelId : 'Choose a model'} · Ctrl+G
-              </Text>
-            </Button>
-            <If when={invocation() !== null}>
-              <Button
-                disabled={stopping()}
-                accessibilityLabel="Stop response"
-                onPress={inputAction(stop, invocation())}
-                style={{ backgroundColor: C.accent, paddingHorizontal: 8, borderRadius: 8 }}
-                hoverStyle={{ backgroundColor: C.accentHover }}
-                focusStyle={{ backgroundColor: C.accentHover }}
-                activeStyle={{ backgroundColor: C.accent }}
-                disabledStyle={{ backgroundColor: C.line }}
-              >
-                <Text style={{ color: stopping() ? C.muted : C.background }}>
-                  {stopping() ? '…' : '■'}
-                </Text>
-              </Button>
-            </If>
-            <Button
-              accessibilityLabel="Send message"
-              disabled={!!sendBlockedReason() || !draft().trim()}
-              onPress={inputAction(sendRendered, {
-                owner: sessionId,
-                text: draft(),
-                backend: backendIdentity(backend()),
-              })}
-              style={{
-                backgroundColor: C.accent,
-                paddingHorizontal: 8,
-                borderRadius: 8,
-              }}
-              hoverStyle={{ backgroundColor: C.accentHover }}
-              focusStyle={{ backgroundColor: C.accentHover }}
-              activeStyle={{ backgroundColor: C.accent }}
-              disabledStyle={{ backgroundColor: C.line }}
-            >
-              <Text
-                style={{
-                  color: sendBlockedReason() || !draft().trim() ? C.muted : C.background,
-                }}
-              >
-                Send
-              </Text>
-            </Button>
-          </View>
-        </View>
-        <Text style={{ color: sendBlockedReason() ? C.warning : C.muted, paddingVertical: 0 }}>
-          {sendBlockedReason() ||
-            (readingSize().width < 720
-              ? 'Enter sends · Shift+Enter newline · Ctrl+P commands'
-              : 'Enter sends · Shift+Enter newline · Ctrl+P commands · Ctrl+Q exits')}
-        </Text>
-        <If when={metricText(metrics())}>
-          <Text numberOfLines={1} style={{ color: C.muted }}>
-            {metricText(metrics())}
-          </Text>
         </If>
       </View>
     </View>
