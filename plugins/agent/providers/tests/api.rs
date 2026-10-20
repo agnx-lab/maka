@@ -124,6 +124,20 @@ async fn public_provider_binding_preserves_protocol_contracts_and_explicit_polic
             json!({"openResponses":{"reasoningEffort":"none"}})
         );
     }
+    for (provider, expected_name) in [
+        ("openai-compatible", "test-account"),
+        ("openrouter", "openrouter"),
+    ] {
+        let binding = binding(provider);
+        let model = binding
+            .prepare(request(&binding, "future-model", ModelOverride::default()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            model.protocol,
+            ProviderKind::OpenaiCompatible { name } if name == expected_name
+        ));
+    }
     for (name, protocol, adapter) in [
         (
             "openai-compatible",

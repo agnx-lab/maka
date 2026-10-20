@@ -208,10 +208,7 @@ pub(crate) fn resolve<'a>(
     };
     url.set_path(&path);
     let kind = match wire {
-        Wire::OpenaiChat
-            if row.provider == "openai-compatible"
-                && matches!(selected.kind, AdapterKind::OpenaiCompatible { .. }) =>
-        {
+        Wire::OpenaiChat if matches!(selected.kind, AdapterKind::OpenaiCompatible { .. }) => {
             ProviderKind::OpenaiCompatible {
                 name: if matches!(
                     selected.kind,

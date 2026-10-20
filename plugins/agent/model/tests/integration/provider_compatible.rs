@@ -161,7 +161,7 @@ async fn ordered_raw_reasoning_preserves_empty_fields_and_reopened_parts() {
                 &completion(&[
                     json!({"reasoning_content":""}),
                     json!({"content":"A"}),
-                    json!({"reasoning":"why"}),
+                    json!({"reasoning":"why","reasoning_details":[{"type":"reasoning.text","text":"why","index":0,"format":"unknown"}]}),
                     json!({"content":"B"}),
                     json!({"reasoning_content":"last","reasoning":"ignored"}),
                     json!({"content":"C"}),
