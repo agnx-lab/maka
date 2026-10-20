@@ -27,6 +27,7 @@ import type {
   AgentProjectsPage,
   AgentProjectCursor,
   AgentWorkspaceSelection,
+  AgentSessionPosition,
 } from '../../../../packages/plugin-sdk/src/index.js';
 
 export type BrowserScope = AgentSessionListScope;
@@ -59,6 +60,9 @@ type CatalogRead = {
   scope: BrowserScope;
   titleQuery: string;
   stream: Subscription | null;
+  // Local read intent: the last published row and one requested next page.
+  extent: string | null;
+  extend: boolean;
   ready(): void;
 };
 
@@ -83,6 +87,27 @@ export function createBrowsing(): Browsing {
   let continuation: SessionPage | null = null;
   let projectRead: object | null = null;
   const owns = (read: CatalogRead) => alive && current === read;
+  const list = async (read: CatalogRead, position: AgentSessionPosition): Promise<SessionPage> =>
+    host.query('agent', 'list', {
+      filter: 'all',
+      scope: read.scope,
+      titleQuery: read.titleQuery,
+      position,
+    });
+  const sameRevision = (next: SessionPage, revision: string) => {
+    if (next.revision !== revision) throw new Error('agent_catalog_changed');
+  };
+  const after = async (read: CatalogRead, previous: SessionPage): Promise<SessionPage> => {
+    const next = await list(read, {
+      kind: 'after',
+      revision: previous.revision,
+      cursor: previous.after!,
+    });
+    sameRevision(next, previous.revision);
+    if (next.after === previous.after)
+      throw new Error('Conversation paging did not advance. Refresh to continue.');
+    return next;
+  };
   const close = (read: CatalogRead | null) => {
     if (!read) return;
     read.ready();
@@ -98,17 +123,26 @@ export function createBrowsing(): Browsing {
   });
 
   const restart = (clear: boolean): Promise<void> => {
+    const extent = clear ? null : (current?.extent ?? sessions().at(-1)?.id ?? null);
+    const extend = !clear && (current?.extend ?? false);
     close(current);
     let ready!: () => void;
     const firstPage = new Promise<void>((resolve) => {
       ready = resolve;
     });
-    const read: CatalogRead = { scope: scope(), titleQuery: titleQuery(), stream: null, ready };
+    const read: CatalogRead = {
+      scope: scope(),
+      titleQuery: titleQuery(),
+      stream: null,
+      extent,
+      extend,
+      ready,
+    };
     current = read;
     page = null;
     continuation = null;
     batch(() => {
-      loading.set(true);
+      loading.set(clear || sessions().length === 0);
       error.set('');
       if (clear) sessions.set([]);
     });
@@ -138,12 +172,48 @@ export function createBrowsing(): Browsing {
         if (!owns(read)) return;
         if (next === null) throw new Error('Conversation updates ended. Refresh to reconnect.');
         if (page?.revision === next.revision) continue;
-        // Each catalog item replaces its window. Earlier continuation pages
-        // cannot be attached to this revision, even if some IDs still match.
-        page = next;
+        // Preserve the requested read range, never append across revisions.
+        // The old snapshot stays mounted while this revision is assembled.
+        continuation = next;
+        if (sessions().length) loading.set(false);
+        let tail = next;
+        const rows = new Map(next.sessions.map((session) => [session.id, session]));
+        const through = read.extent;
+        let boundary = through;
+        try {
+          if (boundary && !rows.has(boundary) && tail.after) {
+            const located = await list(read, { kind: 'at', cursor: boundary });
+            if (!owns(read)) return;
+            sameRevision(located, next.revision);
+            // At returns the current successor window, or the last window if
+            // the old boundary was removed at the end. Do not parse its ID.
+            if (!located.sessions.some((session) => session.id === boundary))
+              boundary = located.sessions.at(-1)?.id ?? null;
+          }
+          for (;;) {
+            const reached = boundary === null || rows.has(boundary);
+            const extended =
+              boundary !== through ||
+              (through !== null && rows.has(through) && tail.sessions.at(-1)?.id !== through);
+            if ((reached && (!read.extend || extended)) || !tail.after) break;
+            tail = await after(read, tail);
+            if (!owns(read)) return;
+            for (const session of tail.sessions) rows.set(session.id, session);
+          }
+        } catch (reason) {
+          if (!owns(read)) return;
+          // Subscription-before-read guarantees a newer catalog window for
+          // this conflict. Keep the gate until it arrives, without retry IO.
+          if (message(reason) === 'agent_catalog_changed') continue;
+          throw reason;
+        }
+        const snapshot = [...rows.values()];
+        page = tail;
         continuation = null;
+        read.extent = snapshot.at(-1)?.id ?? null;
+        read.extend = false;
         batch(() => {
-          sessions.set(uniqueSessions(next.sessions));
+          sessions.set(snapshot);
           loading.set(false);
           error.set('');
         });
@@ -166,33 +236,35 @@ export function createBrowsing(): Browsing {
   const loadMore = async () => {
     const read = current;
     const original = page;
-    if (!read || !owns(read) || !original?.after || loading() || error()) return;
+    if (!read || !owns(read) || error()) return;
+    if (!original) {
+      if (read.extent !== null) read.extend = true;
+      return;
+    }
+    if (!original.after) return;
+    read.extend = true;
+    if (continuation || loading()) return;
     continuation = original;
     loading.set(true);
+    let waitForCatalog = false;
     try {
-      const next: SessionPage = await host.query('agent', 'list', {
-        filter: 'all',
-        scope: read.scope,
-        titleQuery: read.titleQuery,
-        position: { kind: 'after', revision: original.revision, cursor: original.after },
-      });
+      const next = await after(read, original);
       if (!owns(read) || continuation !== original) return;
-      if (next.revision !== original.revision)
-        throw new Error('The conversation list changed. Refresh to continue.');
-      if (next.after === original.after)
-        throw new Error('Conversation paging did not advance. Refresh to continue.');
+      const snapshot = uniqueSessions([...sessions(), ...next.sessions]);
       page = next;
-      sessions.set(uniqueSessions([...sessions(), ...next.sessions]));
+      read.extent = snapshot.at(-1)?.id ?? null;
+      read.extend = false;
+      sessions.set(snapshot);
     } catch (reason) {
       if (!owns(read) || continuation !== original) return;
       if (message(reason) === 'agent_catalog_changed') {
-        await restart(true);
+        waitForCatalog = true;
         return;
       }
       error.set(message(reason));
     } finally {
       if (owns(read) && continuation === original) {
-        continuation = null;
+        if (!waitForCatalog) continuation = null;
         loading.set(false);
       }
     }
