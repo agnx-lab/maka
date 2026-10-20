@@ -31,6 +31,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "../../../cli/tests/integration/terminal/frames.rs"]
+mod frames;
+
 /// The production binary owns this actual terminal; Screen only interprets its ANSI.
 pub struct Pty {
     child: Child,
@@ -40,6 +43,7 @@ pub struct Pty {
     screen: Screen,
     pending: Vec<u8>,
     output: Vec<u8>,
+    frames: frames::Frames,
 }
 
 impl Pty {
@@ -106,6 +110,7 @@ impl Pty {
             screen: Screen::new(TerminalSize::new(120, 40).unwrap()),
             pending: vec![],
             output: vec![],
+            frames: frames::Frames::default(),
         }
     }
     pub fn send(&mut self, bytes: &[u8]) {
@@ -115,6 +120,10 @@ impl Pty {
         self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
     }
     pub fn click_text(&mut self, label: &str) {
+        assert!(
+            self.frames.ready(),
+            "PTY click on {label:?} preceded a complete synchronized frame"
+        );
         let screen = self.snapshot();
         let (row, line) = screen
             .lines()
@@ -149,6 +158,7 @@ impl Pty {
         }
         let mut bytes = [0; 8192];
         let length = self.master.read(&mut bytes).unwrap();
+        self.frames.feed(&bytes[..length]);
         self.output.extend_from_slice(&bytes[..length]);
         self.pending.extend_from_slice(&bytes[..length]);
         let end = match std::str::from_utf8(&self.pending) {
@@ -170,7 +180,7 @@ impl Pty {
         loop {
             self.read();
             let screen = self.screen.text_preview(128 * 1024).screen;
-            if screen.contains(expected) {
+            if self.frames.ready() && screen.contains(expected) {
                 return screen;
             }
             assert!(

@@ -26,7 +26,7 @@ fn main() {
         entry: "app/App.tsx".into(),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry().into(), host.into()],
+        ui_sets: vec![nsh_base::registry().into(), host.into()],
     })
     .expect("bundle terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));

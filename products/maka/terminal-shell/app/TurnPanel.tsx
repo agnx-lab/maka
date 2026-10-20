@@ -19,6 +19,7 @@
 
 import { cleanup, computed, effect, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
+import { Button } from 'nsh/base';
 import type { AnimatedValue } from 'nsh/animated';
 import { List } from 'nsh/list';
 import type { Row } from './history';
@@ -111,12 +112,13 @@ function ActivityLog(props: {
     <View style={{ height: bodyHeight() }}>
       <If when={initial()}>
         <List
+          accessibilityLabel="Turn activity"
           each={rowKeys()}
           estimatedItemSize={16}
           scrollValue={state.offset}
           contentOffset={initial()!}
           maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 16 }}
-          contentContainerStyle={{ paddingRight: 8 }}
+          contentStyle={{ paddingRight: 8 }}
           ref={(node) => {
             ownList = node;
             state.list = node;
@@ -211,16 +213,14 @@ export function TurnPanel(props: {
   };
   return (
     <View style={{ paddingVertical: 16, gap: 0 }}>
-      <View
-        onPress={
-          props.turn().rows.length
-            ? () => {
-                const open = !expanded();
-                props.state.expanded.set({ open, completed: props.turn().completed });
-                if (open) props.reveal();
-              }
-            : undefined
-        }
+      <Button
+        disabled={props.turn().rows.length === 0}
+        selected={expanded()}
+        onPress={() => {
+          const open = !expanded();
+          props.state.expanded.set({ open, completed: props.turn().completed });
+          if (open) props.reveal();
+        }}
         style={{ height: 16, flexDirection: 'row' }}
       >
         <Text
@@ -233,7 +233,7 @@ export function TurnPanel(props: {
         <If when={!expanded()}>
           <Text style={{ color: C.muted }}>{duration()}</Text>
         </If>
-      </View>
+      </Button>
       <If when={expanded()}>
         <ActivityLog
           turn={props.turn}

@@ -240,13 +240,10 @@ impl Session {
             }
             changed |= self.surface.handle_event(input.event);
             let events: Vec<_> = self.surface.drain_events().collect();
-            let invokes_application = events
-                .iter()
-                .any(|event| matches!(event, SurfaceEvent::Event(..)));
             // A captured Down/Drag/Up group can finish before queued JS
             // changes its meaning. Once a callback runs, remaining old-frame
             // pointers lose their authority even if the pixels stay equal.
-            self.dispatch_events(events, true)?;
+            let invokes_application = self.dispatch_events(events, true)?;
             if invokes_application {
                 if inputs.peek().is_some() {
                     self.cancel_pointer()?;
@@ -266,7 +263,14 @@ impl Session {
         // restore the mounted input's focus.
         self.surface.handle_event(Event::FocusLost);
         self.surface.handle_event(Event::FocusGained);
-        self.forward_events(false)
+        // Cancellation restores native capture and focus without admitting
+        // callbacks from the revoked gesture against a later presentation.
+        let events = self
+            .surface
+            .drain_events()
+            .filter(|event| !matches!(event, SurfaceEvent::Event(..)))
+            .collect();
+        self.dispatch_events(events, false).map(|_| ())
     }
 
     fn oversized_cut(&self, event: &Event) -> bool {
@@ -311,43 +315,32 @@ impl Session {
 
     fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
         let events: Vec<_> = self.surface.drain_events().collect();
-        self.dispatch_events(events, presented_input)
+        self.dispatch_events(events, presented_input).map(|_| ())
     }
 
     fn dispatch_events(
         &mut self,
         events: Vec<SurfaceEvent>,
         presented_input: bool,
-    ) -> Result<(), String> {
-        if presented_input
-            && events
-                .iter()
-                .filter(|event| matches!(event, SurfaceEvent::Event(..)))
-                .count()
-                > 1
-        {
-            // This first-party slice subscribes only to a row's onPress or
-            // an input's onChangeText/onSubmitEditing. Multiple callbacks may
-            // change a later target's meaning even inside a reactive batch;
-            // reject the entire group rather than dispatching it incorrectly.
-            return Err("this terminal slice does not support multiple application callbacks from one input".into());
-        }
+    ) -> Result<bool, String> {
+        let mut invokes_application = false;
         let control = self.engine.control();
         for event in events {
             match event {
                 SurfaceEvent::Event(id, event, payload) if presented_input => {
-                    self.engine.dispatch_event_now(id, event, payload)
+                    if !invokes_application {
+                        invokes_application = self.engine.dispatch_event_now(id, event, payload);
+                    }
                 }
                 SurfaceEvent::Event(id, event, payload) => {
                     control.dispatch_event(id, event, payload)
                 }
-                SurfaceEvent::Scroll(id, x, y, applied) => control.scroll(id, x, y, applied),
+                SurfaceEvent::Scroll(id, offset, applied) => control.scroll(id, offset, applied),
                 SurfaceEvent::States(id, states) => control.set_states(id, states),
                 SurfaceEvent::AnimationsFinished(finished) => control.animations_finished(finished),
                 SurfaceEvent::ComponentSize(id, size) => control.set_component_size(id, size),
                 SurfaceEvent::Zoom(id, scale) => control.zoom(id, scale),
                 SurfaceEvent::RootSize(id, size, insets) => control.set_root_size(id, size, insets),
-                SurfaceEvent::ScreenHeader(id, height) => control.set_screen_header(id, height),
                 SurfaceEvent::Service(ServiceRequest::ClipboardWrite(text)) => {
                     let sequence = ServiceOutput::Clipboard(text)
                         .terminal_sequence(std::env::var_os("TMUX").is_some());
@@ -375,7 +368,7 @@ impl Session {
                 }
             }
         }
-        Ok(())
+        Ok(invokes_application)
     }
 
     fn apply_commits(&mut self) -> Result<bool, String> {
@@ -453,24 +446,17 @@ mod tests {
     use nsh_engine::{App, Bundle, Limits};
 
     fn config(source: &str) -> EngineConfig {
-        EngineConfig {
-            app: App::Js(Bundle::source(source.to_owned())),
-            viewport: CellMetrics::default().viewport(40, 8),
-            trace: false,
-            network: None,
-            assets: None,
-            environment: Default::default(),
-            header_heights: (16.0, 32.0),
-            limits: Limits::default(),
-            ui_sets: Vec::new(),
-            runtime: None,
-            data_dir: None,
-            storage: None,
-        }
+        let mut config = EngineConfig::new(App::Js(Bundle::source(source.to_owned())));
+        config.viewport = CellMetrics::default().viewport(40, 8);
+        config.header_heights = nsh_core::NO_NATIVE_HEADER;
+        config.limits = Limits::default();
+        config.ui_sets = vec![nsh_base::registry()];
+        config
     }
 
     const APP: &str = r#"
         import { mount, signal } from "nsh";
+        import { Button } from "nsh/base";
         import { element, prop, bindProp, insert, append, list } from "nsh:rt";
         const rows = signal([{ id: "A" }]);
         const selected = signal("none");
@@ -485,14 +471,14 @@ mod tests {
                 estimatedItemSize: 16,
                 style: { flex: 1 },
                 children: (row) => {
-                    const node = element("view");
-                    prop(node, "style", { height: 16 });
-                    bindProp(node, "accessibilityLabel", () => "row:" + row().id);
-                    prop(node, "onPress", () => selected.set(row().id));
                     const label = element("text");
                     insert(label, () => row().id);
-                    append(node, label);
-                    return node;
+                    return Button({
+                        style: { height: 16 },
+                        get accessibilityLabel() { return "row:" + row().id; },
+                        onPress: () => selected.set(row().id),
+                        children: label,
+                    });
                 }
             }));
             return root;
@@ -583,8 +569,8 @@ mod tests {
         .map(|kind| {
             Event::Mouse(MouseEvent {
                 kind,
-                column: (row.frame.x / 8.0) as u16,
-                row: (row.frame.y / 16.0) as u16,
+                column: (row.frame.origin.x.0 / 8.0) as u16,
+                row: (row.frame.origin.y.0 / 16.0) as u16,
                 modifiers: KeyModifiers::NONE,
             })
         })
@@ -653,13 +639,15 @@ mod tests {
 
     #[test]
     fn driver_revokes_a_second_old_click_after_the_first_callback_rebinds_its_row() {
-        let source = APP.replace(
-            "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
-            "",
-        ).replace(
-            "prop(node, \"onPress\", () => selected.set(row().id));",
-            "prop(node, \"onPress\", () => { selected.set(row().id); rows.set([{ id: \"B\" }]); });",
-        );
+        let source = APP
+            .replace(
+                "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
+                "",
+            )
+            .replace(
+                "onPress: () => selected.set(row().id),",
+                "onPress: () => { selected.set(row().id); rows.set([{ id: \"B\" }]); },",
+            );
         let mut session = Session::new(config(&source)).unwrap();
         drive_burst(&mut session, |surface| {
             let mut events = click(surface, "row:A");
@@ -683,8 +671,8 @@ mod tests {
         let source = APP
             .replace("requestAnimationFrame(() => rows.set([{ id: \"B\" }]));", "")
             .replace(
-                "prop(node, \"onPress\", () => selected.set(row().id));",
-                "prop(node, \"onPress\", () => selected.set(row().id)); prop(node, \"onPressIn\", () => { selected.set('pressed:' + row().id); rows.set([{ id: \"B\" }]); });",
+                "onPress: () => selected.set(row().id),",
+                "onPress: () => selected.set(row().id), onPressDown: () => { selected.set('pressed:' + row().id); rows.set([{ id: \"B\" }]); },",
             );
         let mut session = Session::new(config(&source)).unwrap();
         session.initial_frame().unwrap();
@@ -766,8 +754,12 @@ mod tests {
     }
 
     #[test]
-    fn one_physical_event_with_multiple_business_callbacks_is_rejected_before_any_run() {
-        let mut session = Session::new(config(APP)).unwrap();
+    fn a_callback_revokes_later_callbacks_from_the_same_physical_input() {
+        let source = APP.replace(
+            "onPress: () => selected.set(row().id),",
+            "onPress: () => selected.set(selected() === 'none' ? 'once' : 'twice'),",
+        );
+        let mut session = Session::new(config(&source)).unwrap();
         session.initial_frame().unwrap();
         let row = session
             .surface
@@ -776,18 +768,16 @@ mod tests {
             .find(|node| node.label == "row:A")
             .unwrap()
             .id;
-        let result = session.dispatch_events(
-            vec![
-                SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
-                SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
-            ],
-            true,
-        );
-        assert!(
-            result
-                .unwrap_err()
-                .contains("multiple application callbacks")
-        );
+        let invoked = session
+            .dispatch_events(
+                vec![
+                    SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
+                    SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
+                ],
+                true,
+            )
+            .unwrap();
+        assert!(invoked);
         session
             .advance(Advance {
                 inputs: Vec::new(),
@@ -795,7 +785,7 @@ mod tests {
                 cancel_pointer: false,
             })
             .unwrap();
-        assert!(session.surface.snapshot().contains("selected:none"));
+        assert!(session.surface.snapshot().contains("selected:once"));
     }
 
     #[test]
@@ -815,12 +805,16 @@ mod tests {
                 },
                 MountItem::Frame {
                     id: 900,
-                    frame: nsh_core::Rect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: 160.0,
-                        height: 16.0,
-                    },
+                    frame: nsh_core::Bounds::new(
+                        nsh_core::geometry::point(
+                            nsh_core::geometry::px(0.0),
+                            nsh_core::geometry::px(0.0),
+                        ),
+                        nsh_core::geometry::size(
+                            nsh_core::geometry::px(160.0),
+                            nsh_core::geometry::px(16.0),
+                        ),
+                    ),
                 },
             ],
         });
@@ -852,8 +846,8 @@ mod tests {
         let mouse = |kind| {
             Event::Mouse(MouseEvent {
                 kind,
-                column: (row.frame.x / 8.0) as u16,
-                row: (row.frame.y / 16.0) as u16,
+                column: (row.frame.origin.x.0 / 8.0) as u16,
+                row: (row.frame.origin.y.0 / 16.0) as u16,
                 modifiers: KeyModifiers::NONE,
             })
         };
@@ -931,7 +925,7 @@ mod tests {
                 prop(input, "autoFocus", true);
                 prop(input, "style", { height: 16 });
                 bindProp(input, "value", value);
-                prop(input, "onChangeText", (text) => value.set(text));
+                prop(input, "onChange", (text) => value.set(text));
                 return input;
             });
         "#,

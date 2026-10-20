@@ -23,7 +23,7 @@ import { List } from 'nsh/list';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
-import { Modal } from 'nsh/ui/mobile';
+import { Button, Dialog } from 'nsh/base';
 import { C } from './ui';
 
 export type PaletteEntry = {
@@ -86,7 +86,6 @@ export function Palette(props: {
     if (!entry.keepOpen) props.close();
     entry.run();
   };
-  keymap.bind('escape', props.close, { when: 'always' });
   keymap.bind('up', () => move(-1), { when: 'always', repeat: true });
   keymap.bind('down', () => move(1), { when: 'always', repeat: true });
   keymap.bind('enter', activate, { when: 'always' });
@@ -218,119 +217,118 @@ export function Palette(props: {
       props.kind
     ];
   return (
-    <Modal visible transparent animationType="none" onRequestClose={props.close}>
+    <Dialog
+      animation="none"
+      onOpenChange={props.close}
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#00000099',
+        padding: 16,
+      }}
+    >
       <View
         style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: '#00000099',
+          width: '100%',
+          maxWidth: 640,
+          backgroundColor: C.surface,
           padding: 16,
+          gap: 16,
+          borderWidth: 8,
+          borderColor: C.line,
         }}
       >
-        <View
-          style={{
-            width: '100%',
-            maxWidth: 640,
-            backgroundColor: C.surface,
-            padding: 16,
-            gap: 16,
-            borderWidth: 8,
-            borderColor: C.line,
-          }}
-        >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ color: C.accent, fontWeight: '700' }}>{label()}</Text>
-            <View onPress={props.close}>
-              <Text style={{ color: C.muted }}>Close · Esc</Text>
-            </View>
-          </View>
-          <Input
-            testID="palette-search"
-            autoFocus
-            value={query()}
-            onChangeText={(text) => {
-              selected.set(0);
-              query.set(text);
-              list?.scrollToIndex({ index: 0, animated: false });
-            }}
-            placeholder={`Search ${props.kind}…`}
-            placeholderTextColor={C.muted}
-            style={{
-              color: C.text,
-              height: 32,
-              backgroundColor: C.background,
-              paddingHorizontal: 8,
-            }}
-          />
-          <List
-            each={ids()}
-            ref={(node) => {
-              list = node;
-            }}
-            estimatedItemSize={48}
-            onEndReached={loadMore}
-            style={{ height: count() * 48 }}
-          >
-            {(id) => (
-              <Each of={[id()]} key={(key: string) => key}>
-                {(key) => {
-                  const initial = byId().get(key());
-                  if (!initial) return <View />;
-                  const entry = () => byId().get(key()) ?? initial;
-                  return (
-                    <View
-                      onPress={() => {
-                        const action = entry();
-                        if (!action.keepOpen) props.close();
-                        action.run();
-                      }}
-                      style={{
-                        height: 48,
-                        paddingHorizontal: 8,
-                        backgroundColor: matches()[index()]?.id === entry().id ? C.line : C.surface,
-                      }}
-                    >
-                      <View
-                        style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}
-                      >
-                        <Text
-                          numberOfLines={1}
-                          style={{
-                            color: matches()[index()]?.id === entry().id ? C.accent : C.text,
-                            flex: 1,
-                          }}
-                        >
-                          {matches()[index()]?.id === entry().id ? '› ' : '  '}
-                          {entry().title}
-                        </Text>
-                        <Text style={{ color: C.muted }}>{entry().hint ?? ''}</Text>
-                      </View>
-                      <If when={entry().detail}>
-                        <Text numberOfLines={1} style={{ color: C.muted }}>
-                          {'  '}
-                          {entry().detail}
-                        </Text>
-                      </If>
-                    </View>
-                  );
-                }}
-              </Each>
-            )}
-          </List>
-          <If when={loading()}>
-            <Text style={{ color: C.muted }}>Loading…</Text>
-          </If>
-          <If when={!loading() && !matches().length}>
-            <Text style={{ color: C.muted }}>No matches.</Text>
-          </If>
-          <If when={error()}>
-            <Text style={{ color: C.danger }}>{error()}</Text>
-          </If>
-          <Text style={{ color: C.muted }}>{note() || 'Type to filter · ↑↓ to navigate'}</Text>
-          <Text style={{ color: C.muted }}>Enter selects · Esc closes</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text style={{ color: C.accent, fontWeight: '700' }}>{label()}</Text>
+          <Button onPress={props.close}>
+            <Text style={{ color: C.muted }}>Close · Esc</Text>
+          </Button>
         </View>
+        <Input
+          testID="palette-search"
+          autoFocus
+          value={query()}
+          onChange={(text) => {
+            selected.set(0);
+            query.set(text);
+            list?.scrollToIndex({ index: 0, animated: false });
+          }}
+          placeholder={`Search ${props.kind}…`}
+          style={{
+            placeholderColor: C.muted,
+            color: C.text,
+            height: 32,
+            backgroundColor: C.background,
+            paddingHorizontal: 8,
+          }}
+        />
+        <List
+          each={ids()}
+          ref={(node) => {
+            list = node;
+          }}
+          estimatedItemSize={48}
+          onEndReached={loadMore}
+          style={{ height: count() * 48 }}
+        >
+          {(id) => (
+            <Each of={[id()]} key={(key: string) => key}>
+              {(key) => {
+                const initial = byId().get(key());
+                if (!initial) return <View />;
+                const entry = () => byId().get(key()) ?? initial;
+                return (
+                  <Button
+                    selected={matches()[index()]?.id === entry().id}
+                    onPress={() => {
+                      const action = entry();
+                      if (!action.keepOpen) props.close();
+                      action.run();
+                    }}
+                    style={{
+                      height: 48,
+                      paddingHorizontal: 8,
+                      backgroundColor: matches()[index()]?.id === entry().id ? C.line : C.surface,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: matches()[index()]?.id === entry().id ? C.accent : C.text,
+                          flex: 1,
+                        }}
+                      >
+                        {matches()[index()]?.id === entry().id ? '› ' : '  '}
+                        {entry().title}
+                      </Text>
+                      <Text style={{ color: C.muted }}>{entry().hint ?? ''}</Text>
+                    </View>
+                    <If when={entry().detail}>
+                      <Text numberOfLines={1} style={{ color: C.muted }}>
+                        {'  '}
+                        {entry().detail}
+                      </Text>
+                    </If>
+                  </Button>
+                );
+              }}
+            </Each>
+          )}
+        </List>
+        <If when={loading()}>
+          <Text style={{ color: C.muted }}>Loading…</Text>
+        </If>
+        <If when={!loading() && !matches().length}>
+          <Text style={{ color: C.muted }}>No matches.</Text>
+        </If>
+        <If when={error()}>
+          <Text style={{ color: C.danger }}>{error()}</Text>
+        </If>
+        <Text style={{ color: C.muted }}>{note() || 'Type to filter · ↑↓ to navigate'}</Text>
+        <Text style={{ color: C.muted }}>Enter selects · Esc closes</Text>
       </View>
-    </Modal>
+    </Dialog>
   );
 }

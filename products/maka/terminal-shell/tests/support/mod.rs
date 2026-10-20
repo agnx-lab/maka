@@ -364,7 +364,7 @@ impl Fixture {
             size: evidence_size(),
             data_dir: Some(self.directory.path().join("nsh")),
             ui_sets: Some(vec![
-                nsh_ui_mobile::registry(),
+                nsh_base::registry(),
                 bindings.registry(initial_session),
             ]),
             ..Default::default()
@@ -528,12 +528,12 @@ pub fn click_text(view: &mut AppView, prefix: &str) {
     let node = view
         .accessibility_snapshot()
         .into_iter()
-        .filter(|node| node.label.starts_with(prefix) && node.frame.y >= 0.0)
-        .max_by(|a, b| a.frame.y.total_cmp(&b.frame.y))
+        .filter(|node| node.label.starts_with(prefix) && node.frame.origin.y.0 >= 0.0)
+        .max_by(|a, b| a.frame.origin.y.0.total_cmp(&b.frame.origin.y.0))
         .unwrap_or_else(|| panic!("no rendered native text starts with {prefix:?}"));
     // Native input uses cell centers; a half-cell origin must not select its exclusive far edge.
-    let column = (node.frame.x / 8.0 - 0.5).ceil().max(0.0) as u16;
-    let row = (node.frame.y / 16.0 - 0.5).ceil().max(0.0) as u16;
+    let column = (node.frame.origin.x.0 / 8.0 - 0.5).ceil().max(0.0) as u16;
+    let row = (node.frame.origin.y.0 / 16.0 - 0.5).ceil().max(0.0) as u16;
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
@@ -568,20 +568,29 @@ pub fn scroll_text(view: &mut AppView, text: &str, kind: crossterm::event::Mouse
 // Call after pressing a row/header. Run the normal layout cycle before Home.
 pub async fn focus_activity(view: &mut AppView) {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let previous = view.surface().focused();
     view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             view.poll().unwrap();
-            let focused = view.surface().focused();
-            if focused.is_some() && focused != previous {
+            if view
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.label == "Turn activity" && node.focused)
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("Alt+Down did not move native focus into the activity List");
+    .unwrap_or_else(|error| {
+        panic!(
+            "Alt+Down did not focus Turn activity: {error}; app error: {:?}; focus: {:?}\n{}",
+            view.last_error(),
+            view.surface().focused(),
+            view.snapshot()
+        )
+    });
 }
 
 pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> String {

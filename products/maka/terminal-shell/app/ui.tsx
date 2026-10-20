@@ -18,6 +18,7 @@
  */
 
 import { Text, View } from 'nsh';
+import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 
 export const C = {
@@ -49,9 +50,9 @@ export function Header(props: {
         borderBottomColor: C.line,
       }}
     >
-      <View onPress={props.commands}>
+      <Button onPress={props.commands} accessibilityLabel="Open commands">
         <Text style={{ color: C.accent, fontWeight: '700' }}>MAKA</Text>
-      </View>
+      </Button>
       <Text numberOfLines={1} style={{ color: C.text, flex: 1 }}>
         {props.title}
       </Text>

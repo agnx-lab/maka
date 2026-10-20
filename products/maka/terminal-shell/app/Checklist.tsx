@@ -18,6 +18,7 @@
  */
 
 import { batch, cleanup, signal, Text, View } from 'nsh';
+import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { windowSize } from 'nsh/device';
 import { host } from 'maka/host';
@@ -114,7 +115,8 @@ export function Checklist(props: { sessionId: string }) {
   return (
     <If when={snapshot()?.enabled && snapshot()!.total > 0}>
       <View style={{ backgroundColor: C.surface, borderRadius: 8 }}>
-        <View
+        <Button
+          selected={expanded()}
           onPress={() => expanded.set(!expanded())}
           style={{ height: 16, paddingHorizontal: 8, flexDirection: 'row', gap: 8 }}
         >
@@ -127,7 +129,7 @@ export function Checklist(props: { sessionId: string }) {
                 ? 'All items complete'
                 : 'No active item')}
           </Text>
-        </View>
+        </Button>
         <If when={expanded()}>
           <List
             each={items()}

@@ -19,6 +19,7 @@
 
 import { batch, cleanup, computed, effect, Input, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
+import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { AnimatedValue } from 'nsh/animated';
 import { windowSize } from 'nsh/device';
@@ -817,7 +818,7 @@ export function Conversation(props: ConversationProps) {
           borderBottomColor: C.line,
         }}
       >
-        <View onPress={() => reading.set('chat')}>
+        <Button role="tab" selected={reading() === 'chat'} onPress={() => reading.set('chat')}>
           <Text
             style={{
               color: reading() === 'chat' ? C.accent : C.muted,
@@ -826,8 +827,12 @@ export function Conversation(props: ConversationProps) {
           >
             Chat
           </Text>
-        </View>
-        <View onPress={() => reading.set('trajectory')}>
+        </Button>
+        <Button
+          role="tab"
+          selected={reading() === 'trajectory'}
+          onPress={() => reading.set('trajectory')}
+        >
           <Text
             style={{
               color: reading() === 'trajectory' ? C.accent : C.muted,
@@ -836,7 +841,7 @@ export function Conversation(props: ConversationProps) {
           >
             Trajectory
           </Text>
-        </View>
+        </Button>
       </View>
       <View
         style={{
@@ -857,12 +862,12 @@ export function Conversation(props: ConversationProps) {
             each={displayKeys()}
             estimatedItemSize={96}
             maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 32 }}
-            contentContainerStyle={{ paddingRight: 8 }}
+            contentStyle={{ paddingRight: 8 }}
             style={{ flex: 1, minHeight: 0 }}
             onScroll={(event) => {
               if (event.y <= 32) void loadOlder();
             }}
-            ListEmptyComponent={
+            empty={
               <View style={{ paddingVertical: 32, gap: 16 }}>
                 <Text style={{ color: C.text, fontWeight: '700' }}>
                   {ready() ? 'What shall we build?' : 'Loading session history…'}
@@ -914,14 +919,14 @@ export function Conversation(props: ConversationProps) {
           </List>
         </View>
         <If when={interactions().entries.length > 0}>
-          <View
+          <Button
             onPress={() => props.interaction(sessionId, interactions().entries[0].requestId)}
             style={{ padding: 8, backgroundColor: C.surface }}
           >
             <Text style={{ color: C.warning }}>
               ! Your input is needed · Open request ({interactions().entries.length})
             </Text>
-          </View>
+          </Button>
         </If>
         <If when={error()}>
           <Text selectable style={{ color: C.danger }}>
@@ -932,7 +937,8 @@ export function Conversation(props: ConversationProps) {
           <Text style={{ color: C.muted }}>{notice()}</Text>
         </If>
         <If when={draftReady() && (!receiptsKnown() || unresolved().length > 0)}>
-          <View
+          <Button
+            disabled={recovering() || sending()}
             onPress={() => {
               void recover();
             }}
@@ -941,14 +947,15 @@ export function Conversation(props: ConversationProps) {
             <Text style={{ color: C.warning }}>
               {recovering() ? 'Reading original receipts…' : 'Recover original send receipt'}
             </Text>
-          </View>
+          </Button>
         </If>
         <Each of={unresolved()} key={(original) => original.id}>
           {(original) => {
             const operationId = original().id;
             return (
               <If when={!original().reference}>
-                <View
+                <Button
+                  disabled={recovering() || sending()}
                   onPress={() => {
                     void abandon(operationId);
                   }}
@@ -957,7 +964,7 @@ export function Conversation(props: ConversationProps) {
                   <Text style={{ color: C.warning }}>
                     Abandon unconfirmed send · {operationId.slice(0, 8)}
                   </Text>
-                </View>
+                </Button>
               </If>
             );
           }}
@@ -980,39 +987,49 @@ export function Conversation(props: ConversationProps) {
             multiline
             submitBehavior="submit"
             value={draft()}
-            editable={draftReady() && !savingFailed()}
-            onChangeText={changeDraft}
-            onSubmitEditing={(event) => {
+            readonly={!draftReady() || savingFailed()}
+            onChange={changeDraft}
+            onSubmit={(event) => {
               void send(event.text);
             }}
             placeholder="Message or run a task…"
-            placeholderTextColor={C.muted}
-            style={{ minHeight: 16, maxHeight: 80, color: C.text, fontSize: 16, lineHeight: 16 }}
+            style={{
+              minHeight: 16,
+              maxHeight: 80,
+              color: C.text,
+              placeholderColor: C.muted,
+              fontSize: 16,
+              lineHeight: 16,
+            }}
           />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <View onPress={props.commands}>
+            <Button onPress={props.commands} accessibilityLabel="Open commands">
               <Text style={{ color: C.muted }}>+</Text>
-            </View>
+            </Button>
             <Text style={{ color: C.muted }}>{permissions()}</Text>
-            <View onPress={props.models} style={{ flex: 1, alignItems: 'flex-end' }}>
+            <Button onPress={props.models} style={{ flex: 1, alignItems: 'flex-end' }}>
               <Text
                 numberOfLines={1}
                 style={{ color: backend()?.kind === 'model' ? C.muted : C.warning }}
               >
                 {backend()?.kind === 'model' ? backend().modelId : 'Choose a model'} · Ctrl+G
               </Text>
-            </View>
+            </Button>
             <If when={invocation() !== null}>
-              <View
+              <Button
+                disabled={stopping()}
+                accessibilityLabel="Stop response"
                 onPress={() => {
                   void stop();
                 }}
                 style={{ backgroundColor: C.accent, paddingHorizontal: 8, borderRadius: 8 }}
               >
                 <Text style={{ color: C.background }}>{stopping() ? '…' : '■'}</Text>
-              </View>
+              </Button>
             </If>
-            <View
+            <Button
+              accessibilityLabel="Send message"
+              disabled={!!sendBlockedReason() || !draft().trim()}
               onPress={() => {
                 void send(draft());
               }}
@@ -1023,7 +1040,7 @@ export function Conversation(props: ConversationProps) {
               }}
             >
               <Text style={{ color: C.background }}>Send</Text>
-            </View>
+            </Button>
           </View>
         </View>
         <Text style={{ color: sendBlockedReason() ? C.warning : C.muted, paddingVertical: 0 }}>

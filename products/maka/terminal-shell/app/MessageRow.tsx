@@ -18,6 +18,7 @@
  */
 
 import { cleanup, computed, signal, Text, View } from 'nsh';
+import { Button } from 'nsh/base';
 import { host } from 'maka/host';
 import { messageKey, type Position, type Row } from './history';
 import { C } from './ui';
@@ -215,12 +216,12 @@ function MessageSource({
         <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
       </If>
       <If when={!complete()}>
-        <View onPress={error() ? () => void read() : undefined} style={{ height: 16 }}>
+        <Button disabled={!error()} onPress={() => void read()} style={{ height: 16 }}>
           <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
             {error() ? 'Retry original source' : 'Reading…'} · {messageBytes(content())}/
             {total() ?? '?'} bytes
           </Text>
-        </View>
+        </Button>
       </If>
     </View>
   );
@@ -341,18 +342,20 @@ export function MessageRow({
                           {text()}
                         </Text>
                       </If>
-                      <View
+                      <Button
+                        selected={sourceMode()}
                         onPress={() => sourceMode.set(!sourceMode())}
                         style={{ height: 16, alignSelf: 'flex-end' }}
                       >
                         <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
                           {sourceMode() ? '[Formatted]' : '[Source]'}
                         </Text>
-                      </View>
+                      </Button>
                     </View>
                   }
                 >
-                  <View
+                  <Button
+                    selected={expanded()}
                     onPress={() => expanded.set(!expanded())}
                     style={{ height: 16, paddingVertical: 0 }}
                   >
@@ -367,7 +370,7 @@ export function MessageRow({
                     >
                       {summary()}
                     </Text>
-                  </View>
+                  </Button>
                   <If when={expanded()}>
                     <View style={{ paddingLeft: 16, paddingVertical: 16, gap: 16 }}>
                       <If

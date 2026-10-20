@@ -26,7 +26,7 @@ use maka_host_runtime::application::host::startup;
 use maka_plugin_core::operation::receipt_reader_contract;
 use maka_terminal_shell::{APPLICATION, bindings::Bindings, terminal};
 use nsh_core::{
-    Size,
+    Points, Size,
     platform::{Environment, Idiom, Renderer},
 };
 use nsh_engine::{Bundle, EngineConfig, Limits, Policy};
@@ -163,36 +163,30 @@ fn configuration(
     registry: nsh_core::ui::Registry,
     runtime: tokio::runtime::Handle,
 ) -> EngineConfig {
-    let viewport = Size::new(960.0, 640.0);
+    let viewport = Size::new(Points(960.0), Points(640.0));
+    let mut capabilities = nsh_core::access::Capabilities::default();
+    capabilities.clipboard = true;
+    let app = Bundle::source(APPLICATION.into())
+        .with_app_id(Some("org.apache.maka.terminal"))
+        .with_policy(Policy {
+            declared: Some(capabilities),
+            ..Default::default()
+        });
     EngineConfig {
-        app: Bundle::source(APPLICATION.into())
-            .with_app_id(Some("org.apache.maka.terminal"))
-            .with_policy(Policy {
-                declared: Some(nsh_core::access::Capabilities {
-                    clipboard: true,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
-            .into(),
         viewport,
-        trace: false,
-        network: None,
-        assets: None,
         environment: Environment {
             renderer: Renderer::Terminal,
             idiom: Idiom::Desktop,
-            window: (viewport.width, viewport.height),
+            window: viewport,
             ..Default::default()
         },
-        header_heights: (16.0, 32.0),
+        header_heights: nsh_core::NO_NATIVE_HEADER,
         // APPLICATION is compiled into this trusted executable; only the
         // interpreter stack is bounded, as for other standalone NSH apps.
         limits: Limits::standalone(),
-        ui_sets: vec![nsh_ui_mobile::registry(), registry],
+        ui_sets: vec![nsh_base::registry(), registry],
         runtime: Some(runtime),
-        data_dir: None,
-        storage: None,
+        ..EngineConfig::new(app)
     }
 }
 

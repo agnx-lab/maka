@@ -189,6 +189,16 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
 
         view.handle_event(Event::Paste("NSH user send, exactly once".into()));
         wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once") && screen.contains("Send")).await;
+        // Native editor text can paint before its change reaches the app and enables Send.
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                view.poll().unwrap();
+                if view.accessibility_snapshot().iter().any(|node| node.label == "Send message" && !node.state.disabled) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the presented Send button did not become enabled");
         support::click_text(&mut view, "Send");
         // AppView's engine continues independently while this awaits the real HTTP request.
         let mut request = fixture.next_request().await;

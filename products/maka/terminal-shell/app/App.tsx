@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import { cleanup, mount, signal, Scroll, Text, View } from 'nsh';
+import { cleanup, effect, mount, signal, Text, View } from 'nsh';
+import { Button } from 'nsh/base';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
@@ -90,7 +91,7 @@ function App() {
   const control: Control = async (method, input) => {
     if (method !== 'stop' && !controlsKnown())
       throw new Error('Checking earlier actions. Try again in a moment.');
-    const originals = method === 'stop' ? await host.pendingControls() : controls();
+    const originals: any[] = method === 'stop' ? await host.pendingControls() : controls();
     const pending = originals.find(
       (original) =>
         original.method === method &&
@@ -225,14 +226,9 @@ function App() {
   keymap.bind('mod+l', () => handle?.jumpLatest(), { when: 'always' });
   keymap.bind('alt+up', () => handle?.focusHistory(), { when: 'always' });
   keymap.bind('alt+down', () => handle?.focusActivity(), { when: 'always' });
-  keymap.bind(
-    'escape',
-    () => {
-      if (overlay()) overlay.set(null);
-      else stop();
-    },
-    { when: 'always' },
-  );
+  effect(() => {
+    if (!overlay()) keymap.bind('escape', stop, { when: 'always' });
+  });
   const recoverControls = async () => {
     if (recovering()) return;
     recovering.set(true);
@@ -291,9 +287,9 @@ function App() {
           >
             <Text style={{ color: C.accent, fontWeight: '700' }}>Make something remarkable.</Text>
             <Text style={{ color: C.muted }}>A quiet place for ambitious work.</Text>
-            <View onPress={newConversation} style={{ paddingVertical: 16 }}>
+            <Button onPress={newConversation} style={{ paddingVertical: 16 }}>
               <Text style={{ color: C.text }}>+ New conversation · Ctrl+N</Text>
-            </View>
+            </Button>
             <Each
               of={recent().slice(
                 0,
@@ -302,7 +298,8 @@ function App() {
               key={(session) => session.id}
             >
               {(session) => (
-                <View
+                <Button
+                  disabled={switching()}
                   onPress={() => {
                     void switchSession(session().id);
                   }}
@@ -314,12 +311,12 @@ function App() {
                   <Text numberOfLines={1} style={{ color: C.muted }}>
                     {session().workspace.path}
                   </Text>
-                </View>
+                </Button>
               )}
             </Each>
-            <View onPress={() => open('sessions')}>
+            <Button onPress={() => open('sessions')}>
               <Text style={{ color: C.muted }}>All conversations · Ctrl+O</Text>
-            </View>
+            </Button>
             <Text style={{ color: C.muted }}>Ctrl+P commands · Ctrl+Q exits</Text>
           </View>
         </View>
@@ -361,7 +358,8 @@ function App() {
             <Text style={{ color: C.muted }}>{status()}</Text>
           </If>
           <If when={!controlsKnown() || controls().length > 0}>
-            <View
+            <Button
+              disabled={recovering()}
               onPress={() => {
                 void recoverControls();
               }}
@@ -373,13 +371,13 @@ function App() {
                     ? `Recover original actions (${controls().length})`
                     : 'Recheck original actions'}
               </Text>
-            </View>
+            </Button>
             <Each
               of={controls().filter((original) => !original.reference)}
               key={(original) => original.id}
             >
               {(original) => (
-                <View
+                <Button
                   onPress={() => {
                     void abandonControl(original().id);
                   }}
@@ -387,7 +385,7 @@ function App() {
                   <Text style={{ color: C.warning }}>
                     Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
                   </Text>
-                </View>
+                </Button>
               )}
             </Each>
           </If>

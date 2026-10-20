@@ -84,7 +84,7 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     }
     let (columns, rows) = terminal::size().map_err(|error| error.to_string())?;
     config.viewport = CellMetrics::default().viewport(columns.max(1), rows.max(1));
-    config.environment.window = (config.viewport.width, config.viewport.height);
+    config.environment.window = config.viewport;
     terminal::enable_raw_mode().map_err(|error| error.to_string())?;
     let _raw = RawMode;
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;

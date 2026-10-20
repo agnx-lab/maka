@@ -21,10 +21,14 @@ import { cleanup, effect, Input, signal, Scroll, Text, View } from 'nsh';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
-import { Modal } from 'nsh/ui/mobile';
+import { Button, Dialog } from 'nsh/base';
 import { C } from './ui';
 
 type InteractionControl = (method: string, input: unknown) => Promise<any>;
+type InteractionQuestion = {
+  question: string;
+  options: Array<{ label: string; description?: string }>;
+};
 const interactionBytes = (text: string) => {
   let length = 0;
   for (const point of text) {
@@ -37,15 +41,15 @@ function InteractionAction(props: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  selected?: boolean;
   primary?: boolean;
 }) {
   return (
-    <View
-      accessibilityRole="button"
+    <Button
       accessibilityLabel={props.label}
-      onPress={() => {
-        if (!props.disabled) props.onPress();
-      }}
+      disabled={props.disabled}
+      selected={props.selected}
+      onPress={props.onPress}
       style={{
         paddingHorizontal: 8,
         paddingVertical: 0,
@@ -61,7 +65,7 @@ function InteractionAction(props: {
       >
         {props.label}
       </Text>
-    </View>
+    </Button>
   );
 }
 function interactionPermissions(value: any): string {
@@ -291,8 +295,7 @@ export function InteractionPanel({
     if (kind === 'form') void respond({ kind, action: 'decline' });
   };
   // Parent mounts only the current keyed panel. Native keymap ownership removes
-  // these bindings on close; Escape closes the view, never answers a request.
-  keymap.bind('escape', close, { when: 'always' });
+  // these bindings on close; the Dialog owns Escape without answering a request.
   keymap.bind('mod+enter', submit, { when: 'always' });
   keymap.bind(
     'mod+r',
@@ -318,275 +321,278 @@ export function InteractionPanel({
       client_capability: 'Capability request',
     })[request()?.kind as string] ?? 'Review request';
   return (
-    <Modal visible transparent animationType="none" onRequestClose={close}>
+    <Dialog
+      animation="none"
+      onOpenChange={close}
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 16,
+        backgroundColor: '#000000bb',
+      }}
+    >
       <View
         style={{
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          paddingHorizontal: 8,
-          paddingVertical: 16,
-          backgroundColor: '#000000bb',
+          width: Math.max(8, Math.min(768, windowSize().width - 16)),
+          height: Math.max(80, Math.min(640, windowSize().height - 32)),
+          padding: 16,
+          gap: 16,
+          backgroundColor: C.background,
         }}
       >
-        <View
-          style={{
-            width: Math.max(8, Math.min(768, windowSize().width - 16)),
-            height: Math.max(80, Math.min(640, windowSize().height - 32)),
-            padding: 16,
-            gap: 16,
-            backgroundColor: C.background,
-          }}
-        >
-          <View style={{ flexDirection: 'row', gap: 16 }}>
-            <Text
-              style={{ flex: 1, color: C.warning, fontSize: 16, lineHeight: 16, fontWeight: '700' }}
-            >
-              {title()}
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <Text
+            style={{ flex: 1, color: C.warning, fontSize: 16, lineHeight: 16, fontWeight: '700' }}
+          >
+            {title()}
+          </Text>
+          <InteractionAction label="[Esc] Close" onPress={close} />
+        </View>
+        <Scroll style={{ flex: 1, minHeight: 0 }} contentStyle={{ gap: 16 }}>
+          <If when={!record()}>
+            <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+              {loading() ? 'Reading the original request…' : 'Request not available.'}
             </Text>
-            <InteractionAction label="[Esc] Close" onPress={close} />
-          </View>
-          <Scroll style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 16 }}>
-            <If when={!record()}>
-              <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                {loading() ? 'Reading the original request…' : 'Request not available.'}
-              </Text>
-            </If>
-            <If
-              when={record()?.outcome}
-              else={
-                <View style={{ gap: 16 }}>
-                  <If when={request()?.kind === 'service_approval'}>
+          </If>
+          <If
+            when={record()?.outcome}
+            else={
+              <View style={{ gap: 16 }}>
+                <If when={request()?.kind === 'service_approval'}>
+                  <Text
+                    selectable
+                    style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
+                  >{`${request()?.toolName}\n${request()?.service}.${request()?.method}`}</Text>
+                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                    Approve this original call only. This does not grant access to future calls.
+                  </Text>
+                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                    {argumentsText()}
+                  </Text>
+                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                    {completeArguments()
+                      ? 'Complete original arguments loaded.'
+                      : `${interactionBytes(argumentsText())} of ${argumentTotal() ?? '?'} argument bytes loaded. Read all before allowing.`}
+                  </Text>
+                  <If when={argumentError()}>
+                    <InteractionAction
+                      label="Retry original arguments"
+                      disabled={argumentBusy()}
+                      onPress={() => void readArguments()}
+                    />
+                  </If>
+                  <If when={argumentError()}>
+                    <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>
+                      {argumentError()}
+                    </Text>
+                  </If>
+                </If>
+                <If when={request()?.kind === 'permissions'}>
+                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                    {request()?.request.reason}
+                  </Text>
+                  <If when={request()?.request.command}>
                     <Text
                       selectable
                       style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
-                    >{`${request()?.toolName}\n${request()?.service}.${request()?.method}`}</Text>
-                    <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                      Approve this original call only. This does not grant access to future calls.
-                    </Text>
-                    <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                      {argumentsText()}
-                    </Text>
-                    <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                      {completeArguments()
-                        ? 'Complete original arguments loaded.'
-                        : `${interactionBytes(argumentsText())} of ${argumentTotal() ?? '?'} argument bytes loaded. Read all before allowing.`}
-                    </Text>
-                    <If when={argumentError()}>
-                      <InteractionAction
-                        label="Retry original arguments"
-                        disabled={argumentBusy()}
-                        onPress={() => void readArguments()}
-                      />
-                    </If>
-                    <If when={argumentError()}>
-                      <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>
-                        {argumentError()}
-                      </Text>
-                    </If>
+                    >{`$ ${request()?.request.command.command}\nIn ${request()?.request.command.cwd}`}</Text>
                   </If>
-                  <If when={request()?.kind === 'permissions'}>
-                    <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                      {request()?.request.reason}
-                    </Text>
-                    <If when={request()?.request.command}>
-                      <Text
-                        selectable
-                        style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
-                      >{`$ ${request()?.request.command.command}\nIn ${request()?.request.command.cwd}`}</Text>
-                    </If>
-                    <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                      {request()?.kind === 'permissions'
-                        ? interactionPermissions(request().request.permissions)
-                        : ''}
-                    </Text>
-                    <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                      Allow exactly these paths and network destinations for:
-                    </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                      <Each
-                        of={
-                          request()?.toolUseId === null
-                            ? ['turn', 'session']
-                            : ['once', 'turn', 'session']
-                        }
-                      >
-                        {(duration) => (
-                          <InteractionAction
-                            label={`${scope() === duration() ? '(*)' : '( )'} ${duration() === 'once' ? 'This call' : duration() === 'turn' ? 'This turn' : 'This session'}`}
-                            disabled={blocked()}
-                            onPress={() => {
-                              if (!blocked()) scope.set(duration() as 'once' | 'turn' | 'session');
-                            }}
-                          />
-                        )}
-                      </Each>
-                    </View>
-                  </If>
-                  <If when={request()?.kind === 'question'}>
-                    <Each of={request()?.questions ?? []}>
-                      {(question, index) => (
-                        <View style={{ gap: 16 }}>
-                          <Text
-                            selectable
-                            style={{
-                              color: C.text,
-                              fontSize: 16,
-                              lineHeight: 16,
-                              fontWeight: '600',
-                            }}
-                          >{`${index() + 1}. ${question().question}`}</Text>
-                          <Each of={question().options}>
-                            {(option) => (
-                              <View
-                                onPress={() => choose(index(), option().label)}
-                                style={{ paddingHorizontal: 8, backgroundColor: C.surface }}
-                              >
-                                <Text
-                                  style={{
-                                    color:
-                                      answers()[index()]?.value === option().label
-                                        ? C.accent
-                                        : C.text,
-                                    fontSize: 16,
-                                    lineHeight: 16,
-                                  }}
-                                >{`${answers()[index()]?.value === option().label ? '(*)' : '( )'} ${option().label}`}</Text>
-                                <If when={option().description}>
-                                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                                    {option().description}
-                                  </Text>
-                                </If>
-                              </View>
-                            )}
-                          </Each>
-                          <View style={{ flexDirection: 'row', gap: 16 }}>
-                            <InteractionAction
-                              label={
-                                answers()[index()]?.other ? '(*) Other answer' : '( ) Other answer'
-                              }
-                              disabled={blocked()}
-                              onPress={() => choose(index(), '', true)}
-                            />
-                            <InteractionAction
-                              label={answers()[index()]?.value === null ? '(*) Skip' : '( ) Skip'}
-                              disabled={blocked()}
-                              onPress={() => choose(index(), null)}
-                            />
-                          </View>
-                          <If when={answers()[index()]?.other}>
-                            <Input
-                              value={String(answers()[index()]?.value ?? '')}
-                              editable={!blocked()}
-                              placeholder="Your answer"
-                              placeholderTextColor={C.muted}
-                              onChangeText={(value) => choose(index(), value, true)}
-                              style={{
-                                minHeight: 32,
-                                paddingHorizontal: 8,
-                                color: C.text,
-                                backgroundColor: C.surface,
-                                fontSize: 16,
-                                lineHeight: 16,
-                              }}
-                            />
-                          </If>
-                        </View>
+                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                    {request()?.kind === 'permissions'
+                      ? interactionPermissions(request().request.permissions)
+                      : ''}
+                  </Text>
+                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                    Allow exactly these paths and network destinations for:
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                    <Each
+                      of={
+                        request()?.toolUseId === null
+                          ? ['turn', 'session']
+                          : ['once', 'turn', 'session']
+                      }
+                    >
+                      {(duration) => (
+                        <InteractionAction
+                          label={`${scope() === duration() ? '(*)' : '( )'} ${duration() === 'once' ? 'This call' : duration() === 'turn' ? 'This turn' : 'This session'}`}
+                          disabled={blocked()}
+                          selected={scope() === duration()}
+                          onPress={() => {
+                            if (!blocked()) scope.set(duration() as 'once' | 'turn' | 'session');
+                          }}
+                        />
                       )}
                     </Each>
-                  </If>
-                  <If when={request()?.kind === 'form' || request()?.kind === 'client_capability'}>
-                    <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
-                      {request()?.kind === 'form'
-                        ? 'Fill this form in the existing client, or explicitly Decline / Cancel the request here.'
-                        : 'Review this capability in the existing client. Closing this view leaves it pending.'}
-                    </Text>
-                    <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                      {JSON.stringify(request(), null, 2)}
-                    </Text>
-                  </If>
-                </View>
-              }
-            >
-              <Text style={{ color: C.accent, fontSize: 16, lineHeight: 16 }}>
-                Recorded outcome
-              </Text>
-              <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                {JSON.stringify(record()?.outcome, null, 2)}
-              </Text>
-            </If>
-            <If when={error()}>
-              <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
-            </If>
-            <If when={uncertain() && !record()?.outcome}>
-              <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
-                An original answer receipt is unresolved. Refresh is read-only; further answers stay
-                disabled.
-              </Text>
-            </If>
-            <If when={request()?.kind === 'question' && !record()?.outcome && !questionReady()}>
-              <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                Choose an option, type Other, or explicitly Skip each question. Other answers allow
-                up to 2048 UTF-8 bytes.
-              </Text>
-            </If>
-            <If when={record() && !record().outcome && !pending() && !loading()}>
-              <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
-                This request is no longer listed as pending. Refresh to read its canonical outcome.
-              </Text>
-            </If>
-          </Scroll>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-            <If when={request()?.kind === 'form' && !record()?.outcome}>
-              <InteractionAction label="[D] Decline" disabled={blocked()} onPress={deny} />
-              <InteractionAction
-                label="Cancel request"
-                disabled={blocked()}
-                onPress={() => {
-                  void respond({ kind: 'form', action: 'cancel' });
-                }}
-              />
-            </If>
-            <If
-              when={
-                !record()?.outcome &&
-                ['service_approval', 'permissions', 'question'].includes(request()?.kind)
-              }
-            >
-              <InteractionAction
-                primary
-                label={
-                  busy()
-                    ? 'Recording answer…'
-                    : request()?.kind === 'question'
-                      ? '[Ctrl+Enter] Submit answers'
-                      : '[Ctrl+Enter] Allow'
-                }
-                disabled={
-                  blocked() ||
-                  (request()?.kind === 'question' && !questionReady()) ||
-                  (request()?.kind === 'service_approval' &&
-                    (!completeArguments() || argumentBusy() || !!argumentError()))
-                }
-                onPress={submit}
-              />
-              <If when={request()?.kind !== 'question'}>
-                <InteractionAction label="[D] Deny" disabled={blocked()} onPress={deny} />
-              </If>
-            </If>
+                  </View>
+                </If>
+                <If when={request()?.kind === 'question'}>
+                  <Each<InteractionQuestion> of={request()?.questions ?? []}>
+                    {(question, index) => (
+                      <View style={{ gap: 16 }}>
+                        <Text
+                          selectable
+                          style={{
+                            color: C.text,
+                            fontSize: 16,
+                            lineHeight: 16,
+                            fontWeight: '600',
+                          }}
+                        >{`${index() + 1}. ${question().question}`}</Text>
+                        <Each of={question().options}>
+                          {(option) => (
+                            <Button
+                              disabled={blocked()}
+                              selected={answers()[index()]?.value === option().label}
+                              onPress={() => choose(index(), option().label)}
+                              style={{ paddingHorizontal: 8, backgroundColor: C.surface }}
+                            >
+                              <Text
+                                style={{
+                                  color:
+                                    answers()[index()]?.value === option().label
+                                      ? C.accent
+                                      : C.text,
+                                  fontSize: 16,
+                                  lineHeight: 16,
+                                }}
+                              >{`${answers()[index()]?.value === option().label ? '(*)' : '( )'} ${option().label}`}</Text>
+                              <If when={option().description}>
+                                <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                                  {option().description}
+                                </Text>
+                              </If>
+                            </Button>
+                          )}
+                        </Each>
+                        <View style={{ flexDirection: 'row', gap: 16 }}>
+                          <InteractionAction
+                            label={
+                              answers()[index()]?.other ? '(*) Other answer' : '( ) Other answer'
+                            }
+                            disabled={blocked()}
+                            selected={answers()[index()]?.other}
+                            onPress={() => choose(index(), '', true)}
+                          />
+                          <InteractionAction
+                            label={answers()[index()]?.value === null ? '(*) Skip' : '( ) Skip'}
+                            disabled={blocked()}
+                            selected={answers()[index()]?.value === null}
+                            onPress={() => choose(index(), null)}
+                          />
+                        </View>
+                        <If when={answers()[index()]?.other}>
+                          <Input
+                            value={String(answers()[index()]?.value ?? '')}
+                            readonly={blocked()}
+                            placeholder="Your answer"
+                            onChange={(value) => choose(index(), value, true)}
+                            style={{
+                              placeholderColor: C.muted,
+                              minHeight: 32,
+                              paddingHorizontal: 8,
+                              color: C.text,
+                              backgroundColor: C.surface,
+                              fontSize: 16,
+                              lineHeight: 16,
+                            }}
+                          />
+                        </If>
+                      </View>
+                    )}
+                  </Each>
+                </If>
+                <If when={request()?.kind === 'form' || request()?.kind === 'client_capability'}>
+                  <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+                    {request()?.kind === 'form'
+                      ? 'Fill this form in the existing client, or explicitly Decline / Cancel the request here.'
+                      : 'Review this capability in the existing client. Closing this view leaves it pending.'}
+                  </Text>
+                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                    {JSON.stringify(request(), null, 2)}
+                  </Text>
+                </If>
+              </View>
+            }
+          >
+            <Text style={{ color: C.accent, fontSize: 16, lineHeight: 16 }}>Recorded outcome</Text>
+            <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+              {JSON.stringify(record()?.outcome, null, 2)}
+            </Text>
+          </If>
+          <If when={error()}>
+            <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
+          </If>
+          <If when={uncertain() && !record()?.outcome}>
+            <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+              An original answer receipt is unresolved. Refresh is read-only; further answers stay
+              disabled.
+            </Text>
+          </If>
+          <If when={request()?.kind === 'question' && !record()?.outcome && !questionReady()}>
+            <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+              Choose an option, type Other, or explicitly Skip each question. Other answers allow up
+              to 2048 UTF-8 bytes.
+            </Text>
+          </If>
+          <If when={record() && !record().outcome && !pending() && !loading()}>
+            <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+              This request is no longer listed as pending. Refresh to read its canonical outcome.
+            </Text>
+          </If>
+        </Scroll>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+          <If when={request()?.kind === 'form' && !record()?.outcome}>
+            <InteractionAction label="[D] Decline" disabled={blocked()} onPress={deny} />
             <InteractionAction
-              label="[Ctrl+R] Refresh status"
-              disabled={loading() || busy()}
+              label="Cancel request"
+              disabled={blocked()}
               onPress={() => {
-                void refresh();
+                void respond({ kind: 'form', action: 'cancel' });
               }}
             />
-          </View>
-          <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-            Tab to move · Enter to activate · Esc closes without answering
-          </Text>
+          </If>
+          <If
+            when={
+              !record()?.outcome &&
+              ['service_approval', 'permissions', 'question'].includes(request()?.kind)
+            }
+          >
+            <InteractionAction
+              primary
+              label={
+                busy()
+                  ? 'Recording answer…'
+                  : request()?.kind === 'question'
+                    ? '[Ctrl+Enter] Submit answers'
+                    : '[Ctrl+Enter] Allow'
+              }
+              disabled={
+                blocked() ||
+                (request()?.kind === 'question' && !questionReady()) ||
+                (request()?.kind === 'service_approval' &&
+                  (!completeArguments() || argumentBusy() || !!argumentError()))
+              }
+              onPress={submit}
+            />
+            <If when={request()?.kind !== 'question'}>
+              <InteractionAction label="[D] Deny" disabled={blocked()} onPress={deny} />
+            </If>
+          </If>
+          <InteractionAction
+            label="[Ctrl+R] Refresh status"
+            disabled={loading() || busy()}
+            onPress={() => {
+              void refresh();
+            }}
+          />
         </View>
+        <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+          Tab to move · Enter to activate · Esc closes without answering
+        </Text>
       </View>
-    </Modal>
+    </Dialog>
   );
 }
