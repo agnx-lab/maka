@@ -25,6 +25,7 @@ the revision already used by Maka's GPUI shell standard library. The upstream
 Apache-2.0 `LICENSE`, `NOTICE` and the package's declared `README.md` are copied
 from that repository's root. `upstream.json` records the original finite file
 inventory and SHA-256 hashes before changes.
+Trailing whitespace in `NOTICE` is normalized without changing its text.
 
 The sole source change backports [upstream commit
 a684efb8994d433a00c949fe698f982f8f613f90](https://github.com/awslabs/llrt/commit/a684efb8994d433a00c949fe698f982f8f613f90):
