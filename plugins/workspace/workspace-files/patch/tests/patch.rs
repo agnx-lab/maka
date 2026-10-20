@@ -17,9 +17,7 @@
  * under the License.
  */
 
-use apply_patch::{
-    MAX_BYTES, PatchError, PatchOperation, apply_update, parse_create, parse_patch, parse_update,
-};
+use apply_patch::{PatchOperation, apply_update, parse_create, parse_patch, parse_update};
 
 fn update(source: &str, diff: &str) -> String {
     apply_update(source, &parse_update(diff).unwrap()).unwrap()
@@ -136,32 +134,69 @@ fn creates_and_crlf_envelopes() {
 }
 
 #[test]
-fn resource_limits_precede_expensive_matching() {
-    assert!(matches!(
-        parse_update(&"x".repeat(MAX_BYTES + 1)),
-        Err(PatchError::Limit(_))
-    ));
-    let chunks = parse_update("@@\n-x\n+y").unwrap();
+fn large_utf8_create_and_update_preserve_complete_content() {
+    let content = "configuration value: 零一二三四五六七八九; ".repeat(24_000);
+    assert_eq!(parse_create(&format!("+{content}")).unwrap(), content);
+    assert_eq!(
+        update("old\n", &format!("@@\n-old\n+{content}")),
+        format!("{content}\n")
+    );
+    assert_eq!(
+        update(&format!("{content}\nold\n"), "@@\n-old\n+新"),
+        format!("{content}\n新\n")
+    );
+}
+
+#[test]
+fn many_source_lines_preserve_every_line_and_original_endings() {
     for ending in ["\n", "\r", "\r\n"] {
-        let line = format!("x{ending}");
-        assert!(
-            apply_update(&line.repeat(32_768), &chunks)
-                .unwrap()
-                .starts_with(&format!("y{ending}"))
+        let prefix = format!("unchanged{ending}").repeat(32_769);
+        assert_eq!(
+            update(&format!("{prefix}target{ending}"), "@@\n-target\n+新"),
+            format!("{prefix}新{ending}")
         );
-        assert!(matches!(
-            apply_update(&line.repeat(32_769), &chunks),
-            Err(PatchError::Limit("lines"))
-        ));
     }
-    assert!(matches!(
-        apply_update(&"x".repeat(MAX_BYTES + 1), &chunks),
-        Err(PatchError::Limit(_))
-    ));
-    let diff = format!("@@\n{}+new", "-a\n".repeat(10_000));
-    let chunks = parse_update(&diff).unwrap();
-    assert!(matches!(
-        apply_update(&"a\n".repeat(10_000), &chunks),
-        Err(PatchError::Limit("matching work"))
-    ));
+}
+
+#[test]
+fn large_context_replacement_is_applied_completely() {
+    let source = "x\n".repeat(4_097);
+    let context = " x\n".repeat(4_096);
+    let diff = format!("@@\n{context}-x\n+y");
+    assert_eq!(
+        update(&source, &diff),
+        format!("{}y\n", "x\n".repeat(4_096))
+    );
+}
+
+#[test]
+fn many_chunks_preserve_order_and_apply_each_replacement() {
+    let mut source = String::new();
+    let mut diff = String::new();
+    let mut expected = String::new();
+    for index in 0..32_769 {
+        source.push_str(&format!("setting {index}: old\n"));
+        diff.push_str(&format!(
+            "@@\n-setting {index}: old\n+setting {index}: 新\n"
+        ));
+        expected.push_str(&format!("setting {index}: 新\n"));
+    }
+    assert_eq!(update(&source, &diff), expected);
+}
+
+#[test]
+fn many_operations_retain_every_path_content_and_source_order() {
+    let mut patch = "*** Begin Patch\n".to_owned();
+    let mut expected = Vec::new();
+    for index in 0..129 {
+        patch.push_str(&format!(
+            "*** Add File: config-{index}\n+value {index}: 新\n"
+        ));
+        expected.push(PatchOperation::Add {
+            path: format!("config-{index}").into(),
+            content: format!("value {index}: 新\n"),
+        });
+    }
+    patch.push_str("*** End Patch");
+    assert_eq!(parse_patch(&patch).unwrap(), expected);
 }

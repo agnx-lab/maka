@@ -35886,7 +35886,6 @@ export const contracts = {
                       },
                       diff: {
                         type: 'string',
-                        maxLength: 1048576,
                       },
                       type: {
                         type: 'string',
@@ -35906,7 +35905,6 @@ export const contracts = {
                       },
                       diff: {
                         type: 'string',
-                        maxLength: 1048576,
                       },
                       type: {
                         type: 'string',
@@ -35985,11 +35983,9 @@ export const contracts = {
               old_string: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 1048576,
               },
               new_string: {
                 type: 'string',
-                maxLength: 1048576,
               },
             },
             required: ['path', 'old_string', 'new_string'],
@@ -36303,7 +36299,6 @@ export const contracts = {
               },
               content: {
                 type: 'string',
-                maxLength: 1048576,
               },
             },
             required: ['path', 'content'],

@@ -67,13 +67,6 @@ impl ToolScope {
                 format!("unknown tool: {name}"),
             ));
         }
-        if serde_json::to_vec(&input)
-            .map_err(|e| CellDiagnostic::new(CellDiagnosticKind::ExecutionError, e.to_string()))?
-            .len()
-            > self.limits.max_value_bytes
-        {
-            return Err(CellDiagnostic::limit("tool input byte limit exceeded"));
-        }
         {
             let mut admission = self.admission.lock().unwrap();
             if self.cancellation.is_cancelled() {
@@ -126,18 +119,9 @@ impl ToolScope {
                     scope.context.fail(error.clone());
                 }
                 // The effect is settled even if JS no longer observes its promise.
-                let result = result
-                    .map_err(|error| {
-                        CellDiagnostic::new(CellDiagnosticKind::ToolFailure, error.to_string())
-                    })
-                    .and_then(|value| {
-                        if serde_json::to_vec(&value).unwrap().len() > scope.limits.max_value_bytes
-                        {
-                            Err(CellDiagnostic::limit("tool output byte limit exceeded"))
-                        } else {
-                            Ok(value)
-                        }
-                    });
+                let result = result.map_err(|error| {
+                    CellDiagnostic::new(CellDiagnosticKind::ToolFailure, error.to_string())
+                });
                 let _ = sender.send(result);
             },
             &self.host,

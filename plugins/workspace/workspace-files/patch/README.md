@@ -21,6 +21,6 @@
 
 [简体中文](README.zh-CN.md)
 
-Parses bounded patch text and applies updates to supplied strings. It performs no filesystem I/O. Callers validate paths and obtain write authority before applying the prepared operations to files. See [SOURCE.md](SOURCE.md) for the upstream source and adaptation record.
+Parses complete patch text and applies updates to supplied strings, preserving operation order and original context and line endings. Preparation retains full strings and parsed lines in memory. It performs no filesystem I/O. Callers validate paths and obtain write authority before applying the prepared operations to files. See [SOURCE.md](SOURCE.md) for the upstream source and adaptation record.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

@@ -70,7 +70,7 @@ Helpers:
 - setTimeout(callback, delayMs=0), clearTimeout(id): timers alone do not keep a finished cell alive.
 - ALL_TOOLS: frozen name/description metadata for all authorized nested tools, including deferred tools omitted from this description. Find a tool here and call it in the same cell.
 Use wait only after exec returns a running cell_id. Tool permissions and schemas stay frozen for the cell. Calls to other advertised tools must be made directly. Do not invoke exec in parallel with other model tools.
-Host limits: 64 KiB source, 1 MiB JSON/output/store, 64 MiB V8 heap, 30 seconds cumulative synchronous execution (async waits excluded), 32 tool calls per cell, 8 simultaneous calls, 4 uncollected cells per Run, 128 pending timers."#.into(),
+Host limits: 64 KiB source, 1 MiB cell result/output/store, 64 MiB V8 heap, 30 seconds cumulative synchronous execution (async waits excluded), 32 tool calls per cell, 8 simultaneous calls, 4 uncollected cells per Run, 128 pending timers."#.into(),
         input_schema: schemars::schema_for!(CodeInput).into(),
     }
 }

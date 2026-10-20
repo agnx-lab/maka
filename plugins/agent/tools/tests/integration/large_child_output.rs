@@ -54,11 +54,10 @@ impl ToolExecutor for LargeOutput {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
+async fn large_child_value_is_consumable_while_cell_emission_remains_bounded() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
     let log = Arc::new(EventLog::open(&path).await.unwrap());
-    assert_eq!(CellLimits::default().max_value_bytes, 1024 * 1024);
     let effect = Arc::new(LargeOutput {
         value: json!({"text": "x".repeat(1024 * 1024)}),
         calls: AtomicUsize::new(0),
@@ -79,12 +78,16 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
     .unwrap();
     let cells = CodeExecutor::new(CellLimits::default()).unwrap();
     let mut children = Vec::new();
-    for (id, code, caught) in [
-        ("uncaught", "text(await tools.read({}));", false),
+    for (id, code, expected_text) in [
         (
-            "caught",
-            "try { await tools.read({}); } catch (_) { text('caught'); }",
-            true,
+            "consumed",
+            "const value = await tools.read({}); let sum = 0; for (let i = 0; i < value.text.length; i++) sum += value.text.charCodeAt(i); text({length: value.text.length, codePointSum: sum});",
+            "{\"length\":1048576,\"codePointSum\":125829120}",
+        ),
+        (
+            "emission-caught",
+            "const value = await tools.read({}); try { text(value); } catch (error) { text(error.message); }",
+            "cell output limit exceeded",
         ),
     ] {
         let invocation = support::invocation(id);
@@ -107,17 +110,12 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(result["result"]["ok"], caught);
-        if caught {
-            assert_eq!(result["content"][0]["text"], "caught");
-        } else {
-            assert_eq!(result["result"]["error"]["kind"], "limit_exceeded");
-            assert_eq!(
-                result["result"]["error"]["message"],
-                "tool output byte limit exceeded"
-            );
-        }
-        // Both cases share this ledger; each keeps a 1 MiB model projection.
+        assert_eq!(result["result"]["ok"], true, "{result}");
+        assert_eq!(
+            result["content"],
+            json!([{"kind":"text","text":expected_text}])
+        );
+        // Both cases share this ledger; each retains the complete child value.
         let prefix = log.prefix(32, 2 * 1024 * 1024 + 64 * 1024).await.unwrap();
         let outcomes: Vec<_> = prefix
             .events

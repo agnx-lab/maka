@@ -20,7 +20,6 @@
 use crate::{
     edit_index::{Index, js_space, starts},
     failed,
-    mutation::MAX_CONTENT,
 };
 use maka_agent_facts::tools::ToolError;
 use serde::{Deserialize, Serialize};
@@ -69,15 +68,9 @@ pub(crate) fn replace(
         if source.contains('\0') {
             return Err(failed("Edit refuses non-exact match in binary text"));
         }
-        if source.encode_utf16().count() > 1_000_000 || lines(source) > 50_000 {
-            return Err(failed("Edit source is too large to fuzzy-match safely"));
-        }
         fuzzy(source, old)?
     };
     let length = source.len() - span.len() + new.len();
-    if length > MAX_CONTENT {
-        return Err(failed("Edit output exceeds 1 MiB"));
-    }
     let mut content = String::with_capacity(length);
     content.push_str(&source[..span.start]);
     content.push_str(new);

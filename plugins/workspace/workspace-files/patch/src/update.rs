@@ -1,7 +1,7 @@
 // Portions adapted from OpenAI Codex under the Apache License 2.0.
 // Copyright 2025 OpenAI. See SOURCE.md and the repository LICENSE/NOTICE.
-// Maka modifications: pure bounded APIs, no filesystem/execution integration,
-// restricted patch grammar and explicit preparation limits. SOURCE.md records
+// Maka modifications: pure preparation APIs, no filesystem/execution integration,
+// restricted patch grammar and preserved line endings. SOURCE.md records
 // the exact upstream files/revisions and file-specific changes.
 
 use crate::text_file::Replacement;
