@@ -6477,6 +6477,7 @@ mod tests {
         for _ in 0..120 {
             cx.executor()
                 .advance_clock(std::time::Duration::from_millis(16));
+            cx.update(|window, cx| window.simulate_next_frame(cx));
             cx.update(|window, cx| window.draw(cx).clear(cx));
         }
         view.input.read_with(&cx, |state, _| {
@@ -6589,6 +6590,7 @@ mod tests {
         for _ in 0..120 {
             cx.executor()
                 .advance_clock(std::time::Duration::from_millis(16));
+            cx.update(|window, cx| window.simulate_next_frame(cx));
             cx.update(|window, cx| window.draw(cx).clear(cx));
         }
         assert_eq!(
