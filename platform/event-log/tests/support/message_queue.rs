@@ -96,20 +96,12 @@ pub fn admission(
     }
 }
 
-// Exercise derived receipts whose JSON envelope is larger than the legal queue.
+// Exercise complete cancellation receipts beyond the former 8 MiB limit.
 #[allow(dead_code)]
-pub async fn near_capacity_queue(log: &EventLog) -> maka_event_log::message_queue::MessageQueue {
+pub async fn large_queue(log: &EventLog) -> maka_event_log::message_queue::MessageQueue {
     let queue = log.message_queue("session").await.unwrap();
-    let bytes: usize = queue
-        .entries
-        .iter()
-        .map(|entry| serde_json::to_vec(entry).unwrap().len())
-        .sum();
     let entry = &queue.entries[0];
-    let overhead = bytes
-        - entry.source.message.content.text.len()
-        - entry.source.unprepared_content.text.len();
-    let text = "x".repeat((8 * 1024 * 1024 - 4 - overhead) / 2);
+    let text = "x".repeat(4 * 1024 * 1024);
     let mut content = entry.source.message.content.clone();
     let mut unprepared = entry.source.unprepared_content.clone();
     content.text = text.clone();
@@ -128,12 +120,6 @@ pub async fn near_capacity_queue(log: &EventLog) -> maka_event_log::message_queu
     .await
     .unwrap();
     let queue = log.message_queue("session").await.unwrap();
-    let bytes: usize = queue
-        .entries
-        .iter()
-        .map(|entry| serde_json::to_vec(entry).unwrap().len())
-        .sum();
-    assert!(bytes <= 8 * 1024 * 1024);
     let receipt = maka_event_log::message_queue::QueueReceipt {
         revision: queue.revision + 1,
         retracted: queue.entries.clone(),

@@ -90,7 +90,7 @@ async fn interrupt_fences_delivery_atomically_and_replays_the_original_queue_cut
             .await,
         Err(StoreError::RevisionConflict { .. })
     ));
-    let queued = support::near_capacity_queue(&log).await;
+    let queued = support::large_queue(&log).await;
     let receipt = log
         .interrupt_message_queue(&command, queued.revision, Some(&owner))
         .await

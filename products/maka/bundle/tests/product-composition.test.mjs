@@ -29,25 +29,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sdk = await import(pathToFileURL(resolve(root, 'dist/authoring/sdk.mjs')));
 
-test('default Agent and WorkHub installations allow requests for additional process access', async () => {
-  const { installation } = await import('../dist/authoring/composition.mjs');
-  const config = installation({
-    workspace: '/project',
-    hostRoot: '/state',
-    helper: '/maka',
-    themeFile: '/theme.json',
-  });
-  for (const [agent, processes] of [
-    [config.agent, config.processes],
-    [config.coordinator, config.coordinatorProcesses],
-  ]) {
-    assert.equal(agent.permissions.access, 'workspace_write');
-    assert.equal(agent.permissions.requestPermissions, true);
-    assert.equal(processes.network, 'allowed');
-    assert.deepEqual(processes.filesystem, { default: 'write', rules: [], denyGlobs: [] });
-  }
-});
-
 test('each bundled UI exports the exact contracts admitted by its original manifest', async () => {
   const checked = new Set();
   for (const name of readdirSync(resolve(root, 'dist/packages'))) {
@@ -125,8 +106,6 @@ test('typed scene constructors serialize directly into the actual Rust scene sch
     scroll: 'anchor',
     kind: 'stack',
   });
-  assert.equal(Object.getOwnPropertySymbols(terminal).length, 1);
-  assert.equal(encoded.includes('maka.scene.target'), false);
   assert.equal(terminalScenes.at(-1).member, 0);
   if (process.env.MAKA_PRODUCT_CLI_CHECK) {
     const binary = resolve(

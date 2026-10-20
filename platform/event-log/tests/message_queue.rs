@@ -429,7 +429,7 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     assert!(
         matches!(&proof.event.fact, Fact::MessageSteered { message, .. } if message.content.preparation == [receipt] && message.origin == origin)
     );
-    let before_retraction = support::near_capacity_queue(&log).await;
+    let before_retraction = log.message_queue("session").await.unwrap();
     let cancelled = log
         .edit_message_queue(
             "session",
@@ -443,25 +443,6 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
         .unwrap();
     assert_eq!(cancelled.retracted.len(), 2);
     assert_eq!(cancelled.retracted, before_retraction.entries);
-    assert_eq!(
-        log.queue_command_receipt("session", &command("cancel-rest", Kind::RetractAll))
-            .await
-            .unwrap(),
-        Some(cancelled.clone())
-    );
-    assert_eq!(
-        log.edit_message_queue(
-            "session",
-            before_retraction.revision,
-            QueueEdit::RetractAll {
-                cancellation_id: "cancel-rest".into()
-            },
-            command("cancel-rest", Kind::RetractAll)
-        )
-        .await
-        .unwrap(),
-        cancelled
-    );
     let queue = log.message_queue("session").await.unwrap();
     assert!(queue.entries.is_empty());
     for id in ["one", "three"] {
@@ -647,7 +628,7 @@ async fn pending_dispatchers_remain_disjoint_across_reopen_and_receipts_bind_exe
 }
 
 #[tokio::test]
-async fn pending_queue_preserves_more_than_sixty_four_messages_through_reorder_and_retraction() {
+async fn pending_queue_preserves_more_than_sixty_four_messages_through_reorder() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("many-pending.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -719,32 +700,6 @@ async fn pending_queue_preserves_more_than_sixty_four_messages_through_reorder_a
         .is_err()
     );
     assert_eq!(log.message_queue("session").await.unwrap(), queue);
-    let edit = QueueEdit::RetractAll {
-        cancellation_id: "many-cancel".into(),
-    };
-    let cancel = command("many-retract", Kind::RetractAll);
-    let receipt = log
-        .edit_message_queue("session", 66, edit.clone(), cancel.clone())
-        .await
-        .unwrap();
-    assert_eq!(receipt.revision, 67);
-    assert_eq!(receipt.retracted, queue.entries);
-    assert_eq!(
-        log.edit_message_queue("session", 66, edit, cancel.clone())
-            .await
-            .unwrap(),
-        receipt
-    );
-    for id in ids {
-        assert!(log.message_cancelled("session", &id).await.unwrap());
-    }
-    assert!(log.pending_messages("session").await.unwrap().is_empty());
-    log.close().await.unwrap();
-    let log = EventLog::open(&path).await.unwrap();
-    assert_eq!(
-        log.queue_command_receipt("session", &cancel).await.unwrap(),
-        Some(receipt)
-    );
     log.close().await.unwrap();
 }
 

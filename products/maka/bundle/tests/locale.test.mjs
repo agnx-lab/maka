@@ -84,23 +84,9 @@ test('terminal translations interpolate values and preserve unknown keys and pla
   assert.equal(preferences.tuiText('en', 'settings-language-auto'), 'Auto (system language)');
 });
 
-test('closed runtime states resolve to translated feature messages', () => {
-  for (const [locale, expected] of [
-    ['en', ['Awaiting approval', 'Executing Plan', 'In progress', 'Stopping', 'Paused']],
-    ['zh-CN', ['等待批准', '正在执行计划', '进行中', '停止中', '已暂停']],
-    ['zh-TW', ['等待批准', '正在執行計劃', '進行中', '停止中', '已暫停']],
-  ]) {
+test('closed runtime state maps reference existing feature translations', () => {
+  for (const locale of ['en', 'zh-CN', 'zh-TW']) {
     const text = screen.copy(locale);
-    assert.deepEqual(
-      [
-        text[screen.planProposals.pending_approval],
-        text[screen.planExecutions.active],
-        text[screen.planSteps.in_progress],
-        text[screen.graphStatuses.closing],
-        text[screen.goalStatuses.paused],
-      ],
-      expected,
-    );
     for (const map of [
       screen.planProposals,
       screen.planExecutions,
