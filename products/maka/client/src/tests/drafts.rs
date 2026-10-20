@@ -42,6 +42,8 @@ async fn saved_drafts_and_receipts_preserve_new_edits_across_clear_ordering_and_
         let sent = client.send_draft(id, "agent", "session-one", "composer", first.revision, json!({"model":{"kind":"default"}})).await.unwrap();
         let pending = client.pending_operations("agent", "session-one", "composer").await.unwrap();
         assert_eq!(pending.iter().map(|operation|operation.id).collect::<Vec<_>>(), [id]);
+        assert!(client.pending_controls().await.unwrap().is_empty());
+        assert_eq!(client.operation_for_control(id).await.unwrap_err(), "original client operation belongs to another control owner");
         assert!(pending[0].reference.is_none());
         assert!(client.pending_operations("receipts", "session-one", "composer").await.unwrap().is_empty());
         let operation = sent.prepare().await.unwrap();

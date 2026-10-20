@@ -18,7 +18,7 @@
  */
 
 //! Client-owned correlation and original receipts, independent of UI nodes.
-use crate::Result;
+use crate::{CONTROL_METHODS, Result, control_correlation};
 use maka_plugin_core::{
     composition::InstanceId,
     deployment::DeploymentRef,
@@ -245,6 +245,14 @@ impl Journal {
         let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(serde_json::to_string(key).map_err(error)?).fetch_all(&self.0).await.map_err(error)?;
+        rows.into_iter().map(decode_operation).collect()
+    }
+    pub(crate) async fn pending_controls(&self, host: &DeploymentRef) -> Result<Vec<Operation>> {
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner IS NULL AND json_extract(context,'$.endpoint')='agent' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?)) AND json_extract(context,'$.correlation')=? AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
+            .bind(&host.state_domain).bind(host.deployment.to_string())
+            .bind(serde_json::to_string(&CONTROL_METHODS).map_err(error)?)
+            .bind(control_correlation().to_string())
+            .fetch_all(&self.0).await.map_err(error)?;
         rows.into_iter().map(decode_operation).collect()
     }
     pub(crate) async fn observe(&self, operation: &Operation, receipt: &Receipt) -> Result<()> {

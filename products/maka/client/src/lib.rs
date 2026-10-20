@@ -43,6 +43,11 @@ use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, String>;
 
+const CONTROL_METHODS: [&str; 4] = ["create", "selectBackend", "stop", "respond"];
+fn control_correlation() -> Value {
+    serde_json::json!({"kind": "agent-control"})
+}
+
 /// A shell-owned scope over one launcher-selected, authenticated Host connection.
 /// Clones share custody; dropping a JS handle does not retire an accepted request.
 #[derive(Clone)]
@@ -194,6 +199,33 @@ impl Client {
             description,
         })
     }
+    /// Reserve a shell control attempt separately from composer draft sends.
+    pub async fn control(&self, id: Uuid, method: &str, input: Value) -> Result<Mutation> {
+        if !CONTROL_METHODS.contains(&method) {
+            return Err("unsupported agent control method".into());
+        }
+        let session_id = if method == "create" {
+            None
+        } else {
+            Some(
+                input
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .ok_or("agent control requires a sessionId")?
+                    .to_owned(),
+            )
+        };
+        self.mutation(
+            id,
+            "agent",
+            method,
+            input,
+            Attachments::new(),
+            session_id,
+            control_correlation(),
+        )
+        .await
+    }
     async fn draft_key(&self, endpoint: &str, session: &str, editor: &str) -> Result<DraftKey> {
         let host = self.0.host.lock().await;
         let target = host.catalogue().describe(endpoint)?;
@@ -290,6 +322,22 @@ impl Client {
     }
     pub async fn operation(&self, id: Uuid) -> Result<Operation> {
         self.0.journal.load(&self.0.source, id).await
+    }
+    /// A settled or abandoned original still retains its control owner.
+    pub async fn operation_for_control(&self, id: Uuid) -> Result<Operation> {
+        let operation = self.operation(id).await?;
+        if operation.draft.is_some()
+            || operation.endpoint != "agent"
+            || !CONTROL_METHODS.contains(&operation.method.as_str())
+            || operation.correlation != control_correlation()
+        {
+            return Err("original client operation belongs to another control owner".into());
+        }
+        Ok(operation)
+    }
+    /// Only this shell's unsettled Agent controls on the current Host deployment.
+    pub async fn pending_controls(&self) -> Result<Vec<Operation>> {
+        self.0.journal.pending_controls(&self.0.source).await
     }
     /// Check the immutable product owner independently of a mutable pending list.
     /// A settled or abandoned original still belongs to the same draft editor.

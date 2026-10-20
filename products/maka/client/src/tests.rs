@@ -70,7 +70,7 @@ impl Handler for CounterHandler {
         Box::pin(async move {
             match method.as_str() {
                 "read" => Ok(json!({"sent":owner.effects.load(Ordering::SeqCst)})),
-                "send" => {
+                "send" | "selectBackend" => {
                     owner.messages.lock().unwrap().push(input.clone());
                     if input.get("message").and_then(Value::as_str) == Some("reject") {
                         return Ok(
@@ -129,6 +129,7 @@ impl Fixture {
             "name":"test.Counter","version":1,"transport":"remote","interface":{"kind":"service","methods":{
                 "read":{"mode":"query","input":{},"output":{},"resources":{}},
                 "send":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
         })).unwrap();
@@ -229,7 +230,13 @@ impl Fixture {
                         consumer: InstanceId(vec![Uuid::from_u128(3)]),
                         import: "agent".into(),
                         grant: Grant {
-                            methods: ["read".into(), "send".into(), "watch".into()].into(),
+                            methods: [
+                                "read".into(),
+                                "send".into(),
+                                "selectBackend".into(),
+                                "watch".into(),
+                            ]
+                            .into(),
                             recovery: false,
                         },
                     },
@@ -303,11 +310,17 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
         let fixture = Fixture::new().await;
         fixture.counter.blocked.store(true,Ordering::SeqCst);
         let client = fixture.client().await;
+        assert_eq!(client.control(Uuid::new_v4(),"send",Value::Null).await.err().unwrap(),"unsupported agent control method");
+        let unrelated = client.mutation(Uuid::new_v4(),"agent","selectBackend",Value::Null,Attachments::new(),None,Value::Null).await.unwrap();
+        assert_eq!(client.operation_for_control(unrelated.id()).await.unwrap_err(),"original client operation belongs to another control owner");
+        unrelated.close().await.unwrap();
+        assert!(client.pending_controls().await.unwrap().is_empty());
         let id = Uuid::new_v4();
-        let mutation = send(&client,id).await;
+        let mutation = client.control(id,"selectBackend",json!({"sessionId":"session-one","text":"private draft text"})).await.unwrap();
+        assert_eq!(client.pending_controls().await.unwrap().iter().map(|operation| operation.id).collect::<Vec<_>>(),[id]);
         let original = mutation.prepare().await.unwrap();
         assert_eq!(original.session_id.as_deref(),Some("session-one"));
-        assert_eq!(original.correlation,json!({"draftRevision":7}));
+        assert_eq!(original.correlation,json!({"kind":"agent-control"}));
         assert_eq!(client.operation(id).await.unwrap().reference,original.reference);
         assert_eq!(client.query("agent","read",Value::Null).await.unwrap(),json!({"sent":0}));
         assert!(client.mutation(id,"agent","send",Value::Null,Attachments::new(),None,Value::Null).await.is_err());
@@ -330,6 +343,7 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         assert_eq!(client.pending_requests().await,1,"receipt recovery cannot settle a lost physical request");
+        assert!(client.pending_controls().await.unwrap().is_empty());
         drop(mutation);
         assert_eq!(client.pending_requests().await,1,"dropping a UI handle cannot discard shell custody");
         client.close().await.unwrap();
@@ -337,6 +351,7 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
         let restarted = fixture.client().await;
         let recovered = restarted.recover(id).await.unwrap();
         assert_eq!(recovered.reference,original.reference.unwrap());
+        assert_eq!(restarted.operation_for_control(id).await.unwrap().id,id);
         assert!(matches!(recovered.receipt,Receipt::Recorded {outcome:OperationOutcome::Returned {ref value},..} if value==&json!({"sent":1})));
         assert_eq!(restarted.query("agent","read",Value::Null).await.unwrap(),json!({"sent":1}));
         assert!(restarted.mutation(id,"agent","send",Value::Null,Attachments::new(),None,Value::Null).await.is_err());
