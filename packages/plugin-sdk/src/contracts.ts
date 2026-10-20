@@ -7295,6 +7295,19 @@ export const contracts = {
               position: {
                 $ref: '#/$defs/AgentSessionPosition',
               },
+              scope: {
+                $ref: '#/$defs/AgentSessionListScope',
+                default: {
+                  kind: 'all',
+                },
+              },
+              titleQuery: {
+                description:
+                  'Literal, case-sensitive title substring; an empty query matches all titles.',
+                type: 'string',
+                maxLength: 128,
+                default: '',
+              },
             },
             additionalProperties: false,
             required: ['filter', 'position'],
@@ -7369,6 +7382,54 @@ export const contracts = {
                     },
                     additionalProperties: false,
                     required: ['kind', 'revision', 'cursor'],
+                  },
+                ],
+              },
+              AgentSessionListScope: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'all',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      projectId: {
+                        type: 'string',
+                        format: 'uuid',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'project',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'projectId'],
+                  },
+                  {
+                    description:
+                      'Resolve the exact workspace from an owned session, never a caller path.',
+                    type: 'object',
+                    properties: {
+                      sessionId: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'workspace',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'sessionId'],
                   },
                 ],
               },
@@ -16287,6 +16348,19 @@ export const contracts = {
               position: {
                 $ref: '#/$defs/AgentSessionPosition',
               },
+              scope: {
+                $ref: '#/$defs/AgentSessionListScope',
+                default: {
+                  kind: 'all',
+                },
+              },
+              titleQuery: {
+                description:
+                  'Literal, case-sensitive title substring; an empty query matches all titles.',
+                type: 'string',
+                maxLength: 128,
+                default: '',
+              },
             },
             additionalProperties: false,
             required: ['filter', 'position'],
@@ -16361,6 +16435,54 @@ export const contracts = {
                     },
                     additionalProperties: false,
                     required: ['kind', 'revision', 'cursor'],
+                  },
+                ],
+              },
+              AgentSessionListScope: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'all',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      projectId: {
+                        type: 'string',
+                        format: 'uuid',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'project',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'projectId'],
+                  },
+                  {
+                    description:
+                      'Resolve the exact workspace from an owned session, never a caller path.',
+                    type: 'object',
+                    properties: {
+                      sessionId: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'workspace',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'sessionId'],
                   },
                 ],
               },

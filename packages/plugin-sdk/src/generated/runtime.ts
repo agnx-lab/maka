@@ -2972,6 +2972,18 @@ export type AgentSessionPosition =
       cursor: string;
       kind: 'before';
     };
+export type AgentSessionListScope =
+  | {
+      kind: 'all';
+    }
+  | {
+      projectId: string;
+      kind: 'project';
+    }
+  | {
+      sessionId: string;
+      kind: 'workspace';
+    };
 export type AgentWorkspaceSelection =
   | {
       selection: AgentDirectorySelection;
@@ -8805,6 +8817,11 @@ export interface SkillOverflowFailure {
 export interface AgentList {
   filter: AgentSessionFilter;
   position: AgentSessionPosition;
+  scope?: AgentSessionListScope;
+  /**
+   * Literal, case-sensitive title substring; an empty query matches all titles.
+   */
+  titleQuery?: string;
 }
 export interface AgentCreate {
   /**
