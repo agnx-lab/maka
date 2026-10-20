@@ -79,3 +79,5 @@ Window 可根据原 ClickInputState interruption 创建不可 clone 的 InputGes
 五个适配 crate 现固定到 `b836dd970b26830f2124b7cf91b0e19018fd12da`（`v0.1.10`）。清单采用上游 `script/prepare-release.ts` 的发布规范；九个 Fast 包统一解析为 0.1.10，支持快照及适配 scheduler 保持 0.3.9。发布的 WGPU 后端按上游受检适配使用 registry `wgpu =30.0.1`，其中不含上游尚未发布的 Vulkan surface-drop 修复。Kit 保持原固定版本，其 Fast 版本约束接受本次更新。新增 rounded-clip、composition 和 hot-reload 源码已纳入原始字节清单；无关示例及 iOS 实现不导入，由 registry 依赖提供。
 
 三方整合保留 Maka 原物理输入来源、实际发布的 IME-handler 槽位、选区上下文、定时器取消及原生清理回执。上游字段身份和 handler 恢复通知接入同一既有 owner。原生定时器补丁保留显式 async-io 依赖；profiler 计数器改用稳定的 `AtomicUsize::try_update` 替代弃用别名，保持原内存顺序和 checked subtraction。
+
+测试接口 `Window::painted_quads` 按渲染器实际引用路径读取最终 scene 的 rounded-clip 子组，保留 quad 原坐标与几何；保留的绘制操作和未引用的图层 frame 不作为已呈现输出。Kit 原表格四角断言不变。
