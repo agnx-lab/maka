@@ -355,7 +355,7 @@ impl Fixture {
         let bindings =
             maka_terminal_shell::bindings::Bindings::new(client, tokio::runtime::Handle::current());
         let mut view = AppView::new(AppOptions {
-            size: (120, 36),
+            size: evidence_size(),
             data_dir: Some(self.directory.path().join("nsh")),
             ui_sets: Some(vec![
                 nsh_ui_mobile::registry(),
@@ -541,6 +541,42 @@ pub async fn wait_draft(client: &Client, session: &str, text: &str) {
     })
     .await
     .expect("the editor did not persist its exact draft");
+}
+
+fn evidence_size() -> (u16, u16) {
+    if std::env::var_os("MAKA_NSH_EVIDENCE").is_none() {
+        return (120, 36);
+    }
+    match std::env::var("MAKA_NSH_EVIDENCE_SIZE").as_deref() {
+        Ok("80x24") => (80, 24),
+        Ok("120x36") | Err(_) => (120, 36),
+        Ok(size) => panic!("unsupported evidence size: {size}"),
+    }
+}
+
+pub fn evidence_cells(name: &str, view: &AppView) {
+    use ratatui::{buffer::CellWidth, layout::Rect, style::Color};
+    let Some(directory) = std::env::var_os("MAKA_NSH_EVIDENCE") else {
+        return;
+    };
+    let (columns, rows) = evidence_size();
+    let area = Rect::new(0, 0, columns, rows);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    view.render(area, &mut buffer);
+    let color = |value| match value {
+        Color::Rgb(r, g, b) => json!({"rgb":[r,g,b]}),
+        Color::Indexed(index) => json!({"indexed":index}),
+        value => json!({"named":format!("{value:?}")}),
+    };
+    let cells: Vec<Vec<_>> = (0..rows).map(|y| (0..columns).map(|x| {
+        let cell = &buffer[(x, y)];
+        json!({"symbol":cell.symbol(),"width":cell.cell_width(),"fg":color(cell.fg),"bg":color(cell.bg),"modifier":cell.modifier.bits()})
+    }).collect()).collect();
+    let directory = PathBuf::from(directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(format!("{name}-{columns}x{rows}.cells.json")), serde_json::to_vec(&json!({
+        "source":"NSH AppView::render / Ratatui Buffer","columns":columns,"rows":rows,"cellWidth":8,"cellHeight":16,"cells":cells
+    })).unwrap()).unwrap();
 }
 
 pub fn evidence(name: &str, snapshot: &str) {

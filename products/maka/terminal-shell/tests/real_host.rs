@@ -68,6 +68,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let (mut view, bindings) = fixture.view(client.clone(), None);
         let home = wait_view(&mut view, |screen| screen.contains("Make something remarkable.")).await;
         evidence("workbench-home", &home);
+        support::evidence_cells("workbench-home", &view);
 
         shortcut(&mut view, 'p');
         select_palette(&mut view, "Search commands…", "Sess", "Sessions").await;
@@ -100,6 +101,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let restored = wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Draft A stays in its own conversation") && screen.contains("Enter sends")).await;
         assert!(!restored.contains("Message B uses the selected model"));
         evidence("workbench-draft-after-switch", &restored);
+        support::evidence_cells("workbench-draft-after-switch", &view);
         shortcut(&mut view, 'o');
         select_palette(&mut view, "Search sessions…", &created_id, "New conversation").await;
         wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("Message B uses the selected model") && screen.contains("Enter sends")).await;
@@ -110,6 +112,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert!(!request.body.to_string().contains("Draft A stays in its own conversation"));
         request.delta("REAL_WORKBENCH_RUN_TO_STOP").await;
         wait_view(&mut view, |screen| screen.contains("REAL_WORKBENCH_RUN_TO_STOP")).await;
+        support::evidence_cells("workbench-streaming", &view);
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         let invocation = observed["run"]["invocationId"].as_str().filter(|id| !id.is_empty()).unwrap();
         shortcut(&mut view, 'p');
