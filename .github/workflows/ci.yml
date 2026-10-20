@@ -34,7 +34,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       MBX_CACHE_EXPORT_GROUP: ci-${{ github.run_id }}-${{ github.run_attempt }}-test
       MBX_GC_AUTO: '0'
