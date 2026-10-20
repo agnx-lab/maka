@@ -70,6 +70,18 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         view.surface().input_context().unwrap().text.as_deref(),
         Some(search)
     );
+    // The native field updates before its queued JS change handler. Commit
+    // that handler so an old matching row cannot admit Enter for a new query.
+    let (done, committed) = tokio::sync::oneshot::channel();
+    view.control()
+        .expect("the native app engine must be running")
+        .advance_clock(Duration::ZERO, move || {
+            let _ = done.send(());
+        });
+    tokio::time::timeout(Duration::from_secs(20), committed)
+        .await
+        .expect("the search input change did not commit")
+        .expect("the search engine stopped");
     wait_view(view, |screen| {
         screen.contains(&format!("› {choice}"))
             && screen.contains("Enter selects · Esc closes")
