@@ -1170,6 +1170,8 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
 async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_and_input() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    use maka_app_client::{Client, Journal};
+    use maka_host_runtime::application::host::Client as HostClient;
     const SIXEL: &[u8] = b"\x1bP9;1;0q\"1;1;";
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::registered_images().await;
@@ -1202,11 +1204,19 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         terminal.send(b"\x1b");
         terminal.wait_for_absent("Close · Esc").await;
         terminal.wait_for("Enter sends").await;
+        // Drafts belong to the client journal, not the Host. Observe the actual
+        // binary's journal rather than the fixture client's separate client.db.
+        let terminal_client = Client::new(
+            HostClient::connect(&fixture.address, None).await.unwrap(),
+            Journal::open(&fixture.directory.path().join("host/clients/terminal.sqlite")).await.unwrap(),
+            "receipts".into(),
+        ).unwrap();
+        assert_eq!(terminal_client.source(), client.source());
         // Complete late metadata interleaved between two literal paste events
         // must stay out of the durable editor without swallowing either paste.
         terminal.send("\x1b[200~GRAPHICS_INPUT_你\x1b[201~\x1b[?62;4c\x1b[6;17;9t\x1b[200~好_PRESERVED\x1b[201~".as_bytes());
         terminal.wait_for("GRAPHICS_INPUT_你好_PRESERVED").await;
-        support::wait_draft(&client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
+        support::wait_draft(&terminal_client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         terminal.send(b"\x1b[1;3B");
         terminal.wait_for("> Read").await;
@@ -1249,7 +1259,7 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         assert!(!terminal.wire()[after_resize..].windows(SIXEL.len()).any(|bytes| bytes == SIXEL), "late replies must not restore native images after resize");
         assert_eq!(terminal.wire().windows(3).filter(|bytes| *bytes == b"\x1b[c").count(), 1, "resize must not issue an unidentifiable second DA1 query");
         assert_eq!(terminal.wire().windows(5).filter(|bytes| *bytes == b"\x1b[16t").count(), 1);
-        support::wait_draft(&client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
+        support::wait_draft(&terminal_client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
         evidence("production-sixel-resize-wire", std::str::from_utf8(&terminal.wire()[after_resize..]).unwrap());
         evidence("production-sixel-resize-unicode", &wide);
         request.delta("GRAPHICS_RUN_CONTINUES_AFTER_RESIZE").await;
@@ -1260,6 +1270,7 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "metadata, resize and draft input must not send or stop the real turn");
         terminal.send(b"\x11");
         terminal.finish().await;
+        terminal_client.close().await.unwrap();
         client.close().await.unwrap();
         fixture.finish().await;
     }).await.expect("production Sixel negotiation and resize workflow timed out");
