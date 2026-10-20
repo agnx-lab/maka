@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, effect, mount, signal, Text, View } from 'nsh';
+import { cleanup, effect, inputAction, mount, signal, Text, View } from 'nsh';
 import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { host } from 'maka/host';
@@ -31,9 +31,10 @@ import type { PaletteEntry, PaletteKind } from './Palette';
 import { InteractionPanel } from './InteractionPanel';
 import logo from './assets/maka.png';
 
-type Overlay =
+type Overlay = { instance: number } & (
   | { kind: PaletteKind; sessionId: string | null }
-  | { kind: 'interaction'; sessionId: string; requestId: string };
+  | { kind: 'interaction'; sessionId: string; requestId: string });
+type CommandContext = { instance: number; sessionId: string | null };
 function App() {
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
@@ -55,6 +56,7 @@ function App() {
   let handle: ConversationHandle | null = null;
   let alive = true;
   let controlRead = 0;
+  let overlayInstance = 0;
   cleanup(() => {
     alive = false;
   });
@@ -78,8 +80,8 @@ function App() {
           .sort((a: any, b: any) => b.updatedAt - a.updatedAt),
       );
   };
-  const switchSession = async (id: string) => {
-    if (!alive || selected() === id || switching()) return;
+  const switchSession = async (id: string, expectedSessionId = selected()) => {
+    if (!alive || selected() !== expectedSessionId || selected() === id || switching()) return;
     switching.set(true);
     try {
       if (handle && !(await handle.flushDraft())) return;
@@ -125,13 +127,19 @@ function App() {
       if (method !== 'stop' && alive) busy.set(false);
     }
   };
-  const open = (kind: PaletteKind) => {
-    if (kind === 'models' && !selected()) {
+  const closeOverlay = (instance: number) => {
+    if (!alive || overlay()?.instance !== instance) return false;
+    overlay.set(null);
+    return true;
+  };
+  const open = ({ kind, sessionId }: { kind: PaletteKind; sessionId: string | null }) => {
+    if (!alive || selected() !== sessionId) return;
+    if (kind === 'models' && sessionId === null) {
       status.set('Open or create a conversation before choosing its model.');
       return;
     }
     status.set('');
-    overlay.set({ kind, sessionId: selected() });
+    overlay.set({ kind, sessionId, instance: ++overlayInstance });
   };
   const chooseModel = async (sessionId: string, choice: any) => {
     try {
@@ -170,71 +178,119 @@ function App() {
       if (result.kind !== 'created')
         throw new Error(`Conversation creation rejected: ${result.reason ?? result.kind}`);
       await switchSession(result.session.id);
-      if (selected() === result.session.id) open('models');
+      if (selected() === result.session.id) open({ kind: 'models', sessionId: result.session.id });
       await loadRecent();
     } catch (reason) {
       report(reason);
     }
   };
-  const newConversation = () => {
-    const sessionId = selected();
+  const newConversation = (sessionId: string | null) => {
+    if (!alive || selected() !== sessionId) return;
     if (sessionId) void create({ kind: 'session', sessionId });
-    else open('workspaces');
+    else open({ kind: 'workspaces', sessionId });
   };
   const stop = () => {
-    void handle?.stop().catch(report);
+    if (handle) void handle.stop(handle.invocation()).catch(report);
   };
-  const commands = (): PaletteEntry[] => [
+  const closeCommand = (context: CommandContext) =>
+    alive &&
+    selected() === context.sessionId &&
+    (context.sessionId === null || handle?.sessionId === context.sessionId) &&
+    closeOverlay(context.instance);
+  const commandSessions = (context: CommandContext) => {
+    if (closeCommand(context)) open({ kind: 'sessions', sessionId: context.sessionId });
+  };
+  const commandNew = (context: CommandContext) => {
+    if (closeCommand(context)) newConversation(context.sessionId);
+  };
+  const commandModels = (context: CommandContext) => {
+    if (closeCommand(context)) open({ kind: 'models', sessionId: context.sessionId });
+  };
+  const commandLatest = (context: CommandContext & { turnId: string | null }) => {
+    if (closeCommand(context)) handle?.jumpLatest(context.turnId);
+  };
+  const commandHistory = (context: CommandContext) => {
+    if (closeCommand(context)) handle?.focusHistory();
+  };
+  const commandActivity = (context: CommandContext & { turnId: string | null }) => {
+    if (closeCommand(context)) handle?.focusActivity(context.turnId);
+  };
+  const commandStop = (context: CommandContext & { invocationId: string | null }) => {
+    if (closeCommand(context)) void handle?.stop(context.invocationId).catch(report);
+  };
+  const commands = (context: CommandContext): PaletteEntry[] => [
     {
       id: 'sessions',
       title: 'Sessions',
       detail: 'Resume a conversation',
       hint: 'Ctrl+O',
-      run: () => open('sessions'),
+      run: inputAction(commandSessions, context),
     },
     {
       id: 'new',
       title: 'New conversation',
       detail: 'A fresh start in your workspace',
       hint: 'Ctrl+N',
-      run: newConversation,
+      run: inputAction(commandNew, context),
     },
     {
       id: 'models',
       title: 'Models',
       detail: 'Choose the model for this conversation',
       hint: 'Ctrl+G',
-      run: () => open('models'),
+      run: inputAction(commandModels, context),
     },
     {
       id: 'latest',
       title: 'Jump to latest',
       detail: 'Return to the newest messages',
-      run: () => handle?.jumpLatest(),
+      run: inputAction(commandLatest, {
+        instance: context.instance,
+        sessionId: context.sessionId,
+        turnId: handle?.sessionId === context.sessionId ? handle.activeTurn() : null,
+      }),
     },
     {
       id: 'history-focus',
       title: 'Focus conversation',
       detail: 'Scroll the whole conversation',
       hint: 'Alt+↑',
-      run: () => handle?.focusHistory(),
+      run: inputAction(commandHistory, context),
     },
     {
       id: 'activity-focus',
       title: 'Focus activity',
       detail: 'Read this turn’s independent activity panel',
       hint: 'Alt+↓',
-      run: () => handle?.focusActivity(),
+      run: inputAction(commandActivity, {
+        instance: context.instance,
+        sessionId: context.sessionId,
+        turnId: handle?.sessionId === context.sessionId ? handle.activityTurn() : null,
+      }),
     },
-    { id: 'stop', title: 'Stop', detail: 'Cancel the current run', hint: 'Esc', run: stop },
+    {
+      id: 'stop',
+      title: 'Stop',
+      detail: 'Cancel the current run',
+      hint: 'Esc',
+      run: inputAction(commandStop, {
+        instance: context.instance,
+        sessionId: context.sessionId,
+        invocationId: handle?.sessionId === context.sessionId ? handle.invocation() : null,
+      }),
+    },
   ];
-  keymap.bind('mod+p', () => open('commands'), { when: 'always' });
-  keymap.bind('mod+o', () => open('sessions'), { when: 'always' });
-  keymap.bind('mod+g', () => open('models'), { when: 'always' });
-  keymap.bind('mod+n', newConversation, { when: 'always' });
-  keymap.bind('mod+l', () => handle?.jumpLatest(), { when: 'always' });
+  keymap.bind('mod+p', () => open({ kind: 'commands', sessionId: selected() }), { when: 'always' });
+  keymap.bind('mod+o', () => open({ kind: 'sessions', sessionId: selected() }), { when: 'always' });
+  keymap.bind('mod+g', () => open({ kind: 'models', sessionId: selected() }), { when: 'always' });
+  keymap.bind('mod+n', () => newConversation(selected()), { when: 'always' });
+  keymap.bind('mod+l', () => {
+    if (handle) handle.jumpLatest(handle.activeTurn());
+  }, { when: 'always' });
   keymap.bind('alt+up', () => handle?.focusHistory(), { when: 'always' });
-  keymap.bind('alt+down', () => handle?.focusActivity(), { when: 'always' });
+  keymap.bind('alt+down', () => {
+    if (handle) handle.focusActivity(handle.activityTurn());
+  }, { when: 'always' });
   effect(() => {
     if (!overlay()) keymap.bind('escape', stop, { when: 'always' });
   });
@@ -252,7 +308,8 @@ function App() {
           const result = returned(reply);
           if (original.method === 'create' && result.kind === 'created') {
             await switchSession(result.session.id);
-            if (selected() === result.session.id && !result.session.backend) open('models');
+            if (selected() === result.session.id && !result.session.backend)
+              open({ kind: 'models', sessionId: result.session.id });
           }
         } catch (reason) {
           report(reason);
@@ -276,13 +333,23 @@ function App() {
       report(reason);
     }
   };
+  const selectRecent = ({ sessionId }: { sessionId: string }) => {
+    if (selected() === null) void switchSession(sessionId);
+  };
+  const openInteraction = ({ sessionId, requestId }: { sessionId: string; requestId: string }) => {
+    if (!alive || selected() !== sessionId) return;
+    overlay.set({ kind: 'interaction', sessionId, requestId, instance: ++overlayInstance });
+  };
   void loadRecent().catch(report);
   void refreshControls().catch(report);
   return (
     <View style={{ flex: 1, backgroundColor: C.background }}>
       <If when={selected() === null}>
         <View style={{ flex: 1 }}>
-          <Header title="Your terminal, amplified." commands={() => open('commands')} />
+          <Header
+            title="Your terminal, amplified."
+            commands={inputAction(open, { kind: 'commands', sessionId: null })}
+          />
           <View
             style={{
               flex: 1,
@@ -303,16 +370,14 @@ function App() {
             </If>
             <Text style={{ color: C.accent, fontWeight: '700' }}>Make something remarkable.</Text>
             <Text style={{ color: C.muted }}>A quiet place for ambitious work.</Text>
-            <Button onPress={newConversation} style={{ paddingVertical: 16 }}>
+            <Button onPress={inputAction(newConversation, null)} style={{ paddingVertical: 16 }}>
               <Text style={{ color: C.text }}>+ New conversation · Ctrl+N</Text>
             </Button>
             <Each of={recent().slice(0, homeRecentLimit())} key={(session) => session.id}>
               {(session) => (
                 <Button
                   disabled={switching()}
-                  onPress={() => {
-                    void switchSession(session().id);
-                  }}
+                  onPress={inputAction(selectRecent, { sessionId: session().id })}
                   style={{ paddingVertical: 0 }}
                 >
                   <Text numberOfLines={1} style={{ color: C.text }}>
@@ -324,7 +389,7 @@ function App() {
                 </Button>
               )}
             </Each>
-            <Button onPress={() => open('sessions')}>
+            <Button onPress={inputAction(open, { kind: 'sessions', sessionId: null })}>
               <Text style={{ color: C.muted }}>All conversations · Ctrl+O</Text>
             </Button>
             <Text style={{ color: C.muted }}>Ctrl+P commands · Ctrl+Q exits</Text>
@@ -336,11 +401,9 @@ function App() {
           <Conversation
             client={host.session(id())}
             control={control}
-            commands={() => open('commands')}
-            models={() => open('models')}
-            interaction={(sessionId, requestId) =>
-              overlay.set({ kind: 'interaction', sessionId, requestId })
-            }
+            commands={inputAction(open, { kind: 'commands', sessionId: id() })}
+            models={inputAction(open, { kind: 'models', sessionId: id() })}
+            interaction={openInteraction}
             attach={(next) => {
               handle = next;
             }}
@@ -370,9 +433,7 @@ function App() {
           <If when={!controlsKnown() || controls().length > 0}>
             <Button
               disabled={recovering()}
-              onPress={() => {
-                void recoverControls();
-              }}
+              onPress={inputAction(recoverControls, null)}
             >
               <Text style={{ color: C.warning }}>
                 {recovering()
@@ -388,9 +449,7 @@ function App() {
             >
               {(original) => (
                 <Button
-                  onPress={() => {
-                    void abandonControl(original().id);
-                  }}
+                  onPress={inputAction(abandonControl, original().id)}
                 >
                   <Text style={{ color: C.warning }}>
                     Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
@@ -403,9 +462,7 @@ function App() {
       </If>
       <Each
         of={overlay() ? [overlay()!] : []}
-        key={(value: Overlay) =>
-          `${value.kind}/${value.sessionId}/${'requestId' in value ? value.requestId : ''}`
-        }
+        key={(value: Overlay) => value.instance}
       >
         {(value) => (
           <If
@@ -415,15 +472,16 @@ function App() {
                 sessionId={value().sessionId!}
                 requestId={(value() as any).requestId}
                 control={control}
-                close={() => overlay.set(null)}
+                close={inputAction(closeOverlay, value().instance)}
               />
             }
           >
             <Palette
               kind={value().kind as PaletteKind}
               sessionId={value().sessionId}
-              commands={commands()}
-              close={() => overlay.set(null)}
+              instance={value().instance}
+              commands={commands({ instance: value().instance, sessionId: value().sessionId })}
+              close={closeOverlay}
               selectSession={switchSession}
               create={create}
               chooseModel={chooseModel}

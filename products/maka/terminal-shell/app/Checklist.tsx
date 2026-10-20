@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { batch, cleanup, signal, Text, View } from 'nsh';
+import { batch, cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { windowSize } from 'nsh/device';
@@ -53,6 +53,11 @@ export function Checklist(props: { sessionId: string }) {
   let stream: Subscription | null = null;
   const marker = (item: ChecklistItem) =>
     item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '›' : '·';
+  const setExpanded = (action: { sessionId: string; open: boolean }) => {
+    const page = snapshot();
+    if (!alive || action.sessionId !== sessionId || !page?.enabled || page.total === 0) return;
+    expanded.set(action.open);
+  };
   const loadMore = async () => {
     const page = snapshot();
     const offset = nextOffset();
@@ -117,7 +122,7 @@ export function Checklist(props: { sessionId: string }) {
       <View style={{ backgroundColor: C.surface, borderRadius: 8 }}>
         <Button
           selected={expanded()}
-          onPress={() => expanded.set(!expanded())}
+          onPress={inputAction(setExpanded, { sessionId, open: !expanded() })}
           style={{ height: 16, paddingHorizontal: 16, flexDirection: 'row', gap: 8 }}
           hoverStyle={{ backgroundColor: C.raised }}
           focusStyle={{ backgroundColor: C.line }}

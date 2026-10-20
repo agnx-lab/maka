@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, computed, effect, signal, Text, View } from 'nsh';
+import { cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import type { AnimatedValue } from 'nsh/animated';
@@ -181,6 +181,25 @@ export function TurnPanel(props: {
     if (chosen && chosen.completed === props.turn().completed) return chosen.open;
     return props.trajectory() || active() || outcome() !== 'completed';
   };
+  const setExpanded = (action: {
+    sessionId: string;
+    key: string;
+    turnId: string;
+    completed: boolean;
+    open: boolean;
+  }) => {
+    const turn = props.turn();
+    if (
+      action.sessionId !== props.sessionId ||
+      action.key !== turn.key ||
+      action.turnId !== turn.turnId ||
+      action.completed !== turn.completed ||
+      turn.rows.length === 0
+    )
+      return;
+    props.state.expanded.set({ open: action.open, completed: action.completed });
+    if (action.open) props.reveal();
+  };
   effect(() => {
     if (!active() || startedAt() === null) return;
     const timer = setInterval(() => clock.set(Date.now()), 1000);
@@ -216,11 +235,13 @@ export function TurnPanel(props: {
       <Button
         disabled={props.turn().rows.length === 0}
         selected={expanded()}
-        onPress={() => {
-          const open = !expanded();
-          props.state.expanded.set({ open, completed: props.turn().completed });
-          if (open) props.reveal();
-        }}
+        onPress={inputAction(setExpanded, {
+          sessionId: props.sessionId,
+          key: props.turn().key,
+          turnId: props.turn().turnId,
+          completed: props.turn().completed,
+          open: !expanded(),
+        })}
         style={{ height: 16, flexDirection: 'row' }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}

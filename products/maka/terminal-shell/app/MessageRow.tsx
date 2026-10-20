@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, computed, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { host } from 'maka/host';
 import { messageKey, type Position, type Row } from './history';
@@ -26,6 +26,11 @@ import { C } from './ui';
 export type MessageViewState = {
   expanded: ReturnType<typeof signal<boolean>>;
   sourceMode: ReturnType<typeof signal<boolean>>;
+};
+type MessageRowToggle = {
+  sessionId: string;
+  key: string;
+  value: boolean;
 };
 type MessageBlock = {
   key: number;
@@ -216,7 +221,15 @@ function MessageSource({
         <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
       </If>
       <If when={!complete()}>
-        <Button disabled={!error()} onPress={() => void read()} style={{ height: 16 }}>
+        <Button
+          disabled={!error()}
+          onPress={inputAction(read, {
+            sessionId: original.sessionId,
+            key: original.key,
+            through: original.through,
+          })}
+          style={{ height: 16 }}
+        >
           <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
             {error() ? 'Retry original source' : 'Reading…'} · {messageBytes(content())}/
             {total() ?? '?'} bytes
@@ -243,6 +256,15 @@ export function MessageRow({
       {(row) => {
         const expanded = viewState?.expanded ?? signal(false),
           sourceMode = viewState?.sourceMode ?? signal(false);
+        const ownsRow = (action: MessageRowToggle) => {
+          return action.sessionId === sessionId && action.key === messageKey(row());
+        };
+        const setSourceMode = (action: MessageRowToggle) => {
+          if (ownsRow(action)) sourceMode.set(action.value);
+        };
+        const setExpanded = (action: MessageRowToggle) => {
+          if (ownsRow(action)) expanded.set(action.value);
+        };
         const text = computed(() => row().text);
         const blocks = computed(() =>
           row().tool ||
@@ -344,7 +366,11 @@ export function MessageRow({
                       </If>
                       <Button
                         selected={sourceMode()}
-                        onPress={() => sourceMode.set(!sourceMode())}
+                        onPress={inputAction(setSourceMode, {
+                          sessionId,
+                          key: messageKey(row()),
+                          value: !sourceMode(),
+                        })}
                         style={{ height: 16, alignSelf: 'flex-end' }}
                       >
                         <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
@@ -356,7 +382,11 @@ export function MessageRow({
                 >
                   <Button
                     selected={expanded()}
-                    onPress={() => expanded.set(!expanded())}
+                    onPress={inputAction(setExpanded, {
+                      sessionId,
+                      key: messageKey(row()),
+                      value: !expanded(),
+                    })}
                     style={{ height: 16, paddingVertical: 0 }}
                   >
                     <Text

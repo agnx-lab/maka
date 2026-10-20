@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { batch, cleanup, computed, effect, Input, signal, Text, View } from 'nsh';
+import { batch, cleanup, computed, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -34,23 +34,32 @@ import type { TranscriptItem, TurnItem, TurnViewState } from './TurnPanel';
 
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = {
+  sessionId: string;
+  invocation(): string | null;
+  activeTurn(): string | null;
+  activityTurn(): string | null;
   flushDraft(): Promise<boolean>;
   focus(): void;
-  jumpLatest(): void;
-  stop(): Promise<void>;
+  jumpLatest(turnId: string | null): void;
+  stop(invocationId: string | null): Promise<void>;
   refresh(): Promise<any>;
   focusHistory(): void;
-  focusActivity(): void;
+  focusActivity(turnId: string | null): void;
 };
 type ConversationProps = {
   client: any;
   control: Control;
   models(): void;
   commands(): void;
-  interaction(sessionId: string, requestId: string): void;
+  interaction(target: { sessionId: string; requestId: string }): void;
   attach(handle: ConversationHandle): void;
   detach(handle: ConversationHandle): void;
 };
+type BackendIdentity = {
+  connectionId: string;
+  modelId: string;
+  thinkingLevel: string | null;
+} | null;
 function receiptMessage(reply: any): string {
   const receipt = reply?.receipt;
   if (receipt?.kind === 'recorded' && receipt.outcome?.kind === 'returned') {
@@ -551,10 +560,23 @@ export function Conversation(props: ConversationProps) {
     }
   };
 
-  const selection = async () => {
+  const backendIdentity = (value: any): BackendIdentity => value?.kind === 'model'
+    ? {
+      connectionId: value.connectionId,
+      modelId: value.modelId,
+      thinkingLevel: value.thinkingLevel ?? null,
+    }
+    : null;
+  const sameBackend = (left: BackendIdentity, right: BackendIdentity) =>
+    left === null || right === null ? left === right :
+      left.connectionId === right.connectionId && left.modelId === right.modelId &&
+      left.thinkingLevel === right.thinkingLevel;
+  const selection = async (expectedBackend?: BackendIdentity) => {
     const observed = await observe();
     if (!alive) return null;
     const backend = observed.session.backend ?? observed.rememberedBackend;
+    if (expectedBackend !== undefined && !sameBackend(backendIdentity(backend), expectedBackend))
+      throw new Error('The model changed before confirmation. Send again to confirm it.');
     if (backend?.kind !== 'model') throw new Error('Choose a model with Ctrl+G before sending.');
     const resolved = await host.query('settings', 'resolveModel', {
       connectionId: backend.connectionId,
@@ -605,7 +627,7 @@ export function Conversation(props: ConversationProps) {
       return 'Sending waits for the original receipt; it will not be replayed.';
     return '';
   };
-  const send = async (text: string) => {
+  const send = async (text: string, expectedBackend?: BackendIdentity) => {
     if (!alive || !text.trim()) return;
     if (sendBlockedReason()) {
       notice.set(
@@ -618,13 +640,15 @@ export function Conversation(props: ConversationProps) {
     sending.set(true);
     error.set('');
     try {
-      const model = await selection();
+      const model = await selection(expectedBackend);
       if (!alive || model === null) return;
       await flushDraft();
       if (!alive) return;
       if (savingFailed()) throw new Error('The draft could not be saved; it has not been sent.');
       if (editEpoch !== epoch)
         throw new Error('The draft changed before confirmation. Send again to confirm it.');
+      if (expectedBackend !== undefined && !sameBackend(backendIdentity(backend()), expectedBackend))
+        throw new Error('The model changed before confirmation. Send again to confirm it.');
       // The native journal consumes only this exact revision. New edits keep
       // saving while confirmation waits and never inherit this send attempt.
       receiptsKnown.set(false);
@@ -714,9 +738,8 @@ export function Conversation(props: ConversationProps) {
     }
   };
 
-  const stop = async () => {
-    const invocationId = invocation();
-    if (!alive || !invocationId || stopping()) return;
+  const stop = async (invocationId: string | null) => {
+    if (!alive || !invocationId || invocation() !== invocationId || stopping()) return;
     stoppingRun.set(invocationId);
     try {
       const result = await props.control('stop', { sessionId, invocationId });
@@ -728,7 +751,28 @@ export function Conversation(props: ConversationProps) {
       report(reason);
     }
   };
+  const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
+    if (alive && owner === sessionId) reading.set(mode);
+  };
+  const sendRendered = ({ owner, text, backend: expectedBackend }: {
+    owner: string;
+    text: string;
+    backend: BackendIdentity;
+  }) => {
+    if (
+      !alive || owner !== sessionId || draft() !== text ||
+      !sameBackend(backendIdentity(backend()), expectedBackend)
+    ) return;
+    void send(text, expectedBackend);
+  };
   const ownHandle: ConversationHandle = {
+    sessionId,
+    invocation,
+    activeTurn: runTurn,
+    activityTurn: () => {
+      const item = display().findLast((item) => item.kind === 'turn');
+      return item?.kind === 'turn' ? item.turnId : null;
+    },
     async flushDraft() {
       if (!draftReady()) {
         notice.set('Wait for the saved draft before switching.');
@@ -743,8 +787,8 @@ export function Conversation(props: ConversationProps) {
     focusHistory() {
       list?.focus();
     },
-    focusActivity() {
-      const index = display().findLastIndex((item) => item.kind === 'turn');
+    focusActivity(turnId) {
+      const index = display().findIndex((item) => item.kind === 'turn' && item.turnId === turnId);
       const turn = display()[index];
       if (turn?.kind !== 'turn') return;
       list?.scrollToIndex({ index, viewPosition: 0 });
@@ -756,8 +800,8 @@ export function Conversation(props: ConversationProps) {
         state.list.focus();
       }
     },
-    jumpLatest() {
-      if (runTurn()) turnStates.get(runTurn()!)?.list?.scrollToEnd({ animated: false });
+    jumpLatest(turnId) {
+      if (turnId !== null) turnStates.get(turnId)?.list?.scrollToEnd({ animated: false });
       list?.scrollToEnd({ animated: false });
       editor?.focus();
     },
@@ -821,7 +865,7 @@ export function Conversation(props: ConversationProps) {
         <Button
           role="tab"
           selected={reading() === 'chat'}
-          onPress={() => reading.set('chat')}
+          onPress={inputAction(chooseReading, { owner: sessionId, mode: 'chat' })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
           activeStyle={{ backgroundColor: C.line }}
@@ -838,7 +882,7 @@ export function Conversation(props: ConversationProps) {
         <Button
           role="tab"
           selected={reading() === 'trajectory'}
-          onPress={() => reading.set('trajectory')}
+          onPress={inputAction(chooseReading, { owner: sessionId, mode: 'trajectory' })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
           activeStyle={{ backgroundColor: C.line }}
@@ -930,7 +974,9 @@ export function Conversation(props: ConversationProps) {
         </View>
         <If when={interactions().entries.length > 0}>
           <Button
-            onPress={() => props.interaction(sessionId, interactions().entries[0].requestId)}
+            onPress={inputAction(props.interaction, {
+              sessionId, requestId: interactions().entries[0].requestId,
+            })}
             style={{ padding: 8, backgroundColor: C.surface }}
           >
             <Text style={{ color: C.warning }}>
@@ -949,9 +995,7 @@ export function Conversation(props: ConversationProps) {
         <If when={draftReady() && (!receiptsKnown() || unresolved().length > 0)}>
           <Button
             disabled={recovering() || sending()}
-            onPress={() => {
-              void recover();
-            }}
+            onPress={inputAction(recover, null)}
             style={{ paddingVertical: 16 }}
           >
             <Text style={{ color: C.warning }}>
@@ -966,9 +1010,7 @@ export function Conversation(props: ConversationProps) {
               <If when={!original().reference}>
                 <Button
                   disabled={recovering() || sending()}
-                  onPress={() => {
-                    void abandon(operationId);
-                  }}
+                  onPress={inputAction(abandon, operationId)}
                   style={{ paddingVertical: 16 }}
                 >
                   <Text style={{ color: C.warning }}>
@@ -1035,9 +1077,7 @@ export function Conversation(props: ConversationProps) {
               <Button
                 disabled={stopping()}
                 accessibilityLabel="Stop response"
-                onPress={() => {
-                  void stop();
-                }}
+                onPress={inputAction(stop, invocation())}
                 style={{ backgroundColor: C.accent, paddingHorizontal: 8, borderRadius: 8 }}
                 hoverStyle={{ backgroundColor: C.accentHover }}
                 focusStyle={{ backgroundColor: C.accentHover }}
@@ -1052,9 +1092,9 @@ export function Conversation(props: ConversationProps) {
             <Button
               accessibilityLabel="Send message"
               disabled={!!sendBlockedReason() || !draft().trim()}
-              onPress={() => {
-                void send(draft());
-              }}
+              onPress={inputAction(sendRendered, {
+                owner: sessionId, text: draft(), backend: backendIdentity(backend()),
+              })}
               style={{
                 backgroundColor: C.accent,
                 paddingHorizontal: 8,

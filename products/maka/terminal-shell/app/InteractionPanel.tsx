@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, effect, Input, signal, Scroll, Text, View } from 'nsh';
+import { cleanup, effect, inputAction, Input, signal, Scroll, Text, View } from 'nsh';
 import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
@@ -25,6 +25,8 @@ import { Button, Dialog } from 'nsh/base';
 import { C } from './ui';
 
 type InteractionControl = (method: string, input: unknown) => Promise<any>;
+type InteractionScope = 'once' | 'turn' | 'session';
+type InteractionOwner = { sessionId: string; requestId: string };
 type InteractionQuestion = {
   question: string;
   options: Array<{ label: string; description?: string }>;
@@ -99,7 +101,7 @@ export function InteractionPanel({
     uncertain = signal(false);
   const pending = signal(false),
     error = signal('');
-  const scope = signal<'once' | 'turn' | 'session'>('once');
+  const scope = signal<InteractionScope>('once');
   const answers = signal<Array<{ other: boolean; value: string | null | undefined }>>([]);
   const argumentsText = signal(''),
     argumentTotal = signal<number | null>(null);
@@ -113,6 +115,19 @@ export function InteractionPanel({
   const request = () => record()?.request;
   const sameRecord = (value: any) =>
     value?.sessionId === sessionId && value?.requestId === requestId;
+  const ownsAction = (owner: InteractionOwner) =>
+    alive && owner.sessionId === sessionId && owner.requestId === requestId;
+  const questionIdentity = () =>
+    request()?.kind === 'question' ? JSON.stringify(request().questions) : null;
+  const sourceIdentity = (original = request()) =>
+    original?.kind === 'service_approval'
+      ? JSON.stringify({
+          kind: original.kind,
+          through: original.through,
+          toolUseId: original.toolUseId,
+          toolName: original.toolName,
+        })
+      : null;
   const originalPending = async () =>
     (await host.pendingControls()).some(
       (original: any) =>
@@ -139,12 +154,44 @@ export function InteractionPanel({
         current.map((part, i) => (i === index ? { other, value } : part)),
       );
   };
-  const readArguments = async () => {
-    if (argumentBusy() || completeArguments() || request()?.kind !== 'service_approval') return;
+  const chooseRendered = (
+    choice: InteractionOwner & {
+      index: number;
+      questionJSON: string;
+      value: string | null;
+      other: boolean;
+    },
+  ) => {
+    if (
+      !ownsAction(choice) ||
+      request()?.kind !== 'question' ||
+      JSON.stringify(request().questions[choice.index]) !== choice.questionJSON
+    )
+      return;
+    choose(choice.index, choice.value, choice.other);
+  };
+  const chooseScope = (choice: InteractionOwner & { value: InteractionScope }) => {
+    if (
+      !ownsAction(choice) ||
+      blocked() ||
+      request()?.kind !== 'permissions' ||
+      (choice.value === 'once' && request().toolUseId === null)
+    )
+      return;
+    scope.set(choice.value);
+  };
+  const readArguments = async (original = request()) => {
+    if (
+      !alive ||
+      argumentBusy() ||
+      completeArguments() ||
+      original?.kind !== 'service_approval' ||
+      sourceIdentity(original) !== sourceIdentity()
+    )
+      return;
     argumentBusy.set(true);
     argumentError.set('');
-    const original = request(),
-      offset = interactionBytes(argumentsText());
+    const offset = interactionBytes(argumentsText());
     try {
       const page = await host.query('agent', 'source', {
         sessionId,
@@ -153,7 +200,7 @@ export function InteractionPanel({
         field: 'arguments',
         position: offset === 0 ? { kind: 'start' } : { kind: 'after', offset },
       });
-      if (!alive) return;
+      if (!alive || sourceIdentity(original) !== sourceIdentity()) return;
       const source = page.source,
         call = source?.tool?.call;
       const equalPosition = (a: any, b: any) =>
@@ -186,9 +233,14 @@ export function InteractionPanel({
     } finally {
       if (alive) {
         argumentBusy.set(false);
-        if (!completeArguments() && !argumentError()) void readArguments();
+        if (!completeArguments() && !argumentError()) void readArguments(original);
       }
     }
+  };
+  const readRenderedArguments = (owner: InteractionOwner & { sourceJSON: string | null }) => {
+    if (!ownsAction(owner) || owner.sourceJSON === null || owner.sourceJSON !== sourceIdentity())
+      return;
+    void readArguments(JSON.parse(owner.sourceJSON));
   };
   const refresh = async () => {
     if (loading() || busy()) return;
@@ -214,7 +266,8 @@ export function InteractionPanel({
       if (canonical.request.kind === 'question' && answers().length === 0) {
         answers.set(canonical.request.questions.map(() => ({ other: false, value: undefined })));
       }
-      if (canonical.request.kind === 'service_approval' && !canonical.outcome) void readArguments();
+      if (canonical.request.kind === 'service_approval' && !canonical.outcome)
+        void readArguments(canonical.request);
     } catch (reason) {
       if (alive) {
         uncertain.set(true);
@@ -223,6 +276,9 @@ export function InteractionPanel({
     } finally {
       if (alive) loading.set(false);
     }
+  };
+  const refreshRendered = (owner: InteractionOwner) => {
+    if (ownsAction(owner)) void refresh();
   };
   const respond = async (answer: any) => {
     if (blocked() || answer.kind !== request()?.kind) return;
@@ -265,35 +321,76 @@ export function InteractionPanel({
       if (alive) busy.set(false);
     }
   };
-  const submit = () => {
+  const submissionAnswer = () => {
     const current = request();
-    if (blocked() || !current) return;
+    if (!current) return null;
     if (current.kind === 'service_approval') {
       if (completeArguments() && !argumentBusy() && !argumentError())
-        void respond({ kind: current.kind, decision: 'allow' });
+        return { kind: current.kind, decision: 'allow' };
     } else if (current.kind === 'permissions') {
-      if (scope() === 'once' && current.toolUseId === null) return;
-      void respond({
+      if (scope() === 'once' && current.toolUseId === null) return null;
+      return {
         kind: current.kind,
         decision: { decision: 'allow', scope: scope(), permissions: current.request.permissions },
-      });
+      };
     } else if (current.kind === 'question') {
-      const values = answers();
-      if (!questionReady()) {
-        error.set(
-          'Answer every question or explicitly choose Skip. Other answers must fit in 2048 UTF-8 bytes.',
-        );
-        return;
-      }
-      void respond({ kind: 'question', answers: values.map((part) => part.value) });
+      if (questionReady())
+        return { kind: 'question', answers: answers().map((part) => part.value) };
     }
+    return null;
+  };
+  const submit = () => {
+    if (blocked()) return;
+    if (request()?.kind === 'question' && !questionReady()) {
+      error.set(
+        'Answer every question or explicitly choose Skip. Other answers must fit in 2048 UTF-8 bytes.',
+      );
+      return;
+    }
+    const answer = submissionAnswer();
+    if (answer) void respond(answer);
+  };
+  const denialAnswer = () => {
+    const kind = request()?.kind;
+    if (kind === 'service_approval') return { kind, decision: 'deny' };
+    if (kind === 'permissions') return { kind, decision: { decision: 'deny' } };
+    if (kind === 'form') return { kind, action: 'decline' };
+    return null;
   };
   const deny = () => {
-    const kind = request()?.kind;
-    if (kind === 'service_approval') void respond({ kind, decision: 'deny' });
-    if (kind === 'permissions') void respond({ kind, decision: { decision: 'deny' } });
-    if (kind === 'form') void respond({ kind, action: 'decline' });
+    const answer = denialAnswer();
+    if (answer) void respond(answer);
   };
+  const respondRendered = (
+    rendered: InteractionOwner & {
+      answerJSON: string;
+      questionsJSON: string | null;
+      sourceJSON: string | null;
+    },
+  ) => {
+    if (!ownsAction(rendered) || blocked()) return;
+    const answer = JSON.parse(rendered.answerJSON);
+    if (!answer || answer.kind !== request()?.kind) return;
+    if (answer.kind === 'question' && rendered.questionsJSON !== questionIdentity()) return;
+    if (answer.kind === 'service_approval' && rendered.sourceJSON !== sourceIdentity()) return;
+    if (
+      (answer.kind === 'question' ||
+        (answer.kind === 'permissions' && answer.decision.decision === 'allow') ||
+        (answer.kind === 'service_approval' && answer.decision === 'allow')) &&
+      rendered.answerJSON !== JSON.stringify(submissionAnswer())
+    )
+      return;
+    // Current state can reject a stale answer; only the presented answer is sent.
+    void respond(answer);
+  };
+  const answerBinding = (answer: unknown) =>
+    inputAction(respondRendered, {
+      sessionId,
+      requestId,
+      answerJSON: JSON.stringify(answer),
+      questionsJSON: questionIdentity(),
+      sourceJSON: sourceIdentity(),
+    });
   // Parent mounts only the current keyed panel. Native keymap ownership removes
   // these bindings on close; the Dialog owns Escape without answering a request.
   keymap.bind('mod+enter', submit, { when: 'always' });
@@ -380,7 +477,11 @@ export function InteractionPanel({
                     <InteractionAction
                       label="Retry original arguments"
                       disabled={argumentBusy()}
-                      onPress={() => void readArguments()}
+                      onPress={inputAction(readRenderedArguments, {
+                        sessionId,
+                        requestId,
+                        sourceJSON: sourceIdentity(),
+                      })}
                     />
                   </If>
                   <If when={argumentError()}>
@@ -420,9 +521,11 @@ export function InteractionPanel({
                           label={`${scope() === duration() ? '(*)' : '( )'} ${duration() === 'once' ? 'This call' : duration() === 'turn' ? 'This turn' : 'This session'}`}
                           disabled={blocked()}
                           selected={scope() === duration()}
-                          onPress={() => {
-                            if (!blocked()) scope.set(duration() as 'once' | 'turn' | 'session');
-                          }}
+                          onPress={inputAction(chooseScope, {
+                            sessionId,
+                            requestId,
+                            value: duration() as InteractionScope,
+                          })}
                         />
                       )}
                     </Each>
@@ -446,7 +549,14 @@ export function InteractionPanel({
                             <Button
                               disabled={blocked()}
                               selected={answers()[index()]?.value === option().label}
-                              onPress={() => choose(index(), option().label)}
+                              onPress={inputAction(chooseRendered, {
+                                sessionId,
+                                requestId,
+                                index: index(),
+                                questionJSON: JSON.stringify(question()),
+                                value: option().label,
+                                other: false,
+                              })}
                               style={{ paddingHorizontal: 8, backgroundColor: C.surface }}
                             >
                               <Text
@@ -474,13 +584,27 @@ export function InteractionPanel({
                             }
                             disabled={blocked()}
                             selected={answers()[index()]?.other}
-                            onPress={() => choose(index(), '', true)}
+                            onPress={inputAction(chooseRendered, {
+                              sessionId,
+                              requestId,
+                              index: index(),
+                              questionJSON: JSON.stringify(question()),
+                              value: '',
+                              other: true,
+                            })}
                           />
                           <InteractionAction
                             label={answers()[index()]?.value === null ? '(*) Skip' : '( ) Skip'}
                             disabled={blocked()}
                             selected={answers()[index()]?.value === null}
-                            onPress={() => choose(index(), null)}
+                            onPress={inputAction(chooseRendered, {
+                              sessionId,
+                              requestId,
+                              index: index(),
+                              questionJSON: JSON.stringify(question()),
+                              value: null,
+                              other: false,
+                            })}
                           />
                         </View>
                         <If when={answers()[index()]?.other}>
@@ -545,13 +669,15 @@ export function InteractionPanel({
         </Scroll>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
           <If when={request()?.kind === 'form' && !record()?.outcome}>
-            <InteractionAction label="[D] Decline" disabled={blocked()} onPress={deny} />
+            <InteractionAction
+              label="[D] Decline"
+              disabled={blocked()}
+              onPress={answerBinding(denialAnswer())}
+            />
             <InteractionAction
               label="Cancel request"
               disabled={blocked()}
-              onPress={() => {
-                void respond({ kind: 'form', action: 'cancel' });
-              }}
+              onPress={answerBinding({ kind: 'form', action: 'cancel' })}
             />
           </If>
           <If
@@ -575,18 +701,20 @@ export function InteractionPanel({
                 (request()?.kind === 'service_approval' &&
                   (!completeArguments() || argumentBusy() || !!argumentError()))
               }
-              onPress={submit}
+              onPress={answerBinding(submissionAnswer())}
             />
             <If when={request()?.kind !== 'question'}>
-              <InteractionAction label="[D] Deny" disabled={blocked()} onPress={deny} />
+              <InteractionAction
+                label="[D] Deny"
+                disabled={blocked()}
+                onPress={answerBinding(denialAnswer())}
+              />
             </If>
           </If>
           <InteractionAction
             label="[Ctrl+R] Refresh status"
             disabled={loading() || busy()}
-            onPress={() => {
-              void refresh();
-            }}
+            onPress={inputAction(refreshRendered, { sessionId, requestId })}
           />
         </View>
         <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>

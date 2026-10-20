@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, computed, effect, Input, signal, Text, View } from 'nsh';
+import { cleanup, computed, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
 import { host } from 'maka/host';
@@ -32,22 +32,22 @@ export type PaletteEntry = {
   detail?: string;
   hint?: string;
   run(): void;
-  keepOpen?: boolean;
 };
 export type PaletteKind = 'commands' | 'sessions' | 'models' | 'workspaces';
 
 export function Palette(props: {
   kind: PaletteKind;
   sessionId: string | null;
+  instance: number;
   commands: PaletteEntry[];
-  close(): void;
-  selectSession(id: string): Promise<void>;
+  close(instance: number): boolean;
+  selectSession(id: string, expectedSessionId: string | null): Promise<void>;
   create(workspace: any): Promise<void>;
   chooseModel(id: string, choice: any): Promise<void>;
 }) {
   const query = signal('');
   const selected = signal(0);
-  const entries = signal<PaletteEntry[]>(props.kind === 'commands' ? props.commands : []);
+  const entries = signal<PaletteEntry[]>([]);
   const loading = signal(false);
   const error = signal('');
   const note = signal('');
@@ -56,16 +56,37 @@ export function Palette(props: {
   let page: any = null;
   let sessions: any[] = [];
   let choices: any[] = [];
+  const selectSession = ({ instance, sessionId, expectedSessionId }: {
+    instance: number;
+    sessionId: string;
+    expectedSessionId: string | null;
+  }) => {
+    if (props.close(instance)) void props.selectSession(sessionId, expectedSessionId);
+  };
+  const chooseModel = ({ instance, sessionId, choice }: {
+    instance: number;
+    sessionId: string | null;
+    choice: {
+      selection: { connectionId: string; modelId: string };
+      defaultThinkingLevel: string | null;
+    };
+  }) => {
+    if (sessionId !== null && props.close(instance)) void props.chooseModel(sessionId, choice);
+  };
+  const create = ({ instance, selection }: { instance: number; selection: any }) => {
+    if (props.close(instance)) void props.create({ kind: 'directory', selection });
+  };
   cleanup(() => {
     alive = false;
     generation += 1;
   });
   const matches = computed(() => {
     const needle = query().toLowerCase().trim();
+    const available = props.kind === 'commands' ? props.commands : entries();
     // Settings performs model search; sessions are filtered within the loaded pages.
     return props.kind === 'models'
-      ? entries()
-      : entries().filter((entry) =>
+      ? available
+      : available.filter((entry) =>
           `${entry.title} ${entry.detail ?? ''}`.toLowerCase().includes(needle),
         );
   });
@@ -83,7 +104,6 @@ export function Palette(props: {
   const activate = () => {
     const entry = matches()[index()];
     if (!entry) return;
-    if (!entry.keepOpen) props.close();
     entry.run();
   };
   keymap.bind('up', () => move(-1), { when: 'always', repeat: true });
@@ -121,9 +141,11 @@ export function Palette(props: {
                 title: session.title || 'Untitled conversation',
                 detail: `${session.workspace.path} · ${session.id}`,
                 hint: session.id === props.sessionId ? 'current' : session.activity,
-                run: () => {
-                  void props.selectSession(session.id);
-                },
+                run: inputAction(selectSession, {
+                  instance: props.instance,
+                  sessionId: session.id,
+                  expectedSessionId: props.sessionId,
+                }),
               })),
           );
           note.set('Type to search conversations');
@@ -153,9 +175,17 @@ export function Palette(props: {
               id: `${choice.selection.connectionId}/${choice.selection.modelId}`,
               title: choice.label,
               detail: `${choice.connectionName} · ${choice.selection.modelId}`,
-              run: () => {
-                if (props.sessionId) void props.chooseModel(props.sessionId, choice);
-              },
+              run: inputAction(chooseModel, {
+                instance: props.instance,
+                sessionId: props.sessionId,
+                choice: {
+                  selection: {
+                    connectionId: choice.selection.connectionId,
+                    modelId: choice.selection.modelId,
+                  },
+                  defaultThinkingLevel: choice.defaultThinkingLevel ?? null,
+                },
+              }),
             })),
           );
           note.set(
@@ -173,9 +203,7 @@ export function Palette(props: {
             id: directory.path,
             title: directory.name,
             detail: directory.path,
-            run: () => {
-              void props.create({ kind: 'directory', selection: directory.selection });
-            },
+            run: inputAction(create, { instance: props.instance, selection: directory.selection }),
           })),
         );
         note.set(
@@ -219,7 +247,9 @@ export function Palette(props: {
   return (
     <Dialog
       animation="none"
-      onOpenChange={props.close}
+      onOpenChange={() => {
+        props.close(props.instance);
+      }}
       style={{
         flex: 1,
         justifyContent: 'center',
@@ -241,7 +271,7 @@ export function Palette(props: {
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text style={{ color: C.accent, fontWeight: '700' }}>{label()}</Text>
-          <Button onPress={props.close}>
+          <Button onPress={inputAction(props.close, props.instance)}>
             <Text style={{ color: C.muted }}>Close · Esc</Text>
           </Button>
         </View>
@@ -281,11 +311,7 @@ export function Palette(props: {
                 return (
                   <Button
                     selected={matches()[index()]?.id === entry().id}
-                    onPress={() => {
-                      const action = entry();
-                      if (!action.keepOpen) props.close();
-                      action.run();
-                    }}
+                    onPress={entry().run}
                     style={{
                       height: 48,
                       paddingHorizontal: 8,
