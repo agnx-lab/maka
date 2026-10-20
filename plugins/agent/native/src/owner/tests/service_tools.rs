@@ -691,7 +691,7 @@ impl Setup {
                 key: Uuid::from_u128(21),
                 package: package.application_ref().into(),
                 use_package: PackageUse::Entry,
-                configuration: if self.web || self.jev { NodeConfiguration { values: serde_json::from_value(json!({"network":"allowed"})).unwrap(), parameters: BTreeMap::new() } } else if let Some(path) = &self.skills {
+                configuration: if self.computer { NodeConfiguration { values: serde_json::from_value(json!({"desktop":"local"})).unwrap(), parameters: BTreeMap::new() } } else if self.web || self.jev { NodeConfiguration { values: serde_json::from_value(json!({"network":"allowed"})).unwrap(), parameters: BTreeMap::new() } } else if let Some(path) = &self.skills {
                     NodeConfiguration { values: serde_json::from_value(json!({
                         "bundled":self.bundled_skills,
                         "home":self.standard_sources.then_some(path),
