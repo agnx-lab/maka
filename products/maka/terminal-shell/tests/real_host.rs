@@ -71,7 +71,7 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         Some(search)
     );
     wait_view(view, |screen| {
-        screen.contains(choice)
+        screen.contains(&format!("› {choice}"))
             && screen.contains("Enter selects · Esc closes")
             && !screen.contains("Loading…")
     })
@@ -235,7 +235,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         }
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Close session browser"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Enter selects · Esc closes") && screen.contains("Writing response")).await;
+        wait_view(&mut view, |screen| !screen.contains("Enter selects · Esc closes") && screen.contains("Preparing tool · todo_write")).await;
 
         view.resize(80, 24);
         shortcut(&mut view, 'o');
@@ -244,14 +244,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         evidence("workbench-narrow-session-dialog", &narrow_browser);
         support::evidence_cells("workbench-narrow-session-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Enter selects · Esc closes") && screen.contains("Writing response")).await;
+        wait_view(&mut view, |screen| !screen.contains("Enter selects · Esc closes") && screen.contains("Preparing tool · todo_write")).await;
         request.delta("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE").await;
-        wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Writing response")).await;
+        wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Preparing tool · todo_write")).await;
         let still_running = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(still_running["run"]["invocationId"], invocation);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Writing response")).await;
+        wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Preparing tool · todo_write")).await;
         shortcut(&mut view, 'p');
         select_palette(&mut view, "Search commands…", "Sto", "Stop").await;
         // The SSE is still held. Only the UI's exact-run Stop may cancel it.
