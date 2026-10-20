@@ -1,17 +1,17 @@
 
 [package]
 name = "gpui-fast"
-version = "0.1.7"
+version = "0.1.10"
 edition = "2024"
-authors = ["Nathan Sobo <nathan@zed.dev>"]
+authors = [ "Nathan Sobo <nathan@zed.dev>" ]
 description = "Zed's GPU-accelerated UI framework"
 repository = "https://github.com/sunli829/gpui-fast"
 publish = false
 license = "Apache-2.0"
 homepage = "https://gpui.rs"
 readme = "README.md"
-keywords = ["desktop", "gui", "immediate"]
-categories = ["gui"]
+keywords = [ "desktop", "gui", "immediate" ]
+categories = [ "gui" ]
 autoexamples = false
 autobenches = false
 license-file = "../../LICENSE-APACHE"
@@ -47,20 +47,36 @@ level = "allow"
 priority = -1
 
 [features]
-default = ["font-kit", "wayland", "x11", "windows-manifest"]
-test-support = ["collections/test-support", "http_client/test-support", "wayland", "x11", "proptest", "dep:futures-concurrency", "dep:postage", "dep:web-time"]
-bench-support = ["profiler", "dep:criterion", "dep:bench_metrics"]
-bench = ["bench-support"]
-inspector = ["gpui_macros/inspector"]
-leak-detection = []
-font-kit = []
-wayland = []
-x11 = ["scap?/x11"]
-screen-capture = ["scap"]
-windows-manifest = ["dep:embed-resource"]
-windows-manifest-provided-by-host = []
-profiler = ["dep:hdrhistogram"]
-stacker = ["dep:stacksafe"]
+default = [ "font-kit", "wayland", "x11", "windows-manifest" ]
+test-support = [
+  "collections/test-support",
+  "http_client/test-support",
+  "wayland",
+  "x11",
+  "proptest",
+  "dep:futures-concurrency",
+  "dep:postage",
+  "dep:web-time"
+]
+bench-support = [ "profiler", "dep:criterion", "dep:bench_metrics" ]
+bench = [ "bench-support" ]
+inspector = [ "gpui_macros/inspector" ]
+leak-detection = [ ]
+font-kit = [ ]
+wayland = [ ]
+x11 = [ "scap?/x11" ]
+screen-capture = [ "scap", "dep:windows-capture" ]
+windows-manifest = [ "dep:embed-resource" ]
+windows-manifest-provided-by-host = [ ]
+profiler = [ "dep:hdrhistogram" ]
+stacker = [ "dep:stacksafe" ]
+hot-reload = [
+  "dep:async-tungstenite",
+  "dep:dioxus-cli-config",
+  "dep:dioxus-devtools-types",
+  "dep:smol",
+  "dep:subsecond"
+]
 
 [lib]
 path = "src/gpui.rs"
@@ -124,7 +140,7 @@ optional = true
 
 [dependencies.gpui_macros]
 package = "gpui-fast-macros"
-version = "=0.1.7"
+version = "=0.1.10"
 
 [dependencies.gpui_shared_string]
 package = "gpui-pre-shared-string"
@@ -421,9 +437,9 @@ version = "1.1.0"
 
 [dev-dependencies.gpui_platform]
 default-features = false
-features = ["font-kit", "wayland", "x11", "runtime_shaders"]
+features = [ "font-kit", "wayland", "x11", "runtime_shaders" ]
 package = "gpui-fast-platform"
-version = "=0.1.7"
+version = "=0.1.10"
 
 [dev-dependencies.gpui_util]
 package = "gpui-pre-util"
@@ -450,4 +466,33 @@ version = "1.10"
 
 [build-dependencies.embed-resource]
 version = "3.0"
+optional = true
+
+[target."cfg(target_os = \"windows\")".dependencies.windows-capture]
+version = "=1.4.2"
+optional = true
+
+
+[target."cfg(any(target_os = \"macos\", target_os = \"linux\", target_os = \"windows\", target_os = \"ios\"))".dependencies.async-tungstenite]
+version = "0.33"
+optional = true
+
+
+[target."cfg(any(target_os = \"macos\", target_os = \"linux\", target_os = \"windows\", target_os = \"ios\"))".dependencies.dioxus-cli-config]
+version = "=0.7.10"
+optional = true
+
+
+[target."cfg(any(target_os = \"macos\", target_os = \"linux\", target_os = \"windows\", target_os = \"ios\"))".dependencies.dioxus-devtools-types]
+version = "=0.7.10"
+optional = true
+
+
+[target."cfg(any(target_os = \"macos\", target_os = \"linux\", target_os = \"windows\", target_os = \"ios\"))".dependencies.smol]
+version = "2.0"
+optional = true
+
+
+[target."cfg(any(target_os = \"macos\", target_os = \"linux\", target_os = \"windows\", target_os = \"ios\"))".dependencies.subsecond]
+version = "=0.7.10"
 optional = true

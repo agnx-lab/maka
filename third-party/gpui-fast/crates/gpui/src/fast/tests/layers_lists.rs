@@ -847,9 +847,9 @@ mod list {
         wheel, wheel_deltas, with_window,
     };
     use crate::{
-        AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, ListAlignment, ListState,
-        ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowHandle, div,
-        prelude::FluentBuilder as _, px, rgb,
+        AnyWindowHandle, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+        ListAlignment, ListState, ParentElement as _, Render, Styled as _, TestAppContext, Window,
+        WindowHandle, div, prelude::FluentBuilder as _, px, rgb,
     };
     use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -2645,6 +2645,91 @@ mod list {
         let composited = compare_with_layers_off(cx, with, without, &[-7.; 8], "widened");
         assert!(composited > 0, "the layer was composited");
     }
+
+    /// A white panel holding a list of rows of varying heights, 100 px tall,
+    /// each row found in tests as `row-<ix>`.
+    struct LabelledListPage {
+        state: ListState,
+    }
+
+    impl Render for LabelledListPage {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().bg(rgb(0xffffff)).child(
+                crate::list(self.state.clone(), move |row, _, _| {
+                    div()
+                        .debug_selector(move || format!("row-{row}"))
+                        .w(px(VIEWPORT_WIDTH))
+                        .h(px(row_height(row)))
+                        .bg(row_color(row))
+                        .into_any_element()
+                })
+                .w(px(VIEWPORT_WIDTH))
+                .h(px(VIEWPORT_HEIGHT)),
+            )
+        }
+    }
+
+    /// The rows of the list in `window` that its viewport shows, as the
+    /// frame last drawn records them for tests to find.
+    fn rows_shown(cx: &mut TestAppContext, window: AnyWindowHandle) -> Vec<(usize, String)> {
+        with_window(cx, window, |window, _| {
+            let viewport = crate::Bounds::new(
+                crate::point(px(0.), px(0.)),
+                crate::size(px(VIEWPORT_WIDTH), px(VIEWPORT_HEIGHT)),
+            );
+            let mut rows: Vec<(usize, String)> = window
+                .rendered_frame
+                .debug_bounds
+                .iter()
+                .filter_map(|(selector, bounds)| {
+                    let row = selector.strip_prefix("row-")?.parse().ok()?;
+                    viewport
+                        .intersects(bounds)
+                        .then(|| (row, format!("{bounds:?}")))
+                })
+                .collect();
+            rows.sort();
+            rows
+        })
+    }
+
+    /// The rows a list's layer keeps on a frame that only scrolled it are
+    /// found where they are drawn, as a list without a layer finds them.
+    #[crate::test]
+    fn rows_a_layer_keeps_are_found_where_they_are_drawn(cx: &mut TestAppContext) {
+        if !crate::fast::layers::COMPILED {
+            return;
+        }
+        let open = |cx: &mut TestAppContext| -> AnyWindowHandle {
+            let state = ListState::new(300, ListAlignment::Top, px(0.)).measure_all();
+            let window = cx.add_window(move |_, _| LabelledListPage { state });
+            open_at(cx, window.into(), 1.);
+            window.into()
+        };
+        let with_layers = open(cx);
+        let without_layers = open(cx);
+        with_window(cx, without_layers, |window, _| {
+            window.set_scroll_layers(false)
+        });
+        draw(cx, without_layers);
+
+        let extended = extended_frames();
+        for (step, dy) in wheel_deltas(40).into_iter().enumerate() {
+            wheel(cx, with_layers, dy);
+            wheel(cx, without_layers, dy);
+            let expected = rows_shown(cx, without_layers);
+            assert!(!expected.is_empty(), "step {step}: rows are shown");
+            assert_eq!(
+                rows_shown(cx, with_layers),
+                expected,
+                "step {step}, scrolled by {dy}"
+            );
+        }
+        assert!(
+            extended_frames() - extended > 20,
+            "frames kept the rows the layer held"
+        );
+    }
 }
 
 /// Lists whose rows hand the frame more than what they draw: hitboxes,
@@ -2655,9 +2740,9 @@ mod rows {
         expanded_quads, held_rows, open_at, row_color, wheel, with_window,
     };
     use crate::{
-        AnyWindowHandle, AppContext as _, Bounds, Context, Entity, IntoElement, ListAlignment,
-        ListState, ParentElement as _, Pixels, Render, StatefulInteractiveElement as _,
-        Styled as _, TestAppContext, Window, div, px, rgb,
+        AnyWindowHandle, AppContext as _, Bounds, Context, CursorStyle, Entity, IntoElement,
+        ListAlignment, ListState, ParentElement as _, Pixels, Render,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, div, px, rgb,
     };
     use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -2887,10 +2972,10 @@ mod rows {
         }
     }
 
-    /// While a wheel scrolls rows under a still pointer, hover is held
-    /// still: nothing is hovered, no row is rendered again for its hover,
-    /// and the list stays composited on every frame. A pointer that moves
-    /// hovers what is under it again at once.
+    /// While a wheel scrolls rows under a still pointer, hover styling is held
+    /// still: no row is rendered again for its hover, and the list stays
+    /// composited on every frame. The hit test stays the geometry under the
+    /// pointer. A pointer that moves hovers what is under it again at once.
     #[crate::test]
     fn hover_held_still_while_the_wheel_scrolls_renders_no_row_for_it(cx: &mut TestAppContext) {
         if !crate::fast::layers::COMPILED {
@@ -2912,8 +2997,11 @@ mod rows {
                     "uniform {uniform}, frame {frame}"
                 );
                 assert!(
-                    with_window(cx, window, |window, _| window.mouse_hit_test.ids.is_empty()),
-                    "uniform {uniform}, frame {frame}: nothing is hovered"
+                    with_window(cx, window, |window, _| {
+                        !window.mouse_hit_test.ids.is_empty()
+                            && crate::fast::layers::hover_freeze::frozen(window)
+                    }),
+                    "uniform {uniform}, frame {frame}: the geometry stays while hover is held still"
                 );
             }
             assert_eq!(
@@ -2934,13 +3022,147 @@ mod rows {
             });
             draw(cx, window);
             assert!(
-                with_window(cx, window, |window, _| !window
-                    .mouse_hit_test
-                    .ids
-                    .is_empty()),
+                with_window(cx, window, |window, _| {
+                    window
+                        .rendered_frame
+                        .hitboxes
+                        .iter()
+                        .any(|hitbox| hitbox.is_hovered(window))
+                }),
                 "uniform {uniform}: the moved pointer hovers the row under it"
             );
         }
+    }
+
+    /// The platform cursor stays the text cursor while a wheel scrolls under a
+    /// still pointer. Hover styling is held still over that text. Moving the
+    /// pointer off the text sets the arrow.
+    #[crate::test]
+    fn the_cursor_follows_the_text_under_a_still_pointer_while_hover_is_frozen(
+        cx: &mut TestAppContext,
+    ) {
+        struct TextPage;
+
+        impl Render for TextPage {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .child(div().w(px(40.)).h(px(40.)).cursor(CursorStyle::IBeam))
+            }
+        }
+
+        let window = cx.add_window(|_, _| TextPage).into();
+        with_window(cx, window, |window, _| {
+            window.set_owns_pointer(true);
+            window.set_hover_freeze(true);
+        });
+        open_at(cx, window, 1.);
+        assert_eq!(
+            cx.test_platform().active_cursor_style(),
+            CursorStyle::IBeam,
+            "the text under the pointer sets the cursor before the wheel"
+        );
+
+        for frame in 0..8 {
+            wheel(cx, window, -7.);
+            assert_eq!(
+                cx.test_platform().active_cursor_style(),
+                CursorStyle::IBeam,
+                "frame {frame}: the cursor stays the text cursor while hover is held still"
+            );
+            assert!(
+                with_window(cx, window, |window, _| {
+                    !window.mouse_hit_test.ids.is_empty()
+                        && crate::fast::layers::hover_freeze::frozen(window)
+                }),
+                "frame {frame}: the geometry stays while hover is held still"
+            );
+        }
+
+        with_window(cx, window, |window, cx| {
+            window.dispatch_event(
+                crate::PlatformInput::MouseMove(crate::MouseMoveEvent {
+                    position: crate::point(px(80.), px(80.)),
+                    pressed_button: None,
+                    modifiers: Default::default(),
+                }),
+                cx,
+            );
+        });
+        draw(cx, window);
+        assert_eq!(
+            cx.test_platform().active_cursor_style(),
+            CursorStyle::Arrow,
+            "the pointer off the text sets the arrow"
+        );
+    }
+
+    /// A click under a still pointer right after the wheel reaches its
+    /// handler. Hover styling is held still while frames are drawn; events
+    /// dispatched between them read the geometry under the pointer.
+    #[crate::test]
+    fn a_click_under_a_still_pointer_right_after_the_wheel_reaches_its_handler(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::InteractiveElement as _;
+
+        struct ClickPage {
+            clicks: Rc<RefCell<usize>>,
+        }
+
+        impl Render for ClickPage {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let clicks = self.clicks.clone();
+                div().size_full().child(
+                    div()
+                        .id("button")
+                        .w(px(40.))
+                        .h(px(40.))
+                        .on_click(move |_, _, _| *clicks.borrow_mut() += 1),
+                )
+            }
+        }
+
+        let clicks = Rc::new(RefCell::new(0));
+        let window = cx
+            .add_window({
+                let clicks = clicks.clone();
+                move |_, _| ClickPage { clicks }
+            })
+            .into();
+        with_window(cx, window, |window, _| window.set_hover_freeze(true));
+        open_at(cx, window, 1.);
+        wheel(cx, window, -7.);
+        assert!(
+            with_window(cx, window, |window, _| {
+                crate::fast::layers::hover_freeze::frozen(window)
+            }),
+            "the wheel holds hover still"
+        );
+
+        let position = crate::point(px(20.), px(20.));
+        with_window(cx, window, |window, cx| {
+            window.dispatch_event(
+                crate::PlatformInput::MouseDown(crate::MouseDownEvent {
+                    button: crate::MouseButton::Left,
+                    position,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                crate::PlatformInput::MouseUp(crate::MouseUpEvent {
+                    button: crate::MouseButton::Left,
+                    position,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                }),
+                cx,
+            );
+        });
+        assert_eq!(*clicks.borrow(), 1, "the click reached its handler");
     }
 
     /// A list whose rows take input (a hover style: a hitbox, a listener,

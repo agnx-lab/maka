@@ -19,7 +19,7 @@
 
 # GPUI Fast 平台清理补丁
 
-从 [GPUI Fast](https://github.com/longbridge/gpui-fast/tree/371769f1ff378bc0bd886440e0f97fc94aaeae5d) `main` 固定 revision（manifest 采用正式 `0.1.7` 发布依赖规则） 保留 core、macOS、Windows、Linux 和 scheduler 五个 crate。按上游发布规则使用 `gpui-fast*` 包名，保持原 Rust library 名；修改过的 scheduler 对应 `gpui-pre-scheduler` 0.3.9。未修改 helper 使用同一正式发布及其 0.3.9 支持快照。Kit 选择官方 `gpui-fast` feature，根 registry source patch 提供修改过的实现；移除旧 gpui-pre Git 兼容 facade。
+从 [GPUI Fast](https://github.com/longbridge/gpui-fast/tree/b836dd970b26830f2124b7cf91b0e19018fd12da) `main` 固定 revision（manifest 采用正式 `0.1.10` 发布依赖规则） 保留 core、macOS、Windows、Linux 和 scheduler 五个 crate。按上游发布规则使用 `gpui-fast*` 包名，保持原 Rust library 名；修改过的 scheduler 对应 `gpui-pre-scheduler` 0.3.9。未修改 helper 使用同一正式发布及其 0.3.9 支持快照。Kit 选择官方 `gpui-fast` feature，根 registry source patch 提供修改过的实现；移除旧 gpui-pre Git 兼容 facade。
 
 `upstream.json` 列出改动前的有限原始文件清单与 SHA-256。保留上游许可和署名；Maka 新文件不进入该清单。隔离 workspace 仅规范化 helper 依赖和显式许可文件路径。
 
@@ -74,6 +74,8 @@ Window 可根据原 ClickInputState interruption 创建不可 clone 的 InputGes
 
 程序设置 List offset 时仍推进原依赖版本，使未显式 notify 的保留祖先也能看到偏移变化；图层单独将该版本识别为滚动，避免把它算作内容变化。未修补上游也可复现旧偏移残留。保留上游 deferred-view 拼接保护：重建 gap 外存在延迟绘制时重建祖先，防止复用过时视图；本地测试相应断言重建，并继续验证绘制因果顺序、缓存重放及与全量绘制的一致性。
 
-## 列表行保留布局期的元素状态（2026-10-16）
+## 上游同步（2026-10-20）
 
-在上游合并前，回移上游拉取请求 [#73](https://github.com/longbridge/gpui-fast/pull/73)（提交 `97bff7005ef4e5971237fcf890262947cff21b46`）。某帧沿用列表滚动图层里的行时，该行在渲染和 `request_layout` 中取得的元素状态现在随行保存，并随其 prepaint 记录一起带入新帧；此前它们在第一次沿用该行的帧结束时被丢弃。gpui-kit 的 `TextView` 把超过 4 KB 的已解析文档存为这种状态，状态新建时在后台重新解析，所以在高于视口的 markdown 行内滚动时，该行会有一帧按空文档的高度布局。在另一列表的行布局期间布局的行（内层 `ListSizingBehavior::Infer` 列表的行）属于那一行，不再记成外层列表的行。改动在 `crates/gpui/src/fast/layers/lists.rs`，另有 `crates/gpui/src/fast/layout.rs` 中的一个访问函数，以及 `crates/gpui/src/fast/tests/layers_lists.rs` 中的六个 `layout_states` 测试。固定版本越过上游合并后，删除本节及改动。
+五个适配 crate 现固定到 `b836dd970b26830f2124b7cf91b0e19018fd12da`（`v0.1.10`）。清单采用上游 `script/prepare-release.ts` 的发布规范；九个 Fast 包统一解析为 0.1.10，支持快照及适配 scheduler 保持 0.3.9。发布的 WGPU 后端按上游受检适配使用 registry `wgpu =30.0.1`，其中不含上游尚未发布的 Vulkan surface-drop 修复。Kit 保持原固定版本，其 Fast 版本约束接受本次更新。新增 rounded-clip、composition 和 hot-reload 源码已纳入原始字节清单；无关示例及 iOS 实现不导入，由 registry 依赖提供。
+
+三方整合保留 Maka 原物理输入来源、实际发布的 IME-handler 槽位、选区上下文、定时器取消及原生清理回执。上游字段身份和 handler 恢复通知接入同一既有 owner。原生定时器补丁保留显式 async-io 依赖；profiler 计数器改用稳定的 `AtomicUsize::try_update` 替代弃用别名，保持原内存顺序和 checked subtraction。

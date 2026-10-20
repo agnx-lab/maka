@@ -21,8 +21,8 @@ use crate::{
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextInputConfiguration,
     TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
-    WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
+    WindowBounds, WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams,
+    WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
 };
 
 use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
@@ -39,7 +39,7 @@ use itertools::Itertools;
 use objc2_core_foundation::CFRetained;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use objc2_core_video::CVPixelBuffer;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 use scheduler::Instant;
 use slotmap::SlotMap;
@@ -125,7 +125,7 @@ impl DispatchPhase {
     }
 }
 
-struct WindowInvalidatorInner {
+pub(crate) struct WindowInvalidatorInner {
     #[cfg(feature = "profiler")]
     pub window_id: WindowId,
     pub dirty: bool,
@@ -133,7 +133,7 @@ struct WindowInvalidatorInner {
     pub dirty_views: FxHashSet<EntityId>,
     pub update_count: usize,
     #[cfg(feature = "profiler")]
-    pub frame_dirty: FrameDirtyAccumulator,
+    frame_dirty: FrameDirtyAccumulator,
     pub platform_waker: Option<Rc<dyn Fn()>>,
 }
 
@@ -160,7 +160,7 @@ enum FrameRateLimit {
 
 #[derive(Clone)]
 pub(crate) struct WindowInvalidator {
-    inner: Rc<RefCell<WindowInvalidatorInner>>,
+    pub(crate) inner: Rc<RefCell<WindowInvalidatorInner>>,
 }
 
 impl WindowInvalidator {
@@ -502,7 +502,12 @@ impl ArenaClearNeeded {
     }
 }
 
-pub(crate) type FocusMap = RwLock<SlotMap<FocusId, FocusRef>>;
+#[derive(Default)]
+pub(crate) struct FocusMap {
+    pub(crate) handles: SlotMap<FocusId, FocusRef>,
+    pub(crate) dropped_handles: Vec<FocusId>,
+}
+
 pub(crate) struct FocusRef {
     pub(crate) ref_count: AtomicUsize,
     pub(crate) tab_index: isize,
@@ -561,7 +566,7 @@ impl FocusId {
 /// A handle which can be used to track and manipulate the focused element in a window.
 pub struct FocusHandle {
     pub(crate) id: FocusId,
-    handles: Arc<FocusMap>,
+    handles: Arc<RwLock<FocusMap>>,
     /// The index of this element in the tab order.
     pub tab_index: isize,
     /// Whether this element can be focused by tab navigation.
@@ -575,8 +580,8 @@ impl std::fmt::Debug for FocusHandle {
 }
 
 impl FocusHandle {
-    pub(crate) fn new(handles: &Arc<FocusMap>) -> Self {
-        let id = handles.write().insert(FocusRef {
+    pub(crate) fn new(handles: &Arc<RwLock<FocusMap>>) -> Self {
+        let id = handles.write().handles.insert(FocusRef {
             ref_count: AtomicUsize::new(1),
             tab_index: 0,
             tab_stop: false,
@@ -590,9 +595,9 @@ impl FocusHandle {
         }
     }
 
-    pub(crate) fn for_id(id: FocusId, handles: &Arc<FocusMap>) -> Option<Self> {
+    pub(crate) fn for_id(id: FocusId, handles: &Arc<RwLock<FocusMap>>) -> Option<Self> {
         let lock = handles.read();
-        let focus = lock.get(id)?;
+        let focus = lock.handles.get(id)?;
         if atomic_incr_if_not_zero(&focus.ref_count) == 0 {
             return None;
         }
@@ -607,7 +612,7 @@ impl FocusHandle {
     /// Sets the tab index of the element associated with this handle.
     pub fn tab_index(mut self, index: isize) -> Self {
         self.tab_index = index;
-        if let Some(focus) = self.handles.write().get_mut(self.id) {
+        if let Some(focus) = self.handles.write().handles.get_mut(self.id) {
             focus.tab_index = index;
         }
         self
@@ -618,7 +623,7 @@ impl FocusHandle {
     /// When `false`, the element will not be included in the tab order.
     pub fn tab_stop(mut self, tab_stop: bool) -> Self {
         self.tab_stop = tab_stop;
-        if let Some(focus) = self.handles.write().get_mut(self.id) {
+        if let Some(focus) = self.handles.write().handles.get_mut(self.id) {
             focus.tab_stop = tab_stop;
         }
         self
@@ -692,12 +697,15 @@ impl Eq for FocusHandle {}
 
 impl Drop for FocusHandle {
     fn drop(&mut self) {
-        self.handles
-            .read()
-            .get(self.id)
-            .unwrap()
-            .ref_count
-            .fetch_sub(1, SeqCst);
+        let handles = self.handles.upgradable_read();
+        let focus = handles.handles.get(self.id).expect("focus handle missing");
+        let previous_count = focus.ref_count.fetch_sub(1, SeqCst);
+        assert_ne!(previous_count, 0, "over-released focus handle");
+        if previous_count == 1 {
+            RwLockUpgradableReadGuard::upgrade(handles)
+                .dropped_handles
+                .push(self.id);
+        }
     }
 }
 
@@ -705,7 +713,7 @@ impl Drop for FocusHandle {
 #[derive(Clone, Debug)]
 pub struct WeakFocusHandle {
     pub(crate) id: FocusId,
-    pub(crate) handles: Weak<FocusMap>,
+    pub(crate) handles: Weak<RwLock<FocusMap>>,
 }
 
 impl WeakFocusHandle {
@@ -822,7 +830,7 @@ impl HitboxId {
         if window.captured_hitbox == Some(self) {
             return true;
         }
-        if window.last_input_was_keyboard() {
+        if crate::fast::layers::hover_freeze::hides_hover(window) {
             return false;
         }
         self.hit_test(window)
@@ -1130,6 +1138,7 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) fast_composition_starts: crate::fast::composition::SurfaceStarts,
+    pub(crate) fast_composition_input: crate::fast::composition::SurfaceInput,
     pub(crate) hitboxes: Vec<Hitbox>,
     placement_claims: Vec<ElementId>,
     placed: FxHashSet<ElementId>,
@@ -1199,6 +1208,7 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             fast_composition_starts: crate::fast::composition::SurfaceStarts::default(),
+            fast_composition_input: crate::fast::composition::SurfaceInput::default(),
             hitboxes: Vec::new(),
             placement_claims: Vec::new(),
             placed: FxHashSet::default(),
@@ -1238,6 +1248,7 @@ impl Frame {
         self.hitboxes.clear();
         self.placement_claims.clear();
         self.placed.clear();
+        crate::fast::composition::SurfaceInput::clear(&mut self.fast_composition_input);
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.deferred_paints.clear();
@@ -1276,6 +1287,9 @@ impl Frame {
     }
 
     pub(crate) fn hit_test(&self, position: Point<Pixels>) -> HitTest {
+        if let Some(hit_test) = crate::fast::composition::hit_test(self, position) {
+            return hit_test;
+        }
         let mut set_hover_hitbox_count = false;
         let mut hit_test = HitTest::default();
         for hitbox in self.hitboxes.iter().rev() {
@@ -1430,7 +1444,7 @@ pub struct Window {
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
     last_text_input_configuration: Option<TextInputConfiguration>,
-    focused_text_input_active: bool,
+    focused_text_input: Option<FocusId>,
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     // Opaque inherited renderer context; selection facts remain in its adapter.
     pub(crate) selection_context: crate::window::SelectionContext,
@@ -1444,7 +1458,7 @@ pub struct Window {
     focus_listeners: SubscriberSet<(), AnyWindowFocusListener>,
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
     focus_lost_path: SmallVec<[FocusId; 8]>,
-    default_prevented: bool,
+    pub(crate) default_prevented: bool,
     pub(crate) mouse_position: Point<Pixels>,
     pub(crate) mouse_hit_test: HitTest,
     modifiers: Modifiers,
@@ -1454,11 +1468,11 @@ pub struct Window {
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) button_layout_observers: SubscriberSet<(), AnyObserver>,
-    active: Rc<Cell<bool>>,
+    pub(crate) active: Rc<Cell<bool>>,
     visibility: WindowVisibility,
     pub(crate) visibility_observers:
         SubscriberSet<(), Box<dyn FnMut(WindowVisibility, &mut Window, &mut App) -> bool>>,
-    hovered: Rc<Cell<bool>>,
+    pub(crate) hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
     /// Tracks recent input event timestamps to determine if input is arriving at a high rate.
     /// Used to selectively enable VRR optimization only when input rate exceeds 60fps.
@@ -1795,6 +1809,8 @@ impl Window {
             icon,
             #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
             tabbing_identifier,
+            #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+            use_display_p3,
         } = options;
 
         let initial_window_title = titlebar
@@ -1820,6 +1836,8 @@ impl Window {
                 icon,
                 #[cfg(target_os = "macos")]
                 tabbing_identifier,
+                #[cfg(target_os = "macos")]
+                use_display_p3,
             },
         )?;
 
@@ -2353,7 +2371,7 @@ impl Window {
             autoscroll_focus_generation: None,
             prepaint_visible: true,
             last_text_input_configuration: None,
-            focused_text_input_active: false,
+            focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
@@ -3152,6 +3170,11 @@ impl Window {
         self.platform_window.bounds()
     }
 
+    /// Returns the regions of this window obscured by system UI and the keyboard.
+    pub fn insets(&self) -> WindowInsets {
+        self.platform_window.insets()
+    }
+
     /// Renders the current frame's scene to a texture and returns the pixel data as an RGBA image.
     /// This does not present the frame to screen - useful for visual testing where we want
     /// to capture what would be rendered without displaying it or requiring the window to be visible.
@@ -3698,7 +3721,8 @@ impl Window {
         self.last_input_modality == InputModality::Keyboard
     }
 
-    pub(crate) fn last_input_was_touch(&self) -> bool {
+    /// Returns whether the last input event came from a touch screen.
+    pub fn last_input_was_touch(&self) -> bool {
         self.last_input_modality == InputModality::Touch
     }
 
@@ -3738,6 +3762,7 @@ impl Window {
         // Restore the platform's exact original slot for retained paint reuse.
         // A focused canvas handler need not have a tracked geometry node.
         if let Some(input_handler) = self.platform_window.take_input_handler() {
+            crate::fast::retained::note_restored_input_handler(self, &input_handler);
             let index = self
                 .rendered_frame
                 .published_input_handler
@@ -3844,19 +3869,20 @@ impl Window {
                             .is_some_and(|handler| handler.presentation_is_admitted(self))
                 });
         self.rendered_frame.published_input_handler = focused_handler;
-        let (focused_text_input_active, has_focused_input) = if let Some(index) = focused_handler {
+        let (focused_text_input, has_focused_input) = if let Some(index) = focused_handler {
             let mut input_handler = self.rendered_frame.input_handlers[index].1.take().unwrap();
             let accepts_text_input = input_handler.presentation_accepts_text_input(self, cx);
+            crate::fast::retained::note_installed_input_handler(self, &input_handler);
             self.platform_window.set_input_handler(input_handler);
-            (accepts_text_input, true)
+            (self.focus.filter(|_| accepts_text_input), true)
         } else {
-            (false, false)
+            (None, false)
         };
         self.apply_text_input_configuration(cx);
-        if focused_text_input_active != self.focused_text_input_active {
-            self.focused_text_input_active = focused_text_input_active;
+        let previous = mem::replace(&mut self.focused_text_input, focused_text_input);
+        if previous.is_some() != focused_text_input.is_some() {
             self.platform_window
-                .text_input_state_changed(if focused_text_input_active {
+                .text_input_state_changed(if focused_text_input.is_some() {
                     TextInputStateChange::FocusGained
                 } else {
                     TextInputStateChange::FocusLost
@@ -4038,11 +4064,13 @@ impl Window {
             .as_mut()
             .unwrap()
             .stretch_auto_size_to_fill(root_layout_id, root_size, scale_factor);
+        crate::fast::composition::begin_base_prepaint(self);
         root_element.prepaint_as_root(Point::default(), root_size.into(), self, cx);
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         let inspector_element = self.prepaint_inspector(_inspector_width, cx);
 
+        crate::fast::composition::begin_overlay_prepaint(self);
         self.prepaint_deferred_draws(cx);
 
         let mut prompt_element = None;
@@ -4069,7 +4097,8 @@ impl Window {
         }
 
         crate::fast::stats::FramePhaseTimes::end_prepaint(&mut self.fast_layout.phase_times);
-        self.mouse_hit_test = crate::fast::layers::hover_freeze::hit_test(self);
+        crate::fast::composition::finish_input(self);
+        self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
 
         // Now actually paint the elements.
         #[cfg(feature = "profiler")]
@@ -5812,6 +5841,7 @@ impl Window {
             dispatch_node: self.next_frame.dispatch_tree.active_node_id(),
         };
         self.next_frame.hitboxes.push(hitbox.clone());
+        crate::fast::composition::record_input(self, id);
         hitbox
     }
 
@@ -5996,6 +6026,34 @@ impl Window {
                 self.next_frame.dispatch_tree.input_origin(),
             )),
         ));
+    }
+
+    /// Notifies native text services that the focused component's text changed.
+    ///
+    /// Text components should call this after application-driven edits, in addition
+    /// to notifying GPUI to redraw. Unfocused or unregistered components are ignored.
+    pub fn notify_text_input_changed(&self, focus_handle: &FocusHandle) {
+        if self.focused_text_input == Some(focus_handle.id)
+            && focus_handle.is_focused(self)
+            && self.focus_move_is_admitted(focus_handle)
+        {
+            self.platform_window
+                .text_input_state_changed(TextInputStateChange::ContentChanged);
+        }
+    }
+
+    /// Notifies native text services that the focused component's selection changed.
+    ///
+    /// Text components should call this after application-driven selection changes,
+    /// in addition to notifying GPUI to redraw.
+    pub fn notify_text_selection_changed(&self, focus_handle: &FocusHandle) {
+        if self.focused_text_input == Some(focus_handle.id)
+            && focus_handle.is_focused(self)
+            && self.focus_move_is_admitted(focus_handle)
+        {
+            self.platform_window
+                .text_input_state_changed(TextInputStateChange::SelectionChanged);
+        }
     }
 
     /// Forwards the focused input handler's [`TextInputConfiguration`] to the
@@ -6349,6 +6407,7 @@ impl Window {
             crate::fast::layers::input::before_dispatch(self, cx, &event);
         }
 
+        let native_target = crate::fast::composition::event_target(self, &event);
         if let Some(any_mouse_event) = event.mouse_event() {
             self.dispatch_mouse_event(any_mouse_event, cx);
         } else if let Some(any_key_event) = event.keyboard_event() {
@@ -6356,6 +6415,12 @@ impl Window {
         } else if let Some(touch_event) = event.touch_event() {
             self.dispatch_touch_event(touch_event, cx);
         }
+        crate::fast::composition::dispatch_native(
+            self,
+            &event,
+            native_target,
+            &mut cx.propagate_event,
+        );
         crate::fast::layers::wheel::end_dispatch(self, cx);
         if let PlatformInput::LongPress(long_press) = &event {
             match long_press.phase {
@@ -6590,7 +6655,7 @@ impl Window {
         }
 
         // Bubble phase, where most normal handlers do their work.
-        if cx.propagate_event {
+        if crate::fast::composition::bubble_mouse(self, event, cx) {
             for listener in mouse_listeners.iter_mut().rev() {
                 let listener = listener.as_mut().unwrap();
                 if !self.input_origin_is_admitted(&listener.origin) {
@@ -8714,6 +8779,95 @@ mod tests {
         canvas, div, hsla, point, px, size,
     };
 
+    #[gpui::test]
+    async fn test_focus_handle_release(cx: &mut TestAppContext) {
+        let (handle, survivor) = cx.update(|cx| (cx.focus_handle(), cx.focus_handle()));
+        let handle_id = handle.id;
+        let weak_handle = handle.downgrade();
+        let retained = handle.clone();
+        drop(handle);
+
+        cx.update(|_| {});
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.len(), 2);
+            assert!(handles.dropped_handles.is_empty());
+        });
+        assert_eq!(weak_handle.upgrade().as_ref(), Some(&retained));
+
+        cx.background_spawn(async move { drop(retained) }).await;
+        assert_eq!(weak_handle.upgrade(), None);
+        cx.read(|cx| {
+            assert_eq!(cx.focus_handles.read().dropped_handles, [handle_id]);
+        });
+        cx.update(|_| {});
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.keys().collect::<Vec<_>>(), [survivor.id]);
+            assert!(handles.dropped_handles.is_empty());
+        });
+
+        let replacements = cx.update(|cx| [cx.focus_handle(), cx.focus_handle()]);
+        assert_eq!(weak_handle.upgrade(), None);
+        cx.update(|cx| {
+            drop(replacements);
+            cx.defer(move |_| drop(survivor));
+        });
+        cx.read(|cx| {
+            let handles = cx.focus_handles.read();
+            assert_eq!(handles.handles.len(), 0);
+            assert!(handles.dropped_handles.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn test_dropped_focus_handle_blurs_only_its_windows(cx: &mut TestAppContext) {
+        let windows = [
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+            cx.add_window(|_, _| EmptyView),
+        ];
+        let (handle, other_handle, survivor) =
+            cx.update(|cx| (cx.focus_handle(), cx.focus_handle(), cx.focus_handle()));
+        for window in &windows[..2] {
+            window
+                .update(cx, |_, window, cx| window.focus(&handle, cx))
+                .expect("window exists");
+        }
+        windows[2]
+            .update(cx, |_, window, cx| window.focus(&other_handle, cx))
+            .expect("window exists");
+        windows[3]
+            .update(cx, |_, window, cx| window.focus(&survivor, cx))
+            .expect("window exists");
+
+        cx.update(|cx| {
+            for _ in 0..1_000 {
+                drop(cx.focus_handle());
+            }
+            drop((handle, other_handle));
+        });
+        for window in &windows[..3] {
+            window
+                .update(cx, |_, window, _| assert_eq!(window.focus, None))
+                .expect("window exists");
+        }
+        windows[3]
+            .update(cx, |_, window, cx| {
+                assert_eq!(window.focused(cx).as_ref(), Some(&survivor));
+                assert_eq!(window.focus_generation, 1);
+            })
+            .expect("window exists");
+        windows[4]
+            .update(cx, |_, window, _| {
+                assert_eq!(window.focus, None);
+                assert_eq!(window.focus_generation, 0);
+            })
+            .expect("window exists");
+    }
+
     #[cfg(feature = "profiler")]
     #[gpui::test]
     fn test_frame_requests_and_skips_are_journaled(cx: &mut TestAppContext) {
@@ -9054,7 +9208,7 @@ mod tests {
         assert!(platform_window.frame_wake_count() > wakes);
         platform_window.simulate_frame_request(RequestFrameOptions::default());
         let wakes = platform_window.frame_wake_count();
-        platform_window.simulate_insets_change(crate::WindowInsets {
+        let insets = crate::WindowInsets {
             safe_area: crate::Edges {
                 top: px(60.),
                 right: px(20.),
@@ -9065,10 +9219,14 @@ mod tests {
                 bottom: px(350.),
                 ..Default::default()
             },
-        });
+        };
+        platform_window.simulate_insets_change(insets.clone());
         assert!(platform_window.frame_wake_count() > wakes);
         window
-            .update(cx, |_, window, _| {
+            .update(cx, |_, window, cx| {
+                let focus = cx.focus_handle();
+                window.focus(&focus, cx);
+                assert_eq!(window.insets(), insets);
                 assert_eq!(window.viewport_size(), size(px(400.), px(800.)));
                 assert_eq!(window.visual_viewport_bounds(), visual_bounds);
                 assert_eq!(
@@ -9077,6 +9235,7 @@ mod tests {
                 );
                 window.request_virtual_keyboard();
                 window.dismiss_virtual_keyboard();
+                assert!(focus.is_focused(window));
                 assert_eq!(window.viewport_size(), size(px(400.), px(800.)));
             })
             .unwrap();
@@ -9097,6 +9256,16 @@ mod tests {
                     window.fully_visible_bounds().size,
                     size(Pixels::ZERO, Pixels::ZERO)
                 );
+            })
+            .unwrap();
+
+        // Some backends update geometry snapshots without delivering inset callbacks.
+        use crate::PlatformWindow as _;
+        platform_window.on_insets_changed(Box::new(|_| {}));
+        platform_window.simulate_insets_change(crate::WindowInsets::default());
+        window
+            .update(cx, |_, window, _| {
+                assert_eq!(window.insets(), crate::WindowInsets::default());
             })
             .unwrap();
     }
