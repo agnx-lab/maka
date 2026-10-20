@@ -477,9 +477,13 @@ mod tests {
             "| left | right |\n| --- | --- |\n| 一 | 二 |",
             "<div>HTML</div>",
             "[id]: https://example.test/definition",
-            "[^note]: footnote",
+            // The footnote container includes its final line ending.
+            "[^note]: footnote\n",
         ] {
-            assert!(blocks.iter().any(|block| block.kind == MarkdownBlockKind::Literal && block.text == original));
+            assert!(
+                blocks.iter().any(|block| block.kind == MarkdownBlockKind::Literal && block.text == original),
+                "missing exact literal {original:?} in {blocks:#?}",
+            );
         }
         assert_eq!(blocks.last().unwrap().runs[0].text, "$E = mc^2$ (x) [y]");
     }
