@@ -2976,9 +2976,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let row = point.row;
 
         // Resolve the wrapped row even when the target is outside the last layout.
-        let display_row = self
-            .display_map
-            .offset_to_display_row(offset, self.line_end_affinity_at(offset));
+        let affinity = self.line_end_affinity_at(offset);
+        let display_row = self.display_map.offset_to_display_row(offset, affinity);
         let row_offset_y = line_height * display_row;
 
         // For Right alignment use 0 margin: the cursor indicator is clamped inside bounds
