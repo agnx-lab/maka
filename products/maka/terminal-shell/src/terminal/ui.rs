@@ -20,16 +20,20 @@
 use super::{
     Presentation,
     input::{Input, Pointer},
-    output::FrameWriter,
+    output::{FrameWriter, exceeded_budget},
 };
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use nsh_core::{Command, MountBatch, MountItem, ROOT_ID, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
-    CellMetrics, InputSnapshot, PressLease, ServiceOutput, ServiceRequest, Surface, SurfaceEvent,
-    TerminalTextEngine,
+    CellMetrics, ImageProtocol, InputSnapshot, PressLease, ProtocolType, ServiceOutput,
+    ServiceRequest, Surface, SurfaceEvent, TerminalTextEngine,
 };
-use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
+use ratatui::{
+    Terminal, TerminalOptions, Viewport,
+    backend::{Backend as _, CrosstermBackend},
+    layout::Rect,
+};
 use std::{
     io::{self, Write},
     sync::{Arc, Mutex, mpsc},
@@ -76,6 +80,7 @@ pub(super) struct Frame {
 }
 
 pub(super) struct Advance {
+    pub image_protocol: Option<ImageProtocol>,
     pub inputs: Vec<Input>,
     pub resize: Option<(u16, u16)>,
     pub cancel_pointer: bool,
@@ -83,7 +88,10 @@ pub(super) struct Advance {
 
 impl Advance {
     pub fn is_probe(&self) -> bool {
-        self.inputs.is_empty() && self.resize.is_none() && !self.cancel_pointer
+        self.inputs.is_empty()
+            && self.resize.is_none()
+            && !self.cancel_pointer
+            && self.image_protocol.is_none()
     }
 }
 
@@ -130,6 +138,7 @@ struct Session {
     epoch: u64,
     started: Instant,
     effects: Vec<u8>,
+    sixel: bool,
     presentation: Presentation,
 }
 
@@ -171,6 +180,7 @@ impl Session {
             epoch: 0,
             started: Instant::now(),
             effects: Vec::new(),
+            sixel: false,
             presentation: Presentation::default(),
         })
     }
@@ -210,11 +220,21 @@ impl Session {
 
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
         let mut changed = false;
+        if let Some(protocol) = command.image_protocol {
+            if protocol.protocol_type() != ProtocolType::Sixel {
+                return Err("this shell only negotiates stateless Sixel images".into());
+            }
+            self.surface.set_image_protocol(Some(protocol));
+            self.sixel = true;
+            changed = true;
+        }
         if command.cancel_pointer {
             self.cancel_pointer()?;
             changed = true;
         }
         if let Some((columns, rows)) = command.resize {
+            self.surface.set_image_protocol(None);
+            self.sixel = false;
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
             self.engine.set_focus_path_now(&self.surface.focus_path());
@@ -476,13 +496,48 @@ impl Session {
                 quit: self.surface.should_quit(),
             });
         }
+        // This UI draws its own caret, so the physical cursor is always hidden.
+        let mut suffix = Vec::new();
         crossterm::queue!(
-            self.terminal.backend_mut().writer_mut(),
-            crossterm::terminal::BeginSynchronizedUpdate
+            suffix,
+            crossterm::cursor::Hide,
+            crossterm::terminal::EndSynchronizedUpdate
         )
         .map_err(|error| error.to_string())?;
+        let suffix_bytes = suffix
+            .len()
+            .checked_add(self.effects.len())
+            .ok_or("terminal frame exceeds byte limit")?;
+        let writer = self.terminal.backend_mut().writer_mut();
+        let prefix = writer.0.len();
+        writer
+            .reserve(suffix_bytes)
+            .map_err(|error| error.to_string())?;
+        crossterm::queue!(writer, crossterm::terminal::BeginSynchronizedUpdate)
+            .map_err(|error| error.to_string())?;
+        self.surface
+            .render(self.area, self.terminal.current_buffer_mut());
+        if let Err(error) = self.terminal.flush() {
+            if !self.sixel || !exceeded_budget(&error) {
+                return Err(error.to_string());
+            }
+            // backend.draw failed before cursor bookkeeping or buffer swap. Keep
+            // resize bytes already queued before this pass, discard its partial
+            // candidate, and admit Unicode exactly once with the same suffix.
+            self.terminal.backend_mut().writer_mut().0.truncate(prefix);
+            self.terminal.current_buffer_mut().reset();
+            crossterm::queue!(
+                self.terminal.backend_mut().writer_mut(),
+                crossterm::terminal::BeginSynchronizedUpdate
+            )
+            .map_err(|error| error.to_string())?;
+            self.surface
+                .render_plain(self.area, self.terminal.current_buffer_mut());
+            self.terminal.flush().map_err(|error| error.to_string())?;
+        }
+        self.terminal.backend_mut().writer_mut().release();
         self.terminal
-            .draw(|frame| self.surface.render(self.area, frame.buffer_mut()))
+            .hide_cursor()
             .map_err(|error| error.to_string())?;
         crossterm::queue!(
             self.terminal.backend_mut().writer_mut(),
@@ -492,7 +547,13 @@ impl Session {
         self.terminal
             .backend_mut()
             .writer_mut()
-            .write_all(&std::mem::take(&mut self.effects))
+            .write_all(&self.effects)
+            .map_err(|error| error.to_string())?;
+        self.effects.clear();
+        self.terminal.swap_buffers();
+        self.terminal
+            .backend_mut()
+            .flush()
             .map_err(|error| error.to_string())?;
         let bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
         Ok(Frame {
@@ -554,6 +615,7 @@ mod tests {
         ] {
             session
                 .advance(Advance {
+                    image_protocol: None,
                     inputs: Vec::new(),
                     resize: Some((columns, rows)),
                     cancel_pointer: false,
@@ -599,6 +661,7 @@ mod tests {
         loop {
             let frame = session
                 .advance(Advance {
+                    image_protocol: None,
                     inputs: Vec::new(),
                     resize: None,
                     cancel_pointer: false,
@@ -621,6 +684,84 @@ mod tests {
                 .windows("▀".len())
                 .any(|bytes| bytes == "▀".as_bytes()),
             "the real output frame must paint the image's Unicode fallback"
+        );
+
+        // Calibrate the actual Unicode wire frame after a clear. The later
+        // effects fill exactly the remaining complete-frame budget, so native
+        // Sixel must fall back before committing Ratatui's previous buffer.
+        // These opaque marker bytes stay in FrameWriter; the test never writes stdout.
+        let prepare = |session: &mut Session| {
+            session.terminal.clear().unwrap();
+            session
+                .terminal
+                .backend_mut()
+                .writer_mut()
+                .write_all(b"PREFIX")
+                .unwrap();
+            session.terminal.backend().writer().0.clone()
+        };
+        prepare(&mut session);
+        let plain_bytes = session.encode(true).unwrap().bytes.unwrap();
+        let protocol = ImageProtocol::new(ProtocolType::Sixel, 24, 48).unwrap();
+        let mut native = session
+            .advance(Advance {
+                image_protocol: Some(protocol),
+                inputs: Vec::new(),
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap()
+            .bytes
+            .unwrap_or_default();
+        let deadline = Instant::now() + std::time::Duration::from_secs(3);
+        while !native.windows(2).any(|bytes| bytes == b"\x1bP") {
+            assert!(
+                Instant::now() < deadline,
+                "the real Sixel encoder did not complete"
+            );
+            native = session
+                .advance(Advance {
+                    image_protocol: None,
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap()
+                .bytes
+                .unwrap_or_default();
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        prepare(&mut session);
+        let native_bytes = session.encode(true).unwrap().bytes.unwrap();
+        assert!(
+            native_bytes.len() > plain_bytes.len(),
+            "fixture must force a real Sixel budget rejection"
+        );
+        let prefix = prepare(&mut session);
+        session.effects.resize(
+            super::super::output::MAX_FRAME_BYTES - plain_bytes.len() - 6,
+            b'e',
+        );
+        session.effects.extend_from_slice(b"EFFECT");
+        let frame = session.encode(true).unwrap().bytes.unwrap();
+        assert_eq!(frame.len(), super::super::output::MAX_FRAME_BYTES);
+        assert!(
+            frame.starts_with(&prefix),
+            "clear and preexisting output survive the rejected candidate"
+        );
+        assert!(!frame.windows(2).any(|bytes| bytes == b"\x1bP"));
+        assert!(frame.ends_with(b"EFFECT"));
+        assert_eq!(
+            frame.windows(6).filter(|bytes| *bytes == b"EFFECT").count(),
+            1
+        );
+        assert!(session.effects.is_empty());
+        session.surface.set_image_protocol(None);
+        session.sixel = false;
+        let next = session.encode(true).unwrap().bytes.unwrap();
+        assert!(
+            next.len() < 128,
+            "the accepted Unicode cells must be the next diff baseline"
         );
     }
 
@@ -679,6 +820,7 @@ mod tests {
         // before the original input owner can admit that click.
         let probe = session
             .advance_if_needed(Advance {
+                image_protocol: None,
                 inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
@@ -696,6 +838,7 @@ mod tests {
         let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer: false,
@@ -777,6 +920,7 @@ mod tests {
         let events = click(&session.surface, "Close");
         let background = session
             .advance_if_needed(Advance {
+                image_protocol: None,
                 inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
@@ -806,6 +950,7 @@ mod tests {
         assert_eq!(inputs.len(), 2);
         let acted = session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer: false,
@@ -836,6 +981,7 @@ mod tests {
             .pop_batch(session.epoch);
         let fresh = session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer: false,
@@ -866,6 +1012,7 @@ mod tests {
         };
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer,
@@ -879,6 +1026,7 @@ mod tests {
         // cancelled group's Down. This also checks that its pressed state ended.
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs: vec![Input {
                     event: events[1].clone(),
                     pointer: Some(Pointer::Exact(session.epoch)),
@@ -897,6 +1045,7 @@ mod tests {
             .collect();
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer: false,
@@ -1035,6 +1184,7 @@ mod tests {
             .collect();
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs,
                 resize: None,
                 cancel_pointer: false,
@@ -1131,6 +1281,7 @@ mod tests {
         assert!(invoked);
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
@@ -1208,6 +1359,7 @@ mod tests {
         session.forward_events(true).unwrap();
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: true,
@@ -1215,6 +1367,7 @@ mod tests {
             .unwrap();
         session
             .advance(Advance {
+                image_protocol: None,
                 inputs: vec![Input {
                     event: mouse(MouseEventKind::Up(MouseButton::Left)),
                     pointer: Some(Pointer::Exact(session.epoch)),
@@ -1243,6 +1396,7 @@ mod tests {
         .unwrap();
         session.initial_frame().unwrap();
         let command = |key| Advance {
+            image_protocol: None,
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
                 pointer: None,
@@ -1284,6 +1438,7 @@ mod tests {
         .unwrap();
         session.initial_frame().unwrap();
         let command = |key, modifiers| Advance {
+            image_protocol: None,
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers)),
                 pointer: None,

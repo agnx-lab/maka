@@ -23,6 +23,7 @@ use std::{
     io::{self, Write},
     sync::mpsc,
     thread,
+    time::Instant,
 };
 
 pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -30,7 +31,7 @@ pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 enum Request {
     Frame(
         Vec<u8>,
-        mpsc::SyncSender<io::Result<()>>,
+        mpsc::SyncSender<io::Result<Instant>>,
         Option<(Presentation, u64, Box<InputSnapshot>)>,
     ),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
@@ -40,7 +41,8 @@ enum Request {
 /// abandoning observation never replaces a partially written ANSI frame.
 pub(super) struct Output {
     send: mpsc::SyncSender<Request>,
-    pending: Option<mpsc::Receiver<io::Result<()>>>,
+    pending: Option<mpsc::Receiver<io::Result<Instant>>>,
+    flushed: Option<Instant>,
 }
 
 impl Output {
@@ -52,26 +54,34 @@ impl Output {
             .name("maka-nsh-output".into())
             .spawn(move || {
                 while let Ok(request) = receive.recv() {
-                    let (bytes, receipt, close, presentation) = match request {
+                    match request {
                         Request::Frame(bytes, receipt, presentation) => {
-                            (bytes, receipt, false, presentation)
+                            let result = writer.write_all(&bytes).and_then(|_| writer.flush());
+                            let failed = result.is_err();
+                            let result = result.map(|()| {
+                                let flushed = Instant::now();
+                                if let Some((presentation, epoch, snapshot)) = presentation {
+                                    presentation.publish(epoch, *snapshot);
+                                }
+                                flushed
+                            });
+                            let _ = receipt.send(result);
+                            if failed {
+                                break;
+                            }
                         }
-                        Request::Close(bytes, receipt) => (bytes, receipt, true, None),
-                    };
-                    let result = writer.write_all(&bytes).and_then(|_| writer.flush());
-                    let failed = result.is_err();
-                    if !failed && let Some((presentation, epoch, snapshot)) = presentation {
-                        presentation.publish(epoch, *snapshot);
-                    }
-                    let _ = receipt.send(result);
-                    if close || failed {
-                        break;
+                        Request::Close(bytes, receipt) => {
+                            let _ =
+                                receipt.send(writer.write_all(&bytes).and_then(|_| writer.flush()));
+                            break;
+                        }
                     }
                 }
             })?;
         Ok(Self {
             send,
             pending: None,
+            flushed: None,
         })
     }
 
@@ -103,13 +113,23 @@ impl Output {
         match receive.try_recv() {
             Ok(result) => {
                 self.pending = None;
-                result.map(|_| true).map_err(|error| error.to_string())
+                result
+                    .map(|flushed| {
+                        self.flushed = Some(flushed);
+                        true
+                    })
+                    .map_err(|error| error.to_string())
             }
             Err(mpsc::TryRecvError::Empty) => Ok(false),
             Err(mpsc::TryRecvError::Disconnected) => {
                 Err("terminal output worker stopped before flush".into())
             }
         }
+    }
+
+    /// Actual writer flush time, rather than the time the driver polled its receipt.
+    pub fn take_flushed(&mut self) -> Option<Instant> {
+        self.flushed.take()
     }
 
     /// Queue restoration behind the current frame, without joining a writer
@@ -123,8 +143,46 @@ impl Output {
     }
 }
 
-#[derive(Default)]
-pub(super) struct FrameWriter(pub Vec<u8>);
+#[derive(Debug)]
+struct FrameBudget;
+
+impl std::fmt::Display for FrameBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("terminal frame exceeds byte limit")
+    }
+}
+impl std::error::Error for FrameBudget {}
+
+pub(super) fn exceeded_budget(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|error| error.is::<FrameBudget>())
+}
+
+pub(super) struct FrameWriter(pub Vec<u8>, usize);
+
+impl Default for FrameWriter {
+    fn default() -> Self {
+        Self(Vec::new(), MAX_FRAME_BYTES)
+    }
+}
+
+impl FrameWriter {
+    /// Reserve the exact epilogue before attempting a candidate buffer diff.
+    pub fn reserve(&mut self, suffix: usize) -> io::Result<()> {
+        self.1 = MAX_FRAME_BYTES
+            .checked_sub(suffix)
+            .ok_or_else(|| io::Error::other(FrameBudget))?;
+        if self.0.len() > self.1 {
+            return Err(io::Error::other(FrameBudget));
+        }
+        Ok(())
+    }
+
+    pub fn release(&mut self) {
+        self.1 = MAX_FRAME_BYTES;
+    }
+}
 
 impl Write for FrameWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -132,9 +190,9 @@ impl Write for FrameWriter {
             .0
             .len()
             .checked_add(bytes.len())
-            .is_none_or(|size| size > MAX_FRAME_BYTES)
+            .is_none_or(|size| size > self.1)
         {
-            return Err(io::Error::other("terminal frame exceeds byte limit"));
+            return Err(io::Error::other(FrameBudget));
         }
         self.0.extend_from_slice(bytes);
         Ok(bytes.len())
@@ -177,6 +235,71 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn query_flush_receipt_uses_the_writer_time_without_publishing_a_frame() {
+        struct FlushGate {
+            entered: mpsc::SyncSender<()>,
+            release: Option<mpsc::Receiver<()>>,
+        }
+        impl Write for FlushGate {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                if let Some(release) = self.release.take() {
+                    self.entered.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+                Ok(())
+            }
+        }
+        let (entered, observing) = mpsc::sync_channel(1);
+        let (release, gate) = mpsc::channel();
+        let mut output = Output::new(FlushGate {
+            entered,
+            release: Some(gate),
+        })
+        .unwrap();
+        output
+            .submit(super::super::graphics::QUERY.to_vec(), None)
+            .unwrap();
+        observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        let before_flush = Instant::now();
+        assert!(!output.poll().unwrap());
+        assert!(output.take_flushed().is_none());
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !output.poll().unwrap() {
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(output.take_flushed().unwrap() >= before_flush);
+        assert!(output.take_flushed().is_none());
+        output
+            .close(Vec::new())
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn reserved_suffix_and_prefix_share_the_complete_frame_limit() {
+        let mut writer = FrameWriter::default();
+        writer.write_all(b"PREFIX").unwrap();
+        writer.reserve(17).unwrap();
+        writer
+            .write_all(&vec![b'x'; MAX_FRAME_BYTES - 6 - 17])
+            .unwrap();
+        let error = writer.write_all(b"!").unwrap_err();
+        assert!(exceeded_budget(&error));
+        writer.release();
+        writer.write_all(&[b'e'; 17]).unwrap();
+        assert_eq!(writer.0.len(), MAX_FRAME_BYTES);
+        assert!(exceeded_budget(&writer.write_all(b"!").unwrap_err()));
+        assert!(!exceeded_budget(&io::Error::other("real IO failure")));
     }
 
     #[test]

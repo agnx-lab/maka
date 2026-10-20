@@ -22,7 +22,7 @@ use nsh_platform_tui::{InputSnapshot, PressLease};
 use std::{collections::VecDeque, sync::Arc};
 
 pub(super) const MAX_EVENTS: usize = 128;
-const MAX_BYTES: usize = 64 * 1024;
+pub(super) const MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub(super) struct Input {
@@ -57,6 +57,7 @@ pub(super) struct Inbox {
     events: VecDeque<Input>,
     bytes: usize,
     pub resize: Option<(u16, u16)>,
+    pub graphics: super::graphics::Probe,
     pub cancel_pointer: bool,
     pub error: Option<String>,
     pub quit: bool,
@@ -87,6 +88,7 @@ impl Inbox {
             return;
         }
         if let Event::Resize(columns, rows) = event {
+            self.graphics.cancel();
             self.resize = Some((columns, rows));
             self.cancel_pointer = true;
             if let Some((epoch, _)) = self.last_frame.take() {

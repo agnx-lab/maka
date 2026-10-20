@@ -21,11 +21,13 @@
 //! recovery stay outside this shell; neither blocked stdout nor JS prevents
 //! the input owner from cancelling and returning to that Host scope.
 
+mod adapter;
+mod graphics;
 mod input;
 mod output;
 mod ui;
 
-use crossterm::{event, terminal};
+use crossterm::event;
 use input::Inbox;
 use nsh_engine::EngineConfig;
 use nsh_platform_tui::{CellMetrics, InputSnapshot};
@@ -40,6 +42,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use termina::{EventReader, PlatformTerminal, Terminal as _};
 
 const SETUP: &[u8] = b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h";
 const CLEANUP: &[u8] =
@@ -83,20 +86,33 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("the terminal shell requires a terminal on stdin and stdout".into());
     }
-    let (columns, rows) = terminal::size().map_err(|error| error.to_string())?;
+    let mut terminal = PlatformTerminal::new().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    terminal.set_discard_input_on_drop(false);
+    let size = terminal
+        .get_dimensions()
+        .map_err(|error| error.to_string())?;
+    let (columns, rows) = (size.cols, size.rows);
     config.viewport = CellMetrics::default().viewport(columns.max(1), rows.max(1));
     config.environment.window = config.viewport;
-    terminal::enable_raw_mode().map_err(|error| error.to_string())?;
-    let _raw = RawMode;
+    terminal
+        .enter_raw_mode()
+        .map_err(|error| error.to_string())?;
+    let reader = terminal.event_reader();
+    // The Inbox accepts a full 64 KiB paste. The only unfinished wire framing
+    // beyond that payload is the two six-byte bracketed-paste delimiters.
+    reader
+        .set_max_pending_bytes(input::MAX_BYTES + 12)
+        .map_err(|error| error.to_string())?;
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;
-    output.submit(SETUP.to_vec(), None)?;
+    output.submit([SETUP, graphics::QUERY].concat(), None)?;
     let presentation = Presentation {
         stop: stop.clone(),
         ..Default::default()
     };
-    let _reader = StopReader(stop.clone());
+    let mut input = None;
     let result = (|| {
-        start_reader(presentation.clone())?;
+        input = Some(start_reader(presentation.clone(), reader)?);
         let (commands, frames) =
             ui::spawn(config, presentation.clone()).map_err(|error| error.to_string())?;
         // Returning drops both channel endpoints without joining either
@@ -104,6 +120,9 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
         drive(&mut output, &presentation, &commands, &frames)
     })();
     presentation.shutdown();
+    // The platform guard must outlive the sole reader: restoring console modes
+    // or code pages while it can still decode input races shutdown on Windows.
+    drop(input);
     let cleanup = output.close(CLEANUP.to_vec()).and_then(|receipt| {
         match receipt.recv_timeout(Duration::from_millis(100)) {
             Ok(result) => result.map_err(|error| error.to_string()),
@@ -152,6 +171,9 @@ fn drive(
             }
         }
         if output.poll()? {
+            if setup && let Some(flushed) = output.take_flushed() {
+                state.lock().unwrap().graphics.flushed(flushed);
+            }
             setup = false;
             if let Some(completed) = pending.take() {
                 epoch = completed;
@@ -185,10 +207,12 @@ fn drive(
         }
         if !setup && !busy && pending.is_none() {
             let mut inbox = state.lock().unwrap();
+            let image_protocol = inbox.graphics.take_ready(Instant::now());
             let resize = inbox.resize.take();
             let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
             let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
             let command = ui::Advance {
+                image_protocol,
                 inputs,
                 resize,
                 cancel_pointer,
@@ -210,8 +234,10 @@ fn drive(
     }
 }
 
-fn start_reader(presentation: Presentation) -> Result<(), String> {
-    thread::Builder::new()
+fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reader, String> {
+    let waker = reader.waker();
+    let stop = presentation.stop.clone();
+    let handle = thread::Builder::new()
         .name("maka-nsh-input".into())
         .spawn(move || {
             let Presentation {
@@ -227,13 +253,15 @@ fn start_reader(presentation: Presentation) -> Result<(), String> {
                     // fence, without waiting for stdin while holding it.
                     let mut read = 0;
                     for _ in 0..input::MAX_EVENTS {
-                        let event = event::poll(Duration::ZERO).and_then(|ready| {
-                            if ready {
-                                event::read().map(Some)
-                            } else {
-                                Ok(None)
-                            }
-                        });
+                        let event = reader
+                            .poll(Some(Duration::ZERO), |_| true)
+                            .and_then(|ready| {
+                                if ready {
+                                    reader.read(|_| true).map(Some)
+                                } else {
+                                    Ok(None)
+                                }
+                            });
                         let event = match event {
                             Ok(Some(event)) => event,
                             Ok(None) => break,
@@ -243,6 +271,10 @@ fn start_reader(presentation: Presentation) -> Result<(), String> {
                             }
                         };
                         read += 1;
+                        inbox.graphics.observe(&event, Instant::now());
+                        let Some(event) = adapter::event(event) else {
+                            continue;
+                        };
                         if matches!(event, event::Event::Resize(..)) {
                             presented.store(0, Ordering::Release);
                         }
@@ -256,7 +288,7 @@ fn start_reader(presentation: Presentation) -> Result<(), String> {
                         && inbox.error.is_none()
                         && !stop.load(Ordering::Acquire)
                     {
-                        match event::poll(Duration::ZERO) {
+                        match reader.poll(Some(Duration::ZERO), |_| true) {
                             Ok(true) => inbox.error = Some(
                                 "terminal input exceeded its pending budget; input was rejected"
                                     .into(),
@@ -269,20 +301,27 @@ fn start_reader(presentation: Presentation) -> Result<(), String> {
                 thread::sleep(Duration::from_millis(2));
             }
         })
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(Reader {
+        stop,
+        waker,
+        handle: Some(handle),
+    })
 }
 
-struct RawMode;
-impl Drop for RawMode {
-    fn drop(&mut self) {
-        let _ = terminal::disable_raw_mode();
-    }
+struct Reader {
+    stop: Arc<AtomicBool>,
+    waker: termina::event::PlatformWaker,
+    handle: Option<thread::JoinHandle<()>>,
 }
-struct StopReader(Arc<AtomicBool>);
-impl Drop for StopReader {
+
+impl Drop for Reader {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
+        self.stop.store(true, Ordering::Release);
+        let _ = self.waker.wake();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
