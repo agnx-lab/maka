@@ -185,7 +185,11 @@ fn configuration(
         // APPLICATION is compiled into this trusted executable; only the
         // interpreter stack is bounded, as for other standalone NSH apps.
         limits: Limits::standalone(),
-        ui_sets: vec![nsh_base::registry(), registry],
+        ui_sets: vec![
+            nsh_base::registry(),
+            registry,
+            maka_terminal_shell::markdown::registry(),
+        ],
         runtime: Some(runtime),
         ..EngineConfig::new(app)
     }

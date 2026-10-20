@@ -22,11 +22,13 @@ fn main() {
     // Describe the runtime export without constructing a Host client at build time.
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
     host.native_values(&["host"]);
+    let mut markdown = nsh_core::ui::Registry::ui_set("maka/markdown");
+    markdown.native_values(&["markdown"]);
     let module = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: "app/App.tsx".into(),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry().into(), host.into()],
+        ui_sets: vec![nsh_base::registry().into(), host.into(), markdown.into()],
     })
     .expect("bundle terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));

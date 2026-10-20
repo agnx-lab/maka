@@ -28,6 +28,7 @@ export type Row = {
   text: string;
   position?: Position;
   fragments?: Fragment[];
+  totalBytes?: number;
   tool?: any;
   turnId?: string;
   timestamp?: number;
@@ -46,8 +47,30 @@ export type Row = {
 export const messageKey = (row: Row) =>
   row.role === 'user' ? `user/${row.messageId}/${row.field}` : row.key;
 
+export function messageBytes(text: string): number {
+  let length = 0;
+  for (const point of text) {
+    const code = point.codePointAt(0)!;
+    length += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return length;
+}
+
+// A live part starts at its original opening. A history window may instead
+// contain only a tail or separated fragments, without Markdown's opening context.
+export function hasCompletePrefix(row: Row): boolean {
+  if (!row.fragments) return row.startSequence !== undefined && row.sequence !== undefined;
+  let offset = 0;
+  for (const fragment of row.fragments) {
+    if (fragment.offset !== offset) return false;
+    offset += messageBytes(fragment.text);
+  }
+  return row.fragments.length > 0 && row.totalBytes !== undefined && offset <= row.totalBytes;
+}
+
 export function historyMetadata(chunk: any, through: number) {
   return {
+    totalBytes: chunk.totalBytes,
     timing: chunk.timing,
     model: chunk.model,
     finalOutput: chunk.finalOutput,

@@ -20,7 +20,8 @@
 import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { host } from 'maka/host';
-import { messageKey, type Position, type Row } from './history';
+import { messageBytes, messageKey, type Position, type Row } from './history';
+import { MarkdownBody } from './MarkdownBody';
 import { C } from './ui';
 import { ToolImage, type ImagePreview } from './ToolImage';
 
@@ -33,82 +34,6 @@ type MessageRowToggle = {
   key: string;
   value: boolean;
 };
-type MessageBlock = {
-  key: number;
-  kind: 'paragraph' | 'heading' | 'bullets' | 'code';
-  text: string;
-  language?: string;
-};
-
-// Deliberately a block subset: headings, list runs and fenced code. Everything
-// else stays literal; Source always exposes the exact original selectable text.
-// At most 48 blocks: excess structure becomes one complete literal tail.
-function messageBlocks(source: string): MessageBlock[] {
-  const lines = source.split('\n');
-  const blocks: MessageBlock[] = [];
-  const fence = (line: string) => /^ {0,3}(`{3,}|~{3,})([^\r]*)\r?$/.exec(line);
-  const heading = (line: string) => /^ {0,3}#{1,6}[ \t]+(.+?)\r?$/.exec(line);
-  const bullet = (line: string) => /^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/.test(line);
-  let index = 0;
-  while (index < lines.length && blocks.length < 47) {
-    if (!lines[index].trim()) {
-      index += 1;
-      continue;
-    }
-    const start = index;
-    const opening = fence(lines[index]);
-    if (opening) {
-      index += 1;
-      const body = index;
-      while (index < lines.length) {
-        const closing = fence(lines[index]);
-        if (
-          closing &&
-          closing[1][0] === opening[1][0] &&
-          closing[1].length >= opening[1].length &&
-          !closing[2].trim()
-        )
-          break;
-        index += 1;
-      }
-      blocks.push({
-        key: start,
-        kind: 'code',
-        text: lines.slice(body, index).join('\n'),
-        language: opening[2].trim(),
-      });
-      if (index < lines.length) index += 1;
-      continue;
-    }
-    const title = heading(lines[index]);
-    if (title) {
-      blocks.push({ key: start, kind: 'heading', text: title[1] });
-      index += 1;
-      continue;
-    }
-    const list = bullet(lines[index]);
-    index += 1;
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !fence(lines[index]) &&
-      !heading(lines[index]) &&
-      (list ? bullet(lines[index]) || /^\s+/.test(lines[index]) : !bullet(lines[index]))
-    ) {
-      index += 1;
-    }
-    blocks.push({
-      key: start,
-      kind: list ? 'bullets' : 'paragraph',
-      text: lines.slice(start, index).join('\n'),
-    });
-  }
-  if (index < lines.length) {
-    blocks.push({ key: index, kind: 'paragraph', text: lines.slice(index).join('\n') });
-  }
-  return blocks;
-}
-
 type MessageSourceRef = {
   key: string;
   field: 'arguments' | 'result';
@@ -116,15 +41,6 @@ type MessageSourceRef = {
   position: Position;
   name?: string;
 };
-function messageBytes(text: string): number {
-  let length = 0;
-  for (const point of text) {
-    const code = point.codePointAt(0)!;
-    length += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return length;
-}
-
 // Each instance owns one exact immutable field at its opening fence. It has
 // one in-flight page; closing/rebinding disposes its owner and ignores replies.
 function MessageSource({
@@ -248,6 +164,8 @@ export function MessageRow({
   viewState,
   previewImage,
   onExpand,
+  ownerKey,
+  reasoningPreview,
 }: {
   item: () => Row;
   sessionId: string;
@@ -255,14 +173,17 @@ export function MessageRow({
   viewState?: MessageViewState;
   previewImage(image: ImagePreview): void;
   onExpand?(key: string): void;
+  ownerKey?: () => string;
+  reasoningPreview?: () => boolean;
 }) {
+  const rowKey = (row: Row) => ownerKey?.() ?? messageKey(row);
   return (
-    <Each of={[item()]} key={messageKey}>
+    <Each of={[item()]} key={rowKey}>
       {(row) => {
         const expanded = viewState?.expanded ?? signal(false),
           sourceMode = viewState?.sourceMode ?? signal(false);
         const ownsRow = (action: MessageRowToggle) => {
-          return action.sessionId === sessionId && action.key === messageKey(row());
+          return action.sessionId === sessionId && action.key === rowKey(row());
         };
         const setSourceMode = (action: MessageRowToggle) => {
           if (ownsRow(action)) sourceMode.set(action.value);
@@ -273,14 +194,6 @@ export function MessageRow({
           if (action.value) onExpand?.(action.key);
         };
         const text = computed(() => row().text);
-        const blocks = computed(() =>
-          row().tool ||
-          row().field === 'thinking' ||
-          row().role === 'thinking' ||
-          row().role === 'user'
-            ? []
-            : messageBlocks(text()),
-        );
         const preview = computed(() => {
           const first = /\S[^\r\n]*/.exec(text())?.[0].trim() ?? '';
           return first.length > 160 ? `${first.slice(0, 160)}…` : first;
@@ -291,7 +204,8 @@ export function MessageRow({
         const compact = () => thinking() || isTool();
         const user = () => row().role === 'user';
         const summary = () => {
-          if (thinking()) return `◇ Think${preview() ? ` · ${preview()}` : ''}`;
+          if (thinking())
+            return `◇ Think${reasoningPreview?.() !== false && preview() ? ` · ${preview()}` : ''}`;
           const call = row().tool?.call;
           return `${expanded() ? 'v' : '>'} ${call?.name ?? 'Tool'}${call?.title?.fallback ? ` · ${call.title.fallback}` : ''}${row().tool?.result?.isError ? ' · error' : ''}`;
         };
@@ -333,38 +247,19 @@ export function MessageRow({
                       <If
                         when={sourceMode()}
                         else={
-                          <View style={{ gap: 16 }}>
-                            <Each of={blocks()} key={(block: MessageBlock) => block.key}>
-                              {(block) => (
-                                <View
-                                  style={{
-                                    gap: 0,
-                                    backgroundColor:
-                                      block().kind === 'code' ? C.surface : C.background,
-                                    paddingVertical: block().kind === 'code' ? 16 : 0,
-                                    paddingHorizontal: block().kind === 'code' ? 8 : 0,
-                                  }}
-                                >
-                                  <If when={block().kind === 'code'}>
-                                    <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                                      {block().language || 'code'}
-                                    </Text>
-                                  </If>
-                                  <Text
-                                    selectable
-                                    style={{
-                                      color: C.text,
-                                      fontWeight: block().kind === 'heading' ? '700' : '400',
-                                      fontSize: 16,
-                                      lineHeight: 16,
-                                    }}
-                                  >
-                                    {block().text}
-                                  </Text>
-                                </View>
-                              )}
-                            </Each>
-                          </View>
+                          <If
+                            when={row().role === 'assistant' && row().field === 'body'}
+                            else={
+                              <Text
+                                selectable
+                                style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
+                              >
+                                {text()}
+                              </Text>
+                            }
+                          >
+                            <MarkdownBody row={row} />
+                          </If>
                         }
                       >
                         <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
@@ -375,7 +270,7 @@ export function MessageRow({
                         selected={sourceMode()}
                         onPress={inputAction(setSourceMode, {
                           sessionId,
-                          key: messageKey(row()),
+                          key: rowKey(row()),
                           value: !sourceMode(),
                         })}
                         style={{ height: 16, alignSelf: 'flex-end' }}
@@ -391,7 +286,7 @@ export function MessageRow({
                     selected={expanded()}
                     onPress={inputAction(setExpanded, {
                       sessionId,
-                      key: messageKey(row()),
+                      key: rowKey(row()),
                       value: !expanded(),
                     })}
                     style={{ height: 16, paddingVertical: 0 }}

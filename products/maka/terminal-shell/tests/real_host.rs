@@ -363,6 +363,94 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
     }).await.expect("real Host/Agent UI integration timed out");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_source() {
+    use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::open().await;
+        let client = fixture.client().await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+        let sent = support::mutate(&client, "send", json!({
+            "sessionId":fixture.session,"message":"Render the original Markdown", "model":fixture.selection
+        })).await;
+        assert_eq!(sent["kind"], "started");
+        let mut request = fixture.next_request().await;
+        let prefix = "# RICH_HEADING\n\n**RICH_BOLD** *RICH_ITALIC* ~~RICH_STRIKE~~ `RICH_CODE`";
+        request.delta(prefix).await;
+        let rendered = wait_view(&mut view, |screen| {
+            screen.contains("RICH_HEADING") && screen.contains("RICH_STRIKE")
+                && !screen.contains("# RICH_HEADING") && !screen.contains("**RICH_BOLD**")
+        }).await;
+        evidence("rich-response-live-inline", &rendered);
+        support::evidence_cells("rich-response-live-inline", &view);
+        // Inspect the actual terminal cells, rather than the Markdown DTO or
+        // parser internals: these styles must survive nested NSH Text shaping.
+        let viewport = view.surface().viewport();
+        let area = Rect::new(0, 0, (viewport.width.0 / 8.0) as u16, (viewport.height.0 / 16.0) as u16);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        for (token, expected) in [
+            ("RICH_HEADING", Modifier::BOLD),
+            ("RICH_BOLD", Modifier::BOLD),
+            ("RICH_ITALIC", Modifier::ITALIC),
+            ("RICH_STRIKE", Modifier::CROSSED_OUT),
+        ] {
+            let cells = (0..area.height).find_map(|y| {
+                (0..=area.width.saturating_sub(token.len() as u16)).find_map(|x| {
+                    let text: String = (0..token.len()).map(|index| buffer[(x + index as u16, y)].symbol()).collect();
+                    (text == token).then(|| (x, y))
+                })
+            }).unwrap_or_else(|| panic!("formatted token {token} is not visible:\n{rendered}"));
+            assert!((0..token.len()).all(|index| buffer[(cells.0 + index as u16, cells.1)].modifier.contains(expected)), "terminal cells for {token} lost {expected:?}");
+        }
+        let suffix = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n```txt\nRICH_CODE_BLOCK\n```";
+        request.delta(suffix).await;
+        // The stream remains physically open: parsing cannot wait for final.
+        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        evidence("rich-response-complete", &complete);
+        support::click_text(&mut view, "[Source]");
+        let original = wait_view(&mut view, |screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && screen.contains("[Formatted]")).await;
+        evidence("rich-response-original-source", &original);
+        support::click_text(&mut view, "[Formatted]");
+        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
+        assert_eq!(response["text"], format!("{prefix}{suffix}"));
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        drop(view);
+        bindings.close().await.unwrap();
+
+        // A fresh history tail omits the opening fence. Its heading-looking
+        // lines must stay original source until offset zero has been loaded.
+        let client = fixture.client().await;
+        let sent = support::mutate(&client, "send", json!({
+            "sessionId":fixture.session,"message":"Keep a partial code source literal", "model":fixture.selection
+        })).await;
+        assert_eq!(sent["kind"], "started");
+        let mut request = fixture.next_request().await;
+        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(7000));
+        request.delta(&source).await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let tail = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        let response = tail["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
+        assert!(response["offset"].as_u64().unwrap() > 0, "this history must omit the original opening fence");
+        let (mut view, bindings) = fixture.view(client, Some(fixture.session.clone()));
+        let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
+        evidence("rich-response-incomplete-history", &literal);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+        drop(view);
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host rich response workflow timed out");
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn immutable_tool_images_render_and_preview_without_stopping_the_running_turn() {

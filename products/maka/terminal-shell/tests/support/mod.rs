@@ -397,6 +397,7 @@ impl Fixture {
             ui_sets: Some(vec![
                 nsh_base::registry(),
                 bindings.registry(initial_session),
+                maka_terminal_shell::markdown::registry(),
             ]),
             ..Default::default()
         });
