@@ -17,7 +17,8 @@
  * under the License.
  */
 
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use nsh_platform_tui::{InputSnapshot, PressLease};
 use std::collections::VecDeque;
 
 pub(super) const MAX_EVENTS: usize = 128;
@@ -26,9 +27,29 @@ const MAX_BYTES: usize = 64 * 1024;
 #[derive(Debug)]
 pub(super) struct Input {
     pub event: Event,
-    /// Pointer events are evidence of a particular completed frame. Keys
-    /// retain their order and follow the focused editor after presentation.
-    pub pointer_epoch: Option<u64>,
+    /// Keys follow the focused editor. A pointer either requires the exact
+    /// frame or names a sealed action from the last completed output.
+    pub pointer: Option<Pointer>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum Pointer {
+    Exact(u64),
+    Press { epoch: u64, lease: PressLease },
+}
+
+impl Pointer {
+    fn epoch(&self) -> u64 {
+        match self {
+            Self::Exact(epoch) | Self::Press { epoch, .. } => *epoch,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum Capture {
+    Active(Pointer),
+    Cancelled,
 }
 
 #[derive(Default)]
@@ -39,6 +60,12 @@ pub(super) struct Inbox {
     pub cancel_pointer: bool,
     pub error: Option<String>,
     pub quit: bool,
+    /// The sole output owner replaces this only after a successful flush.
+    pub last_frame: Option<(u64, InputSnapshot)>,
+    /// A physical input entered application code. Every earlier offered
+    /// action is revoked, including offers older than the UI's current frame.
+    pub reject_through: u64,
+    capture: Option<Capture>,
 }
 
 impl Inbox {
@@ -62,17 +89,69 @@ impl Inbox {
         if let Event::Resize(columns, rows) = event {
             self.resize = Some((columns, rows));
             self.cancel_pointer = true;
+            if let Some((epoch, _)) = self.last_frame.take() {
+                self.reject_through = self.reject_through.max(epoch);
+            }
+            self.capture = None;
             return;
         }
         if self.error.is_some() {
             return;
         }
-        let pointer_epoch = if matches!(event, Event::Mouse(_)) {
-            if epoch == 0 || self.resize.is_some() {
+        let pointer = if let Event::Mouse(mouse) = &event {
+            let captured = match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.capture = None;
+                    if mouse.modifiers.is_empty() && self.resize.is_none() {
+                        self.capture = self.last_frame.as_ref().and_then(|(offered, snapshot)| {
+                            (*offered > self.reject_through)
+                                .then(|| snapshot.press_at(mouse.column, mouse.row))
+                                .flatten()
+                                .map(|lease| {
+                                    Capture::Active(Pointer::Press {
+                                        epoch: *offered,
+                                        lease,
+                                    })
+                                })
+                        });
+                    }
+                    match &self.capture {
+                        Some(Capture::Active(pointer)) => Some(pointer.clone()),
+                        _ => None,
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => match self.capture.take() {
+                    Some(Capture::Active(pointer)) => Some(pointer),
+                    Some(Capture::Cancelled) => {
+                        self.cancel_pointer = true;
+                        return;
+                    }
+                    None => None,
+                },
+                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Down(_)
+                    if self.capture.is_some() =>
+                {
+                    // Keep the cancellation in gesture order: a queued Down
+                    // must not recreate its capture after a batch-level cancel.
+                    match self.capture.replace(Capture::Cancelled) {
+                        Some(Capture::Active(pointer)) => Some(pointer),
+                        _ => return,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(captured) = captured {
+                if captured.epoch() <= self.reject_through || self.resize.is_some() {
+                    self.cancel_pointer = true;
+                    return;
+                }
+                Some(captured)
+            } else if epoch == 0 || self.resize.is_some() {
                 self.cancel_pointer = true;
                 return;
+            } else {
+                Some(Pointer::Exact(epoch))
             }
-            Some(epoch)
         } else {
             None
         };
@@ -85,16 +164,18 @@ impl Inbox {
             return;
         }
         self.bytes += bytes;
-        self.events.push_back(Input {
-            event,
-            pointer_epoch,
-        });
+        self.events.push_back(Input { event, pointer });
     }
 
     pub fn pop(&mut self, epoch: u64) -> Option<Input> {
         while let Some(input) = self.events.pop_front() {
             self.bytes -= event_bytes(&input.event);
-            if input.pointer_epoch.is_some_and(|offered| offered != epoch) {
+            let stale = match &input.pointer {
+                Some(Pointer::Exact(offered)) => *offered != epoch,
+                Some(Pointer::Press { epoch, .. }) => *epoch <= self.reject_through,
+                None => false,
+            };
+            if stale {
                 self.cancel_pointer = true;
                 continue;
             }
@@ -121,7 +202,10 @@ impl Inbox {
 }
 
 fn continues_pointer(first: &Input, last: &Input, next: &Input) -> bool {
-    if first.pointer_epoch.is_none() || first.pointer_epoch != next.pointer_epoch {
+    let Some(first_epoch) = first.pointer.as_ref().map(Pointer::epoch) else {
+        return false;
+    };
+    if next.pointer.as_ref().map(Pointer::epoch) != Some(first_epoch) {
         return false;
     }
     let (Event::Mouse(first), Event::Mouse(last), Event::Mouse(next)) =

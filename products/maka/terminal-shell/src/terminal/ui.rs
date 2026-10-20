@@ -17,12 +17,17 @@
  * under the License.
  */
 
-use super::{Presentation, input::Input, output::FrameWriter};
+use super::{
+    Presentation,
+    input::{Input, Pointer},
+    output::FrameWriter,
+};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use nsh_core::{Command, MountBatch, MountItem, ROOT_ID};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
-    CellMetrics, ServiceOutput, ServiceRequest, Surface, SurfaceEvent, TerminalTextEngine,
+    CellMetrics, InputSnapshot, PressLease, ServiceOutput, ServiceRequest, Surface, SurfaceEvent,
+    TerminalTextEngine,
 };
 use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
 use std::{
@@ -65,6 +70,8 @@ impl MountSink for Sink {
 pub(super) struct Frame {
     pub epoch: u64,
     pub bytes: Option<Vec<u8>>,
+    /// None only when an idle probe kept the existing presentation.
+    pub input: Option<InputSnapshot>,
     pub quit: bool,
 }
 
@@ -98,11 +105,12 @@ pub(super) fn spawn(
                     return;
                 }
             };
+            session.presentation = presentation;
             if frames.send(session.initial_frame()).is_err() {
                 return;
             }
             while let Ok(command) = commands.recv() {
-                let result = session.advance_if_needed(command, &presentation);
+                let result = session.advance_if_needed(command);
                 let failed = result.is_err();
                 if frames.send(result).is_err() || failed {
                     return;
@@ -121,6 +129,7 @@ struct Session {
     epoch: u64,
     started: Instant,
     effects: Vec<u8>,
+    presentation: Presentation,
 }
 
 impl Session {
@@ -159,6 +168,7 @@ impl Session {
             epoch: 0,
             started: Instant::now(),
             effects: Vec::new(),
+            presentation: Presentation::default(),
         })
     }
 
@@ -167,12 +177,9 @@ impl Session {
         self.encode(true)
     }
 
-    fn advance_if_needed(
-        &mut self,
-        command: Advance,
-        presentation: &Presentation,
-    ) -> Result<Frame, String> {
+    fn advance_if_needed(&mut self, command: Advance) -> Result<Frame, String> {
         if command.is_probe() {
+            let presentation = &self.presentation;
             let inbox = presentation.state.lock().unwrap();
             if presentation.stop.load(std::sync::atomic::Ordering::Acquire)
                 || inbox.has_pending()
@@ -181,6 +188,7 @@ impl Session {
                 return Ok(Frame {
                     epoch: self.epoch,
                     bytes: None,
+                    input: None,
                     quit: self.surface.should_quit(),
                 });
             }
@@ -189,8 +197,10 @@ impl Session {
                 .store(0, std::sync::atomic::Ordering::Release);
         }
         let frame = self.advance(command)?;
-        if frame.bytes.is_none() {
-            presentation.publish(frame.epoch);
+        if frame.bytes.is_none()
+            && let Some(snapshot) = &frame.input
+        {
+            self.presentation.publish(frame.epoch, snapshot.clone());
         }
         Ok(frame)
     }
@@ -211,12 +221,22 @@ impl Session {
             changed = true;
         }
         for input in &command.inputs {
-            if input.pointer_epoch.is_some_and(|epoch| epoch != self.epoch) {
+            if matches!(input.pointer, Some(Pointer::Exact(epoch)) if epoch != self.epoch) {
                 return Err("pointer input belongs to an obsolete presentation".into());
             }
         }
         let mut inputs = command.inputs.into_iter().peekable();
         while let Some(input) = inputs.next() {
+            let lease = match &input.pointer {
+                Some(Pointer::Press { epoch, lease }) => {
+                    if *epoch <= self.presentation.state.lock().unwrap().reject_through {
+                        self.cancel_pointer()?;
+                        continue;
+                    }
+                    Some(lease)
+                }
+                _ => None,
+            };
             if let Event::Mouse(mouse) = &input.event
                 && matches!(
                     mouse.kind,
@@ -242,12 +262,22 @@ impl Session {
                 changed = true;
                 continue;
             }
-            changed |= self.surface.handle_event(input.event);
+            if let (Event::Mouse(mouse), Some(lease)) = (&input.event, lease) {
+                match self.surface.handle_presented_mouse(*mouse, lease) {
+                    Some(handled) => changed |= handled,
+                    None => {
+                        self.cancel_pointer()?;
+                        continue;
+                    }
+                }
+            } else {
+                changed |= self.surface.handle_event(input.event);
+            }
             let events: Vec<_> = self.surface.drain_events().collect();
             // A captured Down/Drag/Up group can finish before queued JS
             // changes its meaning. Once a callback runs, remaining old-frame
             // pointers lose their authority even if the pixels stay equal.
-            let invokes_application = self.dispatch_events(events, true)?;
+            let invokes_application = self.dispatch_events(events, true, lease)?;
             if invokes_application {
                 if inputs.peek().is_some() {
                     self.cancel_pointer()?;
@@ -274,7 +304,7 @@ impl Session {
             .drain_events()
             .filter(|event| !matches!(event, SurfaceEvent::Event(..)))
             .collect();
-        self.dispatch_events(events, false).map(|_| ())
+        self.dispatch_events(events, false, None).map(|_| ())
     }
 
     fn oversized_cut(&self, event: &Event) -> bool {
@@ -319,13 +349,15 @@ impl Session {
 
     fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
         let events: Vec<_> = self.surface.drain_events().collect();
-        self.dispatch_events(events, presented_input).map(|_| ())
+        self.dispatch_events(events, presented_input, None)
+            .map(|_| ())
     }
 
     fn dispatch_events(
         &mut self,
         events: Vec<SurfaceEvent>,
         presented_input: bool,
+        lease: Option<&PressLease>,
     ) -> Result<bool, String> {
         let mut invokes_application = false;
         let control = self.engine.control();
@@ -333,7 +365,26 @@ impl Session {
             match event {
                 SurfaceEvent::Event(id, event, payload) if presented_input => {
                     if !invokes_application {
-                        invokes_application = self.engine.dispatch_event_now(id, event, payload);
+                        invokes_application = if let Some(lease) = lease {
+                            match self.engine.dispatch_bound_event_now(
+                                id,
+                                event,
+                                payload,
+                                lease.binding(),
+                            ) {
+                                Some(entered) => entered,
+                                None => {
+                                    self.cancel_pointer()?;
+                                    break;
+                                }
+                            }
+                        } else {
+                            self.engine.dispatch_event_now(id, event, payload)
+                        };
+                        if invokes_application {
+                            let mut inbox = self.presentation.state.lock().unwrap();
+                            inbox.reject_through = inbox.reject_through.max(self.epoch);
+                        }
                     }
                 }
                 SurfaceEvent::Event(id, event, payload) => {
@@ -402,6 +453,7 @@ impl Session {
             return Ok(Frame {
                 epoch: self.epoch,
                 bytes: None,
+                input: Some(self.surface.input_snapshot()),
                 quit: self.surface.should_quit(),
             });
         }
@@ -427,6 +479,7 @@ impl Session {
         Ok(Frame {
             epoch: self.epoch,
             bytes: Some(bytes),
+            input: Some(self.surface.input_snapshot()),
             quit: self.surface.should_quit(),
         })
     }
@@ -555,7 +608,8 @@ mod tests {
         session.initial_frame().unwrap();
         let epoch = session.epoch;
         let presentation = Presentation::default();
-        presentation.publish(epoch);
+        presentation.publish(epoch, session.surface.input_snapshot());
+        session.presentation = presentation.clone();
         let row = session
             .surface
             .accessibility_snapshot()
@@ -570,14 +624,11 @@ mod tests {
         // click arrives. Its queued frame callback must not rebind A to B
         // before the original input owner can admit that click.
         let probe = session
-            .advance_if_needed(
-                Advance {
-                    inputs: Vec::new(),
-                    resize: None,
-                    cancel_pointer: false,
-                },
-                &presentation,
-            )
+            .advance_if_needed(Advance {
+                inputs: Vec::new(),
+                resize: None,
+                cancel_pointer: false,
+            })
             .unwrap();
         assert_eq!(probe.epoch, epoch);
         assert!(probe.bytes.is_none());
@@ -618,6 +669,160 @@ mod tests {
         assert!(session.surface.snapshot().contains("selected:A"));
     }
 
+    #[test]
+    fn a_flushed_close_survives_background_work_but_not_an_earlier_action() {
+        let mut session = Session::new(config(
+            r#"
+            import { inputAction, mount, signal } from "nsh";
+            import { Button } from "nsh/base";
+            import { element, prop, insert, append } from "nsh:rt";
+            const status = signal("before");
+            const closed = signal(0);
+            const close = () => closed.set(closed() + 1);
+            mount(() => {
+                const root = element("view");
+                const result = element("text");
+                prop(result, "style", { height: 16 });
+                insert(result, () => status() + " closed:" + closed());
+                append(root, result);
+                append(root, Button({
+                    accessibilityLabel: "Close",
+                    style: { height: 16 },
+                    onPress: inputAction(close, null),
+                }));
+                return root;
+            });
+            requestAnimationFrame(() => status.set("after"));
+        "#,
+        ))
+        .unwrap();
+        let mut output = super::super::output::Output::new(io::sink()).unwrap();
+        let presentation = session.presentation.clone();
+        let publish = |output: &mut super::super::output::Output, frame: Frame| {
+            output
+                .submit(
+                    frame.bytes.unwrap_or_default(),
+                    Some((
+                        presentation.clone(),
+                        frame.epoch,
+                        frame.input.expect("completed frame input"),
+                    )),
+                )
+                .unwrap();
+            let deadline = Instant::now() + std::time::Duration::from_secs(2);
+            while !output.poll().unwrap() {
+                assert!(Instant::now() < deadline, "output did not flush");
+                thread::yield_now();
+            }
+        };
+        // The next UI revision is ready before stdout has displayed it. The
+        // ordinary Close action still belongs to the previously flushed UI.
+        let initial = session.initial_frame().unwrap();
+        let initial_epoch = initial.epoch;
+        publish(&mut output, initial);
+        let events = click(&session.surface, "Close");
+        let background = session
+            .advance_if_needed(Advance {
+                inputs: Vec::new(),
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(background.epoch > initial_epoch);
+        assert!(session.surface.snapshot().contains("after closed:0"));
+        assert_eq!(
+            session
+                .presentation
+                .presented
+                .load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+        {
+            let mut inbox = session.presentation.state.lock().unwrap();
+            for event in events.iter().chain(events.iter()) {
+                inbox.push(event.clone(), 0);
+            }
+        }
+        let inputs = session
+            .presentation
+            .state
+            .lock()
+            .unwrap()
+            .pop_batch(session.epoch);
+        assert_eq!(inputs.len(), 2);
+        let acted = session
+            .advance(Advance {
+                inputs,
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(session.surface.snapshot().contains("after closed:1"));
+        {
+            let mut inbox = session.presentation.state.lock().unwrap();
+            assert!(
+                inbox.pop_batch(session.epoch).is_empty(),
+                "the earlier callback revokes every old lease"
+            );
+            assert!(inbox.cancel_pointer);
+            inbox.cancel_pointer = false;
+        }
+        publish(&mut output, acted);
+        {
+            let mut inbox = session.presentation.state.lock().unwrap();
+            for event in events {
+                inbox.push(event, session.epoch);
+            }
+        }
+        let inputs = session
+            .presentation
+            .state
+            .lock()
+            .unwrap()
+            .pop_batch(session.epoch);
+        let fresh = session
+            .advance(Advance {
+                inputs,
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(
+            session.surface.snapshot().contains("after closed:2"),
+            "a freshly displayed Close remains usable"
+        );
+        publish(&mut output, fresh);
+        let events = click(&session.surface, "Close");
+        {
+            let mut inbox = session.presentation.state.lock().unwrap();
+            inbox.push(events[0].clone(), session.epoch);
+            let Event::Mouse(mut drag) = events[0].clone() else {
+                unreachable!()
+            };
+            drag.kind = MouseEventKind::Drag(MouseButton::Left);
+            inbox.push(Event::Mouse(drag), session.epoch);
+            inbox.push(events[1].clone(), session.epoch);
+        }
+        let (inputs, cancel_pointer) = {
+            let mut inbox = session.presentation.state.lock().unwrap();
+            (
+                inbox.pop_batch(session.epoch),
+                std::mem::take(&mut inbox.cancel_pointer),
+            )
+        };
+        session
+            .advance(Advance {
+                inputs,
+                resize: None,
+                cancel_pointer,
+            })
+            .unwrap();
+        assert!(
+            session.surface.snapshot().contains("after closed:2"),
+            "a cancelled sealed gesture cannot release through the opaque path"
+        );
+    }
+
     fn click(surface: &Surface, label: &str) -> Vec<Event> {
         let row = surface
             .accessibility_snapshot()
@@ -651,6 +856,7 @@ mod tests {
             presented: presented.clone(),
             stop: stop.clone(),
         };
+        session.presentation = presentation.clone();
         let (commands, receive) = mpsc::sync_channel(1);
         let (frames, ready) = mpsc::sync_channel(1);
         frames.send(Ok(initial)).unwrap();
@@ -677,24 +883,20 @@ mod tests {
                     inbox.push(event, epoch);
                 }
                 drop(inbox);
-                let frame = session.advance_if_needed(command, &presentation).unwrap();
+                let frame = session.advance_if_needed(command).unwrap();
                 assert_eq!(frame.epoch, epoch);
                 assert!(frame.bytes.is_none());
                 frames.send(Ok(frame)).unwrap();
                 break;
             }
-            frames
-                .send(session.advance_if_needed(command, &presentation))
-                .unwrap();
+            frames.send(session.advance_if_needed(command)).unwrap();
             assert!(Instant::now() < deadline, "the UI did not reach idle");
         }
         for _ in 0..4 {
             let command = receive
                 .recv_timeout(std::time::Duration::from_secs(1))
                 .unwrap();
-            frames
-                .send(session.advance_if_needed(command, &presentation))
-                .unwrap();
+            frames.send(session.advance_if_needed(command)).unwrap();
         }
         stop.store(true, std::sync::atomic::Ordering::Release);
         driver.join().unwrap().unwrap();
@@ -743,7 +945,7 @@ mod tests {
             .into_iter()
             .map(|event| Input {
                 event,
-                pointer_epoch: Some(session.epoch),
+                pointer: Some(Pointer::Exact(session.epoch)),
             })
             .collect();
         session
@@ -929,7 +1131,7 @@ mod tests {
             .advance(Advance {
                 inputs: vec![Input {
                     event: mouse(MouseEventKind::Up(MouseButton::Left)),
-                    pointer_epoch: Some(session.epoch),
+                    pointer: Some(Pointer::Exact(session.epoch)),
                 }],
                 resize: None,
                 cancel_pointer: false,
@@ -957,7 +1159,7 @@ mod tests {
         let command = |key| Advance {
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
-                pointer_epoch: None,
+                pointer: None,
             }],
             resize: None,
             cancel_pointer: false,
@@ -998,7 +1200,7 @@ mod tests {
         let command = |key, modifiers| Advance {
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers)),
-                pointer_epoch: None,
+                pointer: None,
             }],
             resize: None,
             cancel_pointer: false,

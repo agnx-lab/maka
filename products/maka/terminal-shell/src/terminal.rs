@@ -28,7 +28,7 @@ mod ui;
 use crossterm::{event, terminal};
 use input::Inbox;
 use nsh_engine::EngineConfig;
-use nsh_platform_tui::CellMetrics;
+use nsh_platform_tui::{CellMetrics, InputSnapshot};
 use output::Output;
 use std::{
     io::{self, IsTerminal},
@@ -54,13 +54,14 @@ struct Presentation {
 }
 
 impl Presentation {
-    fn publish(&self, epoch: u64) {
-        let inbox = self.state.lock().unwrap();
+    fn publish(&self, epoch: u64, snapshot: InputSnapshot) {
+        let mut inbox = self.state.lock().unwrap();
         if !self.stop.load(Ordering::Acquire)
             && !inbox.quit
             && inbox.error.is_none()
             && inbox.resize.is_none()
         {
+            inbox.last_frame = Some((epoch, snapshot));
             self.presented.store(epoch, Ordering::Release);
         }
     }
@@ -165,7 +166,14 @@ fn drive(
                     }
                     busy = false;
                     if let Some(bytes) = frame.bytes {
-                        output.submit(bytes, Some((presentation.clone(), frame.epoch)))?;
+                        output.submit(
+                            bytes,
+                            Some((
+                                presentation.clone(),
+                                frame.epoch,
+                                frame.input.expect("completed frame input"),
+                            )),
+                        )?;
                         pending = Some(frame.epoch);
                     } else {
                         epoch = frame.epoch;
@@ -326,6 +334,9 @@ mod tests {
             .send(Ok(ui::Frame {
                 epoch: 7,
                 bytes: Some(b"FRAME".to_vec()),
+                input: Some(
+                    nsh_platform_tui::Surface::new(40, 8, CellMetrics::default()).input_snapshot(),
+                ),
                 quit: false,
             }))
             .unwrap();

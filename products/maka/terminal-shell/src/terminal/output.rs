@@ -18,6 +18,7 @@
  */
 
 use super::Presentation;
+use nsh_platform_tui::InputSnapshot;
 use std::{
     io::{self, Write},
     sync::mpsc,
@@ -30,7 +31,7 @@ enum Request {
     Frame(
         Vec<u8>,
         mpsc::SyncSender<io::Result<()>>,
-        Option<(Presentation, u64)>,
+        Option<(Presentation, u64, InputSnapshot)>,
     ),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
 }
@@ -59,8 +60,8 @@ impl Output {
                     };
                     let result = writer.write_all(&bytes).and_then(|_| writer.flush());
                     let failed = result.is_err();
-                    if !failed && let Some((presentation, epoch)) = presentation {
-                        presentation.publish(epoch);
+                    if !failed && let Some((presentation, epoch, snapshot)) = presentation {
+                        presentation.publish(epoch, snapshot);
                     }
                     let _ = receipt.send(result);
                     if close || failed {
@@ -77,7 +78,7 @@ impl Output {
     pub fn submit(
         &mut self,
         bytes: Vec<u8>,
-        presentation: Option<(Presentation, u64)>,
+        presentation: Option<(Presentation, u64, InputSnapshot)>,
     ) -> Result<(), String> {
         if self.pending.is_some() {
             return Err("terminal frame still in flight".into());
@@ -147,6 +148,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    fn snapshot() -> InputSnapshot {
+        nsh_platform_tui::Surface::new(40, 8, nsh_platform_tui::CellMetrics::default())
+            .input_snapshot()
+    }
+
     struct GatedWriter {
         bytes: Arc<Mutex<Vec<u8>>>,
         gate: mpsc::Receiver<()>,
@@ -184,7 +190,7 @@ mod tests {
         .unwrap();
         let presentation = Presentation::default();
         output
-            .submit(b"ABC".to_vec(), Some((presentation.clone(), 7)))
+            .submit(b"ABC".to_vec(), Some((presentation.clone(), 7, snapshot())))
             .unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(
@@ -229,7 +235,10 @@ mod tests {
         let mut output = Output::new(Failed).unwrap();
         let presentation = Presentation::default();
         output
-            .submit(b"frame".to_vec(), Some((presentation.clone(), 7)))
+            .submit(
+                b"frame".to_vec(),
+                Some((presentation.clone(), 7, snapshot())),
+            )
             .unwrap();
         loop {
             match output.poll() {
