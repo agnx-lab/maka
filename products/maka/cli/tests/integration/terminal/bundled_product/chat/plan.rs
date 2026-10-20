@@ -144,7 +144,7 @@ fn default_product_plan_requires_review_and_restores_frozen_proposal_and_complet
     tui.wait_for("Awaiting approval");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Approve and execute")

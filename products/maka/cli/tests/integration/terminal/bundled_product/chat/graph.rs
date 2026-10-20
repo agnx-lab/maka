@@ -198,7 +198,13 @@ fn default_product_graph_delegates_and_keeps_separate_conversation_epochs() {
     tui.wait_until(|s| {
         !s.contains("Close commands") && (s.contains("Message…") || s.contains(setup_prompt))
     });
-    if tui.screen.snapshot().unwrap().screen.contains(setup_prompt) {
+    if tui
+        .screen
+        .preview(usize::MAX)
+        .unwrap()
+        .screen
+        .contains(setup_prompt)
+    {
         click(&mut tui, "Check result");
     }
     tui.wait_until(|s| s.contains("Message…") && !s.contains("Restoring draft…"));
@@ -293,7 +299,7 @@ fn default_product_graph_delegates_and_keeps_separate_conversation_epochs() {
     tui.wait_for("Historical epoch · read only");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Restart Swarm")

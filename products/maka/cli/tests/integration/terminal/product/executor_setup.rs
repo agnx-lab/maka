@@ -40,7 +40,7 @@ fn process(tui: &mut Pty, listener: &TcpListener) -> (TcpStream, String) {
                 assert!(
                     Instant::now() < deadline,
                     "setup did not start: {}",
-                    tui.screen.snapshot().unwrap().screen
+                    tui.screen.preview(usize::MAX).unwrap().screen
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -160,7 +160,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
         if tui.frames.ready()
             && tui
                 .screen
-                .snapshot()
+                .preview(usize::MAX)
                 .unwrap()
                 .screen
                 .contains("Execution backend")
@@ -185,7 +185,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     click(&mut tui, "[ Plugins ]", accent);
     click(&mut tui, "[ Services ]", accent);
     tui.wait_for("host-deployment-manager");
-    let services = tui.screen.snapshot().unwrap().screen;
+    let services = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "[ Edit product composition ]", accent);
     editable(&mut tui, accent);
     click(&mut tui, "{", accent);
@@ -196,7 +196,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     tui.wait_for("Edit the interface installed in this application.");
     click(&mut tui, "[ Services ]", accent);
     editable(&mut tui, accent);
-    let configured = tui.screen.snapshot().unwrap().screen;
+    let configured = tui.screen.preview(usize::MAX).unwrap().screen;
     let screen_entries = |bytes: &[u8]| {
         bytes
             .windows(8)
@@ -211,7 +211,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         tui.read();
-        let screen = tui.screen.snapshot().unwrap().screen;
+        let screen = tui.screen.preview(usize::MAX).unwrap().screen;
         if tui.frames.ready()
             && screen_entries(&tui.output) > original_screen
             && screen.contains("Execution backend")
@@ -229,18 +229,18 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     let (_, pid) = process(&mut tui, &listener);
     tui.wait_for("fixture-v2 1");
     reaped(&pid);
-    let checked = tui.screen.snapshot().unwrap().screen;
+    let checked = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "[ Sign in: login ]", accent);
     let (mut login, pid) = process(&mut tui, &listener);
     tui.wait_for("Copy authorization URL");
-    let live = tui.screen.snapshot().unwrap().screen;
+    let live = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(live.contains("login.example.invalid"));
     assert!(!live.contains("Authentication confirmed."));
     tui.send(b"\x1b");
     tui.wait_until(|screen| !screen.contains("Cancel setup"));
     click(&mut tui, "[ Execution backend ]", accent);
     tui.wait_for("Copy authorization URL");
-    let reopened = tui.screen.snapshot().unwrap().screen;
+    let reopened = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(
         reopened.contains("Cancel setup"),
         "closing the dialog must retain the original live setup"
@@ -248,7 +248,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     login.write_all(b"continue\n").unwrap();
     tui.wait_for("Authentication confirmed.");
     reaped(&pid);
-    let authenticated = tui.screen.snapshot().unwrap().screen;
+    let authenticated = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "[ Check backend ]", accent);
     let (_, pid) = process(&mut tui, &listener);
     tui.wait_for("fixture-v2 1");
@@ -261,7 +261,7 @@ fn executor_setup_shows_live_login_url_cancels_and_reads_original_receipt() {
     reaped(&pid);
     click(&mut tui, "[ Read original receipt ]", accent);
     tui.wait_for("unconfirmed.");
-    let cancelled = tui.screen.snapshot().unwrap().screen;
+    let cancelled = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(!cancelled.contains("Authentication confirmed."));
     assert!(
         cancelled.contains("Close"),

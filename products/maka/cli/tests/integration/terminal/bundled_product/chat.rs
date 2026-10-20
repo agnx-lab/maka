@@ -234,7 +234,7 @@ fn evidence(tui: &Pty, name: &str) {
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(
             Path::new(&path).join(format!("{name}.txt")),
-            tui.screen.snapshot().unwrap().screen,
+            tui.screen.preview(usize::MAX).unwrap().screen,
         )
         .unwrap();
         std::fs::write(Path::new(&path).join(format!("{name}.ansi")), &tui.output).unwrap();
@@ -319,7 +319,7 @@ fn bundled_chat_sends_follows_renders_markdown_and_scrolls_original_history() {
         tui.wait_for("Rendered");
         if turn == 0 {
             evidence(&tui, "streaming");
-            let screen = tui.screen.snapshot().unwrap().screen;
+            let screen = tui.screen.preview(usize::MAX).unwrap().screen;
             assert!(
                 screen
                     .lines()
@@ -349,7 +349,7 @@ fn bundled_chat_sends_follows_renders_markdown_and_scrolls_original_history() {
     // Message heights and history paging determine how many rows reach the start.
     let history_deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let previous = tui.screen.snapshot().unwrap().screen;
+        let previous = tui.screen.preview(usize::MAX).unwrap().screen;
         if previous.contains("Original prompt 00") {
             break;
         }
@@ -386,7 +386,7 @@ fn bundled_chat_sends_follows_renders_markdown_and_scrolls_original_history() {
     delta(&mut socket, &long);
     tui.wait_for("Paragraph 79");
     for _ in 0..6 {
-        let previous = tui.screen.snapshot().unwrap().screen;
+        let previous = tui.screen.preview(usize::MAX).unwrap().screen;
         let paragraph = first_paragraph(&previous).unwrap();
         tui.send(b"\x1b[<64;70;10M");
         tui.wait_until(|screen| {
@@ -394,13 +394,13 @@ fn bundled_chat_sends_follows_renders_markdown_and_scrolls_original_history() {
         });
     }
     tui.wait_until(|s| !s.contains("Paragraph 79"));
-    let held = tui.screen.snapshot().unwrap().screen;
+    let held = tui.screen.preview(usize::MAX).unwrap().screen;
     evidence(&tui, "held-before");
     delta(&mut socket, "\n\nNewest streamed paragraph");
     // A queue state change has to reach the UI before checking the held viewport.
     complete(&mut socket);
     tui.wait_until(|s| s.contains("Send") && !s.contains("Queue for next turn"));
-    let after = tui.screen.snapshot().unwrap().screen;
+    let after = tui.screen.preview(usize::MAX).unwrap().screen;
     evidence(&tui, "held-after");
     let (held_row, paragraph) = first_paragraph(&held).unwrap();
     assert!(
@@ -419,7 +419,7 @@ fn bundled_chat_sends_follows_renders_markdown_and_scrolls_original_history() {
     tui.finish();
     host_guard.stop();
     server.join().unwrap();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     drop(RootOwner::open(&host, &namespaces).unwrap());
 }
 
@@ -519,7 +519,7 @@ fn ui_only_exit_preserves_accepted_agent_invocation_and_reopens_without_resend()
     );
     tui.send(b"\x1b\x11");
     tui.finish();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     drop(RootOwner::open(&ui, &namespaces).unwrap());
     let error = RootOwner::open(&host, &namespaces)
         .err()

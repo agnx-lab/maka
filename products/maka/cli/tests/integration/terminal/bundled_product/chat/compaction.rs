@@ -99,7 +99,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
     tui.wait_for("/skill:pty-visible-skill");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("PTY visible workspace skill")
@@ -119,7 +119,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
     tui.wait_for("请用  保留尾巴😀");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("/skill:pty-visible-skill")
@@ -187,7 +187,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
     evidence(&tui, "compact-edited");
     // The native dialog title also contains Compact; the button includes its
     // neighboring Cancel control, so locate its row explicitly.
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let (row, line) = screen
         .lines()
         .enumerate()
@@ -234,7 +234,7 @@ fn default_product_compaction_edits_one_shot_prompt_and_keeps_durable_divider() 
     eprintln!("compact: exact one-shot instruction and active footer tint verified");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Context compressed (")

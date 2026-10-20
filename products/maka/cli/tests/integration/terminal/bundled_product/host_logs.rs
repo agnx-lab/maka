@@ -69,7 +69,13 @@ fn default_product_host_logs_without_session_read_follow_and_release_roots() {
         |screen| screen.contains("Settings") && screen.contains("Start a task."),
         Duration::from_secs(60),
     );
-    assert!(!tui.screen.snapshot().unwrap().screen.contains("Message…"));
+    assert!(
+        !tui.screen
+            .preview(usize::MAX)
+            .unwrap()
+            .screen
+            .contains("Message…")
+    );
     tui.send(b"\x0b");
     tui.wait_for("Close commands");
     tui.send(b"Diagnostics");
@@ -83,7 +89,13 @@ fn default_product_host_logs_without_session_read_follow_and_release_roots() {
     writeln!(capture, "{second}").unwrap();
     capture.flush().unwrap();
     tui.wait_for(&second);
-    assert!(tui.screen.snapshot().unwrap().screen.contains(&first));
+    assert!(
+        tui.screen
+            .preview(usize::MAX)
+            .unwrap()
+            .screen
+            .contains(&first)
+    );
     settings_evidence(&tui, "host-logs-follow");
     click(&mut tui, "Stop");
     tui.wait_for("Follow");

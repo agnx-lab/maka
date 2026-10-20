@@ -94,7 +94,7 @@ fn active_run_accepts_unicode_followups_by_enter_and_queue_button() {
         // bracketed-paste path used to seed the first turn.
         tui.send(followup.as_bytes());
         tui.wait_for(followup);
-        let snapshot = tui.screen.snapshot().unwrap();
+        let snapshot = tui.screen.preview(usize::MAX).unwrap();
         let (row, line) = snapshot
             .screen
             .lines()
@@ -152,6 +152,6 @@ fn active_run_accepts_unicode_followups_by_enter_and_queue_button() {
     tui.finish();
     host_guard.stop();
     server.join().unwrap();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     drop(RootOwner::open(&host, &namespaces).unwrap());
 }

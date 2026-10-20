@@ -116,7 +116,7 @@ fn default_product_input_continues_while_the_original_stdout_owner_is_blocked() 
     tui.finish();
     host_guard.stop();
     server.join().unwrap();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     drop(RootOwner::open(&host, &namespaces).unwrap());
 }
 
@@ -244,7 +244,7 @@ fn default_product_scrolls_large_imported_history() {
     // Start away from the tail: showing/hiding the "Scroll to end" control
     // changes viewport height and is not an extra wheel movement.
     for _ in 0..20 {
-        let before = first_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+        let before = first_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
         tui.send(b"\x1b[<64;70;10M");
         tui.wait_until(|screen| first_row(screen).is_some_and(|row| row != before));
     }
@@ -252,10 +252,10 @@ fn default_product_scrolls_large_imported_history() {
     while ready.elapsed() < Duration::from_millis(500) {
         tui.read();
     }
-    let baseline = first_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+    let baseline = first_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
     eprintln!("scroll baseline: {baseline:?}");
     for _ in 0..rounds {
-        let before = first_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+        let before = first_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
         let started = Instant::now();
         tui.send(b"\x1b[<64;70;10M");
         tui.wait_until(|screen| first_row(screen).is_some_and(|row| row != before));
@@ -265,7 +265,7 @@ fn default_product_scrolls_large_imported_history() {
     while ready.elapsed() < Duration::from_millis(500) {
         tui.read();
     }
-    let scrolled = first_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+    let scrolled = first_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
     eprintln!("scroll target: {scrolled:?}");
     for (event, expected) in [
         (b"\x1b[<65;70;10M", baseline),
@@ -299,13 +299,13 @@ fn default_product_scrolls_large_imported_history() {
             tui.read();
             if tui.frames.ready() {
                 assert_eq!(
-                    first_row(&tui.screen.snapshot().unwrap().screen).as_ref(),
+                    first_row(&tui.screen.preview(usize::MAX).unwrap().screen).as_ref(),
                     Some(&expected)
                 );
             }
         }
         assert_eq!(
-            first_row(&tui.screen.snapshot().unwrap().screen).as_ref(),
+            first_row(&tui.screen.preview(usize::MAX).unwrap().screen).as_ref(),
             Some(&expected)
         );
     }
@@ -364,7 +364,12 @@ fn default_product_sends_over_large_imported_history() {
             }
             if visible_at.is_none()
                 && tui.frames.ready()
-                && tui.screen.snapshot().unwrap().screen.contains(&transcript)
+                && tui
+                    .screen
+                    .preview(usize::MAX)
+                    .unwrap()
+                    .screen
+                    .contains(&transcript)
             {
                 visible_at = Some(Instant::now());
             }
@@ -396,7 +401,11 @@ fn default_product_sends_over_large_imported_history() {
             tui.read();
             if tui.frames.ready() {
                 assert!(
-                    tui.screen.snapshot().unwrap().screen.contains(&transcript),
+                    tui.screen
+                        .preview(usize::MAX)
+                        .unwrap()
+                        .screen
+                        .contains(&transcript),
                     "submitted message disappeared"
                 );
             }
@@ -414,7 +423,13 @@ fn default_product_sends_over_large_imported_history() {
                 && s.contains("Send")
                 && !s.contains("Queue for next turn")
         });
-        assert!(tui.screen.snapshot().unwrap().screen.contains(&transcript));
+        assert!(
+            tui.screen
+                .preview(usize::MAX)
+                .unwrap()
+                .screen
+                .contains(&transcript)
+        );
     }
     evidence(&tui, "large-history-send");
     let draft = "Unsent draft after history benchmark";
