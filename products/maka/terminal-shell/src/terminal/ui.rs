@@ -234,7 +234,7 @@ impl Session {
                         changed = true;
                         continue;
                     }
-                    Some(lease)
+                    Some(lease.as_ref())
                 }
                 _ => None,
             };
@@ -1082,6 +1082,7 @@ mod tests {
                     SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
                 ],
                 true,
+                None,
             )
             .unwrap();
         assert!(invoked);

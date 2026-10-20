@@ -33,7 +33,8 @@ import logo from './assets/maka.png';
 
 type Overlay = { instance: number } & (
   | { kind: PaletteKind; sessionId: string | null }
-  | { kind: 'interaction'; sessionId: string; requestId: string });
+  | { kind: 'interaction'; sessionId: string; requestId: string }
+);
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
   const selected = signal<string | null>(host.initialSession);
@@ -284,13 +285,21 @@ function App() {
   keymap.bind('mod+o', () => open({ kind: 'sessions', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+g', () => open({ kind: 'models', sessionId: selected() }), { when: 'always' });
   keymap.bind('mod+n', () => newConversation(selected()), { when: 'always' });
-  keymap.bind('mod+l', () => {
-    if (handle) handle.jumpLatest(handle.activeTurn());
-  }, { when: 'always' });
+  keymap.bind(
+    'mod+l',
+    () => {
+      if (handle) handle.jumpLatest(handle.activeTurn());
+    },
+    { when: 'always' },
+  );
   keymap.bind('alt+up', () => handle?.focusHistory(), { when: 'always' });
-  keymap.bind('alt+down', () => {
-    if (handle) handle.focusActivity(handle.activityTurn());
-  }, { when: 'always' });
+  keymap.bind(
+    'alt+down',
+    () => {
+      if (handle) handle.focusActivity(handle.activityTurn());
+    },
+    { when: 'always' },
+  );
   effect(() => {
     if (!overlay()) keymap.bind('escape', stop, { when: 'always' });
   });
@@ -431,10 +440,7 @@ function App() {
             <Text style={{ color: C.muted }}>{status()}</Text>
           </If>
           <If when={!controlsKnown() || controls().length > 0}>
-            <Button
-              disabled={recovering()}
-              onPress={inputAction(recoverControls, null)}
-            >
+            <Button disabled={recovering()} onPress={inputAction(recoverControls, null)}>
               <Text style={{ color: C.warning }}>
                 {recovering()
                   ? 'Reading original action receipts…'
@@ -448,9 +454,7 @@ function App() {
               key={(original) => original.id}
             >
               {(original) => (
-                <Button
-                  onPress={inputAction(abandonControl, original().id)}
-                >
+                <Button onPress={inputAction(abandonControl, original().id)}>
                   <Text style={{ color: C.warning }}>
                     Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
                   </Text>
@@ -460,10 +464,7 @@ function App() {
           </If>
         </View>
       </If>
-      <Each
-        of={overlay() ? [overlay()!] : []}
-        key={(value: Overlay) => value.instance}
-      >
+      <Each of={overlay() ? [overlay()!] : []} key={(value: Overlay) => value.instance}>
         {(value) => (
           <If
             when={value().kind !== 'interaction'}

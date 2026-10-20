@@ -31,7 +31,7 @@ enum Request {
     Frame(
         Vec<u8>,
         mpsc::SyncSender<io::Result<()>>,
-        Option<(Presentation, u64, InputSnapshot)>,
+        Option<(Presentation, u64, Box<InputSnapshot>)>,
     ),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
 }
@@ -61,7 +61,7 @@ impl Output {
                     let result = writer.write_all(&bytes).and_then(|_| writer.flush());
                     let failed = result.is_err();
                     if !failed && let Some((presentation, epoch, snapshot)) = presentation {
-                        presentation.publish(epoch, snapshot);
+                        presentation.publish(epoch, *snapshot);
                     }
                     let _ = receipt.send(result);
                     if close || failed {
@@ -87,6 +87,8 @@ impl Output {
             return Err("terminal frame exceeds byte limit".into());
         }
         let (send, receive) = mpsc::sync_channel(1);
+        let presentation =
+            presentation.map(|(owner, epoch, snapshot)| (owner, epoch, Box::new(snapshot)));
         self.send
             .try_send(Request::Frame(bytes, send, presentation))
             .map_err(|error| error.to_string())?;

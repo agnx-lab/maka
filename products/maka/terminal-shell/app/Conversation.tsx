@@ -560,17 +560,20 @@ export function Conversation(props: ConversationProps) {
     }
   };
 
-  const backendIdentity = (value: any): BackendIdentity => value?.kind === 'model'
-    ? {
-      connectionId: value.connectionId,
-      modelId: value.modelId,
-      thinkingLevel: value.thinkingLevel ?? null,
-    }
-    : null;
+  const backendIdentity = (value: any): BackendIdentity =>
+    value?.kind === 'model'
+      ? {
+          connectionId: value.connectionId,
+          modelId: value.modelId,
+          thinkingLevel: value.thinkingLevel ?? null,
+        }
+      : null;
   const sameBackend = (left: BackendIdentity, right: BackendIdentity) =>
-    left === null || right === null ? left === right :
-      left.connectionId === right.connectionId && left.modelId === right.modelId &&
-      left.thinkingLevel === right.thinkingLevel;
+    left === null || right === null
+      ? left === right
+      : left.connectionId === right.connectionId &&
+        left.modelId === right.modelId &&
+        left.thinkingLevel === right.thinkingLevel;
   const selection = async (expectedBackend?: BackendIdentity) => {
     const observed = await observe();
     if (!alive) return null;
@@ -647,7 +650,10 @@ export function Conversation(props: ConversationProps) {
       if (savingFailed()) throw new Error('The draft could not be saved; it has not been sent.');
       if (editEpoch !== epoch)
         throw new Error('The draft changed before confirmation. Send again to confirm it.');
-      if (expectedBackend !== undefined && !sameBackend(backendIdentity(backend()), expectedBackend))
+      if (
+        expectedBackend !== undefined &&
+        !sameBackend(backendIdentity(backend()), expectedBackend)
+      )
         throw new Error('The model changed before confirmation. Send again to confirm it.');
       // The native journal consumes only this exact revision. New edits keep
       // saving while confirmation waits and never inherit this send attempt.
@@ -754,15 +760,22 @@ export function Conversation(props: ConversationProps) {
   const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
     if (alive && owner === sessionId) reading.set(mode);
   };
-  const sendRendered = ({ owner, text, backend: expectedBackend }: {
+  const sendRendered = ({
+    owner,
+    text,
+    backend: expectedBackend,
+  }: {
     owner: string;
     text: string;
     backend: BackendIdentity;
   }) => {
     if (
-      !alive || owner !== sessionId || draft() !== text ||
+      !alive ||
+      owner !== sessionId ||
+      draft() !== text ||
       !sameBackend(backendIdentity(backend()), expectedBackend)
-    ) return;
+    )
+      return;
     void send(text, expectedBackend);
   };
   const ownHandle: ConversationHandle = {
@@ -975,7 +988,8 @@ export function Conversation(props: ConversationProps) {
         <If when={interactions().entries.length > 0}>
           <Button
             onPress={inputAction(props.interaction, {
-              sessionId, requestId: interactions().entries[0].requestId,
+              sessionId,
+              requestId: interactions().entries[0].requestId,
             })}
             style={{ padding: 8, backgroundColor: C.surface }}
           >
@@ -1093,7 +1107,9 @@ export function Conversation(props: ConversationProps) {
               accessibilityLabel="Send message"
               disabled={!!sendBlockedReason() || !draft().trim()}
               onPress={inputAction(sendRendered, {
-                owner: sessionId, text: draft(), backend: backendIdentity(backend()),
+                owner: sessionId,
+                text: draft(),
+                backend: backendIdentity(backend()),
               })}
               style={{
                 backgroundColor: C.accent,

@@ -56,14 +56,22 @@ export function Palette(props: {
   let page: any = null;
   let sessions: any[] = [];
   let choices: any[] = [];
-  const selectSession = ({ instance, sessionId, expectedSessionId }: {
+  const selectSession = ({
+    instance,
+    sessionId,
+    expectedSessionId,
+  }: {
     instance: number;
     sessionId: string;
     expectedSessionId: string | null;
   }) => {
     if (props.close(instance)) void props.selectSession(sessionId, expectedSessionId);
   };
-  const chooseModel = ({ instance, sessionId, choice }: {
+  const chooseModel = ({
+    instance,
+    sessionId,
+    choice,
+  }: {
     instance: number;
     sessionId: string | null;
     choice: {

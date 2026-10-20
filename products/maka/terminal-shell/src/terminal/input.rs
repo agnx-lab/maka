@@ -19,7 +19,7 @@
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use nsh_platform_tui::{InputSnapshot, PressLease};
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 pub(super) const MAX_EVENTS: usize = 128;
 const MAX_BYTES: usize = 64 * 1024;
@@ -35,7 +35,7 @@ pub(super) struct Input {
 #[derive(Clone, Debug)]
 pub(super) enum Pointer {
     Exact(u64),
-    Press { epoch: u64, lease: PressLease },
+    Press { epoch: u64, lease: Arc<PressLease> },
 }
 
 impl Pointer {
@@ -110,7 +110,7 @@ impl Inbox {
                                 .map(|lease| {
                                     Capture::Active(Pointer::Press {
                                         epoch: *offered,
-                                        lease,
+                                        lease: Arc::new(lease),
                                     })
                                 })
                         });
