@@ -92,7 +92,7 @@ export function TurnSummary(props: {
         answerKey: props.turn().answerKey,
         open: !props.expanded(),
       })}
-      style={{ height: 16, flexDirection: 'row', marginTop: 16 }}
+      style={{ height: 16, flexDirection: 'row', gap: 8, marginTop: 16 }}
       hoverStyle={{ backgroundColor: C.surface }}
       focusStyle={{ backgroundColor: C.raised }}
       activeStyle={{ backgroundColor: C.line }}
@@ -399,7 +399,7 @@ export function TurnPanel(props: {
           key: props.group().key,
           open: !props.state.open(),
         })}
-        style={{ height: 16, flexDirection: 'row' }}
+        style={{ height: 16, flexDirection: 'row', gap: 8 }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
         activeStyle={{ backgroundColor: C.line }}

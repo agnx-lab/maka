@@ -279,7 +279,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // Rapid paragraphs must update during the stream, at a bounded cadence,
         // while the expanded source and its reader anchor stay put.
         let cadence = std::time::Instant::now();
-        let mut titles = vec![(Duration::ZERO, cadence_source_top.lines().nth(cadence_header_row).unwrap().trim().to_owned())];
+        let mut titles = vec![(Duration::ZERO, support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row))];
         let mut paragraph = 0;
         while cadence.elapsed() < Duration::from_millis(650) {
             paragraph += 1;
@@ -290,8 +290,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 let screen = view.snapshot();
                 assert!(at_source_start(&screen), "a title update moved the source reader:\n{screen}");
                 assert_eq!(screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row), "a title update moved the original source row:\n{screen}");
-                let title = screen.lines().nth(cadence_header_row).unwrap().trim().to_owned();
-                assert!(title.contains("Analyzing the request"), "the fixed activity header moved:\n{screen}");
+                assert!(screen.lines().nth(cadence_header_row).unwrap().contains("Analyzing the request"), "the fixed activity header moved:\n{screen}");
+                let title = support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row);
                 if title != titles.last().unwrap().1 {
                     titles.push((cadence.elapsed(), title));
                 }
@@ -300,8 +300,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         }
         assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}");
         let latest = format!("TITLE_{paragraph:02} 规划 e\u{301}");
-        let settled_title = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(cadence_header_row).is_some_and(|line| line.contains(&latest))).await;
-        let last = settled_title.lines().nth(cadence_header_row).unwrap().trim().to_owned();
+        wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(cadence_header_row).is_some_and(|line| line.contains(&latest))).await;
+        let last = support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row);
         assert!(last.ends_with('…') && !last.ends_with("e…"), "the long title must ellipsize without splitting a combining grapheme: {last}");
         if last != titles.last().unwrap().1 {
             titles.push((cadence.elapsed(), last));

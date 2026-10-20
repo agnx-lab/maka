@@ -672,6 +672,49 @@ pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> 
     }
 }
 
+// Read painted graphemes within the native Text frame, not its untruncated label.
+pub fn painted_text(view: &AppView, prefix: &str, row: usize) -> String {
+    use ratatui::{buffer::CellWidth, layout::Rect};
+    let metrics = view.surface().metrics();
+    let viewport = view.surface().viewport();
+    let columns = (viewport.width.0 / metrics.width().0).round() as u16;
+    let rows = (viewport.height.0 / metrics.height().0).round() as u16;
+    let matches: Vec<_> = view
+        .accessibility_snapshot()
+        .into_iter()
+        .filter(|node| {
+            node.label.starts_with(prefix)
+                && (node.frame.origin.y.0 / metrics.height().0).floor() == row as f32
+        })
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected one native Text {prefix:?} at row {row}"
+    );
+    let frame = matches[0].frame;
+    let mut x = (frame.origin.x.0 / metrics.width().0)
+        .floor()
+        .clamp(0.0, f32::from(columns)) as u16;
+    let right = ((frame.origin.x.0 + frame.size.width.0) / metrics.width().0)
+        .ceil()
+        .clamp(0.0, f32::from(columns)) as u16;
+    assert!(
+        row < usize::from(rows) && x < right,
+        "native Text must be visible"
+    );
+    let area = Rect::new(0, 0, columns, rows);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    view.render(area, &mut buffer);
+    let mut text = String::new();
+    while x < right {
+        let cell = &buffer[(x, row as u16)];
+        text.push_str(cell.symbol());
+        x += cell.cell_width().max(1);
+    }
+    text.trim_end().to_owned()
+}
+
 pub async fn wait_draft(client: &Client, session: &str, text: &str) {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
