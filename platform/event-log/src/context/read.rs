@@ -194,12 +194,10 @@ impl EventLog {
     }
 }
 
-/// Use the same effective-tail/anchor accounting as the successor's first read.
-pub(crate) async fn check_handoff_capacity(
+/// Authenticate the selected context before sealing a handoff.
+pub(crate) async fn validate_handoff_context(
     connection: &mut SqliteConnection,
     opening: &maka_agent_facts::event::RuntimeEvent,
-    max_events: usize,
-    max_bytes: usize,
 ) -> Result<(), StoreError> {
     let selection = Selection::for_opening(connection, opening).await?;
     let high = selection.high_water(connection, i64::MAX as u64).await?;
@@ -208,8 +206,8 @@ pub(crate) async fn check_handoff_capacity(
         &selection,
         high,
         i64::MAX as u64,
-        max_events,
-        max_bytes,
+        usize::MAX,
+        usize::MAX,
         super::LatestMainContext::TraceUnavailable,
     )
     .await?;

@@ -18,184 +18,202 @@
  */
 
 use super::*;
-use maka_agent_facts::continuation::MAX_REPLAY_BYTES;
-use maka_agent_facts::handoff::HandoffIntent;
-use maka_agent_facts::handoff::HandoffPause;
-use maka_agent_facts::model::ModelFinishReason;
-use maka_agent_facts::model::ModelPart;
-use maka_agent_facts::model::ModelStep;
-use maka_agent_facts::model::ModelUsage;
-use maka_agent_facts::model::TextKind;
-use std::time::{Duration, UNIX_EPOCH};
+use maka_agent_facts::handoff::{HandoffIntent, HandoffPause};
+use maka_agent_facts::model::{ModelFinishReason, ModelPart, ModelStep, ModelUsage, TextKind};
+use maka_event_log::{StoreError, context::ContextEvent, turns::InvocationState};
 
 #[tokio::test]
-async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capacity_context() {
-    for reserve_successor in [false, true] {
-        let directory = tempfile::tempdir().unwrap();
-        let log = EventLog::open(&directory.path().join("capacity.sqlite"))
-            .await
-            .unwrap();
-        let source = opening("root", None);
-        append(&log, &source).await;
-        let context = log
-            .read_model_context("session", Some("root"))
-            .await
-            .unwrap();
-        append(
-            &log,
-            &RuntimeEvent::new(
-                source.invocation.clone(),
-                Fact::ModelRequested {
-                    context_breakdown: None,
-                    item_acceptance: false,
-                    step_id: "step".into(),
-                    model_id: "test".into(),
-                    purpose: maka_agent_facts::context::ModelPurpose::Main,
-                    context: None,
-                    source_scope: context.source_evidence.scope,
-                    source_high_water: context.source_evidence.high_water,
-                    source_digest: context.source_evidence.digest,
-                    effective_source_digest: Some(context.effective_source_digest),
-                    input_digest: digest('a'),
-                    route_identity: digest('b'),
-                    checkpoint_event_id: None,
-                },
-            ),
-        )
-        .await;
-        let prefix = log.prefix(100, MAX_REPLAY_BYTES).await.unwrap();
-        let existing_bytes: usize = prefix
-            .events
-            .iter()
-            .map(|event| serde_json::to_vec(&event.event).unwrap().len())
-            .sum();
-        let pause = HandoffPause {
-            intent: HandoffIntent {
-                handoff_id: "handoff".into(),
-                host_epoch: "host".into(),
-                root_run_id: "root".into(),
-                successor_run_id: "successor-run".into(),
-                successor_invocation_id: "successor-invocation".into(),
-                claim_id: "claim".into(),
-            },
-            execution: super::handoff::execution(),
-        };
-        let mut seal = RuntimeEvent::new(
+async fn handoff_above_the_former_replay_allowance_can_be_sealed_and_cancelled_after_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("handoff.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let source = opening("root", None);
+    append(&log, &source).await;
+    let base = log
+        .context_before_run(&source.invocation, usize::MAX, usize::MAX)
+        .await
+        .unwrap();
+    let context = log
+        .read_model_context("session", Some("root"))
+        .await
+        .unwrap();
+    append(
+        &log,
+        &RuntimeEvent::new(
             source.invocation.clone(),
-            Fact::InvocationEnded {
-                outcome: InvocationOutcome::HandoffPaused {
-                    pause: pause.clone(),
-                },
-            },
-        );
-        let mut widest = serde_json::to_value(&seal).unwrap();
-        widest["recorded_at"] =
-            serde_json::json!({ "secs_since_epoch": u64::MAX, "nanos_since_epoch": u32::MAX });
-        let mut reserved_bytes = serde_json::to_vec(&widest).unwrap().len();
-        let mut future = serde_json::to_value(&source).unwrap();
-        future["invocation"] =
-            serde_json::to_value(pause.intent.successor(&source.invocation)).unwrap();
-        future["recorded_at"] = widest["recorded_at"].clone();
-        future["fact"]["input"] = serde_json::json!({
-            "kind":"handoff", "pause": pause,
-            "claim": {
-                "id":pause.intent.claim_id,
-                "source":{"invocation":source.invocation,"high_water":u64::MAX,"digest":digest('a')},
-                "base":{"high_water":u64::MAX,"digest":digest('a')},
-                "replay":{"version":REPLAY_VERSION,"digest":digest('a'),"route_identity":digest('b')}
-            }
-        });
-        if reserve_successor {
-            reserved_bytes += serde_json::to_vec(&future).unwrap().len();
-            let mut cancelled = future.clone();
-            cancelled["fact"] = serde_json::json!({"kind":"invocation_ended", "outcome":{
-                "kind":"cancelled", "source": "runtime_cancellation",
-            }});
-            reserved_bytes += serde_json::to_vec(&cancelled).unwrap().len();
-        }
-        let mut completed = RuntimeEvent::new(
-            source.invocation.clone(),
-            Fact::ModelCompleted {
+            Fact::ModelRequested {
+                context_breakdown: None,
+                item_acceptance: false,
                 step_id: "step".into(),
-                output: ModelStep {
-                    parts: vec![ModelPart::Text {
-                        text_kind: TextKind::Text,
-                        text: String::new(),
-                        provider_options: None,
-                    }],
-                    finish_reason: ModelFinishReason::Stop,
-                    usage: ModelUsage::default(),
-                    provider_options: None,
-                    response_id: None,
-                    model: None,
-                    timestamp: None,
-                },
+                model_id: "test".into(),
+                purpose: maka_agent_facts::context::ModelPurpose::Main,
+                context: None,
+                source_scope: context.source_evidence.scope,
+                source_high_water: context.source_evidence.high_water,
+                source_digest: context.source_evidence.digest,
+                effective_source_digest: Some(context.effective_source_digest),
+                input_digest: digest('a'),
+                route_identity: digest('b'),
+                checkpoint_event_id: None,
             },
-        );
-        let remaining = MAX_REPLAY_BYTES
-            - reserved_bytes
-            - existing_bytes
-            - serde_json::to_vec(&completed).unwrap().len();
-        let Fact::ModelCompleted { output, .. } = &mut completed.fact else {
-            unreachable!()
-        };
-        let ModelPart::Text { text, .. } = &mut output.parts[0] else {
-            unreachable!()
-        };
-        *text = "x".repeat(remaining);
-        append(&log, &completed).await;
-        if !reserve_successor {
-            assert!(
-                log.check_handoff(&source.invocation, &pause).await.is_err(),
-                "fitting the source seal alone does not make its successor readable"
-            );
-            assert!(log.append(&EventWrite::plain(seal).unwrap()).await.is_err());
-            log.close().await.unwrap();
-            continue;
+        ),
+    )
+    .await;
+    let completed = RuntimeEvent::new(
+        source.invocation.clone(),
+        Fact::ModelCompleted {
+            step_id: "step".into(),
+            output: ModelStep {
+                parts: vec![ModelPart::Text {
+                    text_kind: TextKind::Text,
+                    text: "x".repeat(9 * 1024 * 1024),
+                    provider_options: None,
+                }],
+                finish_reason: ModelFinishReason::Stop,
+                usage: ModelUsage::default(),
+                provider_options: None,
+                response_id: None,
+                model: None,
+                timestamp: None,
+            },
+        },
+    );
+    append(&log, &completed).await;
+    let pause = HandoffPause {
+        intent: HandoffIntent {
+            handoff_id: "handoff".into(),
+            host_epoch: "host".into(),
+            root_run_id: "root".into(),
+            successor_run_id: "successor-run".into(),
+            successor_invocation_id: "successor-invocation".into(),
+            claim_id: "claim".into(),
+        },
+        execution: super::handoff::execution(),
+    };
+    let before = log.prefix(100, usize::MAX).await.unwrap();
+    log.check_handoff(&source.invocation, &pause).await.unwrap();
+    assert_eq!(
+        log.prefix(100, usize::MAX).await.unwrap().digest,
+        before.digest
+    );
+    let seal = RuntimeEvent::new(
+        source.invocation.clone(),
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::HandoffPaused {
+                pause: pause.clone(),
+            },
+        },
+    );
+    append(&log, &seal).await;
+    let sealed = log
+        .run_source("session", "root", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(sealed.boundary.high_water, 4);
+    assert_eq!(sealed.last.event, seal);
+    assert!(matches!(
+        log.read_lineage_context(&sealed.boundary, 100, 8 * 1024 * 1024)
+            .await,
+        Err(StoreError::PrefixTooLarge)
+    ));
+    assert!(matches!(
+        log.read_lineage_context(&sealed.boundary, 1, usize::MAX)
+            .await,
+        Err(StoreError::PrefixTooLarge)
+    ));
+    let cancelled = log.cancel_handoff(&source.invocation).await.unwrap();
+    assert_eq!(
+        cancelled.invocation,
+        pause.intent.successor(&source.invocation)
+    );
+    assert_eq!(cancelled.root_invocation(), &source.invocation);
+    let InvocationState::Ended {
+        event_id: cancelled_event_id,
+        outcome: cancelled_outcome,
+    } = &cancelled.state
+    else {
+        panic!("cancellation did not settle")
+    };
+    assert!(matches!(cancelled_outcome,
+        InvocationOutcome::Cancelled { source } if source == "runtime_cancellation"
+    ));
+    let successor = log
+        .run_source("session", "successor-run", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(successor.boundary.high_water, 2);
+    let Fact::InvocationOpened {
+        configuration,
+        input:
+            InvocationInput::Handoff {
+                claim,
+                pause: claimed_pause,
+            },
+    } = &successor.opening.event.fact
+    else {
+        panic!("cancellation did not acquire the sealed handoff")
+    };
+    let Fact::InvocationOpened {
+        configuration: original_configuration,
+        ..
+    } = &source.fact
+    else {
+        unreachable!()
+    };
+    assert_eq!(configuration, original_configuration);
+    assert_eq!(**claimed_pause, pause);
+    assert_eq!(claim.id, "claim");
+    assert_eq!(claim.source, sealed.boundary);
+    assert_eq!(
+        claim.base,
+        SessionBase {
+            high_water: base.source_evidence.high_water,
+            digest: base.source_evidence.digest,
         }
-        log.check_handoff(&source.invocation, &pause).await.unwrap();
-        seal.recorded_at = UNIX_EPOCH + Duration::new(100_000_000_000, 999_999_999);
-        append(&log, &seal).await;
-        let sealed = log
-            .run_source("session", "root", None)
+    );
+    assert_eq!(claim.replay, pause.execution.replay);
+    let selected = log
+        .read_lineage_context(&successor.boundary, usize::MAX, usize::MAX)
+        .await
+        .unwrap();
+    assert!(selected.tail.iter().any(|event| matches!(event,
+        ContextEvent::Canonical(stored) if stored.event == completed
+    )));
+    assert_eq!(
+        log.run_source("session", "root", None)
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(sealed.last.event, seal);
-        assert_eq!(
-            sealed.boundary.high_water, 4,
-            "the pause remains claimable with successor replay capacity reserved"
-        );
-        let base = log
-            .context_before_run(&source.invocation, 100, MAX_REPLAY_BYTES)
+            .unwrap()
+            .boundary,
+        sealed.boundary
+    );
+    assert!(log.pending_handoffs(0).await.unwrap().is_empty());
+    let before = log.prefix(100, usize::MAX).await.unwrap();
+    log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    let owner = log.cancel_handoff(&source.invocation).await.unwrap();
+    assert_eq!(owner.invocation, successor.boundary.invocation);
+    let InvocationState::Ended { event_id, outcome } = owner.state else {
+        panic!("reopen lost the cancellation owner")
+    };
+    assert_eq!(&event_id, cancelled_event_id);
+    assert_eq!(&outcome, cancelled_outcome);
+    assert_eq!(
+        log.prefix(100, usize::MAX).await.unwrap().digest,
+        before.digest
+    );
+    assert_eq!(
+        log.run_source("session", "root", None)
             .await
-            .unwrap();
-        let claim = ContinuationClaim {
-            id: pause.intent.claim_id.clone(),
-            source: sealed.boundary,
-            base: SessionBase {
-                high_water: base.source_evidence.high_water,
-                digest: base.source_evidence.digest,
-            },
-            replay: ReplayEvidence {
-                version: REPLAY_VERSION,
-                digest: digest('a'),
-                route_identity: digest('b'),
-            },
-        };
-        let mut target = opening("unused", None);
-        target.invocation = pause.intent.successor(&source.invocation);
-        let Fact::InvocationOpened { input, .. } = &mut target.fact else {
-            unreachable!()
-        };
-        *input = InvocationInput::Handoff {
-            claim: Box::new(claim),
-            pause: Box::new(pause),
-        };
-        append(&log, &target).await;
-        log.read_model_context("session", Some(&target.invocation.invocation_id))
-            .await
-            .unwrap();
-        log.close().await.unwrap();
-    }
+            .unwrap()
+            .unwrap()
+            .boundary,
+        sealed.boundary
+    );
+    log.read_lineage_context(&successor.boundary, usize::MAX, usize::MAX)
+        .await
+        .unwrap();
+    log.close().await.unwrap();
 }

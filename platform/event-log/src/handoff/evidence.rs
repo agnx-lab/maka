@@ -17,8 +17,9 @@
  * under the License.
  */
 
-use super::{budget, invalid};
+use super::invalid;
 use crate::StoreError;
+use maka_agent_facts::configuration::validation::MAX_SAFE_INTEGER;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::InvocationInput;
 use maka_agent_facts::event::InvocationOutcome;
@@ -132,7 +133,24 @@ pub(crate) async fn validate(
     // harmless; an interrupted request never proves a provider effect settled.
     crate::context::safety::settled_boundary(tx, &event.invocation.invocation_id, i64::MAX as u64)
         .await?;
-    budget::check(tx, event, &opening, pause).await?;
+    let source = crate::run_source::read(
+        tx,
+        &event.invocation.session_id,
+        &event.invocation.run_id,
+        &event.invocation.invocation_id,
+        i64::MAX,
+    )
+    .await?;
+    if source.boundary.invocation != event.invocation {
+        return Err(invalid("handoff source invocation changed"));
+    }
+    source
+        .boundary
+        .high_water
+        .checked_add(1)
+        .filter(|count| *count <= MAX_SAFE_INTEGER)
+        .ok_or_else(|| invalid("handoff source high-water exceeds the safe integer range"))?;
+    crate::context::read::validate_handoff_context(tx, &opening).await?;
     let occupied: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind='invocation_opened'
          AND (invocation_id=?1 OR json_extract(event_json,'$.invocation.run_id')=?2
