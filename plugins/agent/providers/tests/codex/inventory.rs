@@ -202,6 +202,7 @@ async fn discovery_and_preparation_share_account_facts_and_explicit_policy() {
 
 fn wire(model: &maka_agent_ports::provider::Model) -> serde_json::Value {
     maka_responses::request::Request {
+        language: maka_agent_facts::language::Language::En,
         model: &model.info.id,
         prompt: &[],
         tools: &[],
