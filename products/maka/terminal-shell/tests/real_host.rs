@@ -43,9 +43,12 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
     })
     .await;
     view.handle_event(Event::Paste(search.into()));
+    assert_eq!(
+        view.surface().input_context().unwrap().text.as_deref(),
+        Some(search)
+    );
     wait_view(view, |screen| {
         screen.contains(choice)
-            && screen.lines().any(|line| line.trim() == search)
             && screen.contains("Enter selects · Esc closes")
             && !screen.contains("Loading…")
     })
@@ -90,7 +93,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Paste("model-alt".into()));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt") && screen.contains("Enter sends") && !screen.contains("Enter selects")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}));
         view.handle_event(Event::Paste("Message B uses the selected model".into()));
@@ -111,7 +114,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("Message B uses the selected model")));
         assert!(!request.body.to_string().contains("Draft A stays in its own conversation"));
         request.delta("REAL_WORKBENCH_RUN_TO_STOP").await;
-        wait_view(&mut view, |screen| screen.contains("REAL_WORKBENCH_RUN_TO_STOP")).await;
+        wait_view(&mut view, |screen| screen.matches("REAL_WORKBENCH_RUN_TO_STOP").count() == 2).await;
         support::evidence_cells("workbench-streaming", &view);
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         let invocation = observed["run"]["invocationId"].as_str().filter(|id| !id.is_empty()).unwrap();
@@ -151,8 +154,38 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         let history = wait_view(&mut view, |screen| screen.contains("History 15 paragraph") && screen.contains("Enter sends")).await;
         assert!(history.contains("original provider text"));
-        assert!(history.contains("Load earlier messages"));
         evidence("history", &history);
+        let previous = view.surface().focused();
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while view.surface().focused() == previous {
+                view.poll().unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("history did not receive native focus");
+        // Holding Home crosses the actual page boundary without a load button.
+        let scrolling = std::time::Instant::now();
+        loop {
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+            view.poll().unwrap();
+            view.tick(scrolling.elapsed().as_secs_f64()).unwrap();
+            let screen = view.snapshot();
+            if screen.contains("History 00 paragraph") {
+                assert!(!screen.contains("Load earlier messages"));
+                evidence("history-automatically-prepended", &screen);
+                break;
+            }
+            assert!(scrolling.elapsed() < Duration::from_secs(20), "scrolling did not load original history:\n{screen}");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        shortcut(&mut view, 'l');
+        wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while view.surface().focused() != previous {
+                view.poll().unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("jump to latest did not restore composer focus");
 
         view.handle_event(Event::Paste("NSH user send, exactly once".into()));
         wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once")).await;
@@ -160,15 +193,74 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // AppView's engine continues independently while this awaits the real HTTP request.
         let mut request = fixture.next_request().await;
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("NSH user send, exactly once")));
+        let thinking = std::iter::once("NATIVE_THINK_SOURCE_FIRST".to_owned())
+            .chain((1..63).map(|index| format!("NATIVE_THINK_SOURCE_{index:02}")))
+            .chain(["NATIVE_THINK_SOURCE_LAST".to_owned(), "NATIVE_ACTIVITY_HEADER_TAIL_INITIAL".to_owned()])
+            .collect::<Vec<_>>()
+            .join("\n");
+        request.thinking(&thinking).await;
+        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST")).await;
+        support::click_text(&mut view, "◇ Think · NATIVE_THINK_SOURCE_FIRST");
+        // Either end of the actual expanded source must paint before keyboard scrolling.
+        wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_01") || screen.contains("NATIVE_THINK_SOURCE_62")).await;
+        support::focus_activity(&mut view).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        let at_source_start = |screen: &str| screen.matches("NATIVE_THINK_SOURCE_FIRST").count() == 2 && !screen.contains("NATIVE_THINK_SOURCE_LAST");
+        let source_top = wait_view(&mut view, &at_source_start).await;
+        evidence("activity-source-top", &source_top);
+        support::evidence_cells("activity-source-top", &view);
+
+        request.thinking("\nNATIVE_ACTIVITY_HEADER_TAIL_APPENDED").await;
+        let anchored = wait_view(&mut view, |screen| at_source_start(screen) && screen.matches("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED").count() == 1).await;
+        evidence("activity-append-keeps-source-top", &anchored);
+        support::evidence_cells("activity-append-keeps-source-top", &view);
+
+        let todos = json!([
+            {"content":"NATIVE_TODO_DONE","status":"completed"},
+            {"content":"NATIVE_TODO_ACTIVE","status":"in_progress"},
+            {"content":"NATIVE_TODO_PENDING","status":"pending"}
+        ]);
+        assert!(request.body["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "todo_write"));
+        request.tool("todo_write", json!({"todos":todos.clone()})).await;
+        // A real tool result causes exactly one additional model HTTP request.
+        let mut request = fixture.next_request().await;
+        let tool_result = request.body["messages"].as_array().unwrap().iter().find(|message| message["role"] == "tool" && message["tool_call_id"] == "nsh-native-todo-call").unwrap();
+        assert_eq!(tool_result["content"], "1. [completed] \"NATIVE_TODO_DONE\"\n2. [in_progress] \"NATIVE_TODO_ACTIVE\"\n3. [pending] \"NATIVE_TODO_PENDING\"");
+        let checklist = client.query("agent", "checklist", json!({"sessionId":fixture.session,"offset":0})).await.unwrap();
+        assert_eq!(checklist["enabled"], true);
+        assert_eq!(checklist["items"], todos);
+        assert_eq!(checklist["total"], 3);
+        assert_eq!(checklist["completed"], 1);
+        assert_eq!(checklist["current"], todos[1]);
+        assert!(checklist["nextOffset"].is_null());
+        wait_view(&mut view, |screen| screen.contains("▸ Todo 1/3")).await;
+        // The activity List still owns native focus from the source-anchor step.
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.matches("> todo_write").count() == 1).await;
+        support::click_text(&mut view, "▸ Todo 1/3");
+        let checklist_visible = wait_view(&mut view, |screen| screen.contains("▾ Todo 1/3") && screen.contains("NATIVE_TODO_DONE") && screen.contains("NATIVE_TODO_PENDING")).await;
+        evidence("real-tool-and-checklist", &checklist_visible);
+        support::evidence_cells("real-tool-and-checklist", &view);
+
         request.delta("REAL_PROVIDER_STREAM_VISIBLE").await;
         let streaming = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE")).await;
         evidence("streaming", &streaming);
         request.delta(" and committed.").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        let committed = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE") && screen.contains("committed.") && screen.contains("Enter sends")).await;
+        let committed = wait_view(&mut view, |screen| screen.contains("› Completed") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1 && screen.contains("committed.") && !screen.contains("NATIVE_THINK_SOURCE_FIRST") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED") && screen.contains("Enter sends")).await;
         evidence("committed", &committed);
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 17);
+        support::evidence_cells("committed", &view);
+
+        // Reopening restores the measured source tail before a native Home.
+        support::click_text(&mut view, "› Completed");
+        support::focus_activity(&mut view).await;
+        wait_view(&mut view, |screen| screen.contains("⌃ Completed") && screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED") && screen.contains("> todo_write")).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        let reopened = wait_view(&mut view, &at_source_start).await;
+        evidence("completed-activity-source-reopened", &reopened);
+        support::evidence_cells("completed-activity-source-reopened", &view);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 18);
         assert!(client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().is_empty());
         drop(view);
         bindings.close().await.unwrap();

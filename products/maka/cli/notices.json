@@ -1,12 +1,12 @@
 {
   "inputs": {
-    "Cargo.lock": "2f1d5466457cea34f0a9883d49c3fb192fe7802ff085979ec8d4792038a0c3ef",
-    "Cargo.toml": "49e1ca2d576d2e4576c1593d75943d0f99649b8dca3be9974062c99baaa15bd9",
+    "Cargo.lock": "6b8bc87305c09cd04457ac20e786da7179907113ad5945fafab63b2b5c2504af",
+    "Cargo.toml": "b8411def744f3ffbc539cfc9f88a76095d749aeeb2da7006c818bd5ce429d3ad",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
-    "packages/plugin-sdk/src/contracts.ts": "ee1d7719f8c9a1468cb6c814c4ef55ed6fcfc1ca40f38ac902005cabcff34bdd",
-    "packages/plugin-sdk/src/generated/runtime.ts": "446e6bebc603fa14c60b34d089415d5a552c8189923d6fe4fe77abd5cec1b3cd",
+    "packages/plugin-sdk/src/contracts.ts": "75879e08f21a0daa7d003cbb2f621929ce589de6b13a22ed26c40f4ca480a1ba",
+    "packages/plugin-sdk/src/generated/runtime.ts": "c6a4608be69ec9541ff2a236bf0d9b5dada247cb9e07f698738bfc33dec9f8f5",
     "packages/plugin-sdk/src/index.ts": "e33226c48bc54fbf377a604ead3b28ea448f50c287582804dab1e6e1059a6f71",
     "packages/plugin-sdk/src/native.ts": "6a826e012f5b7887c88ea295d5826b29939ae2ff0ff722db7b4124e37fc49749",
     "packages/plugin-sdk/src/ui.ts": "d669d2c5c70fc61aae3c0582f586950bf9cea863ee72b48af673e57c30c1b0b9",
@@ -467,7 +467,7 @@
     "products/maka/desktop-shell/app/workbar.js": "a59d515945e6c6634ed5f446129e36a23b4de93154443eb30d2b3471d516e9cb",
     "products/maka/desktop-shell/app/workhub.js": "cd1555c73ee9f25ccbfba4ea375ed2bd67787d63f30500035da30ace40258b88",
     "products/maka/native/Cargo.toml": "4a3c69dfe3d7e5773316dbd0f703ec376cbaef0a7b9915fce395b8460c633d76",
-    "products/maka/terminal-shell/Cargo.toml": "fd604d67d9ffbbce9600c2bd79f6277a2f8cf6a2d0c1b2a2c2e768a9d371df72",
+    "products/maka/terminal-shell/Cargo.toml": "7c72e8ae3ba1637824feb30b137e16e65937a1c06967bd90f26f5cf2bb3da0b0",
     "scripts/apply-dependency-patches.mjs": "67e548835b0de28e3753be559abb5cb2efbe94a46d72e0b756c23f944896d4bd",
     "scripts/plugins/build.mjs": "7dc0e6c33d047aa628f7e1d4acbfabef8803760f580403e49e4f0c2c06321152",
     "scripts/plugins/product-version.mjs": "6942998c02fbb47d67e4f89175b5615822f846094eedb2feab32c945d07f2449",
@@ -1283,5 +1283,5 @@
     "third-party/sqlx-sqlite/upstream.json": "0d9b56e81ace351d771e27f0e247e346fa6605f5e160176ea531d9f7720a10db",
     "tools/schema/Cargo.toml": "28f0d16abedac58f4e3e899081ae8652633fc3619474418ec954d214672abbe8"
   },
-  "sha256": "75b9c5fa389522a2e72339a6a4d8406741698311b112b0b229d3b3a6ea778e7b"
+  "sha256": "453238cb01e0547338c5f42346acd4e2afb55ff5ae0e3d81921f2986cc42e3ec"
 }

@@ -1,0 +1,109 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+export type Position = { sourceSequence: number; itemIndex: number };
+type Fragment = { offset: number; text: string };
+export type Subscription = { next(): Promise<any | null>; close(): Promise<void> };
+export type Row = {
+  key: string;
+  messageId: string;
+  field: string;
+  role: string;
+  text: string;
+  position?: Position;
+  fragments?: Fragment[];
+  tool?: any;
+  turnId?: string;
+  timestamp?: number;
+  timing?: any;
+  model?: any;
+  finalOutput?: boolean;
+  metadataThrough?: number;
+  invocationId?: string;
+  stepId?: string;
+  sequence?: number;
+  closedAt?: number | null;
+};
+
+// A send receipt and canonical history refer to the same user message.
+export const messageKey = (row: Row) =>
+  row.role === 'user' ? `user/${row.messageId}/${row.field}` : row.key;
+
+export function historyMetadata(chunk: any, through: number) {
+  return {
+    timing: chunk.timing,
+    model: chunk.model,
+    finalOutput: chunk.finalOutput,
+    tool: chunk.tool,
+    metadataThrough: through,
+  };
+}
+
+// These are the Desktop transcript's position/fragment rules, independent of
+// either renderer. History cursors use byte offsets; JS never derives them
+// from UTF-16 string lengths.
+export function mergeChunks(rows: Row[], chunks: any[], older = false, through = 0): Row[] {
+  const merged = new Map(rows.map((row) => [row.key, row]));
+  for (const chunk of chunks) {
+    const key = `${chunk.position.sourceSequence}/${chunk.position.itemIndex}/${chunk.field}`;
+    const previous = merged.get(key);
+    const fresh = { offset: chunk.offset, text: chunk.text };
+    const fragments = (
+      older && previous
+        ? [
+            ...previous.fragments!,
+            ...(previous.fragments!.some((part) => part.offset === chunk.offset) ? [] : [fresh]),
+          ]
+        : [...(previous?.fragments ?? []).filter((part) => part.offset !== chunk.offset), fresh]
+    ).sort((a, b) => a.offset - b.offset);
+    merged.set(key, {
+      key,
+      messageId: chunk.messageId,
+      turnId: chunk.turnId,
+      timestamp: chunk.timestamp,
+      ...((previous?.metadataThrough ?? -1) > through
+        ? historyMetadata(previous, previous!.metadataThrough!)
+        : historyMetadata(chunk, through)),
+      position: chunk.position,
+      field: chunk.field,
+      role: chunk.field === 'thinking' ? 'thinking' : chunk.role,
+      fragments,
+      text: fragments.map((part) => part.text).join(''),
+    });
+  }
+  return [...merged.values()].sort(
+    (a, b) =>
+      a.position!.sourceSequence - b.position!.sourceSequence ||
+      a.position!.itemIndex - b.position!.itemIndex ||
+      Number(a.field === 'body') - Number(b.field === 'body'),
+  );
+}
+
+export function acceptedSend(reply: any, sessionId: string): any | null {
+  const receipt = reply?.receipt;
+  if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned') return null;
+  const result = receipt.outcome.value;
+  if (result?.sessionId !== sessionId || typeof result.messageId !== 'string' || !result.messageId)
+    return null;
+  if (result.kind === 'started' && typeof result.invocationId === 'string' && result.invocationId)
+    return result;
+  if (result.kind === 'queued' && Number.isSafeInteger(result.revision) && result.revision >= 0)
+    return result;
+  return null;
+}

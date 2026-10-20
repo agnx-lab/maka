@@ -165,7 +165,7 @@ impl Fixture {
         };
         let deployment = Uuid::new_v4();
         let input = serde_json::from_value(json!({"environment":{"location":"host"},"instances":{
-            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":[],"permissions":{"access":"read_only","requestPermissions":true}}), json!({})),
+            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":[],"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), json!({})),
             "settings":node(&settings, 2, json!({}), json!({})),
             "receipts":node(&receipts, 3, json!({}), json!({})),
             "gateway":node(&gateway, 4, json!({}), json!({
@@ -213,6 +213,12 @@ impl Fixture {
                             "send",
                             "stop",
                             "execution",
+                            "pendingInteractions",
+                            "interaction",
+                            "respond",
+                            "source",
+                            "checklist",
+                            "watchChecklist",
                             "observe",
                             "history",
                             "watch",
@@ -493,14 +499,70 @@ impl ModelRequest {
     pub async fn delta(&mut self, text: &str) {
         self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"content":text},"finish_reason":null}]})).await;
     }
-    pub async fn finish(mut self) {
-        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}})).await;
+    pub async fn thinking(&mut self, text: &str) {
+        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"reasoning_content":text},"finish_reason":null}]})).await;
+    }
+
+    pub async fn tool(mut self, name: &str, input: Value) {
+        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"nsh-native-todo-call","type":"function","function":{"name":name,"arguments":input.to_string()}}]},"finish_reason":null}]})).await;
+        self.finish_with_reason("tool_calls").await;
+    }
+
+    pub async fn finish(self) {
+        self.finish_with_reason("stop").await;
+    }
+
+    async fn finish_with_reason(mut self, reason: &str) {
+        self.packet(json!({"id":"nsh-real-model","choices":[{"index":0,"delta":{},"finish_reason":reason}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}})).await;
         self.socket
             .write_all(b"e\r\ndata: [DONE]\n\n\r\n0\r\n\r\n")
             .await
             .unwrap();
         self.socket.flush().await.unwrap();
     }
+}
+
+// A public accessibility frame chooses coordinates; real native mouse events act.
+pub fn click_text(view: &mut AppView, prefix: &str) {
+    use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let node = view
+        .accessibility_snapshot()
+        .into_iter()
+        .filter(|node| node.label.starts_with(prefix) && node.frame.y >= 0.0)
+        .max_by(|a, b| a.frame.y.total_cmp(&b.frame.y))
+        .unwrap_or_else(|| panic!("no rendered native text starts with {prefix:?}"));
+    let column = ((node.frame.x + 4.0) / 8.0).floor() as u16;
+    let row = ((node.frame.y + 8.0) / 16.0).floor() as u16;
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        view.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+}
+
+// Call after pressing a row/header. Run the normal layout cycle before Home.
+pub async fn focus_activity(view: &mut AppView) {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let previous = view.surface().focused();
+    view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            view.poll().unwrap();
+            let focused = view.surface().focused();
+            if focused.is_some() && focused != previous {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("Alt+Down did not move native focus into the activity List");
 }
 
 pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> String {
@@ -550,6 +612,7 @@ fn evidence_size() -> (u16, u16) {
     match std::env::var("MAKA_NSH_EVIDENCE_SIZE").as_deref() {
         Ok("80x24") => (80, 24),
         Ok("120x36") | Err(_) => (120, 36),
+        Ok("120x40") => (120, 40),
         Ok(size) => panic!("unsupported evidence size: {size}"),
     }
 }

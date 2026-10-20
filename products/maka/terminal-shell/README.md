@@ -47,7 +47,7 @@ From Home, creating a conversation opens **Workspaces**: choose a directory publ
 | Ctrl+O | Open **Sessions** |
 | Ctrl+G | Open **Models** for the current conversation |
 | Ctrl+N | Create a conversation |
-| Ctrl+L | Jump to the latest messages; in Sessions or Models, load the next page when available |
+| Ctrl+L | Jump to the latest messages |
 | Alt+↑ | Focus the conversation for scrolling |
 | Alt+↓ | Expand and focus the latest turn's activity panel |
 | Enter | Send from the composer, or activate a selected palette entry |
@@ -58,11 +58,11 @@ From Home, creating a conversation opens **Workspaces**: choose a directory publ
 
 Model selection uses **Ctrl+G** because classic terminals encode Ctrl+M as the same carriage return as Enter. Paste through your terminal's paste command.
 
-In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches the loaded pages by title, workspace or ID; Models searches the Host's model catalog. Escape closes the palette without choosing.
+In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches by title, workspace or ID; Models searches the Host's model catalog. Both load more results as you scroll or move down. Escape closes the palette without choosing.
 
 ## Conversation and requests
 
-Each turn has its own bounded native activity panel with independent scrolling. It follows new activity near the bottom; scrolling up keeps your reading position. Completed turns collapse by default, with their final answer outside the panel. Activate a turn header to expand or collapse it. Completion and final-answer placement use the Host's recorded turn metadata, so an individual model response finishing does not prematurely close an ongoing turn.
+Earlier messages load automatically as you scroll up, preserving your reading position. Each turn has its own bounded native activity panel with independent scrolling. It follows new activity near the bottom; scrolling up keeps your reading position. Completed turns collapse by default, with their final answer outside the panel. Activate a turn header to expand or collapse it. Completion and final-answer placement use the Host's recorded turn metadata, so an individual model response finishing does not prematurely close an ongoing turn. Thinking remains expanded when you reopen a turn. Tool details are read on demand; reopening a panel with expanded tool details reloads them from the top.
 
 **Todo** displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 

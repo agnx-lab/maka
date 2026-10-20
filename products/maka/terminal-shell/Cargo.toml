@@ -42,7 +42,8 @@ tokio-util.workspace = true
 uuid.workspace = true
 
 [build-dependencies]
-nsh-bundler.workspace = true
+nsh-bundler = { workspace = true, features = ["bundle"] }
+nsh-core.workspace = true
 nsh-ui-mobile.workspace = true
 
 [dev-dependencies]

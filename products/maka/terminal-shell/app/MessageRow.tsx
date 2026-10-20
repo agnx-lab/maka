@@ -1,0 +1,439 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { cleanup, computed, signal, Text, View } from 'nsh';
+import { host } from 'maka/host';
+import { messageKey, type Position, type Row } from './history';
+import { C } from './ui';
+
+export type MessageViewState = {
+  expanded: ReturnType<typeof signal<boolean>>;
+  sourceMode: ReturnType<typeof signal<boolean>>;
+};
+type MessageBlock = {
+  key: number;
+  kind: 'paragraph' | 'heading' | 'bullets' | 'code';
+  text: string;
+  language?: string;
+};
+
+// Deliberately a block subset: headings, list runs and fenced code. Everything
+// else stays literal; Source always exposes the exact original selectable text.
+// At most 48 blocks: excess structure becomes one complete literal tail.
+function messageBlocks(source: string): MessageBlock[] {
+  const lines = source.split('\n');
+  const blocks: MessageBlock[] = [];
+  const fence = (line: string) => /^ {0,3}(`{3,}|~{3,})([^\r]*)\r?$/.exec(line);
+  const heading = (line: string) => /^ {0,3}#{1,6}[ \t]+(.+?)\r?$/.exec(line);
+  const bullet = (line: string) => /^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/.test(line);
+  let index = 0;
+  while (index < lines.length && blocks.length < 47) {
+    if (!lines[index].trim()) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    const opening = fence(lines[index]);
+    if (opening) {
+      index += 1;
+      const body = index;
+      while (index < lines.length) {
+        const closing = fence(lines[index]);
+        if (
+          closing &&
+          closing[1][0] === opening[1][0] &&
+          closing[1].length >= opening[1].length &&
+          !closing[2].trim()
+        )
+          break;
+        index += 1;
+      }
+      blocks.push({
+        key: start,
+        kind: 'code',
+        text: lines.slice(body, index).join('\n'),
+        language: opening[2].trim(),
+      });
+      if (index < lines.length) index += 1;
+      continue;
+    }
+    const title = heading(lines[index]);
+    if (title) {
+      blocks.push({ key: start, kind: 'heading', text: title[1] });
+      index += 1;
+      continue;
+    }
+    const list = bullet(lines[index]);
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !fence(lines[index]) &&
+      !heading(lines[index]) &&
+      (list ? bullet(lines[index]) || /^\s+/.test(lines[index]) : !bullet(lines[index]))
+    ) {
+      index += 1;
+    }
+    blocks.push({
+      key: start,
+      kind: list ? 'bullets' : 'paragraph',
+      text: lines.slice(start, index).join('\n'),
+    });
+  }
+  if (index < lines.length) {
+    blocks.push({ key: index, kind: 'paragraph', text: lines.slice(index).join('\n') });
+  }
+  return blocks;
+}
+
+type MessageSourceRef = {
+  key: string;
+  field: 'arguments' | 'result';
+  toolUseId: string;
+  position: Position;
+  name?: string;
+};
+function messageBytes(text: string): number {
+  let length = 0;
+  for (const point of text) {
+    const code = point.codePointAt(0)!;
+    length += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return length;
+}
+
+// Each instance owns one exact immutable field at its opening fence. It has
+// one in-flight page; closing/rebinding disposes its owner and ignores replies.
+function MessageSource({
+  reference,
+  sessionId,
+  through,
+}: {
+  reference: MessageSourceRef;
+  sessionId: string;
+  through: () => number;
+}) {
+  const original = {
+    ...reference,
+    position: { ...reference.position },
+    sessionId,
+    through: through(),
+  };
+  const content = signal(''),
+    total = signal<number | null>(null),
+    format = signal('');
+  const busy = signal(false),
+    error = signal('');
+  let alive = true;
+  cleanup(() => {
+    alive = false;
+  });
+  const complete = () => total() !== null && messageBytes(content()) === total();
+  const read = async () => {
+    if (!alive || busy() || complete()) return;
+    const offset = messageBytes(content());
+    busy.set(true);
+    error.set('');
+    try {
+      const page = await host.query('agent', 'source', {
+        sessionId: original.sessionId,
+        through: original.through,
+        source: { kind: 'row', position: original.position },
+        field: original.field,
+        position: offset === 0 ? { kind: 'start' } : { kind: 'after', offset },
+      });
+      if (!alive) return;
+      const source = page.source,
+        tool = source?.tool;
+      const samePosition = (a: any, b: any) =>
+        !!a && !!b && a.sourceSequence === b.sourceSequence && a.itemIndex === b.itemIndex;
+      const owned = original.field === 'arguments' ? tool?.call : tool?.result;
+      const end = offset + messageBytes(source?.text ?? '');
+      if (
+        page.kind !== 'ready' ||
+        page.through !== original.through ||
+        source?.field !== original.field ||
+        source.path != null ||
+        !samePosition(source.position, original.position) ||
+        source.role !== (original.field === 'arguments' ? 'tool_call' : 'tool_result') ||
+        tool?.toolUseId !== original.toolUseId ||
+        !samePosition(owned?.position, original.position) ||
+        (original.field === 'arguments' && tool.call.name !== original.name) ||
+        source.offset !== offset ||
+        messageBytes(content()) !== offset ||
+        !Number.isSafeInteger(source.totalBytes) ||
+        source.totalBytes < 0 ||
+        end > source.totalBytes ||
+        (total() !== null && source.totalBytes !== total()) ||
+        (end === offset && end !== source.totalBytes) ||
+        (format() !== '' && source.format !== format()) ||
+        !(original.field === 'arguments'
+          ? source.format === 'json'
+          : ['text', 'json', 'image_descriptor'].includes(source.format))
+      ) {
+        throw new Error('The original tool source could not be verified.');
+      }
+      total.set(source.totalBytes);
+      format.set(source.format);
+      content.set(content() + source.text);
+    } catch (reason) {
+      if (alive) error.set(String(reason));
+    } finally {
+      if (alive) {
+        busy.set(false);
+        if (!complete() && !error()) void read();
+      }
+    }
+  };
+  void Promise.resolve().then(read);
+  return (
+    <View style={{ gap: 16 }}>
+      <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+        {original.field === 'arguments' ? 'Arguments' : 'Result'}
+        {format() === 'image_descriptor' ? ' · image descriptor' : ''}
+      </Text>
+      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+        {content()}
+      </Text>
+      <If when={error()}>
+        <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
+      </If>
+      <If when={!complete()}>
+        <View onPress={error() ? () => void read() : undefined} style={{ height: 16 }}>
+          <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+            {error() ? 'Retry original source' : 'Reading…'} · {messageBytes(content())}/
+            {total() ?? '?'} bytes
+          </Text>
+        </View>
+      </If>
+    </View>
+  );
+}
+
+export function MessageRow({
+  item,
+  sessionId,
+  through,
+  viewState,
+}: {
+  item: () => Row;
+  sessionId: string;
+  through: () => number;
+  viewState?: MessageViewState;
+}) {
+  return (
+    <Each of={[item()]} key={messageKey}>
+      {(row) => {
+        const expanded = viewState?.expanded ?? signal(false),
+          sourceMode = viewState?.sourceMode ?? signal(false);
+        const text = computed(() => row().text);
+        const blocks = computed(() =>
+          row().tool ||
+          row().field === 'thinking' ||
+          row().role === 'thinking' ||
+          row().role === 'user'
+            ? []
+            : messageBlocks(text()),
+        );
+        const preview = computed(() => {
+          const first = /\S[^\r\n]*/.exec(text())?.[0].trim() ?? '';
+          return first.length > 160 ? `${first.slice(0, 160)}…` : first;
+        });
+        const thinking = () => row().field === 'thinking' || row().role === 'thinking';
+        const isTool = () =>
+          row().tool != null || row().role === 'tool_call' || row().role === 'tool_result';
+        const compact = () => thinking() || isTool();
+        const user = () => row().role === 'user';
+        const summary = () => {
+          if (thinking()) return `◇ Think${preview() ? ` · ${preview()}` : ''}`;
+          const call = row().tool?.call;
+          return `${expanded() ? 'v' : '>'} ${call?.name ?? 'Tool'}${call?.title?.fallback ? ` · ${call.title.fallback}` : ''}${row().tool?.result?.isError ? ' · error' : ''}`;
+        };
+        const timestamp = () => {
+          const value = (row() as Row & { timestamp?: number }).timestamp;
+          if (typeof value !== 'number') return '';
+          const date = new Date(value);
+          return Number.isNaN(date.getTime())
+            ? ''
+            : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        };
+        const sourceRefs = (): MessageSourceRef[] => {
+          const tool = row().tool;
+          if (!tool?.toolUseId) return [];
+          return (['arguments', 'result'] as const).flatMap((field) => {
+            const position = (field === 'arguments' ? tool.call : tool.result)?.position;
+            return position
+              ? [
+                  {
+                    field,
+                    position,
+                    toolUseId: tool.toolUseId,
+                    name: tool.call?.name,
+                    key: `${field}:${tool.toolUseId}:${position.sourceSequence}/${position.itemIndex}`,
+                  },
+                ]
+              : [];
+          });
+        };
+        return (
+          <View style={{ paddingVertical: user() ? 16 : 0, gap: 0, width: '100%' }}>
+            <If
+              when={user()}
+              else={
+                <If
+                  when={compact()}
+                  else={
+                    <View style={{ gap: 0 }}>
+                      <If
+                        when={sourceMode()}
+                        else={
+                          <View style={{ gap: 16 }}>
+                            <Each of={blocks()} key={(block: MessageBlock) => block.key}>
+                              {(block) => (
+                                <View
+                                  style={{
+                                    gap: 0,
+                                    backgroundColor:
+                                      block().kind === 'code' ? C.surface : C.background,
+                                    paddingVertical: block().kind === 'code' ? 16 : 0,
+                                    paddingHorizontal: block().kind === 'code' ? 8 : 0,
+                                  }}
+                                >
+                                  <If when={block().kind === 'code'}>
+                                    <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                                      {block().language || 'code'}
+                                    </Text>
+                                  </If>
+                                  <Text
+                                    selectable
+                                    style={{
+                                      color: C.text,
+                                      fontWeight: block().kind === 'heading' ? '700' : '400',
+                                      fontSize: 16,
+                                      lineHeight: 16,
+                                    }}
+                                  >
+                                    {block().text}
+                                  </Text>
+                                </View>
+                              )}
+                            </Each>
+                          </View>
+                        }
+                      >
+                        <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                          {text()}
+                        </Text>
+                      </If>
+                      <View
+                        onPress={() => sourceMode.set(!sourceMode())}
+                        style={{ height: 16, alignSelf: 'flex-end' }}
+                      >
+                        <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                          {sourceMode() ? '[Formatted]' : '[Source]'}
+                        </Text>
+                      </View>
+                    </View>
+                  }
+                >
+                  <View
+                    onPress={() => expanded.set(!expanded())}
+                    style={{ height: 16, paddingVertical: 0 }}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        height: 16,
+                        color: row().tool?.result?.isError ? C.danger : C.muted,
+                        fontSize: 16,
+                        lineHeight: 16,
+                      }}
+                    >
+                      {summary()}
+                    </Text>
+                  </View>
+                  <If when={expanded()}>
+                    <View style={{ paddingLeft: 16, paddingVertical: 16, gap: 16 }}>
+                      <If
+                        when={thinking()}
+                        else={
+                          <If
+                            when={sourceRefs().length > 0}
+                            else={
+                              <Text
+                                selectable
+                                style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}
+                              >
+                                {text() ||
+                                  'Original tool source is unavailable in this history row.'}
+                              </Text>
+                            }
+                          >
+                            <Each
+                              of={sourceRefs()}
+                              key={(reference: MessageSourceRef) => reference.key}
+                            >
+                              {(reference) => (
+                                <MessageSource
+                                  reference={reference()}
+                                  sessionId={sessionId}
+                                  through={through}
+                                />
+                              )}
+                            </Each>
+                          </If>
+                        }
+                      >
+                        <Text selectable style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                          {text()}
+                        </Text>
+                      </If>
+                    </View>
+                  </If>
+                </If>
+              }
+            >
+              <View
+                style={{
+                  alignSelf: 'flex-end',
+                  maxWidth: '78%',
+                  paddingHorizontal: 16,
+                  paddingVertical: 16,
+                  borderRadius: 16,
+                  backgroundColor: C.surface,
+                }}
+              >
+                <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                  {text()}
+                </Text>
+              </View>
+              <If when={timestamp()}>
+                <Text
+                  style={{ alignSelf: 'flex-end', color: C.muted, fontSize: 16, lineHeight: 16 }}
+                >
+                  {timestamp()}
+                </Text>
+              </If>
+            </If>
+          </View>
+        );
+      }}
+    </Each>
+  );
+}

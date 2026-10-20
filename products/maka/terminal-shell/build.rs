@@ -18,11 +18,17 @@
  */
 
 fn main() {
-    println!("cargo:rerun-if-changed=app/App.tsx");
-    let source = std::fs::read_to_string("app/App.tsx").expect("read terminal application");
-    let module =
-        nsh_bundler::compile_module("App.tsx", &source, &[nsh_ui_mobile::registry().into()])
-            .expect("compile terminal application");
+    println!("cargo:rerun-if-changed=app");
+    // Describe the runtime export without constructing a Host client at build time.
+    let mut host = nsh_core::ui::Registry::ui_set("maka/host");
+    host.native_values(&["host"]);
+    let module = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry: "app/App.tsx".into(),
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_ui_mobile::registry().into(), host.into()],
+    })
+    .expect("bundle terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
-    std::fs::write(output.join("app.js"), module).expect("write terminal application");
+    std::fs::write(output.join("app.js"), module.code).expect("write terminal application");
 }
