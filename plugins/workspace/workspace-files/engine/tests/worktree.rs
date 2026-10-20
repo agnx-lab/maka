@@ -261,6 +261,7 @@ fn worktree_recovery_rejects_dirty_sources_foreign_owners_and_missing_published_
     let bytes = fs::read(&owner).unwrap();
     fs::write(&owner, "{}").unwrap();
     assert!(manager.ensure(&binding, &cancel).is_err());
+    assert!(manager.capture_patch(&binding, cancel.clone()).is_err());
     assert!(manager.remove(&binding).is_err());
     assert!(binding.directory().exists());
     fs::write(&owner, bytes).unwrap();
@@ -316,4 +317,476 @@ fn interrupted_removal_preserves_advanced_branches_and_cannot_resurrect() {
     assert!(manager.ensure(&binding, &cancel).is_err());
     assert_eq!(git(&source, &["rev-parse", &branch]), commit);
     assert!(git(&source, &["status", "--porcelain"]).is_empty());
+}
+
+// Exercise complete exports through public allocation and an independent Git checkout.
+struct CaptureFixture {
+    temp: tempfile::TempDir,
+    source: std::path::PathBuf,
+    manager: Worktrees,
+    binding: maka_fs_tools::worktree::Binding,
+    cancel: Arc<AtomicBool>,
+    original: std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+}
+impl CaptureFixture {
+    fn new(prepare: impl FnOnce(&Path)) -> Self {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("repository");
+        repository(&source, "sha1");
+        prepare(&source);
+        assert!(git(&source, &["status", "--porcelain"]).is_empty());
+        let original = capture_files(&source);
+        let manager = Worktrees::open(&temp.path().join("host")).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let binding = manager
+            .plan(&source, &"4".repeat(64), cancel.clone())
+            .unwrap();
+        manager.ensure(&binding, &cancel).unwrap();
+        Self {
+            temp,
+            source,
+            manager,
+            binding,
+            cancel,
+            original,
+        }
+    }
+    fn export_and_apply(&self) -> (Vec<u8>, std::path::PathBuf) {
+        let source = CaptureState::read(&self.source);
+        let child = CaptureState::read(self.binding.directory());
+        let expected = capture_files(self.binding.directory());
+        let patch = self
+            .manager
+            .capture_patch(&self.binding, self.cancel.clone())
+            .unwrap();
+        source.assert_unchanged(&self.source);
+        child.assert_unchanged(self.binding.directory());
+        assert_capture_files(&self.source, &self.original);
+        assert_capture_files(self.binding.directory(), &expected);
+        let oracle = self.temp.path().join("oracle");
+        git(
+            self.temp.path(),
+            &[
+                "clone",
+                "--quiet",
+                "--local",
+                self.source.to_str().unwrap(),
+                oracle.to_str().unwrap(),
+            ],
+        );
+        let patch_path = self.temp.path().join("result.patch");
+        fs::write(&patch_path, &patch).unwrap();
+        git(
+            &oracle,
+            &["apply", "--index", "--binary", patch_path.to_str().unwrap()],
+        );
+        assert_capture_files(&oracle, &expected);
+        source.assert_unchanged(&self.source);
+        (patch, oracle)
+    }
+}
+struct CaptureState {
+    index: Vec<u8>,
+    index_modified: std::time::SystemTime,
+    head: String,
+}
+impl CaptureState {
+    fn read(root: &Path) -> Self {
+        let index = root.join(git(root, &["rev-parse", "--git-path", "index"]).trim());
+        Self {
+            index: fs::read(&index).unwrap(),
+            index_modified: fs::metadata(index).unwrap().modified().unwrap(),
+            head: git(root, &["rev-parse", "HEAD"]),
+        }
+    }
+    fn assert_unchanged(&self, root: &Path) {
+        let current = Self::read(root);
+        assert!(
+            current.index == self.index,
+            "capture changed the real index bytes"
+        );
+        assert_eq!(current.index_modified, self.index_modified);
+        assert_eq!(current.head, self.head);
+    }
+}
+fn capture_files(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    fn visit(
+        root: &Path,
+        relative: &Path,
+        files: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) {
+        for entry in fs::read_dir(root.join(relative)).unwrap() {
+            let entry = entry.unwrap();
+            if relative.as_os_str().is_empty() && entry.file_name() == ".git" {
+                continue;
+            }
+            let path = relative.join(entry.file_name());
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                visit(root, &path, files);
+            } else {
+                assert!(
+                    kind.is_file(),
+                    "unexpected fixture file kind: {}",
+                    path.display()
+                );
+                files.insert(path.clone(), fs::read(root.join(path)).unwrap());
+            }
+        }
+    }
+    let mut files = std::collections::BTreeMap::new();
+    visit(root, Path::new(""), &mut files);
+    files
+}
+fn assert_capture_files(
+    root: &Path,
+    expected: &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+) {
+    let actual = capture_files(root);
+    assert!(
+        actual.keys().eq(expected.keys()),
+        "export omitted or invented a file path"
+    );
+    for (path, bytes) in expected {
+        assert!(
+            actual.get(path) == Some(bytes),
+            "export bytes differ: {}",
+            path.display()
+        );
+    }
+}
+fn git_input(root: &Path, args: &[&str], input: &[u8]) -> Vec<u8> {
+    use std::{io::Write, process::Stdio};
+    let mut child = Command::new("git")
+        .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+fn stage_absent_empty_files(root: &Path, directory: &str, count: usize) {
+    let oid = String::from_utf8(git_input(root, &["hash-object", "-w", "--stdin"], b"")).unwrap();
+    let mut entries = String::new();
+    for index in 0..count {
+        entries.push_str(&format!(
+            "100644 {}\t{directory}/{:03}/{index:06}\n",
+            oid.trim(),
+            index / 500
+        ));
+    }
+    git_input(
+        root,
+        &["update-index", "--add", "--index-info"],
+        entries.as_bytes(),
+    );
+}
+fn capture_payload(lines: usize) -> Vec<u8> {
+    let line = format!("configuration payload: {}\n", "x".repeat(8_168));
+    line.repeat(lines).into_bytes()
+}
+fn commit_capture_fixture(root: &Path) {
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "capture fixture"]);
+}
+
+#[test]
+fn capture_large_baseline_blob_preserves_small_child_change() {
+    let mut base = capture_payload(6_401);
+    base.extend_from_slice(b"selected = base\n");
+    let f = CaptureFixture::new(|root| {
+        fs::write(root.join("large.txt"), &base).unwrap();
+        commit_capture_fixture(root);
+    });
+    let mut expected = capture_payload(6_401);
+    expected.extend_from_slice(b"selected = child\n");
+    fs::write(f.binding.directory().join("large.txt"), &expected).unwrap();
+    let (patch, oracle) = f.export_and_apply();
+    assert!(
+        patch.len() < 50 * 1024 * 1024,
+        "tiny edit should not require a large patch"
+    );
+    assert!(fs::read(oracle.join("large.txt")).unwrap() == expected);
+}
+
+#[test]
+fn capture_large_working_file_exports_complete_bytes() {
+    let f = CaptureFixture::new(|_| {});
+    let expected = capture_payload(6_401);
+    fs::write(f.binding.directory().join("new-large.txt"), &expected).unwrap();
+    let (_, oracle) = f.export_and_apply();
+    assert!(fs::read(oracle.join("new-large.txt")).unwrap() == expected);
+}
+
+#[test]
+fn capture_expanding_builtin_encoding_exports_complete_converted_bytes() {
+    let f = CaptureFixture::new(|root| {
+        fs::write(
+            root.join(".gitattributes"),
+            "*.crlf text eol=crlf\nencoded.txt -text working-tree-encoding=UTF-16LE\n",
+        )
+        .unwrap();
+        let original: Vec<_> = "original\0\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        fs::write(root.join("encoded.txt"), original).unwrap();
+        commit_capture_fixture(root);
+    });
+    let canonical = format!("{}\n", "配".repeat(4_095)).repeat(4_300) + "\0";
+    let expected: Vec<_> = canonical
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert!(expected.len() < 50 * 1024 * 1024);
+    assert!(canonical.len() > 50 * 1024 * 1024);
+    fs::write(f.binding.directory().join("encoded.txt"), &expected).unwrap();
+    let (patch, oracle) = f.export_and_apply();
+    assert!(
+        patch.len() < 50 * 1024 * 1024,
+        "binary compression isolates the converted-stream gate"
+    );
+    assert!(fs::read(oracle.join("encoded.txt")).unwrap() == expected);
+    assert!(git_input(&oracle, &["show", ":encoded.txt"], b"") == canonical.as_bytes());
+}
+
+#[test]
+fn capture_aggregate_patch_exports_all_files() {
+    let f = CaptureFixture::new(|_| {});
+    let expected = capture_payload(3_300);
+    for name in ["first-large.txt", "second-large.txt"] {
+        fs::write(f.binding.directory().join(name), &expected).unwrap();
+    }
+    let (patch, oracle) = f.export_and_apply();
+    assert!(patch.len() > 50 * 1024 * 1024);
+    for name in ["first-large.txt", "second-large.txt"] {
+        assert!(fs::read(oracle.join(name)).unwrap() == expected);
+    }
+}
+
+#[test]
+fn capture_old_and_present_union_exports_all_deletions() {
+    let f = CaptureFixture::new(|root| {
+        stage_absent_empty_files(root, "old", 50_000);
+        git(root, &["checkout-index", "--all", "--force"]);
+        git(root, &["commit", "--quiet", "-m", "empty baseline files"]);
+    });
+    fs::remove_dir_all(f.binding.directory().join("old")).unwrap();
+    git(f.binding.directory(), &["add", "-u"]);
+    stage_absent_empty_files(f.binding.directory(), "absent", 50_001);
+    fs::write(
+        f.binding.directory().join("source.txt"),
+        "selected child change\n",
+    )
+    .unwrap();
+    let (_, oracle) = f.export_and_apply();
+    assert!(!oracle.join("old").exists());
+    assert!(!oracle.join("absent").exists());
+    assert_eq!(
+        fs::read(oracle.join("source.txt")).unwrap(),
+        b"selected child change\n"
+    );
+}
+
+#[test]
+fn capture_many_present_index_paths_preserves_complete_actual_state() {
+    let f = CaptureFixture::new(|_| {});
+    stage_absent_empty_files(f.binding.directory(), "absent", 100_001);
+    fs::write(
+        f.binding.directory().join("source.txt"),
+        "selected child change\n",
+    )
+    .unwrap();
+    let (_, oracle) = f.export_and_apply();
+    assert!(!oracle.join("absent").exists());
+    assert_eq!(
+        fs::read(oracle.join("source.txt")).unwrap(),
+        b"selected child change\n"
+    );
+}
+
+#[test]
+fn capture_cancellation_and_external_filters_preserve_results_and_ownership() {
+    let f = CaptureFixture::new(|_| {});
+    fs::write(
+        f.binding.directory().join("source.txt"),
+        "selected child change\n",
+    )
+    .unwrap();
+    let source = CaptureState::read(&f.source);
+    let child = CaptureState::read(f.binding.directory());
+    let expected = capture_files(f.binding.directory());
+    assert!(
+        f.manager
+            .capture_patch(&f.binding, Arc::new(AtomicBool::new(true)))
+            .is_err()
+    );
+    source.assert_unchanged(&f.source);
+    child.assert_unchanged(f.binding.directory());
+    assert_capture_files(f.binding.directory(), &expected);
+    let config = f.source.join(".git/config");
+    let original = fs::read(&config).unwrap();
+    let marker = f.temp.path().join("external-filter-ran");
+    git(
+        &f.source,
+        &[
+            "config",
+            "filter.unowned.clean",
+            &format!("touch {}", marker.display()),
+        ],
+    );
+    fs::write(
+        f.binding.directory().join(".gitattributes"),
+        "source.txt filter=unowned\n",
+    )
+    .unwrap();
+    let error = f
+        .manager
+        .capture_patch(&f.binding, f.cancel.clone())
+        .unwrap_err();
+    assert!(error.to_string().contains("external filters"));
+    assert!(!marker.exists());
+    fs::write(config, original).unwrap();
+    fs::write(
+        f.binding.directory().join(".gitattributes"),
+        expected.get(Path::new(".gitattributes")).unwrap(),
+    )
+    .unwrap();
+    source.assert_unchanged(&f.source);
+    child.assert_unchanged(f.binding.directory());
+    assert_capture_files(f.binding.directory(), &expected);
+    f.export_and_apply();
+}
+
+#[test]
+fn capture_rejects_malformed_owner_suffix_and_recovers_after_restoration() {
+    let f = CaptureFixture::new(|_| {});
+    fs::write(
+        f.binding.directory().join("source.txt"),
+        "selected child change\n",
+    )
+    .unwrap();
+    let source = CaptureState::read(&f.source);
+    let child = CaptureState::read(f.binding.directory());
+    let expected = capture_files(f.binding.directory());
+    let owner = f
+        .binding
+        .directory()
+        .parent()
+        .unwrap()
+        .join("maka-owner.json");
+    let proof = fs::read(&owner).unwrap();
+    let mut malformed = proof.clone();
+    malformed.resize(16_385, b' ');
+    malformed.extend_from_slice(b"{}");
+    fs::write(&owner, malformed).unwrap();
+    assert!(
+        f.manager.inspect(&f.binding).is_err(),
+        "a second JSON value after whitespace is not an owner record"
+    );
+    assert!(
+        f.manager
+            .capture_patch(&f.binding, f.cancel.clone())
+            .is_err()
+    );
+    source.assert_unchanged(&f.source);
+    child.assert_unchanged(f.binding.directory());
+    assert_capture_files(f.binding.directory(), &expected);
+    fs::write(owner, proof).unwrap();
+    Worktrees::open(&f.temp.path().join("host"))
+        .unwrap()
+        .inspect(&f.binding)
+        .unwrap();
+    f.export_and_apply();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn capture_generated_large_owner_record_preserves_exact_ownership() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut source = temp.path().to_owned();
+    let mut host = temp.path().join("host");
+    for _ in 0..4 {
+        source.push("\u{1}".repeat(240));
+        host.push("\u{1}".repeat(240));
+    }
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    repository(&source, "sha1");
+    assert!(git(&source, &["status", "--porcelain"]).is_empty());
+    let original = capture_files(&source);
+    let manager = Worktrees::open(&host).unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let binding = manager
+        .plan(&source, &"5".repeat(64), cancel.clone())
+        .unwrap();
+    assert!(
+        serde_json::to_vec(&binding).unwrap().len() > 16_385,
+        "escaped legal Linux paths produce a complete large owner record"
+    );
+    let source_state = CaptureState::read(&source);
+    manager.ensure(&binding, &cancel).unwrap();
+    manager.inspect(&binding).unwrap();
+    let reopened = Worktrees::open(&host).unwrap();
+    reopened.ensure(&binding, &cancel).unwrap();
+    reopened.inspect(&binding).unwrap();
+    let f = CaptureFixture {
+        temp,
+        source,
+        manager,
+        binding,
+        cancel,
+        original,
+    };
+    fs::write(
+        f.binding.directory().join("source.txt"),
+        "child bytes after large ownership record\n",
+    )
+    .unwrap();
+    let owner = f
+        .binding
+        .directory()
+        .parent()
+        .unwrap()
+        .join("maka-owner.json");
+    let proof = fs::read(&owner).unwrap();
+    fs::write(&owner, "{}").unwrap();
+    assert!(reopened.ensure(&f.binding, &f.cancel).is_err());
+    assert!(reopened.inspect(&f.binding).is_err());
+    assert!(
+        reopened
+            .capture_patch(&f.binding, f.cancel.clone())
+            .is_err()
+    );
+    assert!(reopened.remove(&f.binding).is_err());
+    assert_eq!(
+        fs::read(f.binding.directory().join("source.txt")).unwrap(),
+        b"child bytes after large ownership record\n"
+    );
+    fs::write(&owner, &proof).unwrap();
+    reopened.inspect(&f.binding).unwrap();
+    f.export_and_apply();
+    assert!(fs::read(&owner).unwrap() == proof);
+    source_state.assert_unchanged(&f.source);
+    reopened.remove(&f.binding).unwrap();
+    f.manager.remove(&f.binding).unwrap();
+    assert!(!f.binding.directory().exists());
+    source_state.assert_unchanged(&f.source);
+    assert_capture_files(&f.source, &f.original);
 }

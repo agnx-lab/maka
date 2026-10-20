@@ -92,9 +92,11 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let catalog = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
         let sessions = catalog["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 2);
+        let original = sessions.iter().find(|session| session["id"] == fixture.session).unwrap();
         let created = sessions.iter().find(|session| session["id"] != fixture.session).unwrap();
         let created_id = created["id"].as_str().unwrap().to_owned();
-        assert_eq!(created["workspace"]["path"], fixture.directory.path().join("workspace").to_str().unwrap());
+        assert_eq!(created["workspace"], original["workspace"]);
+        assert_eq!(created["workspace"]["path"], fixture.directory.path().join("workspace").canonicalize().unwrap().to_str().unwrap());
         wait_view(&mut view, |screen| screen.contains("Search models…")).await;
         view.handle_event(Event::Paste("model-alt".into()));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
