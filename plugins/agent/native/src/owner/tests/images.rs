@@ -328,6 +328,7 @@ pub(super) async fn canonical_image(
         position = json!({"kind":"after","cursor":page["after"]});
     };
     let request = json!({"sessionId":session,"through":fence,"position":sequence,"offset":0});
+    let expected_digest = content_digest(bytes);
     let mut assembled = Vec::new();
     while assembled.len() < bytes.len() {
         let mut input = request.clone();
@@ -335,7 +336,7 @@ pub(super) async fn canonical_image(
         let page = f.query("toolImage", input).await.unwrap();
         assert_eq!(page["kind"], "ready");
         assert_eq!(page["totalBytes"], bytes.len());
-        assert_eq!(page["digest"], content_digest(bytes));
+        assert_eq!(page["digest"], expected_digest);
         assert_eq!(page["mimeType"], mime_type);
         let chunk = STANDARD.decode(page["data"].as_str().unwrap()).unwrap();
         assert!(!chunk.is_empty() && chunk.len() <= 32768);
