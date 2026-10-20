@@ -37,7 +37,7 @@ build *args: product
     node scripts/rust/build-cli.mjs "$@"
 
 # Check all maintained code and behavior.
-check: fmt-check lint typecheck test-js test licenses
+check: fmt-check lint typecheck test-js test test-termina licenses
 
 fmt:
     cargo fmt --all
@@ -58,6 +58,9 @@ typecheck:
 
 test *args:
     cargo nextest run --locked --workspace "$@"
+
+test-termina:
+    cargo test --locked --manifest-path third-party/termina/Cargo.toml --lib --target-dir "${CARGO_TARGET_DIR:-target}"
 
 test-js:
     node --test scripts/*.test.mjs scripts/rust/*.test.mjs packages/cli/tests/*.test.mjs
