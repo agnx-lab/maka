@@ -29,11 +29,13 @@ import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
 import type { PaletteEntry, PaletteKind } from './Palette';
 import { InteractionPanel } from './InteractionPanel';
+import { ImageViewer, type ImagePreview } from './ToolImage';
 import logo from './assets/maka.png';
 
 type Overlay = { instance: number } & (
   | { kind: PaletteKind; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
+  | { kind: 'image'; sessionId: string; image: ImagePreview }
 );
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
@@ -86,7 +88,10 @@ function App() {
     switching.set(true);
     try {
       if (handle && !(await handle.flushDraft())) return;
-      if (alive) selected.set(id);
+      if (alive) {
+        overlay.set(null);
+        selected.set(id);
+      }
     } catch (reason) {
       report(reason);
     } finally {
@@ -349,6 +354,15 @@ function App() {
     if (!alive || selected() !== sessionId) return;
     overlay.set({ kind: 'interaction', sessionId, requestId, instance: ++overlayInstance });
   };
+  const previewImage = (image: ImagePreview) => {
+    if (!alive || selected() !== image.source.sessionId || overlay()) return;
+    overlay.set({
+      kind: 'image',
+      sessionId: image.source.sessionId,
+      image,
+      instance: ++overlayInstance,
+    });
+  };
   void loadRecent().catch(report);
   void refreshControls().catch(report);
   return (
@@ -413,6 +427,7 @@ function App() {
             commands={inputAction(open, { kind: 'commands', sessionId: id() })}
             models={inputAction(open, { kind: 'models', sessionId: id() })}
             interaction={openInteraction}
+            previewImage={previewImage}
             attach={(next) => {
               handle = next;
             }}
@@ -465,30 +480,32 @@ function App() {
         </View>
       </If>
       <Each of={overlay() ? [overlay()!] : []} key={(value: Overlay) => value.instance}>
-        {(value) => (
-          <If
-            when={value().kind !== 'interaction'}
-            else={
+        {(value) => {
+          const current = value();
+          const close = inputAction(closeOverlay, current.instance);
+          if (current.kind === 'image') return <ImageViewer image={current.image} close={close} />;
+          if (current.kind === 'interaction')
+            return (
               <InteractionPanel
-                sessionId={value().sessionId!}
-                requestId={(value() as any).requestId}
+                sessionId={current.sessionId}
+                requestId={current.requestId}
                 control={control}
-                close={inputAction(closeOverlay, value().instance)}
+                close={close}
               />
-            }
-          >
+            );
+          return (
             <Palette
-              kind={value().kind as PaletteKind}
-              sessionId={value().sessionId}
-              instance={value().instance}
-              commands={commands({ instance: value().instance, sessionId: value().sessionId })}
+              kind={current.kind}
+              sessionId={current.sessionId}
+              instance={current.instance}
+              commands={commands({ instance: current.instance, sessionId: current.sessionId })}
               close={closeOverlay}
               selectSession={switchSession}
               create={create}
               chooseModel={chooseModel}
             />
-          </If>
-        )}
+          );
+        }}
       </Each>
     </View>
   );

@@ -19,6 +19,8 @@
 
 //! The application receives this already connected Host object; it cannot choose a Root.
 
+mod assets;
+
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
 use nsh_core::{JsonValue, ui::prelude::*};
 use std::{
@@ -68,6 +70,11 @@ impl Bindings {
                 tasks: StdMutex::new(Some(TaskTracker::new())),
             }),
         }
+    }
+
+    /// Bundled assets and immutable tool images read through this original Host.
+    pub fn assets(&self) -> Arc<dyn nsh_engine::Assets> {
+        Arc::new(assets::HostAssets(self.owner.clone()))
     }
 
     /// Native objects own subscriptions; the launcher owns calls and durable recovery.

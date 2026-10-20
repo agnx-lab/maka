@@ -140,7 +140,8 @@ impl Args {
         let client = Client::new(native, journal, "receipts".into())?;
         let runtime = tokio::runtime::Handle::current();
         let bindings = Bindings::new(client, runtime.clone());
-        let config = configuration(bindings.registry(self.session), runtime);
+        let mut config = configuration(bindings.registry(self.session), runtime);
+        config.assets = Some(bindings.assets());
         let result = if stop.load(Ordering::Acquire) {
             Ok(())
         } else {

@@ -24,7 +24,10 @@ publish.workspace = true
 build = "build.rs"
 
 [dependencies]
+base64 = "0.22.1"
 clap.workspace = true
+maka-agent-api.workspace = true
+maka-agent-facts.workspace = true
 maka-app-client.workspace = true
 maka-capabilities.workspace = true
 maka-event-log.workspace = true
@@ -50,9 +53,10 @@ nsh-base.workspace = true
 libc.workspace = true
 maka-process.workspace = true
 tempfile.workspace = true
-maka-agent-api.workspace = true
 maka-agent-native.workspace = true
-maka-agent-facts.workspace = true
+maka-files-native.workspace = true
+maka-workspace-api.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 maka-settings-native.workspace = true
 maka-config.workspace = true
 maka-packages.workspace = true

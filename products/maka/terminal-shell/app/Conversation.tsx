@@ -31,6 +31,7 @@ import { Checklist } from './Checklist';
 import { MessageRow } from './MessageRow';
 import { TurnPanel } from './TurnPanel';
 import type { TranscriptItem, TurnItem, TurnViewState } from './TurnPanel';
+import type { ImagePreview } from './ToolImage';
 
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = {
@@ -52,6 +53,7 @@ type ConversationProps = {
   models(): void;
   commands(): void;
   interaction(target: { sessionId: string; requestId: string }): void;
+  previewImage(image: ImagePreview): void;
   attach(handle: ConversationHandle): void;
   detach(handle: ConversationHandle): void;
 };
@@ -961,6 +963,7 @@ export function Conversation(props: ConversationProps) {
                           item={() => (entry() as any).row}
                           sessionId={sessionId}
                           through={() => latestKnown}
+                          previewImage={props.previewImage}
                         />
                       }
                     >
@@ -969,6 +972,7 @@ export function Conversation(props: ConversationProps) {
                         state={turnState((entry() as TurnItem).turnId)}
                         sessionId={sessionId}
                         through={() => latestKnown}
+                        previewImage={props.previewImage}
                         reveal={() =>
                           list?.scrollToIndex({
                             index: displayKeys().indexOf(ownedKey()),

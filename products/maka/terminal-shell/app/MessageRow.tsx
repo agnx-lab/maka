@@ -22,6 +22,7 @@ import { Button } from 'nsh/base';
 import { host } from 'maka/host';
 import { messageKey, type Position, type Row } from './history';
 import { C } from './ui';
+import { ToolImage, type ImagePreview } from './ToolImage';
 
 export type MessageViewState = {
   expanded: ReturnType<typeof signal<boolean>>;
@@ -245,11 +246,13 @@ export function MessageRow({
   sessionId,
   through,
   viewState,
+  previewImage,
 }: {
   item: () => Row;
   sessionId: string;
   through: () => number;
   viewState?: MessageViewState;
+  previewImage(image: ImagePreview): void;
 }) {
   return (
     <Each of={[item()]} key={messageKey}>
@@ -403,6 +406,14 @@ export function MessageRow({
                   </Button>
                   <If when={expanded()}>
                     <View style={{ paddingLeft: 16, paddingVertical: 16, gap: 16 }}>
+                      <If when={row().tool?.result?.image}>
+                        <ToolImage
+                          sessionId={sessionId}
+                          through={through}
+                          position={row().tool.result.position}
+                          preview={previewImage}
+                        />
+                      </If>
                       <If
                         when={thinking()}
                         else={

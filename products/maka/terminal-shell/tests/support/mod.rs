@@ -79,13 +79,17 @@ pub struct Fixture {
 
 impl Fixture {
     pub async fn open() -> Self {
-        Self::open_with_registration(false).await
+        Self::open_with_options(false, false).await
     }
     #[cfg(unix)]
     pub async fn registered() -> Self {
-        Self::open_with_registration(true).await
+        Self::open_with_options(true, false).await
     }
-    async fn open_with_registration(registered: bool) -> Self {
+    #[cfg(unix)]
+    pub async fn registered_images() -> Self {
+        Self::open_with_options(true, true).await
+    }
+    async fn open_with_options(registered: bool, images: bool) -> Self {
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
         let workspace = directory.path().join("workspace");
@@ -102,7 +106,7 @@ impl Fixture {
             Arc::new(RootOwner::create(&directory.path().join("host"), &namespaces).unwrap());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}/v1", listener.local_addr().unwrap());
-        let selection = configure(owner.clone(), &base).await;
+        let selection = configure(owner.clone(), &base, images).await;
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
         let package = |id: &str,
                        implementation: &str,
@@ -124,13 +128,25 @@ impl Fixture {
         let agent_contract = maka_agent_api::contract();
         let settings_contract = maka_settings_native::contract::contract();
         let receipts_contract = receipt_reader_contract();
+        let files_contract = maka_workspace_api::files::contract();
         let empty = json!({"type":"object","additionalProperties":false});
         let agent = package(
             "test.nsh.agent",
             maka_agent_api::IMPLEMENTATION,
             maka_agent_api::configuration_schema(),
-            json!({}),
+            if images {
+                json!({"files":{"contract":files_contract,"cardinality":{"kind":"one"}}})
+            } else {
+                json!({})
+            },
             json!({"agent":{"contract":agent_contract,"availability":"required"}}),
+        );
+        let files = package(
+            "test.nsh.files",
+            maka_workspace_api::files::IMPLEMENTATION,
+            empty.clone(),
+            json!({}),
+            json!({"Files":{"contract":files_contract,"availability":"required"}}),
         );
         let settings = package(
             "test.nsh.settings",
@@ -164,8 +180,8 @@ impl Fixture {
             })
         };
         let deployment = Uuid::new_v4();
-        let input = serde_json::from_value(json!({"environment":{"location":"host"},"instances":{
-            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":[],"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), json!({})),
+        let mut plan = json!({"environment":{"location":"host"},"instances":{
+            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":if images { json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}]) } else { json!([]) },"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), if images { json!({"files":[{"kind":"instance","path":["files"],"export":"Files"}]}) } else { json!({}) }),
             "settings":node(&settings, 2, json!({}), json!({})),
             "receipts":node(&receipts, 3, json!({}), json!({})),
             "gateway":node(&gateway, 4, json!({}), json!({
@@ -173,20 +189,23 @@ impl Fixture {
                 "settings":[{"kind":"instance","path":["settings"],"export":"Settings"}],
                 "receipts":[{"kind":"instance","path":["receipts"],"export":"Receipts"}]
             }))
-        }})).unwrap();
+        }});
+        let mut packages = vec![agent, settings, receipts, gateway];
+        if images {
+            plan["instances"]["files"] = node(&files, 5, json!({}), json!({}));
+            packages.push(files);
+        }
+        let input = serde_json::from_value(plan).unwrap();
         store
-            .commit_application(
-                deployment,
-                0,
-                input,
-                vec![],
-                vec![agent, settings, receipts, gateway],
-            )
+            .commit_application(deployment, 0, input, vec![], packages)
             .await
             .unwrap();
         let mut native = NativeRegistry::default();
         maka_agent_native::provide(&mut native).unwrap();
         maka_settings_native::provide(&mut native).unwrap();
+        if images {
+            maka_files_native::provide(&mut native).unwrap();
+        }
         let endpoint = |import: &str, methods: &[&str], recovery| HostEndpoint {
             consumer: InstanceId(vec![Uuid::from_u128(4)]),
             import: import.into(),
@@ -217,6 +236,7 @@ impl Fixture {
                             "interaction",
                             "respond",
                             "source",
+                            "toolImage",
                             "checklist",
                             "watchChecklist",
                             "observe",
@@ -383,7 +403,7 @@ impl Fixture {
     }
 }
 
-async fn configure(owner: Arc<RootOwner>, base: &str) -> Value {
+async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool) -> Value {
     use maka_agent_facts::configuration::CatalogMutationResult;
     let config = Arc::new(
         maka_config::ConfigurationStore::for_root(owner)
@@ -392,7 +412,7 @@ async fn configure(owner: Arc<RootOwner>, base: &str) -> Value {
     );
     let provider = json!({"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai-compatible"});
     let CatalogMutationResult::Committed {connection:Some(connection),..} = config.create_connection(serde_json::from_value(json!({
-        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":{"fixture-model":{"contextWindow":200000},"fixture-model-alt":{"contextWindow":200000}}}
+        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":{"fixture-model":{"contextWindow":200000,"vision":vision},"fixture-model-alt":{"contextWindow":200000,"vision":vision}}}
     })).unwrap()).await.unwrap() else { panic!("create fixture connection") };
     let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = config.prepare_oauth_login(serde_json::from_value(json!({
         "expectedCredential":null,"attemptId":Uuid::new_v4(),"target":{"kind":"existing","expected":{"connectionId":connection.connection_id,"revision":connection.revision,"provider":provider,"slug":"nsh-fixture","configuration":{"baseUrl":base}},"configuration":{"baseUrl":base}},

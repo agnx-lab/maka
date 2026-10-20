@@ -301,6 +301,80 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
     }).await.expect("real Host/Agent UI integration timed out");
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn immutable_tool_images_render_and_preview_without_stopping_the_running_turn() {
+    use base64::{
+        Engine as _,
+        engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    };
+    use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::registered_images().await;
+        let client = fixture.client().await;
+        let path = fixture.directory.path().join("workspace/scene.png");
+        let pixels: Vec<u8> = (0..192 * 128).flat_map(|index| {
+            if index % 192 < 64 { [255, 64, 32, 255] }
+            else if index % 192 < 128 { [32, 220, 96, 255] }
+            else { [64, 128, 255, 255] }
+        }).collect();
+        let mut bytes = Vec::new();
+        png::PngEncoder::new_with_quality(&mut bytes, png::CompressionType::Uncompressed, png::FilterType::NoFilter)
+            .write_image(&pixels, 192, 128, ExtendedColorType::Rgba8).unwrap();
+        assert!(bytes.len() > 2 * 32768, "the real PNG must cross multiple Host page boundaries");
+        std::fs::write(&path, &bytes).unwrap();
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Read the image", "model":fixture.selection})).await;
+        let request = fixture.next_request().await;
+        request.tool("Read", json!({"path":"scene.png"})).await;
+        let mut request = fixture.next_request().await;
+        let image_url = request.body["messages"].as_array().unwrap().iter()
+            .filter_map(|message| message["content"].as_array()).flatten()
+            .find(|part| part["type"] == "image_url").unwrap()["image_url"]["url"].as_str().unwrap();
+        assert_eq!(STANDARD.decode(image_url.strip_prefix("data:image/png;base64,").unwrap()).unwrap(), bytes);
+        // The live Read tool has settled. Neither viewer may reopen its original file.
+        std::fs::write(&path, b"the workspace image was replaced").unwrap();
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        let result = history["chunks"].as_array().unwrap().iter()
+            .find(|chunk| chunk["tool"]["result"]["image"] == true).unwrap()["tool"]["result"]["position"].clone();
+        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        terminal.wait_for("> Read").await;
+        terminal.click_text("> Read");
+        let inline = terminal.wait_for("Open image · 192 × 128").await;
+        assert!(inline.contains('▀'), "the actual PNG must paint in the production terminal");
+        evidence("tool-image-inline", &inline);
+        terminal.click_text("Open image");
+        let preview = terminal.wait_for("Original image").await;
+        assert!(preview.contains("Image preview") && preview.contains("192 × 128") && preview.contains('▀'));
+        evidence("tool-image-preview", &preview);
+        terminal.send(b"\x1b");
+        terminal.wait_for("Open image · 192 × 128").await;
+        // Native modal focus must return to its opener, so Enter opens it again.
+        terminal.send(b"\r");
+        terminal.wait_for("Original image").await;
+        terminal.click_text("Close · Esc");
+        terminal.wait_for("Open image · 192 × 128").await;
+        request.delta("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
+        terminal.wait_for("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        terminal.send(b"\x11");
+        terminal.finish().await;
+
+        // A source selector cannot move retained image bytes to another Session.
+        let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
+        let other = support::mutate(&client, "create", json!({"title":"Other image owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
+        let other_id = other["session"]["id"].as_str().unwrap();
+        let fence = client.query("agent", "observe", json!({"sessionId":other_id})).await.unwrap();
+        let uri = format!("asset:/tool-image/{}", URL_SAFE_NO_PAD.encode(serde_json::to_vec(&json!({"sessionId":other_id,"through":fence["through"],"position":result,"offset":0})).unwrap()));
+        let bindings = maka_terminal_shell::bindings::Bindings::new(client, tokio::runtime::Handle::current());
+        let assets = bindings.assets();
+        assert!(tokio::task::spawn_blocking(move || assets.read(&uri)).await.unwrap().is_err());
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host tool image workflow timed out");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_later_draft() {
     tokio::time::timeout(Duration::from_secs(90), async {

@@ -25,6 +25,7 @@ import { List } from 'nsh/list';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { C } from './ui';
+import type { ImagePreview } from './ToolImage';
 
 // These are presentation items over the canonical history, not a second transcript.
 export type TurnItem = {
@@ -53,6 +54,7 @@ function ActivityLog(props: {
   sessionId: string;
   through: () => number;
   viewport: () => { width: number; height: number };
+  previewImage(image: ImagePreview): void;
 }) {
   const state = props.state;
   const stateKey = (row: Row) => (row.tool ? row.key : `${row.messageId}/${row.field}`);
@@ -144,6 +146,7 @@ function ActivityLog(props: {
                     viewState={rowState(initial)}
                     sessionId={props.sessionId}
                     through={props.through}
+                    previewImage={props.previewImage}
                   />
                 );
               }}
@@ -166,6 +169,7 @@ export function TurnPanel(props: {
   viewport: () => { width: number; height: number };
   trajectory: () => boolean;
   reveal: () => void;
+  previewImage(image: ImagePreview): void;
 }) {
   const active = computed(
     () => props.turn().active && !props.turn().completed && !props.turn().timing?.finished,
@@ -268,6 +272,7 @@ export function TurnPanel(props: {
           sessionId={props.sessionId}
           through={props.through}
           viewport={props.viewport}
+          previewImage={props.previewImage}
         />
         <Text
           style={{
