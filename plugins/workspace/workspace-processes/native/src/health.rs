@@ -59,9 +59,9 @@ impl Processes {
             .ok_or_else(|| failed("Invalid process resource ref"))?;
         let record = self.read_model(&tool.invocation.session_id, id).await?;
         let snapshot = if input.include_logs {
-            maka_presentation::shell::local_update(record).map(|update| update.result)
+            maka_presentation::shell::local_observation(record).map(|update| update.result)
         } else {
-            maka_presentation::shell::local_state(record)
+            maka_presentation::shell::local_state((*record.record).clone())
         }
         .map_err(persistence)?;
         let process = Process {

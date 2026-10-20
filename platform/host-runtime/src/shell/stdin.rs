@@ -255,7 +255,8 @@ mod tests {
             json!({"actions":[{"type":"key","key":"enter","extra":null}]}),
             json!({"actions":[],"size":{"cols":0,"rows":0}}),
             json!({"size":{"cols":80.5,"rows":24}}),
-            json!({"size":{"cols":80,"rows":101}}),
+            json!({"size":{"cols":80,"rows":1025}}),
+            json!({"size":{"cols":1024,"rows":65}}),
             json!({"size":{"cols":80,"rows":24,"extra":0}}),
         ] {
             assert!(parse(value.clone()).is_err(), "{value}");

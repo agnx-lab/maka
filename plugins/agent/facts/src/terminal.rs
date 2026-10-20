@@ -20,7 +20,20 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub mod display;
 pub mod input;
+
+/// Work and text allowance for a live model-facing terminal preview.
+pub const PREVIEW_BYTES: usize = 50 * 1024;
+/// Bound upstream's row-before-column resize allocation as well as final grids.
+pub const MAX_DIMENSION: u16 = 1024;
+pub const MAX_VISIBLE_CELLS: usize = 65_536;
+/// Retain the existing Desktop workload of 10,000 rows at 80 columns, scaling
+/// by native cell allocation rather than imposing a second fixed row cutoff.
+pub const HISTORY_CELLS: usize = 800_000;
+pub fn history_rows(cols: u16) -> usize {
+    HISTORY_CELLS / usize::from(cols)
+}
 
 /// Shared by native PTY allocation, input validation and screen rendering.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -33,10 +46,25 @@ pub struct TerminalSize {
 
 impl TerminalSize {
     pub fn new(cols: u16, rows: u16) -> Result<Self, &'static str> {
-        if !(2..=240).contains(&cols) || !(1..=100).contains(&rows) {
-            return Err("terminal size must be 2..240 columns and 1..100 rows");
+        if !(2..=MAX_DIMENSION).contains(&cols)
+            || !(1..=MAX_DIMENSION).contains(&rows)
+            || usize::from(cols) * usize::from(rows) > MAX_VISIBLE_CELLS
+        {
+            return Err(
+                "terminal size must be 2..1024 columns, 1..1024 rows and at most 65536 cells",
+            );
         }
         Ok(Self { cols, rows })
+    }
+
+    /// Fit a measured UI area; API requests use `new` and reject invalid sizes.
+    pub fn fit(cols: u16, rows: u16) -> Self {
+        let cols = cols.clamp(2, MAX_DIMENSION);
+        let rows = rows.clamp(
+            1,
+            MAX_DIMENSION.min((MAX_VISIBLE_CELLS / usize::from(cols)) as u16),
+        );
+        Self { cols, rows }
     }
 
     pub fn cols(self) -> u16 {
@@ -51,9 +79,9 @@ impl TerminalSize {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SizeFields {
-    #[schemars(range(min = 2, max = 240))]
+    #[schemars(range(min = 2, max = 1024))]
     cols: u16,
-    #[schemars(range(min = 1, max = 100))]
+    #[schemars(range(min = 1, max = 1024))]
     rows: u16,
 }
 

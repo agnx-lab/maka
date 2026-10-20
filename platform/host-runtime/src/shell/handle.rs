@@ -20,7 +20,7 @@
 use super::control::{Control, ControlError, Input, WriteReceipt};
 use super::output::{Output, PtyStream};
 use super::{ShellError, Update};
-use maka_agent_facts::shell_run::ShellRun;
+use maka_agent_facts::shell_run::ShellObservation;
 use maka_agent_facts::terminal::TerminalSize;
 use maka_agent_facts::terminal::input::InputAction;
 use maka_agent_facts::terminal::input::encode_actions;
@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 /// A settled native stop, including whether this caller owned its first signal.
 #[derive(Debug)]
 pub struct StopReceipt {
-    pub record: Arc<ShellRun>,
+    pub record: Arc<ShellObservation>,
     pub applied: bool,
 }
 
@@ -85,7 +85,7 @@ impl ShellHandle {
         self.snapshot.borrow().clone()
     }
 
-    pub async fn changed(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+    pub async fn changed(&mut self) -> Result<Arc<ShellObservation>, Arc<ShellError>> {
         self.snapshot
             .changed()
             .await
@@ -96,7 +96,7 @@ impl ShellHandle {
             .expect("worker only publishes settled cuts")
     }
 
-    pub async fn ready(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+    pub async fn ready(&mut self) -> Result<Arc<ShellObservation>, Arc<ShellError>> {
         loop {
             if let Some(result) = self.latest() {
                 return result;
@@ -105,7 +105,7 @@ impl ShellHandle {
         }
     }
 
-    pub async fn finished(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+    pub async fn finished(&mut self) -> Result<Arc<ShellObservation>, Arc<ShellError>> {
         loop {
             if let Some(result) = self.latest() {
                 let record = result?;
@@ -119,7 +119,7 @@ impl ShellHandle {
 
     /// The last sender belongs to the worker, after native resources and its
     /// residency have been released. A terminal record alone is not this fence.
-    pub async fn drained(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+    pub async fn drained(&mut self) -> Result<Arc<ShellObservation>, Arc<ShellError>> {
         while self.snapshot.changed().await.is_ok() {}
         self.finished().await
     }
@@ -176,7 +176,7 @@ impl ShellHandle {
             .latest()
             .ok_or_else(|| ControlError::new("PTY not ready", 0))?
             .map_err(|e| ControlError::new(e, 0))?;
-        let maka_agent_facts::shell_run::ShellOutput::Pty { screen } = &record.output else {
+        let Some(screen) = &record.preview else {
             return Err(ControlError::rejected("resource is not a PTY"));
         };
         encode_actions(&actions, screen.input, size.unwrap_or(screen.size))

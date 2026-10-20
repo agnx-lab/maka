@@ -19,14 +19,28 @@
 
 use super::*;
 use maka_agent_facts::shell_run::ShellPatch;
-use maka_agent_facts::shell_run::ShellRun;
 use maka_agent_facts::shell_run::ShellState;
 use maka_agent_facts::shell_run::ShellVisibility;
+use maka_agent_facts::shell_run::{ShellObservation, ShellRun};
 use maka_host_runtime::shell::{ControlErrorKind, request::parse_ref, stdin};
 use serde_json::json;
 
 impl Processes {
-    pub(super) async fn read_model(&self, session: &str, id: &str) -> Result<ShellRun, ToolError> {
+    pub(super) async fn read_model(
+        &self,
+        session: &str,
+        id: &str,
+    ) -> Result<ShellObservation, ToolError> {
+        if let Some(Ok(live)) = self
+            .resources
+            .get(session, id)
+            .and_then(|handle| handle.latest())
+            && live.state.active()
+            && live.visibility == ShellVisibility::Model
+            && live.id.starts_with(&self.prefix)
+        {
+            return Ok((*live).clone());
+        }
         let record = self
             .store
             .read_shell_run(session, id)
@@ -43,11 +57,11 @@ impl Processes {
         {
             return prefer_live(record, update);
         }
-        Ok(record)
+        Ok(record.into())
     }
     pub(super) async fn project(
         &self,
-        mut record: ShellRun,
+        mut record: ShellObservation,
         compact: bool,
     ) -> Result<Value, ToolError> {
         if matches!(
@@ -57,20 +71,22 @@ impl Processes {
                 ..
             }
         ) {
-            record = self
-                .store
-                .patch_shell_run(
-                    &record.session_id,
-                    &record.id,
-                    ShellPatch {
-                        observed_at: Some(maka_agent_authority::now()),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(persistence)?;
+            record.record = Arc::new(
+                self.store
+                    .patch_shell_run(
+                        &record.session_id,
+                        &record.id,
+                        ShellPatch {
+                            observed_at: Some(maka_agent_authority::now()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(persistence)?,
+            );
+            record.preview = None;
         }
-        let mut snapshot = maka_presentation::shell::local_update(record)
+        let mut snapshot = maka_presentation::shell::local_observation(record)
             .map_err(persistence)?
             .result;
         if compact {
@@ -205,13 +221,13 @@ impl Processes {
 // SQL remains the durable authority; an equal revision may carry newer live output.
 pub(super) fn prefer_live(
     durable: ShellRun,
-    update: Result<Arc<ShellRun>, Arc<ShellError>>,
-) -> Result<ShellRun, ToolError> {
+    update: Result<Arc<ShellObservation>, Arc<ShellError>>,
+) -> Result<ShellObservation, ToolError> {
     let live = update.map_err(worker_error)?;
     Ok(if live.revision >= durable.revision {
         (*live).clone()
     } else {
-        durable
+        durable.into()
     })
 }
 
@@ -262,10 +278,10 @@ mod tests {
             unreachable!()
         };
         *stdout = "literal live output".into();
-        let selected = prefer_live(durable.clone(), Ok(Arc::new(live.clone()))).unwrap();
+        let selected = prefer_live(durable.clone(), Ok(Arc::new(live.clone().into()))).unwrap();
         assert_eq!(selected.revision, 2);
         assert_eq!(selected.updated_at, 1);
-        let ShellOutput::Pipes { stdout, .. } = selected.output else {
+        let ShellOutput::Pipes { stdout, .. } = &selected.output else {
             unreachable!()
         };
         assert_eq!(stdout, "literal live output");
@@ -279,7 +295,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        let old_arc = Arc::new(final_cut.clone());
+        let old_arc = Arc::new(final_cut.clone().into());
         let observed = final_cut
             .patched(ShellPatch {
                 observed_at: Some(20),
@@ -295,7 +311,7 @@ mod tests {
                 ..
             }
         ));
-        let ShellOutput::Pipes { stdout, .. } = selected.output else {
+        let ShellOutput::Pipes { stdout, .. } = &selected.output else {
             unreachable!()
         };
         assert_eq!(stdout, "literal live output");

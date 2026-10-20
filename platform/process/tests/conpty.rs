@@ -84,7 +84,7 @@ async fn conpty_console_unicode_resize_exit_259_and_final_output_drain() {
     assert!(output.contains("size:101x37"), "{output:?}");
     assert!(output.contains("final-frame"), "{output:?}");
     screen.write(&output).unwrap();
-    let snapshot = screen.snapshot().unwrap();
+    let snapshot = screen.preview(50 * 1024).unwrap();
     assert!(snapshot.screen.contains("received:中文😀"), "{snapshot:?}");
     assert!(snapshot.screen.contains("size:101x37"), "{snapshot:?}");
     assert!(snapshot.screen.contains("final-frame"), "{snapshot:?}");

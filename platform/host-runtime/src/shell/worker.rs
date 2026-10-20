@@ -29,8 +29,8 @@ use futures_util::FutureExt;
 use maka_agent_facts::shell_run::ShellOutcome;
 use maka_agent_facts::shell_run::ShellOutput;
 use maka_agent_facts::shell_run::ShellPatch;
-use maka_agent_facts::shell_run::ShellRun;
 use maka_agent_facts::shell_run::ShellState;
+use maka_agent_facts::shell_run::{ShellObservation, ShellRun};
 use maka_agent_facts::terminal::TerminalSize;
 use maka_event_log::EventLog;
 use maka_process::pty::{self, PtyChild, PtyCommand, PtyIo};
@@ -45,7 +45,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(super) struct Worker {
     pub log: Arc<EventLog>,
-    pub record: ShellRun,
+    pub record: Arc<ShellRun>,
     pub commands: mpsc::Receiver<Control>,
     pub updates: watch::Sender<Update>,
     pub cancellation: CancellationToken,
@@ -68,15 +68,16 @@ impl Worker {
         size: TerminalSize,
         terminal: &mut Terminal,
     ) -> Result<()> {
-        self.record.output = ShellOutput::Pty {
-            screen: terminal.snapshot.clone(),
+        let mut initial = (*self.record).clone();
+        initial.output = ShellOutput::Pty {
+            screen: terminal.display(),
         };
         if self.cancellation.is_cancelled() {
             return Err(ShellError::CancelledBeforeAdmission);
         }
         // T1: neither a native handle nor a process exists before this settles.
-        self.record = match self.log.create_shell_run(self.record.clone()).await {
-            Ok(record) => record,
+        self.record = match self.log.create_shell_run(initial).await {
+            Ok(record) => Arc::new(record),
             Err(error) => {
                 if matches!(
                     error,
@@ -246,23 +247,25 @@ impl Worker {
     }
 
     fn publish(&mut self, terminal: &Terminal) {
-        let output = ShellOutput::Pty {
-            screen: terminal.snapshot.clone(),
+        let observation = ShellObservation {
+            record: self.record.clone(),
+            preview: Some(terminal.preview.clone()),
         };
-        if output != self.record.output {
-            self.record.output = output;
-            self.updates
-                .send_replace(Some(Ok(Arc::new(self.record.clone()))));
+        if self.updates.borrow().as_ref().is_some_and(|update| {
+            update.as_ref().is_ok_and(|previous| {
+                Arc::ptr_eq(&previous.record, &observation.record)
+                    && previous.preview == observation.preview
+            })
+        }) {
+            return;
         }
+        self.updates.send_replace(Some(Ok(Arc::new(observation))));
     }
 
     async fn persist(&mut self, terminal: &Terminal, state: Option<ShellState>) -> Result<()> {
         let output = ShellOutput::Pty {
-            screen: terminal.snapshot.clone(),
+            screen: terminal.display(),
         };
-        if state.is_none() && output == self.record.output {
-            return Ok(());
-        }
         let patch = ShellPatch {
             state,
             output: Some(output),
@@ -275,9 +278,8 @@ impl Worker {
             .await
         {
             Ok(record) => {
-                self.record = record;
-                self.updates
-                    .send_replace(Some(Ok(Arc::new(self.record.clone()))));
+                self.record = Arc::new(record);
+                self.publish(terminal);
                 Ok(())
             }
             Err(error) => {
@@ -373,7 +375,7 @@ mod tests {
                 revision: 1,
                 state: ShellState::Starting,
                 output: ShellOutput::Pty {
-                    screen: terminal.snapshot.clone(),
+                    screen: terminal.display(),
                 },
             })
             .await
@@ -383,7 +385,7 @@ mod tests {
         let drain = CancellationToken::new();
         let mut worker = Worker {
             log: log.clone(),
-            record,
+            record: Arc::new(record),
             commands,
             updates,
             cancellation: CancellationToken::new(),
@@ -397,10 +399,13 @@ mod tests {
             .unwrap();
         worker.publish(&terminal);
         let live = worker.updates.borrow().clone().unwrap().unwrap();
-        let ShellOutput::Pty { screen } = &live.output else {
-            unreachable!()
-        };
-        assert!(screen.screen.contains("live output before cleanup failure"));
+        assert!(
+            live.preview
+                .as_ref()
+                .unwrap()
+                .screen
+                .contains("live output before cleanup failure")
+        );
         assert_eq!((live.revision, live.updated_at), (1, 1));
         let error = worker
             .settle(
@@ -428,7 +433,12 @@ mod tests {
         let ShellOutput::Pty { screen } = &durable.output else {
             unreachable!()
         };
-        assert!(!screen.screen.contains("live output before cleanup failure"));
+        assert!(
+            !screen
+                .text(50 * 1024)
+                .screen
+                .contains("live output before cleanup failure")
+        );
         drop(worker);
         assert_eq!(log.recover_shell_runs(50).await.unwrap(), 1);
         let recovered = log

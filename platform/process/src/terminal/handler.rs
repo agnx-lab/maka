@@ -53,10 +53,9 @@ pub(super) struct State {
     pub term: Term<Events>,
     events: Events,
     pub truncated: bool,
-    pub last_alternate: Option<String>,
+    pub last_alternate: Option<std::sync::Arc<maka_agent_facts::terminal::display::Alternate>>,
     pub mouse: MouseTracking,
     pub encoding: MouseEncoding,
-    work: usize,
     failed: bool,
     region: std::ops::Range<usize>,
 }
@@ -70,13 +69,9 @@ impl State {
             last_alternate: None,
             mouse: MouseTracking::None,
             encoding: MouseEncoding::Default,
-            work: 0,
             failed: false,
             region: 0..rows,
         }
-    }
-    pub fn begin(&mut self) {
-        self.work = 0;
     }
     pub fn failed(&self) -> bool {
         self.failed || self.events.0.borrow().failed
@@ -84,15 +79,11 @@ impl State {
     pub fn take_replies(&self) -> String {
         std::mem::take(&mut self.events.0.borrow_mut().text)
     }
-    fn charge(&mut self, work: usize) -> bool {
-        self.work = self.work.saturating_add(work);
-        self.failed |= self.work > MAX_WRITE;
-        !self.failed
-    }
     fn loses_history(&mut self, origin: usize, lines: usize) {
         self.truncated |= !self.term.mode().contains(TermMode::ALT_SCREEN)
             && origin == 0
-            && self.term.history_size().saturating_add(lines) > HISTORY;
+            && self.term.history_size().saturating_add(lines)
+                > maka_agent_facts::terminal::history_rows(self.term.columns() as u16);
     }
     fn line_wrap(&mut self) {
         if self.term.grid().cursor.point.line.0 as usize == self.region.end - 1 {
@@ -107,9 +98,16 @@ impl State {
         if enabled && !active {
             self.last_alternate = None;
         } else if !enabled && active {
-            let (screen, _, clipped) = render(&self.term, false);
-            self.last_alternate = (!screen.is_empty()).then_some(screen);
-            self.truncated |= clipped;
+            self.last_alternate = Some(std::sync::Arc::new(
+                maka_agent_facts::terminal::display::Alternate {
+                    size: TerminalSize::new(
+                        self.term.columns() as u16,
+                        self.term.screen_lines() as u16,
+                    )
+                    .expect("native terminal geometry"),
+                    rows: display::rows(&self.term, 0..self.term.screen_lines() as i32),
+                },
+            ));
         }
         if active != enabled {
             self.term.swap_alt();
@@ -120,7 +118,7 @@ impl State {
 macro_rules! forward {
     ($($name:ident($($arg:ident: $ty:ty),*);)*) => {$(
         fn $name(&mut self, $($arg: $ty),*) {
-            if self.charge(1) { self.term.$name($($arg),*); }
+            self.term.$name($($arg),*);
         }
     )*};
 }
@@ -167,9 +165,6 @@ impl Handler for State {
     }
 
     fn input(&mut self, c: char) {
-        if !self.charge(1) {
-            return;
-        }
         let grid = self.term.grid();
         if c.width() == Some(0) {
             let point = grid.cursor.point;
@@ -200,61 +195,43 @@ impl Handler for State {
     }
 
     fn linefeed(&mut self) {
-        if self.charge(1) {
-            self.line_wrap();
-            self.term.linefeed();
-        }
+        self.line_wrap();
+        self.term.linefeed();
     }
     fn newline(&mut self) {
-        if self.charge(1) {
-            self.line_wrap();
-            self.term.newline();
-        }
+        self.line_wrap();
+        self.term.newline();
     }
     fn scroll_up(&mut self, count: usize) {
-        if self.charge(count.saturating_mul(self.term.columns())) {
-            self.loses_history(self.region.start, count.min(self.region.len()));
-            self.term.scroll_up(count);
-        }
+        self.loses_history(self.region.start, count.min(self.region.len()));
+        self.term.scroll_up(count);
     }
     fn scroll_down(&mut self, count: usize) {
-        if self.charge(count.saturating_mul(self.term.columns())) {
-            self.term.scroll_down(count);
-        }
+        self.term.scroll_down(count);
     }
     fn insert_blank_lines(&mut self, count: usize) {
-        if self.charge(count.saturating_mul(self.term.columns())) {
-            self.term.insert_blank_lines(count);
-        }
+        self.term.insert_blank_lines(count);
     }
     fn delete_lines(&mut self, count: usize) {
-        if self.charge(count.saturating_mul(self.term.columns())) {
-            let origin = self.term.grid().cursor.point.line.0 as usize;
-            if self.region.contains(&origin) {
-                self.loses_history(origin, count.min(self.region.len()));
-            }
-            self.term.delete_lines(count);
+        let origin = self.term.grid().cursor.point.line.0 as usize;
+        if self.region.contains(&origin) {
+            self.loses_history(origin, count.min(self.region.len()));
         }
+        self.term.delete_lines(count);
     }
     fn put_tab(&mut self, count: u16) {
-        if self.charge(count.into()) {
-            if self.term.grid().cursor.input_needs_wrap
-                && self.term.mode().contains(TermMode::LINE_WRAP)
-            {
-                self.line_wrap();
-            }
-            self.term.put_tab(count);
+        if self.term.grid().cursor.input_needs_wrap
+            && self.term.mode().contains(TermMode::LINE_WRAP)
+        {
+            self.line_wrap();
         }
+        self.term.put_tab(count);
     }
     fn move_forward_tabs(&mut self, count: u16) {
-        if self.charge(count.into()) {
-            self.term.move_forward_tabs(count);
-        }
+        self.term.move_forward_tabs(count);
     }
     fn move_backward_tabs(&mut self, count: u16) {
-        if self.charge(count.into()) {
-            self.term.move_backward_tabs(count);
-        }
+        self.term.move_backward_tabs(count);
     }
     fn set_scrolling_region(&mut self, top: usize, bottom: Option<usize>) {
         let bottom = bottom
@@ -266,19 +243,17 @@ impl Handler for State {
         self.term.set_scrolling_region(top, Some(bottom));
     }
     fn clear_screen(&mut self, mode: ClearMode) {
-        if self.charge(self.term.columns().saturating_mul(self.term.screen_lines())) {
-            if matches!(mode, ClearMode::All) {
-                let lines = (0..self.term.screen_lines())
-                    .rev()
-                    .find(|&y| {
-                        (0..self.term.columns())
-                            .any(|x| !self.term.grid()[Line(y as i32)][Column(x)].is_empty())
-                    })
-                    .map_or(0, |y| y + 1);
-                self.loses_history(0, lines);
-            }
-            self.term.clear_screen(mode);
+        if matches!(mode, ClearMode::All) {
+            let lines = (0..self.term.screen_lines())
+                .rev()
+                .find(|&y| {
+                    (0..self.term.columns())
+                        .any(|x| !self.term.grid()[Line(y as i32)][Column(x)].is_empty())
+                })
+                .map_or(0, |y| y + 1);
+            self.loses_history(0, lines);
         }
+        self.term.clear_screen(mode);
     }
     fn reset_state(&mut self) {
         self.term.reset_state();

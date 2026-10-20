@@ -190,6 +190,8 @@ fn method<I: JsonSchema, O: JsonSchema>(mode: MethodMode) -> Method {
         resources: BTreeMap::new(),
     }
 }
+pub use maka_agent_facts::terminal::display::Part as DisplayPart;
+
 pub fn contract() -> Contract {
     Contract {
         name: "maka.workspace.Terminal".into(),
@@ -209,6 +211,10 @@ pub fn contract() -> Contract {
                 (
                     "watch".into(),
                     method::<Target, ResourceUpdate>(MethodMode::Subscription),
+                ),
+                (
+                    "readDisplay".into(),
+                    method::<Target, DisplayPart>(MethodMode::Subscription),
                 ),
                 (
                     "readOutput".into(),

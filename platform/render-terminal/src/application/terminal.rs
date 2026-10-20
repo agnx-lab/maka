@@ -228,7 +228,7 @@ impl Widget for Recipe {
         owner.core.presentation(true);
         owner
             .core
-            .resize(geometry.area.width, geometry.area.height.min(100) as u16);
+            .resize(geometry.area.width, geometry.area.height as u16);
         owner.core.capture(geometry.focused);
         owner.geometry = Some(geometry);
         owner.observation()

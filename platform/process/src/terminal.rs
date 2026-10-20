@@ -32,12 +32,11 @@ use maka_agent_facts::terminal::TerminalScreen;
 use maka_agent_facts::terminal::TerminalSize;
 use std::{cell::RefCell, rc::Rc};
 
+pub mod display;
 mod handler;
 use handler::{Events, State};
 
-const HISTORY: usize = 500;
-const MAX_WRITE: usize = 64 * 1024;
-const MAX_TEXT: usize = 2 * 1024 * 1024;
+const MAX_STRING_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 #[error("terminal screen failed: {0}")]
@@ -57,7 +56,7 @@ impl Screen {
         let events = Events(Rc::new(RefCell::new(Default::default())));
         let term = Term::new(
             Config {
-                scrolling_history: HISTORY,
+                scrolling_history: maka_agent_facts::terminal::history_rows(size.cols()),
                 ..Default::default()
             },
             &Size(size),
@@ -73,10 +72,7 @@ impl Screen {
 
     pub fn write(&mut self, mut text: &str) -> Result<String, ScreenError> {
         self.check()?;
-        if text.len() > MAX_WRITE {
-            return Err(ScreenError("write exceeds 64 KiB"));
-        }
-        self.state.begin();
+
         // Native transport decoding belongs to the caller. Keep parser cuts
         // on UTF-8 boundaries too: vte's partial-codepoint path can consume a
         // following ASCII character when its four-byte lookahead spans both.
@@ -98,7 +94,7 @@ impl Screen {
             self.parser.stop_sync(&mut self.state);
             if self.state.failed() {
                 self.failed = true;
-                return Err(ScreenError("terminal expansion or reply budget exceeded"));
+                return Err(ScreenError("terminal cell or reply budget exceeded"));
             }
         }
         Ok(self.state.take_replies())
@@ -107,9 +103,20 @@ impl Screen {
     pub fn resize(&mut self, size: TerminalSize) -> Result<(), ScreenError> {
         self.check()?;
         let previous = self.size();
+        let history = maka_agent_facts::terminal::history_rows(size.cols());
+        // Set the new cell allowance before reflow: trim before width growth,
+        // allow additional physical rows when columns shrink.
+        // set_options targets the primary grid even while the alternate is active.
+        self.state.truncated |= self.state.term.history_size() > history
+            || (self.state.term.mode().contains(TermMode::ALT_SCREEN)
+                && size.cols() > previous.cols());
+        self.state.term.set_options(Config {
+            scrolling_history: history,
+            ..Default::default()
+        });
         self.state.term.resize(Size(size));
         self.state.resized();
-        self.state.truncated |= self.state.term.history_size() == HISTORY
+        self.state.truncated |= self.state.term.history_size() == history
             && (size.cols() < previous.cols() || size.rows() < previous.rows());
         Ok(())
     }
@@ -134,30 +141,50 @@ impl Screen {
         self.state.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
-    pub fn snapshot(&self) -> Result<TerminalScreen, ScreenError> {
+    pub fn preview(&self, budget: usize) -> Result<TerminalScreen, ScreenError> {
         self.check()?;
+        Ok(self.text_preview(budget))
+    }
+
+    /// Read-only capture remains available when the first failed input freezes
+    /// the successfully applied prefix of the native grid.
+    pub fn text_preview(&self, budget: usize) -> TerminalScreen {
         let term = &self.state.term;
-        let mode = term.mode();
-        let (screen, scrollback, clipped) = render(term, true);
+        let mut remaining = budget;
+        let mut clipped = false;
+        let screen = render(term, false, &mut remaining, &mut clipped);
+        let alternate = self.state.last_alternate.as_ref().map(|rows| {
+            maka_agent_facts::terminal::display::text_rows(
+                &rows.rows,
+                false,
+                &mut remaining,
+                &mut clipped,
+            )
+        });
+        let scrollback = render(term, true, &mut remaining, &mut clipped);
         let point = term.grid().cursor.point;
-        Ok(TerminalScreen {
+        TerminalScreen {
             screen,
             scrollback,
-            last_alternate_screen: self.state.last_alternate.clone(),
+            last_alternate_screen: alternate.filter(|text| !text.is_empty()),
             size: self.size(),
             cursor: TerminalCursor {
                 x: point.column.0 as u16,
                 y: point.line.0.max(0) as u16,
-                visible: mode.contains(TermMode::SHOW_CURSOR),
+                visible: term.mode().contains(TermMode::SHOW_CURSOR),
             },
-            alternate_screen: mode.contains(TermMode::ALT_SCREEN),
-            truncated: self.state.truncated || clipped,
-            input: TerminalInputModes {
-                application_cursor_keys_mode: mode.contains(TermMode::APP_CURSOR),
-                mouse_tracking_mode: self.state.mouse,
-                mouse_encoding: self.state.encoding,
-            },
-        })
+            alternate_screen: term.mode().contains(TermMode::ALT_SCREEN),
+            truncated: self.state.truncated || clipped || self.failed,
+            input: self.input_modes(),
+        }
+    }
+
+    fn input_modes(&self) -> TerminalInputModes {
+        TerminalInputModes {
+            application_cursor_keys_mode: self.state.term.mode().contains(TermMode::APP_CURSOR),
+            mouse_tracking_mode: self.state.mouse,
+            mouse_encoding: self.state.encoding,
+        }
     }
 
     fn check(&self) -> Result<(), ScreenError> {
@@ -232,7 +259,7 @@ impl StringLimit {
                         // End the upstream's tiny partial OSC before discarding
                         // subsequent bytes. CAN has no visible or reply effect.
                         forwarded = 0x18;
-                    } else if osc.length > MAX_WRITE {
+                    } else if osc.length > MAX_STRING_BYTES {
                         return Err(());
                     }
                 }
@@ -258,75 +285,69 @@ impl StringLimit {
     }
 }
 
-fn render(term: &Term<Events>, history: bool) -> (String, String, bool) {
-    let grid = term.grid();
-    let mut screen = String::new();
-    let mut clipped = false;
-    let mut remaining = MAX_TEXT;
-    // Preserve the current viewport before spending the snapshot budget on
-    // history. Keep the newest history when old output must be dropped.
-    for y in 0..term.screen_lines() as i32 {
-        let (text, overflow) = render_row(term, y, remaining.saturating_sub(1));
-        if y != 0 {
-            screen.push('\n');
-        }
-        screen.push_str(&text);
-        remaining = MAX_TEXT.saturating_sub(screen.len());
-        clipped |= overflow;
-        if overflow {
+fn render(term: &Term<Events>, history: bool, remaining: &mut usize, clipped: &mut bool) -> String {
+    let count = if history {
+        term.history_size()
+    } else {
+        term.screen_lines()
+    };
+    let mut lines = Vec::new();
+    for index in 0..count {
+        if *remaining == 0 {
+            *clipped = true;
             break;
         }
-    }
-    while screen.ends_with('\n') {
-        screen.pop();
-    }
-    remaining = MAX_TEXT - screen.len();
-    let mut lines = Vec::new();
-    if history {
-        for y in (-(term.history_size() as i32)..0).rev() {
-            let (text, overflow) = render_row(term, y, remaining.saturating_sub(1));
-            if overflow || remaining == 0 {
-                clipped = true;
+        *remaining -= 1; // A row costs work even when every cell is blank.
+        let y = if history {
+            -1 - index as i32
+        } else {
+            index as i32
+        };
+        let row = &term.grid()[Line(y)];
+        let mut text = String::new();
+        for x in 0..term.columns() {
+            let cell = &row[Column(x)];
+            for c in
+                std::iter::once(cell.c).chain(cell.zerowidth().unwrap_or_default().iter().copied())
+            {
+                if c.len_utf8() > *remaining {
+                    *remaining = 0;
+                    *clipped = true;
+                    break;
+                }
+                *remaining -= c.len_utf8();
+                if !cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    text.push(c);
+                }
+            }
+            if *remaining == 0 {
+                *clipped |= x + 1 < term.columns();
                 break;
             }
-            remaining = remaining.saturating_sub(text.len() + 1);
-            let wrapped = grid[Line(y)][Column(term.columns() - 1)]
-                .flags
-                .contains(Flags::WRAPLINE);
-            lines.push((text, wrapped));
         }
-    }
-    let mut scrollback = String::new();
-    let mut wrapped = true;
-    for (text, continues) in lines.into_iter().rev() {
-        if !wrapped {
-            scrollback.push('\n');
-        }
-        scrollback.push_str(&text);
-        wrapped = continues;
-    }
-    (screen, scrollback, clipped)
-}
-
-fn render_row(term: &Term<Events>, y: i32, budget: usize) -> (String, bool) {
-    let row = &term.grid()[Line(y)];
-    let mut text = String::new();
-    for x in 0..term.columns() {
-        let cell = &row[Column(x)];
-        if cell
+        text.truncate(text.trim_end_matches(' ').len());
+        let wrapped = row[Column(term.columns() - 1)]
             .flags
-            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-        {
-            continue;
-        }
-        for c in std::iter::once(cell.c).chain(cell.zerowidth().unwrap_or_default().iter().copied())
-        {
-            if text.len() + c.len_utf8() > budget {
-                return (text, true);
-            }
-            text.push(c);
-        }
+            .contains(Flags::WRAPLINE);
+        lines.push((text, wrapped));
     }
-    text.truncate(text.trim_end_matches(' ').len());
-    (text, false)
+    if history {
+        lines.reverse();
+    }
+    let mut out = String::new();
+    let mut previous_wrapped = true;
+    for (index, (line, wrapped)) in lines.into_iter().enumerate() {
+        if index != 0 && (!history || !previous_wrapped) {
+            out.push('\n');
+        }
+        out.push_str(&line);
+        previous_wrapped = wrapped;
+    }
+    if !history {
+        out.truncate(out.trim_end_matches('\n').len());
+    }
+    out
 }

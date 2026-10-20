@@ -22,11 +22,11 @@ mod state;
 pub use maka_sandbox::Sandbox;
 pub use state::{ShellOutcome, ShellState};
 
-use crate::terminal::TerminalScreen;
+use crate::terminal::{TerminalScreen, display::Display};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 const MAX_SAFE: u64 = 9_007_199_254_740_991;
-pub const MAX_SHELL_RECORD_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,7 +53,7 @@ pub enum ShellOutput {
         stderr_truncated: bool,
     },
     Pty {
-        screen: TerminalScreen,
+        screen: Arc<Display>,
     },
 }
 
@@ -63,10 +63,8 @@ impl ShellOutput {
     }
 
     fn validate(&self) -> Result<(), &'static str> {
-        if let Self::Pty { screen } = self
-            && (screen.cursor.x > screen.size.cols() || screen.cursor.y >= screen.size.rows())
-        {
-            return Err("shell cursor is outside its terminal");
+        if let Self::Pty { screen } = self {
+            screen.validate()?;
         }
         Ok(())
     }
@@ -111,6 +109,13 @@ pub struct ShellPatch {
 
 impl ShellRun {
     pub fn validate(&self) -> Result<(), &'static str> {
+        self.validate_metadata()?;
+        self.output.validate()
+    }
+
+    /// Metadata projections never scan the retained display. Full validation
+    /// belongs at persistence/decoding boundaries.
+    pub fn validate_metadata(&self) -> Result<(), &'static str> {
         if self.permissions.boundary_revision > MAX_SAFE {
             return Err("invalid shell permission revision");
         }
@@ -139,9 +144,7 @@ impl ShellRun {
         if let Some(timeout) = self.timeout_ms {
             time(timeout)?;
         }
-        self.state.validate()?;
-        self.output.validate()?;
-        Ok(())
+        self.state.validate()
     }
 
     pub fn patched(&self, patch: ShellPatch) -> Result<Self, &'static str> {
@@ -187,5 +190,28 @@ fn time(value: u64) -> Result<(), &'static str> {
         Err("invalid shell time")
     } else {
         Ok(())
+    }
+}
+
+/// One published observation: committed metadata/display plus a bounded live
+/// PTY text projection. The preview is never a persisted display or parser seed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShellObservation {
+    pub record: Arc<ShellRun>,
+    pub preview: Option<Arc<TerminalScreen>>,
+}
+impl From<ShellRun> for ShellObservation {
+    fn from(record: ShellRun) -> Self {
+        Self {
+            record: Arc::new(record),
+            preview: None,
+        }
+    }
+}
+
+impl std::ops::Deref for ShellObservation {
+    type Target = ShellRun;
+    fn deref(&self) -> &ShellRun {
+        &self.record
     }
 }

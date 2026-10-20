@@ -22,18 +22,21 @@ use super::{
     control::{ControlError, WriteReceipt},
     output::Output,
 };
-use maka_agent_facts::terminal::TerminalScreen;
 use maka_agent_facts::terminal::TerminalSize;
+use maka_agent_facts::terminal::{PREVIEW_BYTES, TerminalScreen, display::Display};
 use maka_process::pty::PtyIo;
 use maka_process::terminal::Screen;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Terminal {
     screen: Option<Screen>,
-    pub snapshot: TerminalScreen,
+    pub preview: Arc<TerminalScreen>,
+    frozen: Option<Arc<Display>>,
+    incomplete: bool,
     decoder: Decoder,
     pub writes: VecDeque<PendingWrite>,
     output: Output,
@@ -42,7 +45,9 @@ impl Terminal {
     pub fn new(size: TerminalSize, output: Output) -> Self {
         Self {
             screen: Some(Screen::new(size)),
-            snapshot: TerminalScreen::new(size),
+            preview: Arc::new(TerminalScreen::new(size)),
+            frozen: None,
+            incomplete: false,
             decoder: Decoder::default(),
             writes: VecDeque::new(),
             output,
@@ -59,7 +64,7 @@ impl Terminal {
         };
         match screen.write(&text) {
             Ok(replies) => {
-                self.snapshot = screen.snapshot()?;
+                self.preview = Arc::new(screen.preview(PREVIEW_BYTES)?);
                 if !replies.is_empty() {
                     let pending: usize = self
                         .writes
@@ -67,7 +72,7 @@ impl Terminal {
                         .map(|write| write.remaining().len())
                         .sum();
                     if pending.saturating_add(replies.len()) > 1024 * 1024 {
-                        self.close();
+                        self.freeze();
                         return Err(ShellError::Rejected("terminal reply queue exceeds 1 MiB"));
                     }
                     self.writes
@@ -76,8 +81,8 @@ impl Terminal {
                 Ok(())
             }
             Err(error) => {
-                // Preserve the last good cut and release parser state immediately.
-                self.close();
+                // Freeze the applied prefix once, mark it incomplete, then release the parser.
+                self.freeze();
                 Err(error.into())
             }
         }
@@ -93,7 +98,7 @@ impl Terminal {
             .as_mut()
             .ok_or(ShellError::Rejected("terminal parser unavailable"))?;
         screen.resize(size)?;
-        self.snapshot = screen.snapshot()?;
+        self.preview = Arc::new(screen.preview(PREVIEW_BYTES)?);
         Ok(())
     }
 
@@ -103,6 +108,30 @@ impl Terminal {
                 let _ = reply.send(Err(ControlError::new(message, pending.accepted)
                     .after_resize(pending.resized, pending.resize_changed)));
             }
+        }
+    }
+
+    pub fn display(&self) -> Arc<Display> {
+        if let Some(screen) = &self.screen {
+            let mut display = screen.display();
+            display.metadata.truncated |= self.incomplete;
+            Arc::new(display)
+        } else {
+            self.frozen
+                .as_ref()
+                .expect("failed parser froze its display")
+                .clone()
+        }
+    }
+
+    fn freeze(&mut self) {
+        if let Some(screen) = self.screen.take() {
+            let mut display = screen.display();
+            display.metadata.truncated = true;
+            self.frozen = Some(Arc::new(display));
+            let mut preview = screen.text_preview(PREVIEW_BYTES);
+            preview.truncated = true;
+            self.preview = Arc::new(preview);
         }
     }
 
@@ -141,7 +170,7 @@ impl PendingWrite {
         self.accepted == self.bytes.len()
     }
 
-    pub fn finish(mut self, record: std::sync::Arc<maka_agent_facts::shell_run::ShellRun>) {
+    pub fn finish(mut self, record: std::sync::Arc<maka_agent_facts::shell_run::ShellObservation>) {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(Ok(WriteReceipt {
                 accepted_bytes: self.accepted,
@@ -209,7 +238,9 @@ pub(super) async fn drain(
         let count = tokio::select! {
             _ = &mut deadline => {
                 io.discard_output()?;
-                terminal.snapshot.truncated = true;
+                terminal.incomplete = true;
+                Arc::make_mut(&mut terminal.preview).truncated = true;
+                if let Some(display) = &mut terminal.frozen { Arc::make_mut(display).metadata.truncated = true; }
                 return Err(ShellError::Rejected("PTY output did not drain after root exit"));
             }
             read = io.read(&mut buffer) => match read {

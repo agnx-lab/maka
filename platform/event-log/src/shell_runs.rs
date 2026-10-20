@@ -19,7 +19,6 @@
 
 use crate::{EventLog, StoreError};
 mod query;
-use maka_agent_facts::shell_run::MAX_SHELL_RECORD_BYTES;
 use maka_agent_facts::shell_run::ShellOutcome;
 use maka_agent_facts::shell_run::ShellPatch;
 use maka_agent_facts::shell_run::ShellRun;
@@ -233,29 +232,10 @@ async fn write(connection: &mut SqliteConnection, record: &ShellRun) -> Result<(
 fn encode(record: &ShellRun) -> Result<String, StoreError> {
     record.validate().map_err(invalid)?;
     let raw = serde_json::to_string(record)?;
-    // A valid persisted record must still fit its mandatory later transitions.
-    // 512 covers the fixed orphan envelope, 16-digit times and revision growth;
-    // 32 covers null -> first observed timestamp and revision growth.
-    let reserve = match record.state {
-        ShellState::Starting | ShellState::Running => 512,
-        ShellState::Terminal {
-            observed_at: None, ..
-        } => 32,
-        ShellState::Terminal {
-            observed_at: Some(_),
-            ..
-        } => 0,
-    };
-    if raw.len() > MAX_SHELL_RECORD_BYTES - reserve {
-        return Err(invalid("shell record exceeds limit"));
-    }
     Ok(raw)
 }
 
 fn decode(raw: &str, session: &str, id: &str) -> Result<ShellRun, StoreError> {
-    if raw.len() > MAX_SHELL_RECORD_BYTES {
-        return Err(invalid("shell record exceeds limit"));
-    }
     let record: ShellRun = serde_json::from_str(raw)?;
     record.validate().map_err(invalid)?;
     if record.session_id != session || record.id != id {

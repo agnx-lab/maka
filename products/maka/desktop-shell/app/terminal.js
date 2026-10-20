@@ -31,7 +31,7 @@
 // screen that has taken none starts from the first, at its `initialSize`,
 // and one that has resumes after the last it took. Once the Host no longer
 // holds the output (the terminal retired, or the Host restarted), its screen
-// (`read`, plain text) is painted instead. The output goes to the native
+// (`readDisplay`, retained cells and styles) is painted instead. The output goes to the native
 // component as the Host's base64, unread here.
 //
 // Typing or a paste in the terminal acquires its controller (`acquire`), and
@@ -263,6 +263,7 @@ class Term {
     if (run !== null) {
       this.follow = null;
       run.closed = true;
+      this.state?.discard_display();
       untrack(run.handle);
       run.handle = null;
     }
@@ -337,7 +338,7 @@ class Term {
         this.resizeTo(end.size);
         this.live = 'ended';
       } else if (end.kind === 'unavailable') {
-        await this.paintRead(run);
+        await this.paintDisplay(run);
         if (run.closed) return;
         this.live = 'unavailable';
       } else {
@@ -399,17 +400,38 @@ class Term {
     this.state.resize(size.cols, size.rows);
   }
 
-  /** Paints the Host's screen of it (`read`). */
-  async paintRead(run) {
-    const resource = unwrap(await query(this.endpoint, 'read', this.target()));
-    if (run.closed) return;
-    this.update(resource);
-    const output = resource.result.output;
-    if (output?.mode !== 'pty') return;
-    this.state.paint(output);
-    this.size = { cols: output.cols, rows: output.rows };
-    this.parsed = false;
-    this.painted = true;
+  /** Reads one durable styled display; canceled transfers never replace the view. */
+  async paintDisplay(run) {
+    const handle = await subscribe(this.endpoint, 'readDisplay', this.target());
+    if (run.closed) {
+      close(handle).catch(() => {});
+      return;
+    }
+    run.handle = handle;
+    SUBSCRIPTIONS.add(handle);
+    let complete = false;
+    let size = null;
+    try {
+      for (;;) {
+        const item = await next(handle);
+        if (run.closed) return;
+        if (item === null) break;
+        const part = unwrap(item);
+        if (part.kind === 'begin') size = part.metadata.size;
+        this.state.display(JSON.stringify(part));
+        if (part.kind === 'end') {
+          complete = true;
+          this.size = size;
+          this.parsed = false;
+          this.painted = true;
+        }
+      }
+      if (!complete) throw new Error('Terminal display ended before completion');
+    } finally {
+      if (!complete && this.follow === run && this.state !== null) this.state.discard_display();
+      untrack(handle);
+      if (run.handle === handle) run.handle = null;
+    }
   }
 
   /**

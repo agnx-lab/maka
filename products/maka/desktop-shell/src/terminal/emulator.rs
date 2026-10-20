@@ -44,9 +44,11 @@ use alacritty_terminal::term::{Config, Osc52, Term, TermMode};
 use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle, Processor, Timeout};
 use base64::Engine as _;
 use futures_lite::future;
-
-/// Lines of scrollback each terminal keeps.
-pub(crate) const SCROLLBACK_LINES: usize = 10_000;
+use maka_agent_facts::terminal::{
+    TerminalSize,
+    display::{Assembly, Part},
+    history_rows,
+};
 
 /// Feeds the background parser applies before it publishes a picture.
 const FEEDS_PER_PASS: usize = 64;
@@ -56,7 +58,7 @@ const FEEDS_PER_PASS: usize = 64;
 const SYNC_UPDATE_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// A grid size in cells, always within what the Host's PTYs take
-/// (`TerminalSize`: 2–240 columns by 1–100 rows). Nothing outside it ever
+/// (`TerminalSize`: 2–1024 columns, 1–1024 rows, at most 65,536 cells). Nothing outside it ever
 /// reaches the emulator: alacritty panics on a wide character in one
 /// column, reflows without end on a resize to one, and allocates whatever
 /// it is asked for.
@@ -68,17 +70,18 @@ pub(crate) struct GridSize {
 
 impl GridSize {
     pub(crate) const MIN_COLS: u16 = 2;
-    pub(crate) const MAX_COLS: u16 = 240;
+    pub(crate) const MAX_COLS: u16 = maka_agent_facts::terminal::MAX_DIMENSION;
     pub(crate) const MIN_ROWS: u16 = 1;
-    pub(crate) const MAX_ROWS: u16 = 100;
+    pub(crate) const MAX_ROWS: u16 = maka_agent_facts::terminal::MAX_DIMENSION;
 
     /// `cols` × `rows`, brought within the Host's range: a pane that holds
-    /// more than 240 columns draws 240. A size from the script is checked
+    /// more cells than the native allocation budget is fitted. A script size is checked
     /// first, and refused outside the range (`super::grid_size`).
     pub(crate) fn new(cols: u16, rows: u16) -> Self {
+        let size = TerminalSize::fit(cols, rows);
         Self {
-            cols: cols.clamp(Self::MIN_COLS, Self::MAX_COLS),
-            rows: rows.clamp(Self::MIN_ROWS, Self::MAX_ROWS),
+            cols: size.cols(),
+            rows: size.rows(),
         }
     }
 }
@@ -97,10 +100,7 @@ impl Dimensions for GridSize {
     }
 }
 
-/// A screen as the Host's `read` answers it for a PTY (`ShellOutput::Pty`):
-/// the text of the screen and of the scrollback above it, one line per row,
-/// and where the cursor is. It has no colours or modes, so a terminal
-/// painted from it shows plain text until the program draws again.
+/// Plain pipe output painted into the terminal view. PTY displays use `Part`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Snapshot {
     pub size: GridSize,
@@ -250,21 +250,24 @@ impl Timeout for SyncTimeout {
 pub(crate) struct Emulator {
     term: Term<VoidListener>,
     processor: Processor<SyncTimeout>,
+    display: Option<Assembly>,
 }
 
 impl Emulator {
     pub(crate) fn new(size: GridSize) -> Self {
         Self {
-            term: Term::new(config(), &size, VoidListener),
+            term: Term::new(config(size.cols), &size, VoidListener),
             processor: Processor::new(),
+            display: None,
         }
     }
 
     /// Starts over, empty, at `size`: a fresh grid and parser (output that
     /// follows may begin anywhere, even inside an escape sequence).
     pub(crate) fn reset(&mut self, size: GridSize) {
-        self.term = Term::new(config(), &size, VoidListener);
+        self.term = Term::new(config(size.cols), &size, VoidListener);
         self.processor = Processor::new();
+        self.display = None;
     }
 
     /// Starts over from a screen the Host read: its text written into an
@@ -275,6 +278,44 @@ impl Emulator {
         if self.sync_pending() {
             self.stop_sync();
         }
+    }
+
+    /// Stage privately and replace the visible Term only at a complete End.
+    /// Reset is still required before any fresh raw parser attachment.
+    pub(crate) fn display(&mut self, part: Part) -> Result<(), &'static str> {
+        match part {
+            Part::Begin {
+                metadata,
+                scrollback_rows,
+                last_alternate_size,
+                ..
+            } => {
+                self.display = Some(Assembly::begin(
+                    metadata,
+                    scrollback_rows,
+                    last_alternate_size,
+                )?);
+            }
+            Part::Rows { parts } => self
+                .display
+                .as_mut()
+                .ok_or("display rows without begin")?
+                .rows(parts)?,
+            Part::End => {
+                let display = self
+                    .display
+                    .take()
+                    .ok_or("display end without begin")?
+                    .finish()?;
+                let size =
+                    GridSize::new(display.metadata.size.cols(), display.metadata.size.rows());
+                let mut term = Term::new(config(size.cols), &size, VoidListener);
+                maka_process::terminal::display::install(&mut term, &display)?;
+                self.term = term;
+                self.processor = Processor::new();
+            }
+        }
+        Ok(())
     }
 
     /// Parses output.
@@ -295,6 +336,7 @@ impl Emulator {
     /// Follows the PTY's size. A resize reflows the grid as alacritty does.
     pub(crate) fn resize(&mut self, size: GridSize) {
         if self.size() != size {
+            self.term.set_options(config(size.cols));
             self.term.resize(size);
         }
     }
@@ -372,9 +414,9 @@ impl Emulator {
 /// The emulator's settings: the scrollback, a block cursor that blinks
 /// until the program chooses, and OSC 52 never read (the reply would never
 /// be sent anyway).
-fn config() -> Config {
+fn config(cols: u16) -> Config {
     Config {
-        scrolling_history: SCROLLBACK_LINES,
+        scrolling_history: history_rows(cols),
         osc52: Osc52::OnlyCopy,
         default_cursor_style: CursorStyle {
             shape: CursorShape::Block,
@@ -391,6 +433,8 @@ pub(crate) enum Feed {
     Resize(GridSize),
     Reset(GridSize),
     Paint(Snapshot),
+    Display(Part),
+    DiscardDisplay,
     Scroll(Scroll),
     StartSelection(SelectionType, Point, Side),
     UpdateSelection(Point, Side),
@@ -464,6 +508,13 @@ pub(crate) fn apply(emulator: &mut Emulator, feed: Feed) {
         Feed::Resize(size) => emulator.resize(size),
         Feed::Reset(size) => emulator.reset(size),
         Feed::Paint(snapshot) => emulator.paint(&snapshot),
+        Feed::Display(part) => {
+            if let Err(error) = emulator.display(part) {
+                emulator.display = None;
+                eprintln!("maka-terminal: invalid retained display: {error}");
+            }
+        }
+        Feed::DiscardDisplay => emulator.display = None,
         Feed::Scroll(scroll) => emulator.scroll(scroll),
         Feed::StartSelection(ty, point, side) => emulator.start_selection(ty, point, side),
         Feed::UpdateSelection(point, side) => emulator.update_selection(point, side),
@@ -563,28 +614,68 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_of_the_alternate_screen_returns_to_the_primary_one() {
-        let mut emulator = Emulator::new(GridSize::new(80, 24));
-        apply(
-            &mut emulator,
-            Feed::Paint(Snapshot {
-                size: GridSize::new(12, 3),
-                screen: "~\n~\n:wq".into(),
-                scrollback: "$ ls\na  b\n$ vim".into(),
-                cursor: (3, 2),
-                cursor_visible: true,
-                alternate_screen: true,
-            }),
+    fn retained_display_is_atomic_preserves_styles_and_discards_incomplete_transfer() {
+        use maka_agent_facts::terminal::display::{Buffer, RowPart};
+        let mut source = maka_process::terminal::Screen::new(TerminalSize::new(12, 3).unwrap());
+        source
+            .write("\x1b[31mred\x1b[44m   \x1b[0m\r\nhistory\r\nmore\r\nfinal")
+            .unwrap();
+        let display = source.display();
+        let begin = || Part::Begin {
+            revision: 7,
+            metadata: display.metadata.clone(),
+            scrollback_rows: display.scrollback.len() as u32,
+            last_alternate_size: None,
+        };
+        let mut emulator = Emulator::new(GridSize::new(12, 3));
+        feed(&mut emulator, "previous");
+        emulator.display(begin()).unwrap();
+        let parts = display
+            .scrollback
+            .iter()
+            .enumerate()
+            .map(|(row, runs)| RowPart {
+                buffer: Buffer::Scrollback,
+                row: row as u32,
+                column: 0,
+                runs: runs.clone(),
+            })
+            .chain(
+                display
+                    .screen
+                    .iter()
+                    .enumerate()
+                    .map(|(row, runs)| RowPart {
+                        buffer: Buffer::Screen,
+                        row: row as u32,
+                        column: 0,
+                        runs: runs.clone(),
+                    }),
+            )
+            .collect();
+        emulator.display(Part::Rows { parts }).unwrap();
+        assert!(emulator.content().text().starts_with("previous"));
+        emulator.display(Part::End).unwrap();
+        assert_eq!(emulator.content().text(), "history\nmore\nfinal");
+        emulator.scroll(Scroll::Top);
+        let content = emulator.content();
+        assert_eq!(
+            content.cells[0].cell.fg,
+            alacritty_terminal::vte::ansi::Color::Named(
+                alacritty_terminal::vte::ansi::NamedColor::Red
+            )
         );
-        let content = emulator.content();
-        assert!(content.mode.contains(TermMode::ALT_SCREEN));
-        assert_eq!(content.text(), "~\n~\n:wq");
-        assert_eq!(content.cursor.point, Point::new(Line(2), Column(3)));
-        // The program leaves it: the shell's lines are back, live.
-        feed(&mut emulator, "\x1b[?1049l");
-        let content = emulator.content();
-        assert!(!content.mode.contains(TermMode::ALT_SCREEN));
-        assert_eq!(content.text(), "$ ls\na  b\n$ vim");
+        assert_eq!(
+            content.cells[3].cell.bg,
+            alacritty_terminal::vte::ansi::Color::Named(
+                alacritty_terminal::vte::ansi::NamedColor::Blue
+            )
+        );
+        let before = content.text();
+        emulator.display(begin()).unwrap();
+        apply(&mut emulator, Feed::DiscardDisplay);
+        assert!(emulator.display(Part::End).is_err());
+        assert_eq!(emulator.content().text(), before);
     }
 
     #[test]
@@ -594,8 +685,8 @@ mod tests {
         assert_eq!(
             GridSize::new(u16::MAX, u16::MAX),
             GridSize {
-                cols: 240,
-                rows: 100
+                cols: 1024,
+                rows: 64
             }
         );
     }

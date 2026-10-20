@@ -429,6 +429,25 @@ impl TerminalView {
         self.feed(Feed::Paint(snapshot));
     }
 
+    pub(crate) fn display(
+        &mut self,
+        part: maka_agent_facts::terminal::display::Part,
+        cx: &mut Context<Self>,
+    ) {
+        if let maka_agent_facts::terminal::display::Part::Begin { metadata, .. } = &part {
+            self.marked = None;
+            self.revive(
+                GridSize::new(metadata.size.cols(), metadata.size.rows()),
+                cx,
+            );
+        }
+        self.feed(Feed::Display(part));
+    }
+
+    pub(crate) fn discard_display(&self) {
+        self.feed(Feed::DiscardDisplay);
+    }
+
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus.focus(window, cx);
     }

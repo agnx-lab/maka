@@ -124,15 +124,19 @@ pub(crate) fn snapped_cells(
 }
 
 /// The grid `bounds` hold at `cell`, within the sizes the Host's PTYs take
-/// (2–240 columns, 1–100 rows); `None` while they hold no whole cell.
+/// (up to 1024 per axis and 65,536 cells); `None` while they hold no whole cell.
 pub(crate) fn fitting_grid(
     bounds: gpui_shell::gpui::Size<Pixels>,
     cell: gpui_shell::gpui::Size<Pixels>,
 ) -> Option<GridSize> {
     let columns = (f32::from(bounds.width) / f32::from(cell.width)).floor();
     let rows = (f32::from(bounds.height) / f32::from(cell.height)).floor();
-    (columns >= 1. && rows >= 1.)
-        .then(|| GridSize::new(columns.clamp(2., 240.) as u16, rows.clamp(1., 100.) as u16))
+    (columns >= 1. && rows >= 1.).then(|| {
+        GridSize::new(
+            columns.min(f32::from(u16::MAX)) as u16,
+            rows.min(f32::from(u16::MAX)) as u16,
+        )
+    })
 }
 
 /// Where the grid's top left corner goes in `bounds`: at their top left,
@@ -508,7 +512,7 @@ mod tests {
         let cell = size(px(8.4), px(20.));
         let grid = |width: f32, height: f32| fitting_grid(size(px(width), px(height)), cell);
         assert_eq!(grid(400., 300.), Some(GridSize::new(47, 15)));
-        assert_eq!(grid(5000., 5000.), Some(GridSize::new(240, 100)));
+        assert_eq!(grid(5000., 5000.), Some(GridSize::new(595, 110)));
         assert_eq!(
             grid(9., 20.),
             Some(GridSize::new(2, 1)),

@@ -85,7 +85,7 @@ pub(super) async fn run(
                         persistence_error = Some(error);
                     }
                 } else {
-                    updates.send_replace(Some(Ok(Arc::new(record.clone()))));
+                    updates.send_replace(Some(Ok(Arc::new(record.clone().into()))));
                 }
             }
             result = &mut process.completion => break result,
@@ -202,6 +202,6 @@ async fn persist(
             },
         )
         .await?;
-    updates.send_replace(Some(Ok(Arc::new(record.clone()))));
+    updates.send_replace(Some(Ok(Arc::new(record.clone().into()))));
     Ok(())
 }

@@ -24,16 +24,22 @@ use super::{
 use crate::ProjectionError;
 use maka_agent_facts::shell_run::ShellOutcome;
 use maka_agent_facts::shell_run::ShellOutput as StoredOutput;
-use maka_agent_facts::shell_run::ShellRun;
 use maka_agent_facts::shell_run::ShellState;
+use maka_agent_facts::shell_run::{ShellObservation, ShellRun};
+use maka_agent_facts::terminal::TerminalScreen;
+use std::sync::Arc;
 
-const MODEL_BYTES: usize = 50 * 1024;
+const MODEL_BYTES: usize = maka_agent_facts::terminal::PREVIEW_BYTES;
 const TERMINAL_MARKER: &str = "[terminal snapshot truncated to fit the output limit]";
 const FIELD_MARKER: &str = "[runtime resource field truncated]";
 const RECOVERY: &str = "If the command is safe to re-run, redirect its output to a file (e.g. `cmd > out.txt 2>&1`) then Read or Grep that file for the omitted portion. If re-running could repeat side effects, do not. Otherwise work from the kept output above.";
 
 pub fn local_update(record: ShellRun) -> Result<ResourceUpdate, ProjectionError> {
-    project(record, true)
+    project(record, true, None)
+}
+
+pub fn local_observation(observation: ShellObservation) -> Result<ResourceUpdate, ProjectionError> {
+    project((*observation.record).clone(), true, observation.preview)
 }
 
 pub fn local_state(record: ShellRun) -> Result<ShellSnapshot, ProjectionError> {
@@ -42,11 +48,17 @@ pub fn local_state(record: ShellRun) -> Result<ShellSnapshot, ProjectionError> {
 
 /// The same canonical ownership/source envelope without terminal output.
 pub fn local_metadata(record: ShellRun) -> Result<ResourceUpdate, ProjectionError> {
-    project(record, false)
+    project(record, false, None)
 }
 
-fn project(record: ShellRun, include_output: bool) -> Result<ResourceUpdate, ProjectionError> {
-    record.validate().map_err(ProjectionError::Invalid)?;
+fn project(
+    record: ShellRun,
+    include_output: bool,
+    preview: Option<Arc<TerminalScreen>>,
+) -> Result<ResourceUpdate, ProjectionError> {
+    record
+        .validate_metadata()
+        .map_err(ProjectionError::Invalid)?;
     let (status, completed_at, exit_code, failure_message) = match record.state {
         ShellState::Starting => (ShellStatus::Starting, None, None, None),
         ShellState::Running => (ShellStatus::Running, None, None, None),
@@ -86,7 +98,7 @@ fn project(record: ShellRun, include_output: bool) -> Result<ResourceUpdate, Pro
         exit_code,
         failure_message,
         revision: record.revision,
-        output: include_output.then(|| model_output(record.output)),
+        output: include_output.then(|| model_output(record.output, preview)),
     };
     bound(&mut result)?;
     Ok(ResourceUpdate {
@@ -98,7 +110,7 @@ fn project(record: ShellRun, include_output: bool) -> Result<ResourceUpdate, Pro
     })
 }
 
-fn model_output(output: StoredOutput) -> ShellOutput {
+fn model_output(output: StoredOutput, preview: Option<Arc<TerminalScreen>>) -> ShellOutput {
     match output {
         StoredOutput::Pipes {
             stdout,
@@ -118,7 +130,11 @@ fn model_output(output: StoredOutput) -> ShellOutput {
                 redacted: false,
             }
         }
-        StoredOutput::Pty { screen: view } => {
+        StoredOutput::Pty { screen: display } => {
+            let view = preview
+                .as_deref()
+                .cloned()
+                .unwrap_or_else(|| display.text(MODEL_BYTES));
             let mut remaining = MODEL_BYTES;
             let (screen, screen_cut) = prioritized(view.screen, &mut remaining);
             let alternate = view

@@ -150,7 +150,7 @@ fn whole(value: &ComponentDataValue, min: u16, max: u16) -> Option<u16> {
 }
 
 /// A grid size from the script, within what the Host's `TerminalSize`
-/// allows (2–240 columns, 1–100 rows); anything else is refused, as the
+/// allows (2–1024 columns, 1–1024 rows, at most 65,536 cells); anything else is refused, as the
 /// Host refuses it, rather than handed to the emulator.
 fn grid_size(
     cols: &ComponentDataValue,
@@ -169,6 +169,7 @@ fn grid_size(
             GridSize::MAX_ROWS
         );
     };
+    maka_agent_facts::terminal::TerminalSize::new(cols, rows).map_err(anyhow::Error::msg)?;
     Ok(GridSize::new(cols, rows))
 }
 
@@ -290,6 +291,18 @@ fn state_methods() -> Vec<StateMethodDescriptor> {
                 Ok(())
             },
         ),
+        state_method("display", "(part: string): void", |handle, args, _, cx| {
+            let [part] = args else {
+                anyhow::bail!("display expects one serialized display part");
+            };
+            let part = serde_json::from_str(string(part, "display")?)?;
+            handle.view.update(cx, |view, cx| view.display(part, cx));
+            Ok(())
+        }),
+        state_method("discard_display", "(): void", |handle, _, _, cx| {
+            handle.view.read(cx).discard_display();
+            Ok(())
+        }),
         state_method("focus", "(): void", |handle, _, window, cx| {
             handle.view.update(cx, |view, cx| view.focus(window, cx));
             Ok(())
@@ -545,10 +558,11 @@ mod tests {
         for (cols, rows) in [
             (1., 24.),
             (0., 24.),
-            (241., 24.),
+            (1025., 24.),
             (1e9, 24.),
             (80., 0.),
-            (80., 101.),
+            (80., 1025.),
+            (1024., 65.),
             (80.5, 24.),
             (f64::NAN, 24.),
         ] {
@@ -581,7 +595,7 @@ mod tests {
             ])
         };
         assert!(snapshot(&screen(80.)).is_ok());
-        for cols in [0., 1., 241., 1e9] {
+        for cols in [0., 1., 1025., 1e9] {
             assert!(snapshot(&screen(cols)).is_err(), "{cols} columns");
         }
     }

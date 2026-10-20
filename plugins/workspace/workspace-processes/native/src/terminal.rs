@@ -19,12 +19,13 @@
 
 //! Explicit user terminal operations on the original Processes resource owner.
 mod controller;
+mod display;
 mod launch;
 mod output;
 use super::{Processes, SessionConfiguration, cancelled, failed, persistence, worker_error};
 pub(super) use controller::Lease;
 use futures_util::future::BoxFuture;
-use maka_agent_facts::shell_run::ShellRun;
+use maka_agent_facts::shell_run::ShellObservation;
 use maka_agent_facts::tools::ToolError;
 use maka_event_log::sessions::SessionRecord;
 use maka_host_runtime::shell::request::parse_ref;
@@ -95,6 +96,7 @@ impl Processes {
                 self.terminal_read(decode(value)?, name == "watch", context)
                     .await
             }
+            "readDisplay" => self.terminal_display(decode(value)?, context).await,
             "readOutput" | "watchOutput" => {
                 self.terminal_output(decode(value)?, name == "watchOutput", context)
                     .await
@@ -147,9 +149,19 @@ impl Processes {
         }
         Ok(record)
     }
-    async fn terminal_record(&self, target: &Target) -> Result<ShellRun, ToolError> {
+    async fn terminal_record(&self, target: &Target) -> Result<ShellObservation, ToolError> {
         self.terminal_session(&target.session_id, false).await?;
         let id = self.terminal_id(target)?;
+        if let Some(Ok(live)) = self
+            .resources
+            .get(&target.session_id, id)
+            .and_then(|handle| handle.latest())
+            && live.state.active()
+        {
+            // The worker owns active mutations and already carries its committed
+            // row. Avoid decoding a full durable display for each live preview.
+            return Ok((*live).clone());
+        }
         let record = self
             .store
             .read_shell_run(&target.session_id, id)
@@ -163,7 +175,7 @@ impl Processes {
         {
             return super::control::prefer_live(record, update);
         }
-        Ok(record)
+        Ok(record.into())
     }
     fn terminal_id<'a>(&self, target: &'a Target) -> Result<&'a str, ToolError> {
         parse_ref(&target.reference)
@@ -295,8 +307,8 @@ impl Processes {
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ToolError> {
     serde_json::from_value(value).map_err(failed)
 }
-fn snapshot(record: ShellRun) -> Result<ResourceUpdate, ToolError> {
-    maka_presentation::shell::local_update(record).map_err(persistence)
+fn snapshot(record: ShellObservation) -> Result<ResourceUpdate, ToolError> {
+    maka_presentation::shell::local_observation(record).map_err(persistence)
 }
 
 pub(super) fn completed(

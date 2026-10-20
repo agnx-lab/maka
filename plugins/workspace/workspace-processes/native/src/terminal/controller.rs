@@ -75,7 +75,7 @@ impl Processes {
         &self,
         target: &Target,
         handle: &ShellHandle,
-    ) -> Result<Arc<ShellRun>, ToolError> {
+    ) -> Result<Arc<ShellObservation>, ToolError> {
         let current = self.terminal_session(&target.session_id, true).await?;
         let record = handle
             .latest()

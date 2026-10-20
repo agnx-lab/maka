@@ -26,8 +26,8 @@ use maka_agent_facts::shell_run::ShellPermissions;
 use maka_agent_facts::shell_run::ShellRun;
 use maka_agent_facts::shell_run::ShellState;
 use maka_agent_facts::shell_run::ShellVisibility;
-use maka_agent_facts::terminal::TerminalScreen;
 use maka_agent_facts::terminal::TerminalSize;
+use maka_agent_facts::terminal::display::Display;
 use maka_sandbox::filesystem::{Access, Rule};
 
 pub(super) struct Captured {
@@ -193,7 +193,7 @@ impl Processes {
             state: ShellState::Starting,
             output: if input.pty {
                 ShellOutput::Pty {
-                    screen: TerminalScreen::new(size),
+                    screen: Arc::new(Display::new(size)),
                 }
             } else {
                 ShellOutput::Pipes {

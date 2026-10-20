@@ -31,7 +31,7 @@ pub use control::{ControlError, ControlErrorKind, WriteReceipt};
 pub use handle::{ShellHandle, StopReceipt};
 pub use output::{PtyStream, PtyStreamEvent};
 
-use maka_agent_facts::shell_run::ShellRun;
+use maka_agent_facts::shell_run::{ShellObservation, ShellRun};
 use maka_agent_facts::terminal::TerminalSize;
 use maka_event_log::{EventLog, StoreError};
 use maka_process::pty::PtyCommand;
@@ -63,7 +63,7 @@ pub enum ShellError {
 type Result<T> = std::result::Result<T, ShellError>;
 type Key = (String, String);
 type Active = Arc<Mutex<HashMap<Key, ShellHandle>>>;
-pub(super) type Update = Option<std::result::Result<Arc<ShellRun>, Arc<ShellError>>>;
+pub(super) type Update = Option<std::result::Result<Arc<ShellObservation>, Arc<ShellError>>>;
 
 /// At most eight native PTYs; each worker owns its Rust terminal parser.
 /// This is an internal execution API, not a client authorization boundary.
@@ -156,7 +156,7 @@ impl ShellResources {
                     runtime.block_on(
                         worker::Worker {
                             log: log.clone(),
-                            record,
+                            record: Arc::new(record),
                             commands: receiver,
                             updates: updates.clone(),
                             cancellation,

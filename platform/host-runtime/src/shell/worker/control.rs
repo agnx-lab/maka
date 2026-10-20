@@ -23,7 +23,7 @@ use crate::shell::{
     control::{Control, ControlError, Input},
     terminal::{PendingWrite, Terminal},
 };
-use maka_agent_facts::shell_run::ShellRun;
+use maka_agent_facts::shell_run::ShellObservation;
 use maka_agent_facts::terminal::input::encode_actions_with_paste;
 use maka_agent_facts::terminal::input::encode_controller_actions;
 use maka_process::pty::PtyChild;
@@ -53,8 +53,8 @@ impl Worker {
                 };
                 match encode(
                     &actions,
-                    terminal.snapshot.input,
-                    control.size.unwrap_or(terminal.snapshot.size),
+                    terminal.preview.input,
+                    control.size.unwrap_or(terminal.preview.size),
                     terminal.bracketed_paste(),
                 ) {
                     Ok(bytes) => bytes,
@@ -69,7 +69,7 @@ impl Worker {
         let mut resize_changed = false;
         if let Some(size) = control.size {
             let result = async {
-                if size != terminal.snapshot.size {
+                if size != terminal.preview.size {
                     // This sole worker owns publication: preflight the bounded
                     // event counter before accepting an irreversible OS resize.
                     self.output.check_resize(size)?;
@@ -112,7 +112,7 @@ impl Worker {
         Ok(())
     }
 
-    pub(super) fn current_cut(&self) -> Arc<ShellRun> {
+    pub(super) fn current_cut(&self) -> Arc<ShellObservation> {
         // This sole worker publishes each parser cut before servicing input.
         // Cloning the published Arc does not create another snapshot authority.
         self.updates

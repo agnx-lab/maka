@@ -584,15 +584,15 @@ async fn terminal_live_pty_output_leaves_catalog_stable_but_resize_and_final_are
         let sized=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
         assert!(sized.revision>durable.revision);
         let maka_agent_facts::shell_run::ShellOutput::Pty { screen }=&sized.output else {panic!("pty")};
-        assert_eq!((screen.size.cols(),screen.size.rows()),(100,30));
-        assert!(screen.screen.contains("K61-LIVE"));
+        assert_eq!((screen.metadata.size.cols(),screen.metadata.size.rows()),(100,30));
+        assert!(screen.text(50 * 1024).screen.contains("K61-LIVE"));
         assert_ne!(query(&f,"list",json!({"sessionId":session})).await["value"]["revision"],catalog["value"]["revision"]);
         let stopped=mutation(&f,&owner,"stop",target.clone(),Uuid::new_v4()).await;
         assert_eq!(stopped["kind"],"completed","{stopped}");
         let final_record=f.store.read_shell_run(&session,id).await.unwrap().unwrap();
         assert!(!final_record.state.active());
         let maka_agent_facts::shell_run::ShellOutput::Pty { screen }=&final_record.output else {panic!("pty")};
-        assert!(screen.screen.contains("K61-LIVE"), "final snapshot: {screen:?}");
+        assert!(screen.text(50 * 1024).screen.contains("K61-LIVE"), "final snapshot: {screen:?}");
         assert_eq!(query(&f,"read",target).await["value"]["result"]["revision"],final_record.revision);
         lease.completion().await.cleanup.unwrap();
         raw.cancel();raw.completion().await.cleanup.unwrap();
@@ -647,6 +647,90 @@ async fn model_read_and_health_see_live_pipe_logs_without_persisting_output() {
         let again=query(&f,"read",target).await;
         assert_eq!(again["value"]["result"]["revision"],observed["value"]["revision"]);
         detail.cancel();detail.completion().await.cleanup.unwrap();
+        processes::close(&f).await;
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyond_model_preview() {
+    use maka_agent_facts::terminal::display::{Assembly, Color, Display, Part};
+    async fn read_display(f: &Fixture, owner: &Caller, target: &Value) -> Display {
+        let mut stream = subscribe(f, owner, "readDisplay", target.clone()).await;
+        let mut assembly = None;
+        let mut display = None;
+        while let Some(item) = stream.recv().await {
+            assert!(
+                serde_json::to_vec(&item).unwrap().len()
+                    <= maka_plugin_core::json::SUBSCRIPTION_ITEM_BYTES
+            );
+            assert_eq!(item["kind"], "completed", "{item}");
+            match serde_json::from_value::<Part>(item["value"].clone()).unwrap() {
+                Part::Begin {
+                    metadata,
+                    scrollback_rows,
+                    last_alternate_size,
+                    ..
+                } => {
+                    assert!(assembly.is_none());
+                    assembly = Some(
+                        Assembly::begin(metadata, scrollback_rows, last_alternate_size).unwrap(),
+                    );
+                }
+                Part::Rows { parts } => assembly.as_mut().unwrap().rows(parts).unwrap(),
+                Part::End => display = Some(assembly.take().unwrap().finish().unwrap()),
+            }
+        }
+        let done = stream.completion().await;
+        done.cleanup.unwrap();
+        assert_eq!(done.result.unwrap()["kind"], "completed");
+        display.unwrap()
+    }
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let (_, mut f, session) = processes::fixture().await;
+        let owner = caller();
+        let target = start(&f, &owner, &session).await;
+        let (lease, controller) = acquire(&f, &owner, &target).await;
+        let mut detail = subscribe(&f, &owner, "watch", target.clone()).await;
+        let result = mutation(&f, &owner, "control", command(&controller, 1,
+            r#"exec /bin/sh -c 'stty -echo; printf "\033[2J\033[H"; i=0; while [ "$i" -lt 1200 ]; do printf "\033[31m%04d:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\033[44m   \033[0m\n" "$i"; i=$((i+1)); done; printf "\033[32mFINAL-COLOR\033[0m"'"#), Uuid::new_v4()).await;
+        assert_eq!(result["kind"], "completed", "{result}");
+        loop {
+            let frame = detail.recv().await.unwrap();
+            assert_eq!(frame["kind"], "completed", "{frame}");
+            if frame["value"]["result"]["status"] == "completed" { break; }
+        }
+        detail.cancel(); detail.completion().await.cleanup.unwrap();
+        let stopped = mutation(&f, &owner, "stop", target.clone(), Uuid::new_v4()).await;
+        assert_eq!(stopped["kind"], "completed");
+        lease.completion().await.cleanup.unwrap();
+        assert_eq!(output_read(&f, &target, 0).await, json!({"kind":"unavailable","reason":"not_retained"}));
+        let mut canceled = subscribe(&f, &owner, "readDisplay", target.clone()).await;
+        assert_eq!(canceled.recv().await.unwrap()["value"]["kind"], "begin");
+        canceled.cancel(); canceled.completion().await.cleanup.unwrap();
+        let display = read_display(&f, &owner, &target).await;
+        assert!(display.encoded_size() > 50 * 1024);
+        assert!(display.scrollback.len() > 500);
+        assert!(display.scrollback.iter().flatten().any(|run| run.text.starts_with("0000:") && run.style.foreground == Color::Named(1)));
+        assert!(display.scrollback.iter().flatten().any(|run| run.text == "   " && run.style.background == Color::Named(4)));
+        assert!(display.screen.iter().flatten().any(|run| run.text.contains("FINAL-COLOR") && run.style.foreground == Color::Named(2)));
+        let id = maka_host_runtime::shell::request::parse_ref(target["ref"].as_str().unwrap()).unwrap();
+        let stored = f.store.read_shell_run(&session, id).await.unwrap().unwrap();
+        let maka_agent_facts::shell_run::ShellOutput::Pty { screen } = &stored.output else { panic!() };
+        assert_eq!(screen.as_ref(), &display);
+        let deployment = f.app.source().unwrap().deployment;
+        f.app.shutdown().await.unwrap();
+        let root = f.store.owned_root().unwrap();
+        f.store.shutdown().await.unwrap();
+        f.store = Arc::new(EventLog::for_root(root).await.unwrap());
+        let mut native = NativeRegistry::default();
+        maka_settings_native::provide(&mut native).unwrap();
+        provide_all(&mut native).unwrap();
+        let tooling = service_tools::Setup::processes();
+        f.app = Application::start_from_store(f.store.clone(), deployment, native, f.issuer.clone(),
+            Arc::new(Grant(f.issuer.clone(), Some(tooling.policy()))), Some(maka_host_js::factory(Default::default()))).await.unwrap();
+        f.app.ready().await.unwrap();
+        assert_eq!(read_display(&f, &owner, &target).await, display);
+        assert_eq!(f.store.read_shell_run(&session, id).await.unwrap().unwrap(), stored);
         processes::close(&f).await;
     }).await.unwrap();
 }

@@ -107,9 +107,9 @@ fn terminal_size_schema_carries_native_allocation_limits_in_both_directions() {
         assert!(validator.is_valid(&value));
         for size in [
             json!({"cols":1,"rows":1}),
-            json!({"cols":241,"rows":1}),
+            json!({"cols":1025,"rows":1}),
             json!({"cols":80,"rows":0}),
-            json!({"cols":80,"rows":101}),
+            json!({"cols":80,"rows":1025}),
             json!({"cols":80.5,"rows":24}),
             json!({"cols":80,"rows":24,"unknown":true}),
         ] {

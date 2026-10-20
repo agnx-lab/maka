@@ -82,7 +82,7 @@ async fn real_pty_queries_and_mode_aware_input_cross_the_screen_cut() {
                 .write(std::str::from_utf8(&bytes[..count]).unwrap())
                 .unwrap();
             write_pty(&io, replies.as_bytes()).await;
-            let cut = screen.snapshot().unwrap();
+            let cut = screen.preview(50 * 1024).unwrap();
             if !sent && cut.screen.contains("ready") {
                 let input = encode_actions(&actions, cut.input, cut.size).unwrap();
                 assert_eq!(input, expected);
@@ -92,7 +92,13 @@ async fn real_pty_queries_and_mode_aware_input_cross_the_screen_cut() {
         }
         assert!(sent);
         assert_eq!(child.wait().await.unwrap().code(), Some(42));
-        assert!(screen.snapshot().unwrap().screen.contains("verified"));
+        assert!(
+            screen
+                .preview(50 * 1024)
+                .unwrap()
+                .screen
+                .contains("verified")
+        );
     })
     .await
     .unwrap();
@@ -113,12 +119,12 @@ fn unicode_modes_alternate_screen_reflow_and_history_are_observable() {
         screen.write("hello 中文😀\r\nnext\x1b[6n").unwrap(),
         "\x1b[3;5R"
     );
-    let first = screen.snapshot().unwrap();
+    let first = screen.preview(50 * 1024).unwrap();
     assert!(first.screen.contains("中文"));
     screen
         .write("\x1b[?1h\x1b[?1002h\x1b[?1006h\x1b[?25l")
         .unwrap();
-    let modes = screen.snapshot().unwrap();
+    let modes = screen.preview(50 * 1024).unwrap();
     assert!(!modes.cursor.visible);
     assert!(modes.input.application_cursor_keys_mode);
     assert_eq!(
@@ -129,7 +135,7 @@ fn unicode_modes_alternate_screen_reflow_and_history_are_observable() {
     screen
         .write("\x1b[?1049h\x1b[HALT\r\nsecond\x1b[?1049l")
         .unwrap();
-    let restored = screen.snapshot().unwrap();
+    let restored = screen.preview(50 * 1024).unwrap();
     assert!(!restored.alternate_screen);
     assert_eq!(
         restored.last_alternate_screen.as_deref(),
@@ -137,18 +143,18 @@ fn unicode_modes_alternate_screen_reflow_and_history_are_observable() {
     );
     assert!(restored.screen.contains("next"));
     screen.resize(TerminalSize::new(5, 4).unwrap()).unwrap();
-    assert_eq!(screen.snapshot().unwrap().size.cols(), 5);
+    assert_eq!(screen.preview(50 * 1024).unwrap().size.cols(), 5);
     screen.write("\x1bc").unwrap();
     screen.write(&"line\r\n".repeat(520)).unwrap();
-    let history = screen.snapshot().unwrap();
-    assert!(history.truncated);
-    assert!(history.scrollback.lines().count() <= 500);
+    let history = screen.preview(50 * 1024).unwrap();
+    assert!(!history.truncated);
+    assert!(history.scrollback.lines().count() > 500);
     assert!(history.screen.contains("line"));
 
     let mut reflow = Screen::new(TerminalSize::new(6, 3).unwrap());
     reflow.write("abcdefghijkl").unwrap();
     reflow.resize(TerminalSize::new(4, 4).unwrap()).unwrap();
-    let resized = reflow.snapshot().unwrap();
+    let resized = reflow.preview(50 * 1024).unwrap();
     assert_eq!(
         format!("{}{}", resized.scrollback, resized.screen).replace('\n', ""),
         "abcdefghijkl"
@@ -162,15 +168,15 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
     for c in "中文😀e\u{301}".chars() {
         screen.write(c.encode_utf8(&mut [0; 4])).unwrap();
     }
-    assert_eq!(screen.snapshot().unwrap().screen, "中文😀e\u{301}");
+    assert_eq!(screen.preview(50 * 1024).unwrap().screen, "中文😀e\u{301}");
     screen.write("\x1b]52;c;unterminated").unwrap();
     screen.reset_after_gap();
     screen.write("after").unwrap();
-    let snapshot = screen.snapshot().unwrap();
+    let snapshot = screen.preview(50 * 1024).unwrap();
     assert_eq!(snapshot.screen, "after");
     assert!(snapshot.truncated);
-    assert!(screen.write(&"x".repeat(65537)).is_err());
-    assert_eq!(screen.snapshot().unwrap(), snapshot);
+    screen.write(&"x".repeat(65537)).unwrap();
+    assert!(screen.preview(50 * 1024).unwrap().screen.contains("xxxxx"));
     for bytes in [
         b"\x1b]0;"
             .iter()
@@ -178,8 +184,6 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
             .chain(std::iter::repeat_n(b'x', 65540))
             .collect::<Vec<_>>(),
         format!("x{}", "\u{301}".repeat(100)).into_bytes(),
-        b"x\x1b[65535b\x1b[65535b".to_vec(),
-        b"\x1b[65535S".to_vec(),
     ] {
         let mut screen = Screen::new(size);
         let mut failed = false;
@@ -190,7 +194,7 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
             }
         }
         assert!(failed, "unbounded sequence accepted");
-        assert!(screen.snapshot().is_err());
+        assert!(screen.preview(50 * 1024).is_err());
     }
     // Suppressed OSC capabilities cannot emit clipboard data or grow a title stack.
     let mut safe = Screen::new(size);
@@ -199,7 +203,7 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
             .unwrap(),
         "\x1b[0n"
     );
-    assert_eq!(safe.snapshot().unwrap().screen, "OK");
+    assert_eq!(safe.preview(50 * 1024).unwrap().screen, "OK");
 
     // Large historical grapheme clusters must not crowd the current viewport
     // out of the bounded snapshot.
@@ -211,7 +215,7 @@ fn unicode_cuts_gaps_and_adversarial_streams_preserve_bounded_state() {
             .unwrap_or_else(|error| panic!("row {index}: {error}"));
     }
     history.write("current-frame").unwrap();
-    let snapshot = history.snapshot().unwrap();
+    let snapshot = history.preview(50 * 1024).unwrap();
     assert!(snapshot.truncated);
     assert!(snapshot.screen.contains("current-frame"));
     assert!(snapshot.screen.len() + snapshot.scrollback.len() <= 2 * 1024 * 1024);
@@ -243,7 +247,46 @@ fn large_ignored_clipboard_strings_preserve_screen_replies_and_following_output(
             );
         }
         assert_eq!(screen.write("after\x1b[5n").unwrap(), "\x1b[0n");
-        assert_eq!(screen.snapshot().unwrap().screen, "beforeafter");
-        assert_eq!(screen.snapshot().unwrap().cursor.x, 11);
+        assert_eq!(screen.preview(50 * 1024).unwrap().screen, "beforeafter");
+        assert_eq!(screen.preview(50 * 1024).unwrap().cursor.x, 11);
     }
+}
+
+#[test]
+fn large_valid_writes_and_clamped_scrolls_do_not_fail_the_parser() {
+    let mut screen = Screen::new(TerminalSize::new(80, 24).unwrap());
+    screen.write(&"x".repeat(128 * 1024)).unwrap();
+    screen
+        .write("x\x1b[65535b\x1b[65535b\x1b[65535S\x1b[Hstill-live")
+        .unwrap();
+    assert!(
+        screen
+            .preview(50 * 1024)
+            .unwrap()
+            .screen
+            .contains("still-live")
+    );
+    assert!(TerminalSize::new(1024, 64).is_ok());
+    assert!(TerminalSize::new(64, 1024).is_ok());
+    assert!(TerminalSize::new(1024, 65).is_err());
+    assert!(TerminalSize::new(1025, 1).is_err());
+}
+
+#[test]
+fn narrowing_a_full_history_keeps_the_same_cell_allowance_through_reflow() {
+    let mut screen = Screen::new(TerminalSize::new(80, 24).unwrap());
+    let line = format!("FIRST{}", "x".repeat(75));
+    screen
+        .write(&format!(
+            "{line}\r\n{}",
+            format!("{}\r\n", "y".repeat(80)).repeat(9_999)
+        ))
+        .unwrap();
+    let before = screen.display();
+    assert_eq!(before.scrollback.first().unwrap()[0].text, line);
+    screen.resize(TerminalSize::new(40, 24).unwrap()).unwrap();
+    let after = screen.display();
+    assert!(after.scrollback.len() > 10_000);
+    assert!(after.text(2 * 1024 * 1024).scrollback.starts_with(&line));
+    assert!(after.scrollback.len() * 40 <= maka_agent_facts::terminal::HISTORY_CELLS);
 }

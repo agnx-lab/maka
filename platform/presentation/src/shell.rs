@@ -20,7 +20,7 @@
 //! Client-facing shell state. It is a projection, never the operational authority.
 mod project;
 pub use maka_agent_facts::shell_result::*;
-pub use project::{local_metadata, local_state, local_update};
+pub use project::{local_metadata, local_observation, local_state, local_update};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

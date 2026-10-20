@@ -198,10 +198,8 @@ impl State {
         }
     }
     pub fn resize(&mut self, cols: u16, rows: u16) {
-        if let Ok(size) = TerminalSize::new(cols.clamp(2, 240), rows.clamp(1, 100)) {
-            self.desired_size = Some(size);
-            self.pump();
-        }
+        self.desired_size = Some(TerminalSize::fit(cols, rows));
+        self.pump();
     }
     pub fn write(&mut self, action: InputAction) {
         if !self.physical || !self.ready() || !self.captured() {

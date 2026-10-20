@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use maka_agent_facts::shell_run::ShellRun;
+use maka_agent_facts::shell_run::ShellObservation;
 use maka_agent_facts::terminal::TerminalSize;
 use maka_agent_facts::terminal::input::InputAction;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub struct WriteReceipt {
     pub resized: bool,
     pub resize_changed: bool,
     /// The worker's committed parser cut when transport acceptance settles.
-    pub record: Arc<ShellRun>,
+    pub record: Arc<ShellObservation>,
 }
 
 #[derive(Debug, thiserror::Error)]

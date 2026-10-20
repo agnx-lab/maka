@@ -21,6 +21,8 @@ use sqlx::SqliteConnection;
 
 use crate::StoreError;
 
+pub(crate) mod terminal_display;
+
 static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 pub(crate) async fn initialize_connection(
@@ -75,7 +77,11 @@ pub(crate) async fn initialize_connection(
             .await?;
     }
     crate::sqlite_functions::register(connection).await?;
-    MIGRATIONS.run_direct(None, &mut *connection, false).await?;
+    terminal_display::register(connection, true).await?;
+    let migrated = MIGRATIONS.run_direct(None, &mut *connection, false).await;
+    let removed = terminal_display::register(connection, false).await;
+    migrated?;
+    removed?;
     sqlx::raw_sql("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
         .execute(&mut *connection)
         .await?;

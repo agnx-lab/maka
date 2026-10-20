@@ -2002,13 +2002,13 @@ export const contracts = {
                   type: 'integer',
                   format: 'uint16',
                   minimum: 2,
-                  maximum: 240,
+                  maximum: 1024,
                 },
                 rows: {
                   type: 'integer',
                   format: 'uint16',
                   minimum: 1,
-                  maximum: 100,
+                  maximum: 1024,
                 },
               },
               required: ['cols', 'rows'],
@@ -38058,13 +38058,13 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 2,
-                    maximum: 240,
+                    maximum: 1024,
                   },
                   rows: {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 1,
-                    maximum: 100,
+                    maximum: 1024,
                   },
                 },
                 required: ['cols', 'rows'],
@@ -38834,6 +38834,403 @@ export const contracts = {
           },
           resources: {},
         },
+        readDisplay: {
+          mode: 'subscription',
+          input: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              sessionId: {
+                type: 'string',
+              },
+              ref: {
+                type: 'string',
+              },
+            },
+            required: ['sessionId', 'ref'],
+            title: 'TerminalTarget',
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+          },
+          output: {
+            oneOf: [
+              {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  value: {
+                    $ref: '#/$defs/TerminalDisplayPart',
+                  },
+                  kind: {
+                    type: 'string',
+                    const: 'completed',
+                  },
+                },
+                required: ['kind', 'value'],
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  message: {
+                    type: 'string',
+                  },
+                  kind: {
+                    type: 'string',
+                    const: 'failed',
+                  },
+                },
+                required: ['kind', 'message'],
+              },
+            ],
+            title: 'TerminalOutcome_TerminalDisplayPart',
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            $defs: {
+              TerminalDisplayPart: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      revision: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                        maximum: 9007199254740991,
+                      },
+                      metadata: {
+                        $ref: '#/$defs/Metadata',
+                      },
+                      scrollbackRows: {
+                        type: 'integer',
+                        format: 'uint32',
+                        minimum: 0,
+                      },
+                      lastAlternateSize: {
+                        anyOf: [
+                          {
+                            $ref: '#/$defs/TerminalSize',
+                          },
+                          {
+                            type: 'null',
+                          },
+                        ],
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'begin',
+                      },
+                    },
+                    required: ['kind', 'revision', 'metadata', 'scrollbackRows'],
+                  },
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      parts: {
+                        type: 'array',
+                        items: {
+                          $ref: '#/$defs/RowPart',
+                        },
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'rows',
+                      },
+                    },
+                    required: ['kind', 'parts'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'end',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                ],
+                description:
+                  'A finite transfer of one captured durable display. End installs it; these\nparts never claim an original-output cursor or a parser continuation point.',
+              },
+              Metadata: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  size: {
+                    $ref: '#/$defs/TerminalSize',
+                  },
+                  cursor: {
+                    $ref: '#/$defs/TerminalCursor',
+                  },
+                  cursorShape: {
+                    $ref: '#/$defs/CursorShape',
+                  },
+                  cursorBlinking: {
+                    type: 'boolean',
+                  },
+                  alternateScreen: {
+                    type: 'boolean',
+                  },
+                  truncated: {
+                    type: 'boolean',
+                  },
+                  input: {
+                    $ref: '#/$defs/TerminalInputModes',
+                  },
+                  palette: {
+                    type: 'array',
+                    items: {
+                      type: 'array',
+                      prefixItems: [
+                        {
+                          type: 'integer',
+                          format: 'uint16',
+                          minimum: 0,
+                          maximum: 65535,
+                        },
+                        {
+                          type: 'array',
+                          items: {
+                            type: 'integer',
+                            format: 'uint8',
+                            minimum: 0,
+                            maximum: 255,
+                          },
+                          minItems: 3,
+                          maxItems: 3,
+                        },
+                      ],
+                      minItems: 2,
+                      maxItems: 2,
+                    },
+                    description:
+                      "Palette overrides only; absence preserves the viewing client's theme.",
+                  },
+                },
+                required: [
+                  'size',
+                  'cursor',
+                  'cursorShape',
+                  'cursorBlinking',
+                  'alternateScreen',
+                  'truncated',
+                  'input',
+                  'palette',
+                ],
+              },
+              TerminalSize: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  cols: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 2,
+                    maximum: 1024,
+                  },
+                  rows: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 1,
+                    maximum: 1024,
+                  },
+                },
+                required: ['cols', 'rows'],
+                description:
+                  'Shared by native PTY allocation, input validation and screen rendering.',
+              },
+              TerminalCursor: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  x: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 0,
+                    maximum: 65535,
+                  },
+                  y: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 0,
+                    maximum: 65535,
+                  },
+                  visible: {
+                    type: 'boolean',
+                  },
+                },
+                required: ['x', 'y', 'visible'],
+              },
+              CursorShape: {
+                type: 'string',
+                enum: ['block', 'underline', 'beam', 'hollow_block', 'hidden'],
+              },
+              TerminalInputModes: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  applicationCursorKeysMode: {
+                    type: 'boolean',
+                  },
+                  mouseTrackingMode: {
+                    $ref: '#/$defs/MouseTracking',
+                  },
+                  mouseEncoding: {
+                    $ref: '#/$defs/MouseEncoding',
+                  },
+                },
+                required: ['applicationCursorKeysMode', 'mouseTrackingMode', 'mouseEncoding'],
+              },
+              MouseTracking: {
+                type: 'string',
+                enum: ['none', 'x10', 'vt200', 'drag', 'any'],
+              },
+              MouseEncoding: {
+                type: 'string',
+                enum: ['default', 'sgr', 'sgr_pixels'],
+              },
+              RowPart: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  buffer: {
+                    $ref: '#/$defs/Buffer',
+                  },
+                  row: {
+                    type: 'integer',
+                    format: 'uint32',
+                    minimum: 0,
+                  },
+                  column: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 0,
+                    maximum: 65535,
+                  },
+                  runs: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/$defs/Run',
+                    },
+                  },
+                },
+                required: ['buffer', 'row', 'column', 'runs'],
+              },
+              Buffer: {
+                type: 'string',
+                enum: ['scrollback', 'screen', 'last_alternate'],
+              },
+              Run: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  style: {
+                    $ref: '#/$defs/Style',
+                  },
+                  text: {
+                    type: 'string',
+                  },
+                  lengths: {
+                    type: 'array',
+                    items: {
+                      type: 'integer',
+                      format: 'uint8',
+                      minimum: 0,
+                      maximum: 255,
+                    },
+                  },
+                },
+                required: ['style', 'text'],
+                description:
+                  'Consecutive cells with the same style. `text` includes every blank and\ncombining character. Empty `lengths` means one Unicode scalar per cell;\notherwise each entry is the scalar count of one cell, including its base.',
+              },
+              Style: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  foreground: {
+                    $ref: '#/$defs/Color',
+                  },
+                  background: {
+                    $ref: '#/$defs/Color',
+                  },
+                  flags: {
+                    type: 'integer',
+                    format: 'uint16',
+                    minimum: 0,
+                    maximum: 65535,
+                  },
+                  underline: {
+                    anyOf: [
+                      {
+                        $ref: '#/$defs/Color',
+                      },
+                      {
+                        type: 'null',
+                      },
+                    ],
+                  },
+                },
+                required: ['foreground', 'background', 'flags'],
+                description:
+                  "Cell flags use the terminal's fixed bit layout: inverse=1, bold=2, italic=4,\nunderline=8, wrap=16, wide=32, wide spacer=64, dim=128, hidden=256,\nstrike=512, leading wide spacer=1024, double/curl/dotted/dashed underline\n=2048/4096/8192/16384. Geometry flags remain attached to their original cell.",
+              },
+              Color: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      named: {
+                        type: 'integer',
+                        format: 'uint16',
+                        minimum: 0,
+                        maximum: 65535,
+                      },
+                    },
+                    required: ['named'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      indexed: {
+                        type: 'integer',
+                        format: 'uint8',
+                        minimum: 0,
+                        maximum: 255,
+                      },
+                    },
+                    required: ['indexed'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      rgb: {
+                        type: 'array',
+                        items: {
+                          type: 'integer',
+                          format: 'uint8',
+                          minimum: 0,
+                          maximum: 255,
+                        },
+                        minItems: 3,
+                        maxItems: 3,
+                      },
+                    },
+                    required: ['rgb'],
+                    additionalProperties: false,
+                  },
+                ],
+                description:
+                  'Named colors retain their ANSI role (including default foreground/background),\nwhile indexed colors retain their exact palette entry even under bold/dim.',
+              },
+            },
+          },
+          resources: {},
+        },
         readOutput: {
           mode: 'query',
           input: {
@@ -39030,13 +39427,13 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 2,
-                    maximum: 240,
+                    maximum: 1024,
                   },
                   rows: {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 1,
-                    maximum: 100,
+                    maximum: 1024,
                   },
                 },
                 required: ['cols', 'rows'],
@@ -39173,13 +39570,13 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 2,
-                    maximum: 240,
+                    maximum: 1024,
                   },
                   rows: {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 1,
-                    maximum: 100,
+                    maximum: 1024,
                   },
                 },
                 required: ['cols', 'rows'],
@@ -40742,13 +41139,13 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 2,
-                    maximum: 240,
+                    maximum: 1024,
                   },
                   rows: {
                     type: 'integer',
                     format: 'uint16',
                     minimum: 1,
-                    maximum: 100,
+                    maximum: 1024,
                   },
                 },
                 required: ['cols', 'rows'],
