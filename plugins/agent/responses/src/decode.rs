@@ -351,11 +351,13 @@ impl Decoder {
         custom: bool,
         out: &mut Vec<ModelEvent>,
     ) -> Result<()> {
-        let item = self
-            .items
-            .get(item_id)
-            .filter(|item| item.input_started)
-            .ok_or_else(|| Self::invalid("Responses input delta has no open tool item"))?;
+        let Some(item) = self.items.get(item_id) else {
+            // A display-only delta cannot identify a call; its complete item can.
+            return Ok(());
+        };
+        if !item.input_started {
+            return Err(Self::invalid("Responses input delta has no open tool item"));
+        }
         let call_id = match &item.identity {
             Identity::Function { call_id, .. } if !custom => call_id,
             Identity::Custom { call_id, .. } if custom => call_id,
@@ -1145,21 +1147,59 @@ mod tests {
         json!({"type":"function_call", "id":id, "call_id":call, "name":"Read", "arguments":"{}"})
     }
     #[test]
-    fn input_deltas_require_their_open_item_and_never_replace_the_complete_call() {
-        for (kind, item_id) in [
-            ("response.custom_tool_call_input.delta", "item"),
-            ("response.function_call_arguments.delta", "missing"),
+    fn unassociated_input_previews_preserve_complete_calls_and_retry_safety() {
+        for (kind, item, input, options) in [
+            (
+                "response.function_call_arguments.delta",
+                function("item", "call"),
+                ToolInput::Json(json!({})),
+                json!({"openai":{"itemId":"item"}}),
+            ),
+            (
+                "response.custom_tool_call_input.delta",
+                json!({"type":"custom_tool_call","id":"item","call_id":"call","name":"Read","input":"complete input"}),
+                ToolInput::Json(json!("complete input")),
+                json!({"openai":{"itemId":"item","toolKind":"custom"}}),
+            ),
         ] {
             let mut decoder = Decoder::new(None, &[]);
-            decoder
-                .push(json!({"type":"response.output_item.added","item":function("item","call")}))
-                .unwrap();
             assert!(
                 decoder
-                    .push(json!({"type":kind,"item_id":item_id,"delta":"{"}))
-                    .is_err()
+                    .push(json!({"type":kind,"item_id":"item","delta":"unassociated preview"}))
+                    .unwrap()
+                    .is_empty()
             );
+            assert!(!decoder.observed_output);
+            assert!(decoder.replay_safe);
+            assert!(decoder.retained_output_safe());
+            assert_eq!(
+                decoder
+                    .push(json!({"type":"response.output_item.done","item":item}))
+                    .unwrap(),
+                vec![ModelEvent::ToolCall(ModelToolCall {
+                    id: "call".into(),
+                    name: "Read".into(),
+                    input,
+                    provider_executed: false,
+                    provider_options: Some(options),
+                })]
+            );
+            assert!(decoder.observed_output);
+            assert!(!decoder.replay_safe);
+            assert!(decoder.retained_output_safe());
         }
+    }
+    #[test]
+    fn observed_input_deltas_require_open_matching_tools_and_never_replace_complete_calls() {
+        let mut decoder = Decoder::new(None, &[]);
+        decoder
+            .push(json!({"type":"response.output_item.added","item":function("item","call")}))
+            .unwrap();
+        assert!(
+            decoder
+                .push(json!({"type":"response.custom_tool_call_input.delta","item_id":"item","delta":"{"}))
+                .is_err()
+        );
         let mut decoder = Decoder::new(None, &[]);
         assert_eq!(
             decoder
