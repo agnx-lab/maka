@@ -744,6 +744,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
                 .to_string()
                 .contains("Production PTY user message")
         );
+        request.thinking("PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
         request.delta("REAL_PRODUCTION_PTY_STREAM").await;
         let streamed = terminal.wait_for("REAL_PRODUCTION_PTY_STREAM").await;
         evidence("production-pty-streaming", &streamed);
@@ -755,9 +756,30 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         fixture.idle(&control, &fixture.session).await;
         control.close().await.unwrap();
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+        terminal.click_text("Details · Standard");
+        terminal.wait_for("On completion").await;
+        terminal.click_text("Detailed");
+        terminal.wait_for("Details · Detailed").await;
+        terminal.click_text("Next input");
+        let selected = terminal.wait_for("◇ Think · PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
+        assert!(selected.contains("REAL_PRODUCTION_PTY_STREAM"));
+        evidence("production-pty-selected-process-policy", &selected);
+        terminal.click_text("Details · Detailed");
         terminal.send(b"\x11");
         terminal.finish().await;
         drop(terminal);
+        // This is a new OS process using the same selected Root, not an
+        // AppView reload with a test-only data_dir. Detailed plus next-input
+        // must keep the completed reasoning flat beside its original answer.
+        let mut restarted = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        restarted.wait_for("Details · Detailed").await;
+        let persisted = restarted.wait_for("◇ Think · PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
+        assert!(persisted.contains("REAL_PRODUCTION_PTY_STREAM") && persisted.contains("completed."));
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "loading presentation settings must not send another message");
+        evidence("production-pty-process-policy-after-restart", &persisted);
+        restarted.send(b"\x11");
+        restarted.finish().await;
+        drop(restarted);
         let reconnected = fixture.client().await;
         let observed = reconnected.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         assert_eq!(observed["session"]["id"], fixture.session, "quitting the shell must detach without stopping its service Host");

@@ -125,11 +125,12 @@ impl Args {
             }
             let directory = location.canonical_path().join("clients");
             root::private_directory(&directory).map_err(|error| error.to_string())?;
-            Journal::open(&directory.join("terminal.sqlite")).await
+            let journal = Journal::open(&directory.join("terminal.sqlite")).await?;
+            Ok((journal, directory))
         }
         .await;
-        let journal = match prepare {
-            Ok(journal) => journal,
+        let (journal, client_directory) = match prepare {
+            Ok(prepared) => prepared,
             Err(error) => {
                 return match native.close().await {
                     Ok(()) => Err(error),
@@ -141,6 +142,7 @@ impl Args {
         let runtime = tokio::runtime::Handle::current();
         let bindings = Bindings::new(client, runtime.clone());
         let mut config = configuration(bindings.registry(self.session), runtime);
+        config.data_dir = Some(client_directory);
         config.assets = Some(bindings.assets());
         let result = if stop.load(Ordering::Acquire) {
             Ok(())

@@ -22,7 +22,7 @@ import type { ToolActivity } from './toolActivity';
 
 export type MemberRef =
   | { kind: 'row'; rowId: string; toolUseId?: string }
-  | { kind: 'activity'; toolUseId: string; activity: ToolActivity };
+  | { kind: 'activity'; toolUseId: string };
 export type ProcessGroup = {
   kind: 'process';
   key: string;
@@ -191,7 +191,7 @@ export function projectProcessGroups(input: {
         activities[nextActivity].startSequence <= position.sequence)
     ) {
       const activity = activities[nextActivity++];
-      append(activity.turnId, { kind: 'activity', toolUseId: activity.toolUseId, activity });
+      append(activity.turnId, { kind: 'activity', toolUseId: activity.toolUseId });
     }
     const row = rowsById.get(position.rowId)!;
     if (input.gapsBefore?.has(position.rowId)) flush(true);
@@ -221,7 +221,7 @@ export function projectProcessGroups(input: {
   }
   for (; nextActivity < activities.length; nextActivity++) {
     const activity = activities[nextActivity];
-    append(activity.turnId, { kind: 'activity', toolUseId: activity.toolUseId, activity });
+    append(activity.turnId, { kind: 'activity', toolUseId: activity.toolUseId });
   }
   flush(false);
   return { entries, turns, rowsById };

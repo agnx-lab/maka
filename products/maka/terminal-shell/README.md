@@ -62,7 +62,7 @@ In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sess
 
 Earlier messages load automatically as you scroll up, preserving your reading position. Continuous thinking and tool activity form process groups; an intermediate reply or incoming message starts a new group. Replies appear outside these groups, and the final answer appears once. Completed turns fold their work by default. Stopped, failed and interrupted turns, and turns with interleaved input, keep their work available. Completion and final-answer placement use the Host's recorded turn metadata.
 
-**Details** selects **Compact**, **Standard** (the default), **Detailed** or **Verbose**, independently of **Chat** / **Trajectory**. Compact and Standard show group headers with closed contents; Compact omits live header detail and settled thinking previews. Detailed lays out current work as ordinary conversation rows and groups historical work. Verbose keeps all work flat and never folds completed turns. **Fold** chooses completion or the next input; your explicit turn disclosure choice takes precedence. These settings persist on this device.
+**Details** selects **Compact**, **Standard** (the default), **Detailed** or **Verbose**, independently of **Chat** / **Trajectory**. Compact and Standard show group headers with closed contents; Compact omits live header detail and settled thinking previews. Detailed lays out current work as ordinary conversation rows and groups historical work. Verbose keeps all work flat and never folds completed turns. **Fold** chooses completion or the next input; your explicit turn disclosure choice takes precedence. These settings persist locally for the selected Root.
 
 Grouped activity has independent native scrolling, capped at half the reading viewport. A newly opened live group starts at the bottom, while a closed group starts at the top. An already open reader stays in place as the group closes. Scrolling up keeps your source reader in place when later replies arrive. Thinking disclosure and Source choices remain attached to their original rows across updates and policy changes. Tool details load on demand from the Host; a layout change can reload their original source.
 
@@ -86,5 +86,7 @@ Use Tab to move between request controls and Enter to activate. For approvals, p
 ## Saved state and scope
 
 Drafts and operation receipts persist in `<root>/clients/terminal.sqlite`. Each session keeps its own draft, and recovery uses the original Host and operation. Switching conversations saves the current draft first. Recovery starts from the latest acknowledged draft revision; newer unsaved input can be lost on close. A send uses that saved revision. Use the original-operation recovery action for an uncertain result, rather than submitting a duplicate.
+
+Presentation preferences persist separately in `<root>/clients/org.apache.maka.terminal/storage.json`, shared by this Root's terminal conversations. They contain local view choices; the Host remains authoritative for sessions, messages and execution.
 
 The executable verifies the selected Root and live Host epoch. Ctrl+Q, and SIGTERM on Unix, request shutdown independently of JavaScript and terminal output. Shutdown attempts terminal restoration and closes owned Host requests and tasks; incomplete cleanup returns an error.
