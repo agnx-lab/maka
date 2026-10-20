@@ -35,6 +35,8 @@ cargo run -p maka-terminal-shell -- --root /path/to/root --session SESSION_ID
 
 可执行文件验证绑定 Root 的发现记录和在线 Host epoch。持久客户端日志位于 `<root>/clients/terminal.sqlite`；草稿和操作回执按原始 Host 与提供者身份归属。现有产品和发布启动器保持不变。
 
+编译进此可执行文件的可信应用使用 NSH 的独立应用资源策略：保留 4 MiB 解释器栈限制，移除原先的 1 GiB 堆上限、10 秒加载预算、2 秒调用预算，以及操作、画布和节点配额。此策略适用于随程序构建的第一方应用；嵌入不可信应用时，需要明确设置资源限制。
+
 Ctrl+Q 可独立于 JavaScript 和终端输出请求退出。Unix 上的 SIGTERM 具有相同作用。界面尝试恢复终端后，关闭所拥有的 Host 请求和原生任务；恢复或清理未完成会返回错误。
 
 草稿恢复从最近一次确认保存的 revision 开始；之后尚未确认保存的输入可能在关闭时丢失。发送读取准确的已保存 revision；结果不明确的操作保留用于回执恢复，避免重复发送。

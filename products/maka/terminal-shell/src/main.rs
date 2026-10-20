@@ -184,7 +184,9 @@ fn configuration(
             ..Default::default()
         },
         header_heights: (16.0, 32.0),
-        limits: Limits::standalone_desktop(),
+        // APPLICATION is compiled into this trusted executable; only the
+        // interpreter stack is bounded, as for other standalone NSH apps.
+        limits: Limits::standalone(),
         ui_sets: vec![registry],
         runtime: Some(runtime),
         data_dir: None,
