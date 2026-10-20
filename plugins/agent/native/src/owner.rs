@@ -194,6 +194,8 @@ pub(crate) struct Owner {
     producer_gate: Arc<Mutex<()>>,
     #[cfg(test)]
     title_write_gate: std::sync::Mutex<Option<Arc<title::WriteGate>>>,
+    #[cfg(all(test, target_os = "macos"))]
+    file_native_hints: std::sync::atomic::AtomicBool,
     stop: CancellationToken,
 }
 #[derive(Clone, Copy)]
@@ -474,6 +476,8 @@ impl Owner {
             producer_gate: Arc::default(),
             #[cfg(test)]
             title_write_gate: std::sync::Mutex::default(),
+            #[cfg(all(test, target_os = "macos"))]
+            file_native_hints: std::sync::atomic::AtomicBool::new(true),
             stop,
         }))
     }

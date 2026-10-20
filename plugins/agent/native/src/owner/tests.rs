@@ -53,6 +53,8 @@ mod files;
 
 #[path = "tests/file_browsing.rs"]
 mod file_browsing;
+#[path = "tests/file_reconciliation.rs"]
+mod file_reconciliation;
 
 #[path = "tests/health.rs"]
 mod health;
