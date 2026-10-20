@@ -290,7 +290,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Session<R, W> {
         tokio::select! {biased;
             ()=self.stop.cancelled()=>{self.lost=true;self.scope.as_ref().unwrap().cancellation.cancel();future.await},
             control=self.reader.read::<Control>()=>{
-                if !matches!(control,Ok(Control::Cancel)) {self.lost=true;}
+                if matches!(control,Ok(Control::Cancel)) {
+                    // The original observer may still return an accepted item.
+                    // Preserve the peer's stop for the next protocol phase.
+                    self.pending=Some(Control::Cancel);
+                } else {self.lost=true;}
                 self.scope.as_ref().unwrap().cancellation.cancel();future.await
             },
             result=&mut future=>result,
@@ -653,6 +657,66 @@ mod tests {
         ));
         task.await.unwrap();
         observed.finish().await.unwrap();
+    }
+    #[tokio::test]
+    async fn cancellation_while_receiving_a_queued_item_survives_until_cleanup() {
+        let (input, mut command) = tokio::io::duplex(128);
+        let (output, reply) = tokio::io::duplex(1024);
+        let mut reply = Reader::new(reply);
+        let scope = scope();
+        let mut resource = scope.resources.reserve().unwrap();
+        resource.start();
+        let (mut items, emitter) = crate::application::subscriptions::items(
+            Arc::new(jsonschema::validator_for(&serde_json::json!({})).unwrap()),
+            scope.cancellation.clone(),
+        );
+        let value = serde_json::json!("already accepted");
+        emitter.emit(value.clone()).await.unwrap();
+        let mut session = Session {
+            reader: Reader::new(input),
+            writer: output,
+            scope: Some(scope.clone()),
+            stop: CancellationToken::new(),
+            lost: false,
+            pending: None,
+        };
+        // Both are ready on the same poll: cancellation wins observation,
+        // but the real subscription queue still returns its accepted item.
+        wire::write(&mut command, &Control::Cancel).await.unwrap();
+        assert_eq!(session.observe(items.recv()).await, Some(value.clone()));
+        assert!(scope.cancellation.is_cancelled());
+        assert!(!session.lost);
+        session
+            .send(&Reply::Item {
+                value: value.clone(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            reply.read::<Reply>().await.unwrap(),
+            Reply::Item { value: received } if received == value
+        ));
+        // The peer has already sent its one Cancel and now only reads.
+        assert!(matches!(
+            session.control().now_or_never(),
+            Some(Ok(Control::Cancel))
+        ));
+        let finish = session.finish(Reply::Finished {
+            result: Ok(serde_json::Value::Null),
+            cleanup: Ok(()),
+        });
+        tokio::pin!(finish);
+        assert!(finish.as_mut().now_or_never().is_none());
+        resource.complete(Ok(()));
+        finish.await.unwrap();
+        assert!(matches!(
+            reply.read::<Reply>().await.unwrap(),
+            Reply::Finished {
+                cleanup: Ok(()),
+                ..
+            }
+        ));
+        scope.finish().await.unwrap();
     }
     #[tokio::test]
     async fn eof_revokes_but_does_not_drop_the_same_admission_observer() {
