@@ -626,6 +626,15 @@ pub async fn focus_activity(view: &mut AppView) {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
     tokio::time::timeout(Duration::from_secs(20), async {
+        // An old activity List may already be focused. Observe this key's
+        // engine commit before checking the native focus and animation state.
+        let (done, committed) = tokio::sync::oneshot::channel();
+        view.control()
+            .expect("the native app engine must be running")
+            .advance_clock(Duration::ZERO, move || {
+                let _ = done.send(());
+            });
+        committed.await.expect("the focus navigation engine stopped");
         loop {
             tick(view);
             if view
