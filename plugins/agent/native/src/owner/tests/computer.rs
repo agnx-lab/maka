@@ -24,10 +24,15 @@ use maka_agent_facts::{
     tool_output::DurableToolProjection,
 };
 
-async fn pending(fixture: &Fixture, session: &str) -> InteractionRecord {
+async fn pending(
+    fixture: &Fixture,
+    session: &str,
+    step: &std::cell::Cell<&'static str>,
+) -> InteractionRecord {
     let mut commits = fixture.store.subscribe_commits();
     loop {
         commits.borrow_and_update();
+        step.set("pending.query");
         if let Some(record) = fixture
             .store
             .pending_interactions(session)
@@ -36,14 +41,25 @@ async fn pending(fixture: &Fixture, session: &str) -> InteractionRecord {
             .into_iter()
             .next()
         {
+            step.set("pending.returned");
             return record;
         }
+        step.set("pending.commit_wait");
         commits.changed().await.unwrap();
+        step.set("pending.commit_wait.returned");
     }
 }
-async fn answer(f: &Fixture, record: &InteractionRecord, allow: bool) {
+async fn answer(
+    f: &Fixture,
+    record: &InteractionRecord,
+    allow: bool,
+    step: &std::cell::Cell<&'static str>,
+) {
+    step.set("answer.mutation");
     let result = f.mutation(2, "respond", json!({"sessionId":record.session_id,"requestId":record.request_id,"answer":{"kind":"client_capability","decision":if allow { "allow" } else { "deny" }}}), Uuid::new_v4()).await.unwrap();
+    step.set("answer.assertion");
     assert_eq!(result["kind"], "recorded", "{result}");
+    step.set("answer.returned");
 }
 async fn start(
     listener: &TcpListener,
@@ -52,10 +68,15 @@ async fn start(
     method: &str,
     input: Value,
     expected_state: &str,
+    step: &std::cell::Cell<&'static str>,
 ) {
+    step.set("start.send");
     f.send(session).await.unwrap();
+    step.set("provider.accept");
     let (mut socket, _) = listener.accept().await.unwrap();
+    step.set("provider.request");
     let sent = request(&mut socket).await;
+    step.set("start.descriptor_assertions");
     let tools = sent["tools"].as_array().unwrap();
     let tool = tools
         .iter()
@@ -68,13 +89,24 @@ async fn start(
             .contains(expected_state),
         "{tool}"
     );
+    step.set("start.tool_response");
     service_tools::named_tool_response(&mut socket, method, input).await;
+    step.set("start.returned");
 }
-async fn finish(listener: &TcpListener, f: &Fixture) -> Value {
+async fn finish(
+    listener: &TcpListener,
+    f: &Fixture,
+    step: &std::cell::Cell<&'static str>,
+) -> Value {
+    step.set("provider.accept");
     let (mut socket, _) = listener.accept().await.unwrap();
+    step.set("provider.request");
     let sent = request(&mut socket).await;
+    step.set("finish.response");
     response(&mut socket).await;
+    step.set("finish.drain");
     f.drained().await;
+    step.set("finish.returned");
     sent
 }
 fn tool_text(sent: &Value) -> String {
@@ -90,18 +122,44 @@ fn tool_text(sent: &Value) -> String {
 
 #[tokio::test]
 async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
+    let scenario = std::cell::Cell::new("initial");
+    let step = std::cell::Cell::new("initial");
     tokio::time::timeout(Duration::from_secs(90), async {
+        scenario.set("listener.bind");
+        step.set("direct.await");
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        scenario.set("fixture.setup");
+        step.set("direct.await");
         let f = Fixture::with_services(&format!("http://{}/v1", listener.local_addr().unwrap()), None, None, Some(service_tools::Setup::computer())).await;
+        scenario.set("vision.enable");
+        step.set("direct.await");
         images::enable_vision(&f).await;
+        scenario.set("session.create");
+        step.set("direct.await");
         let session = f.create("Computer").await;
+        scenario.set("other_session.create");
+        step.set("direct.await");
         let other = f.create("Other Computer").await;
-        start(&listener, &f, &session, "cua_repl", json!({"code":"globalThis.deniedEffect = true;"}), "fresh").await;
-        let denied = pending(&f, &session).await;
+        scenario.set("denied.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_repl", json!({"code":"globalThis.deniedEffect = true;"}), "fresh", &step).await;
+        scenario.set("denied.pending");
+        step.set("direct.await");
+        let denied = pending(&f, &session, &step).await;
+        scenario.set("denied.pending.returned");
+        step.set("returned_or_assertions");
         assert!(matches!(&denied.request, InteractionRequest::ClientCapability { target, base_revision: Some(0), .. } if target == &maka_workspace_api::computer::target()));
-        answer(&f, &denied, false).await;
-        assert!(tool_text(&finish(&listener, &f).await).contains("not granted"));
+        scenario.set("denied.answer");
+        step.set("direct.await");
+        answer(&f, &denied, false, &step).await;
+        scenario.set("denied.finish_assertion");
+        step.set("direct.await");
+        assert!(tool_text(&finish(&listener, &f, &step).await).contains("not granted"));
+        scenario.set("denied.grant_assertion");
+        step.set("direct.await");
         assert!(f.store.client_capability_grant(&session, &maka_workspace_api::computer::target()).await.unwrap().is_none());
+        scenario.set("denied.grant_assertion.returned");
+        step.set("returned_or_assertions");
         // Real native facade operations stay journaled under the original parent;
         // browser inventory with no configured browser never touches a user app.
         // A >1 MiB image crosses the ordinary service through a durable artifact,
@@ -112,47 +170,120 @@ async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
         };
         let mut expected = vec![0; 1100 * 1024]; expected[..png.len()].copy_from_slice(&png);
         let code = format!("if (globalThis.deniedEffect) throw Error('denied cell ran'); globalThis.counter = 41; await cua.listBrowsers(); const screenshot = new Uint8Array(1100*1024); screenshot.set({}); await nodeRepl.emitImage({{bytes:screenshot,mimeType:'image/png'}}); nodeRepl.write('computer-effect-41');", serde_json::to_string(&png).unwrap());
-        start(&listener, &f, &session, "cua_repl", json!({"code":code,"title":"Inspect selected browsers"}), "fresh").await;
-        let allowed = pending(&f, &session).await;
-        answer(&f, &allowed, true).await;
-        let sent = finish(&listener, &f).await;
+        scenario.set("media.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_repl", json!({"code":code,"title":"Inspect selected browsers"}), "fresh", &step).await;
+        scenario.set("media.pending");
+        step.set("direct.await");
+        let allowed = pending(&f, &session, &step).await;
+        scenario.set("media.answer");
+        step.set("direct.await");
+        answer(&f, &allowed, true, &step).await;
+        scenario.set("media.finish");
+        step.set("direct.await");
+        let sent = finish(&listener, &f, &step).await;
+        scenario.set("media.finish.returned");
+        step.set("returned_or_assertions");
         assert!(sent.to_string().contains("computer-effect-41"), "Computer effect output was not projected");
         assert_eq!(images::model_images(&sent), vec![expected.clone()]);
+        scenario.set("media.observe");
+        step.set("direct.await");
         let observed = f.query("observe", json!({"sessionId":session})).await.unwrap();
+        scenario.set("media.observe.returned");
+        step.set("returned_or_assertions");
         let through = observed["through"].as_u64().unwrap();
+        scenario.set("media.facts");
+        step.set("direct.await");
         let events = service_tools::facts(&f, &session).await;
+        scenario.set("media.facts.returned");
+        step.set("returned_or_assertions");
         assert!(events.iter().any(|event| matches!(event, Fact::ToolDispatched { name, call, .. } if name == "cua_operation" && matches!(&call.origin, maka_agent_facts::tool_call::ToolOrigin::HostSdk { parent_operation_id: Some(_), .. }))));
         assert!(events.iter().any(|event| matches!(event, Fact::ToolDispatched { name, title: Some(title), .. } if name == "cua_repl" && title.fallback == "Inspect selected browsers")));
         assert!(events.iter().any(|event| matches!(event, Fact::ToolSettled { outcome: ToolOutcome::Succeeded { model_projection: DurableToolProjection::Content { parts }, .. }, .. } if parts.iter().any(|part| part.media().is_some()))));
         assert!(through > 0);
-        start(&listener, &f, &session, "cua_repl", json!({"code":"nodeRepl.write(++globalThis.counter);"}), "ready").await;
-        assert!(tool_text(&finish(&listener, &f).await).contains("42"));
+        scenario.set("counter.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_repl", json!({"code":"nodeRepl.write(++globalThis.counter);"}), "ready", &step).await;
+        scenario.set("counter.finish_assertion");
+        step.set("direct.await");
+        assert!(tool_text(&finish(&listener, &f, &step).await).contains("42"));
+        scenario.set("counter.pending_assertion");
+        step.set("direct.await");
         assert!(f.store.pending_interactions(&session).await.unwrap().is_empty());
+        scenario.set("counter.pending_assertion.returned");
+        step.set("returned_or_assertions");
         // Grants and VM globals never leak into another Session.
-        start(&listener, &f, &other, "cua_repl", json!({"code":"nodeRepl.write(typeof globalThis.counter);"}), "fresh").await;
-        answer(&f, &pending(&f, &other).await, true).await;
-        assert!(tool_text(&finish(&listener, &f).await).contains("undefined"));
+        scenario.set("other.start");
+        step.set("direct.await");
+        start(&listener, &f, &other, "cua_repl", json!({"code":"nodeRepl.write(typeof globalThis.counter);"}), "fresh", &step).await;
+        scenario.set("other.pending_then_answer");
+        step.set("direct.await");
+        answer(&f, &pending(&f, &other, &step).await, true, &step).await;
+        scenario.set("other.finish_assertion");
+        step.set("direct.await");
+        assert!(tool_text(&finish(&listener, &f, &step).await).contains("undefined"));
+        scenario.set("other.finish_assertion.returned");
+        step.set("returned_or_assertions");
         // Revocation stops the cell; reset joins the VM before replacing it.
-        start(&listener, &f, &session, "cua_repl", json!({"code":"await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});","timeout_ms":120000}), "ready").await;
+        scenario.set("revocation.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_repl", json!({"code":"await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});","timeout_ms":120000}), "ready", &step).await;
+        scenario.set("revocation.start.returned");
+        step.set("returned_or_assertions");
         let mut commits = f.store.subscribe_commits();
         loop {
             commits.borrow_and_update();
+            scenario.set("revocation.dispatch_facts");
+            step.set("direct.await");
             let events = service_tools::facts(&f, &session).await;
+            scenario.set("revocation.dispatch_facts.returned");
+            step.set("returned_or_assertions");
             if events.iter().filter(|event| matches!(event, Fact::ToolDispatched { input, name, .. } if name == "cua_operation" && input["method"] == "listBrowsers")).count() >= 2 { break; }
+            scenario.set("revocation.commit_wait");
+            step.set("direct.await");
             commits.changed().await.unwrap();
+            scenario.set("revocation.commit_wait.returned");
+            step.set("returned_or_assertions");
         }
+        scenario.set("revocation.policy_change");
+        step.set("direct.await");
         assert_eq!(files::change(&f, &session, "workspace_write", true, true).await["kind"], "committed");
-        let cancelled = finish(&listener, &f).await;
+        scenario.set("revocation.finish");
+        step.set("direct.await");
+        let cancelled = finish(&listener, &f, &step).await;
+        scenario.set("revocation.finish.returned");
+        step.set("returned_or_assertions");
         let stopped = tool_text(&cancelled);
         assert!(stopped.contains("changed") || stopped.contains("revoked") || stopped.contains("cancelled"), "{stopped}");
         assert!(stopped.contains("reset_required"), "{stopped}");
-        start(&listener, &f, &session, "cua_reset", json!({}), "reset_required").await;
-        assert!(tool_text(&finish(&listener, &f).await).contains("reset"));
-        start(&listener, &f, &session, "cua_repl", json!({"code":"nodeRepl.write(typeof globalThis.counter);"}), "fresh").await;
-        let renewal = pending(&f, &session).await;
+        scenario.set("reset.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_reset", json!({}), "reset_required", &step).await;
+        scenario.set("reset.finish_assertion");
+        step.set("direct.await");
+        assert!(tool_text(&finish(&listener, &f, &step).await).contains("reset"));
+        scenario.set("renewal.start");
+        step.set("direct.await");
+        start(&listener, &f, &session, "cua_repl", json!({"code":"nodeRepl.write(typeof globalThis.counter);"}), "fresh", &step).await;
+        scenario.set("renewal.pending");
+        step.set("direct.await");
+        let renewal = pending(&f, &session, &step).await;
+        scenario.set("renewal.pending.returned");
+        step.set("returned_or_assertions");
         assert!(matches!(renewal.request, InteractionRequest::ClientCapability { base_revision: Some(1), .. }));
-        answer(&f, &renewal, true).await;
-        assert!(tool_text(&finish(&listener, &f).await).contains("undefined"));
-        f.app.shutdown().await.unwrap(); f.config.shutdown().await.unwrap();
-    }).await.unwrap();
+        scenario.set("renewal.answer");
+        step.set("direct.await");
+        answer(&f, &renewal, true, &step).await;
+        scenario.set("renewal.finish_assertion");
+        step.set("direct.await");
+        assert!(tool_text(&finish(&listener, &f, &step).await).contains("undefined"));
+        scenario.set("app.shutdown");
+        step.set("direct.await");
+        f.app.shutdown().await.unwrap();
+        scenario.set("config.shutdown");
+        step.set("direct.await");
+        f.config.shutdown().await.unwrap();
+        scenario.set("config.shutdown.returned");
+        step.set("returned_or_assertions");
+    }).await.inspect_err(|_| eprintln!("Computer test timed out: scenario={} helper={}", scenario.get(), step.get())).unwrap();
 }
