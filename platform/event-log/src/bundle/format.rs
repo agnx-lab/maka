@@ -34,7 +34,6 @@ pub(super) const MAX_FRAME: usize = 18 * 1024 * 1024;
 pub(super) const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 pub(super) const MAX_EVENTS: usize = 100_000;
 pub(super) const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
-pub(super) const MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) const CHUNK: usize = 64 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]

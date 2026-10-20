@@ -154,7 +154,7 @@ async fn attachment_payload_validation_and_image_read_use_actual_bytes() {
         let f = Fixture::with_services(&format!("http://{}/v1", listener.local_addr().unwrap()), None, None, Some(service_tools::Setup::files("readImage"))).await;
         images::enable_vision(&f).await;
         let session = f.create("Image upload").await;
-        let bytes = images::gif(50 * 1024);
+        let bytes = images::gif(6 * 1024 * 1024);
         let file = f._dir.path().join("actual.gif");
         std::fs::write(&file, &bytes).unwrap();
         let snapshot = maka_ui_runtime::file::read_selected(&file, &maka_ui_runtime::budget::NativeBudget::default()).unwrap();

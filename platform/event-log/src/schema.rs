@@ -89,3 +89,7 @@ pub(crate) async fn initialize_connection(
     crate::sessions::initialize_execution(connection).await?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../tests/migrations/prior_artifacts.rs"]
+mod artifact_payload_tests;

@@ -212,9 +212,9 @@ pub enum ImageFrame {
     Chunk {
         #[schemars(regex(pattern = "^image/(png|jpeg|gif|webp)$"))]
         mime_type: String,
-        #[schemars(range(min = 1, max = 5242880))]
+        #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
         total_bytes: usize,
-        #[schemars(range(max = 5242879))]
+        #[schemars(range(max = 9_007_199_254_740_991u64))]
         offset: usize,
         #[schemars(length(min = 1, max = 43692))]
         data: String,
@@ -1276,7 +1276,7 @@ pub struct ToolImageRead {
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
     pub position: RowPosition,
-    #[schemars(range(max = 5_242_880u64))]
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub offset: u64,
 }
 #[derive(Serialize, JsonSchema)]
@@ -1292,7 +1292,7 @@ pub enum ToolImagePage {
         through: u64,
         position: RowPosition,
         offset: u64,
-        #[schemars(range(min = 1, max = 5_242_880u64))]
+        #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
         total_bytes: u64,
         #[schemars(regex(pattern = "^image/(png|jpeg|gif|webp|avif)$"))]
         mime_type: String,

@@ -57,7 +57,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 pub const READ_NAME: &str = "Read";
-pub const READ_DESCRIPTION: &str = "Read a bounded page of UTF-8 text or a PNG/JPEG/GIF/WebP image within the Session's allowed filesystem roots. Offset is zero-based lines; limit is a positive line count. Pass a non-null next object to Read to continue; a changed source invalidates the continuation. Images ignore offset/limit and must be at most 5 MiB with dimensions at most 2000 pixels.";
+pub const READ_DESCRIPTION: &str = "Read a bounded page of UTF-8 text or a PNG/JPEG/GIF/WebP image within the Session's allowed filesystem roots. Offset is zero-based lines; limit is a positive line count. Pass a non-null next object to Read to continue; a changed source invalidates the continuation. Images ignore offset/limit and return the original encoded bytes.";
 
 pub fn read_schema() -> Value {
     schemars::schema_for!(ReadInput).into()
@@ -218,31 +218,33 @@ mod image_tests {
     }
 
     #[tokio::test]
-    async fn image_bounds_and_invalid_headers_are_enforced() {
+    async fn image_reads_preserve_large_sources_and_reject_invalid_headers() {
         let temp = tempfile::tempdir().unwrap();
         let read = executor(temp.path());
         let path = temp.path().join("image.png");
-        let mut at_cap = png(2000, 2000);
-        at_cap.resize(5 * 1024 * 1024, 0);
-        fs::write(&path, &at_cap).unwrap();
-        assert!(
-            read.read(
-                request(&path),
-                maka_agent_facts::read::MAX_PAGE_CHARS,
-                CancellationToken::new()
-            )
-            .await
-            .is_ok()
-        );
-        at_cap.push(0);
+        let mut large = png(2200, 700);
+        large.resize(6 * 1024 * 1024, 0);
+        for bytes in [large, png(2001, 1), png(1, 2001)] {
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(
+                read.read(
+                    request(&path),
+                    maka_agent_facts::read::MAX_PAGE_CHARS,
+                    CancellationToken::new()
+                )
+                .await
+                .unwrap(),
+                ReadOutput::Image {
+                    bytes,
+                    mime_type: "image/png".into()
+                }
+            );
+        }
         let mut corrupt_png = png(1, 1);
         corrupt_png[4..8].copy_from_slice(b"oops");
         for bytes in [
-            at_cap,
             corrupt_png,
             b"GIF8xx\x01\0\x01\0\0\0".to_vec(),
-            png(2001, 1),
-            png(1, 2001),
             png(0, 1),
             png(1, 0),
             b"not an image".to_vec(),

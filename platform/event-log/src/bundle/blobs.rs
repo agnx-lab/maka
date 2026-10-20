@@ -20,7 +20,7 @@
 use super::{
     Inventory,
     closure::Closure,
-    format::{Blob, CHUNK, MAX_BLOB_BYTES, Record, Writer},
+    format::{Blob, CHUNK, Record, Writer},
 };
 use crate::{StoreError, sequence_number};
 use sha2::{Digest, Sha256};
@@ -214,9 +214,6 @@ async fn transfer<W: AsyncWrite + Unpin>(
     writer: &mut Writer<W>,
 ) -> Result<(), StoreError> {
     let length = blob.bytes();
-    if length > MAX_BLOB_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
     let mut offset = 0;
     let mut hash = Sha256::new();
     writer.record(&Record::Blob(blob.clone())).await?;

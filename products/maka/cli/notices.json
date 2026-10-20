@@ -5,7 +5,7 @@
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
-    "packages/plugin-sdk/src/contracts.ts": "b0d1f51939f05ff65026caeb58b02933fa4a014fa05c24e609da8e08904b1462",
+    "packages/plugin-sdk/src/contracts.ts": "a6d5be4fa4290dcf2839d1eca577c65421d54983ae95b95b9f5de013feb95b80",
     "packages/plugin-sdk/src/generated/runtime.ts": "ad6374f8ccd098a662cec66d4f74a36cd7e00b1b40b0f77342f7e022e66b357b",
     "packages/plugin-sdk/src/index.ts": "e33226c48bc54fbf377a604ead3b28ea448f50c287582804dab1e6e1059a6f71",
     "packages/plugin-sdk/src/native.ts": "6a826e012f5b7887c88ea295d5826b29939ae2ff0ff722db7b4124e37fc49749",

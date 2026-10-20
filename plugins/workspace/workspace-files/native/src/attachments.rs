@@ -48,16 +48,17 @@ pub async fn read(
             "Use readImage for images and readText for UTF-8 text attachments",
         ));
     }
-    let limit = if image {
-        5 * 1024 * 1024
-    } else {
-        10 * 1024 * 1024
-    };
-    if record.size_bytes > limit as u64 {
+    const TEXT_LIMIT: usize = 10 * 1024 * 1024;
+    if !image && record.size_bytes > TEXT_LIMIT as u64 {
         return Err(failed("Attachment exceeds the Read content limit"));
     }
+    let window = if image {
+        maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES as usize
+    } else {
+        TEXT_LIMIT + 1
+    };
     let chunk = store
-        .read_artifact_chunk(session, id, 0, limit + 1)
+        .read_artifact_chunk(session, id, 0, window)
         .await
         .map_err(failed)?
         .ok_or_else(|| failed("Attachment was not found in this Session"))?;

@@ -39,6 +39,7 @@ use maka_agent_ports::session::history::Role;
 use maka_agent_ports::session::history::Tool;
 use maka_event_log::{
     EventLog,
+    artifacts::ArtifactReadScope,
     bundle::{self, StagedBundle},
     sessions::SessionCopy,
 };
@@ -205,13 +206,22 @@ async fn transferred_generated_borrowed_and_later_frozen_images_keep_exact_row_c
         .unwrap();
     let i = invocation("images", "images-run");
     open(&source, &i).await;
-    super::fixtures::output(
+    // Storage/transfer fixture; native tests separately validate complete image decoding.
+    let mut generated = vec![0x5a; 64 * 1024 * 1024 + 1];
+    generated[..GIF.len()].copy_from_slice(GIF);
+    let generated_digest = content_digest(&generated);
+    let (generated_result, generated_at) = super::fixtures::output(
         &source,
         &i,
         "generated",
-        ToolSuccess::image(GIF.to_vec(), "image/gif".into()).unwrap(),
+        ToolSuccess::image(generated.clone(), "image/gif".into()).unwrap(),
     )
     .await;
+    let generated_id = generated_result.projection_artifacts()[0]
+        .artifact()
+        .id
+        .clone();
+    drop(generated_result);
     upload(&source, "borrowed").await;
     let (_, borrowed_at) =
         super::fixtures::output(&source, &i, "borrowed", borrowed("borrowed")).await;
@@ -222,28 +232,60 @@ async fn transferred_generated_borrowed_and_later_frozen_images_keep_exact_row_c
     let bytes = export(&source, "images").await;
     let summary = bundle::inspect(bytes.as_slice()).await.unwrap();
     let records = super::frames::records(&bytes, &summary.digest);
-    for (id, at) in [("borrowed", borrowed_at), ("late", late_at)] {
+    for (id, at) in [
+        (generated_id.as_str(), generated_at),
+        ("borrowed", borrowed_at),
+        ("late", late_at),
+    ] {
         let record = records
             .iter()
             .find(|r| r["resource"] == "artifact" && r["metadata"]["id"] == id)
             .unwrap();
         assert_eq!(record["frozen_at"], at);
     }
+    drop(records);
     let path = dir.path().join("destination.sqlite");
     let destination = EventLog::open(&path).await.unwrap();
     padding(&destination, "destination-padding", 11).await;
     let receipt = import(&destination, &bytes).await;
     let (through, rows) = rows(&destination, "images", &i).await;
     for step in ["generated", "borrowed", "later"] {
-        assert_eq!(
-            destination
-                .tool_image("images", through, rows[step], 0, 32768)
-                .await
-                .unwrap()
-                .bytes,
+        let image = destination
+            .tool_image("images", through, rows[step], 0, 32768)
+            .await
+            .unwrap();
+        let expected = if step == "generated" {
+            generated.as_slice()
+        } else {
             GIF
-        );
+        };
+        assert_eq!(image.total_bytes, expected.len() as u64);
+        assert_eq!(image.digest, content_digest(expected));
+        assert_eq!(image.bytes, expected[..expected.len().min(32768)]);
     }
+    let expected = generated.clone();
+    let digest = generated_digest.clone();
+    destination
+        .with_artifact(
+            ArtifactReadScope::Session("images"),
+            &generated_id,
+            move |record, reader| {
+                let mut actual = Vec::new();
+                reader.read_to_end(&mut actual).unwrap();
+                assert_eq!(record.size_bytes, expected.len() as u64);
+                assert_eq!(record.source, ArtifactSource::ToolResultProjection);
+                assert_eq!(record.summary, None);
+                assert_eq!(content_digest(&actual), digest);
+                assert!(
+                    actual == expected,
+                    "import must preserve every generated image byte"
+                );
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(rows["generated"].source_sequence, generated_at);
     assert!(
         destination
             .tool_image("images", through, rows["missing"], 0, 32768)
@@ -252,6 +294,7 @@ async fn transferred_generated_borrowed_and_later_frozen_images_keep_exact_row_c
     );
     assert_ne!(rows["borrowed"].source_sequence, borrowed_at);
     assert_eq!(import(&destination, &bytes).await, receipt);
+    drop(bytes);
     destination.close().await.unwrap();
     let reopened = EventLog::open(&path).await.unwrap();
     assert_eq!(
@@ -268,6 +311,88 @@ async fn transferred_generated_borrowed_and_later_frozen_images_keep_exact_row_c
             .await
             .is_err()
     );
+    let revision = reopened
+        .get_session::<Value>("images")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
+    reopened
+        .copy_session(
+            SessionCopy {
+                source_session_id: "images".into(),
+                target_session_id: "branch".into(),
+                expected_source_revision: revision,
+                purpose: CopyPurpose::Branch {
+                    turn_id: None,
+                    side_conversation: false,
+                },
+            },
+            &Value::Null,
+            1,
+        )
+        .await
+        .unwrap();
+    let bytes = export(&reopened, "branch").await;
+    let copied = EventLog::open(&dir.path().join("copied.sqlite"))
+        .await
+        .unwrap();
+    padding(&copied, "copy-padding", 17).await;
+    import(&copied, &bytes).await;
+    assert!(
+        copied
+            .get_session::<Value>("images")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let StorageRef::SessionFile {
+        session_id,
+        relative_path,
+    } = copied
+        .resolve_history_artifact("branch", "images", &generated_id)
+        .await
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("copied generated image must retain destination-owned storage")
+    };
+    assert_eq!(session_id, "branch");
+    let (through, copied_rows) = self::rows(&copied, "branch", &i).await;
+    let image = copied
+        .tool_image("branch", through, copied_rows["generated"], 0, 32768)
+        .await
+        .unwrap();
+    assert_eq!(image.total_bytes, generated.len() as u64);
+    assert_eq!(image.digest, generated_digest);
+    assert_eq!(image.bytes, generated[..32768]);
+    assert!(
+        copied
+            .tool_image("branch", through, copied_rows["missing"], 0, 32768)
+            .await
+            .is_err()
+    );
+    copied
+        .with_artifact(
+            ArtifactReadScope::Session("branch"),
+            &relative_path,
+            move |record, reader| {
+                let mut actual = Vec::new();
+                reader.read_to_end(&mut actual).unwrap();
+                assert_eq!(record.size_bytes, generated.len() as u64);
+                assert_eq!(record.source, ArtifactSource::ToolResultProjection);
+                assert_eq!(record.summary, None);
+                assert_eq!(content_digest(&actual), generated_digest);
+                assert!(
+                    actual == generated,
+                    "copied transfer must preserve every generated image byte"
+                );
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    copied.close().await.unwrap();
     reopened.close().await.unwrap();
     source.close().await.unwrap();
 }

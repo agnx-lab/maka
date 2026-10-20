@@ -26,6 +26,7 @@ use crate::{
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// Admission for the independent MCP and audio routes.
 pub(super) const MAX_MEDIA_BYTES: usize = 5 * 1024 * 1024;
 
 /// Effect output awaiting T2 normalization. This is intentionally not serializable:
@@ -89,11 +90,8 @@ impl ToolSuccess {
     }
 
     /// The executor owns authorization and image-header/dimension validation.
-    /// Core checks representation bounds before accepting pending media.
+    /// Core normalizes the MIME before accepting pending media.
     pub fn image(bytes: Vec<u8>, mime_type: String) -> Result<Self, &'static str> {
-        if bytes.len() > MAX_MEDIA_BYTES {
-            return Err("tool image exceeds 5 MiB byte limit");
-        }
         let mime_type = normalize_mime(&mime_type).ok_or("unsafe tool image MIME")?;
         Ok(Self(ToolSuccessValue::Image { bytes, mime_type }))
     }
@@ -226,9 +224,6 @@ pub(super) fn image_artifact(
     time: SystemTime,
     invocation: &Invocation,
 ) -> Result<(ImageOutput, ProjectionArtifactWrite), &'static str> {
-    if bytes.len() > MAX_MEDIA_BYTES {
-        return Err("tool image exceeds 5 MiB byte limit");
-    }
     let mime_type = normalize_mime(mime).ok_or("unsafe tool image MIME")?;
     let (reference, artifact) =
         media_artifact(bytes, &mime_type, event_id, part, time, invocation)?;

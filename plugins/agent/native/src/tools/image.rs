@@ -82,7 +82,6 @@ impl Image {
             return Err(failed("Image completion cannot be emitted as a chunk"));
         };
         if total_bytes == 0
-            || total_bytes > maka_fs_tools::image::MAX_BYTES
             || offset != self.bytes.len()
             || offset >= total_bytes
             || data.is_empty()
@@ -108,10 +107,10 @@ impl Image {
                 ) {
                     return Err(failed("Unsupported image MIME"));
                 }
-                self.bytes.reserve_exact(total_bytes);
                 self.descriptor = Some((mime_type, total_bytes));
             }
         }
+        self.bytes.try_reserve(chunk.len()).map_err(failed)?;
         self.bytes.extend_from_slice(&chunk);
         Ok(())
     }

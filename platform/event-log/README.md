@@ -45,4 +45,6 @@ First upgrade requires maintenance-first startup with the existing admitted long
 
 Whole-artifact reads use `with_artifact` with Session or execution-turn scope. Metadata and one local read-only BLOB reader share the original writer's snapshot; the synchronous callback owns its destination, and the reader closes after it returns, before the snapshot is released. This avoids reopening and rereading the payload for each chunk. Other writer jobs wait for that artifact copy, and accepted work retains the original owner even if its waiter disappears. Callers retain their resource budgets, digest checks and cancellation policy. `read_artifact_chunk` serves independent windows; repeated windows do not retain a sequential cursor.
 
+Generated tool images retain their complete original artifact bytes through model reconstruction, history copies and bundle transfer. User uploads keep their separate 50 MiB admission limit. Schema migration 36 removes the former generic artifact payload ceiling while preserving payload identity, canonical retention and copied-history mappings; bundle aggregate admission still applies.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

@@ -63,7 +63,7 @@ pub(crate) fn verify_binding(event: &RuntimeEvent, bytes: Option<i64>) -> Result
             for artifact in artifacts {
                 if artifacts.len() > 64 || !ids.insert(&artifact.id)
                     || maka_agent_facts::interaction::entity_id(&artifact.id).is_err()
-                    || artifact.bytes > maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES
+                    || artifact.bytes > 9_007_199_254_740_991
                     || !maka_agent_facts::archive::valid_projection_digest(&artifact.digest)
                     || !references.iter().any(|(reference, _)| {
                         matches!(reference, maka_agent_facts::attachment::StorageRef::SessionFile { session_id, relative_path }

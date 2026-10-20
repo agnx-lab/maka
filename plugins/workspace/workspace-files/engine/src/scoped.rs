@@ -34,8 +34,6 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::image::MAX_BYTES as MAX_IMAGE_BYTES;
-
 mod directory;
 mod path;
 pub(crate) use directory::Directory;
@@ -351,22 +349,18 @@ impl Authority {
             return Err(failed("Read supports only regular files"));
         }
         if image {
-            if metadata.len() > MAX_IMAGE_BYTES as u64 {
-                return Err(failed("Read source exceeds byte limit"));
-            }
             let mut bytes = Vec::new();
             let mut chunk = [0_u8; 8192];
             loop {
                 check_cancelled(&cancellation)?;
-                let available = (MAX_IMAGE_BYTES + 1 - bytes.len()).min(chunk.len());
-                let count = file.read(&mut chunk[..available]).map_err(io_error)?;
+                let count = file.read(&mut chunk).map_err(io_error)?;
                 if count == 0 {
                     break;
                 }
+                bytes
+                    .try_reserve(count)
+                    .map_err(|error| failed(error.to_string()))?;
                 bytes.extend_from_slice(&chunk[..count]);
-                if bytes.len() > MAX_IMAGE_BYTES {
-                    return Err(failed("Read source exceeds byte limit"));
-                }
             }
             check_cancelled(&cancellation)?;
             let mime_type = crate::image::validate(&bytes)?;

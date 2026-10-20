@@ -19,6 +19,7 @@
 
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use image::{ExtendedColorType, ImageEncoder, ImageFormat, codecs::png};
 use maka_agent_facts::artifact::content_digest;
 use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
@@ -290,7 +291,12 @@ pub(super) async fn enable_vision(f: &Fixture) {
     })
     .await;
 }
-pub(super) async fn canonical_image(f: &Fixture, session: &str, bytes: &[u8]) -> Value {
+pub(super) async fn canonical_image(
+    f: &Fixture,
+    session: &str,
+    bytes: &[u8],
+    mime_type: &str,
+) -> Value {
     let fence = f
         .query("observe", json!({"sessionId":session}))
         .await
@@ -330,12 +336,12 @@ pub(super) async fn canonical_image(f: &Fixture, session: &str, bytes: &[u8]) ->
         assert_eq!(page["kind"], "ready");
         assert_eq!(page["totalBytes"], bytes.len());
         assert_eq!(page["digest"], content_digest(bytes));
-        assert_eq!(page["mimeType"], "image/gif");
+        assert_eq!(page["mimeType"], mime_type);
         let chunk = STANDARD.decode(page["data"].as_str().unwrap()).unwrap();
         assert!(!chunk.is_empty() && chunk.len() <= 32768);
         assembled.extend(chunk);
     }
-    assert_eq!(content_digest(&assembled), content_digest(bytes));
+    assert_eq!(assembled, bytes);
     request
 }
 
@@ -352,17 +358,30 @@ async fn selected_workspace_image_stream_reaches_model_and_immutable_canonical_r
         .await;
         enable_vision(&f).await;
         let session = f.create("Actual workspace image").await;
-        let bytes = gif(2 * 1024 * 1024);
-        assert!(
-            bytes.len() > 1024 * 1024,
-            "exceeds ordinary service JSON response budget"
-        );
-        std::fs::write(f.workspace.join("large.gif"), &bytes).unwrap();
+        let (width, height) = (2200, 700);
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|index| [index as u8, (index >> 8) as u8, (index >> 16) as u8, 255])
+            .collect();
+        let mut bytes = Vec::new();
+        png::PngEncoder::new_with_quality(
+            &mut bytes,
+            png::CompressionType::Uncompressed,
+            png::FilterType::NoFilter,
+        )
+        .write_image(&pixels, width, height, ExtendedColorType::Rgba8)
+        .unwrap();
+        let decoded = image::load_from_memory_with_format(&bytes, ImageFormat::Png)
+            .unwrap()
+            .into_rgba8();
+        assert_eq!(decoded.dimensions(), (2200, 700));
+        assert_eq!(decoded.as_raw(), &pixels);
+        assert!(bytes.len() > 5 * 1024 * 1024);
+        std::fs::write(f.workspace.join("large.png"), &bytes).unwrap();
         files::change(&f, &session, "read_only", false, false).await;
         f.send(&session).await.unwrap();
         let (mut socket, _) = listener.accept().await.unwrap();
         request(&mut socket).await;
-        files::tool_response(&mut socket, json!({"path":"large.gif"})).await;
+        files::tool_response(&mut socket, json!({"path":"large.png"})).await;
         let (mut socket, _) = listener.accept().await.unwrap();
         let sent = request(&mut socket).await;
         let images = model_images(&sent);
@@ -371,13 +390,12 @@ async fn selected_workspace_image_stream_reaches_model_and_immutable_canonical_r
             1,
             "model must receive actual image content: {sent}"
         );
-        assert_eq!(images[0].len(), bytes.len());
-        assert_eq!(content_digest(&images[0]), content_digest(&bytes));
+        assert_eq!(images[0], bytes);
         response(&mut socket).await;
         f.drained().await;
         // The original file can change; the canonical tool image must not.
-        std::fs::write(f.workspace.join("large.gif"), gif(0)).unwrap();
-        let mut read = canonical_image(&f, &session, &bytes).await;
+        std::fs::write(f.workspace.join("large.png"), b"source replaced").unwrap();
+        let mut read = canonical_image(&f, &session, &bytes, "image/png").await;
         read["sessionId"] = json!(f.create("Other image owner").await);
         assert!(f.query("toolImage", read).await.is_err());
         f.app.shutdown().await.unwrap();
@@ -576,8 +594,8 @@ async fn javascript_image_stream_requires_complete_valid_bytes_and_independent_s
         offset["offset"] = json!(1);
         let mut mime = good.clone();
         mime["mimeType"] = json!("image/png");
-        let mut oversized = good.clone();
-        oversized["totalBytes"] = json!(5 * 1024 * 1024 + 1);
+        let mut incomplete_large = good.clone();
+        incomplete_large["totalBytes"] = json!(5 * 1024 * 1024 + 1);
         let mut invalid_base64 = good.clone();
         invalid_base64["data"] = json!("bad!");
         let mut truncated = good.clone();
@@ -608,15 +626,22 @@ async fn javascript_image_stream_requires_complete_valid_bytes_and_independent_s
             (vec![], Some(complete.clone()), false, false),
             (vec![offset], Some(complete.clone()), false, false),
             (vec![mime], Some(complete.clone()), false, false),
-            (vec![oversized], Some(complete.clone()), false, false),
+            (vec![incomplete_large], Some(complete.clone()), false, false),
             (vec![invalid_base64], Some(complete.clone()), false, false),
             (vec![truncated], Some(complete.clone()), false, false),
             (vec![invalid_header], Some(complete.clone()), false, false),
             (vec![first.clone()], Some(complete.clone()), false, false),
             (vec![first, changed], Some(complete.clone()), false, false),
-            (vec![frame(&large_dimensions)], Some(complete.clone()), false, false),
+            (vec![frame(&large_dimensions)], Some(complete.clone()), false, true),
             (vec![], Some(good.clone()), true, true),
         ] {
+            let expected_bytes: Vec<u8> = if succeeds && !query {
+                frames.iter().flat_map(|frame| {
+                    STANDARD.decode(frame["data"].as_str().unwrap()).unwrap()
+                }).collect()
+            } else {
+                Vec::new()
+            };
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let f = image_fixture(
                 &listener,
@@ -649,8 +674,8 @@ async fn javascript_image_stream_requires_complete_valid_bytes_and_independent_s
                 "{outcome:?}"
             );
             if succeeds && !query {
-                assert_eq!(images[0], bytes);
-                canonical_image(&f, &session, &bytes).await;
+                assert_eq!(images[0], expected_bytes);
+                canonical_image(&f, &session, &expected_bytes, "image/gif").await;
             } else if query {
                 let maka_agent_facts::event::ToolOutcome::Succeeded {
                     model_projection, ..

@@ -29,6 +29,7 @@ use maka_agent_facts::input::InvocationInput;
 use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_output::ImageOutput;
 use maka_agent_facts::tool_output::ToolOutput;
+use maka_agent_facts::tool_output::ToolSuccess;
 use maka_event_log::EventLog;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
@@ -37,6 +38,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 const FOUR_MIB: usize = 4 * 1024 * 1024;
+const LARGE_TOOL_IMAGE_BYTES: usize = 50 * 1024 * 1024 + 1;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authority() {
@@ -59,14 +61,27 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
                 source_scope: maka_agent_facts::event::LogScope::Session { id: "session".into() },
                 source_high_water: 1, source_digest: "fixture".into(), input_digest: "fixture".into(), route_identity: "fixture".into() },
             Fact::ModelCompleted { step_id: "prior-step".into(), output: serde_json::from_value(json!({
-                "parts":[{"kind":"tool_call","call":{"id":"read","name":"Read","input":{"kind":"json","data":{}},"provider_executed":false}}],
+                "parts":[{"kind":"tool_call","call":{"id":"read","name":"Read","input":{"kind":"json","data":{}},"provider_executed":false}},
+                    {"kind":"tool_call","call":{"id":"read-large","name":"Read","input":{"kind":"json","data":{}},"provider_executed":false}}],
                 "finish_reason":"tool-calls", "usage":{}})).unwrap() },
             Fact::ToolDispatched { presentation: None,
         title: None, operation_id: "prior-step:read".into(), call: ToolCallIdentity::provider("prior-step".into(), "read".into()), name: "Read".into(), input: json!({}) },
+            Fact::ToolDispatched { presentation: None, title: None, operation_id: "prior-step:read-large".into(), call: ToolCallIdentity::provider("prior-step".into(), "read-large".into()), name: "Read".into(), input: json!({}) },
         ];
         for fact in facts { log.append(&EventWrite::plain(RuntimeEvent::new(prior.clone(), fact)).unwrap()).await.unwrap(); }
         log.append(&EventWrite::tool_success("prior-result".into(), std::time::SystemTime::now(), prior.clone(), "prior-step:read".into(),
             ToolOutput::Image(ImageOutput { detail: Some(maka_agent_facts::tool_output::ImageDetail::High), mime_type: "image/png".into(), reference: serde_json::from_value(attachment("tool")["ref"].clone()).unwrap() }).into()).unwrap().0).await.unwrap();
+        // Header-only storage fixture: native tests separately prove complete image decoding.
+        // This must be generated tool evidence, rather than an upload with a larger allowance.
+        let mut large_bytes = vec![0; LARGE_TOOL_IMAGE_BYTES];
+        large_bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        let (large_result, _) = EventWrite::tool_success(
+            "prior-large-result".into(), std::time::SystemTime::now(), prior.clone(),
+            "prior-step:read-large".into(), ToolSuccess::image(large_bytes, "image/png".into()).unwrap(),
+        ).unwrap();
+        let generated_id = large_result.projection_artifacts()[0].artifact().id.clone();
+        log.append(&large_result).await.unwrap();
+        drop(large_result);
         log.append(&EventWrite::plain(RuntimeEvent::new(prior, Fact::InvocationEnded { outcome: InvocationOutcome::Completed })).unwrap()).await.unwrap();
         let revision = log.get_session::<Value>("session").await.unwrap().unwrap().revision;
         assert!(matches!(log.copy_session(maka_event_log::sessions::SessionCopy {
@@ -98,13 +113,9 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
         let body = server.await.unwrap();
         let mut urls = Vec::new();
         collect_images(&body["messages"], &mut urls);
-        assert_eq!(urls.len(), 5, "prior user + typed Read + all three current images must reach the provider");
-        for (url, size) in urls.into_iter().zip([FOUR_MIB, FOUR_MIB, FOUR_MIB, 8, 50 * 1024 * 1024]) {
-            let data = url.strip_prefix("data:image/png;base64,").unwrap();
-            let bytes = STANDARD.decode(data).unwrap();
-            assert!(bytes.len() == size, "provider image length differs from the accepted artifact");
-            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
-            assert!(bytes[8..].iter().all(|byte| *byte == 0), "provider image bytes differ from the accepted artifact");
+        assert_eq!(urls.len(), 6, "prior user + typed and generated Read images + all three current images must reach the provider");
+        for (url, size) in urls.into_iter().zip([FOUR_MIB, FOUR_MIB, LARGE_TOOL_IMAGE_BYTES, FOUR_MIB, 8, 50 * 1024 * 1024]) {
+            assert_fixture_image(url, size);
         }
         let text = body["messages"].to_string();
         assert!(text.contains("\"detail\":\"high\""), "tool image detail reaches the provider after reopening");
@@ -120,7 +131,7 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
         assert!(!canonical.contains("data:image"), "projection must not persist image bytes");
         assert!(canonical.len() < 32 * 1024);
         use maka_event_log::artifacts::ArtifactDeletion;
-        for (id, expected) in [("historical", ArtifactDeletion::Deleted), ("tool", ArtifactDeletion::Protected)] {
+        for (id, expected) in [("historical", ArtifactDeletion::Deleted), ("tool", ArtifactDeletion::Protected), (generated_id.as_str(), ArtifactDeletion::Protected)] {
             assert_eq!(log.delete_user_artifact("session", id).await.unwrap(), expected, "{id}");
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -138,7 +149,10 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
         let copied_request = copied_request.await.unwrap();
         let mut inherited_images = Vec::new();
         collect_images(&copied_request["messages"], &mut inherited_images);
-        assert_eq!(inherited_images.len(), 2, "copy retains the deleted user upload and protected tool image through destination-owned references");
+        assert_eq!(inherited_images.len(), 3, "copy retains the deleted user upload and both protected tool images through destination-owned references");
+        for (url, size) in inherited_images.into_iter().zip([FOUR_MIB, FOUR_MIB, LARGE_TOOL_IMAGE_BYTES]) {
+            assert_fixture_image(url, size);
+        }
         let reference = log.resolve_history_artifact("branch", "session", "historical").await.unwrap().unwrap();
         assert!(copied_request["messages"].to_string().contains(&reference.resource_ref().unwrap()),
             "Read must receive the destination-owned resource URI");
@@ -146,6 +160,11 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
         let maka_agent_facts::attachment::StorageRef::SessionFile { relative_path, .. } = tool_reference else { panic!("owned tool image") };
         assert!(log.read_tool_result("branch", "prior-result").await.unwrap().unwrap().serialized_result.contains(&relative_path),
             "tool-result Read renders the copied image's locator, not the source artifact ID");
+        let generated_reference = log.resolve_history_artifact("branch", "session", &generated_id).await.unwrap().unwrap();
+        let maka_agent_facts::attachment::StorageRef::SessionFile { session_id, relative_path } = generated_reference else { panic!("owned generated image") };
+        assert_eq!(session_id, "branch");
+        assert!(log.read_tool_result("branch", "prior-large-result").await.unwrap().unwrap().serialized_result.contains(&relative_path),
+            "generated tool evidence keeps destination-owned authority after copying");
         let original = log.prefix(100, 128 * 1024).await.unwrap();
         let source_opening = original.events.iter().find(|e| e.event.invocation.invocation_id == "invocation-historical"
             && matches!(e.event.fact, Fact::InvocationOpened { .. })).unwrap();
@@ -153,6 +172,21 @@ async fn reopened_images_preserve_complete_accepted_artifacts_and_copied_authori
             "rendering aliases cannot rewrite canonical input");
         engine.drain().await;
     }).await.expect("image projection must make bounded progress");
+}
+
+fn assert_fixture_image(url: &str, size: usize) {
+    let data = url.strip_prefix("data:image/png;base64,").unwrap();
+    let bytes = STANDARD.decode(data).unwrap();
+    assert_eq!(
+        bytes.len(),
+        size,
+        "provider image length differs from the accepted artifact"
+    );
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(
+        bytes[8..].iter().all(|byte| *byte == 0),
+        "provider image bytes differ from the accepted artifact"
+    );
 }
 
 fn collect_images<'a>(value: &'a Value, urls: &mut Vec<&'a str>) {

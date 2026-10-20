@@ -19,7 +19,7 @@
 
 use super::{
     BundleError, BundleSummary,
-    format::{Blob, MAX_BLOB_BYTES, Record},
+    format::{Blob, Record},
     reader::Reader,
 };
 use crate::StoreError;
@@ -34,22 +34,23 @@ pub(super) async fn payload(
     number: i64,
     descriptor: &Blob,
 ) -> Result<Vec<u8>, StoreError> {
-    if descriptor.bytes() > MAX_BLOB_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
-    let mut payload = Vec::with_capacity(descriptor.bytes() as usize);
-    while payload.len() < descriptor.bytes() as usize {
+    let length = usize::try_from(descriptor.bytes()).map_err(|_| StoreError::PrefixTooLarge)?;
+    let mut payload = Vec::new();
+    while payload.len() < length {
         let chunk: Vec<u8> =
             sqlx::query_scalar("SELECT payload FROM chunks WHERE frame=? AND offset=?")
                 .bind(number)
                 .bind(payload.len() as i64)
                 .fetch_one(&mut *staged)
                 .await?;
-        if chunk.is_empty() || chunk.len() > descriptor.bytes() as usize - payload.len() {
+        if chunk.is_empty() || chunk.len() > length - payload.len() {
             return Err(StoreError::InvalidTransition(
                 "staged blob length differs".into(),
             ));
         }
+        payload
+            .try_reserve(chunk.len())
+            .map_err(std::io::Error::other)?;
         payload.extend_from_slice(&chunk);
     }
     if content_digest(&payload) != descriptor.digest() {

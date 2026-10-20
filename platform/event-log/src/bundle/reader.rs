@@ -19,7 +19,7 @@
 
 use super::{
     BundleError, BundleSummary, Inventory,
-    format::{Blob, CHUNK, MAGIC, MAX_BLOB_BYTES, MAX_BYTES, MAX_EVENTS, MAX_FRAME, Record},
+    format::{Blob, CHUNK, MAGIC, MAX_BYTES, MAX_EVENTS, MAX_FRAME, Record},
 };
 use crate::StoreError;
 use sha2::{Digest, Sha256};
@@ -159,11 +159,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
                 self.previous_event = *sequence;
             }
             Record::Blob(blob) => {
-                // Matches the largest canonical payload; metadata cannot request a
-                // giant allocation or an unbounded binary drain.
-                if blob.bytes() > MAX_BLOB_BYTES
-                    || blob.bytes() > MAX_BYTES.saturating_sub(self.bytes)
-                {
+                if blob.bytes() > MAX_BYTES.saturating_sub(self.bytes) {
                     return Err(StoreError::PrefixTooLarge);
                 }
                 self.pending = Some(BlobRead {

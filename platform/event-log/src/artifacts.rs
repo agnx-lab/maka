@@ -176,7 +176,10 @@ pub(crate) fn validate_material(
     digest: &str,
 ) -> Result<String, StoreError> {
     artifact.validate().map_err(invalid)?;
-    if artifact.size_bytes != bytes || artifact.size_bytes > MAX_ATTACHMENT_BYTES {
+    if artifact.size_bytes != bytes
+        || (artifact.source == ArtifactSource::UserUpload
+            && artifact.size_bytes > MAX_ATTACHMENT_BYTES)
+    {
         return Err(invalid("Artifact payload size mismatch or limit exceeded"));
     }
     let encoded = serde_json::to_string(artifact)?;
@@ -266,7 +269,6 @@ pub(crate) async fn read_image(
             "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/avif"
         )
         || artifact.size_bytes == 0
-        || artifact.size_bytes > 5 * 1024 * 1024
         || !digest.strip_prefix("sha256:").is_some_and(|value| {
             value.len() == 64
                 && value

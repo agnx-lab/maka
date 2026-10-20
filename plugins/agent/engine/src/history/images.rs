@@ -21,7 +21,6 @@ use maka_agent_facts::language::Language;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use maka_agent_facts::attachment::AttachmentRef;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_agent_facts::attachment::sniff_binary_mime;
 use maka_agent_facts::event::StoredEvent;
@@ -198,15 +197,23 @@ async fn read(
     if maka_agent_facts::interaction::entity_id(relative_path).is_err() {
         return Ok(ImageRead::Unavailable("not_found"));
     }
-    // Storage admission bounds each artifact; project its complete accepted payload.
-    let Some(chunk) = log
-        .read_artifact_chunk(session, relative_path, 0, MAX_ATTACHMENT_BYTES as usize)
+    let Some(bytes) = log
+        .with_artifact(
+            maka_event_log::artifacts::ArtifactReadScope::Session(session),
+            relative_path,
+            |_, reader| {
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes)?;
+                Ok::<_, maka_event_log::StoreError>(bytes)
+            },
+        )
         .await?
+        .transpose()?
     else {
         return Ok(ImageRead::Unavailable("not_found"));
     };
-    if !audio && sniff_binary_mime(&chunk.bytes).is_none() {
+    if !audio && sniff_binary_mime(&bytes).is_none() {
         return Ok(ImageRead::Unavailable("unsupported_mime"));
     }
-    Ok(ImageRead::Bytes(chunk.bytes))
+    Ok(ImageRead::Bytes(bytes))
 }

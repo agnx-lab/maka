@@ -25381,7 +25381,7 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint64',
                 minimum: 0,
-                maximum: 5242880,
+                maximum: 9007199254740991,
               },
             },
             additionalProperties: false,
@@ -25434,7 +25434,7 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint64',
                     minimum: 1,
-                    maximum: 5242880,
+                    maximum: 9007199254740991,
                   },
                   mimeType: {
                     type: 'string',
@@ -36183,13 +36183,13 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint',
                     minimum: 1,
-                    maximum: 5242880,
+                    maximum: 9007199254740991,
                   },
                   offset: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 5242879,
+                    maximum: 9007199254740991,
                   },
                   data: {
                     type: 'string',
