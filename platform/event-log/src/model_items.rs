@@ -113,7 +113,11 @@ pub(crate) async fn project(
                         .as_ref()
                         .map_or(0, |value| value.to_string().len())
             }
-            ModelEvent::ResponseMetadata { .. } | ModelEvent::Finished { .. } => 0,
+            ModelEvent::ToolInputStarted { .. }
+            | ModelEvent::ToolInputDelta { .. }
+            | ModelEvent::ToolInputFinished { .. }
+            | ModelEvent::ResponseMetadata { .. }
+            | ModelEvent::Finished { .. } => 0,
             _ => serde_json::to_vec(&observation)?.len(),
         });
         if scratch > max_bytes {

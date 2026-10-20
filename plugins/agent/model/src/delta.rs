@@ -24,11 +24,16 @@ use tokio::sync::OwnedSemaphorePermit;
 
 /// Bound individual journal observations independently of provider chunk sizes.
 /// Splitting is linear and retains provider metadata once, on the first chunk.
+pub(crate) enum DeltaKind {
+    Part(Option<Value>),
+    ToolInput,
+}
+
 pub(crate) struct PendingDelta {
     id: String,
     text: String,
     offset: usize,
-    provider_options: Option<Value>,
+    kind: DeltaKind,
     reservation: Option<Arc<OwnedSemaphorePermit>>,
 }
 
@@ -36,14 +41,14 @@ impl PendingDelta {
     pub fn new(
         id: String,
         text: String,
-        provider_options: Option<Value>,
+        kind: DeltaKind,
         reservation: Option<Arc<OwnedSemaphorePermit>>,
     ) -> Self {
         Self {
             id,
             text,
             offset: 0,
-            provider_options,
+            kind,
             reservation,
         }
     }
@@ -56,19 +61,91 @@ impl Iterator for PendingDelta {
         if self.offset == self.text.len() {
             return None;
         }
-        let mut end = (self.offset + 8 * 1024).min(self.text.len());
-        while !self.text.is_char_boundary(end) {
-            end -= 1;
-        }
+        let end = match &self.kind {
+            DeltaKind::Part(_) => {
+                let mut end = (self.offset + 8 * 1024).min(self.text.len());
+                while !self.text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                end
+            }
+            DeltaKind::ToolInput => {
+                // The watch budget counts JSON bytes. Reserve its quotes too;
+                // an ASCII control may need six bytes despite one raw byte.
+                let mut encoded = 2;
+                let mut end = self.offset;
+                for ch in self.text[self.offset..].chars() {
+                    let bytes = match ch {
+                        '"' | '\\' | '\u{8}' | '\t' | '\n' | '\u{c}' | '\r' => 2,
+                        '\0'..='\u{1f}' => 6,
+                        _ => ch.len_utf8(),
+                    };
+                    if encoded + bytes > 8 * 1024 {
+                        break;
+                    }
+                    encoded += bytes;
+                    end += ch.len_utf8();
+                }
+                end
+            }
+        };
         let text = self.text[self.offset..end].to_owned();
         self.offset = end;
-        Some(Emission {
-            event: ModelEvent::PartDelta {
+        let event = match &mut self.kind {
+            DeltaKind::Part(provider_options) => ModelEvent::PartDelta {
                 id: self.id.clone(),
                 text,
-                provider_options: self.provider_options.take(),
+                provider_options: provider_options.take(),
             },
+            DeltaKind::ToolInput => ModelEvent::ToolInputDelta {
+                id: self.id.clone(),
+                text,
+            },
+        };
+        Some(Emission {
+            event,
             reservation: self.reservation.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::Semaphore;
+
+    #[test]
+    fn tool_input_chunks_bound_json_escaping_and_keep_the_original_reservation() {
+        let text = format!("{}中文😀\"\\\n{}", "\u{1}".repeat(1365), "\0".repeat(1366));
+        let budget = Arc::new(Semaphore::new(7));
+        let reservation = budget.clone().try_acquire_many_owned(7).unwrap();
+        let mut pending = PendingDelta::new(
+            "tool".into(),
+            text.clone(),
+            DeltaKind::ToolInput,
+            Some(Arc::new(reservation)),
+        );
+        let chunks = pending.by_ref().collect::<Vec<_>>();
+        assert_eq!(chunks.len(), 3);
+        let mut observed = String::new();
+        for (index, chunk) in chunks.iter().enumerate() {
+            let ModelEvent::ToolInputDelta { id, text } = &chunk.event else {
+                panic!("expected tool input fragment");
+            };
+            assert_eq!(id, "tool");
+            let encoded = serde_json::to_vec(text).unwrap();
+            assert!(encoded.len() <= 8 * 1024);
+            if index == 0 {
+                assert_eq!(text, &"\u{1}".repeat(1365));
+                assert_eq!(encoded.len(), 8 * 1024);
+            }
+            observed.push_str(text);
+        }
+        assert_eq!(observed, text);
+        assert_eq!(budget.available_permits(), 0);
+        drop(pending);
+        assert_eq!(budget.available_permits(), 0);
+        drop(chunks);
+        assert_eq!(budget.available_permits(), 7);
     }
 }

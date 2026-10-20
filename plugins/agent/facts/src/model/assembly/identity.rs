@@ -40,14 +40,18 @@ impl StepBuilder {
     }
 
     pub(super) fn validate_call(&self, call: &ModelToolCall) -> Result<(), ModelError> {
+        self.validate_tool_identity(&call.id, &call.name)
+    }
+
+    pub(super) fn validate_tool_identity(&self, id: &str, name: &str) -> Result<(), ModelError> {
         let max_id_bytes =
             TOOL_IDENTITY_MAX_BYTES.saturating_sub(self.step_id_bytes.map_or(0, |bytes| bytes + 1));
-        if call.id.is_empty() || call.id.len() > max_id_bytes {
+        if id.is_empty() || id.len() > max_id_bytes {
             return Err(invalid(
                 "tool call identity exceeds durable operation bounds",
             ));
         }
-        if call.name.is_empty() || call.name.len() > TOOL_NAME_MAX_BYTES {
+        if name.is_empty() || name.len() > TOOL_NAME_MAX_BYTES {
             return Err(invalid("tool name must contain 1 to 256 UTF-8 bytes"));
         }
         Ok(())
@@ -165,5 +169,115 @@ mod tests {
                 .is_err()
         );
         assert!(builder.finish().is_err());
+    }
+
+    #[test]
+    fn input_observations_never_accept_items_or_change_final_argument_authority() {
+        let mut builder = StepBuilder::for_step("step").unwrap();
+        builder
+            .push(ModelEvent::PartStarted {
+                id: "text".into(),
+                text_kind: crate::model::TextKind::Text,
+                provider_options: None,
+            })
+            .unwrap();
+        for event in [
+            ModelEvent::ToolInputStarted {
+                id: "call".into(),
+                name: "echo".into(),
+                provider_executed: false,
+            },
+            ModelEvent::ToolInputDelta {
+                id: "call".into(),
+                text: "{\"path\":\"src/中".into(),
+            },
+            ModelEvent::ToolInputFinished { id: "call".into() },
+        ] {
+            builder.push(event).unwrap();
+            assert!(builder.accepted_item().is_none());
+            assert_eq!(builder.accepted_parts().count(), 0);
+        }
+        let complete = ModelToolCall {
+            id: "call".into(),
+            name: "echo".into(),
+            provider_executed: false,
+            input: json!({"path":"normalized/中文"}).into(),
+            provider_options: Some(json!({"provider":{"signature":"final"}})),
+        };
+        builder
+            .push(ModelEvent::ToolCall(complete.clone()))
+            .unwrap();
+        assert_eq!(
+            builder.accepted_item(),
+            Some((1, &ModelPart::ToolCall { call: complete }))
+        );
+        // Adapters that only supply complete calls retain the same admission.
+        builder
+            .push(call("direct".into(), "echo".into(), false))
+            .unwrap();
+        assert_eq!(builder.accepted_item().unwrap().0, 2);
+        builder
+            .push(ModelEvent::PartFinished {
+                id: "text".into(),
+                provider_options: None,
+            })
+            .unwrap();
+        assert_eq!(builder.accepted_item().unwrap().0, 0);
+        builder.push(finish()).unwrap();
+        let step = builder.finish().unwrap();
+        assert_eq!(step.parts.len(), 3);
+        assert_eq!(
+            step.tool_calls()
+                .map(|call| call.id.as_str())
+                .collect::<Vec<_>>(),
+            ["call", "direct"]
+        );
+    }
+
+    #[test]
+    fn incomplete_or_mismatched_input_identity_cannot_complete_a_step() {
+        let start = ModelEvent::ToolInputStarted {
+            id: "call".into(),
+            name: "echo".into(),
+            provider_executed: false,
+        };
+        let end = ModelEvent::ToolInputFinished { id: "call".into() };
+        let delta = ModelEvent::ToolInputDelta {
+            id: "call".into(),
+            text: "{}".into(),
+        };
+        for events in [
+            vec![delta.clone()],
+            vec![end.clone()],
+            vec![start.clone(), start.clone()],
+            vec![start.clone(), end.clone(), end.clone()],
+            vec![start.clone(), end.clone(), delta],
+            vec![start.clone(), call("call".into(), "other".into(), false)],
+            vec![start.clone(), call("call".into(), "echo".into(), true)],
+            vec![start.clone(), finish()],
+            vec![start.clone(), end, finish()],
+            vec![call("call".into(), "echo".into(), false), start.clone()],
+        ] {
+            let mut builder = StepBuilder::for_step("step").unwrap();
+            let mut rejected = false;
+            for event in events {
+                if builder.push(event).is_err() {
+                    rejected = true;
+                    break;
+                }
+            }
+            assert!(rejected);
+            assert!(builder.finish().is_err());
+        }
+        // Final acceptance can close an observed input even if no separate
+        // display-only end event was supplied by the adapter.
+        let mut builder = StepBuilder::for_step("step").unwrap();
+        builder.push(start).unwrap();
+        builder
+            .push(call("call".into(), "echo".into(), false))
+            .unwrap();
+        assert_eq!(builder.accepted_item().unwrap().0, 0);
+        builder.push(finish()).unwrap();
+        assert_eq!(builder.finish().unwrap().parts.len(), 1);
     }
 }

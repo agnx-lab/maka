@@ -52,6 +52,7 @@ pub enum StreamFact {
     },
     ExecutorToolProgress {
         tool_call_id: String,
+        /// The latest at most 2048 codepoints; the original observation remains in the log.
         text: String,
     },
     ExecutorToolResult {
@@ -74,8 +75,31 @@ pub enum StreamFact {
         step_id: String,
         part_id: String,
     },
+    ToolInputStarted {
+        step_id: String,
+        tool_call_id: String,
+        name: String,
+        provider_executed: bool,
+    },
+    ToolInputDelta {
+        step_id: String,
+        tool_call_id: String,
+        text: String,
+    },
+    ToolInputReady {
+        step_id: String,
+        tool_call_id: String,
+        name: String,
+        provider_executed: bool,
+    },
+    ProviderToolResult {
+        step_id: String,
+        tool_call_id: String,
+        is_error: bool,
+    },
     StepEnded {
         step_id: String,
+        completed: bool,
         failed: bool,
         #[serde(default)]
         interrupted: Vec<String>,
@@ -106,6 +130,7 @@ pub enum StreamFact {
 pub enum ToolSettlement {
     Succeeded,
     Failed,
+    Unknown,
 }
 
 #[derive(Debug)]
@@ -225,8 +250,8 @@ impl EventLog {
     }
 }
 
-// CASE evaluates only the selected arm: accepted model output, tool input/output,
-// and provider options are never included in the selected delivery value.
+// CASE evaluates only the selected arm: complete tool input/output and provider
+// options never enter delivery. Only bounded, display-only input deltas do.
 const STREAM_EVENTS: &str = "
 WITH events AS MATERIALIZED (
 SELECT json_object(
@@ -252,7 +277,7 @@ SELECT json_object(
         WHEN kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') = 'tool_start' THEN
             json_object('kind', 'executor_tool_start', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'), 'name', json_extract(event_json, '$.fact.output.name'))
         WHEN kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') = 'tool_progress' THEN
-            json_object('kind', 'executor_tool_progress', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'), 'text', json_extract(event_json, '$.fact.output.text'))
+            json_object('kind', 'executor_tool_progress', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'), 'text', substr(json_extract(event_json, '$.fact.output.text'), -2048))
         WHEN kind = 'executor_observed' THEN
             json_object('kind', 'executor_tool_result', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'),
                 'is_error', json(CASE WHEN json_extract(event_json, '$.fact.output.isError') THEN 'true' ELSE 'false' END))
@@ -277,7 +302,30 @@ SELECT json_object(
         WHEN kind IN ('model_completed', 'model_interrupted') THEN
             json_object('kind', 'step_ended',
                 'step_id', json_extract(event_json, '$.fact.step_id'),
+                'completed', json(CASE WHEN kind='model_completed' THEN 'true' ELSE 'false' END),
                 'failed', json(CASE WHEN kind = 'model_interrupted' AND json_extract(event_json, '$.fact.status') != 'cancelled' THEN 'true' ELSE 'false' END))
+        WHEN json_extract(event_json, '$.fact.event.kind') = 'tool_input_started' THEN
+            json_object('kind', 'tool_input_started',
+                'step_id', json_extract(event_json, '$.fact.step_id'),
+                'tool_call_id', json_extract(event_json, '$.fact.event.data.id'),
+                'name', json_extract(event_json, '$.fact.event.data.name'),
+                'provider_executed', json(CASE WHEN json_extract(event_json, '$.fact.event.data.provider_executed') THEN 'true' ELSE 'false' END))
+        WHEN json_extract(event_json, '$.fact.event.kind') = 'tool_input_delta' THEN
+            json_object('kind', 'tool_input_delta',
+                'step_id', json_extract(event_json, '$.fact.step_id'),
+                'tool_call_id', json_extract(event_json, '$.fact.event.data.id'),
+                'text', json_extract(event_json, '$.fact.event.data.text'))
+        WHEN json_extract(event_json, '$.fact.event.kind') = 'tool_call' THEN
+            json_object('kind', 'tool_input_ready',
+                'step_id', json_extract(event_json, '$.fact.step_id'),
+                'tool_call_id', json_extract(event_json, '$.fact.event.data.id'),
+                'name', json_extract(event_json, '$.fact.event.data.name'),
+                'provider_executed', json(CASE WHEN json_extract(event_json, '$.fact.event.data.provider_executed') THEN 'true' ELSE 'false' END))
+        WHEN json_extract(event_json, '$.fact.event.kind') = 'provider_tool_result' THEN
+            json_object('kind', 'provider_tool_result',
+                'step_id', json_extract(event_json, '$.fact.step_id'),
+                'tool_call_id', json_extract(event_json, '$.fact.event.data.id'),
+                'is_error', json(CASE WHEN json_extract(event_json, '$.fact.event.data.is_error') THEN 'true' ELSE 'false' END))
         WHEN json_extract(event_json, '$.fact.event.kind') = 'part_started' THEN
             json_object('kind', 'part_started',
                 'step_id', json_extract(event_json, '$.fact.step_id'),
@@ -308,12 +356,21 @@ AND (kind != 'model_observed' OR
              AND request.operation_id = json_extract(runtime_events.event_json, '$.fact.step_id')
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND json_extract(request.event_json, '$.fact.purpose') = 'main'))
+AND (kind != 'model_observed' OR json_extract(event_json, '$.fact.event.kind') != 'provider_tool_result'
+     OR EXISTS (SELECT 1 FROM runtime_events call WHERE call.invocation_id=runtime_events.invocation_id
+         AND call.kind='model_observed' AND call.sequence<runtime_events.sequence
+         AND json_extract(call.event_json,'$.fact.step_id')=json_extract(runtime_events.event_json,'$.fact.step_id')
+         AND json_extract(call.event_json,'$.fact.event.kind')='tool_call'
+         AND json_extract(call.event_json,'$.fact.event.data.id')=json_extract(runtime_events.event_json,'$.fact.event.data.id')
+         AND json_extract(call.event_json,'$.fact.event.data.provider_executed')))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
              'tool_dispatched', 'tool_rejected', 'tool_settled', 'executor_started', 'executor_observed', 'executor_completed', 'context_checkpoint_recorded')
      OR (kind = 'model_requested' AND json_extract(event_json, '$.fact.purpose') = 'summary')
      OR (kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') IN
-             ('part_started', 'part_delta', 'part_finished')))
+             ('part_started', 'part_delta', 'part_finished',
+              'tool_input_started', 'tool_input_delta',
+              'tool_call', 'provider_tool_result')))
 ORDER BY sequence LIMIT ?4
 ), roots AS MATERIALIZED (
  SELECT opening.invocation_id,

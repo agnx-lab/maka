@@ -458,3 +458,94 @@ test('a completed authoritative empty answer clears live text at its terminal fe
   );
   assert.deepEqual(historyRequests(requests), [request(20, afterSeed)]);
 });
+
+test('tool input previews and executor progress do not become prose or reread history', () => {
+  const { transcript: t, reports, requests } = seeded([]);
+  t.parts = [part('reply')];
+  t.appendLive(part('reply'), 'Reading the project.', 6);
+  t.deliver({
+    kind: 'events',
+    through: 9,
+    nextAfter: 9,
+    events: [
+      {
+        kind: 'tool_input_started',
+        toolUseId: 'tool',
+        stepId: 'step',
+        name: 'Read',
+        providerExecuted: false,
+      },
+      { kind: 'tool_input_delta', toolUseId: 'tool', text: '{"path":"秘密.txt"}' },
+      { kind: 'executor_tool_progress', toolUseId: 'external', text: 'Private progress' },
+    ].map((fact, index) => ({
+      sequence: index + 7,
+      invocationId: 'run',
+      turnId: 'turn',
+      fact,
+    })),
+  });
+  assert.deepEqual(
+    {
+      rows: t.rows.map(({ role, text }) => ({ role, text })),
+      live: t.live.map(({ text }) => text),
+      requests,
+      reports,
+      nextAfter: t.watchLast,
+    },
+    {
+      rows: [{ role: 'user', text: 'Earlier question' }],
+      live: ['Reading the project.'],
+      requests: [],
+      reports: [],
+      nextAfter: 9,
+    },
+  );
+});
+
+for (const fact of [
+  {
+    kind: 'tool_input_ready',
+    toolUseId: 'tool',
+    stepId: 'step',
+    name: 'Read',
+    providerExecuted: false,
+  },
+  { kind: 'tool_dispatched', toolUseId: 'tool', name: 'Read', title: null },
+  { kind: 'tool_rejected', toolUseId: 'tool' },
+  { kind: 'tool_settled', toolUseId: 'tool', settlement: 'returned' },
+  { kind: 'provider_tool_result', toolUseId: 'tool', isError: false },
+  { kind: 'executor_tool_start', toolUseId: 'tool', name: 'Read' },
+  { kind: 'executor_tool_result', toolUseId: 'tool', isError: false },
+]) {
+  test(`${fact.kind} reads the canonical tool row at the delivery fence`, async () => {
+    const {
+      transcript: t,
+      reports,
+      requests,
+    } = seeded([page(20, [chunk('tool-row', 20, 'Read project.txt', { role: 'tool_call' })])]);
+    let following;
+    // Capture the production follow promise started by delivery, without a second read.
+    t.follow = () => {
+      following = Transcript.prototype.follow.call(t);
+      return following;
+    };
+    t.deliver({
+      kind: 'events',
+      through: 20,
+      nextAfter: 20,
+      events: [{ sequence: 20, invocationId: 'run', turnId: 'turn', fact }],
+    });
+    await following;
+    assert.deepEqual(
+      { rows: t.rows.map(({ role, text }) => ({ role, text })), reports },
+      {
+        rows: [
+          { role: 'user', text: 'Earlier question' },
+          { role: 'tool_call', text: 'Read project.txt' },
+        ],
+        reports: [],
+      },
+    );
+    assert.deepEqual(historyRequests(requests), [request(20, afterSeed)]);
+  });
+}

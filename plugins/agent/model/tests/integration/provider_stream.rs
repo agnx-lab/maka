@@ -255,6 +255,100 @@ assert_eq!(step.finish_reason, maka_agent_facts::model::ModelFinishReason::ToolC
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sdk_tool_argument_prefix_is_observed_before_completion_and_chunked_at_utf8_boundaries() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let executor = ModelExecutor::new(Duration::from_secs(15)).unwrap();
+        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiCompatible { name: "fixture".into() }, ProviderKind::Anthropic] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let gate = Arc::new(Notify::new());
+            let release = gate.clone();
+            let path = format!("src/{}文", "中😀".repeat(1800));
+            let prefix = format!("{{\"path\":\"src/{}", "中😀".repeat(1800));
+            let suffix = "文\"}";
+            let (first, last) = match &kind {
+                ProviderKind::OpenaiChat | ProviderKind::OpenaiCompatible { .. } => (
+                    sse(&[json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"tool-1","type":"function","function":{"name":"echo","arguments":prefix}}]},"finish_reason":null}]})]),
+                    sse(&[
+                        json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":suffix}}]},"finish_reason":null}]}),
+                        json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}),
+                    ]) + "data: [DONE]\n\n",
+                ),
+                ProviderKind::Anthropic => (
+                    sse(&[
+                        json!({"type":"message_start","message":{"id":"reply","type":"message","role":"assistant","model":"test-model","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2,"output_tokens":0}}}),
+                        json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-1","name":"echo","input":{}}}),
+                        json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":prefix}}),
+                    ]),
+                    sse(&[
+                        json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":suffix}}),
+                        json!({"type":"content_block_stop","index":0}),
+                        json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":3}}),
+                        json!({"type":"message_stop"}),
+                    ]),
+                ),
+                _ => unreachable!("native Responses has its own stream test"),
+            };
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{first}", first.len() + last.len()).as_bytes()).await.unwrap();
+                release.notified().await;
+                socket.write_all(last.as_bytes()).await.unwrap();
+            });
+            let mut stream = executor.stream(request(kind, base), CancellationToken::new()).await.unwrap();
+            let mut builder = StepBuilder::for_step("arguments").unwrap();
+            let mut observed = String::new();
+            let mut started = false;
+            let mut finished = false;
+            let mut released = false;
+            while let Some(event) = stream.next().await {
+                let event = event.unwrap().event;
+                match &event {
+                    ModelEvent::ToolInputStarted { id, name, provider_executed } => {
+                        assert!(!started);
+                        assert_eq!(id, "tool-1");
+                        assert_eq!(name, "echo");
+                        assert!(!provider_executed);
+                        started = true;
+                    }
+                    ModelEvent::ToolInputDelta { id, text } => {
+                        assert_eq!(id, "tool-1");
+                        assert!(started && !finished);
+                        assert!(text.len() <= 8 * 1024);
+                        observed.push_str(text);
+                    }
+                    ModelEvent::ToolInputFinished { id } => {
+                        assert_eq!(id, "tool-1");
+                        assert!(released && !finished);
+                        finished = true;
+                    }
+                    ModelEvent::ToolCall(_) => assert!(released && finished),
+                    _ => {}
+                }
+                builder.push(event).unwrap();
+                if !released && observed == prefix {
+                    assert!(started);
+                    assert!(builder.accepted_item().is_none());
+                    assert_eq!(builder.accepted_parts().count(), 0);
+                    released = true;
+                    gate.notify_one();
+                }
+            }
+            assert!(released && finished);
+            assert_eq!(observed, format!("{prefix}{suffix}"));
+            let step = builder.finish().unwrap();
+            assert_eq!(step.parts.len(), 1);
+            let call = step.tool_calls().next().unwrap();
+            assert_eq!(call.id, "tool-1");
+            assert_eq!(call.input, maka_agent_facts::model::ToolInput::Json(json!({"path":path})));
+            stream.cancel_and_wait().await.expect("actual stream cleanup");
+            server.await.unwrap();
+        }
+    }).await.expect("tool prefix must cross actual HTTP before the server releases final arguments");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chat_tool_media_follow_the_complete_parallel_result_group_on_the_wire() {
     use maka_model::prompt::{AssistantPart, ContentPart, FileData, Message, ToolOutput};
 

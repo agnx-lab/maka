@@ -799,6 +799,8 @@ pub enum DeliveryFact {
     TranscriptChanged,
     StepEnded {
         step_id: String,
+        /// The model/executor completed; this says nothing about tool business success.
+        completed: bool,
     },
     PartStarted {
         message_id: String,
@@ -814,6 +816,55 @@ pub enum DeliveryFact {
     PartFinished {
         step_id: String,
         part_id: String,
+    },
+    /// Model input observations are display-only; they cannot authorize a tool effect.
+    ToolInputStarted {
+        tool_use_id: String,
+        step_id: String,
+        name: String,
+        provider_executed: bool,
+    },
+    ToolInputDelta {
+        tool_use_id: String,
+        text: String,
+    },
+    /// Complete model input was observed, not authorization to execute it.
+    ToolInputReady {
+        tool_use_id: String,
+        step_id: String,
+        name: String,
+        provider_executed: bool,
+    },
+    /// Original Host admission, not a claim that the effect is currently using CPU.
+    ToolDispatched {
+        tool_use_id: String,
+        name: String,
+        title: Option<maka_agent_facts::display::Text>,
+    },
+    ToolRejected {
+        tool_use_id: String,
+    },
+    ToolSettled {
+        tool_use_id: String,
+        settlement: maka_agent_facts::tool_call::ToolSettlement,
+    },
+    /// Provider-reported completion, distinct from a Host effect settlement.
+    ProviderToolResult {
+        tool_use_id: String,
+        is_error: bool,
+    },
+    ExecutorToolStart {
+        tool_use_id: String,
+        name: String,
+    },
+    ExecutorToolProgress {
+        tool_use_id: String,
+        /// The most recent at most 2048 codepoints of reported progress, not the complete result.
+        text: String,
+    },
+    ExecutorToolResult {
+        tool_use_id: String,
+        is_error: bool,
     },
     Ended {
         failed: bool,
@@ -899,6 +950,15 @@ pub struct Observation {
     pub through: u64,
     pub run: Option<Run>,
     pub parts: Vec<Part>,
+    /// Replay starts for active tool display, read at the same fence as the run.
+    pub tool_seeds: Vec<ToolSeed>,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentToolSeed")]
+pub struct ToolSeed {
+    pub tool_use_id: String,
+    pub start_sequence: u64,
 }
 /// Display-only readings from the latest completed main-model request.
 #[derive(Serialize, JsonSchema, Deserialize)]

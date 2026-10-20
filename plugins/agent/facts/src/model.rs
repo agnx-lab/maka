@@ -168,6 +168,20 @@ pub enum ModelEvent {
         id: String,
         provider_options: Option<Value>,
     },
+    /// Display-only source observations. Only the complete ToolCall below can
+    /// accept a model item or authorize execution.
+    ToolInputStarted {
+        id: String,
+        name: String,
+        provider_executed: bool,
+    },
+    ToolInputDelta {
+        id: String,
+        text: String,
+    },
+    ToolInputFinished {
+        id: String,
+    },
     ToolCall(ModelToolCall),
     ProviderToolResult {
         id: String,

@@ -107,26 +107,30 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let gate = Arc::new(Notify::new());
         let release = gate.clone();
+        let input_gate = Arc::new(Notify::new());
+        let release_input = input_gate.clone();
         let first = frames(&[
             json!({"type":"response.created","response":{"id":"resp_1","created_at":1,"model":"gpt-5"}}),
             json!({"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}),
             json!({"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0}),
             json!({"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"Check the echo tool."}),
         ]);
-        let mut tail = vec![
+        let mut preview = vec![
             json!({"type":"response.reasoning_summary_part.done","item_id":"rs_1","summary_index":0}),
             json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque-reasoning","summary":[{"type":"summary_text","text":"Check the echo tool."}]}}),
         ];
-        tail.extend(text_events("Checking 😀"));
-        tail.extend([
+        preview.extend(text_events("Checking 😀"));
+        preview.extend([
             json!({"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_item_1","call_id":"call_raw_1","name":"maka_tool_search","arguments":""}}),
-            json!({"type":"response.function_call_arguments.delta","item_id":"fc_item_1","output_index":2,"delta":"{\"text\":"}),
-            json!({"type":"response.function_call_arguments.delta","item_id":"fc_item_1","output_index":2,"delta":"\"你好😀\"}"}),
+            json!({"type":"response.function_call_arguments.delta","item_id":"fc_item_1","output_index":2,"delta":"{\"text\":\"你"}),
+        ]);
+        let preview = frames(&preview);
+        let tail = frames(&[
+            json!({"type":"response.function_call_arguments.delta","item_id":"fc_item_1","output_index":2,"delta":"好😀\"}"}),
             json!({"type":"response.function_call_arguments.done","item_id":"fc_item_1","output_index":2,"arguments":"{\"text\":\"你好😀\"}"}),
             json!({"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","id":"fc_item_1","call_id":"call_raw_1","name":"maka_tool_search","arguments":"{\"text\":\"你好😀\"}","status":"completed"}}),
             completed(),
         ]);
-        let tail = frames(&tail);
         let mut second = vec![json!({"type":"response.created","response":{"id":"resp_2","created_at":2,"model":"gpt-5"}})];
         second.extend(text_events("Echoed 你好😀"));
         second.push(completed());
@@ -136,7 +140,7 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
             for index in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 requests.push(read_request(&mut socket).await);
-                let length = if index == 0 { first.len() + tail.len() } else { second.len() };
+                let length = if index == 0 { first.len() + preview.len() + tail.len() } else { second.len() };
                 // The subscription endpoint can omit this header on a valid
                 // response; both turns must be decoded by their SSE events.
                 let content_type = if index == 0 { "Content-Type: text/event-stream\r\n" } else { "" };
@@ -144,6 +148,8 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
                 if index == 0 {
                     socket.write_all(first.as_bytes()).await.unwrap();
                     release.notified().await;
+                    socket.write_all(preview.as_bytes()).await.unwrap();
+                    release_input.notified().await;
                     socket.write_all(tail.as_bytes()).await.unwrap();
                 } else {
                     socket.write_all(second.as_bytes()).await.unwrap();
@@ -165,10 +171,25 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
             };
             let mut stream = executor.stream(request, CancellationToken::new()).await.unwrap();
             let mut builder = StepBuilder::for_step(&format!("step-{index}")).unwrap();
+            let mut input_events = Vec::new();
             while let Some(event) = stream.next().await {
                 let event = event.unwrap().event;
                 if matches!(&event, ModelEvent::PartDelta { text, .. } if text == "Check the echo tool.") {
                     gate.notify_one(); // The provider cannot finish until reasoning reaches Rust.
+                }
+                if matches!(&event, ModelEvent::ToolInputStarted { .. } | ModelEvent::ToolInputDelta { .. } | ModelEvent::ToolInputFinished { .. }) {
+                    input_events.push(event.clone());
+                }
+                if matches!(&event, ModelEvent::ToolInputDelta { id, text } if id == "call_raw_1" && text == "{\"text\":\"你") {
+                    assert_eq!(input_events, vec![
+                        ModelEvent::ToolInputStarted { id: "call_raw_1".into(), name: "tool_search".into(), provider_executed: false },
+                        ModelEvent::ToolInputDelta { id: "call_raw_1".into(), text: "{\"text\":\"你".into() },
+                    ]);
+                    // Final arguments and the complete call remain held at the provider.
+                    input_gate.notify_one();
+                }
+                if matches!(&event, ModelEvent::ToolCall(_)) {
+                    assert_eq!(input_events.last(), Some(&ModelEvent::ToolInputFinished { id: "call_raw_1".into() }));
                 }
                 builder.push(event).unwrap();
             }
@@ -187,6 +208,12 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
                 continue;
             }
             assert_eq!(step.finish_reason, ModelFinishReason::ToolCalls);
+            assert_eq!(input_events, vec![
+                ModelEvent::ToolInputStarted { id: "call_raw_1".into(), name: "tool_search".into(), provider_executed: false },
+                ModelEvent::ToolInputDelta { id: "call_raw_1".into(), text: "{\"text\":\"你".into() },
+                ModelEvent::ToolInputDelta { id: "call_raw_1".into(), text: "好😀\"}".into() },
+                ModelEvent::ToolInputFinished { id: "call_raw_1".into() },
+            ]);
             assert_eq!(step.parts.len(), 3);
             let ModelPart::Text { text_kind, text, provider_options } = &step.parts[0] else { panic!("reasoning missing") };
             assert_eq!(*text_kind, TextKind::Thinking);
@@ -240,6 +267,86 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
         assert_eq!(history[4]["call_id"], "call_raw_1");
         assert_eq!(serde_json::from_str::<Value>(history[4]["output"].as_str().unwrap()).unwrap(), json!({"echo":"你好😀"}));
     }).await.expect("Responses SSE and continuation must make bounded progress");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_http_streams_custom_input_before_its_complete_freeform_call() {
+    use maka_agent_facts::model::ToolInput;
+    use maka_agent_facts::tools::FreeformGrammar;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let gate = Arc::new(Notify::new());
+        let release = gate.clone();
+        let source = "text('你好😀');\n";
+        let first = frames(&[
+            json!({"type":"response.output_item.added","output_index":0,"item":{"type":"custom_tool_call","id":"custom_item","call_id":"custom_call","name":"exec","input":""}}),
+            json!({"type":"response.custom_tool_call_input.delta","item_id":"custom_item","output_index":0,"delta":"text('你"}),
+        ]);
+        let tail = frames(&[
+            json!({"type":"response.custom_tool_call_input.delta","item_id":"custom_item","output_index":0,"delta":"好😀');\n"}),
+            json!({"type":"response.custom_tool_call_input.done","item_id":"custom_item","output_index":0,"input":source}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"custom_tool_call","id":"custom_item","call_id":"custom_call","name":"exec","input":source}}),
+            completed(),
+        ]);
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut socket).await;
+            let length = first.len() + tail.len();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            socket.write_all(first.as_bytes()).await.unwrap();
+            release.notified().await;
+            socket.write_all(tail.as_bytes()).await.unwrap();
+            request
+        });
+        let executor = ModelExecutor::new(Duration::from_secs(3)).unwrap();
+        let mut request = super::provider_stream::request(ProviderKind::OpenaiResponses, base_url);
+        request.provider.auth = maka_model::ProviderAuth::ApiKey("local-test-key".into());
+        request.provider.headers.insert("x-test-provider".into(), "responses".into());
+        request.tools = vec![maka_model::ToolDefinition {
+            name: "exec".into(), description: "JavaScript".into(), provider: None,
+            input_schema: json!({"type":"object"}), output_schema: None,
+            freeform: Some(FreeformGrammar::Lark { definition: "start: /[\\s\\S]+/".into() }),
+        }];
+        let mut stream = executor.stream(request, CancellationToken::new()).await.unwrap();
+        let mut builder = StepBuilder::for_step("custom-step").unwrap();
+        let mut input_events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.unwrap().event;
+            if matches!(&event, ModelEvent::ToolInputStarted { .. } | ModelEvent::ToolInputDelta { .. } | ModelEvent::ToolInputFinished { .. }) {
+                input_events.push(event.clone());
+            }
+            if matches!(&event, ModelEvent::ToolInputDelta { id, text } if id == "custom_call" && text == "text('你") {
+                assert_eq!(input_events, vec![
+                    ModelEvent::ToolInputStarted { id: "custom_call".into(), name: "exec".into(), provider_executed: false },
+                    ModelEvent::ToolInputDelta { id: "custom_call".into(), text: "text('你".into() },
+                ]);
+                gate.notify_one();
+            }
+            if matches!(&event, ModelEvent::ToolCall(_)) {
+                assert_eq!(input_events.last(), Some(&ModelEvent::ToolInputFinished { id: "custom_call".into() }));
+            }
+            builder.push(event).unwrap();
+        }
+        assert_eq!(input_events, vec![
+            ModelEvent::ToolInputStarted { id: "custom_call".into(), name: "exec".into(), provider_executed: false },
+            ModelEvent::ToolInputDelta { id: "custom_call".into(), text: "text('你".into() },
+            ModelEvent::ToolInputDelta { id: "custom_call".into(), text: "好😀');\n".into() },
+            ModelEvent::ToolInputFinished { id: "custom_call".into() },
+        ]);
+        let step = builder.finish().unwrap();
+        assert_eq!(step.finish_reason, ModelFinishReason::ToolCalls);
+        let [ModelPart::ToolCall { call }] = &step.parts[..] else { panic!("expected one complete freeform call") };
+        assert_eq!(call.id, "custom_call");
+        assert_eq!(call.name, "exec");
+        assert_eq!(call.input, ToolInput::Json(json!(source)));
+        assert!(!call.provider_executed);
+        assert_eq!(call.provider_options, Some(json!({"openai":{"itemId":"custom_item","toolKind":"custom"}})));
+        let request = server.await.unwrap();
+        assert_eq!(request["tools"][0]["type"], "custom");
+        assert_eq!(request["tools"][0]["name"], "exec");
+        assert_eq!(request["tools"][0]["format"]["syntax"], "lark");
+    }).await.expect("custom argument preview must arrive before the complete call is released");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

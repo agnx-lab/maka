@@ -220,7 +220,18 @@ impl ModelStream {
                     self.pending_delta = Some(delta::PendingDelta::new(
                         id,
                         text,
-                        provider_options,
+                        delta::DeltaKind::Part(provider_options),
+                        reservation,
+                    ));
+                }
+                Ok(Some(Emission {
+                    event: ModelEvent::ToolInputDelta { id, text },
+                    reservation,
+                })) if !text.is_empty() => {
+                    self.pending_delta = Some(delta::PendingDelta::new(
+                        id,
+                        text,
+                        delta::DeltaKind::ToolInput,
                         reservation,
                     ));
                 }

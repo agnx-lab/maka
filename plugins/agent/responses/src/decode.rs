@@ -53,6 +53,10 @@ enum Event {
     Summary { item_id: String, delta: String },
     #[serde(rename = "response.reasoning_text.delta")]
     Reasoning { item_id: String, delta: String },
+    #[serde(rename = "response.function_call_arguments.delta")]
+    FunctionInput { item_id: String, delta: String },
+    #[serde(rename = "response.custom_tool_call_input.delta")]
+    CustomInput { item_id: String, delta: String },
     #[serde(rename = "response.output_text.annotation.added")]
     Annotation {
         item_id: String,
@@ -120,6 +124,10 @@ enum Identity {
     Function { call_id: String, name: String },
     Custom { call_id: String, name: String },
     Search,
+}
+struct ObservedItem {
+    identity: Identity,
+    input_started: bool,
 }
 impl Item {
     fn identity(&self) -> Result<(&str, Identity)> {
@@ -213,7 +221,7 @@ pub struct Decoder {
     plaintext: Option<PlaintextResponses>,
     open: BTreeMap<String, Part>,
     seen: HashSet<String>,
-    items: BTreeMap<String, Identity>,
+    items: BTreeMap<String, ObservedItem>,
     text_bytes: usize,
     done: HashSet<String>,
     citations: HashSet<String>,
@@ -280,7 +288,7 @@ impl Decoder {
             return Err(Self::invalid("invalid Responses item identity"));
         }
         if let Some(previous) = self.items.get(id) {
-            if added || previous != &identity {
+            if added || previous.identity != identity {
                 return Err(Self::invalid(
                     "Responses item identity changed or duplicated",
                 ));
@@ -314,9 +322,59 @@ impl Decoder {
                     provider_options: Some(json!({"openai":{"itemId":id}})),
                 }));
             }
-            self.items.insert(id.into(), identity);
+            let mut input_started = false;
+            if let Identity::Function { call_id, name } | Identity::Custom { call_id, name } =
+                &identity
+                && added
+            {
+                input_started = true;
+                out.push(ModelEvent::ToolInputStarted {
+                    id: call_id.clone(),
+                    name: crate::request::local_name(name).into(),
+                    provider_executed: false,
+                });
+            }
+            self.items.insert(
+                id.into(),
+                ObservedItem {
+                    identity,
+                    input_started,
+                },
+            );
         }
         Ok(())
+    }
+    fn input_delta(
+        &self,
+        item_id: &str,
+        text: String,
+        custom: bool,
+        out: &mut Vec<ModelEvent>,
+    ) -> Result<()> {
+        let item = self
+            .items
+            .get(item_id)
+            .filter(|item| item.input_started)
+            .ok_or_else(|| Self::invalid("Responses input delta has no open tool item"))?;
+        let call_id = match &item.identity {
+            Identity::Function { call_id, .. } if !custom => call_id,
+            Identity::Custom { call_id, .. } if custom => call_id,
+            _ => return Err(Self::invalid("Responses input delta has invalid tool kind")),
+        };
+        out.push(ModelEvent::ToolInputDelta {
+            id: call_id.clone(),
+            text,
+        });
+        Ok(())
+    }
+    fn finish_input(&mut self, item_id: &str, call_id: &str, out: &mut Vec<ModelEvent>) {
+        if self
+            .items
+            .get_mut(item_id)
+            .is_some_and(|item| std::mem::take(&mut item.input_started))
+        {
+            out.push(ModelEvent::ToolInputFinished { id: call_id.into() });
+        }
     }
     fn start(&mut self, id: &str, kind: TextKind, out: &mut Vec<ModelEvent>) -> Result<()> {
         if id.is_empty()
@@ -513,6 +571,7 @@ impl Decoder {
                 self.observed_output = true;
                 self.replay_safe = false; // The emitted call includes opaque provider metadata.
                 let input = ToolInput::from_json(arguments);
+                self.finish_input(&id, &call_id, out);
                 out.push(ModelEvent::ToolCall(ModelToolCall {
                     id: call_id,
                     name: crate::request::local_name(&name).into(),
@@ -535,6 +594,7 @@ impl Decoder {
                 self.tool_calls = true;
                 self.observed_output = true;
                 self.replay_safe = false; // The emitted call includes opaque provider metadata.
+                self.finish_input(&id, &call_id, out);
                 out.push(ModelEvent::ToolCall(ModelToolCall {
                     id: call_id,
                     name: crate::request::local_name(&name).into(),
@@ -651,6 +711,12 @@ impl Decoder {
                 }) {
                     self.delta(item_id, delta, TextKind::Thinking, &mut out)?;
                 }
+            }
+            Event::FunctionInput { item_id, delta } => {
+                self.input_delta(&item_id, delta, false, &mut out)?;
+            }
+            Event::CustomInput { item_id, delta } => {
+                self.input_delta(&item_id, delta, true, &mut out)?;
             }
             Event::Annotation {
                 item_id,
@@ -1077,6 +1143,55 @@ mod tests {
 
     fn function(id: &str, call: &str) -> Value {
         json!({"type":"function_call", "id":id, "call_id":call, "name":"Read", "arguments":"{}"})
+    }
+    #[test]
+    fn input_deltas_require_their_open_item_and_never_replace_the_complete_call() {
+        for (kind, item_id) in [
+            ("response.custom_tool_call_input.delta", "item"),
+            ("response.function_call_arguments.delta", "missing"),
+        ] {
+            let mut decoder = Decoder::new(None, &[]);
+            decoder
+                .push(json!({"type":"response.output_item.added","item":function("item","call")}))
+                .unwrap();
+            assert!(
+                decoder
+                    .push(json!({"type":kind,"item_id":item_id,"delta":"{"}))
+                    .is_err()
+            );
+        }
+        let mut decoder = Decoder::new(None, &[]);
+        assert_eq!(
+            decoder
+                .push(json!({"type":"response.output_item.added","item":function("item","call")}))
+                .unwrap(),
+            vec![ModelEvent::ToolInputStarted {
+                id: "call".into(),
+                name: "Read".into(),
+                provider_executed: false,
+            }]
+        );
+        decoder
+            .push(json!({"type":"response.function_call_arguments.delta","item_id":"item","delta":"{\"path\":\"你"}))
+            .unwrap();
+        let final_events = decoder
+            .push(json!({"type":"response.output_item.done","item":function("item","call")}))
+            .unwrap();
+        assert!(
+            matches!(&final_events[..], [ModelEvent::ToolInputFinished { id }, ModelEvent::ToolCall(call)]
+            if id == "call" && call.id == "call" && call.input == ToolInput::Json(json!({})))
+        );
+        assert!(decoder.push(json!({"type":"response.function_call_arguments.delta","item_id":"item","delta":"好\"}"})).is_err());
+        let end = decoder
+            .push(json!({"type":"response.completed","response":{"output":[function("item","call")]}}))
+            .unwrap();
+        assert!(matches!(
+            &end[..],
+            [ModelEvent::Finished {
+                reason: ModelFinishReason::ToolCalls,
+                ..
+            }]
+        ));
     }
     #[test]
     fn streamed_item_identity_and_bounded_finalization_cannot_be_reinterpreted() {

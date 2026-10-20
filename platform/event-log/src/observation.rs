@@ -29,8 +29,10 @@ mod delivery;
 mod message;
 pub use message::{AssistantExcerpt, MessageObservation, WorkOrigin};
 mod streams;
+mod tools;
 pub use delivery::{StoreStreamEvent, StreamEventPage, StreamFact, ToolSettlement};
 pub use streams::AssistantStreamSeed;
+pub use tools::ToolStreamSeed;
 
 /// Metadata, latest root Turn and catch-up cursor from the same SQL snapshot.
 pub struct SessionObservation<T> {
@@ -38,6 +40,7 @@ pub struct SessionObservation<T> {
     pub root_turn: Option<turns::TurnBoundary>,
     pub through_sequence: u64,
     pub active_streams: Vec<AssistantStreamSeed>,
+    pub active_tools: Vec<ToolStreamSeed>,
     pub compacting: bool,
     pub pending_interactions: Vec<InteractionRecord>,
 }
@@ -165,6 +168,7 @@ impl EventLog {
                     };
                     let active_streams =
                         streams::read(&mut transaction, root_turn.as_ref()).await?;
+                    let active_tools = tools::read(&mut transaction, root_turn.as_ref()).await?;
                     let compacting =
                         streams::compacting(&mut transaction, root_turn.as_ref()).await?;
                     transaction.commit().await?;
@@ -173,6 +177,7 @@ impl EventLog {
                         root_turn,
                         through_sequence,
                         active_streams,
+                        active_tools,
                         compacting,
                         pending_interactions,
                     }))

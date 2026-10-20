@@ -179,7 +179,11 @@ impl Step {
                 is_error: *is_error,
                 provider_options: provider_options.clone(),
             })?,
-            ModelEvent::ResponseMetadata { .. } | ModelEvent::Finished { .. } => {}
+            ModelEvent::ToolInputStarted { .. }
+            | ModelEvent::ToolInputDelta { .. }
+            | ModelEvent::ToolInputFinished { .. }
+            | ModelEvent::ResponseMetadata { .. }
+            | ModelEvent::Finished { .. } => {}
         }
         Ok(())
     }

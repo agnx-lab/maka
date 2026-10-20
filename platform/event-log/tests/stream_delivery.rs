@@ -79,6 +79,66 @@ fn delta(text: &str) -> Fact {
 }
 
 #[tokio::test]
+async fn tool_input_delivery_counts_escaped_text_and_full_provider_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("events.sqlite"))
+        .await
+        .unwrap();
+    let append = async |fact| {
+        log.append(&EventWrite::plain(event("session", fact)).unwrap())
+            .await
+            .unwrap()
+    };
+    append(Fact::InvocationOpened {
+        configuration: None,
+        input: maka_agent_facts::input::InvocationInput::Message {
+            source_messages: Vec::new(),
+            content: "".into(),
+            request_fingerprint: None,
+        },
+    })
+    .await;
+    append(request("step")).await;
+    // This is the full 4096-byte step:call budget. The original provider ID
+    // remains opaque, including characters that expand sixfold in JSON.
+    let call = "\u{1}".repeat(4091);
+    let start = append(observed(
+        "step",
+        ModelEvent::ToolInputStarted {
+            id: call.clone(),
+            name: "Counter".into(),
+            provider_executed: false,
+        },
+    ))
+    .await;
+    let text = "\0".repeat(1365);
+    assert_eq!(serde_json::to_string(&text).unwrap().len(), 8192);
+    let through = append(observed(
+        "step",
+        ModelEvent::ToolInputDelta {
+            id: call.clone(),
+            text: text.clone(),
+        },
+    ))
+    .await;
+    let page = log
+        .session_stream_events("session", start, through, 32, 48 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(page.events.len(), 1);
+    assert_eq!(
+        page.events[0].fact,
+        StreamFact::ToolInputDelta {
+            step_id: "step".into(),
+            tool_call_id: call,
+            text,
+        }
+    );
+    assert!(serde_json::to_vec(&page.events[0]).unwrap().len() <= 48 * 1024);
+    assert_eq!(page.next_after, None);
+}
+
+#[tokio::test]
 async fn giant_bodies_and_metadata_do_not_block_stream_delivery() {
     let temp = tempfile::tempdir().unwrap();
     let log = EventLog::open(&temp.path().join("events.sqlite"))

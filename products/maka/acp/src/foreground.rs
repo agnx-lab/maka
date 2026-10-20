@@ -272,7 +272,15 @@ impl Foreground {
                                 .append(&event.turn_id, message, kind, &text)?;
                         self.publish(updates).await?;
                     }
-                    DeliveryFact::TranscriptChanged | DeliveryFact::Ended { .. } => {
+                    DeliveryFact::TranscriptChanged
+                    | DeliveryFact::ToolInputReady { .. }
+                    | DeliveryFact::ToolDispatched { .. }
+                    | DeliveryFact::ToolRejected { .. }
+                    | DeliveryFact::ToolSettled { .. }
+                    | DeliveryFact::ProviderToolResult { .. }
+                    | DeliveryFact::ExecutorToolStart { .. }
+                    | DeliveryFact::ExecutorToolResult { .. }
+                    | DeliveryFact::Ended { .. } => {
                         catchup = true;
                     }
                     _ => {}

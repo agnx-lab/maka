@@ -32,6 +32,8 @@ import { MessageRow } from './MessageRow';
 import { TurnPanel } from './TurnPanel';
 import type { TranscriptItem, TurnItem, TurnViewState } from './TurnPanel';
 import type { ImagePreview } from './ToolImage';
+import { latestToolActivity, updateToolActivity } from './toolActivity';
+import type { ToolActivity } from './toolActivity';
 
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = {
@@ -78,6 +80,7 @@ export function Conversation(props: ConversationProps) {
   const sessionId = client.sessionId;
   const rows = signal<Row[]>([]);
   const live = signal<Row[]>([]);
+  const toolActivity = signal<ToolActivity[]>([]);
   const pendingMessages = signal<Row[]>([]);
   const title = signal(sessionId);
   const run = signal('Loading session…');
@@ -168,6 +171,24 @@ export function Conversation(props: ConversationProps) {
       if (row.finalOutput && row.field === 'body' && row.role === 'assistant') {
         if (reading() === 'chat') result.push({ kind: 'message', key: row.key, row });
       } else turn.rows.push(row);
+    }
+    const activeTurn = runTurn();
+    if (
+      activeTurn &&
+      !turns.has(activeTurn) &&
+      latestToolActivity(toolActivity(), invocation(), activeTurn)
+    ) {
+      // A source-backed process header can precede the first canonical row.
+      // Parameter observations never become transcript messages.
+      result.push({
+        kind: 'turn',
+        key: `turn/${activeTurn}`,
+        turnId: activeTurn,
+        rows: [],
+        timing: null,
+        active: true,
+        completed: false,
+      });
     }
     return result.filter(
       (item) => item.kind !== 'turn' || item.rows.length > 0 || item.active || item.completed,
@@ -347,6 +368,8 @@ export function Conversation(props: ConversationProps) {
     for (const event of page.events) {
       if (event.sequence <= watchLast) continue;
       const fact = event.fact;
+      const nextTools = updateToolActivity(toolActivity(), event);
+      if (nextTools !== toolActivity()) toolActivity.set(nextTools);
       const field = (kind: string) => (kind === 'thinking' ? 'thinking' : 'body');
       switch (fact.kind) {
         case 'opened':
@@ -436,6 +459,13 @@ export function Conversation(props: ConversationProps) {
           }
           changed = true;
           break;
+        case 'tool_input_ready':
+        case 'tool_dispatched':
+        case 'tool_rejected':
+        case 'tool_settled':
+        case 'provider_tool_result':
+        case 'executor_tool_start':
+        case 'executor_tool_result':
         case 'transcript_changed':
           changed = true;
           break;
@@ -456,6 +486,7 @@ export function Conversation(props: ConversationProps) {
     const after = Math.min(
       observed.through,
       ...observed.parts.map((part: any) => part.startSequence - 1),
+      ...observed.toolSeeds.map((tool: any) => tool.startSequence - 1),
     );
     const stream = await host.subscribe('agent', 'watch', { sessionId, after });
     if (!alive) {
@@ -478,8 +509,8 @@ export function Conversation(props: ConversationProps) {
       list?.scrollToEnd({ animated: false });
       break;
     }
-    // This is the sole next() loop; watching from the earliest open part also
-    // recovers deltas emitted before observe, without a history/watch gap.
+    // The sole next() loop recovers text and active tool observations from
+    // their starts at the observe fence, without a history/watch gap.
     for (;;) {
       const page = await stream.next();
       if (!alive) return;
@@ -827,6 +858,7 @@ export function Conversation(props: ConversationProps) {
 
   cleanup(() => {
     alive = false;
+    toolActivity.set([]);
     props.detach(ownHandle);
     const stream = subscription;
     subscription = null;
@@ -840,6 +872,7 @@ export function Conversation(props: ConversationProps) {
       })
       .catch(report);
     void openTranscript().catch(async (reason) => {
+      if (alive) toolActivity.set([]);
       report(reason);
       const stream = subscription;
       subscription = null;
@@ -969,6 +1002,13 @@ export function Conversation(props: ConversationProps) {
                     >
                       <TurnPanel
                         turn={() => entry() as TurnItem}
+                        toolActivity={() =>
+                          latestToolActivity(
+                            toolActivity(),
+                            invocation(),
+                            (entry() as TurnItem).turnId,
+                          )
+                        }
                         state={turnState((entry() as TurnItem).turnId)}
                         sessionId={sessionId}
                         through={() => latestKnown}

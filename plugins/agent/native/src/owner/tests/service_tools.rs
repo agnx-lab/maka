@@ -948,6 +948,178 @@ async fn pending_approval(
 }
 
 #[tokio::test]
+async fn live_tool_input_replays_across_model_completion_approval_and_original_effect_settlement() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        async fn next_event(
+            watch: &mut maka_host_runtime::application::Subscription,
+            pending: &mut std::collections::VecDeque<Value>,
+        ) -> Value {
+            loop {
+                if let Some(event) = pending.pop_front() {
+                    return event;
+                }
+                let page = watch.recv().await.expect("original Agent watch closed");
+                if let Some(events) = page["events"].as_array() {
+                    pending.extend(events.iter().cloned());
+                }
+            }
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let counter = Counter::new(Behavior::Blocked);
+        let mut setup = Setup::native(counter.clone(), true);
+        setup.confirmation = contract::ToolConfirmation::Required;
+        let fixture = Fixture::with_services(
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+            None,
+            None,
+            Some(setup),
+        )
+        .await;
+        let session = fixture.create("Observe original live tool input").await;
+        let accepted = fixture.send(&session).await.unwrap();
+        let mut watch = fixture
+            .app
+            .client()
+            .subscribe(
+                fixture.binding(2).await,
+                "watch".into(),
+                json!({"sessionId":session,"after":0}),
+                scope(&fixture.issuer, true),
+                Attachments::new().into(),
+            )
+            .await
+            .unwrap();
+        let mut pending = std::collections::VecDeque::new();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        let prefix = "{\"amount\":1";
+        let first = format!(
+            "data: {}\n\n",
+            json!({"id":"live-tool","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"counter-call","type":"function","function":{"name":"Counter","arguments":prefix}}]},"finish_reason":null}]})
+        );
+        let last = format!(
+            "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"id":"live-tool","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}),
+            json!({"id":"live-tool","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]})
+        );
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{first}",
+                    first.len() + last.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let started = loop {
+            let event = next_event(&mut watch, &mut pending).await;
+            if event["fact"]["kind"] == "tool_input_started" {
+                break event;
+            }
+        };
+        let tool_use_id = started["fact"]["toolUseId"].as_str().unwrap().to_owned();
+        let step_id = started["fact"]["stepId"].as_str().unwrap().to_owned();
+        let start_sequence = started["sequence"].as_u64().unwrap();
+        assert_eq!(started["invocationId"], accepted["invocationId"]);
+        assert_eq!(started["fact"], json!({"kind":"tool_input_started","toolUseId":tool_use_id,
+            "stepId":step_id,"name":"Counter","providerExecuted":false}));
+        let delta = next_event(&mut watch, &mut pending).await;
+        assert_eq!(delta["fact"], json!({"kind":"tool_input_delta","toolUseId":tool_use_id,"text":prefix}));
+        let seeds = json!([{"toolUseId":tool_use_id,"startSequence":start_sequence}]);
+        let streaming = fixture.query("observe", json!({"sessionId":session})).await.unwrap();
+        assert_eq!(streaming["toolSeeds"], seeds);
+        assert!(streaming["through"].as_u64().unwrap() >= delta["sequence"].as_u64().unwrap());
+        assert_eq!(counter.effects.load(Ordering::SeqCst), 0);
+        assert_eq!(counter.entered.available_permits(), 0);
+
+        socket.write_all(last.as_bytes()).await.unwrap();
+        let approval = pending_approval(&fixture, &session).await;
+        let maka_agent_facts::interaction::InteractionRequest::ServiceApproval {
+            tool_use_id: approval_tool,
+            ..
+        } = &approval.request else { unreachable!() };
+        assert_eq!(approval_tool, &tool_use_id);
+        let recorded = facts(&fixture, &session).await;
+        assert!(recorded.iter().any(|fact| matches!(fact,
+            Fact::ModelRequested { step_id: id, item_acceptance: false, .. } if id == &step_id)));
+        assert!(recorded.iter().any(|fact| matches!(fact,
+            Fact::ModelCompleted { step_id: id, .. } if id == &step_id)));
+        let waiting = fixture.query("observe", json!({"sessionId":session})).await.unwrap();
+        assert_eq!(waiting["run"]["state"], "waiting_for_user");
+        assert_eq!(waiting["toolSeeds"], seeds);
+        assert_eq!(counter.effects.load(Ordering::SeqCst), 0);
+        drop(watch);
+
+        let mut watch = fixture.app.client().subscribe(
+            fixture.binding(2).await, "watch".into(),
+            json!({"sessionId":session,"after":start_sequence - 1}),
+            scope(&fixture.issuer, true), Attachments::new().into(),
+        ).await.unwrap();
+        pending.clear();
+        let replayed_start = next_event(&mut watch, &mut pending).await;
+        assert_eq!(replayed_start, started);
+        let mut arguments = String::new();
+        let mut ready = None;
+        loop {
+            let event = next_event(&mut watch, &mut pending).await;
+            let fact = &event["fact"];
+            match fact["kind"].as_str().unwrap() {
+                "tool_input_delta" => {
+                    assert_eq!(fact["toolUseId"], tool_use_id);
+                    arguments.push_str(fact["text"].as_str().unwrap());
+                }
+                "tool_input_ready" => ready = Some(fact.clone()),
+                "step_ended" => {
+                    assert_eq!(fact, &json!({"kind":"step_ended","stepId":step_id,"completed":true}));
+                    break;
+                }
+                _ => panic!("unexpected live tool replay: {event}"),
+            }
+        }
+        assert_eq!(arguments, "{\"amount\":1}");
+        assert_eq!(ready, Some(json!({"kind":"tool_input_ready","toolUseId":tool_use_id,
+            "stepId":step_id,"name":"Counter","providerExecuted":false})));
+        let reconnected = fixture.query("observe", json!({"sessionId":session})).await.unwrap();
+        assert_eq!(reconnected["run"]["state"], "waiting_for_user");
+        assert_eq!(reconnected["toolSeeds"], seeds);
+        assert_eq!(counter.effects.load(Ordering::SeqCst), 0);
+
+        let answer = fixture.mutation(2, "respond", json!({"sessionId":session,
+            "requestId":approval.request_id,"answer":{"kind":"service_approval","decision":"allow"}}),
+            Uuid::new_v4()).await.unwrap();
+        assert_eq!(answer["record"]["outcome"]["decision"], "allow");
+        counter.entered.acquire().await.unwrap().forget();
+        let dispatch = next_event(&mut watch, &mut pending).await;
+        assert_eq!(dispatch["fact"], json!({"kind":"tool_dispatched","toolUseId":tool_use_id,
+            "name":"Counter","title":null}));
+        assert_eq!(fixture.query("observe", json!({"sessionId":session})).await.unwrap()["toolSeeds"], seeds);
+        fixture.mutation(2, "stop", json!({"sessionId":session,"invocationId":accepted["invocationId"]}),
+            Uuid::new_v4()).await.unwrap();
+        counter.cancelled.acquire().await.unwrap().forget();
+        assert_eq!(fixture.owner.workers.len(), 1);
+        counter.release.add_permits(1);
+        let mut settled = None;
+        loop {
+            let event = next_event(&mut watch, &mut pending).await;
+            match event["fact"]["kind"].as_str().unwrap() {
+                "tool_settled" => settled = Some(event["fact"].clone()),
+                "ended" => break,
+                _ => {}
+            }
+        }
+        assert_eq!(settled, Some(json!({"kind":"tool_settled","toolUseId":tool_use_id,"settlement":"returned"})));
+        fixture.drained().await;
+        assert_eq!(fixture.query("observe", json!({"sessionId":session})).await.unwrap()["toolSeeds"], json!([]));
+        assert_eq!(counter.effects.load(Ordering::SeqCst), 1);
+        drop(watch);
+        fixture.app.shutdown().await.unwrap();
+        fixture.config.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn service_confirmation_reviews_exact_large_arguments_and_never_replaces_grant_admission() {
     tokio::time::timeout(Duration::from_secs(60), async {
         for (granted, query, decision) in [(true, false, "allow"), (true, false, "deny"), (false, false, "allow"), (true, true, "allow")] {
@@ -1309,7 +1481,7 @@ async fn unknown_service_outcome_has_typed_original_evidence_and_never_enters_mo
         )
         .await;
         let session = fixture.create("Unknown original effect").await;
-        fixture.send(&session).await.unwrap();
+        let accepted = fixture.send(&session).await.unwrap();
         fixture.drained().await;
         let observed = facts(&fixture, &session).await;
         server.await.unwrap();
@@ -1357,6 +1529,50 @@ async fn unknown_service_outcome_has_typed_original_evidence_and_never_enters_mo
             recovered.outcome,
             OperationOutcome::Unknown { .. }
         ));
+        let operation_id = facts
+            .iter()
+            .find_map(|fact| match fact {
+                Fact::ToolSettled { operation_id, .. } => Some(operation_id),
+                _ => None,
+            })
+            .unwrap();
+        let tool_use_id = maka_agent_facts::tool_call::tool_use_id(
+            accepted["invocationId"].as_str().unwrap(),
+            operation_id,
+        );
+        let mut watch = fixture
+            .app
+            .client()
+            .subscribe(
+                fixture.binding(2).await,
+                "watch".into(),
+                json!({"sessionId":session,"after":0}),
+                scope(&fixture.issuer, true),
+                Attachments::new().into(),
+            )
+            .await
+            .unwrap();
+        let mut settlement = None;
+        'delivery: loop {
+            let page = watch
+                .recv()
+                .await
+                .expect("unknown original outcome must remain readable");
+            if let Some(events) = page["events"].as_array() {
+                for event in events {
+                    match event["fact"]["kind"].as_str().unwrap() {
+                        "tool_settled" => settlement = Some(event["fact"].clone()),
+                        "ended" => break 'delivery,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            settlement,
+            Some(json!({"kind":"tool_settled","toolUseId":tool_use_id,"settlement":"unknown"}))
+        );
+        drop(watch);
         fixture.app.shutdown().await.unwrap();
         fixture.config.shutdown().await.unwrap();
     })

@@ -604,6 +604,13 @@ export class Transcript {
           canonicalChanged = observeAgain = true;
           break;
         case 'transcript_changed':
+        case 'tool_input_ready':
+        case 'tool_dispatched':
+        case 'tool_rejected':
+        case 'tool_settled':
+        case 'provider_tool_result':
+        case 'executor_tool_start':
+        case 'executor_tool_result':
           canonicalChanged = true;
           break;
         case 'ended':

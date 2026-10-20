@@ -96,6 +96,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         },
     });
     log.append(&started).await.unwrap();
+    let call = "\"".repeat(1024);
     for output in [
         Output::ThinkingDelta {
             text: "external reasoning".into(),
@@ -104,12 +105,12 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             text: "partial answer".into(),
         },
         Output::ToolStart {
-            tool_call_id: "external-call".into(),
+            tool_call_id: call.clone(),
             name: "shell".into(),
             input: json!({"command":"external only"}),
         },
         Output::ToolProgress {
-            tool_call_id: "external-call".into(),
+            tool_call_id: call.clone(),
             text: "working".into(),
         },
     ] {
@@ -117,6 +118,14 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             .await
             .unwrap();
     }
+    let progress = Output::ToolProgress {
+        tool_call_id: call.clone(),
+        text: format!("{}current", "\u{1}".repeat(64 * 1024 - 7)),
+    };
+    progress.validate().unwrap();
+    log.append(&event(Fact::ExecutorObserved { output: progress }))
+        .await
+        .unwrap();
     let before = log.prefix(100, 1024 * 1024).await.unwrap();
     let observation = log
         .observe_session::<serde_json::Value>("session")
@@ -124,6 +133,11 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         .unwrap()
         .unwrap();
     assert_eq!(observation.active_streams.len(), 2);
+    assert_eq!(observation.active_tools.len(), 1);
+    assert_eq!(
+        observation.active_tools[0].tool_use_id,
+        maka_agent_facts::tool_call::tool_use_id("invocation", &call)
+    );
     assert!(
         observation
             .active_streams
@@ -131,7 +145,7 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             .all(|seed| seed.message_id == started.event().id)
     );
     let stream = log
-        .session_stream_events("session", 0, before.high_water, 32, 1024 * 1024)
+        .session_stream_events("session", 0, before.high_water, 32, 48 * 1024)
         .await
         .unwrap();
     use maka_agent_facts::model::TextKind;
@@ -140,6 +154,10 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
         StreamFact::ExecutorDelta {text_kind: TextKind::Thinking, text} if text == "external reasoning")));
     assert!(stream.events.iter().any(|event| matches!(&event.fact,
         StreamFact::ExecutorToolProgress {text, ..} if text == "working")));
+    assert!(stream.events.iter().any(|event| matches!(&event.fact,
+        StreamFact::ExecutorToolProgress {text, tool_call_id}
+        if text == &format!("{}current", "\u{1}".repeat(2048-7)) && tool_call_id == &call)));
+    assert_eq!(stream.next_after, None);
     let overlay = log
         .active_transcript(&invocation, before.high_water)
         .await
@@ -169,13 +187,21 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
     );
     log.append(&event(Fact::ExecutorObserved {
         output: Output::ToolResult {
-            tool_call_id: "external-call".into(),
+            tool_call_id: call,
             text: "external result".into(),
             is_error: false,
         },
     }))
     .await
     .unwrap();
+    assert!(
+        log.observe_session::<serde_json::Value>("session")
+            .await
+            .unwrap()
+            .unwrap()
+            .active_tools
+            .is_empty()
+    );
     log.append(&event(Fact::ExecutorCompleted {
         text: "final authoritative answer".into(),
     }))

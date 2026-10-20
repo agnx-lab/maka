@@ -38,6 +38,12 @@ enum StepState {
     Poisoned,
 }
 
+struct PendingToolInput {
+    name: String,
+    provider_executed: bool,
+    finished: bool,
+}
+
 /// Shared validation and assembly for Host ingress, durable acceptance proofs
 /// and history projection. Only closed items can authorize streaming execution.
 #[derive(Default)]
@@ -47,6 +53,7 @@ pub struct StepBuilder {
     accepted: Option<usize>,
     open: HashMap<String, usize>,
     seen: HashSet<String>,
+    tool_inputs: HashMap<String, PendingToolInput>,
     calls: HashMap<String, (String, bool)>,
     results: HashSet<String>,
     state: StepState,
@@ -136,8 +143,55 @@ impl StepBuilder {
                 }
                 self.accepted = Some(index);
             }
+            ModelEvent::ToolInputStarted {
+                id,
+                name,
+                provider_executed,
+            } => {
+                self.validate_tool_identity(&id, &name)?;
+                if self.calls.contains_key(&id)
+                    || self
+                        .tool_inputs
+                        .insert(
+                            id,
+                            PendingToolInput {
+                                name,
+                                provider_executed,
+                                finished: false,
+                            },
+                        )
+                        .is_some()
+                {
+                    return Err(invalid("duplicate tool input"));
+                }
+            }
+            ModelEvent::ToolInputDelta { id, .. } => {
+                let input = self
+                    .tool_inputs
+                    .get(&id)
+                    .ok_or_else(|| invalid("delta without open tool input"))?;
+                if input.finished {
+                    return Err(invalid("delta after tool input end"));
+                }
+            }
+            ModelEvent::ToolInputFinished { id } => {
+                let input = self
+                    .tool_inputs
+                    .get_mut(&id)
+                    .ok_or_else(|| invalid("end without open tool input"))?;
+                if input.finished {
+                    return Err(invalid("duplicate tool input end"));
+                }
+                input.finished = true;
+            }
             ModelEvent::ToolCall(call) => {
                 self.validate_call(&call)?;
+                if let Some(input) = self.tool_inputs.remove(&call.id)
+                    && (input.name != call.name
+                        || input.provider_executed != call.provider_executed)
+                {
+                    return Err(invalid("complete tool call differs from input identity"));
+                }
                 if self
                     .calls
                     .insert(call.id.clone(), (call.name.clone(), call.provider_executed))
@@ -191,7 +245,7 @@ impl StepBuilder {
                 usage,
                 provider_options,
             } => {
-                if !self.open.is_empty() {
+                if !self.open.is_empty() || !self.tool_inputs.is_empty() {
                     return Err(invalid("incomplete model step"));
                 }
                 if self

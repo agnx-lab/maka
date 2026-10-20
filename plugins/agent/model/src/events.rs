@@ -117,10 +117,16 @@ impl Normalizer {
             }
             "tool-input-start" => {
                 let id = string(&value, "id")?;
-                if self.tool_input.insert(id, options).is_some() {
+                let name = string(&value, "toolName")?;
+                let provider_executed = optional_bool(&value, "providerExecuted")?;
+                if self.tool_input.insert(id.clone(), options).is_some() {
                     return Err(invalid("duplicate tool input"));
                 }
-                return Ok(None);
+                ModelEvent::ToolInputStarted {
+                    id,
+                    name,
+                    provider_executed,
+                }
             }
             "tool-input-delta" | "tool-input-end" => {
                 let id = string(&value, "id")?;
@@ -129,7 +135,14 @@ impl Normalizer {
                     .get_mut(&id)
                     .ok_or_else(|| invalid("unknown tool input"))?;
                 merge(pending, options);
-                return Ok(None);
+                if kind == "tool-input-delta" {
+                    ModelEvent::ToolInputDelta {
+                        id,
+                        text: string(&value, "delta")?,
+                    }
+                } else {
+                    ModelEvent::ToolInputFinished { id }
+                }
             }
             "tool-call" => {
                 let provider_executed = optional_bool(&value, "providerExecuted")?;
@@ -404,6 +417,57 @@ mod tests {
         let mut result = tool("tool-result");
         result["preliminary"] = json!(true);
         assert!(Normalizer::default().push(result).is_err());
+    }
+
+    #[test]
+    fn tool_input_observations_preserve_metadata_only_on_the_complete_call() {
+        let mut normalizer = Normalizer::default();
+        assert_eq!(
+            normalizer
+                .push(json!({"type":"tool-input-start","id":"call","toolName":"tool",
+                    "providerExecuted":true,"providerMetadata":{"provider":{"itemId":"item","signature":"start"}}}))
+                .unwrap(),
+            Some(ModelEvent::ToolInputStarted {
+                id: "call".into(),
+                name: "tool".into(),
+                provider_executed: true,
+            })
+        );
+        assert_eq!(
+            normalizer
+                .push(
+                    json!({"type":"tool-input-delta","id":"call","delta":"{\"path\":\"中",
+                    "providerMetadata":{"provider":{"signature":"delta"}}})
+                )
+                .unwrap(),
+            Some(ModelEvent::ToolInputDelta {
+                id: "call".into(),
+                text: "{\"path\":\"中".into(),
+            })
+        );
+        assert_eq!(
+            normalizer
+                .push(json!({"type":"tool-input-end","id":"call",
+                    "providerMetadata":{"provider":{"cache":"end"}}}))
+                .unwrap(),
+            Some(ModelEvent::ToolInputFinished { id: "call".into() })
+        );
+        let mut complete = tool("tool-call");
+        complete["providerExecuted"] = json!(true);
+        complete["input"] = json!("{\"path\":\"normalized/中文\"}");
+        complete["providerMetadata"] = json!({"provider":{"signature":"complete"}});
+        assert_eq!(
+            normalizer.push(complete).unwrap(),
+            Some(ModelEvent::ToolCall(ModelToolCall {
+                id: "call".into(),
+                name: "tool".into(),
+                input: ToolInput::Json(json!({"path":"normalized/中文"})),
+                provider_executed: true,
+                provider_options: Some(
+                    json!({"provider":{"itemId":"item","signature":"complete","cache":"end"}})
+                ),
+            }))
+        );
     }
 
     #[test]

@@ -26,6 +26,8 @@ import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { C } from './ui';
 import type { ImagePreview } from './ToolImage';
+import { toolActivitySummary } from './toolActivity';
+import type { ToolActivity } from './toolActivity';
 
 // These are presentation items over the canonical history, not a second transcript.
 export type TurnItem = {
@@ -163,6 +165,7 @@ function ActivityLog(props: {
 
 export function TurnPanel(props: {
   turn: () => TurnItem;
+  toolActivity: () => ToolActivity | undefined;
   state: TurnViewState;
   sessionId: string;
   through: () => number;
@@ -225,12 +228,10 @@ export function TurnPanel(props: {
           : outcome() === 'aborted'
             ? 'Stopped'
             : 'Activity';
-    const latest = props.turn().rows.at(-1);
+    const tool = props.toolActivity();
+    if (tool) return toolActivitySummary(tool);
+    const latest = props.turn().rows.findLast((row) => !row.tool);
     if (!latest) return 'Working…';
-    if (latest.tool) {
-      const call = latest.tool.call;
-      return `${latest.tool.result ? 'Working' : 'Running tool'}${call?.name ? ` · ${call.name}` : ''}${call?.title?.fallback ? ` · ${call.title.fallback}` : ''}`;
-    }
     const tail = latest.text.slice(-512).trimEnd().split('\n').at(-1)?.trim() ?? '';
     return `${latest.role === 'thinking' ? 'Analyzing the request' : 'Writing response'}${tail ? ` · ${tail.slice(-240)}` : ''}`;
   };
@@ -258,14 +259,14 @@ export function TurnPanel(props: {
             color: outcome() === 'failed' ? C.danger : active() ? C.secondary : C.muted,
           }}
         >
-          {props.turn().rows.length ? (expanded() ? '⌃ ' : '› ') : '✓ '}
+          {props.turn().rows.length ? (expanded() ? '⌃ ' : '› ') : active() ? '… ' : '✓ '}
           {summary()}
         </Text>
         <If when={!expanded()}>
           <Text style={{ color: C.muted }}>{duration()}</Text>
         </If>
       </Button>
-      <If when={expanded()}>
+      <If when={expanded() && props.turn().rows.length > 0}>
         <ActivityLog
           turn={props.turn}
           state={props.state}

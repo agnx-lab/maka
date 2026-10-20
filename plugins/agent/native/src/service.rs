@@ -396,6 +396,14 @@ impl Handler for Agent {
                                 text_kind: part.text_kind.into(),
                             })
                             .collect(),
+                        tool_seeds: observed
+                            .active_tools
+                            .into_iter()
+                            .map(|tool| ToolSeed {
+                                tool_use_id: tool.tool_use_id,
+                                start_sequence: tool.start_sequence,
+                            })
+                            .collect(),
                     })?;
                     maka_plugin_core::json::check_delivery(&result, 48 * 1024)
                         .map_err(|_| "agent_observation_unavailable")?;
@@ -916,6 +924,10 @@ pub(crate) fn summary_for(
     }
 }
 fn delivery(event: StoreStreamEvent) -> Delivery {
+    let tool_id = |operation: &str| {
+        maka_agent_facts::tool_call::tool_use_id(&event.invocation.invocation_id, operation)
+    };
+    let model_tool_id = |step: &str, call: &str| tool_id(&format!("{step}:{call}"));
     let fact = match event.fact {
         StreamFact::InvocationOpened => DeliveryFact::Opened,
         StreamFact::ExecutorStarted => DeliveryFact::ExecutorStarted {
@@ -932,6 +944,7 @@ fn delivery(event: StoreStreamEvent) -> Delivery {
         },
         StreamFact::ExecutorCompleted => DeliveryFact::StepEnded {
             step_id: event.invocation.invocation_id.clone(),
+            completed: true,
         },
         StreamFact::PartStarted {
             step_id,
@@ -955,16 +968,94 @@ fn delivery(event: StoreStreamEvent) -> Delivery {
         StreamFact::PartFinished { step_id, part_id } => {
             DeliveryFact::PartFinished { step_id, part_id }
         }
+        StreamFact::ToolInputStarted {
+            step_id,
+            tool_call_id,
+            name,
+            provider_executed,
+        } => DeliveryFact::ToolInputStarted {
+            tool_use_id: model_tool_id(&step_id, &tool_call_id),
+            step_id,
+            name,
+            provider_executed,
+        },
+        StreamFact::ToolInputDelta {
+            step_id,
+            tool_call_id,
+            text,
+        } => DeliveryFact::ToolInputDelta {
+            tool_use_id: model_tool_id(&step_id, &tool_call_id),
+            text,
+        },
+        StreamFact::ToolInputReady {
+            step_id,
+            tool_call_id,
+            name,
+            provider_executed,
+        } => DeliveryFact::ToolInputReady {
+            tool_use_id: model_tool_id(&step_id, &tool_call_id),
+            step_id,
+            name,
+            provider_executed,
+        },
+        StreamFact::ProviderToolResult {
+            step_id,
+            tool_call_id,
+            is_error,
+        } => DeliveryFact::ProviderToolResult {
+            tool_use_id: model_tool_id(&step_id, &tool_call_id),
+            is_error,
+        },
+        StreamFact::ToolDispatched {
+            operation_id,
+            name,
+            title,
+        } => DeliveryFact::ToolDispatched {
+            tool_use_id: tool_id(&operation_id),
+            name,
+            title,
+        },
+        StreamFact::ToolRejected { operation_id, .. } => DeliveryFact::ToolRejected {
+            tool_use_id: tool_id(&operation_id),
+        },
+        StreamFact::ToolSettled {
+            operation_id,
+            outcome,
+        } => {
+            use maka_agent_facts::tool_call::ToolSettlement;
+            DeliveryFact::ToolSettled {
+                tool_use_id: tool_id(&operation_id),
+                settlement: match outcome {
+                    maka_event_log::observation::ToolSettlement::Succeeded => {
+                        ToolSettlement::Returned
+                    }
+                    maka_event_log::observation::ToolSettlement::Failed => ToolSettlement::Failed,
+                    maka_event_log::observation::ToolSettlement::Unknown => ToolSettlement::Unknown,
+                },
+            }
+        }
+        StreamFact::ExecutorToolStart { tool_call_id, name } => DeliveryFact::ExecutorToolStart {
+            tool_use_id: tool_id(&tool_call_id),
+            name,
+        },
+        StreamFact::ExecutorToolProgress { tool_call_id, text } => {
+            DeliveryFact::ExecutorToolProgress {
+                tool_use_id: tool_id(&tool_call_id),
+                text,
+            }
+        }
+        StreamFact::ExecutorToolResult {
+            tool_call_id,
+            is_error,
+        } => DeliveryFact::ExecutorToolResult {
+            tool_use_id: tool_id(&tool_call_id),
+            is_error,
+        },
         StreamFact::InvocationEnded { failed, .. } => DeliveryFact::Ended { failed },
-        StreamFact::StepEnded { step_id, .. } => DeliveryFact::StepEnded { step_id },
-        StreamFact::ContextChanged
-        | StreamFact::MessageSteered
-        | StreamFact::ExecutorToolStart { .. }
-        | StreamFact::ExecutorToolProgress { .. }
-        | StreamFact::ExecutorToolResult { .. }
-        | StreamFact::ToolDispatched { .. }
-        | StreamFact::ToolRejected { .. }
-        | StreamFact::ToolSettled { .. } => DeliveryFact::TranscriptChanged,
+        StreamFact::StepEnded {
+            step_id, completed, ..
+        } => DeliveryFact::StepEnded { step_id, completed },
+        StreamFact::ContextChanged | StreamFact::MessageSteered => DeliveryFact::TranscriptChanged,
     };
     Delivery {
         sequence: event.sequence,
