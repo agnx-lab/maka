@@ -451,7 +451,7 @@ glutin_wgl_sys@0.6.1		X
 gpu-allocator@0.28.0		X									X					
 gpu-descriptor-types@0.2.0		X									X					
 gpu-descriptor@0.3.2		X									X					
-gpui-base@0.7.3		X														
+gpui-base@0.8.0		X														
 gpui-fast-apple@0.1.10		X														
 gpui-fast-linux@0.1.10		X														
 gpui-fast-macos@0.1.10		X														
@@ -460,7 +460,8 @@ gpui-fast-platform@0.1.10		X
 gpui-fast-wgpu@0.1.10		X														
 gpui-fast-windows@0.1.10		X														
 gpui-fast@0.1.10		X														
-gpui-fps@0.7.3		X														
+gpui-fps@0.8.0		X														
+gpui-kit@0.8.0		X														
 gpui-pre-apple@0.3.9		X														
 gpui-pre-collections@0.3.9		X														
 gpui-pre-derive-refineable@0.3.9		X														
@@ -480,7 +481,7 @@ gpui-pre-windows@0.3.9		X
 gpui-pre-ztracing-macro@0.3.9		X														
 gpui-pre-ztracing@0.3.9		X														
 gpui-pre@0.3.9		X														
-gpui-shell@0.7.3		X														
+gpui-shell@0.8.0		X														
 grep-matcher@0.1.9											X				X	
 grep-regex@0.1.14											X				X	
 grep-searcher@0.1.17											X				X	
