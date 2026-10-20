@@ -57,6 +57,71 @@ async fn catalog_observes_metadata_pending_and_removal_at_its_original_location(
     }
     bootstrap.completion().await;
     ids.sort();
+    let owned_scope = json!({"kind":"workspace","sessionId":ids[0]});
+    let first_title = fixture
+        .query(
+            "list",
+            json!({
+                "filter":"all","position":{"kind":"start"},
+                "scope":owned_scope,"titleQuery":"First"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_title["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(first_title["sessions"][0]["title"], "First");
+    for (scope, title) in [
+        (owned_scope.clone(), "Second"),
+        (json!({"kind":"workspace","sessionId":ids[1]}), "First"),
+        (json!({"kind":"all"}), "First"),
+    ] {
+        let changed = fixture.query("list", json!({
+            "filter":"all","position":{"kind":"after","revision":first_title["revision"],"cursor":first_title["sessions"][0]["id"]},
+            "scope":scope,"titleQuery":title
+        })).await.unwrap_err();
+        assert!(changed.contains("agent_catalog_changed"), "{changed}");
+    }
+    let defaults = fixture
+        .query("list", json!({"filter":"all","position":{"kind":"start"}}))
+        .await
+        .unwrap();
+    let explicit = fixture.query("list", json!({"filter":"all","position":{"kind":"start"},"scope":{"kind":"all"},"titleQuery":""})).await.unwrap();
+    assert_eq!(
+        defaults, explicit,
+        "omitted and empty query have one catalog identity"
+    );
+    let unavailable = fixture.query("list", json!({
+        "filter":"all","position":{"kind":"start"},"scope":{"kind":"workspace","sessionId":"foreign"}
+    })).await.unwrap_err();
+    assert!(
+        unavailable.contains("agent_session_unavailable"),
+        "{unavailable}"
+    );
+    assert_eq!(
+        fixture
+            .query(
+                "list",
+                json!({"filter":"all","position":{"kind":"start"},"titleQuery":"界".repeat(128)})
+            )
+            .await
+            .unwrap()["sessions"],
+        json!([])
+    );
+    assert!(
+        fixture
+            .query(
+                "list",
+                json!({"filter":"all","position":{"kind":"start"},"titleQuery":"界".repeat(129)})
+            )
+            .await
+            .is_err()
+    );
+    let mut filtered = fixture.app.client().subscribe(
+        fixture.binding(2).await, "catalog".into(),
+        json!({"filter":"all","position":{"kind":"start"},"scope":owned_scope,"titleQuery":"Updated"}),
+        scope(&fixture.issuer, true), Attachments::new().into(),
+    ).await.unwrap();
+    assert_eq!(next(&mut filtered).await["sessions"], json!([]));
     let mut stream = fixture
         .app
         .client()
@@ -90,6 +155,11 @@ async fn catalog_observes_metadata_pending_and_removal_at_its_original_location(
     assert_eq!(changed["kind"], "committed");
     let renamed = next(&mut stream).await;
     assert_eq!(renamed["sessions"][0]["title"], "Updated while reading");
+    let matched = next(&mut filtered).await;
+    assert_eq!(matched["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(matched["sessions"][0]["id"], ids[1]);
+    assert_eq!(matched["sessions"][0]["title"], "Updated while reading");
+    assert_eq!(fixture.query("list", json!({"filter":"all","position":{"kind":"start"},"scope":owned_scope,"titleQuery":"updated"})).await.unwrap()["sessions"], json!([]), "title substring matching is case-sensitive");
     fixture
         .store
         .set_session_archived::<SessionConfiguration>(&ids[1], true, 3)
@@ -97,6 +167,15 @@ async fn catalog_observes_metadata_pending_and_removal_at_its_original_location(
         .unwrap();
     let archived = next(&mut stream).await;
     assert_eq!(archived["sessions"][0]["id"], ids[2]);
+    assert_eq!(
+        next(&mut filtered).await["sessions"],
+        json!([]),
+        "a catalog update replaces its filtered window"
+    );
+    filtered.cancel();
+    tokio::time::timeout(Duration::from_secs(5), filtered.completion())
+        .await
+        .unwrap();
 
     // Background pending sessions outside this page contribute to the exact count.
     fixture

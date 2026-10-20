@@ -238,6 +238,32 @@ pub fn configuration_schema() -> Value {
 pub struct List {
     pub filter: SessionFilter,
     pub position: SessionPosition,
+    #[serde(default)]
+    pub scope: SessionListScope,
+    /// Literal, case-sensitive title substring; an empty query matches all titles.
+    #[serde(default)]
+    #[schemars(length(max = 128))]
+    pub title_query: String,
+}
+#[derive(Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[schemars(rename = "AgentSessionListScope")]
+pub enum SessionListScope {
+    #[default]
+    All,
+    Project {
+        project_id: uuid::Uuid,
+    },
+    /// Resolve the exact workspace from an owned session, never a caller path.
+    Workspace {
+        #[schemars(length(min = 1, max = 128))]
+        session_id: String,
+    },
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

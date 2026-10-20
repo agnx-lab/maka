@@ -85,6 +85,24 @@ pub enum CatalogScope {
     Workspace(String),
     /// Server-owned namespace. This is a data filter, never authorization.
     IdPrefix(String),
+    /// One owner's catalog query. Every selection remains within its namespace.
+    /// This is a data filter; the caller still supplies the original authority.
+    Owned {
+        id_prefix: String,
+        selection: CatalogSelection,
+        title_query: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub enum CatalogSelection {
+    All,
+    Project(uuid::Uuid),
+    Workspace {
+        /// The original owned anchor also participates in continuation identity.
+        session_id: String,
+        identity: maka_agent_facts::execution::WorkspaceIdentity,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

@@ -180,6 +180,262 @@ async fn create_replay_conflict_reopen_and_anchored_catalog_pages() {
 }
 
 #[tokio::test]
+async fn owned_catalog_filters_before_paging_and_binds_literal_query_and_scope_to_revision() {
+    use maka_agent_facts::{
+        execution::WorkspaceIdentity,
+        interaction::{InteractionRecord, InteractionRequest},
+    };
+    use maka_event_log::sessions::{
+        CatalogFilter, CatalogScope, CatalogSelection, SessionPosition,
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&directory.path().join("owned-catalog.sqlite"))
+        .await
+        .unwrap();
+    let project = uuid::Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+    let other_project = uuid::Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+    let identity =
+        WorkspaceIdentity::from_marker_id("33333333-3333-4333-8333-333333333333").unwrap();
+    let other_identity =
+        WorkspaceIdentity::from_marker_id("44444444-4444-4444-8444-444444444444").unwrap();
+    let query = "Keep 会话%_'";
+    let title = "Keep 会话%_' 标题";
+    let configuration = |project, identity: &WorkspaceIdentity, title, path| {
+        json!({"title":title,"workspace":{
+            "projectId":project,"identity":identity,"path":path,"hostCwd":"/shared"
+        }})
+    };
+    // These earlier IDs would displace real matches if filtering happened
+    // after LIMIT. Equal paths do not establish intrinsic workspace membership.
+    for (id, project, workspace, title) in [
+        ("foreign_aaa_match", project, &identity, title),
+        ("owned_aaa_other_workspace", project, &other_identity, title),
+        (
+            "owned_aaa_wrong_project",
+            other_project,
+            &other_identity,
+            title,
+        ),
+        (
+            "owned_aaa_literal_noise",
+            project,
+            &identity,
+            "Keep 会话AA' 标题",
+        ),
+        (
+            "owned_aaa_case_noise",
+            project,
+            &identity,
+            "keep 会话%_' 标题",
+        ),
+    ] {
+        log.create_session(
+            id,
+            id,
+            &configuration(project, workspace, title, "/shared"),
+            1,
+        )
+        .await
+        .unwrap();
+    }
+    for index in 0..35 {
+        let id = format!("owned_match_{index:02}");
+        let path = if index == 0 { "/relocated" } else { "/shared" };
+        log.create_session(&id, &id, &configuration(project, &identity, title, path), 1)
+            .await
+            .unwrap();
+    }
+    for id in [
+        "owned_match_00",
+        "foreign_aaa_match",
+        "owned_aaa_other_workspace",
+        "owned_aaa_wrong_project",
+        "owned_aaa_literal_noise",
+        "owned_aaa_case_noise",
+    ] {
+        log.establish_interaction(&InteractionRecord {
+            session_id: id.into(),
+            turn_id: "turn".into(),
+            run_id: "run".into(),
+            request_id: format!("request_{id}"),
+            created_at: 10,
+            request: InteractionRequest::ServiceApproval {
+                tool_use_id: "tool".into(),
+                tool_name: "tool".into(),
+                service: "service".into(),
+                method: "method".into(),
+                binding: "binding".into(),
+                through: 1,
+            },
+            outcome: None,
+        })
+        .await
+        .unwrap();
+    }
+    let owned = |selection, title_query: &str| CatalogScope::Owned {
+        id_prefix: "owned_".into(),
+        selection,
+        title_query: title_query.into(),
+    };
+    let workspace_scope = |session_id: &str, identity: &WorkspaceIdentity, title_query: &str| {
+        owned(
+            CatalogSelection::Workspace {
+                session_id: session_id.into(),
+                identity: identity.clone(),
+            },
+            title_query,
+        )
+    };
+    let workspace = workspace_scope("owned_match_00", &identity, query);
+    let filter = CatalogFilter {
+        archived_only: false,
+        include_archived: false,
+        pending_only: false,
+    };
+    let first = log
+        .scoped_sessions::<Value>(workspace.clone(), None, SessionPosition::Start, filter)
+        .await
+        .unwrap();
+    assert_eq!(first.sessions.len(), 32);
+    assert_eq!(first.sessions.first().unwrap().id, "owned_match_00");
+    assert_eq!(first.sessions.last().unwrap().id, "owned_match_31");
+    assert_eq!(first.pending_session_count, 1);
+    assert!(first.previous_cursor.is_none());
+    assert_eq!(first.next_cursor.as_deref(), Some("owned_match_31"));
+    assert_eq!(
+        log.catalog_revision(workspace.clone(), filter)
+            .await
+            .unwrap(),
+        first.revision
+    );
+    let tail = log
+        .scoped_sessions::<Value>(
+            workspace.clone(),
+            Some(&first.revision),
+            SessionPosition::After(first.next_cursor.as_deref().unwrap()),
+            filter,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tail.sessions
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["owned_match_32", "owned_match_33", "owned_match_34"]
+    );
+    assert_eq!(tail.pending_session_count, 1);
+    assert!(tail.next_cursor.is_none());
+    let previous = log
+        .scoped_sessions::<Value>(
+            workspace.clone(),
+            Some(&first.revision),
+            SessionPosition::Before(tail.previous_cursor.as_deref().unwrap()),
+            filter,
+        )
+        .await
+        .unwrap();
+    assert_eq!(previous.sessions, first.sessions);
+    for (selection, expected_pending) in [
+        (CatalogSelection::Project(project), 2),
+        (CatalogSelection::All, 3),
+    ] {
+        let page = log
+            .scoped_sessions::<Value>(
+                owned(selection, query),
+                None,
+                SessionPosition::Start,
+                filter,
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.sessions.len(), 32);
+        assert_eq!(
+            page.sessions.first().unwrap().id,
+            "owned_aaa_other_workspace"
+        );
+        assert_eq!(page.pending_session_count, expected_pending);
+    }
+    let unfiltered = log
+        .scoped_sessions::<Value>(
+            owned(CatalogSelection::All, ""),
+            None,
+            SessionPosition::Start,
+            filter,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        unfiltered.sessions.first().unwrap().id,
+        "owned_aaa_case_noise"
+    );
+    assert_eq!(unfiltered.pending_session_count, 5);
+    for (scope, filter) in [
+        (CatalogScope::IdPrefix("owned_".into()), filter),
+        (owned(CatalogSelection::All, query), filter),
+        (owned(CatalogSelection::Project(project), query), filter),
+        (
+            owned(CatalogSelection::Project(other_project), query),
+            filter,
+        ),
+        (workspace_scope("owned_match_01", &identity, query), filter),
+        (
+            workspace_scope("owned_aaa_other_workspace", &other_identity, query),
+            filter,
+        ),
+        (
+            CatalogScope::Owned {
+                id_prefix: "owned".into(),
+                selection: CatalogSelection::Workspace {
+                    session_id: "owned_match_00".into(),
+                    identity: identity.clone(),
+                },
+                title_query: query.into(),
+            },
+            filter,
+        ),
+        (workspace_scope("owned_match_00", &identity, "Keep"), filter),
+        (
+            workspace.clone(),
+            CatalogFilter {
+                include_archived: true,
+                ..filter
+            },
+        ),
+        (
+            workspace.clone(),
+            CatalogFilter {
+                pending_only: true,
+                ..filter
+            },
+        ),
+    ] {
+        assert!(matches!(
+            log.scoped_sessions::<Value>(
+                scope,
+                Some(&first.revision),
+                SessionPosition::After("owned_match_31"),
+                filter
+            )
+            .await,
+            Err(StoreError::RevisionConflict { .. })
+        ));
+    }
+    assert!(
+        log.catalog_revision(owned(CatalogSelection::All, &"界".repeat(128)), filter)
+            .await
+            .is_ok()
+    );
+    assert!(
+        log.catalog_revision(owned(CatalogSelection::All, &"界".repeat(129)), filter)
+            .await
+            .is_err()
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
     let directory = tempfile::tempdir().unwrap();
     let log = EventLog::open(&directory.path().join("events.sqlite"))

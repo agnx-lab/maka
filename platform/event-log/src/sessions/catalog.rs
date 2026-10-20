@@ -30,34 +30,69 @@ const PREDICATE: &str = "
         SELECT 1 FROM interaction_requests request
         WHERE request.session_id = session_control.id AND NOT EXISTS (
             SELECT 1 FROM interaction_outcomes outcome
-            WHERE outcome.request_id = request.request_id)))";
+            WHERE outcome.request_id = request.request_id)))
+    AND (?6 IS NULL OR json_extract(configuration, '$.workspace.projectId') = ?6)
+    AND (?7 IS NULL OR json_extract(configuration, '$.workspace.identity') = ?7)
+    AND instr(COALESCE(json_extract(configuration, '$.title'), ''), ?8) > 0";
 
 struct Selection {
     session: Option<String>,
     cwd: Option<String>,
     prefix: Option<String>,
+    project: Option<String>,
+    workspace_identity: Option<String>,
+    title_query: String,
     filter: CatalogFilter,
 }
 impl Selection {
     fn new(scope: &CatalogScope, filter: CatalogFilter) -> Result<Self, StoreError> {
-        let (session, cwd, prefix) = match scope {
+        let mut selection = Self {
+            session: None,
+            cwd: None,
+            prefix: None,
+            project: None,
+            workspace_identity: None,
+            title_query: String::new(),
+            filter,
+        };
+        match scope {
             CatalogScope::Session(id) => {
                 validate_id(id)?;
-                (Some(id.clone()), None, None)
+                selection.session = Some(id.clone());
             }
-            CatalogScope::Workspace(cwd) => (None, Some(cwd.clone()), None),
+            CatalogScope::Workspace(cwd) => selection.cwd = Some(cwd.clone()),
             CatalogScope::IdPrefix(prefix) => {
                 validate_id(prefix)?;
-                (None, None, Some(prefix.clone()))
+                selection.prefix = Some(prefix.clone());
             }
-            CatalogScope::Profile => (None, None, None),
-        };
-        Ok(Self {
-            session,
-            cwd,
-            prefix,
-            filter,
-        })
+            CatalogScope::Owned {
+                id_prefix,
+                selection: scope,
+                title_query,
+            } => {
+                validate_id(id_prefix)?;
+                if title_query.chars().take(129).count() > 128 {
+                    return Err(invalid("catalog title query exceeds 128 characters"));
+                }
+                selection.prefix = Some(id_prefix.clone());
+                selection.title_query.clone_from(title_query);
+                match scope {
+                    CatalogSelection::All => {}
+                    CatalogSelection::Project(project) => {
+                        selection.project = Some(project.to_string());
+                    }
+                    CatalogSelection::Workspace {
+                        session_id,
+                        identity,
+                    } => {
+                        validate_id(session_id)?;
+                        selection.workspace_identity = Some(identity.clone().into());
+                    }
+                }
+            }
+            CatalogScope::Profile => {}
+        }
+        Ok(selection)
     }
 
     async fn ids(
@@ -75,7 +110,7 @@ impl Selection {
         };
         let sql = format!(
             "SELECT id FROM session_control WHERE {PREDICATE}
-            AND id {comparison} ?6 ORDER BY id {order} LIMIT ?7"
+            AND id {comparison} ?9 ORDER BY id {order} LIMIT ?10"
         );
         let mut ids = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
             .bind(if self.filter.archived_only {
@@ -87,6 +122,9 @@ impl Selection {
             .bind(&self.cwd)
             .bind(&self.prefix)
             .bind(self.filter.pending_only)
+            .bind(&self.project)
+            .bind(&self.workspace_identity)
+            .bind(&self.title_query)
             .bind(cursor)
             .bind(limit as i64)
             .fetch_all(connection)
@@ -109,6 +147,9 @@ impl Selection {
             .bind(&self.cwd)
             .bind(&self.prefix)
             .bind(true)
+            .bind(&self.project)
+            .bind(&self.workspace_identity)
+            .bind(&self.title_query)
             .fetch_one(connection)
             .await?;
         u64::try_from(count).map_err(|_| invalid("invalid pending session count"))

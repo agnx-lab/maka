@@ -23,7 +23,7 @@ use futures_util::future::BoxFuture;
 use maka_agent_api::session::SessionConfiguration;
 use maka_event_log::{
     observation::{StoreStreamEvent, StreamFact},
-    sessions::{CatalogScope, SessionRecord},
+    sessions::{CatalogScope, CatalogSelection, SessionRecord},
 };
 use maka_host_runtime::application::{Context, Handler};
 use serde::{Serialize, de::DeserializeOwned};
@@ -71,7 +71,7 @@ impl Handler for Agent {
                         let current = owner
                             .store
                             .catalog_revision(
-                                CatalogScope::IdPrefix(owner.prefix.clone()),
+                                catalog_scope(&owner, &input).await?,
                                 catalog_filter(&input),
                             )
                             .await
@@ -806,6 +806,30 @@ impl Handler for Agent {
         })
     }
 }
+async fn catalog_scope(owner: &Owner, input: &List) -> Result<CatalogScope, String> {
+    if input.title_query.chars().take(129).count() > 128 {
+        return Err("agent_catalog_query_invalid".into());
+    }
+    let selection = match &input.scope {
+        SessionListScope::All => CatalogSelection::All,
+        SessionListScope::Project { project_id } => CatalogSelection::Project(*project_id),
+        SessionListScope::Workspace { session_id } => CatalogSelection::Workspace {
+            session_id: session_id.clone(),
+            identity: owner
+                .session(session_id)
+                .await?
+                .configuration
+                .workspace
+                .identity,
+        },
+    };
+    Ok(CatalogScope::Owned {
+        id_prefix: owner.prefix.clone(),
+        selection,
+        title_query: input.title_query.clone(),
+    })
+}
+
 fn catalog_filter(input: &List) -> maka_event_log::sessions::CatalogFilter {
     maka_event_log::sessions::CatalogFilter {
         archived_only: matches!(input.filter, SessionFilter::Archived),
@@ -832,13 +856,16 @@ async fn catalog_page(owner: &Owner, input: &List) -> Result<SessionPage, String
     let page = owner
         .store
         .scoped_sessions::<SessionConfiguration>(
-            CatalogScope::IdPrefix(owner.prefix.clone()),
+            catalog_scope(owner, input).await?,
             revision,
             position,
             catalog_filter(input),
         )
         .await
-        .map_err(|_| "agent_catalog_unavailable")?;
+        .map_err(|error| match error {
+            maka_event_log::StoreError::RevisionConflict { .. } => "agent_catalog_changed",
+            _ => "agent_catalog_unavailable",
+        })?;
     let reverse = matches!(position, SessionPosition::Before(_));
     let mut result = SessionPage {
         revision: page.revision,
