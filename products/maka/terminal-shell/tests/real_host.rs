@@ -238,7 +238,9 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         wait_view(&mut view, |screen| screen.contains("Details · Standard") && screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
         support::click_text(&mut view, "Details ·");
         wait_view(&mut view, |screen| !screen.contains("On completion")).await;
-        support::click_text(&mut view, "Analyzing the request");
+        // The one live group's button has a stable semantic label; its text
+        // includes a disclosure glyph before the source-backed activity title.
+        support::click_text(&mut view, "Process group");
         wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST")).await;
         support::click_text(&mut view, "◇ Think · NATIVE_THINK_SOURCE_FIRST");
         // Either end of the actual expanded source must paint before keyboard scrolling.
@@ -401,8 +403,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // This older group is now closed: each manual opening starts at the
         // top. The row's small disclosure state still belongs to its source id.
         support::click_text(&mut view, "› Completed");
-        wait_view(&mut view, |screen| screen.contains("1 thought")).await;
-        support::click_text(&mut view, "1 thought");
+        wait_view(&mut view, |screen| screen.contains("› 1 thought")).await;
+        support::click_text(&mut view, "› 1 thought");
         let reopened = wait_view(&mut view, &at_source_start).await;
         evidence("completed-activity-source-reopened-at-top", &reopened);
         support::evidence_cells("completed-activity-source-reopened-at-top", &view);
