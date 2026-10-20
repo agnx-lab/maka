@@ -43,7 +43,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -58,6 +58,22 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub const EDITOR: &str = "composer";
+
+fn frame_time() -> f64 {
+    static STARTED: OnceLock<Instant> = OnceLock::new();
+    STARTED.get_or_init(Instant::now).elapsed().as_secs_f64()
+}
+
+pub fn load_application(view: &mut AppView) {
+    view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into())
+        .unwrap();
+    // load resets Surface; seed its clock before poll can apply an animation.
+    view.surface_mut().tick(frame_time());
+}
+
+pub fn tick(view: &mut AppView) {
+    view.tick(frame_time()).unwrap();
+}
 
 #[cfg(unix)]
 pub mod pty;
@@ -401,8 +417,7 @@ impl Fixture {
             ]),
             ..Default::default()
         });
-        view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into())
-            .unwrap();
+        load_application(&mut view);
         (view, bindings)
     }
     pub async fn finish(self) {
@@ -606,17 +621,18 @@ pub fn scroll_text(view: &mut AppView, text: &str, kind: crossterm::event::Mouse
     }));
 }
 
-// Call after pressing a row/header. Run the normal layout cycle before Home.
+// Complete native focus navigation before Home and recording source coordinates.
 pub async fn focus_activity(view: &mut AppView) {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            view.poll().unwrap();
+            tick(view);
             if view
                 .accessibility_snapshot()
                 .iter()
                 .any(|node| node.label == "Turn activity" && node.focused)
+                && !view.surface().animating()
             {
                 break;
             }
@@ -638,7 +654,7 @@ pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> 
     let started = Instant::now();
     loop {
         view.poll().unwrap();
-        view.tick(started.elapsed().as_secs_f64()).unwrap();
+        tick(view);
         assert!(
             view.last_error().is_none(),
             "NSH app error: {:?}",

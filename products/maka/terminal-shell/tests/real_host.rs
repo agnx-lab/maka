@@ -21,7 +21,6 @@ mod support;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use maka_plugin_core::operation::{OperationOutcome, Receipt};
-use nsh_engine::Bundle;
 use nsh_platform_tui::AppView;
 use serde_json::{Value, json};
 #[cfg(unix)]
@@ -179,7 +178,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         loop {
             support::scroll_text(&mut view, "History ", MouseEventKind::ScrollUp);
             view.poll().unwrap();
-            view.tick(scrolling.elapsed().as_secs_f64()).unwrap();
+            support::tick(&mut view);
             let screen = view.snapshot();
             if screen.contains("History 00 paragraph") {
                 assert!(!screen.contains("Load earlier messages"));
@@ -283,7 +282,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             request.thinking(&format!("\n\nTITLE_{paragraph:02} 规划 e\u{301} {}", "界e\u{301}".repeat(48))).await;
             for _ in 0..4 {
                 view.poll().unwrap();
-                view.tick(cadence.elapsed().as_secs_f64()).unwrap();
+                support::tick(&mut view);
                 let screen = view.snapshot();
                 assert!(at_source_start(&screen), "a title update moved the source reader:\n{screen}");
                 let title = screen.lines().nth(header_row).unwrap().trim().to_owned();
@@ -424,7 +423,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let verbose = wait_view(&mut view, |screen| screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS") && screen.contains("> todo_write") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
         evidence("verbose-settled-process-flat", &verbose);
-        view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into()).unwrap();
+        support::load_application(&mut view);
         let persisted = wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
         support::click_text(&mut view, "Details ·");
         wait_view(&mut view, |screen| screen.contains("Fold:")).await;
@@ -663,7 +662,7 @@ async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_
         assert!(restarted.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().is_empty());
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "recovering a receipt must never send A or draft B again");
 
-        view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into()).unwrap();
+        support::load_application(&mut view);
         let reloaded = wait_view(&mut view, |screen| screen.contains("Later unsent draft B survives recovery") && screen.contains("REAL_RECOVERED_PROVIDER_ANSWER") && screen.contains("Enter sends")).await;
         evidence("reloaded-draft", &reloaded);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
