@@ -22,7 +22,7 @@ use super::{
     input::{Input, Pointer},
     output::FrameWriter,
 };
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use nsh_core::{Command, MountBatch, MountItem, ROOT_ID};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
@@ -231,6 +231,7 @@ impl Session {
                 Some(Pointer::Press { epoch, lease }) => {
                     if *epoch <= self.presentation.state.lock().unwrap().reject_through {
                         self.cancel_pointer()?;
+                        changed = true;
                         continue;
                     }
                     Some(lease)
@@ -263,10 +264,19 @@ impl Session {
                 continue;
             }
             if let (Event::Mouse(mouse), Some(lease)) = (&input.event, lease) {
+                if !matches!(
+                    mouse.kind,
+                    MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+                ) {
+                    self.cancel_pointer()?;
+                    changed = true;
+                    continue;
+                }
                 match self.surface.handle_presented_mouse(*mouse, lease) {
                     Some(handled) => changed |= handled,
                     None => {
                         self.cancel_pointer()?;
+                        changed = true;
                         continue;
                     }
                 }
@@ -281,6 +291,7 @@ impl Session {
             if invokes_application {
                 if inputs.peek().is_some() {
                     self.cancel_pointer()?;
+                    changed = true;
                 }
                 break;
             }
@@ -820,6 +831,37 @@ mod tests {
         assert!(
             session.surface.snapshot().contains("after closed:2"),
             "a cancelled sealed gesture cannot release through the opaque path"
+        );
+        // A later opaque release must not complete a capture recreated by the
+        // cancelled group's Down. This also checks that its pressed state ended.
+        session
+            .advance(Advance {
+                inputs: vec![Input {
+                    event: events[1].clone(),
+                    pointer: Some(Pointer::Exact(session.epoch)),
+                }],
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(session.surface.snapshot().contains("after closed:2"));
+        let inputs = click(&session.surface, "Close")
+            .into_iter()
+            .map(|event| Input {
+                event,
+                pointer: Some(Pointer::Exact(session.epoch)),
+            })
+            .collect();
+        session
+            .advance(Advance {
+                inputs,
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(
+            session.surface.snapshot().contains("after closed:3"),
+            "the next native click remains usable after cancellation"
         );
     }
 
