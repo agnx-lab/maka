@@ -87,14 +87,16 @@ impl Captured {
         }
         let module = &self.0.module;
         module.ready().await?;
-        let size = json::encoded_size(&args, 1024 * 1024).map_err(failed)?;
+        let size = json::encoded_size(&args, usize::MAX).map_err(failed)?;
         let bytes = module
             .0
             .vm
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(size.max(1) as u32)
+            .try_acquire_many_owned(
+                u32::try_from(size.max(1)).map_err(|_| failed("VM input budget exhausted"))?,
+            )
             .map_err(|_| failed("VM input budget exhausted"))?;
         let (reply, result) = oneshot::channel();
         module
@@ -132,14 +134,16 @@ impl Module {
         {
             return Err(failed("invalid worker callback registration"));
         }
-        let size = json::encoded_size(&(&namespace, &methods), 1024 * 1024).map_err(failed)?;
+        let size = json::encoded_size(&(&namespace, &methods), usize::MAX).map_err(failed)?;
         let bytes = self
             .0
             .vm
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(size.max(1) as u32)
+            .try_acquire_many_owned(
+                u32::try_from(size.max(1)).map_err(|_| failed("VM input budget exhausted"))?,
+            )
             .map_err(|_| failed("VM input budget exhausted"))?;
         let (reply, result) = oneshot::channel();
         self.0

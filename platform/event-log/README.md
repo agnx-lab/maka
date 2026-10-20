@@ -25,6 +25,8 @@ Owns the SQLite event store and State Root lease. It persists application source
 
 Original operation contracts are stored once by digest. Operation requests and receipt references carry that identity, so journal reads, caller history and UI delivery do not repeatedly copy service schemas. Reads verify the exact original request fingerprint; admission still validates the complete contract and resource requirements.
 
+The operation journal retains complete admitted requests and returned values without separate request, result or receipt-reference size quotas. Exact retries and reopened readers recover the original outcome and cleanup status.
+
 Message delivery retains prepared content, the editable original and the original submission digest. Its internal records can exceed the public request envelope because they preserve these separate facts; writes and exact message reads do not reapply that envelope to the encoded record. Pending queues have no fixed message-count or aggregate-byte quota. Stop and whole-queue retraction retain complete admitted entries in their transactional receipts, without a separate receipt-size quota. Exact retries and reopened readers return the same original receipt. Use `editable_message` to read one owned source by its Session, Turn and message identity.
 
 Source messages, executor tool calls and generated tool results share the Session's visible-message identity namespace. Admission checks both claim orders against canonical facts, including results synthesized for pending tools at executor completion or invocation termination. Only actual result identities are occupied; a matching suffix alone does not reserve an identity.

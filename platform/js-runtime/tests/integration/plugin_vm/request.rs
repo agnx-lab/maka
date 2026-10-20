@@ -58,9 +58,9 @@ async fn private_contexts_expire_before_reply_without_an_ambient_or_json_address
                 async stale() { try { await saved.invoke('old'); return false; } catch(e) { return e.message.includes('expired'); } },
                 async invalid(mode, context) {
                     try {
-                        await context.invoke(mode==='large'? 'x'.repeat(1024*1024):mode==='bigint'?1n:'inexact');
+                        await context.invoke(mode==='bigint'?1n:'inexact');
                         return false;
-                    } catch(e) { return e.message.includes(mode==='large'?'1 MiB':mode==='bigint'?'BigInt':'represented exactly'); }
+                    } catch(e) { return e.message.includes(mode==='bigint'?'BigInt':'represented exactly'); }
                 },
                 mutateIntrinsics() { Object.freeze=()=>{throw Error('poisoned freeze')}; }
             };
@@ -73,7 +73,7 @@ async fn private_contexts_expire_before_reply_without_an_ambient_or_json_address
         assert!(weak.upgrade().is_none(), "reply cannot precede ContextState release");
         assert_eq!(callbacks.call("stale", vec![]).await.unwrap(), json!(true));
         assert!(callbacks.call("read", vec![json!("forged"),json!({"invoke":"1","moduleId":1})]).await.is_err());
-        for mode in ["large","bigint","inexact"] {
+        for mode in ["bigint","inexact"] {
             assert_eq!(callbacks.call_with_context("invalid", vec![json!(mode)], Arc::new(Echo { label:mode.into(),calls:calls.clone() })).await.unwrap(), json!(true));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 2, "invalid inputs never dispatch");

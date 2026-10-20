@@ -384,30 +384,25 @@ async fn dispatch_requires_original_source_and_settlement_requires_original_clai
     store.close().await.unwrap();
 }
 #[tokio::test]
-async fn stored_receipt_bounds_precede_materialization() {
-    for column in ["request_json", "outcome_json", "cleanup_json"] {
-        let (_dir, store) = store().await;
-        let original = request(&store).await;
-        let reference = original.reference().unwrap();
-        store.dispatch_operation(original).await.unwrap();
-        store.connection.run(move |conn| Box::pin(async move {
-            let sql = match column {
-                "request_json" => "UPDATE application_operations SET request_json=json_object('huge', printf('%.*c', 4194304, 'x'))",
-                "outcome_json" => "UPDATE application_operations SET outcome_json=json_object('huge', printf('%.*c', 4194304, 'x'))",
-                _ => "UPDATE application_operations SET cleanup_json=json_object('huge', printf('%.*c', 4194304, 'x'))",
-            };
-            sqlx::query(sql).execute(conn).await?; Ok(())
-        })).await.unwrap();
-        assert!(
-            store
-                .operation_observation(&reference)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("exceeds limit")
-        );
-        store.close().await.unwrap();
-    }
+async fn stored_cleanup_bounds_precede_materialization() {
+    let (_dir, store) = store().await;
+    let original = request(&store).await;
+    let reference = original.reference().unwrap();
+    store.dispatch_operation(original).await.unwrap();
+    store.connection.run(move |conn| Box::pin(async move {
+        sqlx::query("UPDATE application_operations SET cleanup_json=json_object('huge', printf('%.*c', 4194304, 'x'))")
+            .execute(conn).await?;
+        Ok(())
+    })).await.unwrap();
+    assert!(
+        store
+            .operation_observation(&reference)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds limit")
+    );
+    store.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -631,7 +626,7 @@ fn dynamic_request(request: &OperationRequest) -> OperationRequest<()> {
 }
 
 #[tokio::test]
-async fn compiled_operation_preserves_reference_capture_budget_and_original_dispatch() {
+async fn compiled_operation_preserves_reference_capture_and_complete_original_dispatch() {
     let (_dir, store) = store().await;
     let mut original = request(&store).await;
     for required in [false, true] {
@@ -671,25 +666,11 @@ async fn compiled_operation_preserves_reference_capture_budget_and_original_disp
         serde_json::json!({"description": "x".repeat(100_000)});
     let templates = OperationTemplate::for_contract(&original.contract).unwrap();
     let template = &templates["change"];
-    // Compact journal alone fits, but original full contract plus input exceeds its budget.
-    original.input = serde_json::json!("x".repeat(MAX_REQUEST - 50_000));
-    assert!(original.reference().is_err());
-    assert!(template.prepare(dynamic_request(&original)).is_err());
-    original.input = serde_json::json!("");
-    let overhead = encode(&original, MAX_REQUEST).unwrap().len();
-    original.input = serde_json::json!("x".repeat(MAX_REQUEST - overhead));
-    assert_eq!(encode(&original, MAX_REQUEST).unwrap().len(), MAX_REQUEST);
-    assert_eq!(
-        template
-            .prepare(dynamic_request(&original))
-            .unwrap()
-            .reference(),
-        &original.reference().unwrap()
-    );
-    original.input = serde_json::json!("x".repeat(MAX_REQUEST - overhead + 1));
-    assert!(original.reference().is_err());
-    assert!(template.prepare(dynamic_request(&original)).is_err());
-    original.input = serde_json::json!({"original": true});
+    original.input = serde_json::json!({
+        "text": "界😀\n\"\\\t".repeat(180_000),
+        "tail": {"complete": true, "original": "末尾"},
+    });
+    assert!(serde_json::to_vec(&original.input).unwrap().len() > 2 * 1024 * 1024);
     let mut invalid_consumer = dynamic_request(&original);
     invalid_consumer.consumer = InstanceId(vec![Uuid::nil()]);
     assert!(template.prepare(invalid_consumer).is_err());
@@ -704,6 +685,48 @@ async fn compiled_operation_preserves_reference_capture_budget_and_original_disp
     };
     assert_eq!(observation.reference, *claim.reference());
     assert_eq!(observation.outcome, OperationOutcome::Unresolved);
+    assert_eq!(observation.cleanup, OperationCleanup::Unconfirmed);
+    let outcome = OperationOutcome::Returned {
+        value: serde_json::json!({
+            "text": "结果😀\n\"\\\t".repeat(100_000),
+            "tail": {"complete": true, "original": "完整结果"},
+        }),
+    };
+    assert!(serde_json::to_vec(&outcome).unwrap().len() > 1024 * 1024 + 128);
+    let settled = store
+        .finish_operation(&claim, outcome.clone(), OperationCleanup::Confirmed)
+        .await
+        .unwrap();
+    assert_eq!(settled.reference, *claim.reference());
+    assert_eq!(settled.outcome, outcome);
+    assert_eq!(settled.cleanup, OperationCleanup::Confirmed);
+    assert_eq!(
+        store
+            .finish_operation(&claim, outcome, OperationCleanup::Confirmed)
+            .await
+            .unwrap(),
+        settled
+    );
+    let Dispatch::Existing(retried) = store.dispatch_operation(original.clone()).await.unwrap()
+    else {
+        panic!("settled original must not execute again")
+    };
+    assert_eq!(retried, settled);
+    let Dispatch::Existing(retried) = store
+        .dispatch_prepared_operation(template.prepare(dynamic_request(&original)).unwrap())
+        .await
+        .unwrap()
+    else {
+        panic!("settled prepared original must not execute again")
+    };
+    assert_eq!(retried, settled);
+    assert_eq!(
+        store
+            .operation_observation(claim.reference())
+            .await
+            .unwrap(),
+        Some(settled.clone())
+    );
     original.input = serde_json::json!({"replacement": true});
     assert!(matches!(
         store
@@ -711,6 +734,13 @@ async fn compiled_operation_preserves_reference_capture_budget_and_original_disp
             .await,
         Err(StoreError::EventConflict)
     ));
+    assert_eq!(
+        store
+            .operation_observation(claim.reference())
+            .await
+            .unwrap(),
+        Some(settled)
+    );
     drop(claim);
     store.close().await.unwrap();
 }
@@ -759,7 +789,7 @@ async fn contract_templates_keep_each_mutations_resources_and_request_identity()
                 assert_eq!(prepared.journal, original.journal().unwrap());
                 assert_eq!(
                     &*prepared.contract_json,
-                    encode(&original.contract, MAX_REQUEST).unwrap()
+                    serde_json::to_string(&original.contract).unwrap()
                 );
             }
         }

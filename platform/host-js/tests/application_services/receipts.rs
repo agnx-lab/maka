@@ -414,7 +414,7 @@ async fn composed_portable_receipts_preserve_exact_journal_values_and_original_r
                     cleanup: OperationCleanup::Confirmed
                 }
             ));
-            originals.push(original);
+            originals.push((input, original));
         }
         let (input, packages) = reader_source(json!({}));
         store
@@ -427,17 +427,16 @@ async fn composed_portable_receipts_preserve_exact_journal_values_and_original_r
         let reader = reader_application(store.clone(), deployment, &issuer, recovery).await;
         let client = reader.client();
         let binding = reader_binding(&client).await;
-        for original in originals {
-            assert!(
-                unavailable(read(&client, binding.clone(), &original.reference, &issuer).await)
-                    .contains("cannot be represented")
-            );
-            assert!(matches!(
-                script_read(&client, &original.reference, &issuer)
-                    .await
-                    .receipt,
-                Receipt::Unavailable { .. }
-            ));
+        for (input, original) in originals {
+            let observed = read(&client, binding.clone(), &original.reference, &issuer).await;
+            let scripted = script_read(&client, &original.reference, &issuer).await;
+            if input == "integer" {
+                assert!(unavailable(observed).contains("cannot be represented"));
+                assert!(matches!(scripted.receipt, Receipt::Unavailable { .. }));
+            } else {
+                assert_eq!(observed, original);
+                assert_eq!(scripted, original);
+            }
             let raw = client
                 .recover(
                     client.activation(&id(2)).unwrap(),

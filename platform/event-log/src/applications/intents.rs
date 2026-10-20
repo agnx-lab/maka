@@ -28,7 +28,6 @@ use sqlx::{Connection, Row, SqliteConnection};
 use std::sync::Arc;
 use uuid::Uuid;
 
-const MAX_REFERENCE: usize = 512 * 1024;
 const MAX_PAGE: usize = 1024 * 1024;
 const MAX_RECOVERY: usize = 32 * 1024;
 
@@ -81,7 +80,6 @@ impl CallerConfirmation {
         }
         self.caller.validate().map_err(invalid)?;
         consumer_valid(&self.consumer)?;
-        encode(&self.reference, MAX_REFERENCE)?;
         encode(self, MAX_PAGE)?;
         self.reference
             .validate()
@@ -113,13 +111,11 @@ async fn read(
     consumer: &InstanceId,
     operation: Uuid,
 ) -> Result<Option<CallerIntent>, StoreError> {
-    let row = sqlx::query("SELECT cursor, source_revision, CASE WHEN length(CAST(reference_json AS BLOB)) <= 524288 THEN reference_json END AS reference_json, CASE WHEN length(CAST(recovery_json AS BLOB)) <= 32768 THEN recovery_json END AS recovery_json FROM application_intents WHERE deployment=? AND consumer=? AND operation=?")
+    let row = sqlx::query("SELECT cursor, source_revision, reference_json, CASE WHEN length(CAST(recovery_json AS BLOB)) <= 32768 THEN recovery_json END AS recovery_json FROM application_intents WHERE deployment=? AND consumer=? AND operation=?")
         .bind(deployment.to_string()).bind(encode(consumer,4096)?).bind(operation.to_string()).fetch_optional(connection).await?;
     row.map(|row| {
-        let reference: RecoveryRef = serde_json::from_str(
-            &row.try_get::<Option<String>, _>("reference_json")?
-                .ok_or_else(|| invalid("caller reference exceeds 512 KiB"))?,
-        )?;
+        let reference: RecoveryRef =
+            serde_json::from_str(&row.try_get::<String, _>("reference_json")?)?;
         let recovery = serde_json::from_str(
             &row.try_get::<Option<String>, _>("recovery_json")?
                 .ok_or_else(|| invalid("caller recovery metadata exceeds 32 KiB"))?,
@@ -182,7 +178,6 @@ impl EventLog {
     ) -> Result<RecordedIntent, StoreError> {
         consumer_valid(&consumer)?;
         reference.validate().map_err(|e| invalid(e.to_string()))?;
-        encode(&reference, MAX_REFERENCE)?;
         encode(&recovery, MAX_RECOVERY)?;
         let loaded = self
             .load_application_at(&caller)
@@ -205,7 +200,7 @@ impl EventLog {
         source.check(self, &consumer)?;
         let caller = source.reference().clone();
         reference.validate().map_err(|e| invalid(e.to_string()))?;
-        let encoded = encode(&reference, MAX_REFERENCE)?;
+        let encoded = serde_json::to_string(&reference)?;
         let encoded_recovery = encode(&recovery, MAX_RECOVERY)?;
         let domain = self.application_domain()?;
         let owner = self.root_owner.as_ref().expect("owned caller Root").clone();

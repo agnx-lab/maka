@@ -361,7 +361,10 @@ impl Dispatch {
                 let input = self
                     .bytes
                     .clone()
-                    .try_acquire_many_owned(input_size.max(1) as u32)
+                    .try_acquire_many_owned(
+                        u32::try_from(input_size.max(1))
+                            .map_err(|_| "Host input budget exhausted")?,
+                    )
                     .map_err(|_| "Host input budget exhausted")?;
                 reserved.bytes.merge(input);
                 Ok(*reserved)
@@ -381,10 +384,15 @@ impl Dispatch {
                         return Err(error);
                     }
                 };
+                let bytes_needed = input_size
+                    .max(1)
+                    .checked_add(size.descriptors)
+                    .and_then(|size| u32::try_from(size).ok())
+                    .ok_or("Host input budget exhausted")?;
                 let bytes = self
                     .bytes
                     .clone()
-                    .try_acquire_many_owned((input_size.max(1) + size.descriptors) as u32)
+                    .try_acquire_many_owned(bytes_needed)
                     .map_err(|_| "Host input budget exhausted")?;
                 let resources = self
                     .resources

@@ -211,6 +211,9 @@ fn consumer() -> Package {
         Some("export function activate() { return {}; }".into()),
     )
 }
+fn large_json_text() -> String {
+    "original界🙂\"\\\n\t".repeat(64 * 1024)
+}
 fn scope(issuer: &Issuer, allowed: bool) -> Scope {
     issuer
         .issue_with(
@@ -407,11 +410,7 @@ async fn authority_and_validation_reject_before_work_and_business_errors_settle_
                 .await
                 .is_err()
         );
-        for (method, input) in [
-            ("unknown", json!("input")),
-            ("echo", json!(false)),
-            ("echo", json!("x".repeat(1024 * 1024))),
-        ] {
+        for (method, input) in [("unknown", json!("input")), ("echo", json!(false))] {
             assert!(
                 client
                     .start(
@@ -426,6 +425,26 @@ async fn authority_and_validation_reject_before_work_and_business_errors_settle_
             );
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let original = json!(large_json_text());
+        let large_scope = scope(&issuer, true);
+        assert_eq!(
+            client
+                .start(
+                    binding.clone(),
+                    "echo".into(),
+                    original.clone(),
+                    large_scope.clone(),
+                    Attachments::new().into()
+                )
+                .await
+                .unwrap()
+                .result()
+                .await
+                .unwrap(),
+            original
+        );
+        large_scope.finish().await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         for value in ["fail", "bad-result"] {
             assert!(
                 client
@@ -472,6 +491,118 @@ async fn authority_and_validation_reject_before_work_and_business_errors_settle_
     })
     .await
     .unwrap();
+}
+
+async fn javascript_nested_echo_preserves_large_json(configuration: bool) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        for realm in [Realm::Shared, Realm::Dedicated] {
+            let implementation = Implementation::JavaScript {
+                module: "host.mjs".into(),
+                realm,
+            };
+            let mut declaration = entry(true, implementation.clone(), MethodMode::Query);
+            declaration.imports = entry(false, implementation, MethodMode::Query).imports;
+            let source = format!(
+                r#"
+                    let configuration;
+                    export const service = {{
+                        async echo(input, _observation, context) {{
+                            return await context.invoke({{
+                                operation: 'call', import: 'echo', provider: 0,
+                                method: 'echo', input: configuration.original ?? input,
+                                attachments: {{}}
+                            }});
+                        }}
+                    }};
+                    export function activate(config) {{
+                        configuration = config;
+                        return {{echo: {{contract: {}, service: ['service']}}}};
+                    }}
+                "#,
+                serde_json::to_string(&contract(MethodMode::Query)).unwrap()
+            );
+            let wrapper = package("forwarder", declaration, Some(source));
+            let provider = native_package();
+            let consumer = consumer();
+            let mut composition = input(&provider, &consumer);
+            let mut wrapper_node = node(&wrapper, 4, false);
+            let original = json!(large_json_text());
+            if configuration {
+                wrapper_node
+                    .configuration
+                    .values
+                    .insert("original".into(), original.clone());
+            }
+            composition.instances.insert("wrapper".into(), wrapper_node);
+            composition
+                .instances
+                .get_mut("a")
+                .unwrap()
+                .bindings
+                .get_mut("echo")
+                .unwrap()[0] = Target::Instance {
+                path: vec!["wrapper".into()],
+                export: "echo".into(),
+            };
+            let calls = Arc::new(AtomicUsize::new(0));
+            let issuer = Issuer::default();
+            let app = Application::start(
+                composition,
+                vec![provider, consumer, wrapper],
+                registry(Arc::new(Echo {
+                    calls: calls.clone(),
+                })),
+                issuer.clone(),
+                Arc::new(Grant(issuer.clone())),
+                Some(maka_host_js::factory(Limits::default())),
+            )
+            .unwrap();
+            app.ready().await.unwrap();
+            let client = app.client();
+            let binding = client
+                .bind(client.activation(&id(2)).unwrap(), "echo".into())
+                .await
+                .unwrap()
+                .remove(0);
+            let request_scope = scope(&issuer, true);
+            assert_eq!(
+                client
+                    .start(
+                        binding,
+                        "echo".into(),
+                        if configuration {
+                            json!("read configuration")
+                        } else {
+                            original.clone()
+                        },
+                        request_scope.clone(),
+                        Attachments::new().into(),
+                    )
+                    .await
+                    .unwrap()
+                    .result()
+                    .await
+                    .unwrap(),
+                original
+            );
+            request_scope.finish().await.unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            app.shutdown().await.unwrap();
+            assert!(client.snapshot().closed);
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn javascript_nested_query_preserves_large_unicode_json() {
+    javascript_nested_echo_preserves_large_json(false).await;
+}
+
+#[tokio::test]
+async fn javascript_configuration_preserves_large_unicode_json() {
+    javascript_nested_echo_preserves_large_json(true).await;
 }
 
 struct Held {

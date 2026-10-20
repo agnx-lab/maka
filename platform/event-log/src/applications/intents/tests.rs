@@ -295,7 +295,7 @@ async fn caller_requires_owned_exact_source_and_actual_executable_namespace() {
 }
 
 #[tokio::test]
-async fn corrupted_history_is_bounded_and_never_overwritten_as_a_fresh_intent() {
+async fn corrupted_history_is_never_overwritten_as_a_fresh_intent() {
     let (_dir, store) = store().await;
     let deployment = Uuid::new_v4();
     let caller = source(&store, deployment, 0).await;
@@ -341,7 +341,7 @@ async fn corrupted_history_is_bounded_and_never_overwritten_as_a_fresh_intent() 
                     "UPDATE application_intents SET operation=?, reference_json=? WHERE cursor=?",
                 )
                 .bind(operation)
-                .bind(serde_json::to_string(&"x".repeat(MAX_REFERENCE)).unwrap())
+                .bind("{}")
                 .bind(cursor as i64)
                 .execute(&mut *connection)
                 .await?;

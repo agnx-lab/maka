@@ -184,9 +184,8 @@ impl<V: ?Sized + 'static> Application<V> {
                 let prepared = async {
                     let original = owner.prepare().await?;
                     original.validate().map_err(|e| e.to_string())?;
-                    maka_plugin_core::json::check_delivery(
+                    maka_plugin_core::json::exact_numbers(
                         &serde_json::to_value(&original).map_err(|e| e.to_string())?,
-                        512 * 1024,
                     )
                     .map_err(|e| e.to_string())?;
                     if original.operation != id {

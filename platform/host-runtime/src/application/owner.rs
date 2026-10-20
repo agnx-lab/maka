@@ -1205,9 +1205,14 @@ impl Owner {
                                 return Err("Host attachment slots or types mismatch".into());
                             }
                             let size = resource_ingress::attachment_size(&attachments)?;
+                            let input_size =
+                                maka_plugin_core::json::value_size(&input, usize::MAX)?.max(1);
+                            let bytes_needed = size
+                                .descriptors
+                                .checked_add(input_size)
+                                .ok_or("Host input budget exhausted")?;
                             if size.payload != resources.num_permits()
-                                || size.descriptors + check_json(&input)?.max(1)
-                                    > bytes.num_permits()
+                                || bytes_needed > bytes.num_permits()
                             {
                                 return Err(
                                     "Host attachment descriptor changed before admission".into()
@@ -1412,7 +1417,6 @@ impl Owner {
                                 if scope.cancellation.is_cancelled() { return Err("Host invocation was revoked before callback".into()); }
                                 let service = execution.value();
                                 let value = service.implementation.call(method.clone(), input, context).await?;
-                                check_json(&value)?;
                                 service.methods[&method].output.validate(&value).map_err(|e| e.to_string())?;
                                 Ok(value)
                             };

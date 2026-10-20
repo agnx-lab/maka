@@ -545,19 +545,28 @@ async fn original_receipt_survives_restart_and_new_composition_without_provider(
             .await
             .unwrap()
             .remove(0);
+        let original = large_receipt_value();
         let accepted = mutate(
             &client,
             &store,
             binding,
             "echo".into(),
-            json!("original"),
+            original.clone(),
             scope(&issuer, true),
             Uuid::new_v4(),
         )
         .await
         .unwrap();
         let reference = accepted.reference.clone();
-        returned(accepted.result().await);
+        assert_eq!(
+            accepted.result().await.receipt,
+            Receipt::Recorded {
+                outcome: OperationOutcome::Returned {
+                    value: original.clone()
+                },
+                cleanup: OperationCleanup::Confirmed,
+            }
+        );
         let mut declaration = entry(
             false,
             Implementation::JavaScript {
@@ -654,9 +663,7 @@ async fn original_receipt_survives_restart_and_new_composition_without_provider(
             .unwrap();
         assert_eq!(
             observation.outcome,
-            OperationOutcome::Returned {
-                value: json!("original")
-            }
+            OperationOutcome::Returned { value: original }
         );
         assert_eq!(observation.cleanup, OperationCleanup::Confirmed);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -1194,6 +1201,10 @@ fn unknown(reply: OperationReply) -> bool {
     )
 }
 
+fn large_receipt_value() -> Value {
+    json!("回🙂\"\\\n".repeat(128 * 1024))
+}
+
 struct ReceiptBoundaryEcho(Arc<AtomicUsize>);
 impl Handler for ReceiptBoundaryEcho {
     fn call(&self, _: String, input: Value, _: Context) -> BoxFuture<'static, Result<Value>> {
@@ -1201,7 +1212,7 @@ impl Handler for ReceiptBoundaryEcho {
         Box::pin(async move {
             calls.fetch_add(1, Ordering::SeqCst);
             if input == json!("large") {
-                Ok(json!("x".repeat(1024 * 1024 - 2)))
+                Ok(large_receipt_value())
             } else if input == json!("integer") {
                 Ok(json!(9007199254740993_u64))
             } else {
@@ -1285,11 +1296,15 @@ async fn javascript_receipts_preserve_child_reference_unknown_and_oversized_reco
         assert_eq!(stored_integer.cleanup,OperationCleanup::Confirmed);
         assert_eq!(calls.load(Ordering::SeqCst),2);
         let large = read("large").await;
-        assert!(matches!(large.receipt,Receipt::Unavailable {..}));
+        assert!(matches!(&large.receipt,Receipt::Recorded {
+            outcome:OperationOutcome::Returned {value},
+            cleanup:OperationCleanup::Confirmed,
+        } if value == &large_receipt_value()), "expected the complete large returned value with confirmed cleanup; calls={}, unknown={}", calls.load(Ordering::SeqCst), matches!(&large.receipt, Receipt::Recorded { outcome: OperationOutcome::Unknown {..}, .. }));
         let stored = store.operation_observation(&large.reference).await.unwrap().unwrap();
-        assert_eq!(stored.outcome,OperationOutcome::Returned {value:json!("x".repeat(1024*1024-2))});
+        assert_eq!(stored.outcome,OperationOutcome::Returned {value:large_receipt_value()});
         assert_eq!(stored.cleanup,OperationCleanup::Confirmed);
-        assert_eq!(read("large").await.reference,large.reference);
+        assert_eq!(read("large").await,large);
+        assert_eq!(read("recover").await,large);
         assert_eq!(calls.load(Ordering::SeqCst),3);
         client.retire(client.activation(&id(1)).unwrap()).await.unwrap();
         let reader_binding = client.bind(client.activation(&id(6)).unwrap(),"echo".into()).await.unwrap().remove(0);
@@ -1397,16 +1412,17 @@ async fn original_contract_metadata_stays_native_while_compact_receipts_are_deli
     .await
     .unwrap();
     let reference = mutation.reference.clone();
-    maka_plugin_core::json::check_delivery(&serde_json::to_value(&reference).unwrap(), 1024)
-        .unwrap();
     let reply = mutation.result().await;
-    assert!(matches!(
+    assert_eq!(reply.reference, reference);
+    assert_eq!(
         reply.receipt,
         Receipt::Recorded {
-            outcome: OperationOutcome::Returned { .. },
+            outcome: OperationOutcome::Returned {
+                value: json!("effect")
+            },
             cleanup: OperationCleanup::Confirmed,
         }
-    ));
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     app.shutdown().await.unwrap();
     drop(binding);

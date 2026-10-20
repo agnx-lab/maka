@@ -109,12 +109,12 @@ pub(super) fn receipt_reply(
 // Delivery failure must never replace the original journal's durable outcome.
 pub(super) fn receipt_value(mut reply: OperationReply) -> Result<Value> {
     let value = serde_json::to_value(&reply).map_err(|e| e.to_string())?;
-    if maka_plugin_core::json::check_delivery(&value, 1024 * 1024).is_ok() {
+    if maka_plugin_core::json::exact_numbers(&value).is_ok() {
         return Ok(value);
     }
     reply.receipt = Receipt::Unavailable { diagnostic: "original receipt cannot be represented by this observer; read original journal through a compatible observer".into() };
     let value = serde_json::to_value(reply).map_err(|e| e.to_string())?;
-    maka_plugin_core::json::check_delivery(&value, 1024 * 1024).map_err(|e| e.to_string())?;
+    maka_plugin_core::json::exact_numbers(&value)?;
     Ok(value)
 }
 

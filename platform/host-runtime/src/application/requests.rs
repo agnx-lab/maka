@@ -121,7 +121,6 @@ impl Context {
                     metadata: resource.metadata(),
                 })
                 .map_err(|error| error.to_string())?;
-                check_json(&value)?;
                 Ok(value)
             }
             HostRequest::Read { start, end, .. } => {

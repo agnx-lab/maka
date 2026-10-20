@@ -37,8 +37,6 @@ use sqlx::{Connection, Row, SqliteConnection};
 use std::sync::Arc;
 use uuid::Uuid;
 
-const MAX_REQUEST: usize = 2 * 1024 * 1024;
-const MAX_RESULT: usize = 1024 * 1024 + 128;
 const MAX_DIAGNOSTIC: usize = 64 * 1024;
 
 /// Trusted embedding supplies these facts after its private admission check.
@@ -82,7 +80,7 @@ impl OperationTemplate {
         else {
             return Ok(Default::default());
         };
-        let contract_json: Arc<str> = encode(contract, MAX_REQUEST)?.into();
+        let contract_json: Arc<str> = serde_json::to_string(contract)?.into();
         let recovery =
             RecoveryContract::for_method(contract, mutation).map_err(|e| invalid(e.to_string()))?;
         methods
@@ -103,12 +101,6 @@ impl OperationTemplate {
             .collect()
     }
     pub fn prepare(&self, request: OperationRequest<()>) -> Result<PreparedOperation, StoreError> {
-        // The unit contract serializes as null. Replacing those four bytes with
-        // the cached contract preserves the original entire-record byte budget.
-        let request_bytes = encode(&request, MAX_REQUEST)?.len();
-        if request_bytes - 4 + self.contract_json.len() > MAX_REQUEST {
-            return Err(invalid("operation request exceeds limit"));
-        }
         if request.method != self.method {
             return Err(invalid("operation template method mismatch"));
         }
@@ -167,8 +159,6 @@ impl OperationRequest {
     }
 
     fn journal(&self) -> Result<OperationRequest<RecoveryContract>, StoreError> {
-        // Bound the entire record before building a canonical representation.
-        encode(self, MAX_REQUEST)?;
         let Interface::Service { methods } = &self.contract.interface else {
             return Err(invalid("operation requires a service contract"));
         };
@@ -207,7 +197,6 @@ impl OperationRequest {
 
 impl OperationRequest<RecoveryContract> {
     fn stored_reference(&self) -> Result<RecoveryRef, StoreError> {
-        encode(self, MAX_REQUEST)?;
         if self.consumer.0.is_empty()
             || self.consumer.0.len() > 64
             || self.consumer.0.iter().any(Uuid::is_nil)
@@ -223,7 +212,9 @@ impl OperationRequest<RecoveryContract> {
         canonical.sort_all_objects();
         let fingerprint = format!(
             "sha256-{}",
-            hex::encode(Sha256::digest(encode(&canonical, MAX_REQUEST)?.as_bytes()))
+            hex::encode(Sha256::digest(
+                serde_json::to_string(&canonical)?.as_bytes()
+            ))
         );
         let reference = RecoveryRef {
             source: self.source.clone(),
@@ -277,7 +268,6 @@ fn validate_settlement(
     {
         return Err(invalid("operation diagnostic exceeds 64 KiB"));
     }
-    encode(outcome, MAX_RESULT)?;
     encode(cleanup, MAX_DIAGNOSTIC + 128)?;
     Ok(())
 }
@@ -286,21 +276,23 @@ async fn read(
     reference: &RecoveryRef,
 ) -> Result<Option<Record>, StoreError> {
     let namespace = encode(&reference.namespace, 4096)?;
-    let Some(row) = sqlx::query("SELECT source_revision, contract_digest,
-        CASE WHEN length(CAST(request_json AS BLOB)) <= 2097152 THEN request_json END AS request_json,
-        CASE WHEN length(CAST(outcome_json AS BLOB)) <= 1048704 THEN outcome_json END AS outcome_json,
+    let Some(row) = sqlx::query(
+        "SELECT source_revision, contract_digest, request_json, outcome_json,
         CASE WHEN length(CAST(cleanup_json AS BLOB)) <= 65664 THEN cleanup_json END AS cleanup_json
-        FROM application_operations WHERE deployment=? AND namespace=? AND operation=?")
-        .bind(reference.source.deployment.to_string()).bind(namespace).bind(reference.operation.to_string())
-        .fetch_optional(connection).await? else { return Ok(None); };
-    let request: OperationRequest<RecoveryContract> = serde_json::from_str(
-        &row.try_get::<Option<String>, _>("request_json")?
-            .ok_or_else(|| invalid("stored operation request exceeds limit"))?,
-    )?;
-    let outcome: OperationOutcome = serde_json::from_str(
-        &row.try_get::<Option<String>, _>("outcome_json")?
-            .ok_or_else(|| invalid("stored operation outcome exceeds limit"))?,
-    )?;
+        FROM application_operations WHERE deployment=? AND namespace=? AND operation=?",
+    )
+    .bind(reference.source.deployment.to_string())
+    .bind(namespace)
+    .bind(reference.operation.to_string())
+    .fetch_optional(connection)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let request: OperationRequest<RecoveryContract> =
+        serde_json::from_str(&row.try_get::<String, _>("request_json")?)?;
+    let outcome: OperationOutcome =
+        serde_json::from_str(&row.try_get::<String, _>("outcome_json")?)?;
     let cleanup: OperationCleanup = serde_json::from_str(
         &row.try_get::<Option<String>, _>("cleanup_json")?
             .ok_or_else(|| invalid("stored operation cleanup exceeds limit"))?,
@@ -339,7 +331,7 @@ impl EventLog {
         &self,
         request: OperationRequest,
     ) -> Result<Dispatch, StoreError> {
-        let contract_json = encode(&request.contract, MAX_REQUEST)?;
+        let contract_json = serde_json::to_string(&request.contract)?;
         let request = request.journal()?;
         let reference = request.stored_reference()?;
         self.dispatch_prepared_operation(PreparedOperation {
@@ -361,7 +353,7 @@ impl EventLog {
         } = prepared;
         self.operation_domain(&reference)?;
         let owner = self.root_owner.as_ref().expect("owned Root").clone();
-        let request_json = encode(&request, MAX_REQUEST)?;
+        let request_json = serde_json::to_string(&request)?;
         let commits = self.commits.clone();
         self.connection
             .run(move |connection| {
@@ -389,7 +381,7 @@ impl EventLog {
                         .bind(reference.operation.to_string())
                         .bind(reference.source.revision as i64)
                         .bind(request_json)
-                        .bind(encode(&OperationOutcome::Unresolved, MAX_RESULT)?)
+                        .bind(serde_json::to_string(&OperationOutcome::Unresolved)?)
                         .bind(encode(
                             &OperationCleanup::Unconfirmed,
                             MAX_DIAGNOSTIC + 128,
@@ -428,7 +420,7 @@ impl EventLog {
                 if old != observation { return Err(StoreError::EventConflict); }
             } else {
                 sqlx::query("UPDATE application_operations SET outcome_json=?, cleanup_json=? WHERE deployment=? AND namespace=? AND operation=?")
-                    .bind(encode(&observation.outcome, MAX_RESULT)?).bind(encode(&observation.cleanup, MAX_DIAGNOSTIC + 128)?)
+                    .bind(serde_json::to_string(&observation.outcome)?).bind(encode(&observation.cleanup, MAX_DIAGNOSTIC + 128)?)
                     .bind(reference.source.deployment.to_string()).bind(encode(&reference.namespace, 4096)?)
                     .bind(reference.operation.to_string()).execute(&mut *tx).await?;
             }

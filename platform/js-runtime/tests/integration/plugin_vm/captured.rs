@@ -214,7 +214,6 @@ async fn worker_registration_checks_input_result_json_and_registration_shapes() 
         }
         assert!(module.capture(vec!["service".into();33], vec!["read".into()]).await.is_err());
         let callbacks = module.capture(vec!["service".into()], vec!["read".into(),"json".into(),"circular".into()]).await.unwrap();
-        assert!(callbacks.call("read", vec![json!("x".repeat(1024*1024))]).await.is_err());
         for value in [json!(u64::MAX), json!(i64::MAX), json!(9_007_199_254_740_993_u64)] {
             assert!(callbacks.call("read", vec![json!({"nested":[value]})]).await
                 .unwrap_err().to_string().contains("represented exactly"));
@@ -307,7 +306,7 @@ impl RequestBridge for CountInput {
     }
 }
 #[tokio::test]
-async fn native_bridge_checks_vm_json_input_before_copy_and_before_dispatch() {
+async fn native_bridge_checks_json_and_input_capacity_before_dispatch() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let vm = Vm::scoped(Limits::default()).unwrap();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -315,7 +314,7 @@ async fn native_bridge_checks_vm_json_input_before_copy_and_before_dispatch() {
             export const service = { async read(mode, context) {
                 const input = mode==='bigint' ? {nested:[9007199254740993n]} : {text:'x'.repeat(32*1024*1024)};
                 try { await context.invoke(input); return false; }
-                catch(error) { return error.message.includes(mode==='bigint'?'BigInt':'1 MiB'); }
+                catch(error) { return error.message.includes(mode==='bigint'?'BigInt':'input budget'); }
             }};
         "#.into()).unwrap();
         let callbacks = capture_result(&module).await.unwrap();

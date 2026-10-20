@@ -25,7 +25,9 @@ Runs checked service compositions and owns call admission, activation and retire
 
 A committed source is desired configuration. It becomes effective only after its instances converge. Updates preserve unchanged activations and their captured bindings; replacements wait for accepted calls and native resources to settle. Mutation receipts distinguish business results from cleanup, so a lost reply must be resolved through its original receipt.
 
-Retiring either party of a subscription requests cancellation of its original invocation. The Host still waits for the handler and its native resources to settle before closing the provider. Accepted queries and mutations retain their original completion and cleanup semantics. Subscription and mutation-progress delivery use queue backpressure and consumer demand without a separate item-size quota. JavaScript bridge and IPC envelope requirements still apply at their respective boundaries.
+Retiring either party of a subscription requests cancellation of its original invocation. The Host still waits for the handler and its native resources to settle before closing the provider. Accepted queries and mutations retain their original completion and cleanup semantics. Subscription and mutation-progress delivery use queue backpressure and consumer demand without a separate item-size quota.
+
+Service inputs, outputs, configuration and original receipts have no separate JSON envelope quota in the Host or JavaScript request bridge. Accepted inputs still reserve shared capacity until their work settles; this does not bound output memory. Schema validation, JavaScript numeric precision and IPC framing requirements apply at their respective boundaries. A receipt that JavaScript cannot represent exactly remains available in its original journal.
 
 Complete source documents, including frozen remote contracts and package references, have a shared 2 MiB budget for admission, persistence and management. Read them in pages under one source revision; replace large documents through immutable resources.
 

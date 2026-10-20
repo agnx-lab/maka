@@ -78,7 +78,7 @@ impl<'a> FromV8<'a> for Input {
         scope: &mut v8::PinScope<'a, 'i>,
         value: v8::Local<'a, v8::Value>,
     ) -> std::result::Result<Self, Self::Error> {
-        decode(scope, value, Some(1024 * 1024)).map(Self)
+        decode(scope, value, None).map(Self)
     }
 }
 
@@ -92,7 +92,7 @@ async fn op_maka_request(
         .0
         .upgrade()
         .ok_or_else(|| JsErrorBox::generic("request context expired"))?;
-    let size = super::json::encoded_size(&input.0, 1024 * 1024)
+    let size = super::json::encoded_size(&input.0, usize::MAX)
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
     let _bytes = {
         let state = state.borrow();
@@ -100,7 +100,10 @@ async fn op_maka_request(
             .borrow::<Budget>()
             .bytes
             .clone()
-            .try_acquire_many_owned(size.max(1) as u32)
+            .try_acquire_many_owned(
+                u32::try_from(size.max(1))
+                    .map_err(|_| JsErrorBox::generic("request operation input budget exhausted"))?,
+            )
             .map_err(|_| JsErrorBox::generic("request operation input budget exhausted"))?
     };
     // The observer owns no ContextState. A saved Promise or native cppgc root
@@ -113,8 +116,6 @@ async fn op_maka_request(
         .catch_unwind()
         .await
         .map_err(|_| JsErrorBox::generic("request observer panicked"))?
-        .map_err(|e| JsErrorBox::generic(e.to_string()))?;
-    maka_plugin_core::json::check_delivery(&output, 1024 * 1024)
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
     tokio::task::yield_now().await;
     Json::encode(&output)

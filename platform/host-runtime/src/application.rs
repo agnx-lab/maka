@@ -1164,15 +1164,10 @@ impl Client {
     }
 }
 
-fn check_json(value: &Value) -> Result<usize> {
-    check_json_limit(value, 1024 * 1024)
-}
-
-// Leave room for receipt status and bounded diagnostics in the 1 MiB JS envelope.
 fn check_reference(reference: &RecoveryRef) -> Result<usize> {
     maka_plugin_core::json::check_delivery(
         &serde_json::to_value(reference).map_err(|e| e.to_string())?,
-        512 * 1024,
+        usize::MAX,
     )
     .map_err(|e| e.to_string())
 }
@@ -1211,7 +1206,7 @@ impl Dispatch {
     ) -> Result<()> {
         // Early validation also drops physical input before its inert ticket.
         let custody = (attachments, parent);
-        let size = check_json(&input)?;
+        let size = maka_plugin_core::json::value_size(&input, usize::MAX)?;
         if method.is_empty() || method.len() > 128 {
             return Err("invalid service method".into());
         }
@@ -1250,7 +1245,9 @@ impl Dispatch {
         let bytes = self
             .bytes
             .clone()
-            .try_acquire_many_owned(size.max(1) as u32)
+            .try_acquire_many_owned(
+                u32::try_from(size.max(1)).map_err(|_| "Host recovery budget exhausted")?,
+            )
             .map_err(|_| "Host recovery budget exhausted")?;
         let (reply, result) = oneshot::channel();
         self.commands
@@ -1311,7 +1308,6 @@ fn prepare_plan(
         .map(|p| (p.application_ref(), p))
         .collect();
     for instance in plan.instances().values().filter(|i| !i.disabled) {
-        check_json(&instance.configuration)?;
         if let Some(entry) = &instance.entry {
             for export in entry.exports.values() {
                 let Interface::Service { methods } = &export.contract.interface else {
