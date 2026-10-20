@@ -90,7 +90,14 @@ impl Processes {
             self.display_emit(&target, Part::Rows { parts }, context)
                 .await?;
         }
-        self.display_emit(&target, Part::End, context).await?;
+        // The non-null final result is the last part delivered to subscribers.
+        self.terminal_session(&target.session_id, false).await?;
+        if context.scope().cancellation.is_cancelled() {
+            return Err(failed("Terminal display cancelled"));
+        }
+        if self.drain.is_cancelled() {
+            return Err(failed("Process owner is draining"));
+        }
         completed(Part::End)
     }
 

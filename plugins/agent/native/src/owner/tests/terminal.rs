@@ -657,7 +657,6 @@ async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyo
     async fn read_display(f: &Fixture, owner: &Caller, target: &Value) -> Display {
         let mut stream = subscribe(f, owner, "readDisplay", target.clone()).await;
         let mut assembly = None;
-        let mut display = None;
         while let Some(item) = stream.recv().await {
             assert!(
                 serde_json::to_vec(&item).unwrap().len()
@@ -677,13 +676,16 @@ async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyo
                     );
                 }
                 Part::Rows { parts } => assembly.as_mut().unwrap().rows(parts).unwrap(),
-                Part::End => display = Some(assembly.take().unwrap().finish().unwrap()),
+                Part::End => panic!("display End must be the final result, not a streamed item"),
             }
         }
         let done = stream.completion().await;
         done.cleanup.unwrap();
-        assert_eq!(done.result.unwrap()["kind"], "completed");
-        display.unwrap()
+        assert_eq!(
+            done.result.unwrap(),
+            json!({"kind": "completed", "value": {"kind": "end"}})
+        );
+        assembly.unwrap().finish().unwrap()
     }
     tokio::time::timeout(Duration::from_secs(90), async {
         let (_, mut f, session) = processes::fixture().await;
