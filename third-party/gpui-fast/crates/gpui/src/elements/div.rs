@@ -6084,8 +6084,8 @@ mod tests {
         assert_eq!(node.numeric_value_step(), Some(1.0));
     }
 
-    /// Two focusable, clickable elements ("a" and "b") used to exercise the
-    /// Enter/Space -> synthesized click press/release pairing.
+    // Two focusable, clickable elements ("a" and "b") used to exercise the
+    // Enter/Space -> synthesized click press/release pairing.
     crate::actions!(native_click_replay_test, [ReplayChord]);
 
     struct KeyboardActivationTest {
