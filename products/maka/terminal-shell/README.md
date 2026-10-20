@@ -19,7 +19,7 @@
 
 # Maka NSH terminal shell
 
-An experimental first-party NSH application over public Maka Host services. The native executable selects one existing Root and Agent session; JavaScript receives that connected client. The Host must expose the `agent`, `settings` and `receipts` endpoints.
+An experimental first-party NSH application over public Maka Host services. The native executable selects one existing Root; JavaScript receives that connected client and creates immutable scopes for its Agent sessions. The Host must expose the `agent`, `settings` and `receipts` endpoints.
 
 For a Root whose Host is not running, start the existing service entrypoint in a separate terminal:
 
@@ -27,11 +27,13 @@ For a Root whose Host is not running, start the existing service entrypoint in a
 cargo run -p maka-cli --bin maka -- host serve --root /path/to/root
 ```
 
-Then run the independent shell from the workspace root, selecting an existing session:
+Then run the independent shell from the workspace root:
 
 ```sh
-cargo run -p maka-terminal-shell -- --root /path/to/root --session SESSION_ID
+cargo run -p maka-terminal-shell -- --root /path/to/root
 ```
+
+Use `--session SESSION_ID` to open an existing session initially. Without it, the shell opens its session picker.
 
 The executable verifies root-bound discovery and the live Host epoch. The durable client journal is `<root>/clients/terminal.sqlite`; drafts and operation receipts are scoped by their original Host and provider identities. The existing product and release launchers remain unchanged.
 

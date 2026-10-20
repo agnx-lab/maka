@@ -46,7 +46,14 @@ struct Scope {
     session: String,
 }
 
-/// The native capability selected by the launcher for this application.
+/// Root services and session scopes within the Host admitted by the launcher.
+#[class]
+pub struct ApplicationHost {
+    owner: Arc<Owner>,
+    initial_session: Option<String>,
+}
+
+/// One immutable Agent session's editor and original send operations.
 #[class]
 pub struct ScopedHost {
     scope: Arc<Scope>,
@@ -64,15 +71,13 @@ impl Bindings {
     }
 
     /// Native objects own subscriptions; the launcher owns calls and durable recovery.
-    pub fn registry(&self, session: String) -> Registry {
+    pub fn registry(&self, initial_session: Option<String>) -> Registry {
         let owner = self.owner.clone();
         let mut registry = Registry::ui_set("maka/host");
         registry.value("host", move || {
-            Instance::new(ScopedHost {
-                scope: Arc::new(Scope {
-                    owner: owner.clone(),
-                    session: session.clone(),
-                }),
+            Instance::new(ApplicationHost {
+                owner: owner.clone(),
+                initial_session: initial_session.clone(),
             })
         });
         registry
@@ -117,11 +122,24 @@ async fn execute<T: Send + 'static>(
 }
 
 #[class]
-impl ScopedHost {
-    /// The immutable session selected by the launcher.
+impl ApplicationHost {
+    /// The optional session initially requested by the launcher.
     #[getter]
-    pub fn session_id(&self) -> String {
-        self.scope.session.clone()
+    pub fn initial_session(&self) -> Option<String> {
+        self.initial_session.clone()
+    }
+
+    /// Capture a session without rebinding another view's editor or sends.
+    pub fn session(&self, session_id: String) -> Result<Instance<ScopedHost>, String> {
+        if session_id.is_empty() || session_id.len() > 128 {
+            return Err("session must contain between 1 and 128 bytes".into());
+        }
+        Ok(Instance::new(ScopedHost {
+            scope: Arc::new(Scope {
+                owner: self.owner.clone(),
+                session: session_id,
+            }),
+        }))
     }
 
     /// Query a service exposed by the original Host catalogue.
@@ -131,9 +149,10 @@ impl ScopedHost {
         method: String,
         input: JsonValue,
     ) -> Result<JsonValue, String> {
-        let scope = this.with(|host| host.scope.clone());
-        execute(scope.owner.clone(), async move {
-            scope.owner.client.query(&endpoint, &method, input).await
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        execute(owner.clone(), async move {
+            owner.client.query(&endpoint, &method, input).await
         })
         .await
     }
@@ -145,21 +164,87 @@ impl ScopedHost {
         method: String,
         input: JsonValue,
     ) -> Result<Instance<ScopedSubscription>, String> {
-        let scope = this.with(|host| host.scope.clone());
+        let owner = this.with(|host| host.owner.clone());
         drop(this);
-        let subscription = execute(scope.owner.clone(), async move {
-            let subscription = scope
-                .owner
-                .client
-                .subscribe(&endpoint, &method, input)
-                .await?;
+        let subscription = execute(owner.clone(), async move {
+            let subscription = owner.client.subscribe(&endpoint, &method, input).await?;
             Ok(ScopedSubscription {
-                owner: scope.owner.clone(),
+                owner,
                 subscription: Arc::new(subscription),
             })
         })
         .await?;
         Ok(Instance::new(subscription))
+    }
+
+    /// Prepare and confirm one allowed Agent control, preserving its original receipt.
+    pub async fn control(
+        this: Instance<Self>,
+        method: String,
+        input: JsonValue,
+    ) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        execute(owner.clone(), async move {
+            let id = Uuid::new_v4();
+            let mutation = owner.client.control(id, &method, input).await?;
+            mutation.prepare().await?;
+            let reply = mutation.confirm().await?;
+            Ok(serde_json::json!({"operationId": id, "reply": reply}))
+        })
+        .await
+    }
+
+    /// Unresolved controls across this admitted Root, independent of the selected session.
+    pub async fn pending_controls(this: Instance<Self>) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        execute(owner.clone(), async move {
+            let operations = owner.client.pending_controls().await?;
+            serde_json::to_value(operations).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Read a control's original receipt without reissuing its business method.
+    pub async fn recover_control(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(owner.clone(), async move {
+            owner.client.operation_for_control(id).await?;
+            let reply = owner.client.recover(id).await?;
+            serde_json::to_value(reply).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Fence a control only if its preparation has not committed.
+    pub async fn abandon_control(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(owner.clone(), async move {
+            owner.client.operation_for_control(id).await?;
+            let operation = owner.client.abandon_unprepared(id).await?;
+            serde_json::to_value(operation).map_err(|error| error.to_string())
+        })
+        .await
+    }
+}
+
+#[class]
+impl ScopedHost {
+    /// The immutable session selected when this editor scope was created.
+    #[getter]
+    pub fn session_id(&self) -> String {
+        self.scope.session.clone()
     }
 
     /// Read this editor's persisted draft and its monotonic editing revision.

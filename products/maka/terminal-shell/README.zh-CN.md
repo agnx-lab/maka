@@ -19,7 +19,7 @@
 
 # Maka NSH 终端界面
 
-通过公共 Maka Host 服务工作的实验性第一方 NSH 应用。原生可执行文件选择一个已有 Root 和 Agent 会话，JavaScript 获得已连接的客户端。Host 必须提供 `agent`、`settings` 和 `receipts` 端点。
+通过公共 Maka Host 服务工作的实验性第一方 NSH 应用。原生可执行文件选择一个已有 Root，JavaScript 获得已连接的客户端，并为其中的 Agent 会话创建不可变作用域。Host 必须提供 `agent`、`settings` 和 `receipts` 端点。
 
 如果所选 Root 的 Host 尚未运行，在另一个终端使用现有服务入口启动：
 
@@ -27,11 +27,13 @@
 cargo run -p maka-cli --bin maka -- host serve --root /path/to/root
 ```
 
-随后在工作区根目录运行独立界面，明确选择一个已有会话：
+随后在工作区根目录运行独立界面：
 
 ```sh
-cargo run -p maka-terminal-shell -- --root /path/to/root --session SESSION_ID
+cargo run -p maka-terminal-shell -- --root /path/to/root
 ```
+
+使用 `--session SESSION_ID` 可在启动时打开已有会话；省略时，界面打开会话选择器。
 
 可执行文件验证绑定 Root 的发现记录和在线 Host epoch。持久客户端日志位于 `<root>/clients/terminal.sqlite`；草稿和操作回执按原始 Host 与提供者身份归属。现有产品和发布启动器保持不变。
 

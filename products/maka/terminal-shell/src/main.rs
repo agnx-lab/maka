@@ -50,9 +50,9 @@ struct Args {
     /// Existing business Host Root selected by the native launcher.
     #[arg(long)]
     root: PathBuf,
-    /// Existing Agent session to display.
+    /// Existing Agent session to display initially; otherwise open the session picker.
     #[arg(long)]
-    session: String,
+    session: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -94,7 +94,11 @@ impl Args {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err("the terminal shell requires a terminal on stdin and stdout".into());
         }
-        if self.session.is_empty() || self.session.len() > 128 {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.is_empty() || session.len() > 128)
+        {
             return Err("session must contain between 1 and 128 bytes".into());
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -187,7 +191,7 @@ fn configuration(
         // APPLICATION is compiled into this trusted executable; only the
         // interpreter stack is bounded, as for other standalone NSH apps.
         limits: Limits::standalone(),
-        ui_sets: vec![registry],
+        ui_sets: vec![nsh_ui_mobile::registry(), registry],
         runtime: Some(runtime),
         data_dir: None,
         storage: None,
