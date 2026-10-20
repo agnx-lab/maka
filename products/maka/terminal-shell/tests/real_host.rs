@@ -122,7 +122,8 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("Message B uses the selected model")));
         assert!(!request.body.to_string().contains("Draft A stays in its own conversation"));
         request.delta("REAL_WORKBENCH_RUN_TO_STOP").await;
-        wait_view(&mut view, |screen| screen.matches("REAL_WORKBENCH_RUN_TO_STOP").count() == 2).await;
+        let writing = wait_view(&mut view, |screen| screen.contains("REAL_WORKBENCH_RUN_TO_STOP") && screen.contains("Writing response")).await;
+        assert_eq!(writing.matches("REAL_WORKBENCH_RUN_TO_STOP").count(), 1);
         support::evidence_cells("workbench-streaming", &view);
         request.tool_prefix("todo_write", "{\"todos\":[").await;
         let preparing = wait_view(&mut view, |screen| screen.contains("Preparing tool · todo_write · {\"todos\":[")).await;
