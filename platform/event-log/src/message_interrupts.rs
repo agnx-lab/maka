@@ -127,9 +127,6 @@ impl EventLog {
                 }
             } else { None };
             let encoded = fence.as_ref().map(serde_json::to_string).transpose()?;
-            if encoded.as_ref().is_some_and(|value| value.len() > MAX_FENCE_BYTES) {
-                return Err(StoreError::PrefixTooLarge);
-            }
             sqlx::query("INSERT INTO message_interrupt_receipts(host_epoch, session_id, interrupt_id, turn_id, run_id, fence_json) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(&command.host_epoch).bind(&command.session_id).bind(&command.interrupt_id)
                 .bind(&command.turn_id).bind(&command.run_id).bind(encoded).execute(&mut *tx).await?;
@@ -140,14 +137,10 @@ impl EventLog {
     }
 }
 
-const MAX_FENCE_BYTES: usize = 8 * 1024 * 1024;
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())
 }
 fn decode(value: &str) -> Result<QueueReceipt, StoreError> {
-    if value.len() > MAX_FENCE_BYTES {
-        return Err(StoreError::PrefixTooLarge);
-    }
     Ok(serde_json::from_str(value)?)
 }
 async fn read(

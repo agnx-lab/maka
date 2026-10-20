@@ -95,3 +95,49 @@ pub fn admission(
         },
     }
 }
+
+// Exercise derived receipts whose JSON envelope is larger than the legal queue.
+#[allow(dead_code)]
+pub async fn near_capacity_queue(log: &EventLog) -> maka_event_log::message_queue::MessageQueue {
+    let queue = log.message_queue("session").await.unwrap();
+    let bytes: usize = queue
+        .entries
+        .iter()
+        .map(|entry| serde_json::to_vec(entry).unwrap().len())
+        .sum();
+    let entry = &queue.entries[0];
+    let overhead = bytes
+        - entry.source.message.content.text.len()
+        - entry.source.unprepared_content.text.len();
+    let text = "x".repeat((8 * 1024 * 1024 - 4 - overhead) / 2);
+    let mut content = entry.source.message.content.clone();
+    let mut unprepared = entry.source.unprepared_content.clone();
+    content.text = text.clone();
+    unprepared.text = text;
+    log.edit_message_queue(
+        "session",
+        queue.revision,
+        maka_event_log::message_queue::QueueEdit::Update {
+            message_id: entry.source.message.message_id.clone(),
+            content: Box::new(content),
+            unprepared_content: Box::new(unprepared),
+            required_tools: entry.required_tools.clone(),
+        },
+        command("fill-queue", QueueCommandKind::Update),
+    )
+    .await
+    .unwrap();
+    let queue = log.message_queue("session").await.unwrap();
+    let bytes: usize = queue
+        .entries
+        .iter()
+        .map(|entry| serde_json::to_vec(entry).unwrap().len())
+        .sum();
+    assert!(bytes <= 8 * 1024 * 1024);
+    let receipt = maka_event_log::message_queue::QueueReceipt {
+        revision: queue.revision + 1,
+        retracted: queue.entries.clone(),
+    };
+    assert!(serde_json::to_vec(&receipt).unwrap().len() > 8 * 1024 * 1024);
+    queue
+}

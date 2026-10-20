@@ -429,11 +429,11 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     assert!(
         matches!(&proof.event.fact, Fact::MessageSteered { message, .. } if message.content.preparation == [receipt] && message.origin == origin)
     );
-    let queue = log.message_queue("session").await.unwrap();
+    let before_retraction = support::near_capacity_queue(&log).await;
     let cancelled = log
         .edit_message_queue(
             "session",
-            queue.revision,
+            before_retraction.revision,
             QueueEdit::RetractAll {
                 cancellation_id: "cancel-rest".into(),
             },
@@ -442,6 +442,26 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
         .await
         .unwrap();
     assert_eq!(cancelled.retracted.len(), 2);
+    assert_eq!(cancelled.retracted, before_retraction.entries);
+    assert_eq!(
+        log.queue_command_receipt("session", &command("cancel-rest", Kind::RetractAll))
+            .await
+            .unwrap(),
+        Some(cancelled.clone())
+    );
+    assert_eq!(
+        log.edit_message_queue(
+            "session",
+            before_retraction.revision,
+            QueueEdit::RetractAll {
+                cancellation_id: "cancel-rest".into()
+            },
+            command("cancel-rest", Kind::RetractAll)
+        )
+        .await
+        .unwrap(),
+        cancelled
+    );
     let queue = log.message_queue("session").await.unwrap();
     assert!(queue.entries.is_empty());
     for id in ["one", "three"] {
@@ -500,6 +520,12 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     drop(db);
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(log.message_queue("session").await.unwrap(), queue);
+    assert_eq!(
+        log.queue_command_receipt("session", &command("cancel-rest", Kind::RetractAll))
+            .await
+            .unwrap(),
+        Some(cancelled)
+    );
     assert_eq!(
         log.message_resolutions("session", &ids).await.unwrap(),
         resolutions

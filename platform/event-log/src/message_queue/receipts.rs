@@ -76,6 +76,8 @@ impl QueueCommand {
 }
 
 /// Only the result is retained. Ordinary edits do not duplicate queue contents.
+/// Retraction retains the admitted entries; its JSON envelope is not a new
+/// pending-content admission and must not prevent cancelling that queue.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueReceipt {
     pub revision: u64,
@@ -149,9 +151,6 @@ pub(super) async fn read(
         if fingerprint != command.fingerprint {
             return Err(invalid("command identity belongs to another input"));
         }
-        if json.len() > 8 * 1024 * 1024 {
-            return Err(StoreError::PrefixTooLarge);
-        }
         Ok(serde_json::from_str(&json)?)
     })
     .transpose()
@@ -164,9 +163,6 @@ pub(super) async fn insert(
     receipt: &QueueReceipt,
 ) -> Result<(), StoreError> {
     let json = serde_json::to_string(receipt)?;
-    if json.len() > 8 * 1024 * 1024 {
-        return Err(StoreError::PrefixTooLarge);
-    }
     sqlx::query(
         "INSERT INTO queue_command_receipts
          (host_epoch, session_id, operation, command_id, fingerprint, receipt_json)

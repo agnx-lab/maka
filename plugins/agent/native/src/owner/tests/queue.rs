@@ -297,3 +297,65 @@ async fn queue_controls_are_bounded_revisioned_and_observed_without_transcript_p
         fixture.config.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn stopping_near_capacity_queue_preserves_full_receipt_and_cancels_every_message() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fixture = Fixture::new(&format!("http://{}/v1", listener.local_addr().unwrap()), None).await;
+        let session = fixture.create("Stop accepted queue").await;
+        let started = fixture.send(&session).await.unwrap();
+        let (mut held, _) = listener.accept().await.unwrap();
+        request(&mut held).await;
+        let selection = fixture.selection().await;
+        let mut ids = Vec::new();
+        for index in 0..7 {
+            let result = fixture.mutation(2, "send", json!({"sessionId":session,"message":format!("q{index}"),"model":selection}), Uuid::new_v4()).await.unwrap();
+            ids.push(result["messageId"].as_str().unwrap().to_owned());
+        }
+        // Each public message/edit text stays <=600 KiB. Prepared and editable text
+        // are both retained, so seven edits approach the admitted queue budget.
+        for id in &ids {
+            let queue = fixture.store.message_queue(&session).await.unwrap();
+            let bytes: usize = queue.entries.iter().map(|entry| serde_json::to_vec(entry).unwrap().len()).sum();
+            let length = (2 + (8 * 1024 * 1024 - 4 - bytes) / 2).min(600 * 1024);
+            let message = "x".repeat(length);
+            let changed = fixture.mutation(2, "editQueue", json!({"sessionId":session,"expectedRevision":queue.revision,"edit":{"kind":"update","messageId":id,"message":message}}), Uuid::new_v4()).await.unwrap();
+            assert_eq!(changed["kind"], "committed");
+            let read = fixture.query("queueMessage", json!({"sessionId":session,"messageId":id,"expectedRevision":changed["revision"]})).await.unwrap();
+            assert_eq!(read["message"], message);
+        }
+        let queue = fixture.store.message_queue(&session).await.unwrap();
+        let bytes: usize = queue.entries.iter().map(|entry| serde_json::to_vec(entry).unwrap().len()).sum();
+        let receipt = maka_event_log::message_queue::QueueReceipt { revision:queue.revision+1,retracted:queue.entries.clone() };
+        assert!(bytes <= 8 * 1024 * 1024);
+        assert!(serde_json::to_vec(&receipt).unwrap().len() > 8 * 1024 * 1024);
+        let cancellation = fixture.owner.runs.lock().await.controls[&session].cancellation.clone();
+        let input = json!({"sessionId":session,"invocationId":started["invocationId"]});
+        let operation = Uuid::new_v4();
+        let stopped = fixture.mutation(2, "stop", input.clone(), operation).await;
+        let replayed = fixture.mutation(2, "stop", input, operation).await;
+        let cancelled_by_stop = cancellation.is_cancelled();
+        if stopped.is_err() {
+            // Keep baseline failure cleanup on the public path. The final
+            // assertion still requires the original full queue to Stop.
+            fixture.mutation(2, "editQueue", json!({"sessionId":session,"expectedRevision":queue.revision,"edit":{"kind":"update","messageId":ids[6],"message":"cleanup"}}), Uuid::new_v4()).await.unwrap();
+            fixture.mutation(2, "stop", json!({"sessionId":session,"invocationId":started["invocationId"]}), Uuid::new_v4()).await.unwrap();
+        }
+        fixture.drained().await;
+        let remaining = fixture.store.message_queue(&session).await.unwrap();
+        let mut cancellations = Vec::new();
+        for id in &ids {
+            cancellations.push(fixture.store.message_cancelled(&session, id).await.unwrap());
+            assert!(fixture.store.root_message(&session, id).await.unwrap().is_none());
+        }
+        fixture.app.shutdown().await.unwrap();
+        fixture.config.shutdown().await.unwrap();
+        assert_eq!(stopped, Ok(json!({"requested":true})));
+        assert_eq!(replayed, stopped);
+        assert!(cancelled_by_stop);
+        assert_eq!(remaining.revision, receipt.revision);
+        assert!(remaining.entries.is_empty());
+        assert_eq!(cancellations, vec![true; 7]);
+    }).await.unwrap();
+}

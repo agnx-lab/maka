@@ -90,7 +90,7 @@ async fn interrupt_fences_delivery_atomically_and_replays_the_original_queue_cut
             .await,
         Err(StoreError::RevisionConflict { .. })
     ));
-    let queued = log.message_queue("session").await.unwrap();
+    let queued = support::near_capacity_queue(&log).await;
     let receipt = log
         .interrupt_message_queue(&command, queued.revision, Some(&owner))
         .await
@@ -99,6 +99,11 @@ async fn interrupt_fences_delivery_atomically_and_replays_the_original_queue_cut
         panic!("accepted fence");
     };
     assert_eq!(fence.revision, queued.revision + 1);
+    assert_eq!(fence.retracted, queued.entries);
+    assert_eq!(
+        log.message_interrupt_receipt(&command).await.unwrap(),
+        Some(receipt.clone())
+    );
     assert_eq!(
         fence
             .retracted
