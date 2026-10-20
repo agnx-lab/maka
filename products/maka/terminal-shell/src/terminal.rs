@@ -235,7 +235,6 @@ fn drive(
 }
 
 fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reader, String> {
-    let waker = reader.waker();
     let stop = presentation.stop.clone();
     let handle = thread::Builder::new()
         .name("maka-nsh-input".into())
@@ -304,21 +303,18 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
         .map_err(|error| error.to_string())?;
     Ok(Reader {
         stop,
-        waker,
         handle: Some(handle),
     })
 }
 
 struct Reader {
     stop: Arc<AtomicBool>,
-    waker: termina::event::PlatformWaker,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Drop for Reader {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let _ = self.waker.wake();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }

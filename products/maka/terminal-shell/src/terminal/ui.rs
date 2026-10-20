@@ -31,7 +31,7 @@ use nsh_platform_tui::{
 };
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
-    backend::{Backend as _, CrosstermBackend},
+    backend::{Backend, CrosstermBackend},
     layout::Rect,
 };
 use std::{
@@ -551,10 +551,7 @@ impl Session {
             .map_err(|error| error.to_string())?;
         self.effects.clear();
         self.terminal.swap_buffers();
-        self.terminal
-            .backend_mut()
-            .flush()
-            .map_err(|error| error.to_string())?;
+        Backend::flush(self.terminal.backend_mut()).map_err(|error| error.to_string())?;
         let bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
         Ok(Frame {
             epoch: self.epoch,
