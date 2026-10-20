@@ -546,6 +546,24 @@ pub fn click_text(view: &mut AppView, prefix: &str) {
     }
 }
 
+// Hit rendered body text so nested scrolling is selected by the native pointer path.
+pub fn scroll_text(view: &mut AppView, text: &str, kind: crossterm::event::MouseEventKind) {
+    use crossterm::event::{Event, KeyModifiers, MouseEvent};
+    let snapshot = view.snapshot();
+    let (row, line) = snapshot
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(text))
+        .unwrap_or_else(|| panic!("no rendered native text contains {text:?}:\n{snapshot}"));
+    let column = line[..line.find(text).unwrap()].chars().count() as u16;
+    view.handle_event(Event::Mouse(MouseEvent {
+        kind,
+        column,
+        row: row as u16,
+        modifiers: KeyModifiers::NONE,
+    }));
+}
+
 // Call after pressing a row/header. Run the normal layout cycle before Home.
 pub async fn focus_activity(view: &mut AppView) {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};

@@ -19,9 +19,9 @@
 
 use super::*;
 use crate::local_fixture as support;
+use maka_host_runtime::application::host::startup::{self, Request};
 use maka_host_runtime::application::transport::{Grant, HostEndpoint, Reply};
 use maka_plugin_core::operation::{OperationCleanup, OperationOutcome, OperationReply, Receipt};
-use maka_host_runtime::application::host::startup::{self, Request};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 use uuid::Uuid;

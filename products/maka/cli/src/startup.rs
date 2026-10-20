@@ -18,11 +18,11 @@
  */
 
 use clap::Args;
+use maka_host_runtime::application::host::startup::{REQUEST_LIMIT, Ready, Request};
 use maka_host_runtime::{
     HostError,
     application::{host::discovery, transport::wire},
 };
-use maka_host_runtime::application::host::startup::{REQUEST_LIMIT, Ready, Request};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
@@ -73,7 +73,9 @@ impl Ensure {
             }
         };
         let registered = discovery::read(root)?;
-        if request.as_ref().is_some_and(|request| registered.source.deployment != request.deployment)
+        if request
+            .as_ref()
+            .is_some_and(|request| registered.source.deployment != request.deployment)
             || registered.host_epoch != client.epoch()
             || &registered.source != client.source()
         {

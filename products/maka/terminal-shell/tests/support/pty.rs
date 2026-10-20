@@ -114,6 +114,20 @@ impl Pty {
     pub fn paste(&mut self, text: &str) {
         self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
     }
+    pub fn click_text(&mut self, label: &str) {
+        let screen = self.snapshot();
+        let (row, line) = screen
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(label))
+            .unwrap_or_else(|| panic!("no visible PTY button {label:?}:\n{screen}"));
+        let offset = line.find(label).unwrap();
+        let column = ratatui::text::Line::from(&line[..offset]).width() + 1;
+        let row = row + 1;
+        // Both physical events arrive in one write, as a real terminal's input
+        // buffer can deliver a quick click. Production admission must keep it.
+        self.send(format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").as_bytes());
+    }
     pub fn snapshot(&self) -> String {
         self.screen.text_preview(128 * 1024).screen
     }

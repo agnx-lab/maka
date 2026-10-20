@@ -17,10 +17,10 @@
  * under the License.
  */
 
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use std::collections::VecDeque;
 
-const MAX_EVENTS: usize = 128;
+pub(super) const MAX_EVENTS: usize = 128;
 const MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
@@ -94,6 +94,44 @@ impl Inbox {
         }
         None
     }
+
+    pub fn pop_batch(&mut self, epoch: u64) -> Vec<Input> {
+        let Some(first) = self.pop(epoch) else {
+            return Vec::new();
+        };
+        let mut inputs = vec![first];
+        while let Some(next) = self.events.front() {
+            if !continues_pointer(&inputs[0], inputs.last().unwrap(), next) {
+                break;
+            }
+            let next = self.events.pop_front().unwrap();
+            self.bytes -= event_bytes(&next.event);
+            inputs.push(next);
+        }
+        inputs
+    }
+}
+
+fn continues_pointer(first: &Input, last: &Input, next: &Input) -> bool {
+    if first.pointer_epoch.is_none() || first.pointer_epoch != next.pointer_epoch {
+        return false;
+    }
+    let (Event::Mouse(first), Event::Mouse(last), Event::Mouse(next)) =
+        (&first.event, &last.event, &next.event)
+    else {
+        return false;
+    };
+    match first.kind {
+        MouseEventKind::Down(button) | MouseEventKind::Drag(button) => {
+            !matches!(last.kind, MouseEventKind::Up(_))
+                && matches!(next.kind, MouseEventKind::Drag(next) | MouseEventKind::Up(next) if next == button)
+        }
+        MouseEventKind::ScrollUp
+        | MouseEventKind::ScrollDown
+        | MouseEventKind::ScrollLeft
+        | MouseEventKind::ScrollRight => first == next,
+        _ => false,
+    }
 }
 
 fn event_bytes(event: &Event) -> usize {
@@ -112,8 +150,11 @@ mod tests {
         Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
     }
     fn mouse() -> Event {
+        pointer(MouseEventKind::Down(MouseButton::Left))
+    }
+    fn pointer(kind: MouseEventKind) -> Event {
         Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind,
             column: 1,
             row: 1,
             modifiers: KeyModifiers::NONE,
@@ -176,5 +217,81 @@ mod tests {
         );
         assert!(inbox.events.is_empty());
         assert!(inbox.cancel_pointer);
+    }
+
+    #[test]
+    fn groups_one_captured_gesture_without_consuming_the_next_key_or_click() {
+        let mut inbox = Inbox::default();
+        let down = mouse();
+        let drag = pointer(MouseEventKind::Drag(MouseButton::Left));
+        let up = pointer(MouseEventKind::Up(MouseButton::Left));
+        for event in [down.clone(), drag.clone(), up.clone(), down, key('x')] {
+            inbox.push(event, 7);
+        }
+        assert_eq!(
+            inbox
+                .pop_batch(7)
+                .into_iter()
+                .map(|input| input.event)
+                .collect::<Vec<_>>(),
+            vec![mouse(), drag, up]
+        );
+        // The callback may replace the row after the first gesture. The
+        // second click keeps its old authority and cannot target the new row.
+        assert_eq!(
+            inbox
+                .pop_batch(8)
+                .into_iter()
+                .map(|input| input.event)
+                .collect::<Vec<_>>(),
+            vec![key('x')]
+        );
+        assert!(inbox.cancel_pointer);
+    }
+
+    #[test]
+    fn wheel_group_stops_before_old_coordinates_can_click_the_scrolled_content() {
+        let mut inbox = Inbox::default();
+        let wheel = pointer(MouseEventKind::ScrollDown);
+        for event in [wheel.clone(), wheel.clone(), mouse(), key('a'), key('b')] {
+            inbox.push(event, 7);
+        }
+        assert_eq!(
+            inbox
+                .pop_batch(7)
+                .into_iter()
+                .map(|input| input.event)
+                .collect::<Vec<_>>(),
+            vec![wheel.clone(), wheel]
+        );
+        for expected in [key('a'), key('b')] {
+            assert_eq!(
+                inbox
+                    .pop_batch(8)
+                    .into_iter()
+                    .map(|input| input.event)
+                    .collect::<Vec<_>>(),
+                vec![expected]
+            );
+        }
+        assert!(inbox.cancel_pointer);
+    }
+
+    #[test]
+    fn wheel_group_reuses_the_existing_budget_and_releases_its_bytes() {
+        let mut inbox = Inbox::default();
+        for _ in 0..MAX_EVENTS {
+            inbox.push(pointer(MouseEventKind::ScrollDown), 7);
+        }
+        assert_eq!(inbox.pop_batch(7).len(), 128);
+        inbox.push(Event::Paste("z".repeat(MAX_BYTES)), 8);
+        assert_eq!(
+            inbox
+                .pop_batch(8)
+                .into_iter()
+                .map(|input| input.event)
+                .collect::<Vec<_>>(),
+            vec![Event::Paste("z".repeat(MAX_BYTES))]
+        );
     }
 }

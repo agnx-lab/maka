@@ -234,10 +234,10 @@ async fn prepare_target(
 fn check_selection(discovered: &Discovery, target: Target<'_>) -> Result<()> {
     if let Some(request) = target.request()
         && (discovered.source.deployment != request.deployment
-        || request
-            .state_domain
-            .as_ref()
-            .is_some_and(|expected| *expected != discovered.root_id))
+            || request
+                .state_domain
+                .as_ref()
+                .is_some_and(|expected| *expected != discovered.root_id))
     {
         return Err("discovered Host differs from its configured deployment or State Root".into());
     }

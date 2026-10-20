@@ -148,16 +148,19 @@ fn drive(
         if !setup && !busy && pending.is_none() {
             let mut inbox = state.lock().unwrap();
             let resize = inbox.resize.take();
-            let input = inbox.pop(if resize.is_some() { 0 } else { epoch });
+            let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
             let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
-            if resize.is_some() || input.is_some() || cancel_pointer || Instant::now() >= next_tick
+            if resize.is_some()
+                || !inputs.is_empty()
+                || cancel_pointer
+                || Instant::now() >= next_tick
             {
                 // Revoke the complete presentation before the UI worker can
                 // advance JS callbacks, list bindings or native geometry.
                 presented.store(0, Ordering::Release);
                 commands
                     .try_send(ui::Advance {
-                        input,
+                        inputs,
                         resize,
                         cancel_pointer,
                     })
@@ -188,27 +191,53 @@ fn start_reader(
         .name("maka-nsh-input".into())
         .spawn(move || {
             while !stop.load(Ordering::Acquire) {
-                let event = event::poll(Duration::from_millis(25)).and_then(|ready| {
-                    if ready {
-                        event::read().map(Some)
-                    } else {
-                        Ok(None)
-                    }
-                });
-                match event {
-                    Ok(Some(event)) => {
-                        let mut inbox = state.lock().unwrap();
+                {
+                    let mut inbox = state.lock().unwrap();
+                    // poll itself can consume and cache terminal bytes. Keep
+                    // polling, decoding and stamping under the presentation
+                    // fence, without waiting for stdin while holding it.
+                    let mut read = 0;
+                    for _ in 0..input::MAX_EVENTS {
+                        let event = event::poll(Duration::ZERO).and_then(|ready| {
+                            if ready {
+                                event::read().map(Some)
+                            } else {
+                                Ok(None)
+                            }
+                        });
+                        let event = match event {
+                            Ok(Some(event)) => event,
+                            Ok(None) => break,
+                            Err(error) => {
+                                inbox.error = Some(error.to_string());
+                                return;
+                            }
+                        };
+                        read += 1;
                         if matches!(event, event::Event::Resize(..)) {
                             presented.store(0, Ordering::Release);
                         }
                         inbox.push(event, presented.load(Ordering::Acquire));
+                        if inbox.quit || inbox.error.is_some() || stop.load(Ordering::Acquire) {
+                            break;
+                        }
                     }
-                    Ok(None) => {}
-                    Err(error) => {
-                        state.lock().unwrap().error = Some(error.to_string());
-                        return;
+                    if read == input::MAX_EVENTS
+                        && !inbox.quit
+                        && inbox.error.is_none()
+                        && !stop.load(Ordering::Acquire)
+                    {
+                        match event::poll(Duration::ZERO) {
+                            Ok(true) => inbox.error = Some(
+                                "terminal input exceeded its pending budget; input was rejected"
+                                    .into(),
+                            ),
+                            Ok(false) => {}
+                            Err(error) => inbox.error = Some(error.to_string()),
+                        }
                     }
                 }
+                thread::sleep(Duration::from_millis(2));
             }
         })
         .map(|_| ())

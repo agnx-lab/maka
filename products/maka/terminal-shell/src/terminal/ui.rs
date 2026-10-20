@@ -18,8 +18,8 @@
  */
 
 use super::{input::Input, output::FrameWriter};
-use crossterm::event::Event;
-use nsh_core::MountBatch;
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use nsh_core::{Command, MountBatch, MountItem, ROOT_ID};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
     CellMetrics, ServiceOutput, ServiceRequest, Surface, SurfaceEvent, TerminalTextEngine,
@@ -69,7 +69,7 @@ pub(super) struct Frame {
 }
 
 pub(super) struct Advance {
-    pub input: Option<Input>,
+    pub inputs: Vec<Input>,
     pub resize: Option<(u16, u16)>,
     pub cancel_pointer: bool,
 }
@@ -157,11 +157,7 @@ impl Session {
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
         let mut changed = false;
         if command.cancel_pointer {
-            // NSH's terminal focus-loss path cancels all pointer captures.
-            // Reconcile immediately to restore the mounted input's focus.
-            self.surface.handle_event(Event::FocusLost);
-            self.surface.handle_event(Event::FocusGained);
-            self.forward_events(false)?;
+            self.cancel_pointer()?;
             changed = true;
         }
         if let Some((columns, rows)) = command.resize {
@@ -173,21 +169,107 @@ impl Session {
                 .map_err(|error| error.to_string())?;
             changed = true;
         }
-        if let Some(input) = command.input {
+        for input in &command.inputs {
             if input.pointer_epoch.is_some_and(|epoch| epoch != self.epoch) {
                 return Err("pointer input belongs to an obsolete presentation".into());
             }
+        }
+        let mut inputs = command.inputs.into_iter().peekable();
+        while let Some(input) = inputs.next() {
+            if let Event::Mouse(mouse) = &input.event
+                && matches!(
+                    mouse.kind,
+                    MouseEventKind::ScrollUp
+                        | MouseEventKind::ScrollDown
+                        | MouseEventKind::ScrollLeft
+                        | MouseEventKind::ScrollRight
+                )
+            {
+                // Inbox supplies one bounded group of identical wheels.
+                // The Surface resolves its original target once. A custom
+                // component may consume only one; its old-frame remainder
+                // is revoked, never replayed against another target.
+                changed |= self
+                    .surface
+                    .handle_wheel(*mouse, (1 + inputs.count()) as u16)
+                    != 0;
+                self.forward_events(true)?;
+                break;
+            }
+            if self.oversized_cut(&input.event) {
+                self.clipboard_failure();
+                changed = true;
+                continue;
+            }
             changed |= self.surface.handle_event(input.event);
-            // Resolve the whole physical input against the presented Surface,
-            // then invoke it before queued timers/Host completions can recycle
-            // a cell or replace the node's handler.
-            self.forward_events(true)?;
+            let events: Vec<_> = self.surface.drain_events().collect();
+            let invokes_application = events
+                .iter()
+                .any(|event| matches!(event, SurfaceEvent::Event(..)));
+            // A captured Down/Drag/Up group can finish before queued JS
+            // changes its meaning. Once a callback runs, remaining old-frame
+            // pointers lose their authority even if the pixels stay equal.
+            self.dispatch_events(events, true)?;
+            if invokes_application {
+                if inputs.peek().is_some() {
+                    self.cancel_pointer()?;
+                }
+                break;
+            }
         }
         self.engine.pump();
         changed |= self.apply_commits()?;
         changed |= self.surface.tick(self.started.elapsed().as_secs_f64());
         self.forward_events(false)?;
         self.encode(changed)
+    }
+
+    fn cancel_pointer(&mut self) -> Result<(), String> {
+        // NSH's focus-loss path cancels captures. Reconcile immediately to
+        // restore the mounted input's focus.
+        self.surface.handle_event(Event::FocusLost);
+        self.surface.handle_event(Event::FocusGained);
+        self.forward_events(false)
+    }
+
+    fn oversized_cut(&self, event: &Event) -> bool {
+        let Event::Key(key) = event else { return false };
+        if key.kind == KeyEventKind::Release
+            || !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
+            || !matches!(key.code, KeyCode::Char('x' | 'X'))
+        {
+            return false;
+        }
+        let Some(context) = self.surface.input_context() else {
+            return false;
+        };
+        let Some(text) = context.text else {
+            return false;
+        };
+        let selected: Vec<_> = text
+            .encode_utf16()
+            .skip(context.selection.start as usize)
+            .take((context.selection.end - context.selection.start) as usize)
+            .collect();
+        // Native selections end at complete Unicode characters. Ask the
+        // actual transport encoder before the editor performs a cut.
+        ServiceOutput::Clipboard(String::from_utf16(&selected).expect("valid native selection"))
+            .terminal_sequence(false)
+            .is_empty()
+    }
+
+    fn clipboard_failure(&mut self) {
+        self.surface.apply(MountBatch {
+            items: vec![MountItem::Command {
+                id: ROOT_ID,
+                command: Command::Toast {
+                    text: "Copy failed: exceeds 64 KiB.".into(),
+                    long: true,
+                },
+            }],
+        });
     }
 
     fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
@@ -233,11 +315,10 @@ impl Session {
                     let sequence = ServiceOutput::Clipboard(text)
                         .terminal_sequence(std::env::var_os("TMUX").is_some());
                     if sequence.is_empty() {
-                        return Err(
-                            "clipboard copy exceeds the terminal's 64 KiB OSC 52 limit".into()
-                        );
+                        self.clipboard_failure();
+                    } else {
+                        self.effects.extend_from_slice(sequence.as_bytes());
                     }
-                    self.effects.extend_from_slice(sequence.as_bytes());
                 }
                 SurfaceEvent::Service(ServiceRequest::ClipboardRead { id, has_only }) => {
                     self.surface.complete_clipboard(
@@ -408,7 +489,7 @@ mod tests {
             .unwrap();
         session
             .advance(Advance {
-                input: None,
+                inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
             })
@@ -422,6 +503,197 @@ mod tests {
             .unwrap()
             .id;
         assert_eq!(row, rebound, "the actual virtual-list cell was retained");
+    }
+
+    #[test]
+    fn driver_accepts_a_click_queued_in_one_presented_frame() {
+        let source = APP.replace(
+            "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
+            "",
+        );
+        let mut session = Session::new(config(&source)).unwrap();
+        drive_burst(&mut session, |surface| click(surface, "row:A"));
+        assert!(session.surface.snapshot().contains("selected:A"));
+    }
+
+    fn click(surface: &Surface, label: &str) -> Vec<Event> {
+        let row = surface
+            .accessibility_snapshot()
+            .into_iter()
+            .find(|node| node.label == label)
+            .unwrap();
+        [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ]
+        .into_iter()
+        .map(|kind| {
+            Event::Mouse(MouseEvent {
+                kind,
+                column: (row.frame.x / 8.0) as u16,
+                row: (row.frame.y / 16.0) as u16,
+                modifiers: KeyModifiers::NONE,
+            })
+        })
+        .collect()
+    }
+
+    fn drive_burst(session: &mut Session, events: impl FnOnce(&Surface) -> Vec<Event>) {
+        let initial = session.initial_frame().unwrap();
+        let events = events(&session.surface);
+        let state = Arc::new(Mutex::new(super::super::input::Inbox::default()));
+        let presented = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (commands, receive) = mpsc::sync_channel(1);
+        let (frames, ready) = mpsc::sync_channel(1);
+        frames.send(Ok(initial)).unwrap();
+        let driver = {
+            let (state, presented, stop) = (state.clone(), presented.clone(), stop.clone());
+            thread::spawn(move || {
+                let mut output = super::super::output::Output::new(io::sink()).unwrap();
+                output.submit(b"SETUP".to_vec()).unwrap();
+                super::super::drive(&mut output, &state, &presented, &commands, &ready, &stop)
+            })
+        };
+        let deadline = Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            let mut inbox = state.lock().unwrap();
+            let epoch = presented.load(std::sync::atomic::Ordering::Acquire);
+            if epoch != 0 {
+                for event in events {
+                    inbox.push(event, epoch);
+                }
+                break;
+            }
+            drop(inbox);
+            if let Ok(command) = receive.try_recv() {
+                frames.send(session.advance(command)).unwrap();
+            }
+            assert!(Instant::now() < deadline, "initial frame was not presented");
+            thread::yield_now();
+        }
+        for _ in 0..4 {
+            let command = receive
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
+            frames.send(session.advance(command)).unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        driver.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn driver_revokes_a_second_old_click_after_the_first_callback_rebinds_its_row() {
+        let source = APP.replace(
+            "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
+            "",
+        ).replace(
+            "prop(node, \"onPress\", () => selected.set(row().id));",
+            "prop(node, \"onPress\", () => { selected.set(row().id); rows.set([{ id: \"B\" }]); });",
+        );
+        let mut session = Session::new(config(&source)).unwrap();
+        drive_burst(&mut session, |surface| {
+            let mut events = click(surface, "row:A");
+            events.extend(click(surface, "row:A"));
+            events
+        });
+        assert!(session.surface.snapshot().contains("selected:A"));
+        assert!(
+            session
+                .surface
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.label == "row:B")
+        );
+        drive_burst(&mut session, |surface| click(surface, "row:B"));
+        assert!(session.surface.snapshot().contains("selected:B"));
+    }
+
+    #[test]
+    fn mouse_down_callback_revokes_the_queued_release_before_it_reads_a_new_row() {
+        let source = APP
+            .replace("requestAnimationFrame(() => rows.set([{ id: \"B\" }]));", "")
+            .replace(
+                "prop(node, \"onPress\", () => selected.set(row().id));",
+                "prop(node, \"onPress\", () => selected.set(row().id)); prop(node, \"onPressIn\", () => { selected.set('pressed:' + row().id); rows.set([{ id: \"B\" }]); });",
+            );
+        let mut session = Session::new(config(&source)).unwrap();
+        session.initial_frame().unwrap();
+        let inputs = click(&session.surface, "row:A")
+            .into_iter()
+            .map(|event| Input {
+                event,
+                pointer_epoch: Some(session.epoch),
+            })
+            .collect();
+        session
+            .advance(Advance {
+                inputs,
+                resize: None,
+                cancel_pointer: false,
+            })
+            .unwrap();
+        assert!(session.surface.snapshot().contains("selected:pressed:A"));
+        assert!(
+            session
+                .surface
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.label == "row:B")
+        );
+    }
+
+    #[test]
+    fn driver_accumulates_wheels_without_clicking_new_content_at_old_coordinates() {
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, insert, append } from "nsh:rt";
+            const offset = signal(0);
+            const selected = signal("none");
+            mount(() => {
+                const root = element("view");
+                prop(root, "style", { flex: 1 });
+                const result = element("text");
+                insert(result, () => "offset:" + offset() + " selected:" + selected());
+                append(root, result);
+                const scroll = element("scroll");
+                prop(scroll, "style", { flex: 1 });
+                prop(scroll, "onScroll", (event) => offset.set(event.y));
+                for (let row = 0; row < 30; row++) {
+                    const node = element("view");
+                    prop(node, "style", { height: 16 });
+                    prop(node, "accessibilityLabel", "row:" + row);
+                    prop(node, "onPress", () => selected.set(String(row)));
+                    const label = element("text");
+                    insert(label, "Row " + row);
+                    append(node, label);
+                    append(scroll, node);
+                }
+                append(root, scroll);
+                return root;
+            });
+        "#,
+        ))
+        .unwrap();
+        drive_burst(&mut session, |surface| {
+            let click = click(surface, "row:0");
+            let Event::Mouse(mut mouse) = click[0] else {
+                unreachable!()
+            };
+            mouse.kind = MouseEventKind::ScrollDown;
+            let mut events = vec![Event::Mouse(mouse); 3];
+            events.extend(click);
+            events
+        });
+        assert!(
+            session
+                .surface
+                .snapshot()
+                .contains("offset:144 selected:none")
+        );
+        drive_burst(&mut session, |surface| click(surface, "row:9"));
+        assert!(session.surface.snapshot().contains("offset:144 selected:9"));
     }
 
     #[test]
@@ -449,7 +721,7 @@ mod tests {
         );
         session
             .advance(Advance {
-                input: None,
+                inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
             })
@@ -522,17 +794,17 @@ mod tests {
         session.forward_events(true).unwrap();
         session
             .advance(Advance {
-                input: None,
+                inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: true,
             })
             .unwrap();
         session
             .advance(Advance {
-                input: Some(Input {
+                inputs: vec![Input {
                     event: mouse(MouseEventKind::Up(MouseButton::Left)),
                     pointer_epoch: Some(session.epoch),
-                }),
+                }],
                 resize: None,
                 cancel_pointer: false,
             })
@@ -557,10 +829,10 @@ mod tests {
         .unwrap();
         session.initial_frame().unwrap();
         let command = |key| Advance {
-            input: Some(Input {
+            inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
                 pointer_epoch: None,
-            }),
+            }],
             resize: None,
             cancel_pointer: false,
         };
@@ -572,6 +844,84 @@ mod tests {
         assert!(
             copied
                 .bytes
+                .unwrap()
+                .windows(sequence.len())
+                .any(|bytes| bytes == sequence.as_bytes())
+        );
+    }
+
+    #[test]
+    fn oversized_copy_and_cut_keep_the_draft_and_allow_later_editing() {
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, bindProp } from "nsh:rt";
+            const value = signal("x".repeat(65535) + "😀");
+            mount(() => {
+                const input = element("input");
+                prop(input, "autoFocus", true);
+                prop(input, "style", { height: 16 });
+                bindProp(input, "value", value);
+                prop(input, "onChangeText", (text) => value.set(text));
+                return input;
+            });
+        "#,
+        ))
+        .unwrap();
+        session.initial_frame().unwrap();
+        let command = |key, modifiers| Advance {
+            inputs: vec![Input {
+                event: Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers)),
+                pointer_epoch: None,
+            }],
+            resize: None,
+            cancel_pointer: false,
+        };
+        session
+            .advance(command('a', KeyModifiers::CONTROL))
+            .unwrap();
+        for key in ['c', 'x'] {
+            let frame = session
+                .advance(command(key, KeyModifiers::CONTROL))
+                .unwrap();
+            assert!(!frame.quit);
+            assert_eq!(
+                session.surface.input_context().unwrap().text,
+                Some("x".repeat(65_535) + "😀")
+            );
+            assert!(
+                session
+                    .surface
+                    .snapshot()
+                    .contains("Copy failed: exceeds 64 KiB.")
+            );
+            assert!(
+                !frame
+                    .bytes
+                    .unwrap()
+                    .windows(4)
+                    .any(|bytes| bytes == b"\x1b]52")
+            );
+        }
+        session.advance(command('z', KeyModifiers::NONE)).unwrap();
+        assert_eq!(
+            session.surface.input_context().unwrap().text.as_deref(),
+            Some("z")
+        );
+        session
+            .advance(command('a', KeyModifiers::CONTROL))
+            .unwrap();
+        let cut = session
+            .advance(command('x', KeyModifiers::CONTROL))
+            .unwrap();
+        assert_eq!(
+            session.surface.input_context().unwrap().text.as_deref(),
+            Some("")
+        );
+        let sequence = ServiceOutput::Clipboard("z".into())
+            .terminal_sequence(std::env::var_os("TMUX").is_some());
+        assert!(
+            cut.bytes
                 .unwrap()
                 .windows(sequence.len())
                 .any(|bytes| bytes == sequence.as_bytes())

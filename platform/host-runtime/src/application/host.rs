@@ -21,8 +21,8 @@
 mod access;
 mod client;
 pub mod discovery;
-pub mod startup;
 mod lifecycle;
+pub mod startup;
 pub mod websocket;
 pub use access::Pairing;
 pub mod protocol;

@@ -19,7 +19,7 @@
 
 mod support;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use maka_plugin_core::operation::{OperationOutcome, Receipt};
 use nsh_engine::Bundle;
 use nsh_platform_tui::AppView;
@@ -73,9 +73,15 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         evidence("workbench-home", &home);
         support::evidence_cells("workbench-home", &view);
 
-        shortcut(&mut view, 'p');
-        select_palette(&mut view, "Search commands…", "Sess", "Sessions").await;
-        select_palette(&mut view, "Search sessions…", "NSH real", "NSH real Agent").await;
+        support::click_text(&mut view, "MAKA");
+        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("Close · Esc")).await;
+        support::click_text(&mut view, "Close · Esc");
+        wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Search commands…")).await;
+        support::click_text(&mut view, "MAKA");
+        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("› Sessions")).await;
+        support::click_text(&mut view, "› Sessions");
+        wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("› NSH real Agent") && !screen.contains("Loading…")).await;
+        support::click_text(&mut view, "› NSH real Agent");
         wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Enter sends")).await;
         view.handle_event(Event::Paste("Draft A stays in its own conversation".into()));
         support::wait_draft(&client, &fixture.session, "Draft A stays in its own conversation").await;
@@ -156,17 +162,11 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(history.contains("original provider text"));
         evidence("history", &history);
         let previous = view.surface().focused();
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
-        tokio::time::timeout(Duration::from_secs(20), async {
-            while view.surface().focused() == previous {
-                view.poll().unwrap();
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        }).await.expect("history did not receive native focus");
-        // Holding Home crosses the actual page boundary without a load button.
+        assert!(view.surface().input_context().is_some(), "the history wheel must start with composer focus, so a missed pointer cannot scroll the focused List");
+        // Wheel events over the conversation cross the actual history page boundary.
         let scrolling = std::time::Instant::now();
         loop {
-            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+            support::scroll_text(&mut view, "History ", MouseEventKind::ScrollUp);
             view.poll().unwrap();
             view.tick(scrolling.elapsed().as_secs_f64()).unwrap();
             let screen = view.snapshot();
@@ -176,7 +176,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 break;
             }
             assert!(scrolling.elapsed() < Duration::from_secs(20), "scrolling did not load original history:\n{screen}");
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
         shortcut(&mut view, 'l');
         wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
@@ -188,8 +188,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         }).await.expect("jump to latest did not restore composer focus");
 
         view.handle_event(Event::Paste("NSH user send, exactly once".into()));
-        wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once")).await;
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once") && screen.contains("Send")).await;
+        support::click_text(&mut view, "Send");
         // AppView's engine continues independently while this awaits the real HTTP request.
         let mut request = fixture.next_request().await;
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("NSH user send, exactly once")));
@@ -209,6 +209,25 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let source_top = wait_view(&mut view, &at_source_start).await;
         evidence("activity-source-top", &source_top);
         support::evidence_cells("activity-source-top", &view);
+
+        // Keep focus outside the activity List so the wheel cannot pass via focus fallback.
+        let activity_focus = view.surface().focused();
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while view.surface().focused().is_none() || view.surface().focused() == activity_focus {
+                view.poll().unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("history did not receive native focus");
+        let header_row = source_top.lines().position(|line| line.contains("Analyzing the request")).expect("the activity header must be visible above its source");
+        support::scroll_text(&mut view, "NATIVE_THINK_SOURCE_01", MouseEventKind::ScrollDown);
+        let wheeled = wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_03") && !screen.contains("NATIVE_THINK_SOURCE_01")).await;
+        assert_eq!(wheeled.lines().position(|line| line.contains("Analyzing the request")), Some(header_row), "the body wheel must not move the fixed turn header");
+        evidence("activity-mouse-wheel", &wheeled);
+        support::evidence_cells("activity-mouse-wheel", &view);
+        support::focus_activity(&mut view).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        wait_view(&mut view, &at_source_start).await;
 
         request.thinking("\nNATIVE_ACTIVITY_HEADER_TAIL_APPENDED").await;
         let anchored = wait_view(&mut view, |screen| at_source_start(screen) && screen.matches("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED").count() == 1).await;
@@ -344,6 +363,11 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         evidence("production-pty-home", &home);
         terminal.send(b"\x10");
         terminal.wait_for("Search commands…").await;
+        terminal.wait_for("Enter selects · Esc closes").await;
+        terminal.click_text("Close");
+        terminal.wait_for("Make something remarkable.").await;
+        terminal.send(b"\x10");
+        terminal.wait_for("Search commands…").await;
         terminal.paste("Sess");
         terminal.send(b"\r");
         terminal.wait_for("Search sessions…").await;
@@ -363,7 +387,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         terminal.paste("Production PTY user message");
         terminal.wait_for("Production PTY user message").await;
         terminal.send(b"\r");
-        let blocked = terminal.wait_for("This Enter did not send a message.").await;
+        let blocked = terminal.wait_for("This message was not sent.").await;
         assert!(blocked.contains("Production PTY user message"));
         assert!(blocked.contains("Loading session history"));
         assert!(!blocked.contains("Enter sends"));
@@ -372,7 +396,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         gate.release();
         terminal.wait_for("Enter sends").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "history recovery must not replay the early Enter");
-        terminal.send(b"\r");
+        terminal.click_text("Send");
         // A real terminal keeps reading stdout while waiting for the provider.
         // This also exercises the production LocalEngine presentation acknowledgements.
         let awaiting = Instant::now();
@@ -383,7 +407,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
             }
             assert!(
                 awaiting.elapsed() < Duration::from_secs(20),
-                "physical Enter never reached the real provider:\n{}",
+                "physical Send click never reached the real provider:\n{}",
                 terminal.snapshot()
             );
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -408,6 +432,10 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         terminal.send(b"\x11");
         terminal.finish().await;
         drop(terminal);
+        let reconnected = fixture.client().await;
+        let observed = reconnected.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(observed["session"]["id"], fixture.session, "quitting the shell must detach without stopping its service Host");
+        reconnected.close().await.unwrap();
         drop(gate);
         fixture.finish().await;
     })
