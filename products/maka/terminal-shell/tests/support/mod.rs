@@ -634,7 +634,9 @@ pub async fn focus_activity(view: &mut AppView) {
             .advance_clock(Duration::ZERO, move || {
                 let _ = done.send(());
             });
-        committed.await.expect("the focus navigation engine stopped");
+        committed
+            .await
+            .expect("the focus navigation engine stopped");
         loop {
             tick(view);
             if view

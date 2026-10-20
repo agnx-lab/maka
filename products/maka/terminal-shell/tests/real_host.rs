@@ -601,7 +601,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
             let cells = (0..area.height).find_map(|y| {
                 (0..=area.width.saturating_sub(token.len() as u16)).find_map(|x| {
                     let text: String = (0..token.len()).map(|index| buffer[(x + index as u16, y)].symbol()).collect();
-                    (text == token).then(|| (x, y))
+                    (text == token).then_some((x, y))
                 })
             }).unwrap_or_else(|| panic!("formatted token {token} is not visible:\n{rendered}"));
             assert!((0..token.len()).all(|index| buffer[(cells.0 + index as u16, cells.1)].modifier.contains(expected)), "terminal cells for {token} lost {expected:?}");
