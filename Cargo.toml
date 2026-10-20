@@ -44,6 +44,8 @@ members = [
     "products/maka/cli",
     "plugins/settings/store",
     "products/maka/desktop-shell",
+    "products/maka/client",
+    "products/maka/terminal-shell",
     "platform/computer-use",
     "platform/event-log",
     "plugins/agent/acp-executor/engine",
@@ -89,6 +91,11 @@ publish = false
 [workspace.dependencies]
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
+maka-app-client = { path = "products/maka/client" }
+nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "10261e04b1828216d38b5a7ba4016781db0e41f8" }
+nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "10261e04b1828216d38b5a7ba4016781db0e41f8" }
+nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "10261e04b1828216d38b5a7ba4016781db0e41f8" }
+nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "10261e04b1828216d38b5a7ba4016781db0e41f8", default-features = false }
 maka-agent-facts = { path = "plugins/agent/facts" }
 maka-packages = { path = "platform/packages" }
 maka-agent-ports = { path = "plugins/agent/ports" }
