@@ -20,10 +20,12 @@
 // The Maka desktop window: tasks on the canvas at the side, and the plate
 // beside them with the selected task's transcript and the composer, or the
 // empty state for a new task, or WorkHub (workhub.js), whose conversation is
-// drawn as a task's, or the Search page (search.js). Settings (settings.js)
-// takes the sidebar and the plate while open. The look follows the native
-// client (theme.js). Every Host call goes through `maka-host` (see host.js);
-// MAKA_HOST_ENDPOINT and MAKA_HOST_EPOCH name the Host.
+// drawn as a task's, or the Search page (search.js). Beside a conversation
+// the Workbar (workbar.js) can show its folder's changes and files, on a
+// plate of its own. Settings (settings.js) takes the sidebar and the plate
+// while open. The look follows the native client (theme.js). Every Host
+// call goes through `maka-host` (see host.js); MAKA_HOST_ENDPOINT and
+// MAKA_HOST_EPOCH name the Host.
 //
 // An optional `dev.js` beside this file (never committed) can turn on the
 // debug log and drive the window without focus:
@@ -31,19 +33,30 @@
 //   export default { debug: true, run: async ({ app, cx, log }) => { ... } };
 
 import { View, div } from 'gpui-kit';
-import { v_flex, h_flex } from 'gpui-base';
+import { v_flex, h_flex, h_resizable, resizable_panel, Button } from 'gpui-base';
 import { query, operation, log, setDebug } from './host.js';
 import { rowPositionKey } from './history-position.js';
 import { SessionCatalog, SidebarState, sidebar } from './sessions.js';
 import { Transcript, transcriptPane } from './transcript.js';
 import { Composer, composerPane } from './composer.js';
+import { ContextUse, contextControl } from './context.js';
+import { Find, findBar } from './find.js';
 import { interactionCard } from './interactions.js';
 import { Settings, settingsNav, settingsPage } from './settings.js';
 import { Directories, folderPicker } from './directories.js';
 import { WorkHub, workhubTabs, workhubBody, chatHint } from './workhub.js';
 import { Search, searchPage } from './search.js';
 import { usable } from './subagents.js';
-import { followAppearance, palette, text, icon, controlButton, ghostButton } from './theme.js';
+import { Workbar, WORKBAR_WIDTH, workbarPane, workbarButton } from './workbar.js';
+import {
+  followAppearance,
+  palette,
+  typeset,
+  text,
+  icon,
+  controlButton,
+  ghostButton,
+} from './theme.js';
 import { t, onLanguageChange } from './locale.js';
 
 /**
@@ -53,6 +66,21 @@ import { t, onLanguageChange } from './locale.js';
  * clearance from the plate's edge, as the native client's title bar does.
  */
 const LIGHTS_END = 80;
+
+/** The sidebar's width, beside the plate. */
+const SIDEBAR_WIDTH = 256;
+
+/** The narrowest the conversation's plate gets while the Workbar's divider is dragged. */
+const CONVERSATION_MIN = 420;
+
+/** The space between the conversation's plate and the Workbar's, split between the two panels. */
+const SPLIT_GAP = 4;
+
+/**
+ * The narrowest it gets in a window too narrow for both plates at their
+ * usual minimums (960 wide with the sidebar leaves them 696).
+ */
+const CONVERSATION_FLOOR = 320;
 
 /** WorkHub and the Search page as places in the Back and Forward lists, beside session ids. */
 const WORKHUB = 'workhub';
@@ -66,8 +94,11 @@ const SHORTCUTS = [
   { keystroke: 'secondary-]', action: 'maka.forward' },
   { keystroke: 'secondary-,', action: 'maka.settings' },
   { keystroke: 'secondary-shift-f', action: 'maka.search' },
+  { keystroke: 'secondary-f', action: 'maka.find' },
   { keystroke: 'secondary-.', action: 'maka.stop' },
   { keystroke: 'f2', action: 'maka.rename-task' },
+  { keystroke: 'ctrl-shift-g', action: 'maka.toggle-changes' },
+  { keystroke: 'secondary-p', action: 'maka.toggle-files' },
 ];
 
 export default class MakaDesktop extends View {
@@ -75,7 +106,19 @@ export default class MakaDesktop extends View {
     // The context `init` receives may be held across awaits; the Host loops
     // below notify through it.
     this.cx = cx;
-    const hooks = { changed: () => this.cx.notify(), report: (message) => this.report(message) };
+    const report = (message) => this.report(message);
+    // Its own changes only redraw; everything else may change the
+    // conversation it serves, so it is told (syncWorkbar) before each frame.
+    this.workbar = new Workbar({ changed: () => this.cx.notify(), report }, cx);
+    const hooks = {
+      changed: () => {
+        this.syncWorkbar();
+        this.cx.notify();
+      },
+      report,
+      // A turn footer's Fork: the sidebar's fork, through that turn.
+      fork: (session, turnId) => this.sidebarUi.fork(session, turnId),
+    };
     this.hooks = hooks;
     this.catalog = new SessionCatalog({
       ...hooks,
@@ -103,6 +146,23 @@ export default class MakaDesktop extends View {
         const folder = this.startFolder();
         return folder === null ? Promise.resolve(null) : this.newSession(folder);
       },
+      cx,
+    );
+    // The composer's context use follows the conversation the composer serves.
+    this.contextUse = new ContextUse(hooks, this.composer);
+    // Find in the conversation the window shows: a row it selects is shown
+    // in place when loaded, else the conversation opens again at it.
+    this.find = new Find(
+      {
+        changed: hooks.changed,
+        report,
+        reveal: (transcript, position, field) => this.reveal(transcript, position, field),
+        giveBack: (toComposer) => {
+          if (toComposer) this.composer.focusDraft();
+          else this.rootFocus.focus();
+        },
+      },
+      cx,
     );
     // A model added or chosen in Settings is what the composer sends with next,
     // and the subagents Settings reads or saves are what WorkHub's hint goes by.
@@ -141,10 +201,19 @@ export default class MakaDesktop extends View {
         archived: (sessionId) => {
           if (this.transcript?.id === sessionId) this.home();
         },
+        forked: (session) => this.select(session),
         focusRoot: () => this.rootFocus.focus(),
       },
       cx,
     );
+    /**
+     * id -> what the header of a fork names its source by when the sidebar
+     * does not list it (an archived task): `{ session }` as `agent.observe`
+     * read it, `{ gone: true }` when the Host has no such task, `{ failed:
+     * true }` when it could not be read, until a task is opened again (select),
+     * or null while it is read.
+     */
+    this.forkSources = new Map();
     this.creating = false;
     this.error = null;
     this.sidebarHidden = false;
@@ -217,6 +286,52 @@ export default class MakaDesktop extends View {
     return this.workhub.open ? this.workhub.transcript : this.transcript;
   }
 
+  /**
+   * The conversation the Workbar serves: the selected task's, or WorkHub's
+   * while its conversation shows; none on the start pane, Search, Settings
+   * or WorkHub's tasks.
+   */
+  workbarTarget() {
+    if (this.settings.open) return null;
+    if (this.workhub.open) return this.workhub.chat();
+    if (this.search.open) return null;
+    return this.transcript;
+  }
+
+  /**
+   * Tells the Workbar and Find what the window shows now, and the
+   * composer's context use which conversation the composer serves; cheap
+   * when nothing they follow changed.
+   */
+  syncWorkbar() {
+    this.workbar.follow(this.workbarTarget());
+    this.contextUse.follow(this.current());
+    this.find.follow(this.workbarTarget());
+  }
+
+  /** ⌘F: Find over the conversation the window shows, if it shows one. */
+  startFind() {
+    const transcript = this.workbarTarget();
+    if (transcript === null) return;
+    this.find.show(transcript, this.composer.focused);
+  }
+
+  /**
+   * Shows Find's row at `position` (its `field`): in place when the
+   * transcript has it loaded, else by opening the conversation again at that
+   * row, as a Search passage opens its task (Find follows the conversation
+   * it opens).
+   */
+  reveal(transcript, position, field) {
+    if (transcript.reveal(position, field)) return;
+    log(`find: row ${rowPositionKey(position)} is not loaded; opening the conversation at it`);
+    if (transcript.endpoint === 'coordinator') {
+      this.workhub.attach(transcript.session, position, field);
+    } else {
+      this.select(transcript.session, false, position, field);
+    }
+  }
+
   /** Records a move from the current place, for Back. */
   visit(next) {
     const current = this.place();
@@ -266,18 +381,23 @@ export default class MakaDesktop extends View {
   /**
    * Switches the transcript, leaving WorkHub or the Search page; the previous
    * one's watch is closed first. With `anchor` (a transcript row, from a
-   * Search passage) it opens at that row, also when the task is open already.
+   * Search passage or Find) it opens at that row, also when the task is open
+   * already; `anchorField` is a Find match's field there (Transcript).
    */
-  async select(session, record = true, anchor = null) {
+  async select(session, record = true, anchor = null, anchorField = null) {
     if (this.settings.open) this.settings.hide();
     if (this.place() === session.id && anchor === null) return;
     if (record) this.visit(session.id);
     const previous = this.transcript;
-    const transcript = new Transcript(session, this.hooks, 'agent', { anchor });
+    const transcript = new Transcript(session, this.hooks, 'agent', { anchor, anchorField });
     this.transcript = transcript;
+    for (const [id, source] of this.forkSources) {
+      if (source?.failed === true) this.forkSources.delete(id);
+    }
     const leaving = this.workhub.hide();
     this.search.hide();
     log(`select "${session.title}"${anchor === null ? '' : ` at row ${rowPositionKey(anchor)}`}`);
+    this.syncWorkbar();
     this.cx.notify();
     if (previous !== null) await previous.close();
     await leaving;
@@ -292,6 +412,7 @@ export default class MakaDesktop extends View {
     this.transcript = null;
     const leaving = this.workhub.hide();
     this.search.hide();
+    this.syncWorkbar();
     this.cx.notify();
     if (previous !== null) await previous.close();
     await leaving;
@@ -307,6 +428,7 @@ export default class MakaDesktop extends View {
     this.search.hide();
     log('open WorkHub');
     const showing = this.workhub.show();
+    this.syncWorkbar();
     this.cx.notify();
     if (previous !== null) await previous.close();
     await showing;
@@ -325,6 +447,7 @@ export default class MakaDesktop extends View {
     const leaving = this.workhub.hide();
     this.search.show();
     log('open Search');
+    this.syncWorkbar();
     this.cx.notify();
     if (previous !== null) await previous.close();
     await leaving;
@@ -424,6 +547,15 @@ export default class MakaDesktop extends View {
     // Settings keep their navigation in the sidebar's place even while the
     // sidebar is hidden: it is the only way between their pages.
     const column = settings || !this.sidebarHidden;
+    const plate = v_flex()
+      .size_full()
+      .rounded(12)
+      .bg(m.plate)
+      .overflow_hidden()
+      .when(settings, (el) => el.child(settingsPage(this.settings, cx)))
+      .when(!settings && this.workhub.open, (el) => this.workhubPane(el, cx))
+      .when(!settings && this.search.open, (el) => this.searchPane(el, cx))
+      .when(!settings && !this.workhub.open && !this.search.open, (el) => this.taskPane(el, cx));
     return h_flex()
       .size_full()
       .items_start()
@@ -437,7 +569,10 @@ export default class MakaDesktop extends View {
       .on_action('maka.forward', () => this.go(1))
       .on_action('maka.settings', () => this.settings.show())
       .on_action('maka.search', () => this.startSearch())
+      .on_action('maka.find', () => this.startFind())
       .on_action('maka.rename-task', () => this.renameSelected())
+      .on_action('maka.toggle-changes', () => this.workbar.toggle('changes'))
+      .on_action('maka.toggle-files', () => this.workbar.toggle('files'))
       .on_action('maka.stop', () => {
         const current = this.current();
         if (current !== null) this.composer.stop(current);
@@ -445,7 +580,7 @@ export default class MakaDesktop extends View {
       .when(column, (el) =>
         el.child(
           v_flex()
-            .w(256)
+            .w(SIDEBAR_WIDTH)
             .flex_none()
             .h_full()
             .child(this.chromeStrip(!settings, cx))
@@ -480,20 +615,71 @@ export default class MakaDesktop extends View {
           .py(8)
           .pr(8)
           .when(!column, (el) => el.pl(8))
-          .child(
-            v_flex()
-              .size_full()
-              .rounded(12)
-              .bg(m.plate)
-              .overflow_hidden()
-              .when(settings, (el) => el.child(settingsPage(this.settings, cx)))
-              .when(!settings && this.workhub.open, (el) => this.workhubPane(el, cx))
-              .when(!settings && this.search.open, (el) => this.searchPane(el, cx))
-              .when(!settings && !this.workhub.open && !this.search.open, (el) =>
-                this.taskPane(el, cx),
-              ),
-          ),
+          .child(this.withWorkbar(plate, column, cx)),
       );
+  }
+
+  /**
+   * The conversation's plate, with the Workbar's to its right while it
+   * shows: two panels whose divider drags, in the middle of the 8 between
+   * them. The width it is dragged to is kept (Workbar.resized), and the
+   * conversation keeps at least CONVERSATION_MIN, less in a narrow window
+   * (see workbarSplit). `column` says whether the sidebar's column shows.
+   */
+  withWorkbar(plate, column, cx) {
+    if (!this.workbar.shown()) return plate;
+    // Each panel holds half the gap, so the divider sits in its middle.
+    const gap = SPLIT_GAP;
+    const { conversation, workbar } = this.workbarSplit(column, gap);
+    return h_resizable('workbar-split')
+      .size_full()
+      .on_resize((sizes) => this.workbar.resized(sizes[1] - gap))
+      .child(
+        resizable_panel()
+          .size_range(conversation + gap)
+          .pr(gap)
+          .child(plate),
+      )
+      .child(
+        resizable_panel()
+          .size(workbar + gap)
+          .size_range(WORKBAR_WIDTH.min + gap, WORKBAR_WIDTH.max + gap)
+          .pl(gap)
+          .child(workbarPane(this.workbar, cx)),
+      );
+  }
+
+  /**
+   * The conversation's least width and the Workbar's width to start from,
+   * for the width the window leaves the two plates. The panels never shrink
+   * below their least widths, so in a window too narrow for
+   * CONVERSATION_MIN beside the Workbar's least width the conversation gets
+   * what is left, down to CONVERSATION_FLOOR, and the Workbar's kept width
+   * is cut to what fits: both always stay in the window, and the first
+   * frame too.
+   */
+  workbarSplit(column, gap) {
+    const shared = window.viewport_size().width - (column ? SIDEBAR_WIDTH : 8) - 8;
+    const conversation = Math.min(
+      CONVERSATION_MIN,
+      Math.max(CONVERSATION_FLOOR, shared - WORKBAR_WIDTH.min - 2 * gap),
+    );
+    const workbar = Math.max(
+      WORKBAR_WIDTH.min,
+      Math.min(this.workbar.width, shared - conversation - 2 * gap),
+    );
+    return { shared, conversation, workbar };
+  }
+
+  /**
+   * Whether the conversation's plate can be narrower than CONVERSATION_MIN:
+   * beside the Workbar in a narrow window (see workbarSplit).
+   */
+  narrowConversation() {
+    return (
+      this.workbar.shown() &&
+      this.workbarSplit(!this.sidebarHidden, SPLIT_GAP).conversation < CONVERSATION_MIN
+    );
   }
 
   /** The plate's content for a task or a new one: header, connection strip, then the conversation. */
@@ -502,7 +688,15 @@ export default class MakaDesktop extends View {
     const folder = transcript === null ? this.startFolder() : null;
     return this.conversation(
       el
-        .child(this.header(transcript?.session.title ?? '', runState(transcript), null, cx))
+        .child(
+          this.header(
+            transcript?.session.title ?? '',
+            runState(transcript),
+            null,
+            cx,
+            this.forkOrigin(transcript, cx),
+          ),
+        )
         .child(this.connectionStrip(cx)),
       transcript,
       {
@@ -522,6 +716,80 @@ export default class MakaDesktop extends View {
       },
       cx,
     );
+  }
+
+  /**
+   * After the header's title on a task forked from another: "Forked from" and
+   * the source's title, muted, opening the source. The title is the
+   * sidebar's, else what `agent.observe` reads once (an archived source); a
+   * source the Host no longer has is named as deleted, without a link.
+   * Null for a task that is not a fork, and while the source is read.
+   */
+  forkOrigin(transcript, cx) {
+    const sessionId = transcript?.session.branch?.sessionId ?? null;
+    if (sessionId === null) return null;
+    const m = palette(cx);
+    const source = this.forkSource(sessionId);
+    if (source === null) return null;
+    if (source.gone === true) {
+      return text(t('forkedFromRemoved'), 'small', m.inkMuted).flex_none();
+    }
+    const label =
+      source.session === undefined
+        ? t('forkedFromUnknown')
+        : t('forkedFrom', { title: source.session.title });
+    return typeset(Button.new('forked-from'), 'small')
+      .flex_initial()
+      .min_w_0()
+      .max_w(360)
+      .h(24)
+      .px(6)
+      .items_center()
+      .rounded(6)
+      .text_color(m.inkMuted)
+      .hover((style) => style.bg(m.hover))
+      .tooltip(label)
+      .on_click(() => this.openForkSource(sessionId))
+      .child(div().min_w_0().truncate().child(label));
+  }
+
+  /**
+   * The source of a fork, as forkSources keeps it: the sidebar's entry when
+   * it lists the task, else the cached read, else null after starting it.
+   */
+  forkSource(sessionId) {
+    const listed = this.catalog.sessions.find((entry) => entry.id === sessionId);
+    if (listed !== undefined) return { session: listed };
+    if (this.forkSources.has(sessionId)) return this.forkSources.get(sessionId);
+    this.forkSources.set(sessionId, null);
+    query('agent', 'observe', { sessionId }).then(
+      (observed) => {
+        this.forkSources.set(sessionId, { session: observed.session });
+        this.cx.notify();
+      },
+      (error) => {
+        log(`fork source ${sessionId}: ${error.message}`);
+        const gone = error.message.includes('session_unavailable');
+        this.forkSources.set(sessionId, gone ? { gone: true } : { failed: true });
+        this.cx.notify();
+      },
+    );
+    return null;
+  }
+
+  /** The header's "Forked from": opens the source, archived or not. */
+  async openForkSource(sessionId) {
+    const known = this.forkSource(sessionId)?.session;
+    if (known !== undefined) {
+      await this.select(known);
+      return;
+    }
+    try {
+      const observed = await query('agent', 'observe', { sessionId });
+      await this.select(observed.session);
+    } catch (error) {
+      this.report(t('forkSourceFailed', { value: error.message }));
+    }
   }
 
   /**
@@ -591,7 +859,10 @@ export default class MakaDesktop extends View {
     const card = transcript ? interactionCard(transcript.interactions, cx) : null;
     const failed = transcript !== null && card === null ? transcript.failedTurn() : null;
     const bar = card === null && failed === null ? view.bar : null;
+    const finding =
+      this.find.open && transcript !== null && this.find.transcript?.id === transcript.id;
     return el
+      .when(finding, (el) => el.child(findBar(this.find, cx)))
       .when(transcript === null, (el) => el.child(view.empty))
       .when(transcript !== null, (el) =>
         el.child(transcriptPane(transcript, () => transcript.loadOlder(), cx, view.hint)),
@@ -606,6 +877,10 @@ export default class MakaDesktop extends View {
           {
             folder: view.folder,
             picker: view.picker,
+            usage:
+              transcript === null
+                ? null
+                : contextControl(this.contextUse, cx, this.narrowConversation()),
             // A session whose permissions were never changed still has the
             // level the Host gives every new one.
             defaultAccess:
@@ -628,21 +903,35 @@ export default class MakaDesktop extends View {
 
   /**
    * Above the composer when the newest turn failed: says so and offers to
-   * send its message again. Picking the failed run up where it ended
-   * (`agent.resume`) is not offered yet.
+   * continue the failed run where it stopped (`agent.resume`), unless the
+   * Host said it will not, and to send the turn's message again when there
+   * is one to send.
    */
   failedBar(transcript, turn, cx) {
     const m = palette(cx);
-    return composerBar(
-      icon('status-failed', 16, m.destructive),
-      t('turnFailedNote'),
-      turn.message === null
-        ? null
-        : controlButton('send-again', t('sendAgain'), 'outline', this.composer.sending, cx)
-            .tooltip(t('sendAgainTip'))
-            .on_click(() => this.composer.send(transcript, turn.message)),
-      cx,
-    );
+    const busy = this.composer.sending || this.composer.resuming;
+    const buttons = [];
+    if (this.composer.offersContinue(transcript, turn.turnId)) {
+      buttons.push(
+        controlButton(
+          'continue-run',
+          t('continueRun'),
+          'primary',
+          busy || this.composer.awaitingResume(transcript),
+          cx,
+        )
+          .tooltip(t('continueRunTip'))
+          .on_click(() => this.composer.resume(transcript, turn.turnId)),
+      );
+    }
+    if (turn.message !== null) {
+      buttons.push(
+        controlButton('send-again', t('sendAgain'), 'outline', busy, cx)
+          .tooltip(t('sendAgainTip'))
+          .on_click(() => this.composer.send(transcript, turn.message)),
+      );
+    }
+    return composerBar(icon('status-failed', 16, m.destructive), t('turnFailedNote'), buttons, cx);
   }
 
   /**
@@ -654,9 +943,15 @@ export default class MakaDesktop extends View {
     return composerBar(
       icon('triangle-alert', 16, m.warning),
       t('workhubNeedsSubagent'),
-      controlButton('workhub-subagents', t('workhubSetUpSubagents'), 'outline', false, cx).on_click(
-        () => this.settings.show('subagents'),
-      ),
+      [
+        controlButton(
+          'workhub-subagents',
+          t('workhubSetUpSubagents'),
+          'outline',
+          false,
+          cx,
+        ).on_click(() => this.settings.show('subagents')),
+      ],
       cx,
     );
   }
@@ -709,12 +1004,15 @@ export default class MakaDesktop extends View {
   /**
    * The plate's 48px header: `title`, and what its conversation is doing
    * (`state`, or null). `controls`, when given, sit in the middle of the
-   * plate, with the state after them. With the sidebar hidden it also
-   * carries the window controls, clear of the traffic lights.
+   * plate, with the state after them; `origin`, when given, right after the
+   * title (a fork's source). With the sidebar hidden it also carries the
+   * window controls, clear of the traffic lights. Beside a conversation the
+   * Workbar's button ends it.
    */
-  header(title, state, controls, cx) {
+  header(title, state, controls, cx, origin = null) {
     const m = palette(cx);
     const hidden = this.sidebarHidden;
+    const toggle = this.workbarTarget() === null ? null : workbarButton(this.workbar, cx);
     // The parts around the buttons move the window; the buttons are outside
     // them, so a press on one never starts a move.
     const side = () =>
@@ -734,10 +1032,33 @@ export default class MakaDesktop extends View {
           .child(dragArea().w(8).h_full()),
       )
       .when(!hidden, (el) => el.child(dragArea().w(20).h_full()))
-      .child(
-        side()
-          .child(text(title, 'strong', m.ink).flex_1().min_w_0().truncate())
-          .when(controls === null && stateText !== null, (el) => el.child(stateText)),
+      .when(origin === null, (el) =>
+        el.child(
+          side()
+            .child(text(title, 'strong', m.ink).flex_1().min_w_0().truncate())
+            .when(controls === null && stateText !== null, (el) => el.child(stateText)),
+        ),
+      )
+      // The origin is a button, so it stands between two parts that move the
+      // window: the title's, as wide as the title, and the rest.
+      .when(origin !== null, (el) =>
+        el
+          .child(
+            h_flex()
+              .flex_initial()
+              .min_w_0()
+              .h_full()
+              .items_center()
+              .window_control_area('drag')
+              .child(text(title, 'strong', m.ink).min_w_0().truncate()),
+          )
+          .child(origin.ml(8))
+          .child(
+            side()
+              .min_w(12)
+              .justify_end()
+              .when(controls === null && stateText !== null, (el) => el.child(stateText)),
+          ),
       );
     return h_flex()
       .flex_none()
@@ -751,7 +1072,8 @@ export default class MakaDesktop extends View {
             .justify_end()
             .when(stateText !== null, (el) => el.child(stateText)),
         ),
-      );
+      )
+      .when(toggle !== null, (el) => el.child(toggle.ml(8)));
   }
 
   /**
@@ -870,8 +1192,8 @@ function runState(transcript) {
   return transcript.run ? t('working') : null;
 }
 
-/** A bar above the composer, in its column: a glyph, a line, and a button at its end, or none. */
-function composerBar(glyph, words, button, cx) {
+/** A bar above the composer, in its column: a glyph, a line, and the buttons at its end. */
+function composerBar(glyph, words, buttons, cx) {
   const m = palette(cx);
   return h_flex()
     .flex_none()
@@ -894,7 +1216,7 @@ function composerBar(glyph, words, button, cx) {
         .bg(m.plate)
         .child(glyph)
         .child(text(words, 'body', m.ink).flex_1().min_w_0())
-        .when(button !== null, (el) => el.child(button)),
+        .children(buttons),
     );
 }
 

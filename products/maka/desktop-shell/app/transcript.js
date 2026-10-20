@@ -48,6 +48,7 @@ import { v_flex, h_flex, TextView, Scrollbar } from 'gpui-base';
 import { query, subscribe, next, close, log, readHistory, readSource } from './host.js';
 import { Interactions } from './interactions.js';
 import { compareRowPositions, rowPositionKey } from './history-position.js';
+import { markedPlain, holdsRow, FOUND_ROW } from './find.js';
 import {
   palette,
   typeset,
@@ -59,6 +60,7 @@ import {
   fileChip,
   escapeHtml,
   MONTHS,
+  MATCH_FILL,
 } from './theme.js';
 import { t, tn, language } from './locale.js';
 
@@ -66,6 +68,11 @@ import { t, tn, language } from './locale.js';
 const NEAR_TOP = 3;
 /** How many rows back to look for a tool call when its result arrives. */
 const TOOL_PAIR_WINDOW = 64;
+/** The reading column: at most this wide, with this much on each side (transcriptItem). */
+const COLUMN_WIDTH = 720;
+const COLUMN_GUTTER = 24;
+/** The footer's Fork button, square at the end of the column (turnFooter). */
+const FORK_BUTTON = 24;
 
 const FIELD_ORDER = { thinking: 0, body: 1 };
 
@@ -185,9 +192,12 @@ export class Transcript {
    * @param {{ changed: () => void, report: (message: string) => void }} hooks
    * @param {string} endpoint the Agent endpoint that holds the session: `agent`
    *   for a task, `coordinator` for WorkHub's conversation; every call goes to it
-   * @param {{ anchor?: import('./history-position.js').RowPosition | null }} options `anchor`, a transcript row
-   *   position (a Search passage's `anchorPosition`), opens the transcript at
-   *   that row instead of at the newest
+   * @param {{ anchor?: import('./history-position.js').RowPosition | null, anchorField?: string | null }} options
+   *   `anchor`, a transcript row position (a Search passage's
+   *   `anchorPosition`, a Find match's `position`), opens the transcript at
+   *   that row instead of at the newest; `anchorField`, the source field of a
+   *   Find match there, opens it at the row's thinking for `thinking`, else at
+   *   its body
    */
   constructor(session, hooks, endpoint = 'agent', options = {}) {
     this.session = session;
@@ -195,6 +205,7 @@ export class Transcript {
     this.hooks = hooks;
     this.endpoint = endpoint;
     this.anchor = options.anchor ?? null;
+    this.anchorField = options.anchorField === 'thinking' ? 'thinking' : 'body';
     /**
      * While the list opens at the anchor and keeps the reader where they
      * are, instead of following the newest row (see showing).
@@ -224,6 +235,20 @@ export class Transcript {
     // Live state from observe and watch.
     this.run = null;
     this.runThrough = 0;
+    /**
+     * How many runs ended while this was open: an `ended` fact newer than
+     * what `run` was last set from, or an observation that found no run
+     * where there was one. A run that opened and ended in one watch page
+     * counts too, though `run` never showed it (the Workbar reads the
+     * status on each).
+     */
+    this.runsEnded = 0;
+    /** turnId -> the invocation id of its run, from the watch's `opened` and `ended` facts. */
+    this.invocations = new Map();
+    /** Turns whose failed run the Host will not continue: Continue is not offered for them. */
+    this.noContinue = new Set();
+    /** turnId -> 'reading', 'read' or 'unknown': ownFailure's reads in a fork of all history. */
+    this.probes = new Map();
     this.latestKnown = 0;
     this.watchHandle = null;
     this.watchLast = 0;
@@ -239,6 +264,25 @@ export class Transcript {
     this.olderError = null;
     /** The footer whose turn was just copied, for two seconds. */
     this.copied = null;
+    /**
+     * Where the last left press in the transcript was, `{ x, width }` against
+     * the list: the click that follows tells a footer's Fork button from the
+     * rest of the footer by it (see onForkButton).
+     */
+    this.press = null;
+    /**
+     * Find's selected match, `{ position, field, pattern }`: its row is
+     * tinted, and in a sent message the text `pattern` finds is marked. Null
+     * without one.
+     */
+    this.found = null;
+    /**
+     * The row Find last showed at the top of the list, `{ position, field,
+     * drawn }`, and how many times it did (the list's id counts them; see
+     * reveal).
+     */
+    this.jump = null;
+    this.jumps = 0;
     /** The list items last built from the rows (see displayItems). */
     this.view = null;
     /**
@@ -331,12 +375,13 @@ export class Transcript {
   }
 
   /**
-   * The history page that starts at the anchor's row, read at `fence` as the
-   * exact inclusive row boundary. Null when it cannot be read or has
-   * nothing, and the transcript then opens at the newest row as usual.
+   * The history page that starts at the anchor's row (its `anchorField`),
+   * read at `fence` as the exact inclusive row boundary. Null when it cannot
+   * be read or has nothing, and the transcript then opens at the newest row
+   * as usual.
    */
   async readAnchor(fence) {
-    const position = { kind: 'row', position: this.anchor, field: 'body' };
+    const position = { kind: 'row', position: this.anchor, field: this.anchorField };
     try {
       const { page, calls } = await readHistory(this.historyInput(fence, position), this.endpoint);
       this.stats.tailCalls += calls;
@@ -378,8 +423,10 @@ export class Transcript {
    * `{ turnId, message }`, with the whole text of the message that started
    * it, or null as `message` when only part of that text is loaded, it has
    * none, it came with files (the files are not at hand to send again), or a
-   * WorkHub notice started the turn. Null otherwise, and while newer history
-   * is still to be read. A stopped turn is left alone: the user stopped it.
+   * WorkHub notice started the turn. A turn whose message is not loaded, or
+   * that a continued run started (it has no message of its own), has a null
+   * `message` too. Null otherwise, and while newer history is still to be
+   * read. A stopped turn is left alone: the user stopped it.
    */
   failedTurn() {
     if (!this.ready || this.after !== null) return null;
@@ -387,13 +434,69 @@ export class Transcript {
     const last = this.rows.at(-1);
     if (last?.timing?.finished?.outcome !== 'failed') return null;
     const start = this.rows.find((row) => row.turnId === last.turnId && row.role === 'user');
-    if (!start) return null;
+    if (!start) return { turnId: last.turnId, message: null };
     // A turn a WorkHub notice started is WorkHub's to start again, not the user's.
     const notice = originOf(start) !== null;
     const whole = start.fragments[0]?.offset === 0 && utf8Length(start.text) === start.totalBytes;
     const files = (start.attachments ?? []).length > 0;
     const message = whole && !notice && !files ? ownText(start) : '';
     return { turnId: last.turnId, message: message.trim() !== '' ? message : null };
+  }
+
+  /**
+   * The invocation id of the run that failed `turnId`, for `agent.resume`:
+   * from the watch when the run ended while this was open, else from the
+   * newest execution entries of `agent.diagnostics` (a few pages at most).
+   * Null when neither has it.
+   */
+  async failedRun(turnId) {
+    const seen = this.invocations.get(turnId);
+    if (seen !== undefined) return seen;
+    let position = { kind: 'latest' };
+    for (let pages = 0; pages < 4; pages += 1) {
+      const page = await query(this.endpoint, 'diagnostics', { sessionId: this.id, position });
+      const entry = page.entries.find(
+        (each) => each.detail?.kind === 'execution' && each.detail.invocation?.turn_id === turnId,
+      );
+      if (entry) return entry.detail.invocation.invocation_id;
+      if (page.nextBefore === null || page.nextBefore === undefined) return null;
+      position = { kind: 'before', through: page.through, sequence: page.nextBefore };
+    }
+    return null;
+  }
+
+  /**
+   * Whether the run that failed `turnId` is this task's own, the only kind
+   * `agent.resume` continues. In a fork the newest turn can be a failure
+   * copied from the source, whose runs the fork's diagnostics do not list.
+   * A fork through a turn copied that turn and none after it. In a fork of
+   * all history this reads failedRun once, and is false while it reads: a
+   * run it finds is kept in `invocations`, a turn it does not goes to
+   * `noContinue`, and when the read fails this is true, so Continue can ask.
+   */
+  ownFailure(turnId) {
+    const branch = this.session.branch ?? null;
+    if (branch === null || this.invocations.has(turnId)) return true;
+    if ((branch.turnId ?? null) !== null) return branch.turnId !== turnId;
+    if (!this.probes.has(turnId)) {
+      this.probes.set(turnId, 'reading');
+      this.failedRun(turnId).then(
+        (invocationId) => {
+          if (invocationId === null) this.noContinue.add(turnId);
+          else this.invocations.set(turnId, invocationId);
+          this.probes.set(turnId, 'read');
+          if (!this.closed) this.hooks.changed();
+        },
+        (error) => {
+          log(
+            `transcript "${this.session.title}": finding the failed run failed: ${error.message}`,
+          );
+          this.probes.set(turnId, 'unknown');
+          if (!this.closed) this.hooks.changed();
+        },
+      );
+    }
+    return this.probes.get(turnId) === 'unknown';
   }
 
   /** Stops the live updates. A pending `next()` resolves with null. */
@@ -440,6 +543,7 @@ export class Transcript {
       const fact = event.fact;
       switch (fact.kind) {
         case 'opened':
+          if (event.turnId) this.invocations.set(event.turnId, event.invocationId);
           if (event.sequence > this.runThrough) {
             this.run = { invocationId: event.invocationId, turnId: event.turnId, state: 'running' };
             this.runThrough = event.sequence;
@@ -503,8 +607,10 @@ export class Transcript {
           canonicalChanged = true;
           break;
         case 'ended':
+          if (event.turnId) this.invocations.set(event.turnId, event.invocationId);
           this.closeLive(event.sequence, event.invocationId);
           this.parts = this.parts.filter((open) => open.invocationId !== event.invocationId);
+          if (event.sequence > this.runThrough) this.runsEnded += 1;
           if (event.sequence > this.runThrough && this.run?.invocationId === event.invocationId) {
             this.run = null;
             this.runThrough = event.sequence;
@@ -588,7 +694,9 @@ export class Transcript {
     // The model the TUI would send with: the session's own, else the one the owner remembers.
     this.backend = observed.session.backend ?? observed.rememberedBackend ?? null;
     if (observed.through >= this.runThrough) {
-      this.run = observed.run ?? null;
+      const run = observed.run ?? null;
+      if (this.run !== null && run === null) this.runsEnded += 1;
+      this.run = run;
       this.runThrough = observed.through;
     }
   }
@@ -755,8 +863,12 @@ export class Transcript {
       return;
     }
     if (key.startsWith('footer/')) {
-      if (!this.view?.items.find((entry) => entry.key === key)?.copies) return;
       const turnId = key.slice('footer/'.length);
+      if (this.forks() && this.onForkButton()) {
+        this.hooks.fork(this.session, turnId);
+        return;
+      }
+      if (!this.view?.items.find((entry) => entry.key === key)?.copies) return;
       const reply = this.rows
         .filter((row) => row.turnId === turnId && row.role === 'assistant')
         .map((row) => row.text)
@@ -784,6 +896,56 @@ export class Transcript {
     if (!this.expanded.delete(key)) this.expanded.add(key);
     this.expandedVersion += 1;
     this.hooks.changed();
+  }
+
+  /**
+   * Shows the row at `position` (its `field`, when given; see holdsRow) at
+   * the top of the list, for Find, when it is loaded, and answers whether it
+   * was. A list cannot be scrolled to an item, but a new list opens at its
+   * first item: a list with a new id is drawn from the row's item for one
+   * frame, then whole, and keeps that item at its top (transcriptPane). It
+   * stays there while rows are added, as at an anchor, until the reader
+   * reaches the newest row again. A loaded row that no item shows leaves the
+   * list as it is.
+   */
+  reveal(position, field = null) {
+    const loaded = this.rows.some((row) => compareRowPositions(row.position, position) === 0);
+    if (!this.ready || !loaded) return false;
+    if (!displayItems(this).some((item) => holdsRow(item, position, field))) {
+      log(`transcript "${this.session.title}": no item shows row ${rowPositionKey(position)}`);
+      return true;
+    }
+    this.jumps += 1;
+    this.jump = { position, field, drawn: false };
+    this.anchored = true;
+    this.hooks.changed();
+    return true;
+  }
+
+  /** Whether turn footers offer Fork: a task's conversation, not WorkHub's. */
+  forks() {
+    return this.endpoint === 'agent' && typeof this.hooks.fork === 'function';
+  }
+
+  /** A left press in the transcript, from the area around the list. */
+  pressed(event) {
+    const { local_position: at, bounds } = event;
+    this.press = at && bounds ? { x: at.x, width: bounds.width } : null;
+  }
+
+  /**
+   * Whether the press before a footer's click was on its Fork button, the
+   * last FORK_BUTTON of the reading column. List rows take one click
+   * handler for the whole list, so the press's place tells the button from
+   * the rest of the footer, which copies.
+   */
+  onForkButton() {
+    const press = this.press;
+    this.press = null;
+    if (press === null) return false;
+    const column = Math.min(COLUMN_WIDTH, press.width - 2 * COLUMN_GUTTER);
+    const end = (press.width + column) / 2;
+    return press.x >= end - FORK_BUTTON && press.x <= end;
   }
 
   /**
@@ -954,23 +1116,38 @@ function displayItems(transcript) {
     } else if (row.role === 'tool_call' || row.role === 'tool_result') {
       const result =
         row.role === 'tool_call' ? (results.get(rowPositionKey(row.position)) ?? null) : row;
+      // Keyed by its call's position, whether the call is loaded or not: a
+      // result read before its call (a transcript opened at the result) keeps
+      // its key, and so its place at the top of the list, when the call is
+      // read in above it.
+      const call = row.role === 'tool_call' ? row.position : row.tool?.call?.position;
+      const key = call === undefined ? row.key : `tool/${rowPositionKey(call)}`;
       items.push({
-        key: row.key,
+        key,
         kind: 'tool',
         row,
         result,
-        open: transcript.expanded.has(row.key),
+        open: transcript.expanded.has(key),
       });
     } else if (row.role === 'thinking') {
       items.push({ key: row.key, kind: 'thinking', row, open: transcript.expanded.has(row.key) });
     } else if (row.role === 'failure') {
-      // A run's interruption and its end can both record the same reason.
+      // A run's interruption and its end can both record the same reason:
+      // one item shows both, keyed by the later row so that its key stays
+      // when the earlier one is read in after it. `also` lists the rows it
+      // stands for besides its own (holdsRow).
       const previous = items.at(-1);
       const repeated =
         previous?.kind === 'failure' &&
         previous.row.turnId === row.turnId &&
         previous.row.text === row.text;
-      if (!repeated) items.push({ key: row.key, kind: 'failure', row });
+      const item = { key: row.key, kind: 'failure', row };
+      if (repeated) {
+        item.also = [previous.row.position, ...(previous.also ?? [])];
+        items[items.length - 1] = item;
+      } else {
+        items.push(item);
+      }
     } else if (row.role === 'compaction') {
       // As in the TUI, a checkpoint shows only once it was adopted.
       if (row.compaction !== null) items.push({ key: row.key, kind: 'compaction', row });
@@ -1037,75 +1214,125 @@ export function transcriptPane(transcript, loadOlder, cx, empty = null) {
   const m = palette(cx);
   // One snapshot for this render; the list's callbacks run during later
   // layouts and must agree with the count given here.
-  const items = displayItems(transcript);
+  const all = displayItems(transcript);
+  // After Find showed a row: the items from it on for one frame (reveal).
+  const jump = transcript.jump;
+  const from =
+    jump === null || jump.drawn
+      ? 0
+      : Math.max(
+          0,
+          all.findIndex((item) => holdsRow(item, jump.position, jump.field)),
+        );
+  const items = from > 0 ? all.slice(from) : all;
   const hasRows = transcript.rows.length + transcript.pending.length + transcript.live.length > 0;
-  const id = `transcript-${transcript.id}`;
-  return v_flex()
-    .id(`${id}-area`)
-    .relative()
-    .flex_1()
-    .min_h_0()
-    .when(!transcript.ready || !hasRows, (el) =>
-      el
-        .items_center()
-        .justify_center()
-        .child(
-          transcript.ready && empty !== null
-            ? empty
-            : text(transcript.ready ? t('noMessagesYet') : t('loading'), 'body', m.inkMuted),
-        ),
-    )
-    .when(transcript.ready && hasRows, (el) =>
-      el
-        .child(
-          list(
-            id,
-            items.length,
-            (index) => items[index].key,
-            (index, cx) => transcriptItem(items[index], transcript, cx),
+  const id = `transcript-${transcript.id}${transcript.jumps > 0 ? `-${transcript.jumps}` : ''}`;
+  return (
+    v_flex()
+      .id(`${id}-area`)
+      .relative()
+      .flex_1()
+      .min_h_0()
+      // A footer's click comes on release; the press before it says where it was.
+      .on_mouse_down('left', (event) => transcript.pressed(event))
+      .when(!transcript.ready || !hasRows, (el) =>
+        el
+          .items_center()
+          .justify_center()
+          .child(
+            transcript.ready && empty !== null
+              ? empty
+              : text(transcript.ready ? t('noMessagesYet') : t('loading'), 'body', m.inkMuted),
+          ),
+      )
+      .when(transcript.ready && hasRows, (el) =>
+        el
+          .child(
+            list(
+              id,
+              items.length,
+              (index) => items[index].key,
+              (index, cx) => transcriptItem(items[index], transcript, cx),
+            )
+              // Opens at the newest row and stays there while a reply
+              // streams, until the reader scrolls up. Opened at an anchor, it
+              // opens at its top, the anchor's row, and keeps the reader's top
+              // row in place as pages are put above and added below, until the
+              // reader reaches the newest row or sends (Transcript.showing).
+              .with_follow_mode(transcript.anchored ? 'normal' : 'tail')
+              .scroll_to_end(transcript.scrollToEnd)
+              // Reported after the frame, however the range changed: a
+              // wheel, a scrollbar drag, or rows that do not fill the view.
+              // The range is of the items drawn, which start at `from`.
+              .on_visible_range_change((range, shown) => {
+                const start = range.start + from;
+                const end = range.end + from;
+                log(`transcript: showing ${start}..${end} of ${shown + from}`);
+                if (jump !== null && !jump.drawn) {
+                  jump.drawn = true;
+                  if (from > 0) transcript.hooks.changed();
+                }
+                transcript.showing({ start, end }, shown + from);
+                if (start < NEAR_TOP && transcript.before !== null) loadOlder();
+              })
+              .on_item_click((key, cx) => transcript.click(key, cx)),
           )
-            // Opens at the newest row and stays there while a reply
-            // streams, until the reader scrolls up. Opened at an anchor, it
-            // opens at its top, the anchor's row, and keeps the reader's top
-            // row in place as pages are put above and added below, until the
-            // reader reaches the newest row or sends (Transcript.showing).
-            .with_follow_mode(transcript.anchored ? 'normal' : 'tail')
-            .scroll_to_end(transcript.scrollToEnd)
-            // Reported after the frame, however the range changed: a
-            // wheel, a scrollbar drag, or rows that do not fill the view.
-            .on_visible_range_change((range, shown) => {
-              log(`transcript: showing ${range.start}..${range.end} of ${shown}`);
-              transcript.showing(range, shown);
-              if (range.start < NEAR_TOP && transcript.before !== null) loadOlder();
-            })
-            .on_item_click((key, cx) => transcript.click(key, cx)),
-        )
-        .child(Scrollbar.vertical(id).absolute().inset_0()),
-    );
+          .child(Scrollbar.vertical(id).absolute().inset_0()),
+      )
+  );
 }
 
 /** One item of the transcript list, in the reading column; called from layout for each visible item. */
 function transcriptItem(item, transcript, cx) {
+  const found = transcript.found;
+  const hit = found !== null && holdsRow(item, found.position, found.field);
+  const body = itemBody(item, transcript, cx, hit ? found.pattern : null);
+  const dark = cx.theme().is_dark;
+  // Find's match: the row tinted, reaching 8 past the column on each side
+  // and 8 above and below the row (16 for a sent message, which has 16
+  // above it already), taken from the space after it where there is some.
+  const below = item.kind === 'user' ? 16 : 8;
   return h_flex()
     .w_full()
-    .px(24)
+    .px(COLUMN_GUTTER)
     .justify_center()
     .child(
       v_flex()
         .w_full()
-        .max_w(720)
-        .pb(item.gap)
-        .child(itemBody(item, transcript, cx)),
+        .max_w(COLUMN_WIDTH)
+        .pb(hit ? Math.max(0, item.gap - below) : item.gap)
+        .child(
+          hit
+            ? div()
+                .mx(-8)
+                .px(8)
+                .when(item.kind !== 'user', (el) => el.pt(8))
+                .pb(below)
+                .rounded(8)
+                .bg(dark ? FOUND_ROW.dark : FOUND_ROW.light)
+                .child(body)
+            : body,
+        ),
     );
 }
 
-function itemBody(item, transcript, cx) {
+/**
+ * An item's content; `pattern`, when given, finds the text to mark in a sent
+ * message (Find). Replies are markdown, which marks inserted into it can
+ * change, so they get only the row's tint.
+ */
+function itemBody(item, transcript, cx, pattern = null) {
   const m = palette(cx);
+  const fill = cx.theme().is_dark ? MATCH_FILL.dark : MATCH_FILL.light;
   switch (item.kind) {
     case 'history':
       return historyRow(item.state, transcript, cx);
     case 'user':
-      return userMessage(item.row, cx);
+      return userMessage(
+        item.row,
+        cx,
+        pattern === null ? null : (own) => markedPlain(own, pattern, fill),
+      );
     case 'assistant':
       return markdownText(`md-${item.key}`, item.row.text, cx);
     case 'thinking':
@@ -1156,9 +1383,10 @@ function plainHtml(value) {
 /**
  * A message the user sent: its files right-aligned above the bubble with its
  * text, which can be selected and copied as a reply's can. A message of files
- * alone has no bubble.
+ * alone has no bubble. `marked`, when given, makes the text's HTML with
+ * Find's matches marked.
  */
-function userMessage(row, cx) {
+function userMessage(row, cx, marked = null) {
   const m = palette(cx);
   const files = row.attachments ?? [];
   const own = ownText(row);
@@ -1188,7 +1416,10 @@ function userMessage(row, cx) {
           .bg(m.bubble)
           .text_color(m.ink)
           .child(
-            TextView.html(`sent-${row.key}`, plainHtml(own)).text_style({
+            TextView.html(
+              marked === null ? `sent-${row.key}` : `sent-${row.key}-found`,
+              marked === null ? plainHtml(own) : `<pre>\n${marked(own)}</pre>`,
+            ).text_style({
               paragraph_gap: 0,
               foreground: m.ink,
             }),
@@ -1887,14 +2118,16 @@ function lowSurrogate(text, index) {
 /**
  * Below a finished turn, as the native client's footer: how it ended when it
  * did not complete, when, and the copy icon right after when the turn has
- * reply text. A click anywhere on the row copies the reply (list rows take
- * one click handler, see click).
+ * reply text; in a task's conversation, Fork at the end of the row. A click
+ * on Fork forks the task through this turn, anywhere else on the row it
+ * copies the reply (list rows take one click handler, see click).
  */
 function turnFooter(item, transcript, cx) {
   const m = palette(cx);
   const outcome = { failed: t('failed'), aborted: t('stopped') }[item.finished.outcome] ?? null;
   const copied = transcript.copied === item.key;
   return h_flex()
+    .w_full()
     .h(24)
     .gap(4)
     .items_center()
@@ -1921,6 +2154,20 @@ function turnFooter(item, transcript, cx) {
           .hover((style) => style.bg(m.wash))
           .child(icon(copied ? 'check' : 'copy', 14, copied ? m.ink : m.inkMuted))
           .when(copied, (el) => el.child(text(t('copied'), 'small', m.inkMuted))),
+      ),
+    )
+    .when(transcript.forks(), (el) =>
+      el.child(div().flex_1()).child(
+        h_flex()
+          .id(`fork-${item.turnId}`)
+          .flex_none()
+          .size(FORK_BUTTON)
+          .items_center()
+          .justify_center()
+          .rounded(6)
+          .hover((style) => style.bg(m.wash))
+          .tooltip(t('forkFromHere'))
+          .child(icon('fork', 14, m.inkMuted)),
       ),
     );
 }

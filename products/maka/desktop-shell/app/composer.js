@@ -37,8 +37,23 @@ import {
   menuLabel,
   menuSeparator,
   controlButton,
+  focusInput,
 } from './theme.js';
 import { t, onLanguageChange } from './locale.js';
+
+/** Why the Host did not continue a failed run (`AgentResumeParkReason`), in words. */
+const PARKED = {
+  closed: 'resumeClosed',
+  archived: 'resumeArchived',
+  busy: 'resumeBusy',
+  source_missing: 'resumeSourceMissing',
+  source_changed: 'resumeSourceChanged',
+  source_not_resumable: 'resumeNotResumable',
+  source_unreadable: 'resumeSourceUnreadable',
+  already_continued: 'resumeAlreadyContinued',
+  workspace_changed: 'resumeWorkspaceChanged',
+  safety_check_failed: 'resumeSafetyCheckFailed',
+};
 
 /** The most files one message carries (`agent.send` `attachments`). */
 const MAX_ATTACHMENTS = 8;
@@ -52,15 +67,17 @@ const REJECTIONS = {
 
 export class Composer {
   /**
-   * Creates retained input state, so it belongs in the view's `init`.
+   * Creates retained input state and a focus handle, so it belongs in the
+   * view's `init`, whose context it keeps for focusing the draft.
    * @param {{ changed: () => void, report: (message: string) => void }} hooks
    * @param {() => import("./transcript.js").Transcript | null} target the session Enter sends to
    * @param {() => Promise<import("./transcript.js").Transcript | null>} start starts a session
    *   when none is selected, and resolves with it
    */
-  constructor(hooks, target, start) {
+  constructor(hooks, target, start, cx) {
     this.hooks = hooks;
     this.start = start;
+    this.cx = cx;
     this.draft = TextareaState.new({ placeholder: t('composerPlaceholder'), rows: 1 });
     this.draft.set_auto_grow(1, 8);
     // The placeholder follows a change of language; the draft lives as long as the app.
@@ -80,6 +97,16 @@ export class Composer {
     this.draft.on('submit', (event) => {
       if (!event.shift) this.send(target());
     });
+    /** Whether the draft has the keyboard, as its focus events say (Find gives it back). */
+    this.focused = false;
+    this.draft.on('focus', () => {
+      this.focused = true;
+    });
+    this.draft.on('blur', () => {
+      this.focused = false;
+    });
+    /** Around the draft: what the keyboard is moved from to reach it (focusDraft). */
+    this.draftFocus = cx.focus_handle();
     /** The default model's choice, or the first offered one, for sessions without their own. */
     this.model = null;
     /** That model's name, or null when there is none (the footer then says so). */
@@ -90,6 +117,13 @@ export class Composer {
     this.choices = [];
     this.sending = false;
     this.stopping = false;
+    /** Whether Continue for a failed run is under way. */
+    this.resuming = false;
+    /**
+     * The last Continue the Host did not answer, `{ id, transcript, runsEnded }`,
+     * or null: it may have started a run, so Continue waits (awaitingResume).
+     */
+    this.unanswered = null;
     /** Whether the model menu is open. */
     this.menuOpen = false;
     /** sessionId (or '' for a new task) -> the model chosen in the menu, which the next send uses. */
@@ -110,6 +144,18 @@ export class Composer {
     this.attached = new Map();
     /** Whether the open panel for attachments is up. */
     this.choosing = false;
+  }
+
+  /** Gives the draft the keyboard, as Find does when it closes. */
+  focusDraft() {
+    this.cx.spawn(async (cx) => {
+      await focusInput(
+        this.draftFocus,
+        () => this.focused,
+        () => true,
+        cx,
+      );
+    });
   }
 
   /** The files attached to the draft for `transcript`, or for a new task. */
@@ -468,6 +514,100 @@ export class Composer {
     }
   }
 
+  /**
+   * Continue on a failed turn: `agent.resume` picks the run that failed it up
+   * where it ended, with the model the composer would send with. The run
+   * shows up through the watch. When the Host parks the request, the notice
+   * says why; a run it will not continue loses the button. When the Host
+   * does not answer, the run may have started, so the notice says so and
+   * Continue waits until the conversation shows a run (awaitingResume).
+   */
+  async resume(transcript, turnId) {
+    if (this.resuming || this.sending || this.awaitingResume(transcript)) return;
+    this.resuming = true;
+    this.hooks.changed();
+    try {
+      const reason = await this.continueRun(transcript, turnId);
+      if (reason === null) return;
+      log(`composer: resume parked: ${reason}`);
+      if (
+        reason === 'source_not_resumable' ||
+        reason === 'already_continued' ||
+        reason === 'source_missing'
+      ) {
+        transcript.noContinue.add(turnId);
+      }
+      this.hooks.report(t(PARKED[reason] ?? 'resumeParked', { value: reason }));
+    } catch (error) {
+      if (error.unanswered) {
+        this.unanswered = { id: transcript.id, transcript, runsEnded: transcript.runsEnded };
+        this.hooks.report(t('resumeUnknown'));
+      } else {
+        this.hooks.report(t('resumeFailed', { value: error.message }));
+      }
+    } finally {
+      this.resuming = false;
+      this.hooks.changed();
+    }
+  }
+
+  /** Asks the Host to continue the run that failed `turnId`: null once it started, else why it did not. */
+  async continueRun(transcript, turnId) {
+    const invocationId = await transcript.failedRun(turnId);
+    if (invocationId === null) return 'source_missing';
+    const found = await query(transcript.endpoint, 'execution', {
+      sessionId: transcript.id,
+      invocationId,
+    });
+    if (found.kind !== 'found') return 'source_missing';
+    const { model, thinkingLevel } = await this.selection(transcript);
+    let result;
+    try {
+      result = await operation(transcript.endpoint, 'resume', {
+        sessionId: transcript.id,
+        sourceInvocationId: invocationId,
+        sourceHighWater: found.execution.highWater,
+        model,
+        thinkingLevel,
+      });
+    } catch (error) {
+      log(`composer: resume of ${invocationId} got no answer: ${error.message}`);
+      throw Object.assign(new Error(error.message), { unanswered: true });
+    }
+    if (result.kind === 'parked') return result.reason;
+    log(`composer: resume started ${result.execution.invocationId} from ${invocationId}`);
+    // The new run shows up through the watch; this reads it now so the
+    // failed bar gives way before the first fact arrives.
+    await transcript.observeRun();
+    return null;
+  }
+
+  /**
+   * Whether the failed bar offers Continue for `turnId`: not for a run the
+   * Host will not continue or a failure a fork copied from its source
+   * (ownFailure), nor in a task an executor runs, where the composer starts
+   * no runs (selection).
+   */
+  offersContinue(transcript, turnId) {
+    return (
+      transcript.backend?.kind !== 'executor' &&
+      !transcript.noContinue.has(turnId) &&
+      transcript.ownFailure(turnId)
+    );
+  }
+
+  /**
+   * Whether Continue in `transcript` waits after a Continue the Host did not
+   * answer: until the conversation shows a run start or end, or until it is
+   * opened again (a new Transcript, once it has read its rows).
+   */
+  awaitingResume(transcript) {
+    const unanswered = this.unanswered;
+    if (unanswered === null || transcript === null || transcript.id !== unanswered.id) return false;
+    if (transcript !== unanswered.transcript) return !transcript.ready;
+    return transcript.run === null && transcript.runsEnded === unanswered.runsEnded;
+  }
+
   async stop(transcript) {
     const run = transcript?.run;
     if (!run || this.stopping) return;
@@ -493,11 +633,12 @@ export class Composer {
  * @param {Composer} composer
  * @param {import("./transcript.js").Transcript | null} transcript
  * @param {{ folder: { name: string, path: string } | null, picker: object | null,
- *   defaultAccess: string | null, notice: string | null, dismiss: () => void,
- *   addConnection: () => void }} context
+ *   usage: object | null, defaultAccess: string | null, notice: string | null,
+ *   dismiss: () => void, addConnection: () => void }} context
  *   `folder` is where a new task starts when no task is selected, and `picker`
- *   the chip that chooses it; `defaultAccess` the permission level new tasks
- *   get when known; `notice` is the last error
+ *   the chip that chooses it; `usage` the context use before Send (context.js),
+ *   or null; `defaultAccess` the permission level new tasks get when known;
+ *   `notice` is the last error
  */
 export function composerPane(composer, transcript, context, cx) {
   const m = palette(cx);
@@ -530,14 +671,19 @@ export function composerPane(composer, transcript, context, cx) {
             .p(12)
             .gap(6)
             .child(
-              typeset(Textarea.new(composer.draft), 'body')
+              div()
                 .w_full()
-                .px(8)
-                .py(4)
-                .bg('#00000000')
-                .border_0()
-                .text_color(m.ink)
-                .disabled(inactive),
+                .track_focus(composer.draftFocus)
+                .child(
+                  typeset(Textarea.new(composer.draft), 'body')
+                    .w_full()
+                    .px(8)
+                    .py(4)
+                    .bg('#00000000')
+                    .border_0()
+                    .text_color(m.ink)
+                    .disabled(inactive),
+                ),
             )
             .when(files.length > 0, (el) =>
               el.child(attachmentRow(composer, transcript, files, cx)),
@@ -554,10 +700,16 @@ export function composerPane(composer, transcript, context, cx) {
                     cx,
                   ),
                 )
-                .child(modelMenu(composer, transcript, context, cx))
+                // The model's chip gives way first where the row is short of room.
+                .child(
+                  div()
+                    .min_w_0()
+                    .child(modelMenu(composer, transcript, context, cx)),
+                )
                 .child(permissionMenu(composer, transcript, context, cx))
                 .when(context.picker !== null, (el) => el.child(context.picker))
                 .child(note(context, executor, cx))
+                .when(context.usage !== null, (el) => el.child(context.usage))
                 .child(
                   stop
                     ? actionButton('stop', 'stop', cx)

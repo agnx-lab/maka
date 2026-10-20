@@ -100,6 +100,89 @@ export const MESSAGES = {
     '請先停止此任務並處理佇列訊息，再封存或刪除。',
   ],
 
+  // Forking a task: the menu, a turn's footer (transcript.js) and the header
+  // of a fork (main.js).
+  forkTask: ['Fork', '分叉', '分岔'],
+  forkFromHere: [
+    'Fork from here: a new task with the history up to this turn',
+    '从这里分叉：用到这一轮为止的历史新建任务',
+    '從這裡分岔：用到這一輪為止的歷史新建任務',
+  ],
+  forkSuffix: [' (fork)', '（分叉）', '（分岔）'],
+  forkedFrom: ['Forked from {title}', '分叉自 {title}', '分岔自 {title}'],
+  forkedFromRemoved: [
+    'Forked from a task that was deleted',
+    '分叉自一个已删除的任务',
+    '分岔自一個已刪除的任務',
+  ],
+  forkedFromUnknown: ['Forked from another task', '分叉自另一个任务', '分岔自另一個任務'],
+  forkSourceFailed: [
+    'Couldn’t open the task this one was forked from: {value}',
+    '无法打开此任务分叉自的任务：{value}',
+    '無法開啟此任務分岔自的任務：{value}',
+  ],
+  forkFailed: ['Couldn’t fork the task: {value}', '分叉任务失败：{value}', '分岔任務失敗：{value}'],
+  forkUnknown: [
+    'The Host did not answer the fork, so it may or may not have been made. Check the task list before forking again.',
+    'Host 没有回应分叉请求，分叉可能已经创建，也可能没有。再次分叉前请先查看任务列表。',
+    'Host 沒有回應分岔請求，分岔可能已經建立，也可能沒有。再次分岔前請先查看任務列表。',
+  ],
+  forkRejected: [
+    'The Host did not fork the task ({value}).',
+    'Host 没有分叉此任务（{value}）。',
+    'Host 沒有分岔此任務（{value}）。',
+  ],
+  forkTitleInvalid: [
+    'The Host did not accept the title for the fork.',
+    'Host 不接受分叉任务的标题。',
+    'Host 不接受分岔任務的標題。',
+  ],
+  forkLabelsInvalid: [
+    'The Host did not accept the labels for the fork.',
+    'Host 不接受分叉任务的标签。',
+    'Host 不接受分岔任務的標籤。',
+  ],
+  forkToolsUnavailable: [
+    'The tools of this task are not available, so it cannot be forked.',
+    '此任务的工具不可用，无法分叉。',
+    '此任務的工具無法使用，無法分岔。',
+  ],
+  forkBusy: [
+    'Something is running in this task. Fork it when it ends.',
+    '此任务正在运行，结束后再分叉。',
+    '此任務正在執行，結束後再分岔。',
+  ],
+  forkWorkspaceUnavailable: [
+    'The folder of this task is not available, so it cannot be forked.',
+    '此任务的文件夹不可用，无法分叉。',
+    '此任務的資料夾無法使用，無法分岔。',
+  ],
+  forkSessionUnavailable: [
+    'This task is no longer available, so it cannot be forked.',
+    '此任务已不可用，无法分叉。',
+    '此任務已無法使用，無法分岔。',
+  ],
+  forkHistoryUnavailable: [
+    'The history of this task cannot be copied now. If something is running, fork it when it ends.',
+    '此任务的历史现在无法复制。如果任务正在运行，请在结束后再分叉。',
+    '此任務的歷史現在無法複製。如果任務正在執行，請在結束後再分岔。',
+  ],
+  forkWhileRunning: [
+    'A task can be forked whole while nothing runs in it; a finished turn can be forked from its footer.',
+    '任务中没有运行时才能整体分叉；已结束的一轮可以从它下方分叉。',
+    '任務中沒有執行時才能整體分岔；已結束的一輪可以從它下方分岔。',
+  ],
+  forkManagedSession: [
+    'WorkHub manages this task, so it cannot be forked.',
+    '此任务由 WorkHub 管理，无法分叉。',
+    '此任務由 WorkHub 管理，無法分岔。',
+  ],
+  forkClosed: [
+    'The Host is closing, so the task cannot be forked.',
+    'Host 正在关闭，无法分叉任务。',
+    'Host 正在關閉，無法分岔任務。',
+  ],
+
   // Ages in lists (theme.js)
   ageNow: ['now', '刚刚', '剛剛'],
 
@@ -219,6 +302,109 @@ export const MESSAGES = {
   attachmentClosed: ['the Host is closing', 'Host 正在关闭', 'Host 正在關閉'],
   attachmentArchived: ['the task is archived', '任务已归档', '任務已封存'],
 
+  // Context use and Compact, in the composer (context.js). The confirmation
+  // copies the TUI's (plugins/agent/agent-screen/compact.ts).
+  contextUseTip: ['Context use', '上下文用量', '上下文用量'],
+  contextUseShare: ['Context use: {value}', '上下文用量：{value}', '上下文用量：{value}'],
+  contextTokens: ['{count} tokens', '{count} tokens', '{count} tokens'],
+  contextUsed: [
+    '{used} of {limit} tokens ({percent})',
+    '已用 {used} / {limit} tokens（{percent}）',
+    '已用 {used} / {limit} tokens（{percent}）',
+  ],
+  contextEstimated: ['estimated', '估算', '估算'],
+  contextSystem: ['System', '系统', '系統'],
+  contextUser: ['Messages you sent', '你发送的消息', '你傳送的訊息'],
+  contextAssistant: ['Replies', '回复', '回覆'],
+  contextTool: ['Tool results', '工具结果', '工具結果'],
+  contextToolSchemas: ['Tool definitions', '工具定义', '工具定義'],
+  contextMessagesOne: ['{count} message', '{count} 条消息', '{count} 則訊息'],
+  contextMessagesOther: ['{count} messages', '{count} 条消息', '{count} 則訊息'],
+  contextToolCallsOne: ['{count} tool call', '{count} 次工具调用', '{count} 次工具呼叫'],
+  contextToolCallsOther: ['{count} tool calls', '{count} 次工具调用', '{count} 次工具呼叫'],
+  contextToolsOne: ['{count} tool', '{count} 个工具', '{count} 個工具'],
+  contextToolsOther: ['{count} tools', '{count} 个工具', '{count} 個工具'],
+  contextRequested: [
+    'These numbers are from a request the model has not answered yet.',
+    '这些数字来自模型尚未回复的请求。',
+    '這些數字來自模型尚未回覆的請求。',
+  ],
+  contextInterrupted: [
+    'These numbers are from a request that was interrupted.',
+    '这些数字来自一次被中断的请求。',
+    '這些數字來自一次被中斷的請求。',
+  ],
+  contextCompactedSince: [
+    'The conversation was compacted after this request. The next request will show the new size.',
+    '此请求之后对话已被压缩，下一次请求会显示新的用量。',
+    '此請求之後對話已被壓縮，下一次請求會顯示新的用量。',
+  ],
+  compact: ['Compact', '压缩', '壓縮'],
+  compactTip: [
+    'Summarize the conversation so far to free up context',
+    '总结目前的对话，以腾出上下文空间',
+    '總結目前的對話，以騰出上下文空間',
+  ],
+  compactUnavailable: [
+    'Compact is available while nothing runs in this task',
+    '任务中没有运行时才能压缩',
+    '任務中沒有執行時才能壓縮',
+  ],
+  compactTitle: ['Compact context', '压缩上下文', '壓縮上下文'],
+  compactHelp: [
+    'This prompt applies to this compression only.',
+    '此提示词仅用于本次压缩。',
+    '此提示詞僅用於本次壓縮。',
+  ],
+  compactLoading: ['Loading prompt…', '正在加载提示词…', '正在載入提示詞…'],
+  compactConfirm: ['Compact', '开始压缩', '開始壓縮'],
+  compactFailed: ['Compact: {value}', '压缩失败：{value}', '壓縮失敗：{value}'],
+  compactRejected: [
+    'The Host did not start the compaction ({value}).',
+    'Host 没有开始压缩（{value}）。',
+    'Host 沒有開始壓縮（{value}）。',
+  ],
+  compactBusy: [
+    'Something is running in this task. Compact when it ends.',
+    '这个任务正在运行，结束后再压缩。',
+    '這個任務正在執行，結束後再壓縮。',
+  ],
+  compactClosed: [
+    'The Host is closing, so the conversation cannot be compacted.',
+    'Host 正在关闭，无法压缩对话。',
+    'Host 正在關閉，無法壓縮對話。',
+  ],
+  compactUnknown: [
+    'The Host did not answer, so the conversation may or may not be compacting. Compact comes back once this task shows a run, or after you open the task again.',
+    'Host 没有回应，对话可能正在压缩，也可能没有。任务显示出运行后，或重新打开任务后，才能再次压缩。',
+    'Host 沒有回應，對話可能正在壓縮，也可能沒有。任務顯示出執行後，或重新開啟任務後，才能再次壓縮。',
+  ],
+  compactAwaiting: [
+    'Waiting for this task to show whether the last Compact started',
+    '正在等待任务显示上次压缩是否已开始',
+    '正在等待任務顯示上次壓縮是否已開始',
+  ],
+  compactPromptPlaceholder: [
+    'Leave empty to use the default prompt',
+    '留空则使用默认提示词',
+    '留空則使用預設提示詞',
+  ],
+  compactArchived: [
+    'This task is archived, so it cannot be compacted.',
+    '这个任务已归档，无法压缩。',
+    '這個任務已封存，無法壓縮。',
+  ],
+  compactBackendUnavailable: [
+    'The model for this task is not available, so it cannot be compacted.',
+    '这个任务的模型不可用，无法压缩。',
+    '這個任務的模型無法使用，無法壓縮。',
+  ],
+  compactWorkspaceChanged: [
+    "The task's folder changed, so it cannot be compacted.",
+    '任务的文件夹已变化，无法压缩。',
+    '任務的資料夾已變化，無法壓縮。',
+  ],
+
   // Folder picker (directories.js)
   choose: ['Choose', '选择', '選擇'],
   chooseFolderFailed: [
@@ -327,6 +513,73 @@ export const MESSAGES = {
     'Send the message that started this turn once more',
     '把这一轮的消息再发送一次',
     '把這一輪的訊息再傳送一次',
+  ],
+  continueRun: ['Continue', '继续', '繼續'],
+  continueRunTip: [
+    'Continue the failed run from where it stopped',
+    '从失败的运行中断处继续',
+    '從失敗的執行中斷處繼續',
+  ],
+  resumeFailed: ['Continue: {value}', '继续失败：{value}', '繼續失敗：{value}'],
+  resumeParked: [
+    'The Host did not continue the run ({value}).',
+    'Host 没有继续这次运行（{value}）。',
+    'Host 沒有繼續這次執行（{value}）。',
+  ],
+  resumeClosed: [
+    'The Host is closing, so the run cannot continue.',
+    'Host 正在关闭，无法继续运行。',
+    'Host 正在關閉，無法繼續執行。',
+  ],
+  resumeUnknown: [
+    'The Host did not answer, so the run may or may not have continued. Continue comes back once this task shows a run, or after you open the task again.',
+    'Host 没有回应，运行可能已经继续，也可能没有。任务显示出运行后，或重新打开任务后，才能再次继续。',
+    'Host 沒有回應，執行可能已經繼續，也可能沒有。任務顯示出執行後，或重新開啟任務後，才能再次繼續。',
+  ],
+  resumeArchived: [
+    'This task is archived, so the run cannot continue.',
+    '这个任务已归档，无法继续运行。',
+    '這個任務已封存，無法繼續執行。',
+  ],
+  resumeBusy: [
+    'Another run is going in this task. Try again when it ends.',
+    '这个任务正有一次运行在进行，结束后再试。',
+    '這個任務正有一次執行在進行，結束後再試。',
+  ],
+  resumeSourceMissing: [
+    'The failed run could not be found.',
+    '找不到失败的那次运行。',
+    '找不到失敗的那次執行。',
+  ],
+  resumeSourceChanged: [
+    'The failed run changed since it was read. Try again.',
+    '失败的运行在读取后有了变化，请再试一次。',
+    '失敗的執行在讀取後有了變化，請再試一次。',
+  ],
+  resumeNotResumable: [
+    'This run cannot be continued. Send the message again instead.',
+    '这次运行无法继续，请改为重新发送消息。',
+    '這次執行無法繼續，請改為重新傳送訊息。',
+  ],
+  resumeSourceUnreadable: [
+    'The failed run could not be read, so it cannot continue.',
+    '无法读取失败的运行，因此不能继续。',
+    '無法讀取失敗的執行，因此不能繼續。',
+  ],
+  resumeAlreadyContinued: [
+    'This run was already continued.',
+    '这次运行已经继续过了。',
+    '這次執行已經繼續過了。',
+  ],
+  resumeWorkspaceChanged: [
+    "The task's folder changed since the run, so it cannot continue.",
+    '任务的文件夹在运行后有了变化，无法继续。',
+    '任務的資料夾在執行後有了變化，無法繼續。',
+  ],
+  resumeSafetyCheckFailed: [
+    'The Host could not confirm it is safe to continue this run.',
+    'Host 无法确认继续这次运行是安全的。',
+    'Host 無法確認繼續這次執行是安全的。',
   ],
 
   // How long ago, in the transcript (transcript.js relativeTime)
@@ -1051,6 +1304,24 @@ export const MESSAGES = {
   searchFailed: ['Couldn’t search: {value}', '搜索失败：{value}', '搜尋失敗：{value}'],
   searchClear: ['Clear', '清除', '清除'],
 
+  // Find in the conversation shown (find.js, ⌘F)
+  findPlaceholder: ['Find in this conversation', '在此对话中查找', '在此對話中尋找'],
+  findCount: ['{index} of {count}', '第 {index} 个，共 {count} 个', '第 {index} 個，共 {count} 個'],
+  findNoResults: ['No results', '无结果', '沒有結果'],
+  findTooLong: ['Too long', '过长', '過長'],
+  findError: ['Failed', '失败', '失敗'],
+  findPrevious: ['Previous match (⇧↩)', '上一个（⇧↩）', '上一個（⇧↩）'],
+  findNext: ['Next match (↩)', '下一个（↩）', '下一個（↩）'],
+  findMatchCase: ['Match case', '区分大小写', '區分大小寫'],
+  findWholeWord: ['Match whole word', '全字匹配', '全字相符'],
+  findClose: ['Close (Esc)', '关闭（Esc）', '關閉（Esc）'],
+  findFailed: ['Find failed: {value}', '查找失败：{value}', '尋找失敗：{value}'],
+  findNotReady: [
+    'the Host did not finish preparing the search',
+    'Host 没有完成搜索的准备',
+    'Host 沒有完成搜尋的準備',
+  ],
+
   // WorkHub: setup and the conversation (workhub.js, main.js)
   workhubChat: ['Chat', '对话', '對話'],
   workhubTasks: ['Tasks', '任务', '任務'],
@@ -1179,4 +1450,117 @@ export const MESSAGES = {
   workhubNoticeEndedUntitled: ['A task ended', '一个任务已结束', '一個任務已結束'],
   workhubNoticeGraph: ['A task graph has new results', '任务图有新结果', '任務圖有新結果'],
   workhubNoticeView: ['View', '查看', '查看'],
+
+  // Workbar: its header and the button that opens it (workbar.js, main.js)
+  workbarChanges: ['Changes', '改动', '變更'],
+  workbarFiles: ['Files', '文件', '檔案'],
+  workbarChangesTip: ['Changes ({shortcut})', '改动（{shortcut}）', '變更（{shortcut}）'],
+  workbarRefresh: ['Refresh', '刷新', '重新整理'],
+
+  // Workbar: Changes (changes.js)
+  changesStaged: ['Staged', '已暂存', '已暫存'],
+  changesWorktree: ['Changes', '改动', '變更'],
+  changesUntracked: ['Untracked', '未跟踪', '未追蹤'],
+  changesReading: ['Reading changes…', '正在读取改动…', '正在讀取變更…'],
+  changesFailed: [
+    "Couldn't read the changes: {value}",
+    '读取改动失败：{value}',
+    '讀取變更失敗：{value}',
+  ],
+  changesNotRepository: [
+    'This folder is not a Git repository',
+    '此文件夹不是 Git 仓库',
+    '此資料夾不是 Git 儲存庫',
+  ],
+  changesNone: ['No changes', '没有改动', '沒有變更'],
+  changesNoCommits: ['No commits yet', '还没有提交', '還沒有提交'],
+  changesFilesOne: ['{count} file changed', '{count} 个文件有改动', '{count} 個檔案有變更'],
+  changesFilesOther: ['{count} files changed', '{count} 个文件有改动', '{count} 個檔案有變更'],
+  changesTruncated: [
+    'Only the first {count} changes are listed',
+    '仅列出前 {count} 项改动',
+    '僅列出前 {count} 項變更',
+  ],
+  diffUnstaged: ['Unstaged', '未暂存', '未暫存'],
+  diffBack: ['Back to the list (Esc)', '返回列表（Esc）', '返回列表（Esc）'],
+  diffPrevious: ['Previous file ([)', '上一个文件（[）', '上一個檔案（[）'],
+  diffNext: ['Next file (])', '下一个文件（]）', '下一個檔案（]）'],
+  diffReading: ['Reading the diff…', '正在读取差异…', '正在讀取差異…'],
+  diffFailed: ["Couldn't read the diff: {value}", '读取差异失败：{value}', '讀取差異失敗：{value}'],
+  // The error last: the note is one line, and a long error is cut off.
+  diffStale: [
+    "Couldn't read this diff again. It may be out of date: {value}",
+    '再次读取差异失败，下方内容可能已过时：{value}',
+    '再次讀取差異失敗，下方內容可能已過時：{value}',
+  ],
+  diffBinary: ['Binary file', '二进制文件', '二進位檔案'],
+  diffTooLarge: [
+    'This diff is too large to show',
+    '这个差异太大，无法显示',
+    '這個差異太大，無法顯示',
+  ],
+  diffUnchanged: ['No differences', '没有差异', '沒有差異'],
+  diffUnsupported: ['This change cannot be shown', '无法显示这个改动', '無法顯示這個變更'],
+  diffNotRepository: [
+    'The folder is no longer a Git repository',
+    '此文件夹已不是 Git 仓库',
+    '此資料夾已不是 Git 儲存庫',
+  ],
+  diffGone: [
+    'This file no longer has changes here',
+    '这个文件在这里已没有改动',
+    '這個檔案在這裡已沒有變更',
+  ],
+
+  // Workbar: Files (files.js)
+  filesEmpty: ['Empty folder', '空文件夹', '空資料夾'],
+  filesTooManyOpen: [
+    'Too many folders are open. Collapse others first.',
+    '打开的文件夹太多，请先收起其他文件夹。',
+    '開啟的資料夾太多，請先收合其他資料夾。',
+  ],
+  filesLink: ['link', '链接', '連結'],
+  filesSpecial: ['special file', '特殊文件', '特殊檔案'],
+  filesWatchEnded: [
+    'The Host stopped watching this folder',
+    'Host 已停止监视此文件夹',
+    'Host 已停止監視此資料夾',
+  ],
+  filesFolderGone: ['The folder is no longer there', '文件夹已不存在', '資料夾已不存在'],
+  filesFolderReplaced: [
+    'The folder kept changing while it was read',
+    '读取时文件夹一直在变化',
+    '讀取時資料夾一直在變化',
+  ],
+  filesOpen: ['Open', '打开', '開啟'],
+  filesLaunchTitle: ['Open “{name}”?', '打开“{name}”？', '開啟「{name}」？'],
+  filesLaunchBody: [
+    'This file can run a program. Open it only if you know what it does.',
+    '这个文件可以运行程序。只在清楚它会做什么时打开。',
+    '這個檔案可以執行程式。只在清楚它會做什麼時開啟。',
+  ],
+  filesReveal: ['Reveal in Finder', '在访达中显示', '在 Finder 中顯示'],
+  filesCopyPath: ['Copy path', '复制路径', '複製路徑'],
+  filesCopyRelativePath: ['Copy relative path', '复制相对路径', '複製相對路徑'],
+  filesShowChanges: ['Show changes', '查看改动', '查看變更'],
+  filesPathRefused: [
+    '{path} is not a path in the folder',
+    '{path} 不是此文件夹中的路径',
+    '{path} 不是此資料夾中的路徑',
+  ],
+  filesOpenFailed: [
+    "Couldn't open {name}: {value}",
+    '无法打开 {name}：{value}',
+    '無法開啟 {name}：{value}',
+  ],
+  filesRevealFailed: [
+    "Couldn't show {name} in Finder: {value}",
+    '无法在访达中显示 {name}：{value}',
+    '無法在 Finder 中顯示 {name}：{value}',
+  ],
+  filesCopyFailed: [
+    "Couldn't copy the path: {value}",
+    '无法复制路径：{value}',
+    '無法複製路徑：{value}',
+  ],
 };
