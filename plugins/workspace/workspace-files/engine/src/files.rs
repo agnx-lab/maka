@@ -37,10 +37,8 @@ pub use watch::Watch;
 #[cfg(test)]
 mod tests;
 
-const MAX_SCAN: usize = 100_000;
 const PAGE_SIZE: usize = 128;
 const MAX_PAGE_BYTES: usize = 512 * 1024;
-const MAX_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -101,6 +99,25 @@ pub enum FileUnavailable {
     DirectoryChanged,
 }
 
+/// Actual admitted shallow state; no file content or descendant traversal.
+#[cfg(target_os = "macos")]
+#[derive(Debug, PartialEq, Eq)]
+pub struct Snapshot(BTreeMap<Vec<u8>, EntryMetadata>);
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, PartialEq, Eq)]
+struct EntryMetadata {
+    dev: u64,
+    ino: u64,
+    mode: u32,
+    nlink: u64,
+    size: u64,
+    mtime: i64,
+    mtime_nsec: i64,
+    ctime: i64,
+    ctime_nsec: i64,
+}
+
 struct Anchor {
     path: PathBuf,
     directory: Dir,
@@ -133,9 +150,6 @@ impl Directory {
                 .map_err(|_| error("files_invalid_path"))?,
                 None => PathBuf::new(),
             };
-            if relative.components().count() > MAX_DEPTH {
-                return Err(error("files_invalid_path"));
-            }
             let directory = crate::directory::open(workspace, identity)?;
             let root = dunce::canonicalize(workspace)?;
             let private_root = dunce::canonicalize(private_root)?;
@@ -211,6 +225,59 @@ impl Directory {
             || (path.starts_with(&self.private_root)
                 && !(self.managed && path.starts_with(&self.anchors[0].path)))
     }
+    fn excluded_child(&self, directory: &Path, name: &std::ffi::OsStr) -> bool {
+        name.as_encoded_bytes().eq_ignore_ascii_case(b".git")
+            || name == std::ffi::OsStr::new(crate::workspace::MARKER_FILE)
+            || self.excluded(&directory.join(name))
+    }
+    /// Reconcile only direct, admitted entries through the held target descriptor.
+    #[cfg(target_os = "macos")]
+    pub fn snapshot(&self, cancel: &AtomicBool) -> io::Result<Snapshot> {
+        use cap_std::fs::MetadataExt;
+        expose((|| {
+            interrupted(cancel)?;
+            self.validate_inner()?;
+            interrupted(cancel)?;
+            let target = self.anchors.last().expect("target anchor");
+            let mut entries = BTreeMap::new();
+            for entry in target.directory.entries()? {
+                interrupted(cancel)?;
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                };
+                let name = entry.file_name();
+                if self.excluded_child(&target.path, &name) {
+                    continue;
+                }
+                let metadata = match target.directory.symlink_metadata(&name) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                };
+                interrupted(cancel)?;
+                entries.insert(
+                    name.as_encoded_bytes().to_vec(),
+                    EntryMetadata {
+                        dev: metadata.dev(),
+                        ino: metadata.ino(),
+                        mode: metadata.mode(),
+                        nlink: metadata.nlink(),
+                        size: metadata.size(),
+                        mtime: metadata.mtime(),
+                        mtime_nsec: metadata.mtime_nsec(),
+                        ctime: metadata.ctime(),
+                        ctime_nsec: metadata.ctime_nsec(),
+                    },
+                );
+            }
+            interrupted(cancel)?;
+            self.validate_inner()?;
+            interrupted(cancel)?;
+            Ok(Snapshot(entries))
+        })())
+    }
     pub fn list(&self, after: Option<&FileCursor>, cancel: &AtomicBool) -> io::Result<FilePage> {
         expose(self.list_inner(after, cancel))
     }
@@ -236,17 +303,11 @@ impl Directory {
             .transpose()?;
         let target = self.anchors.last().expect("target anchor");
         let mut entries = BTreeMap::new();
-        for (visited, entry) in target.directory.entries()?.enumerate() {
+        for entry in target.directory.entries()? {
             interrupted(cancel)?;
-            if visited >= MAX_SCAN {
-                return Err(error("files_too_large"));
-            }
             let entry = entry?;
             let name = entry.file_name();
-            if name.as_encoded_bytes().eq_ignore_ascii_case(b".git")
-                || name == std::ffi::OsStr::new(crate::workspace::MARKER_FILE)
-                || self.excluded(&target.path.join(&name))
-            {
+            if self.excluded_child(&target.path, &name) {
                 continue;
             }
             let relative = gix::path::to_unix_separators_on_windows(
@@ -309,7 +370,7 @@ impl Directory {
         self.validate_inner()?;
         Ok(page)
     }
-    /// Install the bounded nonrecursive chain before emitting Ready or reading a list.
+    /// Install the nonrecursive anchor chain before emitting Ready or reading a list.
     pub fn watch(&self) -> io::Result<Watch> {
         expose(watch::open(self))
     }

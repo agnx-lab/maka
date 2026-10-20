@@ -24,6 +24,35 @@ fn path(name: &str) -> Value {
     json!({"bytesBase64":STANDARD.encode(name.as_bytes())})
 }
 
+// Keep the actual query's Scope until both Host cleanup and native work settle.
+async fn settled_list_files(f: &Fixture, input: Value) -> Result<Value, String> {
+    let observed = scope(&f.issuer, true);
+    let accepted = f
+        .app
+        .client()
+        .start(
+            f.binding(2).await,
+            "listFiles".into(),
+            input,
+            observed.clone(),
+            Attachments::new().into(),
+        )
+        .await;
+    let result = match accepted {
+        Ok(accepted) => {
+            let completed = accepted.completion().await;
+            completed.cleanup.and(completed.result)
+        }
+        Err(error) => Err(error),
+    };
+    let finished = observed.resources.finish().await;
+    finished.map_err(|error| format!("listFiles resources: {error:?}"))?;
+    if !observed.resources.is_idle() {
+        return Err("listFiles resource custody did not settle".into());
+    }
+    result
+}
+
 #[tokio::test]
 async fn list_files_reads_selected_directories_without_crossing_session_or_symlink_boundaries() {
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -271,9 +300,58 @@ async fn watch_files_invalidates_reconnects_and_settles_without_retaining_observ
     tokio::time::timeout(Duration::from_secs(60), async {
         let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
         let session = f.create("Watched files").await;
-        let selected = "parent/a/b/c/d/e/f/g/h/i/j/k/l/m/n/target";
+        let selected = "parent/d01/d02/d03/d04/d05/d06/d07/d08/d09/d10/d11/d12/d13/d14/d15/d16/d17/d18/d19/d20/d21/d22/d23/d24/d25/d26/d27/d28/d29/d30/d31/d32/d33/d34/d35/d36/d37/d38/d39/d40/d41/d42/d43/d44/d45/d46/d47/d48/d49/d50/d51/d52/d53/d54/d55/d56/d57/d58/d59/d60/d61/d62/d63/target";
         let directory = f.workspace.join(selected);
         std::fs::create_dir_all(&directory).unwrap();
+        // Probe both public methods and settle their resources before asserting
+        // failures, so a refused observation cannot strand its owners.
+        let parent = selected.rsplit_once('/').unwrap().0;
+        let parent_page = settled_list_files(&f, json!({"sessionId":session,"path":path(parent),"after":null})).await;
+        let listed = settled_list_files(&f, json!({"sessionId":session,"path":path(selected),"after":null})).await;
+        let observed = scope(&f.issuer, true);
+        let subscription = f.app.client().subscribe(
+            f.binding(2).await,
+            "watchFiles".into(),
+            json!({"sessionId":session,"path":path(selected)}),
+            observed.clone(),
+            Attachments::new().into(),
+        ).await;
+        let watch_probe: Result<Value, String> = match subscription {
+            Ok(mut stream) => {
+                let first = tokio::time::timeout(Duration::from_secs(10), stream.recv()).await;
+                stream.cancel();
+                let completed = stream.completion().await;
+                match completed.cleanup {
+                    Err(error) => Err(format!("watch cleanup failed: {error:?}")),
+                    Ok(()) => match first {
+                        Err(error) => Err(format!("watch first item timed out: {error}")),
+                        Ok(None) => Err(format!("watch ended before Ready: {:?}", completed.result)),
+                        Ok(Some(value)) => Ok(value),
+                    },
+                }
+            }
+            Err(error) => Err(error),
+        };
+        let finished = observed.resources.finish().await;
+        let idle = observed.resources.is_idle();
+        f.drained().await;
+        if parent_page.is_err() || listed.is_err() || !watch_probe.as_ref().is_ok_and(|event| event["kind"] == "ready") || finished.is_err() || !idle {
+            let app_shutdown = f.app.shutdown().await;
+            let config_shutdown = f.config.shutdown().await;
+            assert!(app_shutdown.is_ok(), "app shutdown: {app_shutdown:?}");
+            assert!(config_shutdown.is_ok(), "config shutdown: {config_shutdown:?}");
+            assert!(finished.is_ok(), "watch resource finish: {finished:?}");
+            assert!(idle, "watch resource custody must settle");
+            assert!(listed.is_ok() && watch_probe.is_ok(), "65-component public observations must succeed: listFiles={listed:?}; watchFiles={watch_probe:?}; parent={parent_page:?}");
+            panic!("65-component preflight failed: parent={parent_page:?}; watchFiles={watch_probe:?}");
+        }
+        let parent_page = parent_page.unwrap();
+        assert_eq!(parent_page["entries"], json!([{"path":path(selected),"kind":"directory"}]));
+        assert_eq!(parent_page["next"], Value::Null);
+        let listed = listed.unwrap();
+        assert_eq!(listed["entries"], json!([]));
+        assert_eq!(listed["next"], Value::Null);
+        assert_eq!(watch_probe.unwrap(), json!({"kind":"ready","directoryIdentity":listed["directoryIdentity"]}));
         let request = json!({"sessionId":session,"path":path(selected)});
         let denied = f
             .app
@@ -330,8 +408,8 @@ async fn watch_files_invalidates_reconnects_and_settles_without_retaining_observ
                 .await
                 .unwrap();
             let expected = match operation {
-                0 | 1 => json!([{"path":path("parent/a/b/c/d/e/f/g/h/i/j/k/l/m/n/target/created"),"kind":"file"}]),
-                2 => json!([{"path":path("parent/a/b/c/d/e/f/g/h/i/j/k/l/m/n/target/renamed"),"kind":"file"}]),
+                0 | 1 => json!([{"path":path("parent/d01/d02/d03/d04/d05/d06/d07/d08/d09/d10/d11/d12/d13/d14/d15/d16/d17/d18/d19/d20/d21/d22/d23/d24/d25/d26/d27/d28/d29/d30/d31/d32/d33/d34/d35/d36/d37/d38/d39/d40/d41/d42/d43/d44/d45/d46/d47/d48/d49/d50/d51/d52/d53/d54/d55/d56/d57/d58/d59/d60/d61/d62/d63/target/created"),"kind":"file"}]),
+                2 => json!([{"path":path("parent/d01/d02/d03/d04/d05/d06/d07/d08/d09/d10/d11/d12/d13/d14/d15/d16/d17/d18/d19/d20/d21/d22/d23/d24/d25/d26/d27/d28/d29/d30/d31/d32/d33/d34/d35/d36/d37/d38/d39/d40/d41/d42/d43/d44/d45/d46/d47/d48/d49/d50/d51/d52/d53/d54/d55/d56/d57/d58/d59/d60/d61/d62/d63/target/renamed"),"kind":"file"}]),
                 3 => json!([]),
                 _ => unreachable!(),
             };
@@ -378,7 +456,7 @@ async fn watch_files_invalidates_reconnects_and_settles_without_retaining_observ
         assert_eq!(current["directoryIdentity"], fresh["directoryIdentity"]);
         assert_eq!(
             current["entries"],
-            json!([{"path":path("parent/a/b/c/d/e/f/g/h/i/j/k/l/m/n/target/fresh"),"kind":"file"}])
+            json!([{"path":path("parent/d01/d02/d03/d04/d05/d06/d07/d08/d09/d10/d11/d12/d13/d14/d15/d16/d17/d18/d19/d20/d21/d22/d23/d24/d25/d26/d27/d28/d29/d30/d31/d32/d33/d34/d35/d36/d37/d38/d39/d40/d41/d42/d43/d44/d45/d46/d47/d48/d49/d50/d51/d52/d53/d54/d55/d56/d57/d58/d59/d60/d61/d62/d63/target/fresh"),"kind":"file"}])
         );
         // Closing an observer leaves the Session and Owner available.
         stream.cancel();
@@ -527,4 +605,85 @@ async fn watch_files_rechecks_session_authority_on_commits_without_filesystem_ch
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn list_files_keeps_returned_cursor_live_after_directory_grows_past_100000_entries() {
+    let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let session = f.create("Large live file cursor").await;
+    let directory = f.workspace.join("many");
+    // Keep the two remaining files' original bytes, independent of listing.
+    let original_99999 = b"original suffix 099999\0\xff";
+    let original_100000 = b"original suffix 100000\0\xfe";
+    let observed: Result<_, String> = async {
+        std::fs::create_dir(&directory).map_err(|error| error.to_string())?;
+        for index in 99_871..=100_000 {
+            let bytes: &[u8] = match index {
+                99_999 => original_99999,
+                100_000 => original_100000,
+                _ => b"",
+            };
+            std::fs::write(directory.join(format!("file-{index:06}")), bytes)
+                .map_err(|error| error.to_string())?;
+        }
+        let first = settled_list_files(
+            &f,
+            json!({"sessionId":session,"path":path("many"),"after":null}),
+        )
+        .await?;
+        // Every new key sorts before the unmodified, genuinely returned cursor.
+        // No native watcher is open during these 99,871 metadata creations.
+        for index in 0..=99_870 {
+            std::fs::File::create_new(directory.join(format!("file-{index:06}")))
+                .map_err(|error| error.to_string())?;
+        }
+        let second = settled_list_files(
+            &f,
+            json!({"sessionId":session,"path":path("many"),"after":first["next"]}),
+        )
+        .await;
+        let count = std::fs::read_dir(&directory)
+            .map_err(|error| error.to_string())?
+            .try_fold(0_usize, |count, entry| entry.map(|_| count + 1))
+            .map_err(|error| error.to_string())?;
+        let preserved_99999 =
+            std::fs::read(directory.join("file-099999")).map_err(|error| error.to_string())?;
+        let preserved_100000 =
+            std::fs::read(directory.join("file-100000")).map_err(|error| error.to_string())?;
+        Ok((first, second, count, preserved_99999, preserved_100000))
+    }
+    .await;
+    // Settle the original Host before asserting either query result.
+    f.drained().await;
+    let app_shutdown = f.app.shutdown().await;
+    let config_shutdown = f.config.shutdown().await;
+    assert!(app_shutdown.is_ok(), "app shutdown: {app_shutdown:?}");
+    assert!(
+        config_shutdown.is_ok(),
+        "config shutdown: {config_shutdown:?}"
+    );
+    let (first, second, count, preserved_99999, preserved_100000) = observed.unwrap();
+    let expected: Vec<_> = (99_871..=99_998)
+        .map(|index| json!({"path":path(&format!("many/file-{index:06}")),"kind":"file"}))
+        .collect();
+    assert_eq!(first["entries"], json!(expected));
+    assert_eq!(
+        first["next"],
+        json!({"directoryIdentity":first["directoryIdentity"],"after":path("many/file-099998")})
+    );
+    assert_eq!(count, 100_001);
+    assert_eq!(preserved_99999, original_99999);
+    assert_eq!(preserved_100000, original_100000);
+    let second = second.expect(
+        "listFiles must apply its returned live cursor in a directory with 100001 real entries",
+    );
+    assert_eq!(
+        second["entries"],
+        json!([
+            {"path":path("many/file-099999"),"kind":"file"},
+            {"path":path("many/file-100000"),"kind":"file"}
+        ])
+    );
+    assert_eq!(second["directoryIdentity"], first["directoryIdentity"]);
+    assert_eq!(second["next"], Value::Null);
 }

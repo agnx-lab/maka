@@ -183,3 +183,61 @@ async fn ancestor_move_wakes_without_reading_the_moved_outside_directory() {
     watch.close().await.unwrap();
     assert_eq!(result.unwrap_err().to_string(), "files_changed");
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn shallow_snapshot_observes_actual_entries_without_native_hints() {
+    use std::os::unix::{
+        ffi::OsStringExt,
+        fs::{MetadataExt, symlink},
+    };
+    let f = Fixture::new();
+    let directory = f.open(None).unwrap();
+    let cancel = AtomicBool::new(false);
+    let empty = directory.snapshot(&cancel).unwrap();
+    assert_eq!(empty.0.len(), 0);
+    fs::write(f.private.join("private"), b"private").unwrap();
+    fs::write(f.control.join("control"), b"control").unwrap();
+    fs::create_dir(f.root.join(".GiT")).unwrap();
+    fs::write(f.root.join(crate::workspace::MARKER_FILE), b"marker").unwrap();
+    assert_eq!(directory.snapshot(&cancel).unwrap(), empty);
+    let raw = std::ffi::OsString::from_vec(b"raw-\\name".to_vec());
+    fs::write(f.root.join(&raw), b"first").unwrap();
+    let created = directory.snapshot(&cancel).unwrap();
+    assert_eq!(
+        created.0.keys().cloned().collect::<Vec<_>>(),
+        vec![b"raw-\\name".to_vec()]
+    );
+    fs::write(f.root.join(&raw), b"other").unwrap();
+    let updated = directory.snapshot(&cancel).unwrap();
+    assert_ne!(updated, created);
+    let old_metadata = fs::metadata(f.root.join(&raw)).unwrap();
+    fs::write(f.root.join("replacement"), b"other").unwrap();
+    std::fs::File::open(f.root.join("replacement"))
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(old_metadata.modified().unwrap()))
+        .unwrap();
+    fs::rename(f.root.join("replacement"), f.root.join(&raw)).unwrap();
+    let replaced_metadata = fs::metadata(f.root.join(&raw)).unwrap();
+    assert_eq!(replaced_metadata.len(), old_metadata.len());
+    assert_eq!(
+        replaced_metadata.modified().unwrap(),
+        old_metadata.modified().unwrap()
+    );
+    assert_ne!(replaced_metadata.ino(), old_metadata.ino());
+    assert_ne!(directory.snapshot(&cancel).unwrap(), updated);
+    symlink(f.temp.path().join("absent"), f.root.join("link")).unwrap();
+    assert_eq!(directory.snapshot(&cancel).unwrap().0.len(), 2);
+    fs::remove_file(f.root.join(&raw)).unwrap();
+    let removed = directory.snapshot(&cancel).unwrap();
+    assert_eq!(
+        removed.0.keys().cloned().collect::<Vec<_>>(),
+        vec![b"link".to_vec()]
+    );
+    assert_eq!(directory.snapshot(&cancel).unwrap(), removed);
+    cancel.store(true, Ordering::Relaxed);
+    assert_eq!(
+        directory.snapshot(&cancel).unwrap_err().to_string(),
+        "files_cancelled"
+    );
+}

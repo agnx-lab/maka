@@ -156,51 +156,137 @@ impl Owner {
         watch: &mut Watch,
         context: &Context,
     ) -> Result<Value, String> {
-        // Subscribe before revalidating the captured Session. Earlier changes
-        // are caught by the read; later changes remain pending on this receiver.
-        let mut commits = self.store.subscribe_commits();
-        commits.borrow_and_update();
-        let mut change = Some(FileChange::Ready {
-            directory_identity: directory.directory_identity().clone(),
-        });
-        loop {
-            let capture = directory.clone();
-            let valid = worktrees::blocking(context.scope(), &self.stop, move |_| {
-                capture.validate().map_err(file_failure)
-            })
-            .await;
-            self.check_file_session(session, original, context.scope())
-                .await?;
-            match valid {
-                Ok(()) => {}
-                Err(error) if error == "agent_files_changed" => {
-                    let terminal = FileChange::Unavailable {
-                        reason: FileUnavailable::DirectoryChanged,
-                    };
-                    return self.emit_file_change(terminal, context).await;
+        #[cfg(target_os = "macos")]
+        let mut snapshot = None;
+        let result = async {
+            // Subscribe before revalidating the captured Session. Earlier changes
+            // are caught by the read; later changes remain pending on this receiver.
+            let mut commits = self.store.subscribe_commits();
+            commits.borrow_and_update();
+            #[cfg(not(all(test, target_os = "macos")))]
+            let native_hints = true;
+            #[cfg(all(test, target_os = "macos"))]
+            let native_hints = self.file_native_hints.load(std::sync::atomic::Ordering::Relaxed);
+            #[cfg(target_os = "macos")]
+            let mut next_scan;
+            #[cfg(target_os = "macos")]
+            {
+                self.check_file_session(session, original, context.scope()).await?;
+                let capture = directory.clone();
+                let baseline = worktrees::blocking(context.scope(), &self.stop, move |cancel| {
+                    let started = std::time::Instant::now();
+                    let current = capture.snapshot(&cancel).map_err(file_failure)?;
+                    Ok((current, started.elapsed()))
+                }).await;
+                let (current, elapsed) = match baseline {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.check_file_session(session, original, context.scope()).await?;
+                        if error == "agent_files_changed" {
+                            return self.emit_file_change(FileChange::Unavailable {
+                                reason: FileUnavailable::DirectoryChanged,
+                            }, context).await;
+                        }
+                        return Err(error);
+                    }
+                };
+                snapshot = Some(current);
+                next_scan = next_file_scan(elapsed);
+                self.check_file_session(session, original, context.scope()).await?;
+            }
+            let mut change = Some(FileChange::Ready {
+                directory_identity: directory.directory_identity().clone(),
+            });
+            loop {
+                let capture = directory.clone();
+                let valid = worktrees::blocking(context.scope(), &self.stop, move |_| {
+                    capture.validate().map_err(file_failure)
+                })
+                .await;
+                self.check_file_session(session, original, context.scope())
+                    .await?;
+                match valid {
+                    Ok(()) => {}
+                    Err(error) if error == "agent_files_changed" => {
+                        let terminal = FileChange::Unavailable {
+                            reason: FileUnavailable::DirectoryChanged,
+                        };
+                        return self.emit_file_change(terminal, context).await;
+                    }
+                    Err(error) => return Err(error),
                 }
-                Err(error) => return Err(error),
+                if let Some(change) = change {
+                    self.emit_file_change(change, context).await?;
+                }
+                change = tokio::select! {
+                    biased;
+                    _ = context.scope().cancellation.cancelled() => return Err("agent_files_cancelled".into()),
+                    _ = self.stop.cancelled() => return Err("agent_files_cancelled".into()),
+                    // A due scan precedes advisory/commit traffic. Non-macOS has no
+                    // snapshot or timer; this permanently pending branch is inert.
+                    _ = async {
+                        #[cfg(target_os = "macos")]
+                        tokio::time::sleep_until(next_scan).await;
+                        #[cfg(not(target_os = "macos"))]
+                        std::future::pending::<()>().await;
+                    } => {
+                        #[cfg(target_os = "macos")]
+                        {
+                            self.check_file_session(session, original, context.scope()).await?;
+                            let capture = directory.clone();
+                            let previous = snapshot.take().expect("baseline snapshot");
+                            let current = worktrees::blocking(context.scope(), &self.stop, move |cancel| {
+                                let started = std::time::Instant::now();
+                                let current = capture.snapshot(&cancel).map_err(file_failure)?;
+                                let changed = previous != current;
+                                drop(previous);
+                                Ok((current, changed, started.elapsed()))
+                            }).await;
+                            let changed = match current {
+                                Ok((current, changed, elapsed)) => {
+                                    snapshot = Some(current);
+                                    next_scan = next_file_scan(elapsed);
+                                    Ok(changed)
+                                }
+                                Err(error) => Err(error),
+                            };
+                            self.check_file_session(session, original, context.scope()).await?;
+                            match changed {
+                                Ok(changed) => changed.then_some(FileChange::Changed),
+                                Err(error) if error == "agent_files_changed" => {
+                                    return self.emit_file_change(FileChange::Unavailable {
+                                        reason: FileUnavailable::DirectoryChanged,
+                                    }, context).await;
+                                }
+                                Err(error) => return Err(error),
+                            }
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        unreachable!("reconciliation is macOS only")
+                    },
+                    result = watch.changed(), if native_hints => {
+                        // A native observation failure ends the stream. Reconnect
+                        // starts with a fresh read, never an invented replay cursor.
+                        result.map_err(file_failure)?;
+                        Some(FileChange::Changed)
+                    },
+                    result = commits.changed() => {
+                        result.map_err(|_| "agent_observation_closed")?;
+                        commits.borrow_and_update();
+                        None
+                    },
+                };
             }
-            if let Some(change) = change {
-                self.emit_file_change(change, context).await?;
-            }
-            change = tokio::select! {
-                biased;
-                _ = context.scope().cancellation.cancelled() => return Err("agent_files_cancelled".into()),
-                _ = self.stop.cancelled() => return Err("agent_files_cancelled".into()),
-                result = watch.changed() => {
-                    // A native observation failure ends the stream. Reconnect
-                    // starts with a fresh read, never an invented replay cursor.
-                    result.map_err(file_failure)?;
-                    Some(FileChange::Changed)
-                },
-                result = commits.changed() => {
-                    result.map_err(|_| "agent_observation_closed")?;
-                    commits.borrow_and_update();
-                    None
-                },
-            };
+        }.await;
+        #[cfg(target_os = "macos")]
+        if let Some(snapshot) = snapshot.take() {
+            worktrees::blocking(context.scope(), &self.stop, move |_| {
+                drop(snapshot);
+                Ok(())
+            })
+            .await?;
         }
+        result
     }
 
     async fn emit_file_change(
@@ -219,6 +305,15 @@ impl Owner {
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn next_file_scan(elapsed: std::time::Duration) -> tokio::time::Instant {
+    // Keep small active directories fresh. Large scans rest for nine times
+    // their duration, targeting 10% scan duty per subscription rather than
+    // consuming a core continuously; native hints remain active between scans.
+    let pause = std::time::Duration::from_secs(1).max(elapsed.saturating_mul(9));
+    tokio::time::Instant::now() + pause
 }
 
 // Only backend-owned static causes cross the service boundary. OS paths and
