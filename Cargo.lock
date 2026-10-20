@@ -10216,6 +10216,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "tempfile",
+ "termina 0.4.0",
  "tokio",
  "tokio-util",
  "uuid",
@@ -10952,7 +10953,7 @@ dependencies = [
 [[package]]
 name = "nsh-base"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "nsh-core",
  "serde_json",
@@ -10961,7 +10962,7 @@ dependencies = [
 [[package]]
 name = "nsh-bundler"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "anyhow",
  "dunce",
@@ -10985,7 +10986,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "cap-std",
  "futures-util",
@@ -11006,7 +11007,7 @@ dependencies = [
 [[package]]
 name = "nsh-engine"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -11023,7 +11024,7 @@ dependencies = [
 [[package]]
 name = "nsh-js"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -11044,7 +11045,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -11056,7 +11057,7 @@ dependencies = [
 [[package]]
 name = "nsh-package"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -11071,7 +11072,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tui"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=aa80d49c24d50fda690cb603070c70fa68c8a98d#aa80d49c24d50fda690cb603070c70fa68c8a98d"
+source = "git+https://github.com/M4n5ter/nsh?rev=98cfaf67c32da0f199deab8a841786f77ce13ecb#98cfaf67c32da0f199deab8a841786f77ce13ecb"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -13960,7 +13961,7 @@ checksum = "c0bf912d9e66f057a759d92e386a280ea886b352ab757d6ac4d653c7ed2c43c2"
 dependencies = [
  "instability",
  "ratatui-core",
- "termina",
+ "termina 0.3.3",
 ]
 
 [[package]]
@@ -17032,6 +17033,17 @@ name = "termina"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9048a889effe34a5cddee0af7f53285198b16dca3be510858d38dfdb3e62a04e"
+dependencies = [
+ "bitflags 2.13.2",
+ "parking_lot",
+ "rustix 1.1.4",
+ "signal-hook 0.3.18",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "termina"
+version = "0.4.0"
 dependencies = [
  "bitflags 2.13.2",
  "parking_lot",
