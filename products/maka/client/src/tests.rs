@@ -130,6 +130,8 @@ impl Fixture {
                 "read":{"mode":"query","input":{},"output":{},"resources":{}},
                 "send":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "stop":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "respond":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
         })).unwrap();
@@ -234,6 +236,8 @@ impl Fixture {
                                 "read".into(),
                                 "send".into(),
                                 "selectBackend".into(),
+                                "stop".into(),
+                                "respond".into(),
                                 "watch".into(),
                             ]
                             .into(),
@@ -315,6 +319,30 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
         assert_eq!(client.operation_for_control(unrelated.id()).await.unwrap_err(),"original client operation belongs to another control owner");
         unrelated.close().await.unwrap();
         assert!(client.pending_controls().await.unwrap().is_empty());
+        for (method, input, expected) in [
+            ("stop", json!({"sessionId":"session-one","invocationId":"run-A"}), json!({"kind":"agent-control","invocationId":"run-A"})),
+            ("respond", json!({"sessionId":"session-one","requestId":"interaction-A"}), json!({"kind":"agent-control","requestId":"interaction-A"})),
+        ] {
+            assert_eq!(client.control(Uuid::new_v4(),method,json!({"sessionId":"session-one"})).await.err().unwrap(),"agent control requires a valid invocationId or requestId");
+            let control = client.control(Uuid::new_v4(),method,input).await.unwrap();
+            let original = client.operation_for_control(control.id()).await.unwrap();
+            assert_eq!(original.session_id.as_deref(),Some("session-one"));
+            assert_eq!(original.correlation,expected);
+            let mut extra = expected.clone();
+            extra["extra"] = json!(true);
+            for correlation in [json!({"kind":"agent-control"}), extra] {
+                let unrelated = client.mutation(Uuid::new_v4(),"agent",method,Value::Null,Attachments::new(),Some("session-one".into()),correlation).await.unwrap();
+                assert_eq!(client.operation_for_control(unrelated.id()).await.unwrap_err(),"original client operation belongs to another control owner");
+                unrelated.close().await.unwrap();
+            }
+            let pending = client.pending_controls().await.unwrap();
+            assert_eq!(pending.iter().map(|operation| operation.id).collect::<Vec<_>>(),[control.id()]);
+            assert_eq!(pending[0].correlation,expected);
+            assert!(client.abandon_unprepared(control.id()).await.unwrap().abandoned);
+            assert_eq!(client.operation_for_control(control.id()).await.unwrap().correlation,expected);
+            assert!(client.pending_controls().await.unwrap().is_empty());
+            control.close().await.unwrap();
+        }
         let id = Uuid::new_v4();
         let mutation = client.control(id,"selectBackend",json!({"sessionId":"session-one","text":"private draft text"})).await.unwrap();
         assert_eq!(client.pending_controls().await.unwrap().iter().map(|operation| operation.id).collect::<Vec<_>>(),[id]);

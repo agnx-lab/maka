@@ -44,8 +44,23 @@ use uuid::Uuid;
 pub type Result<T> = std::result::Result<T, String>;
 
 const CONTROL_METHODS: [&str; 4] = ["create", "selectBackend", "stop", "respond"];
-fn control_correlation() -> Value {
-    serde_json::json!({"kind": "agent-control"})
+const CONTROL_KIND: &str = "agent-control";
+fn control_correlation(method: &str, input: &Value) -> Result<Value> {
+    let mut correlation = serde_json::json!({"kind": CONTROL_KIND});
+    let key = match method {
+        "stop" => Some("invocationId"),
+        "respond" => Some("requestId"),
+        _ => None,
+    };
+    if let Some(key) = key {
+        let target = input
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|target| !target.is_empty() && target.len() <= 128)
+            .ok_or("agent control requires a valid invocationId or requestId")?;
+        correlation[key] = Value::String(target.to_owned());
+    }
+    Ok(correlation)
 }
 
 /// A shell-owned scope over one launcher-selected, authenticated Host connection.
@@ -204,6 +219,7 @@ impl Client {
         if !CONTROL_METHODS.contains(&method) {
             return Err("unsupported agent control method".into());
         }
+        let correlation = control_correlation(method, &input)?;
         let session_id = if method == "create" {
             None
         } else {
@@ -222,7 +238,7 @@ impl Client {
             input,
             Attachments::new(),
             session_id,
-            control_correlation(),
+            correlation,
         )
         .await
     }
@@ -326,10 +342,11 @@ impl Client {
     /// A settled or abandoned original still retains its control owner.
     pub async fn operation_for_control(&self, id: Uuid) -> Result<Operation> {
         let operation = self.operation(id).await?;
+        let correlation = control_correlation(&operation.method, &operation.correlation);
         if operation.draft.is_some()
             || operation.endpoint != "agent"
             || !CONTROL_METHODS.contains(&operation.method.as_str())
-            || operation.correlation != control_correlation()
+            || correlation.ok().as_ref() != Some(&operation.correlation)
         {
             return Err("original client operation belongs to another control owner".into());
         }
