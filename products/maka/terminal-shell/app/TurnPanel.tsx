@@ -269,7 +269,7 @@ function ActivityLog(props: {
                         const pending = pendingReveal();
                         if (
                           pending?.rowId === ownedId() &&
-                          pending.height !== frame.height &&
+                          frame.height > pending.height &&
                           props.rowState(ownedId()).expanded()
                         ) {
                           pendingReveal.set(null);
