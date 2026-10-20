@@ -190,10 +190,10 @@ impl Presentation<'_> {
                     // Even if a later child exhausted the budget, this item's
                     // retained first block still owns its marker. The literal
                     // tail itself already contains the original source marker.
-                    if !self.finished || first + 1 < self.blocks.len() {
-                        if let Some((_, block)) = self.blocks.get_mut(first) {
-                            block.marker = marker;
-                        }
+                    if (!self.finished || first + 1 < self.blocks.len())
+                        && let Some((_, block)) = self.blocks.get_mut(first)
+                    {
+                        block.marker = marker;
                     }
                     if self.finished {
                         break;
@@ -374,15 +374,14 @@ fn inline(
     if text.is_empty() {
         return true;
     }
-    if let Some(previous) = runs.last_mut() {
-        if previous.strong == marks.strong
-            && previous.emphasis == marks.emphasis
-            && previous.strike == marks.strike
-            && previous.code == marks.code
-        {
-            previous.text.push_str(text);
-            return true;
-        }
+    if let Some(previous) = runs.last_mut()
+        && previous.strong == marks.strong
+        && previous.emphasis == marks.emphasis
+        && previous.strike == marks.strike
+        && previous.code == marks.code
+    {
+        previous.text.push_str(text);
+        return true;
     }
     if runs.len() == limit {
         return false;

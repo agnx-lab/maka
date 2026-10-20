@@ -170,14 +170,30 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             if screen.contains(marker) {
                 return screen;
             }
-            assert!(started.elapsed() < Duration::from_secs(20), "history wheel did not reveal {marker:?}:\n{screen}");
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "history wheel did not reveal {marker:?}:\n{screen}"
+            );
             // These phases are flat or folded. Exclude the fixed checklist's
             // NATIVE_TODO labels so the pointer always hits transcript content.
-            let text = screen.lines().find(|line| [
-                "History ", "NATIVE_THINK_SOURCE_", "NATIVE_ACTIVITY_HEADER_", "TITLE_",
-                "NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS", "REAL_PROVIDER_STREAM_VISIBLE",
-                "NEXT_INPUT_FOLDS_PREVIOUS_PROCESS", "SECOND_POLICY_TURN_FINAL", "> todo_write", "Completed",
-            ].iter().any(|marker| line.contains(*marker)))
+            let text = screen
+                .lines()
+                .find(|line| {
+                    [
+                        "History ",
+                        "NATIVE_THINK_SOURCE_",
+                        "NATIVE_ACTIVITY_HEADER_",
+                        "TITLE_",
+                        "NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS",
+                        "REAL_PROVIDER_STREAM_VISIBLE",
+                        "NEXT_INPUT_FOLDS_PREVIOUS_PROCESS",
+                        "SECOND_POLICY_TURN_FINAL",
+                        "> todo_write",
+                        "Completed",
+                    ]
+                    .iter()
+                    .any(|marker| line.contains(*marker))
+                })
                 .map(str::trim)
                 .expect("the viewport must contain painted fixture transcript text");
             support::scroll_text(view, text, MouseEventKind::ScrollUp);
