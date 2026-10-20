@@ -35,8 +35,8 @@ pub(super) struct Probe(Option<Replies>);
 #[derive(Default)]
 struct Replies {
     deadline: Option<Instant>,
-    sixel: Option<bool>,
-    cell: Option<(u16, u16)>,
+    sixel: Option<(bool, Instant)>,
+    cell: Option<(u16, u16, Instant)>,
 }
 
 impl Default for Probe {
@@ -48,7 +48,13 @@ impl Default for Probe {
 impl Probe {
     pub fn flushed(&mut self, at: Instant) {
         if let Some(replies) = &mut self.0 {
-            replies.deadline = Some(at + TIMEOUT);
+            let deadline = at + TIMEOUT;
+            replies.deadline = Some(deadline);
+            // Reader and writer run independently. A driver delayed in polling
+            // this receipt must not turn already-buffered late replies into
+            // capabilities merely because the deadline was not armed yet.
+            replies.sixel = replies.sixel.filter(|(_, at)| *at <= deadline);
+            replies.cell = replies.cell.filter(|(_, _, at)| *at <= deadline);
         }
     }
 
@@ -65,7 +71,7 @@ impl Probe {
             Event::Csi(Csi::PrimaryDeviceAttributes(attributes)) => {
                 replies
                     .sixel
-                    .get_or_insert(attributes.attributes.contains(&4));
+                    .get_or_insert((attributes.attributes.contains(&4), now));
             }
             Event::Csi(Csi::Window(window)) => {
                 if let Window::ReportCellSizePixelsResponse {
@@ -76,7 +82,7 @@ impl Probe {
                     && width != 0
                     && height != 0
                 {
-                    replies.cell.get_or_insert((width, height));
+                    replies.cell.get_or_insert((width, height, now));
                 }
             }
             _ => {}
@@ -86,13 +92,13 @@ impl Probe {
     pub fn take_ready(&mut self, now: Instant) -> Option<ImageProtocol> {
         let replies = self.0.as_ref()?;
         let deadline = replies.deadline?;
-        if replies.sixel == Some(true)
-            && let Some((width, height)) = replies.cell
+        if matches!(replies.sixel, Some((true, _)))
+            && let Some((width, height, _)) = replies.cell
         {
             self.0 = None;
             return ImageProtocol::new(ProtocolType::Sixel, width, height).ok();
         }
-        if replies.sixel == Some(false) || now >= deadline {
+        if matches!(replies.sixel, Some((false, _))) || now >= deadline {
             self.0 = None;
         }
         None
@@ -126,6 +132,19 @@ mod tests {
         assert_eq!(protocol.protocol_type(), ProtocolType::Sixel);
         assert_eq!(protocol.cell_size(), (9, 17));
         assert!(probe.take_ready(now).is_none());
+    }
+
+    #[test]
+    fn delayed_receipt_observation_keeps_only_replies_arriving_before_actual_deadline() {
+        let flushed = Instant::now();
+        let late = flushed + TIMEOUT + Duration::from_millis(1);
+        for (arrived, accepted) in [(flushed + Duration::from_millis(1), true), (late, false)] {
+            let mut probe = Probe::default();
+            observe(&mut probe, b"\x1b[?62;4c\x1b[6;16;8t", arrived);
+            // The writer completed at `flushed`; only its observer is delayed.
+            probe.flushed(flushed);
+            assert_eq!(probe.take_ready(late).is_some(), accepted);
+        }
     }
 
     #[test]
