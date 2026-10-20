@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use super::Presentation;
 use std::{
     io::{self, Write},
     sync::mpsc,
@@ -26,7 +27,11 @@ use std::{
 pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
 enum Request {
-    Frame(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
+    Frame(
+        Vec<u8>,
+        mpsc::SyncSender<io::Result<()>>,
+        Option<(Presentation, u64)>,
+    ),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
 }
 
@@ -46,12 +51,17 @@ impl Output {
             .name("maka-nsh-output".into())
             .spawn(move || {
                 while let Ok(request) = receive.recv() {
-                    let (bytes, receipt, close) = match request {
-                        Request::Frame(bytes, receipt) => (bytes, receipt, false),
-                        Request::Close(bytes, receipt) => (bytes, receipt, true),
+                    let (bytes, receipt, close, presentation) = match request {
+                        Request::Frame(bytes, receipt, presentation) => {
+                            (bytes, receipt, false, presentation)
+                        }
+                        Request::Close(bytes, receipt) => (bytes, receipt, true, None),
                     };
                     let result = writer.write_all(&bytes).and_then(|_| writer.flush());
                     let failed = result.is_err();
+                    if !failed && let Some((presentation, epoch)) = presentation {
+                        presentation.publish(epoch);
+                    }
                     let _ = receipt.send(result);
                     if close || failed {
                         break;
@@ -64,7 +74,11 @@ impl Output {
         })
     }
 
-    pub fn submit(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+    pub fn submit(
+        &mut self,
+        bytes: Vec<u8>,
+        presentation: Option<(Presentation, u64)>,
+    ) -> Result<(), String> {
         if self.pending.is_some() {
             return Err("terminal frame still in flight".into());
         }
@@ -73,7 +87,7 @@ impl Output {
         }
         let (send, receive) = mpsc::sync_channel(1);
         self.send
-            .try_send(Request::Frame(bytes, send))
+            .try_send(Request::Frame(bytes, send, presentation))
             .map_err(|error| error.to_string())?;
         self.pending = Some(receive);
         Ok(())
@@ -168,10 +182,19 @@ mod tests {
             entered,
         })
         .unwrap();
-        output.submit(b"ABC".to_vec()).unwrap();
+        let presentation = Presentation::default();
+        output
+            .submit(b"ABC".to_vec(), Some((presentation.clone(), 7)))
+            .unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            presentation
+                .presented
+                .load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
         assert!(!output.poll().unwrap());
-        assert!(output.submit(b"replacement".to_vec()).is_err());
+        assert!(output.submit(b"replacement".to_vec(), None).is_err());
         let closed = output.close(b"!".to_vec()).unwrap();
         assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
         for _ in 0..4 {
@@ -182,6 +205,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(*bytes.lock().unwrap(), b"ABC!");
+        // No driver poll observes either completion: the actual flush
+        // publishes the frame before the final cleanup receipt arrives.
+        assert_eq!(
+            presentation
+                .presented
+                .load(std::sync::atomic::Ordering::Acquire),
+            7
+        );
     }
 
     #[test]
@@ -196,12 +227,21 @@ mod tests {
             }
         }
         let mut output = Output::new(Failed).unwrap();
-        output.submit(b"frame".to_vec()).unwrap();
+        let presentation = Presentation::default();
+        output
+            .submit(b"frame".to_vec(), Some((presentation.clone(), 7)))
+            .unwrap();
         loop {
             match output.poll() {
                 Ok(false) => thread::yield_now(),
                 Err(error) => {
                     assert_eq!(error, "flush failed");
+                    assert_eq!(
+                        presentation
+                            .presented
+                            .load(std::sync::atomic::Ordering::Acquire),
+                        0
+                    );
                     break;
                 }
                 Ok(true) => panic!("failed frame admitted"),

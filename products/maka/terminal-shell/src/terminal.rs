@@ -46,6 +46,32 @@ const CLEANUP: &[u8] =
     b"\x1b[?2026l\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l";
 const TICK: Duration = Duration::from_millis(16);
 
+#[derive(Clone, Default)]
+struct Presentation {
+    state: Arc<Mutex<Inbox>>,
+    presented: Arc<AtomicU64>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Presentation {
+    fn publish(&self, epoch: u64) {
+        let inbox = self.state.lock().unwrap();
+        if !self.stop.load(Ordering::Acquire)
+            && !inbox.quit
+            && inbox.error.is_none()
+            && inbox.resize.is_none()
+        {
+            self.presented.store(epoch, Ordering::Release);
+        }
+    }
+
+    fn shutdown(&self) {
+        self.stop.store(true, Ordering::Release);
+        let _inbox = self.state.lock().unwrap();
+        self.presented.store(0, Ordering::Release);
+    }
+}
+
 /// Runs the first-party terminal UI. Ctrl+Q cancels independently of the
 /// UI and writer; Ctrl+C retains the surface's copy/exit behavior.
 /// An error reports incomplete output restoration;
@@ -62,18 +88,21 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     terminal::enable_raw_mode().map_err(|error| error.to_string())?;
     let _raw = RawMode;
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;
-    output.submit(SETUP.to_vec())?;
-    let state = Arc::new(Mutex::new(Inbox::default()));
-    let presented = Arc::new(AtomicU64::new(0));
+    output.submit(SETUP.to_vec(), None)?;
+    let presentation = Presentation {
+        stop: stop.clone(),
+        ..Default::default()
+    };
     let _reader = StopReader(stop.clone());
     let result = (|| {
-        start_reader(state.clone(), presented.clone(), stop.clone())?;
-        let (commands, frames) = ui::spawn(config).map_err(|error| error.to_string())?;
+        start_reader(presentation.clone())?;
+        let (commands, frames) =
+            ui::spawn(config, presentation.clone()).map_err(|error| error.to_string())?;
         // Returning drops both channel endpoints without joining either
         // blocked owner, including startup errors after terminal mutation.
-        drive(&mut output, &state, &presented, &commands, &frames, &stop)
+        drive(&mut output, &presentation, &commands, &frames)
     })();
-    presented.store(0, Ordering::Release);
+    presentation.shutdown();
     let cleanup = output.close(CLEANUP.to_vec()).and_then(|receipt| {
         match receipt.recv_timeout(Duration::from_millis(100)) {
             Ok(result) => result.map_err(|error| error.to_string()),
@@ -94,12 +123,15 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
 
 fn drive(
     output: &mut Output,
-    state: &Mutex<Inbox>,
-    presented: &AtomicU64,
+    presentation: &Presentation,
     commands: &mpsc::SyncSender<ui::Advance>,
     frames: &mpsc::Receiver<Result<ui::Frame, String>>,
-    stop: &AtomicBool,
 ) -> Result<(), String> {
+    let Presentation {
+        state,
+        presented,
+        stop,
+    } = presentation;
     let mut setup = true;
     let mut busy = true;
     let mut pending = None;
@@ -122,7 +154,6 @@ fn drive(
             setup = false;
             if let Some(completed) = pending.take() {
                 epoch = completed;
-                publish(state, presented, epoch);
             }
         }
         if !setup && pending.is_none() && busy {
@@ -134,11 +165,10 @@ fn drive(
                     }
                     busy = false;
                     if let Some(bytes) = frame.bytes {
-                        output.submit(bytes)?;
+                        output.submit(bytes, Some((presentation.clone(), frame.epoch)))?;
                         pending = Some(frame.epoch);
                     } else {
                         epoch = frame.epoch;
-                        publish(state, presented, epoch);
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => return Err("NSH UI worker stopped".into()),
@@ -150,20 +180,19 @@ fn drive(
             let resize = inbox.resize.take();
             let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
             let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
-            if resize.is_some()
-                || !inputs.is_empty()
-                || cancel_pointer
-                || Instant::now() >= next_tick
-            {
-                // Revoke the complete presentation before the UI worker can
-                // advance JS callbacks, list bindings or native geometry.
-                presented.store(0, Ordering::Release);
+            let command = ui::Advance {
+                inputs,
+                resize,
+                cancel_pointer,
+            };
+            if !command.is_probe() || Instant::now() >= next_tick {
+                if !command.is_probe() {
+                    // Explicit input revokes before the UI worker can run.
+                    // Idle probes first check whether any work is due.
+                    presented.store(0, Ordering::Release);
+                }
                 commands
-                    .try_send(ui::Advance {
-                        inputs,
-                        resize,
-                        cancel_pointer,
-                    })
+                    .try_send(command)
                     .map_err(|error| error.to_string())?;
                 busy = true;
                 next_tick = Instant::now() + TICK;
@@ -173,23 +202,15 @@ fn drive(
     }
 }
 
-fn publish(state: &Mutex<Inbox>, presented: &AtomicU64, epoch: u64) {
-    let inbox = state.lock().unwrap();
-    // Actual terminal resize invalidates the old physical geometry at once,
-    // even before the worker has consumed the latest resize notification.
-    if inbox.resize.is_none() {
-        presented.store(epoch, Ordering::Release);
-    }
-}
-
-fn start_reader(
-    state: Arc<Mutex<Inbox>>,
-    presented: Arc<AtomicU64>,
-    stop: Arc<AtomicBool>,
-) -> Result<(), String> {
+fn start_reader(presentation: Presentation) -> Result<(), String> {
     thread::Builder::new()
         .name("maka-nsh-input".into())
         .spawn(move || {
+            let Presentation {
+                state,
+                presented,
+                stop,
+            } = presentation;
             while !stop.load(Ordering::Acquire) {
                 {
                     let mut inbox = state.lock().unwrap();
@@ -298,7 +319,7 @@ mod tests {
             resume: gate,
         })
         .unwrap();
-        output.submit(b"SETUP".to_vec()).unwrap();
+        output.submit(b"SETUP".to_vec(), None).unwrap();
         let (commands, _worker) = mpsc::sync_channel(1);
         let (frames, receive) = mpsc::sync_channel(1);
         frames
@@ -309,17 +330,13 @@ mod tests {
             }))
             .unwrap();
         let (finished, result) = mpsc::sync_channel(1);
-        let (observed_state, observed_presentation) = (state.clone(), presented.clone());
-        let observed_stop = stop.clone();
+        let presentation = Presentation {
+            state: state.clone(),
+            presented: presented.clone(),
+            stop: stop.clone(),
+        };
         thread::spawn(move || {
-            let result = drive(
-                &mut output,
-                &observed_state,
-                &observed_presentation,
-                &commands,
-                &receive,
-                &observed_stop,
-            );
+            let result = drive(&mut output, &presentation, &commands, &receive);
             let _ = finished.send(result);
         });
         observing.recv_timeout(Duration::from_secs(1)).unwrap();

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{input::Input, output::FrameWriter};
+use super::{Presentation, input::Input, output::FrameWriter};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use nsh_core::{Command, MountBatch, MountItem, ROOT_ID};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
@@ -74,9 +74,18 @@ pub(super) struct Advance {
     pub cancel_pointer: bool,
 }
 
+impl Advance {
+    pub fn is_probe(&self) -> bool {
+        self.inputs.is_empty() && self.resize.is_none() && !self.cancel_pointer
+    }
+}
+
 type Frames = mpsc::Receiver<Result<Frame, String>>;
 
-pub(super) fn spawn(config: EngineConfig) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
+pub(super) fn spawn(
+    config: EngineConfig,
+    presentation: Presentation,
+) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
     let (send, commands) = mpsc::sync_channel::<Advance>(1);
     let (frames, receive) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -93,7 +102,7 @@ pub(super) fn spawn(config: EngineConfig) -> io::Result<(mpsc::SyncSender<Advanc
                 return;
             }
             while let Ok(command) = commands.recv() {
-                let result = session.advance(command);
+                let result = session.advance_if_needed(command, &presentation);
                 let failed = result.is_err();
                 if frames.send(result).is_err() || failed {
                     return;
@@ -152,6 +161,34 @@ impl Session {
     fn initial_frame(&mut self) -> Result<Frame, String> {
         self.apply_commits()?;
         self.encode(true)
+    }
+
+    fn advance_if_needed(
+        &mut self,
+        command: Advance,
+        presentation: &Presentation,
+    ) -> Result<Frame, String> {
+        if command.is_probe() {
+            let inbox = presentation.state.lock().unwrap();
+            if presentation.stop.load(std::sync::atomic::Ordering::Acquire)
+                || inbox.has_pending()
+                || (!self.engine.needs_pump() && !self.surface.animating())
+            {
+                return Ok(Frame {
+                    epoch: self.epoch,
+                    bytes: None,
+                    quit: self.surface.should_quit(),
+                });
+            }
+            presentation
+                .presented
+                .store(0, std::sync::atomic::Ordering::Release);
+        }
+        let frame = self.advance(command)?;
+        if frame.bytes.is_none() {
+            presentation.publish(frame.epoch);
+        }
+        Ok(frame)
     }
 
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
@@ -467,6 +504,9 @@ mod tests {
     fn presented_input_precedes_a_queued_rebind_of_the_same_list_node() {
         let mut session = Session::new(config(APP)).unwrap();
         session.initial_frame().unwrap();
+        let epoch = session.epoch;
+        let presentation = Presentation::default();
+        presentation.publish(epoch);
         let row = session
             .surface
             .accessibility_snapshot()
@@ -474,22 +514,35 @@ mod tests {
             .find(|node| node.label == "row:A")
             .unwrap()
             .id;
-        // A frame callback is queued, but VM and Surface have not advanced
-        // beyond the fully presented A frame. Invoking pump first would
-        // make this exact node's row accessor read B.
-        session
-            .dispatch_events(
-                vec![SurfaceEvent::Event(
-                    row,
-                    EventKind::Press,
-                    EventPayload::None,
-                )],
-                true,
+        for event in click(&session.surface, "row:A") {
+            presentation.state.lock().unwrap().push(event, epoch);
+        }
+        // The driver has already posted an idle probe when the physical
+        // click arrives. Its queued frame callback must not rebind A to B
+        // before the original input owner can admit that click.
+        let probe = session
+            .advance_if_needed(
+                Advance {
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                },
+                &presentation,
             )
             .unwrap();
+        assert_eq!(probe.epoch, epoch);
+        assert!(probe.bytes.is_none());
+        assert!(
+            session
+                .surface
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.label == "row:A")
+        );
+        let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
         session
             .advance(Advance {
-                inputs: Vec::new(),
+                inputs,
                 resize: None,
                 cancel_pointer: false,
             })
@@ -544,39 +597,55 @@ mod tests {
         let state = Arc::new(Mutex::new(super::super::input::Inbox::default()));
         let presented = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let presentation = Presentation {
+            state: state.clone(),
+            presented: presented.clone(),
+            stop: stop.clone(),
+        };
         let (commands, receive) = mpsc::sync_channel(1);
         let (frames, ready) = mpsc::sync_channel(1);
         frames.send(Ok(initial)).unwrap();
         let driver = {
-            let (state, presented, stop) = (state.clone(), presented.clone(), stop.clone());
+            let presentation = presentation.clone();
             thread::spawn(move || {
                 let mut output = super::super::output::Output::new(io::sink()).unwrap();
-                output.submit(b"SETUP".to_vec()).unwrap();
-                super::super::drive(&mut output, &state, &presented, &commands, &ready, &stop)
+                output.submit(b"SETUP".to_vec(), None).unwrap();
+                super::super::drive(&mut output, &presentation, &commands, &ready)
             })
         };
         let deadline = Instant::now() + std::time::Duration::from_secs(1);
         loop {
-            let mut inbox = state.lock().unwrap();
-            let epoch = presented.load(std::sync::atomic::Ordering::Acquire);
-            if epoch != 0 {
+            let command = receive
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
+            if command.is_probe() && !session.engine.needs_pump() && !session.surface.animating() {
+                // The real driver has sent an idle probe, but its UI owner
+                // has not replied. Input still belongs to the visible frame.
+                let mut inbox = state.lock().unwrap();
+                let epoch = presented.load(std::sync::atomic::Ordering::Acquire);
+                assert_eq!(epoch, session.epoch);
                 for event in events {
                     inbox.push(event, epoch);
                 }
+                drop(inbox);
+                let frame = session.advance_if_needed(command, &presentation).unwrap();
+                assert_eq!(frame.epoch, epoch);
+                assert!(frame.bytes.is_none());
+                frames.send(Ok(frame)).unwrap();
                 break;
             }
-            drop(inbox);
-            if let Ok(command) = receive.try_recv() {
-                frames.send(session.advance(command)).unwrap();
-            }
-            assert!(Instant::now() < deadline, "initial frame was not presented");
-            thread::yield_now();
+            frames
+                .send(session.advance_if_needed(command, &presentation))
+                .unwrap();
+            assert!(Instant::now() < deadline, "the UI did not reach idle");
         }
         for _ in 0..4 {
             let command = receive
                 .recv_timeout(std::time::Duration::from_secs(1))
                 .unwrap();
-            frames.send(session.advance(command)).unwrap();
+            frames
+                .send(session.advance_if_needed(command, &presentation))
+                .unwrap();
         }
         stop.store(true, std::sync::atomic::Ordering::Release);
         driver.join().unwrap().unwrap();

@@ -92,11 +92,11 @@ publish = false
 hex = "0.4.3"
 maka-ui-authoring = { path = "plugins/application/authoring/native" }
 maka-app-client = { path = "products/maka/client" }
-nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "0d3d620fc10367fb77c0bf4671196d44646c0794" }
-nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "0d3d620fc10367fb77c0bf4671196d44646c0794" }
-nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "0d3d620fc10367fb77c0bf4671196d44646c0794" }
-nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "0d3d620fc10367fb77c0bf4671196d44646c0794", default-features = false }
-nsh-ui-mobile = { git = "https://github.com/M4n5ter/nsh", rev = "0d3d620fc10367fb77c0bf4671196d44646c0794" }
+nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "59f76aad97cfd9b1ef9b51d74f83b8f7c4a82402" }
+nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "59f76aad97cfd9b1ef9b51d74f83b8f7c4a82402" }
+nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "59f76aad97cfd9b1ef9b51d74f83b8f7c4a82402" }
+nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "59f76aad97cfd9b1ef9b51d74f83b8f7c4a82402", default-features = false }
+nsh-ui-mobile = { git = "https://github.com/M4n5ter/nsh", rev = "59f76aad97cfd9b1ef9b51d74f83b8f7c4a82402" }
 maka-agent-facts = { path = "plugins/agent/facts" }
 maka-packages = { path = "platform/packages" }
 maka-agent-ports = { path = "plugins/agent/ports" }

@@ -42,6 +42,14 @@ pub(super) struct Inbox {
 }
 
 impl Inbox {
+    pub fn has_pending(&self) -> bool {
+        !self.events.is_empty()
+            || self.resize.is_some()
+            || self.cancel_pointer
+            || self.error.is_some()
+            || self.quit
+    }
+
     pub fn push(&mut self, event: Event, epoch: u64) {
         if let Event::Key(key) = event
             && key.kind != KeyEventKind::Release

@@ -531,8 +531,9 @@ pub fn click_text(view: &mut AppView, prefix: &str) {
         .filter(|node| node.label.starts_with(prefix) && node.frame.y >= 0.0)
         .max_by(|a, b| a.frame.y.total_cmp(&b.frame.y))
         .unwrap_or_else(|| panic!("no rendered native text starts with {prefix:?}"));
-    let column = ((node.frame.x + 4.0) / 8.0).floor() as u16;
-    let row = ((node.frame.y + 8.0) / 16.0).floor() as u16;
+    // Native input uses cell centers; a half-cell origin must not select its exclusive far edge.
+    let column = (node.frame.x / 8.0 - 0.5).ceil().max(0.0) as u16;
+    let row = (node.frame.y / 16.0 - 0.5).ceil().max(0.0) as u16;
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),

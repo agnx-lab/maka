@@ -220,8 +220,10 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             }
         }).await.expect("history did not receive native focus");
         let header_row = source_top.lines().position(|line| line.contains("Analyzing the request")).expect("the activity header must be visible above its source");
+        let source_row = source_top.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")).unwrap();
         support::scroll_text(&mut view, "NATIVE_THINK_SOURCE_01", MouseEventKind::ScrollDown);
-        let wheeled = wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_03") && !screen.contains("NATIVE_THINK_SOURCE_01")).await;
+        let wheeled = wait_view(&mut view, |screen| screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")) == Some(source_row - 3)).await;
+        assert!(wheeled.contains("NATIVE_THINK_SOURCE_03"));
         assert_eq!(wheeled.lines().position(|line| line.contains("Analyzing the request")), Some(header_row), "the body wheel must not move the fixed turn header");
         evidence("activity-mouse-wheel", &wheeled);
         support::evidence_cells("activity-mouse-wheel", &view);
