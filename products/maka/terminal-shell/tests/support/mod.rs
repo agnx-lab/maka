@@ -346,7 +346,10 @@ impl Fixture {
         let mut view = AppView::new(AppOptions {
             size: (120, 36),
             data_dir: Some(self.directory.path().join("nsh")),
-            ui_sets: Some(vec![bindings.registry(self.session.clone())]),
+            ui_sets: Some(vec![
+                nsh_ui_mobile::registry(),
+                bindings.registry(Some(self.session.clone())),
+            ]),
             ..Default::default()
         });
         view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into())

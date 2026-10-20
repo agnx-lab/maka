@@ -21,7 +21,8 @@ fn main() {
     println!("cargo:rerun-if-changed=app/App.tsx");
     let source = std::fs::read_to_string("app/App.tsx").expect("read terminal application");
     let module =
-        nsh_bundler::compile_module("App.tsx", &source, &[]).expect("compile terminal application");
+        nsh_bundler::compile_module("App.tsx", &source, &[nsh_ui_mobile::registry().into()])
+            .expect("compile terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
     std::fs::write(output.join("app.js"), module).expect("write terminal application");
 }

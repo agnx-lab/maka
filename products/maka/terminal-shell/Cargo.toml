@@ -33,6 +33,7 @@ maka-plugin-core.workspace = true
 nsh-core.workspace = true
 nsh-engine.workspace = true
 nsh-platform-tui.workspace = true
+nsh-ui-mobile.workspace = true
 crossterm.workspace = true
 ratatui = { workspace = true, features = ["unstable-backend-writer"] }
 serde_json.workspace = true
@@ -42,6 +43,7 @@ uuid.workspace = true
 
 [build-dependencies]
 nsh-bundler.workspace = true
+nsh-ui-mobile.workspace = true
 
 [dev-dependencies]
 libc.workspace = true
