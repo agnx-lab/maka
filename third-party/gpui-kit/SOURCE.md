@@ -19,7 +19,7 @@
 
 # GPUI Kit local presentation projection
 
-The `gpui-base` crate is copied from [GPUI Kit](https://github.com/longbridge/gpui-kit/tree/c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2), revision `c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2`, under Apache-2.0. The `gpui-shell` crate is copied from the same revision; see the section below. Other Kit crates remain dependencies from that exact revision. `upstream.json` records the finite imported file inventory and original SHA-256 hashes before modifications; licenses are retained byte-for-byte. The root README is retained because upstream library tests include it. Examples, benchmarks and website sources are omitted. Benchmark-only dependencies and GPUI profiler features are omitted; library tests keep their original test support. The crate manifest is normalized to explicit upstream dependencies/lints and disables automatic example targets; this repository includes the adapted Base crate as a workspace member so its actual unit tests can run with the same source patches as the application.
+The `gpui-base` crate is copied from [GPUI Kit](https://github.com/longbridge/gpui-kit/tree/77ff6f794dca3bcee2e90977cedf12a64aed17e4), revision `77ff6f794dca3bcee2e90977cedf12a64aed17e4`, under Apache-2.0. The `gpui-shell` crate is copied from the same revision; see the section below. Other Kit crates remain dependencies from that exact revision. `upstream.json` records the finite imported file inventory and original SHA-256 hashes before modifications; licenses are retained byte-for-byte. The root README is retained because upstream library tests include it. Examples, benchmarks and website sources are omitted. Benchmark-only dependencies and GPUI profiler features are omitted; library tests keep their original test support. The crate manifest is normalized to explicit upstream dependencies/lints and disables automatic example targets; this repository includes the adapted Base crate as a workspace member so its actual unit tests can run with the same source patches as the application.
 
 The bounded changes preserve the single native editing engine:
 
@@ -162,11 +162,11 @@ Plain-text paint compares its own attached document's copy projection, rather th
 
 ## Upstream synchronization (2026-10-14)
 
-Kit is pinned to `c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2` (0.7.3). The input-menu callback and parser acknowledgement now use upstream's implementations, replacing the equivalent local patches. Upstream's immutable run/copy projections and quiet participant registration replace the corresponding mutable query paths. Its reflow selection preservation, table rendering and native controls are retained.
+This synchronization pinned Kit to `c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2` (0.7.3); the current revision is recorded in the 2026-10-20 synchronization section below. The input-menu callback and parser acknowledgement now use upstream's implementations, replacing the equivalent local patches. Upstream's immutable run/copy projections and quiet participant registration replace the corresponding mutable query paths. Its reflow selection preservation, table rendering and native controls are retained.
 
 The local physical input groups, exact byte selections, per-hitbox retained geometry and locally projected theme values remain: the upstream global traversal stack and paint-order counter do not provide those behaviors. Quiet registration still passes a participant's first or changed group through original custody reconciliation; completed-frame pruning remains tied to the native focus tree and hitboxes. This update does not merge the separate UI performance branch or migrate Maka to gpui-shell.
 
-同步上游后，菜单回调、解析确认和部分只读选区投影直接采用上游实现。仍保留上游尚未覆盖的物理输入隔离、精确字节选区、保留帧几何与局部主题投影；本次不合并独立性能分支，也不代表完成 gpui-shell 迁移。
+该次同步将 Kit 固定到 `c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2`（0.7.3）；当前版本见下方 2026-10-20 同步节。菜单回调、解析确认和部分只读选区投影直接采用上游实现。仍保留上游尚未覆盖的物理输入隔离、精确字节选区、保留帧几何与局部主题投影；本次不合并独立性能分支，也不代表完成 gpui-shell 迁移。
 
 Participant enablement checks the current value before acquiring a write lease. Repeating the same admission state during layout must not invalidate retained rows under upstream's finer-grained entity-write tracking; real enablement changes retain the original revocation and group withdrawal path.
 
@@ -174,18 +174,18 @@ Plain input modes can install an exact whitespace-delimited literal-token regist
 
 ## gpui-shell runtime (2026-10-16)
 
-`crates/shell` (`gpui-shell`) is copied from revision `c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2` with its `rquickjs-compat` facade, README and component inventory; `upstream.json` records each original file. Its integration tests are omitted because most of them need `gpui-component`. The facade's manifest declares MIT to match the `rquickjs` crate it replaces; its source comes from the GPUI Kit repository. The workspace includes both crates as members and patches crates.io `rquickjs` to the vendored facade, so LLRT and the shell share one QuickJS VM as in GPUI Kit.
+`crates/shell` (`gpui-shell`) is copied from revision `77ff6f794dca3bcee2e90977cedf12a64aed17e4` with its `rquickjs-compat` facade, README and component inventory; `upstream.json` records each original file. Its integration tests are omitted because most of them need `gpui-component`. The facade's manifest declares MIT to match the `rquickjs` crate it replaces; its source comes from the GPUI Kit repository. The workspace includes both crates as members and patches crates.io `rquickjs` to the vendored facade, so LLRT and the shell share one QuickJS VM as in GPUI Kit.
 
-The manifest is normalized to explicit upstream dependencies and lints. `gpui-fast` and `quickjs` are default features. The `components` feature and its `gpui-component` dependency are removed: `gpui-component` at this revision does not build against the adapted Base above, so an embedding host registers its own component catalog. Check-cfg declares the removed feature name, so the code it guards compiles out without warnings.
+The manifest is normalized to explicit upstream dependencies and lints. `gpui-fast` and `quickjs` are default features. The `components` and `webview` features and their `gpui-component`, `gpui-webview` and `wry` dependencies are removed: `gpui-component` at this revision does not build against the adapted Base above, so an embedding host registers its own component catalog. Check-cfg declares the removed feature names, so the code it guards compiles out without warnings.
 
-The bounded source changes adapt the runtime to the adapted Base, add two development switches, and backport four upstream pull requests (#3547, #3549 and #3550 have since been merged; #3548 is open):
+The bounded source changes adapt the runtime to the adapted Base and add two development switches. The four former backports (#3547, #3548, #3549 and #3550) now use their merged upstream implementations:
 
 - `TextView` link handling uses Base's `on_link_activation`. Both handlers return a decision that prevents Base's default URL opening: the script callback receives the URL, or, without one, the shell opens only URLs its own rules admit. Accessibility activation counts as keyboard activation.
 - Two element helpers that call `ElementExt::on_prepaint` add the `IntoElement` bound the adapted trait requires.
 - `GPUI_SHELL_PASSIVE` opens the window without activating the application or taking focus. `GPUI_SHELL_METRICS_LOG` prints the runtime's script counters to stderr once a second. Both are off unless the variable is set.
-- From longbridge/gpui-kit #3547, #3548, #3549 and #3550: a `list` keeps the reader on the item at the top of the view when its item count changes; `with_follow_mode("tail")` makes a `list` follow its end; `on_visible_range_change` reports which items a `list` shows after a frame in which that changed; and `TextareaState.set_submit_on_enter` makes Enter submit without inserting a line break. The next sync replaces them with the upstream versions.
+- From the merged upstream #3547, #3548, #3549 and #3550: a `list` keeps the reader on the item at the top of the view when its item count changes; `with_follow_mode("tail")` makes a `list` follow its end; `on_visible_range_change` reports which items a `list` shows after a frame in which that changed; and `TextareaState.set_submit_on_enter` makes Enter submit without inserting a line break.
 
-`gpui-shell` 及其 `rquickjs-compat` 兼容层自同一上游版本复制，`upstream.json` 记录每个原始文件；集成测试大多依赖 `gpui-component`，因此未导入。兼容层清单声明 MIT 以对应其替代的 `rquickjs`，源码来自 GPUI Kit 仓库。工作区将两者作为成员，并把 crates.io 的 `rquickjs` 指向本地兼容层，使 LLRT 与 shell 共用同一 QuickJS VM。清单改为显式上游依赖与 lints，默认启用 `gpui-fast` 与 `quickjs`；该版本的 `gpui-component` 无法基于上面改过的 Base 编译，因此移除 `components` 特性及其依赖，由嵌入方注册自己的组件目录。源码改动仅限：链接处理改用 Base 的 `on_link_activation` 并阻止 Base 默认打开 URL，由脚本回调或 shell 自身的 URL 规则决定；两个调用 `on_prepaint` 的辅助函数补上 `IntoElement` 约束；新增仅在设置环境变量时生效的开发开关 `GPUI_SHELL_PASSIVE`（不激活、不抢焦点）与 `GPUI_SHELL_METRICS_LOG`（每秒输出脚本计数）；回移四个上游 PR（longbridge/gpui-kit #3547、#3548、#3549、#3550；其中 #3547、#3549、#3550 已合入，#3548 尚未合入）：`list` 在条目数变化时让读者停在视口顶部的条目上，`with_follow_mode("tail")` 让 `list` 跟随末尾，`on_visible_range_change` 在可见范围变化的帧之后报告，`TextareaState.set_submit_on_enter` 让 Enter 直接提交、不插入换行。下次同步时以上游版本替换。
+`gpui-shell` 及其 `rquickjs-compat` 兼容层自同一上游版本复制，`upstream.json` 记录每个原始文件；集成测试大多依赖 `gpui-component`，因此未导入。兼容层清单声明 MIT 以对应其替代的 `rquickjs`，源码来自 GPUI Kit 仓库。工作区将两者作为成员，并把 crates.io 的 `rquickjs` 指向本地兼容层，使 LLRT 与 shell 共用同一 QuickJS VM。清单改为显式上游依赖与 lints，默认启用 `gpui-fast` 与 `quickjs`；该版本的 `gpui-component` 无法基于上面改过的 Base 编译，因此同时移除 `components`、`webview` 特性及其 `gpui-component`、`gpui-webview`、`wry` 依赖，由嵌入方注册自己的组件目录；本地投影不提供上游 WebView 组件。源码改动仅限：链接处理改用 Base 的 `on_link_activation` 并阻止 Base 默认打开 URL，由脚本回调或 shell 自身的 URL 规则决定；两个调用 `on_prepaint` 的辅助函数补上 `IntoElement` 约束；新增仅在设置环境变量时生效的开发开关 `GPUI_SHELL_PASSIVE`（不激活、不抢焦点）与 `GPUI_SHELL_METRICS_LOG`（每秒输出脚本计数）；四个先前回移的 PR（longbridge/gpui-kit #3547、#3548、#3549、#3550）现采用已合入的上游实现：`list` 在条目数变化时让读者停在视口顶部的条目上，`with_follow_mode("tail")` 让 `list` 跟随末尾，`on_visible_range_change` 在可见范围变化的帧之后报告，`TextareaState.set_submit_on_enter` 让 Enter 直接提交、不插入换行。
 
 ## Desktop theme fixes (2026-10-16)
 
@@ -221,19 +221,25 @@ One addition to the script API of `gpui-shell`, a candidate for an upstream pull
 
 为 `gpui-shell` 的脚本 API 新增一项，可提交上游 PR：`InputState` 与 `TextareaState` 新增 `set_placeholder(text)`，在存活的状态上调用 gpui-base 的 `set_placeholder`。此前占位文字只能在 `new({ placeholder })` 时设定，应用在运行中切换语言时，必须连同监听器重建每个输入框，才能翻译空输入框显示的文字。
 
-## `<pre>` text kept as text (2026-10-17)
-
-One fix to Base's HTML minifier, submitted upstream as longbridge/gpui-kit#3570:
-
-- `TextView::html` minifies the HTML and parses the result again. The text of a `<pre>` or `<textarea>` skips whitespace collapsing, and the minifier wrote it as it was decoded, so escaped markup such as `&lt;b&gt;` came back as an element and an `&amp;` as a bare `&`. That text is now escaped with the function the collapsing path uses. The parser also drops a line feed right after `<pre>` or `<textarea>`, so text that starts the element with a line feed (comments before it, which the minifier leaves out, do not count) is written with one more in front of it, and a leading blank line survives the second parse.
-
-为 Base 的 HTML minifier 修了一处，已提交上游 longbridge/gpui-kit#3570：`TextView::html` 先压缩 HTML 再重新解析。`<pre>` 与 `<textarea>` 中的文本不折叠空白，minifier 原样写出解码后的文本，因此 `&lt;b&gt;` 这类转义标记会变回元素，`&amp;` 变回单独的 `&`。现在这段文本用折叠路径的同一函数转义。解析器还会丢掉紧跟 `<pre>` 或 `<textarea>` 的换行，因此以换行开头的首段文本（其前被 minifier 略去的注释不计）会在前面多写一个换行，开头的空行在第二次解析后得以保留。
-
 ## Explicit measured-list end requests (2026-10-18)
 
 The shell exposes `list.scroll_to_end(requestKey)` for an explicit local action such as an accepted message. A new non-null string scrolls once after applying the current item count; a stable key does not undo a later user scroll. Tail mode resumes following, while Normal mode only scrolls once. The request reuses the retained native list state and clears pending native scrolling before moving to the end. Native tests check row identity and in-row pixel offsets, including a final row taller than the viewport. The imported WebSocket header test prepares its script runtime before starting its existing bounded server wait, retaining all actual request-header assertions.
 
 shell 通过 `list.scroll_to_end(requestKey)` 表达消息受理等本地动作的滚动意图。新的非空字符串在应用当前条目数后滚动一次；相同键不会撤销用户之后的上滚。Tail 模式恢复跟随，Normal 模式只滚动一次。请求复用原生列表状态，先清除待执行的原生滚动。原生测试检查行身份和行内像素位置，包含末行高于视口的情况。导入的 WebSocket 请求头测试先准备脚本运行时，再开始原有的有界服务端等待，保留全部真实请求头断言。
+
+## Upstream synchronization (2026-10-20)
+
+Base and Shell now track official `main` revision `77ff6f794dca3bcee2e90977cedf12a64aed17e4`, after the `v0.8.0` tag. Both crates and all remaining Kit dependencies use 0.8.0 from that same Git revision. The bounded inventory contains 406 original files and retains the component-to-Base window-border mapping. Fast remains at 0.1.10 and support snapshots at 0.3.9. Shell's new Kit dependency keeps default features off and resolves to the single adapted Base through the Git source patch; Maka continues to register its own component catalog. QuickJS, its compatibility facade and LLRT retain their existing VM revisions.
+
+The four list/submit backports and HTML minifier fix now use upstream implementations, including the newer nested `<pre><code>` whitespace preservation. Full-cycle focus trapping, overscroll, input viewport fixes, source copying across styles and external-editor rendering are imported. Maka retains original input provenance, post-dispatch Tab defaults, exact IME slots, local themes, selection groups, retained hitbox geometry, context-menu custody, native cleanup and scoped Host ownership. Script placeholder updates and measured-list end requests remain because the new upstream APIs do not replace those behaviors.
+
+Immediate copying uses the upstream current snapshot and full-update revision guard. Its immutable copy projections belong to the existing per-hitbox contribution, including native retained translation and pruning; no parallel frame or copy registry is added. External-editor links use an explicit rendering source and ordinary native fragmented click targets, while TextView retains its original occurrence and admission owner.
+
+Base 与 Shell 更新到官方 `main` 固定版本 `77ff6f794dca3bcee2e90977cedf12a64aed17e4`，位于 `v0.8.0` 标签之后。两者及其余 Kit 依赖统一为同一 Git revision 的 0.8.0；有限来源清单包含 406 个原始文件，并保留 Component 到 Base 的 window-border 映射。Fast 保持 0.1.10，支持快照保持 0.3.9。Shell 新增的 Kit 依赖关闭默认 features，并通过 Git source patch 共用唯一适配 Base；Maka 继续注册自己的组件目录。QuickJS、兼容层及 LLRT 的 VM 固定版本不变。
+
+四项列表/提交回移及 HTML minifier 修复现采用上游实现，包含嵌套 `<pre><code>` 空白保留的新修复。引入完整一圈的 focus trap、overscroll、输入视口修复、跨样式源码复制及外部编辑器呈现。Maka 原输入来源、分发后的 Tab 默认行为、准确 IME 槽位、局部主题、选区分组、保留帧 hitbox 几何、菜单 custody、原生清理和 scoped Host owner 均保留。脚本占位文字更新及 measured-list 末尾请求仍使用原实现，因为新版上游 API 并不提供等价行为。
+
+即时复制采用上游当前 snapshot 与 full-update revision 检查；不可变复制投影附着既有的逐 hitbox contribution，共用原生保留帧平移和 pruning，不新增并行 frame 或复制 registry。外部编辑器链接使用明确的呈现来源与普通原生分片点击 target；TextView 保留其原 occurrence 和准入 owner。
 
 ## Scrollable with a maximum size (2026-10-20)
 

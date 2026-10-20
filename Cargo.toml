@@ -203,3 +203,6 @@ gpui-fast-macos = { path = "third-party/gpui-fast/crates/gpui_macos" }
 gpui-fast-windows = { path = "third-party/gpui-fast/crates/gpui_windows" }
 gpui-fast-linux = { path = "third-party/gpui-fast/crates/gpui_linux" }
 gpui-pre-scheduler = { path = "third-party/gpui-fast/crates/scheduler" }
+
+[patch."https://github.com/longbridge/gpui-kit"]
+gpui-base = { path = "third-party/gpui-kit/crates/base" }

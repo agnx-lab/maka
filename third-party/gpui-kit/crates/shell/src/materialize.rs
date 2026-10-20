@@ -389,6 +389,8 @@ struct Behavior {
     on_mouse_down_out: Option<CallbackId>,
     /// Wheel and trackpad scrolling over this element.
     on_scroll_wheel: Option<CallbackId>,
+    /// A pinch-to-zoom gesture over this element.
+    on_pinch: Option<CallbackId>,
     /// Handlers for named actions, one entry per action listened for.
     ///
     /// A list because an element that responds to actions usually responds to
@@ -597,6 +599,7 @@ impl Behavior {
             || !self.on_mouse_up.is_empty()
             || self.on_mouse_down_out.is_some()
             || self.on_scroll_wheel.is_some()
+            || self.on_pinch.is_some()
     }
 
     /// Whether focus or accessibility gave this element a reason to be
@@ -622,6 +625,7 @@ impl Behavior {
             || !self.on_mouse_up.is_empty()
             || self.on_mouse_down_out.is_some()
             || self.on_scroll_wheel.is_some()
+            || self.on_pinch.is_some()
             || !self.on_action.is_empty()
             || self.key_context.is_some()
             || self.window_control_area.is_some()
@@ -1851,6 +1855,15 @@ where
                 );
             });
         }
+        if let Some(callback) = behavior.on_pinch {
+            let runtime = Rc::downgrade(runtime);
+            let bounds = Rc::clone(&bounds);
+            element = element.on_pinch(move |event, window, cx| {
+                if let Some(runtime) = runtime.upgrade() {
+                    runtime.dispatch_pinch(callback, event, bounds.get(), window, cx);
+                }
+            });
+        }
     }
 
     // The context has to be installed before the listeners for the same reason
@@ -1995,6 +2008,7 @@ fn warn_unhonoured_input(component: &Component, behavior: &Behavior) {
         ("on_mouse_up", !behavior.on_mouse_up.is_empty()),
         ("on_mouse_down_out", behavior.on_mouse_down_out.is_some()),
         ("on_scroll_wheel", behavior.on_scroll_wheel.is_some()),
+        ("on_pinch", behavior.on_pinch.is_some()),
         ("on_action", !behavior.on_action.is_empty()),
         ("key_context", behavior.key_context.is_some()),
     ];
@@ -2158,6 +2172,7 @@ fn flex_element(
         && behavior.on_mouse_up.is_empty()
         && behavior.on_mouse_down_out.is_none()
         && behavior.on_scroll_wheel.is_none()
+        && behavior.on_pinch.is_none()
         && behavior.on_action.is_empty()
         && behavior.key_context.is_none()
         && !behavior.scroll_x
@@ -2616,6 +2631,7 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_mouse_up_middle" => behavior.on_mouse_up.push((MouseButton::Middle, *id)),
                 "on_mouse_down_out" => behavior.on_mouse_down_out = Some(*id),
                 "on_scroll_wheel" => behavior.on_scroll_wheel = Some(*id),
+                "on_pinch" => behavior.on_pinch = Some(*id),
                 "on_resize" => behavior.on_resize = Some(*id),
                 "on_change" => behavior.on_change = Some(*id),
                 "token" => behavior.token = Some(*id),

@@ -27,8 +27,15 @@ pub(super) const INLINE_CODE_PADDING: f32 = 4.;
 pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
-    text_view: Option<gpui::WeakEntity<super::TextViewState>>,
+    link_source: super::link::LinkSource,
+    /// The block editor leaf this flow renders (design D3): its fragments
+    /// and atoms are reported to the editor sink as pieces.
+    editor_key: Option<u64>,
 }
+
+/// Bytes an image or custom inline node occupies in an editor leaf (one
+/// U+FFFC).
+const EDITOR_ATOM_LEN: usize = '\u{FFFC}'.len_utf8();
 
 pub(super) type InlineRenderer = dyn Fn(&super::InlineRenderContext, &mut Window, &mut App) -> Option<super::InlineElement>
     + Send
@@ -58,6 +65,7 @@ pub(super) enum InlineFlowItem {
     Image {
         source: ImageSource,
         link: Option<LinkMark>,
+        title: SharedString,
         width: Option<DefiniteLength>,
         height: Option<DefiniteLength>,
     },
@@ -167,6 +175,7 @@ struct InlineFlowTypography {
 #[derive(Default)]
 struct InlineFlowLayout {
     fragments: Vec<PositionedFragment>,
+    empty_lines: Vec<(usize, Bounds<Pixels>)>,
     size: Size<Pixels>,
     wrap_width: Option<Pixels>,
 }
@@ -238,20 +247,33 @@ enum LineFragmentKind {
     Image,
 }
 
+/// Atom decorations are overlays so they remain visible over opaque content.
+pub(super) struct FlowPaintItem {
+    element: AnyElement,
+    background: Option<(Bounds<Pixels>, Hsla)>,
+    overlays: Vec<(Bounds<Pixels>, Hsla)>,
+}
+
 impl InlineFlow {
     pub(super) fn new(id: impl Into<ElementId>, items: Vec<InlineFlowItem>) -> Self {
         Self {
             id: id.into(),
             items,
-            text_view: None,
+            link_source: super::link::LinkSource::None,
+            editor_key: None,
         }
     }
 
-    pub(super) fn text_view(
-        mut self,
-        view: Option<gpui::WeakEntity<super::TextViewState>>,
-    ) -> Self {
-        self.text_view = view;
+    pub(super) fn editor_key(mut self, key: Option<u64>) -> Self {
+        if let Some(key) = key {
+            self.id = ("editor-leaf", key).into();
+        }
+        self.editor_key = key;
+        self
+    }
+
+    pub(super) fn link_source(mut self, source: super::link::LinkSource) -> Self {
+        self.link_source = source;
         self
     }
 
@@ -276,7 +298,7 @@ impl IntoElement for InlineFlow {
 
 #[derive(Default)]
 pub(crate) struct InlineFlowPrepaintState {
-    elements: Vec<(AnyElement, Option<(Bounds<Pixels>, gpui::Hsla)>)>,
+    elements: Vec<FlowPaintItem>,
     links: Vec<AnyElement>,
 }
 
@@ -437,6 +459,72 @@ impl Element for InlineFlow {
             .reduce(|found, next| if found.1 { found } else { next })
             .map(|(ix, _)| ix);
 
+        // Editor leaf byte offset where each item starts: text items count
+        // their bytes, images and custom nodes one U+FFFC.
+        let editor = self
+            .editor_key
+            .and_then(|key| super::editor_seam::current().map(|sink| (key, sink)));
+        // Ordinary TextViews do not allocate editor bookkeeping.
+        let item_starts: Vec<usize> = if let Some((key, sink)) = &editor {
+            sink.begin_pieces(*key);
+            let mut at = 0;
+            self.items
+                .iter()
+                .map(|item| {
+                    let start = at;
+                    at += match item {
+                        InlineFlowItem::Text { text, .. } => text.len(),
+                        _ => EDITOR_ATOM_LEN,
+                    };
+                    start
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if let Some((key, sink)) = &editor {
+            for (start, line_bounds) in &layout.empty_lines {
+                // Flow layout uses a one-byte object placeholder; the public
+                // leaf coordinate space uses the three-byte U+FFFC instead.
+                let mut flow_start = 0;
+                let mut leaf_start = 0;
+                for item in &self.items {
+                    let len = match item {
+                        InlineFlowItem::Text { text, .. } => text.len(),
+                        _ => IMAGE_LEN,
+                    };
+                    if flow_start + len > *start {
+                        break;
+                    }
+                    flow_start += len;
+                    leaf_start += match item {
+                        InlineFlowItem::Text { text, .. } => text.len(),
+                        _ => EDITOR_ATOM_LEN,
+                    };
+                }
+                sink.report_empty_piece(
+                    *key,
+                    leaf_start + start - flow_start,
+                    Bounds::new(bounds.origin + line_bounds.origin, line_bounds.size),
+                );
+            }
+        }
+        let decorations = editor.as_ref().map(|(key, sink)| sink.backgrounds(*key));
+        let report_box = |item_ix: usize, bounds: Bounds<Pixels>| {
+            let mut overlays = Vec::new();
+            if let Some((key, sink)) = &editor {
+                let start = item_starts[item_ix];
+                let end = start + EDITOR_ATOM_LEN;
+                sink.report_box_piece(*key, start..end, bounds);
+                for (range, color) in decorations.as_deref().unwrap_or_default() {
+                    if range.start < range.end && range.start < end && range.end > start {
+                        overlays.push((bounds, *color));
+                    }
+                }
+            }
+            overlays
+        };
+
         let mut text_fragment_count = 0;
         for (fragment_ix, fragment) in layout.fragments.iter().enumerate() {
             match fragment {
@@ -458,6 +546,8 @@ impl Element for InlineFlow {
                         continue;
                     };
                     let object_size = object.metrics.size;
+                    let overlays =
+                        report_box(*item_ix, Bounds::new(bounds.origin + *origin, object_size));
                     let mut element = InlineObject::new(
                         ("inline-object", *id),
                         text.clone(),
@@ -473,7 +563,7 @@ impl Element for InlineFlow {
                             size(bounds.size.width, selection_bounds.size.height),
                         ),
                     )
-                    .text_view(self.text_view.clone())
+                    .text_view(self.link_source.text_view().cloned())
                     .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + *origin,
@@ -484,12 +574,18 @@ impl Element for InlineFlow {
                         window,
                         cx,
                     );
-                    if let Some(id) = link.as_ref().and_then(|link| link.occurrence) {
-                        fragments
-                            .borrow_mut()
-                            .push((id, Bounds::new(bounds.origin + *origin, object_size)));
+                    if let Some(link) = link {
+                        fragments.borrow_mut().push(super::link::Fragment::new(
+                            link.clone(),
+                            accessibility_label.clone(),
+                            Bounds::new(bounds.origin + *origin, object_size),
+                        ));
                     }
-                    elements.push((element, None));
+                    elements.push(FlowPaintItem {
+                        element,
+                        background: None,
+                        overlays,
+                    });
                 }
                 PositionedFragment::Text {
                     item_ix,
@@ -539,7 +635,7 @@ impl Element for InlineFlow {
                     fragment_style.line_height = fragment_size.height.into();
                     fragment_style.white_space = WhiteSpace::Nowrap;
                     let mut element = Inline::new(state, links.clone(), highlights.clone())
-                        .text_view(self.text_view.clone())
+                        .link_source(self.link_source.clone())
                         .link_fragments(fragments.clone())
                         .selection_source(source_state.clone(), source_range.clone())
                         .range_backgrounds(slice_ranges(
@@ -555,6 +651,11 @@ impl Element for InlineFlow {
                                 .map(|reveal| reveal.clamp(source_range.start, source_range.end)),
                         )
                         .text_style(fragment_style.clone())
+                        .editor_piece(
+                            editor
+                                .as_ref()
+                                .map(|(key, _)| (*key, item_starts[*item_ix] + source_range.start)),
+                        )
                         .selection_bounds(Bounds::new(
                             point(bounds.left(), bounds.top() + selection_bounds.top()),
                             size(bounds.size.width, selection_bounds.size.height),
@@ -582,17 +683,29 @@ impl Element for InlineFlow {
                             },
                         );
                     });
-                    elements.push((element, background));
+                    elements.push(FlowPaintItem {
+                        element,
+                        background,
+                        overlays: Vec::new(),
+                    });
                 }
                 PositionedFragment::Image {
                     item_ix,
                     origin,
                     size: fragment_size,
                 } => {
-                    let InlineFlowItem::Image { source, link, .. } = &self.items[*item_ix] else {
+                    let InlineFlowItem::Image {
+                        source,
+                        link,
+                        title,
+                        ..
+                    } = &self.items[*item_ix]
+                    else {
                         continue;
                     };
                     let (origin, fragment_size) = (*origin, *fragment_size);
+                    let overlays =
+                        report_box(*item_ix, Bounds::new(bounds.origin + origin, fragment_size));
                     let mut element = Self::image_element(elements.len(), source, fragment_size);
                     element.prepaint_as_root(
                         bounds.origin + origin,
@@ -603,12 +716,18 @@ impl Element for InlineFlow {
                         window,
                         cx,
                     );
-                    if let Some(id) = link.as_ref().and_then(|link| link.occurrence) {
-                        fragments
-                            .borrow_mut()
-                            .push((id, Bounds::new(bounds.origin + origin, fragment_size)));
+                    if let Some(link) = link {
+                        fragments.borrow_mut().push(super::link::Fragment::new(
+                            link.clone(),
+                            title.clone(),
+                            Bounds::new(bounds.origin + origin, fragment_size),
+                        ));
                     }
-                    elements.push((element, None));
+                    elements.push(FlowPaintItem {
+                        element,
+                        background: None,
+                        overlays,
+                    });
                 }
             }
         }
@@ -619,7 +738,7 @@ impl Element for InlineFlow {
             .truncate(text_fragment_count);
 
         let fragments = std::mem::take(&mut *fragments.borrow_mut());
-        let links = super::link::targets(fragments, &self.text_view, window, cx);
+        let links = super::link::targets(fragments, &self.link_source, window, cx);
         InlineFlowPrepaintState { elements, links }
     }
 
@@ -634,8 +753,8 @@ impl Element for InlineFlow {
         cx: &mut App,
     ) {
         let preserve_selection = self
-            .text_view
-            .as_ref()
+            .link_source
+            .text_view()
             .and_then(gpui::WeakEntity::upgrade)
             .is_some_and(|view| view.read(cx).preserve_inline_selection);
         for item in &self.items {
@@ -647,11 +766,19 @@ impl Element for InlineFlow {
             }
         }
         let radius = crate::Theme::global(cx).tokens.radius.sm;
-        for (element, background) in &mut prepaint.elements {
+        for FlowPaintItem {
+            element,
+            background,
+            overlays,
+        } in &mut prepaint.elements
+        {
             if let Some((bounds, color)) = background {
                 window.paint_quad(gpui::fill(*bounds, *color).corner_radii(radius));
             }
             element.paint(window, cx);
+            for (bounds, color) in overlays {
+                window.paint_quad(gpui::fill(*bounds, *color));
+            }
         }
         for link in &mut prepaint.links {
             link.paint(window, cx);
@@ -861,6 +988,7 @@ fn layout_measured_flow(
     let line_ranges = line_ranges(items, image_sizes, &objects, text_style, wrap_width, window);
     let font_size = text_style.font_size.to_pixels(rem_size);
     let mut fragments = Vec::new();
+    let mut empty_lines = Vec::new();
     let mut max_width = Pixels::ZERO;
     let mut y = Pixels::ZERO;
 
@@ -1006,6 +1134,15 @@ fn layout_measured_flow(
             item_start = item_end;
         }
 
+        if line_range.is_empty() {
+            empty_lines.push((
+                line_range.start,
+                Bounds::new(
+                    point(Pixels::ZERO, y),
+                    size(Pixels::ZERO, line_ascent + line_descent),
+                ),
+            ));
+        }
         let mut x = Pixels::ZERO;
         for mut fragment in line_fragments {
             // Give a text run's glyph box equal leading on both sides, as
@@ -1075,6 +1212,7 @@ fn layout_measured_flow(
 
     InlineFlowLayout {
         fragments,
+        empty_lines,
         size: size(max_width, y),
         wrap_width,
     }
@@ -1155,6 +1293,10 @@ fn line_ranges(
     let mut ranges = Vec::new();
 
     for hard_line in hard_lines {
+        if hard_line.is_empty() {
+            ranges.push(hard_line);
+            continue;
+        }
         let mut item_start = 0;
         let mut wrap_fragments = Vec::new();
         for (ix, item) in items.iter().enumerate() {

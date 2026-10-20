@@ -1,7 +1,7 @@
 [package]
 name = "gpui-shell"
 description = "A scriptable application runtime for GPUI, built on gpui-base."
-version = "0.7.3"
+version = "0.8.0"
 keywords = ["desktop", "gpui", "javascript", "runtime"]
 license = "Apache-2.0"
 publish = false
@@ -26,6 +26,7 @@ gpui-fast = [
     "dep:gpui-fast-platform",
     "gpui-base/gpui-fast",
     "gpui-fps/gpui-fast",
+    "gpui-kit/gpui-fast",
 ]
 default = ["gpui-fast", "quickjs"]
 quickjs = [
@@ -58,7 +59,7 @@ version = "=0.3.9"
 
 [dependencies.gpui-fast]
 package = "gpui-fast"
-version = "0.1.7"
+version = "=0.1.10"
 features = ["windows-manifest-provided-by-host"]
 optional = true
 
@@ -69,7 +70,7 @@ features = ["font-kit", "x11", "wayland", "runtime_shaders"]
 
 [dependencies.gpui-fast-platform]
 package = "gpui-fast-platform"
-version = "0.1.7"
+version = "=0.1.10"
 features = ["font-kit", "x11", "wayland", "runtime_shaders"]
 optional = true
 
@@ -79,7 +80,12 @@ features = ["inspector"]
 
 [dependencies.gpui-fps]
 git = "https://github.com/longbridge/gpui-kit"
-rev = "c5f8eca4a0759f8c0c7ed624eddfd03f1c93a5f2"
+rev = "77ff6f794dca3bcee2e90977cedf12a64aed17e4"
+
+[dependencies.gpui-kit]
+git = "https://github.com/longbridge/gpui-kit"
+rev = "77ff6f794dca3bcee2e90977cedf12a64aed17e4"
+default-features = false
 
 [dependencies.image]
 version = "0.25"
@@ -172,7 +178,7 @@ features = ["test-support"]
 
 [dev-dependencies.gpui-fast]
 package = "gpui-fast"
-version = "0.1.7"
+version = "=0.1.10"
 features = ["windows-manifest-provided-by-host", "test-support"]
 
 [dev-dependencies.gpui-base]
@@ -182,7 +188,10 @@ features = ["test-support"]
 [lints]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("components"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("components", "webview"))'] }
+
+[package.metadata.cargo-machete]
+ignored = ["gpui-kit"]
 
 [lints.clippy]
 almost_complete_range = "allow"
