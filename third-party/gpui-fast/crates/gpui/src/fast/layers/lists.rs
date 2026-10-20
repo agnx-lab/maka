@@ -1214,14 +1214,24 @@ fn carry_paint_rows(window: &mut Window, id: &GlobalElementId) {
     let carried = frame.carried.clone();
     let leaving = frame.leaving.clone();
     let (translation, viewport) = (frame.translation, frame.viewport);
+    let last_translation = layer.rows.last_translation;
     let mut rows = mem::take(&mut layer.rows.rows);
     for ix in &carried {
         let Some(row) = rows.get_mut(ix) else {
             continue;
         };
         let delta = row.delta(translation, scale_factor);
+        // The rendered frame holds the row's debug bounds where it showed.
+        let scrolled = last_translation.map_or(delta, |last| delta - row.delta(last, scale_factor));
         let element_states = !row.dropped && !leaving.contains(ix);
-        row.paint = reuse::carry_paint_records(window, &row.paint, delta, viewport, element_states);
+        row.paint = reuse::carry_paint_records(
+            window,
+            &row.paint,
+            delta,
+            scrolled,
+            viewport,
+            element_states,
+        );
     }
     if let Some(layer) = window.fast_layers.layers.get_mut(id) {
         layer.rows.rows = rows;
@@ -1630,6 +1640,9 @@ fn drawn_alike(a: &Row, b: &Row) -> bool {
                     size: bounds.size,
                 }),
                 PaintOperation::EndLayer => PaintOperation::EndLayer,
+                PaintOperation::FastRoundedClip(clip) => {
+                    PaintOperation::FastRoundedClip(clip.translated(to_row))
+                }
             })
             .collect();
         let (tiles, _) = part_tile_hashes(&operations, paint::TILE_SIZE);
@@ -2834,6 +2847,7 @@ pub(crate) fn end_paint_rows(window: &mut Window, cx: &mut App, id: Option<&Glob
                 PaintOperation::Primitive(primitive) => move_primitive(primitive, to_content),
                 PaintOperation::StartLayer(bounds) => bounds.origin = bounds.origin + to_content,
                 PaintOperation::EndLayer => {}
+                PaintOperation::FastRoundedClip(clip) => *clip = clip.translated(to_content),
             }
         }
         let (row_operations, overlay, whole) =

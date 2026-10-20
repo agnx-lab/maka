@@ -334,7 +334,7 @@ GPUI Fast platform source (adapted, Apache License 2.0)
 
 third-party/gpui-fast contains five crates from
 https://github.com/longbridge/gpui-fast at revision
-8e1e1987fdb512bb8b0ab27261906a598aff2ab8.
+b836dd970b26830f2124b7cf91b0e19018fd12da.
 Copyright 2022 - 2025 Zed Industries, Inc.
 Original license texts, finite file provenance and modifications are recorded in
 third-party/gpui-fast/{LICENSE,LICENSE-APACHE,upstream.json,SOURCE.md}.
