@@ -147,7 +147,8 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         }).await.expect("the UI did not cancel its original execution");
         drop(request);
         fixture.idle(&client, &created_id).await;
-        let stopped = wait_view(&mut view, |screen| screen.contains("Stopped") && screen.contains("Enter sends") && !screen.contains("Preparing tool") && !screen.contains("Running tool")).await;
+        let stopped = wait_view(&mut view, |screen| screen.contains("Stopped") && screen.contains("REAL_WORKBENCH_RUN_TO_STOP") && screen.contains("Enter sends") && !screen.contains("Preparing tool") && !screen.contains("Running tool")).await;
+        assert_eq!(stopped.matches("REAL_WORKBENCH_RUN_TO_STOP").count(), 1);
         evidence("workbench-stopped-clears-tool-input", &stopped);
         support::evidence_cells("workbench-stopped-clears-tool-input", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
@@ -219,7 +220,26 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             .collect::<Vec<_>>()
             .join("\n");
         request.thinking(&thinking).await;
-        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL")).await;
+        let grouped = wait_view(&mut view, |screen| screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
+        evidence("standard-live-group-collapsed", &grouped);
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| screen.contains("On completion") && screen.contains("Verbose")).await;
+        support::click_text(&mut view, "Compact");
+        let compact = wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("Analyzing the request") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
+        evidence("compact-live-process", &compact);
+        support::click_text(&mut view, "Detailed");
+        let detailed = wait_view(&mut view, |screen| screen.contains("Details · Detailed") && screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && !screen.contains("Analyzing the request")).await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
+        evidence("detailed-live-flat-process", &detailed);
+        support::click_text(&mut view, "Verbose");
+        wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && !screen.contains("Analyzing the request")).await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
+        support::click_text(&mut view, "Standard");
+        wait_view(&mut view, |screen| screen.contains("Details · Standard") && screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| !screen.contains("On completion")).await;
+        support::click_text(&mut view, "Analyzing the request");
+        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST")).await;
         support::click_text(&mut view, "◇ Think · NATIVE_THINK_SOURCE_FIRST");
         // Either end of the actual expanded source must paint before keyboard scrolling.
         wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_01") || screen.contains("NATIVE_THINK_SOURCE_62")).await;
@@ -301,10 +321,18 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let arguments = tool_input.to_string();
         let prefix = "{\"todos\":[";
         let suffix = arguments.strip_prefix(prefix).unwrap();
+        request.delta("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS").await;
+        // A reply closes only this contiguous process segment. The same native
+        // source reader stays at its original row while later work gets a group.
+        let cut = wait_view(&mut view, |screen| at_source_start(screen) && screen.contains("1 thought") && screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
+        assert_eq!(cut.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(source_row));
+        evidence("intermediate-response-cuts-process-group", &cut);
+        support::evidence_cells("intermediate-response-cuts-process-group", &view);
         request.tool_prefix("todo_write", prefix).await;
-        // The held SSE cannot finish its call until the actual native header
-        // paints the original argument prefix, without moving the source reader.
-        let preparing = wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(header_row).is_some_and(|line| line.contains("Preparing tool · todo_write") && line.contains(prefix))).await;
+        // Navigation selects the new source-backed segment. It cannot finish
+        // its call until the actual native header paints the exact prefix.
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
+        let preparing = wait_view(&mut view, |screen| screen.contains("Preparing tool · todo_write") && screen.contains(prefix)).await;
         let pending = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let pending_history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":pending["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         assert!(pending_history["chunks"].as_array().unwrap().iter().all(|chunk| chunk["tool"]["call"]["name"] != "todo_write"), "an unfinished argument prefix must not become a canonical tool call");
@@ -347,15 +375,60 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         evidence("committed", &committed);
         support::evidence_cells("committed", &view);
 
-        // Reopening restores the measured source tail before a native Home.
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| screen.contains("On completion")).await;
+        support::click_text(&mut view, "Compact");
+        wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("› Completed") && !screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
+        support::click_text(&mut view, "Detailed");
+        wait_view(&mut view, |screen| screen.contains("Details · Detailed") && screen.contains("› Completed")).await;
+        support::click_text(&mut view, "Next input");
+        let deferred = wait_view(&mut view, |screen| screen.contains("⌃ Completed") && screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1).await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
+        evidence("detailed-next-input-keeps-completed-process-flat", &deferred);
+        support::click_text(&mut view, "Details ·");
+        shortcut(&mut view, 'l');
+        view.handle_event(Event::Paste("NEXT_INPUT_FOLDS_PREVIOUS_PROCESS".into()));
+        support::wait_draft(&client, &fixture.session, "NEXT_INPUT_FOLDS_PREVIOUS_PROCESS").await;
+        support::click_text(&mut view, "Send");
+        let mut next = fixture.next_request().await;
+        let next_input = wait_view(&mut view, |screen| screen.contains("NEXT_INPUT_FOLDS_PREVIOUS_PROCESS") && screen.contains("› Completed") && !screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
+        evidence("next-input-folds-previous-process", &next_input);
+        next.delta("SECOND_POLICY_TURN_FINAL").await;
+        next.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        wait_view(&mut view, |screen| screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
+
+        // This older group is now closed: each manual opening starts at the
+        // top. The row's small disclosure state still belongs to its source id.
         support::click_text(&mut view, "› Completed");
-        support::focus_activity(&mut view).await;
-        wait_view(&mut view, |screen| screen.contains("⌃ Completed") && screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED") && screen.contains("> todo_write")).await;
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("1 thought")).await;
+        support::click_text(&mut view, "1 thought");
         let reopened = wait_view(&mut view, &at_source_start).await;
-        evidence("completed-activity-source-reopened", &reopened);
-        support::evidence_cells("completed-activity-source-reopened", &view);
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 18);
+        evidence("completed-activity-source-reopened-at-top", &reopened);
+        support::evidence_cells("completed-activity-source-reopened-at-top", &view);
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| screen.contains("Verbose") && screen.contains("Next input")).await;
+        support::click_text(&mut view, "Compact");
+        let compact_settled = wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("◇ Think") && !screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && screen.matches("NATIVE_THINK_SOURCE_FIRST").count() == 1).await;
+        evidence("compact-settled-thinking-without-preview", &compact_settled);
+        support::click_text(&mut view, "Standard");
+        wait_view(&mut view, |screen| screen.contains("Details · Standard") && at_source_start(screen)).await;
+        support::click_text(&mut view, "Detailed");
+        wait_view(&mut view, |screen| screen.contains("Details · Detailed") && at_source_start(screen)).await;
+        support::click_text(&mut view, "Verbose");
+        wait_view(&mut view, |screen| screen.contains("Details · Verbose")).await;
+        support::click_text(&mut view, "Details ·");
+        shortcut(&mut view, 'l');
+        let verbose = wait_view(&mut view, |screen| screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS") && screen.contains("> todo_write") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
+        evidence("verbose-settled-process-flat", &verbose);
+        view.load(Bundle::source(maka_terminal_shell::APPLICATION.into()).into()).unwrap();
+        let persisted = wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| screen.contains("Fold:")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "Fold work details: Next input" && node.state.selected));
+        evidence("process-policy-survives-reload", &persisted);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 19);
         assert!(client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().is_empty());
         drop(view);
         bindings.close().await.unwrap();
@@ -497,6 +570,8 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let result = history["chunks"].as_array().unwrap().iter()
             .find(|chunk| chunk["tool"]["result"]["image"] == true).unwrap()["tool"]["result"]["position"].clone();
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        terminal.wait_for("Details · Standard").await;
+        terminal.send(b"\x1b[1;3B");
         terminal.wait_for("> Read").await;
         terminal.click_text("> Read");
         let inline = terminal.wait_for("Open image · 192 × 128").await;

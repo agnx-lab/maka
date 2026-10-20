@@ -30,6 +30,7 @@ import { Palette } from './Palette';
 import type { PaletteEntry, PaletteKind } from './Palette';
 import { InteractionPanel } from './InteractionPanel';
 import { ImageViewer, type ImagePreview } from './ToolImage';
+import { createPresentationSettings } from './presentation';
 import logo from './assets/maka.png';
 
 type Overlay = { instance: number } & (
@@ -39,6 +40,7 @@ type Overlay = { instance: number } & (
 );
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
+  const presentation = createPresentationSettings();
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
   const recent = signal<any[]>([]);
@@ -423,6 +425,7 @@ function App() {
         {(id) => (
           <Conversation
             client={host.session(id())}
+            presentation={presentation}
             control={control}
             commands={inputAction(open, { kind: 'commands', sessionId: id() })}
             models={inputAction(open, { kind: 'models', sessionId: id() })}

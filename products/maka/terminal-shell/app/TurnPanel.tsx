@@ -24,116 +24,205 @@ import type { AnimatedValue } from 'nsh/animated';
 import { List } from 'nsh/list';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
+import type { ProcessGroup, TurnPresentation } from './processGroups';
+import type { PresentationPolicy } from './presentation';
 import { C } from './ui';
 import type { ImagePreview } from './ToolImage';
-import { toolActivitySummary } from './toolActivity';
-import type { ToolActivity } from './toolActivity';
+import { toolActivitySummary, type ToolActivity } from './toolActivity';
 
-// These are presentation items over the canonical history, not a second transcript.
-export type TurnItem = {
-  kind: 'turn';
-  key: string;
-  turnId: string;
-  rows: Row[];
-  timing: any;
-  active: boolean;
-  completed: boolean;
-};
-export type TranscriptItem = TurnItem | { kind: 'message'; key: string; row: Row };
 export type LiveActivity = {
   kind: 'working' | 'thinking' | 'response' | 'waiting';
   detail: string;
+  rowId?: string;
 };
 export type TurnViewState = {
-  expanded: ReturnType<typeof signal<{ open: boolean; completed: boolean } | null>>;
+  expanded: ReturnType<typeof signal<{ open: boolean; answerKey: string | undefined } | null>>;
+};
+export type GroupViewState = {
+  open: ReturnType<typeof signal<boolean>>;
+  following: ReturnType<typeof signal<boolean>>;
   offset: AnimatedValue;
-  rows: Map<string, MessageViewState>;
-  visited: boolean;
+  measured: Map<string, { width: number; height: number }>;
   lease: number;
+  opening?: 'top' | 'bottom';
   list?: YNode;
   requestFocus?: boolean;
 };
 
+export function turnOutcome(turn: TurnPresentation): string | null {
+  return turn.finalOutputIds.length > 0 ? 'completed' : (turn.timing?.finished?.outcome ?? null);
+}
+
+function duration(turn: TurnPresentation, now?: number): string {
+  const start = turn.timing?.startedAt;
+  const end = turn.timing?.finished?.at ?? now;
+  if (start == null || end == null || end < start) return '';
+  const seconds = Math.floor((end - start) / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+export function TurnSummary(props: {
+  turn: () => TurnPresentation;
+  expanded: () => boolean;
+  canFold: () => boolean;
+  toggle(open: boolean): void;
+}) {
+  const label = () => {
+    const outcome = turnOutcome(props.turn());
+    return outcome === 'completed'
+      ? 'Completed'
+      : outcome === 'failed'
+        ? 'Failed'
+        : outcome === 'aborted'
+          ? 'Stopped'
+          : 'Activity';
+  };
+  const choose = (action: { turnId: string; answerKey: string | undefined; open: boolean }) => {
+    const turn = props.turn();
+    if (turn.turnId === action.turnId && turn.answerKey === action.answerKey && props.canFold())
+      props.toggle(action.open);
+  };
+  return (
+    <Button
+      accessibilityLabel="Turn work details"
+      disabled={!props.canFold()}
+      selected={props.expanded()}
+      onPress={inputAction(choose, {
+        turnId: props.turn().turnId,
+        answerKey: props.turn().answerKey,
+        open: !props.expanded(),
+      })}
+      style={{ height: 16, flexDirection: 'row', marginTop: 16 }}
+      hoverStyle={{ backgroundColor: C.surface }}
+      focusStyle={{ backgroundColor: C.raised }}
+      activeStyle={{ backgroundColor: C.line }}
+    >
+      <Text
+        numberOfLines={1}
+        style={{ flex: 1, color: turnOutcome(props.turn()) === 'failed' ? C.danger : C.muted }}
+      >
+        {props.canFold() ? (props.expanded() ? '⌃ ' : '› ') : ''}
+        {label()}
+      </Text>
+      <If when={turnOutcome(props.turn()) === 'completed'}>
+        <Text style={{ color: C.muted }}>{duration(props.turn())}</Text>
+      </If>
+    </Button>
+  );
+}
+
+function stableActivityTitle(desiredTitle: () => string, active: () => boolean) {
+  let presentedTitle = desiredTitle();
+  let presentedAt = Date.now();
+  const stableTitle = signal(presentedTitle);
+  effect(() => {
+    const desired = desiredTitle();
+    if (desired === presentedTitle) return;
+    const remaining = active() ? 150 - (Date.now() - presentedAt) : 0;
+    const commit = () => {
+      presentedTitle = desiredTitle();
+      presentedAt = Date.now();
+      stableTitle.set(presentedTitle);
+    };
+    if (remaining <= 0) commit();
+    else {
+      const timer = setTimeout(commit, remaining);
+      cleanup(() => clearTimeout(timer));
+    }
+  });
+  return stableTitle;
+}
+
+export function ActivityStatus(props: { title: () => string; active: () => boolean }) {
+  const title = stableActivityTitle(props.title, props.active);
+  return (
+    <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: C.secondary }}>
+      {title()}
+    </Text>
+  );
+}
+
 function ActivityLog(props: {
-  turn: () => TurnItem;
-  state: TurnViewState;
+  group: () => ProcessGroup;
+  row(id: string): Row | undefined;
+  rowState(id: string): MessageViewState;
+  reasoningPreview(id: string): boolean;
+  state: GroupViewState;
   sessionId: string;
   through: () => number;
   viewport: () => { width: number; height: number };
   previewImage(image: ImagePreview): void;
+  reading(away: boolean): void;
 }) {
   const state = props.state;
-  const stateKey = (row: Row) => (row.tool ? row.key : `${row.messageId}/${row.field}`);
-  const rowState = (row: Row) => {
-    const key = stateKey(row);
-    let value = state.rows.get(key);
-    if (!value) {
-      value = { expanded: signal(false), sourceMode: signal(false) };
-      state.rows.set(key, value);
-    }
-    return value;
-  };
-  const rowsByKey = computed(() => new Map(props.turn().rows.map((row) => [row.key, row])));
-  const rowKeys = computed(() => props.turn().rows.map((row) => row.key));
-  const initial = signal<{ y: number } | null>(null);
-  const bodyHeight = () => {
-    const columns = Math.max(1, Math.floor(props.viewport().width / 8) - 4);
-    const estimated = props
-      .turn()
-      .rows.reduce(
-        (lines, row) =>
-          lines +
-          (row.tool || row.role === 'thinking'
-            ? 1
-            : Math.max(2, Math.ceil(row.text.length / columns) + 1)),
-        0,
-      );
-    const available = Math.max(16, props.viewport().height - 80);
-    return Math.min(352, available, Math.max(128, estimated * 16));
-  };
-  const error = signal('');
   const lease = ++state.lease;
+  const initial = signal<{ y: number } | null>(null);
+  const measurements = signal(0);
+  const error = signal('');
+  const opening = state.opening;
+  state.opening = undefined;
   let ownList: YNode | undefined;
   let alive = true;
   cleanup(() => {
     alive = false;
     if (state.list === ownList) state.list = undefined;
   });
-  // Read before binding the new Scroll: its first layout would overwrite the gauge.
-  // The same object is then retained for this mount, so later renders never reset a user's scroll.
-  void state.offset
-    .getValue()
-    .then((y) => {
-      if (alive && lease === state.lease) {
-        // Tool source pages are loaded on demand and are not retained across mounts.
-        // Their shorter loading view cannot restore a previous source offset.
-        const sourceReloads = props
-          .turn()
-          .rows.some((row) => row.tool && state.rows.get(stateKey(row))?.expanded());
-        initial.set({ y: sourceReloads ? 0 : y });
-      }
-    })
-    .catch((reason) => {
-      if (alive) error.set(String(reason));
-    });
+  // Native cell measurements fit short groups. Unmeasured cells start at the
+  // one-line row minimum; text length never acts as a layout authority.
+  const bodyHeight = () => {
+    measurements();
+    const viewport = props.viewport();
+    const cap = Math.max(16, Math.min(400, Math.floor(viewport.height / 32) * 16));
+    const measured = props.group().rowIds.reduce((height, id) => {
+      const row = state.measured.get(id);
+      return height + (row?.width === viewport.width ? row.height : 16);
+    }, 0);
+    return Math.min(cap, Math.max(16, measured));
+  };
+  // Read before binding: the new List's first layout writes its scroll gauge.
+  if (opening) initial.set({ y: 0 });
+  else
+    void state.offset
+      .getValue()
+      .then((y) => {
+        if (alive && lease === state.lease) {
+          // Mount-owned tool loaders read again. Their temporary loading view
+          // cannot restore an offset from a previous, much taller source body.
+          const reloading = props
+            .group()
+            .rowIds.some((id) => props.row(id)?.tool && props.rowState(id).expanded());
+          if (reloading) state.following.set(false);
+          initial.set({ y: reloading ? 0 : y });
+        }
+      })
+      .catch((reason) => {
+        if (alive) error.set(String(reason));
+      });
   return (
     <View style={{ height: bodyHeight() }}>
       <If when={initial()}>
         <List
           accessibilityLabel="Turn activity"
-          each={rowKeys()}
+          each={props.group().rowIds}
           estimatedItemSize={16}
           scrollValue={state.offset}
           contentOffset={initial()!}
-          maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 16 }}
+          maintainVisibleContentPosition={
+            state.following() ? { autoscrollToBottomThreshold: 16 } : {}
+          }
+          showsIndicator={true}
+          onScroll={(event) => {
+            if (!alive || lease !== state.lease) return;
+            const away = event.y < Math.max(0, event.contentHeight - event.height) - 1;
+            state.following.set(!away);
+            props.reading(away);
+          }}
           contentStyle={{ paddingRight: 8 }}
           ref={(node) => {
             ownList = node;
             state.list = node;
-            if (!state.visited) {
-              state.visited = true;
-              node.scrollToEnd({ animated: false });
-            }
+            if (opening === 'bottom') node.scrollToEnd({ animated: false });
+            else if (opening === 'top') node.scrollToOffset({ offset: 0, animated: false });
             if (state.requestFocus) {
               state.requestFocus = false;
               node.focus();
@@ -141,25 +230,49 @@ function ActivityLog(props: {
           }}
           style={{ height: bodyHeight() }}
         >
-          {(key) => (
-            <Each of={[key()]} key={(id: string) => id}>
-              {(ownedKey) => {
-                const initial = rowsByKey().get(ownedKey());
-                if (!initial) return <View />;
+          {(id) => (
+            <Each of={[id()]} key={(key: string) => key}>
+              {(ownedId) => {
+                const first = props.row(ownedId());
+                if (!first) return <View />;
                 return (
-                  <MessageRow
-                    item={() => rowsByKey().get(ownedKey()) ?? initial}
-                    viewState={rowState(initial)}
-                    sessionId={props.sessionId}
-                    through={props.through}
-                    previewImage={props.previewImage}
-                    onExpand={(key) => {
-                      if (!alive || !ownList) return;
-                      const index = rowKeys().indexOf(key);
-                      if (index >= 0)
-                        ownList.scrollToIndex({ index, viewPosition: 0, animated: false });
+                  <View
+                    onLayout={(frame) => {
+                      if (
+                        !alive ||
+                        lease !== state.lease ||
+                        !props.group().rowIds.includes(ownedId())
+                      )
+                        return;
+                      const width = props.viewport().width;
+                      const old = state.measured.get(ownedId());
+                      if (
+                        frame.height > 0 &&
+                        (!old || old.width !== width || old.height !== frame.height)
+                      ) {
+                        state.measured.set(ownedId(), { width, height: frame.height });
+                        measurements.set(measurements() + 1);
+                      }
                     }}
-                  />
+                  >
+                    <MessageRow
+                      item={() => props.row(ownedId()) ?? first}
+                      ownerKey={ownedId}
+                      viewState={props.rowState(ownedId())}
+                      reasoningPreview={() => props.reasoningPreview(ownedId())}
+                      sessionId={props.sessionId}
+                      through={props.through}
+                      previewImage={props.previewImage}
+                      onExpand={(key) => {
+                        if (!alive || !ownList) return;
+                        state.following.set(false);
+                        props.reading(true);
+                        const index = props.group().rowIds.indexOf(key);
+                        if (index >= 0)
+                          ownList.scrollToIndex({ index, viewPosition: 0, animated: false });
+                      }}
+                    />
+                  </View>
                 );
               }}
             </Each>
@@ -174,111 +287,89 @@ function ActivityLog(props: {
 }
 
 export function TurnPanel(props: {
-  turn: () => TurnItem;
+  group: () => ProcessGroup;
+  turn: () => TurnPresentation;
   toolActivity: () => ToolActivity | undefined;
-  state: TurnViewState;
+  state: GroupViewState;
+  policy: () => PresentationPolicy;
+  row(id: string): Row | undefined;
+  rowState(id: string): MessageViewState;
+  reasoningPreview(id: string): boolean;
   sessionId: string;
   through: () => number;
   viewport: () => { width: number; height: number };
-  trajectory: () => boolean;
   activity: () => LiveActivity;
-  reveal: () => void;
+  reveal(): void;
   previewImage(image: ImagePreview): void;
+  reading(away: boolean): void;
 }) {
-  const active = computed(
-    () => props.turn().active && !props.turn().completed && !props.turn().timing?.finished,
-  );
-  const timing = computed(() => props.turn().timing);
-  const startedAt = computed(() => timing()?.startedAt ?? null);
-  const outcome = computed(() =>
-    props.turn().completed ? 'completed' : (timing()?.finished?.outcome ?? null),
-  );
+  const active = () =>
+    props.turn().active &&
+    turnOutcome(props.turn()) === null &&
+    (!props.group().closed || props.toolActivity() !== undefined);
   const clock = signal(Date.now());
-  const expanded = () => {
-    const chosen = props.state.expanded();
-    if (chosen && chosen.completed === props.turn().completed) return chosen.open;
-    return props.trajectory() || active() || outcome() !== 'completed';
-  };
-  const setExpanded = (action: {
-    sessionId: string;
-    key: string;
-    turnId: string;
-    completed: boolean;
-    open: boolean;
-  }) => {
-    const turn = props.turn();
-    if (
-      action.sessionId !== props.sessionId ||
-      action.key !== turn.key ||
-      action.turnId !== turn.turnId ||
-      action.completed !== turn.completed ||
-      turn.rows.length === 0
-    )
-      return;
-    props.state.expanded.set({ open: action.open, completed: action.completed });
-    if (action.open) props.reveal();
-  };
   effect(() => {
-    if (!active() || startedAt() === null) return;
+    if (!active() || props.turn().timing?.startedAt == null) return;
     const timer = setInterval(() => clock.set(Date.now()), 1000);
     cleanup(() => clearInterval(timer));
   });
-  const duration = () => {
-    if (startedAt() === null) return '';
-    const end = timing()?.finished?.at ?? (active() ? clock() : null);
-    if (end === null || end < startedAt()) return '';
-    const seconds = Math.floor((end - startedAt()) / 1000);
-    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const counts = () => {
+    const thoughts = props
+      .group()
+      .rowIds.filter((id) => props.row(id)?.field === 'thinking').length;
+    const tools = props.group().toolIds.length;
+    return (
+      [
+        thoughts ? `${thoughts} thought${thoughts === 1 ? '' : 's'}` : '',
+        tools ? `${tools} tool${tools === 1 ? '' : 's'}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ') || 'Process'
+    );
   };
   const desiredTitle = computed(() => {
-    if (!active())
-      return outcome() === 'completed'
-        ? 'Completed'
-        : outcome() === 'failed'
-          ? 'Failed'
-          : outcome() === 'aborted'
-            ? 'Stopped'
-            : 'Activity';
+    if (!active()) return counts();
     const activity = props.activity();
     if (activity.kind === 'waiting') return 'Waiting for your response';
     const tool = props.toolActivity();
-    if (tool) return toolActivitySummary(tool);
-    if (activity.kind === 'response') return 'Writing response';
-    if (activity.kind !== 'thinking') return 'Working…';
-    return `Analyzing the request${activity.detail ? ` · ${activity.detail}` : ''}`;
+    if (tool)
+      return toolActivitySummary(
+        props.policy().liveProcessDetail ? tool : { ...tool, title: undefined, detail: '' },
+      );
+    if (
+      activity.kind === 'thinking' &&
+      activity.rowId &&
+      props.group().rowIds.includes(activity.rowId)
+    )
+      return `Analyzing the request${props.policy().liveProcessDetail && activity.detail ? ` · ${activity.detail}` : ''}`;
+    return 'Working…';
   });
-  let presentedTitle = desiredTitle();
-  let presentedAt = Date.now();
-  const stableTitle = signal(presentedTitle);
-  effect(() => {
-    const desired = desiredTitle();
-    const running = active();
-    if (desired === presentedTitle) return;
-    const remaining = running ? 150 - (Date.now() - presentedAt) : 0;
-    const commit = () => {
-      presentedTitle = desiredTitle();
-      presentedAt = Date.now();
-      stableTitle.set(presentedTitle);
-    };
-    if (remaining <= 0) commit();
-    else {
-      // New deltas keep the same deadline; a busy stream cannot postpone the title forever.
-      const timer = setTimeout(commit, remaining);
-      cleanup(() => clearTimeout(timer));
+  const stableTitle = stableActivityTitle(desiredTitle, active);
+  const choose = (action: { sessionId: string; key: string; open: boolean }) => {
+    if (
+      action.sessionId !== props.sessionId ||
+      action.key !== props.group().key ||
+      !props.group().rowIds.length
+    )
+      return;
+    if (action.open) {
+      props.state.opening = props.group().closed ? 'top' : 'bottom';
+      props.state.following.set(!props.group().closed);
     }
-  });
-  const summary = () => (active() ? stableTitle() : desiredTitle());
+    props.reading(action.open && props.group().closed);
+    props.state.open.set(action.open);
+    if (action.open) props.reveal();
+  };
   return (
     <View style={{ paddingVertical: 16, gap: 0 }}>
       <Button
-        disabled={props.turn().rows.length === 0}
-        selected={expanded()}
-        onPress={inputAction(setExpanded, {
+        accessibilityLabel="Process group"
+        disabled={props.group().rowIds.length === 0}
+        selected={props.state.open()}
+        onPress={inputAction(choose, {
           sessionId: props.sessionId,
-          key: props.turn().key,
-          turnId: props.turn().turnId,
-          completed: props.turn().completed,
-          open: !expanded(),
+          key: props.group().key,
+          open: !props.state.open(),
         })}
         style={{ height: 16, flexDirection: 'row' }}
         hoverStyle={{ backgroundColor: C.surface }}
@@ -288,37 +379,17 @@ export function TurnPanel(props: {
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"
-          style={{
-            flex: 1,
-            color: outcome() === 'failed' ? C.danger : active() ? C.secondary : C.muted,
-          }}
+          style={{ flex: 1, color: active() ? C.secondary : C.muted }}
         >
-          {props.turn().rows.length ? (expanded() ? '⌃ ' : '› ') : active() ? '… ' : '✓ '}
-          {summary()}
+          {props.group().rowIds.length ? (props.state.open() ? '⌃ ' : '› ') : '… '}
+          {active() ? stableTitle() : desiredTitle()}
         </Text>
-        <If when={!expanded()}>
-          <Text style={{ color: C.muted }}>{duration()}</Text>
+        <If when={active()}>
+          <Text style={{ color: C.muted }}>{duration(props.turn(), clock())}</Text>
         </If>
       </Button>
-      <If when={expanded() && props.turn().rows.length > 0}>
-        <ActivityLog
-          turn={props.turn}
-          state={props.state}
-          sessionId={props.sessionId}
-          through={props.through}
-          viewport={props.viewport}
-          previewImage={props.previewImage}
-        />
-        <Text
-          style={{
-            color: active() ? C.accent : C.muted,
-            borderTopWidth: 16,
-            borderTopColor: C.surface,
-          }}
-        >
-          {active() ? 'Working' : outcome() === 'completed' ? 'Worked' : 'Activity'}
-          {duration() ? ` for ${duration()}` : ''}
-        </Text>
+      <If when={props.state.open() && props.group().rowIds.length > 0}>
+        <ActivityLog {...props} />
       </If>
     </View>
   );

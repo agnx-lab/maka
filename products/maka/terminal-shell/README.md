@@ -47,7 +47,7 @@ From Home, creating a conversation opens **Workspaces**: choose a directory publ
 | Ctrl+N | Create a conversation |
 | Ctrl+L | Jump to the latest messages |
 | Alt+↑ | Focus the conversation for scrolling |
-| Alt+↓ | Expand and focus the latest turn's activity panel |
+| Alt+↓ | Open and focus the latest process group (or its flat rows) |
 | Enter | Send from the composer, or activate a selected palette entry |
 | Shift+Enter | Insert a newline in the composer |
 | Esc | Close the current overlay; otherwise request Stop for the current run |
@@ -60,7 +60,11 @@ In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sess
 
 ## Conversation and requests
 
-Earlier messages load automatically as you scroll up, preserving your reading position. Each turn has its own bounded native activity panel with independent scrolling. It follows new activity near the bottom; scrolling up keeps your reading position. Completed turns collapse by default, with their final answer outside the panel. Activate a turn header to expand or collapse it. Completion and final-answer placement use the Host's recorded turn metadata, so an individual model response finishing does not prematurely close an ongoing turn. Thinking remains expanded when you reopen a turn. Tool details are read on demand; reopening a panel with expanded tool details reloads them from the top.
+Earlier messages load automatically as you scroll up, preserving your reading position. Continuous thinking and tool activity form process groups; an intermediate reply or incoming message starts a new group. Replies appear outside these groups, and the final answer appears once. Completed turns fold their work by default. Stopped, failed and interrupted turns, and turns with interleaved input, keep their work available. Completion and final-answer placement use the Host's recorded turn metadata.
+
+**Details** selects **Compact**, **Standard** (the default), **Detailed** or **Verbose**, independently of **Chat** / **Trajectory**. Compact and Standard show group headers with closed contents; Compact omits live header detail and settled thinking previews. Detailed lays out current work as ordinary conversation rows and groups historical work. Verbose keeps all work flat and never folds completed turns. **Fold** chooses completion or the next input; your explicit turn disclosure choice takes precedence. These settings persist on this device.
+
+Grouped activity has independent native scrolling, capped at half the reading viewport. A newly opened live group starts at the bottom, while a closed group starts at the top. An already open reader stays in place as the group closes. Scrolling up keeps your source reader in place when later replies arrive. Thinking disclosure and Source choices remain attached to their original rows across updates and policy changes. Tool details load on demand from the Host; a layout change can reload their original source.
 
 Assistant responses format headings, emphasis, lists, quotes and code. **Source** switches to the exact selectable text. Partial history stays literal until its opening is loaded. Responses larger than 256 KiB remain complete selectable source to bound formatting work; this does not limit messages or content retained by the Host.
 
