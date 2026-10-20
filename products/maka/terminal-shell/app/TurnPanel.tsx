@@ -153,18 +153,32 @@ function ActivityLog(props: {
   viewport: () => { width: number; height: number };
   previewImage(image: ImagePreview): void;
   reading(away: boolean): void;
+  reveal(): void;
 }) {
   const state = props.state;
   const lease = ++state.lease;
   const initial = signal<{ y: number } | null>(null);
   const measurements = signal(0);
   const error = signal('');
+  // Reveal a user-opened source after its native height changes, so the outer
+  // List positions the grown group rather than its old one-line body.
+  const pendingReveal = signal<{ rowId: string; height: number } | null>(null);
+  effect(() => {
+    const pending = pendingReveal();
+    if (
+      pending &&
+      (!props.group().rowIds.includes(pending.rowId) ||
+        !props.rowState(pending.rowId).expanded())
+    )
+      pendingReveal.set(null);
+  });
   const opening = state.opening;
   state.opening = undefined;
   let ownList: YNode | undefined;
   let alive = true;
   cleanup(() => {
     alive = false;
+    pendingReveal.set(null);
     if (state.list === ownList) state.list = undefined;
   });
   // Native cell measurements fit short groups. Unmeasured cells start at the
@@ -252,6 +266,15 @@ function ActivityLog(props: {
                       ) {
                         state.measured.set(ownedId(), { width, height: frame.height });
                         measurements.set(measurements() + 1);
+                        const pending = pendingReveal();
+                        if (
+                          pending?.rowId === ownedId() &&
+                          pending.height !== frame.height &&
+                          props.rowState(ownedId()).expanded()
+                        ) {
+                          pendingReveal.set(null);
+                          props.reveal();
+                        }
                       }
                     }}
                   >
@@ -268,8 +291,13 @@ function ActivityLog(props: {
                         state.following.set(false);
                         props.reading(true);
                         const index = props.group().rowIds.indexOf(key);
-                        if (index >= 0)
+                        if (index >= 0) {
+                          pendingReveal.set({
+                            rowId: key,
+                            height: state.measured.get(key)?.height ?? 16,
+                          });
                           ownList.scrollToIndex({ index, viewPosition: 0, animated: false });
+                        }
                       }}
                     />
                   </View>
