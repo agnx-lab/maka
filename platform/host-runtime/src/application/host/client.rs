@@ -209,7 +209,7 @@ impl Client {
         if self.phase != Phase::Ready {
             return Err("Host session control is not ready".into());
         }
-        wire::encode_bounded(&command, wire::FRAME_LIMIT)?;
+        wire::encode_bounded(&command, usize::MAX)?;
         // Cancellation or a partial frame permanently fences further commands.
         self.phase = Phase::Lost;
         wire::write(&mut self.anchor.inner, &command).await?;
@@ -275,7 +275,7 @@ impl Client {
                 retain: retain.clone(),
                 captured: captured.clone(),
             },
-            wire::FRAME_LIMIT,
+            usize::MAX,
         )?;
         Ok(())
     }

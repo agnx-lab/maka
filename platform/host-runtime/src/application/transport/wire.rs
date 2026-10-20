@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded frames; payload chunks are raw bytes, never expanded JSON arrays.
+//! Length-prefixed JSON frames; payload chunks remain raw bytes.
 use crate::application::Result;
 use maka_event_log::applications::intents::CallerConfirmation;
 use maka_plugin_core::{
@@ -28,10 +28,9 @@ use maka_plugin_core::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::io::Write;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
-pub const FRAME_LIMIT: usize = 2 * 1024 * 1024;
 /// Observations supplied by the caller adapter, never transport authentication.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,6 +103,9 @@ impl Write for Bounded {
                 "Application frame exceeds byte limit",
             ));
         }
+        self.0
+            .try_reserve(bytes.len())
+            .map_err(std::io::Error::other)?;
         self.0.extend_from_slice(bytes);
         Ok(bytes.len())
     }
@@ -112,7 +114,7 @@ impl Write for Bounded {
     }
 }
 pub async fn write<W: AsyncWrite + Unpin, T: Serialize>(writer: &mut W, value: &T) -> Result<()> {
-    write_bounded(writer, value, FRAME_LIMIT).await
+    write_bounded(writer, value, usize::MAX).await
 }
 pub async fn write_bounded<W: AsyncWrite + Unpin, T: Serialize>(
     writer: &mut W,
@@ -120,15 +122,13 @@ pub async fn write_bounded<W: AsyncWrite + Unpin, T: Serialize>(
     limit: usize,
 ) -> Result<()> {
     let buffer = encode_bounded(value, limit)?;
-    writer
-        .write_u32(buffer.len() as u32)
-        .await
-        .map_err(|e| e.to_string())?;
+    let length = u32::try_from(buffer.len()).map_err(|e| e.to_string())?;
+    writer.write_u32(length).await.map_err(|e| e.to_string())?;
     writer.write_all(&buffer).await.map_err(|e| e.to_string())?;
     writer.flush().await.map_err(|e| e.to_string())
 }
 pub fn encode_bounded<T: Serialize>(value: &T, limit: usize) -> Result<Vec<u8>> {
-    let mut buffer = Bounded(Vec::new(), limit.min(FRAME_LIMIT));
+    let mut buffer = Bounded(Vec::new(), limit.min(u32::MAX as usize));
     serde_json::to_writer(&mut buffer, value).map_err(|e| e.to_string())?;
     Ok(buffer.0)
 }
@@ -138,7 +138,6 @@ pub struct Reader<R> {
     prefix: [u8; 4],
     prefix_read: usize,
     body: Vec<u8>,
-    body_read: usize,
 }
 impl<R: AsyncRead + Unpin> Reader<R> {
     pub fn new(inner: R) -> Self {
@@ -147,11 +146,10 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             prefix: [0; 4],
             prefix_read: 0,
             body: Vec::new(),
-            body_read: 0,
         }
     }
     pub async fn read<T: DeserializeOwned>(&mut self) -> Result<T> {
-        self.read_bounded(FRAME_LIMIT).await
+        self.read_bounded(usize::MAX).await
     }
     pub async fn read_bounded<T: DeserializeOwned>(&mut self, limit: usize) -> Result<T> {
         while self.prefix_read < 4 {
@@ -166,26 +164,21 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             self.prefix_read += n;
         }
         let length = u32::from_be_bytes(self.prefix) as usize;
-        if !(1..=limit.min(FRAME_LIMIT)).contains(&length) {
+        if !(1..=limit).contains(&length) {
             return Err("invalid Application frame length".into());
         }
-        if self.body.is_empty() {
-            self.body.resize(length, 0);
-        }
-        while self.body_read < length {
-            let n = self
-                .inner
-                .read(&mut self.body[self.body_read..])
-                .await
-                .map_err(|e| e.to_string())?;
-            if n == 0 {
+        while self.body.len() < length {
+            let bytes = self.inner.fill_buf().await.map_err(|e| e.to_string())?;
+            if bytes.is_empty() {
                 return Err("Application channel ended before a complete frame".into());
             }
-            self.body_read += n;
+            let count = bytes.len().min(length - self.body.len());
+            self.body.try_reserve(count).map_err(|e| e.to_string())?;
+            self.body.extend_from_slice(&bytes[..count]);
+            self.inner.consume(count);
         }
         let body = std::mem::take(&mut self.body);
         self.prefix_read = 0;
-        self.body_read = 0;
         serde_json::from_slice(&body).map_err(|e| e.to_string())
     }
 }
@@ -210,72 +203,59 @@ mod tests {
             let mut future = Box::pin(reader.read::<Value>());
             assert!(futures_util::poll!(&mut future).is_pending());
         }
+        assert_eq!(reader.body, body[..3]);
         output.write_all(&body[3..]).await.unwrap();
         assert_eq!(
             reader.read::<Value>().await.unwrap(),
             serde_json::json!({"done":true})
         );
+        output.write_all(&prefix).await.unwrap();
+        output.write_all(&body[..3]).await.unwrap();
+        drop(output);
+        assert_eq!(
+            reader.read::<Value>().await.unwrap_err(),
+            "Application channel ended before a complete frame"
+        );
+        assert_eq!(reader.body, body[..3]);
     }
     #[tokio::test]
-    async fn oversized_serialization_writes_no_frame_prefix() {
+    async fn explicit_frame_bound_rejects_before_writing_a_prefix() {
         let mut output = Vec::new();
-        assert!(write(&mut output, &"x".repeat(FRAME_LIMIT)).await.is_err());
+        assert!(
+            write_bounded(&mut output, &"long original value", 16)
+                .await
+                .is_err()
+        );
         assert!(output.is_empty());
+        write_bounded(&mut output, &serde_json::json!({"ok": true}), 16)
+            .await
+            .unwrap();
+        let mut reader = Reader::new(output.as_slice());
+        assert!(reader.read_bounded::<Value>(4).await.is_err());
+        assert_eq!(
+            reader.read_bounded::<Value>(16).await.unwrap(),
+            serde_json::json!({"ok": true})
+        );
     }
     #[tokio::test]
-    async fn near_limit_input_and_descriptors_use_separate_real_frames() {
-        use crate::application::ResourceDescriptor;
-        use maka_capabilities::call::ResourceEncoding;
-        use maka_plugin_core::{
-            composition::InstanceId, contract::ResourceType, deployment::DeploymentRef,
-        };
-        use std::collections::BTreeMap;
-        let open = Open {
-            endpoint: "business".into(),
-            registration_epoch: Uuid::new_v4(),
-            source: Source {
-                deployment: DeploymentRef {
-                    state_domain: "original-root-domain".into(),
-                    deployment: Uuid::new_v4(),
-                    revision: 1,
-                },
-                consumer: InstanceId(vec![Uuid::new_v4()]),
-                mount: uuid::Uuid::new_v4(),
-                request: Uuid::new_v4(),
-            },
-            method: "read".into(),
-            input: Value::String("i".repeat(1_048_574)),
-        };
-        let mut descriptors = BTreeMap::from([(
-            "text".to_string(),
-            ResourceDescriptor {
-                encoding: ResourceEncoding::Utf8,
-                resource: ResourceType {
-                    name: "Text".into(),
-                    version: 1,
-                },
-                length: 0,
-                metadata: Value::String(String::new()),
-            },
-        )]);
-        let overhead = serde_json::to_vec(&descriptors).unwrap().len();
-        descriptors.get_mut("text").unwrap().metadata =
-            Value::String("m".repeat(1_048_576 - overhead));
-        assert_eq!(serde_json::to_vec(&open.input).unwrap().len(), 1_048_576);
-        assert_eq!(serde_json::to_vec(&descriptors).unwrap().len(), 1_048_576);
-        let combined = serde_json::json!({"endpoint":open.endpoint,"source":open.source,"method":open.method,"input":open.input,"resources":descriptors});
-        assert!(serde_json::to_vec(&combined).unwrap().len() > FRAME_LIMIT);
-        let (output, input) = tokio::io::duplex(64 * 1024);
-        let mut reader = Reader::new(input);
-        let writer = tokio::spawn(async move {
-            let mut output = output;
-            write(&mut output, &open).await.unwrap();
-            write(&mut output, &descriptors).await.unwrap();
+    async fn sequential_frames_preserve_complete_large_values() {
+        let original = serde_json::json!({
+            "text": "中🙂\"\\\n\0".repeat(160_000),
+            "tail": "原始末尾",
         });
-        let decoded: Open = reader.read().await.unwrap();
-        assert_eq!(decoded.input.as_str().unwrap().len(), 1_048_574);
-        let decoded: BTreeMap<String, ResourceDescriptor> = reader.read().await.unwrap();
-        assert_eq!(serde_json::to_vec(&decoded).unwrap().len(), 1_048_576);
-        writer.await.unwrap();
+        assert!(serde_json::to_vec(&original).unwrap().len() > 2 * 1024 * 1024);
+        let (mut output, input) = tokio::io::duplex(64 * 1024);
+        let mut reader = Reader::new(input);
+        let sent = original.clone();
+        let writer = tokio::spawn(async move {
+            write(&mut output, &sent).await?;
+            write(&mut output, &serde_json::json!({"next": true})).await
+        });
+        let first = reader.read::<Value>().await;
+        let second = reader.read::<Value>().await;
+        let written = writer.await.unwrap();
+        assert!(written.is_ok(), "complete frame write failed: {written:?}");
+        assert!(first.unwrap() == original, "complete frame value changed");
+        assert_eq!(second.unwrap(), serde_json::json!({"next": true}));
     }
 }

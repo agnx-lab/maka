@@ -590,12 +590,11 @@ impl Host {
                                             catalogue
                                         });
                                 let response = Response::Captured(result);
-                                if wire::encode_bounded(&response, wire::FRAME_LIMIT).is_err() {
+                                if let Err(error) = wire::encode_bounded(&response, usize::MAX) {
                                     captured = None;
-                                    Response::Captured(Err(
-                                        "Host captured catalogue exceeds control frame limit"
-                                            .into(),
-                                    ))
+                                    Response::Captured(Err(format!(
+                                        "cannot encode Host captured catalogue: {error}"
+                                    )))
                                 } else {
                                     response
                                 }

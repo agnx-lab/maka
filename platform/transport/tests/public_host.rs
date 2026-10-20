@@ -115,6 +115,7 @@ async fn public_ipc_persists_original_gateway_intent_and_retires_original_owner(
 
 struct IpcSubscription {
     value: Value,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 impl maka_host_runtime::application::Handler for IpcSubscription {
     fn call(
@@ -124,6 +125,7 @@ impl maka_host_runtime::application::Handler for IpcSubscription {
         context: maka_host_runtime::application::Context,
     ) -> futures_util::future::BoxFuture<'static, Result<Value, String>> {
         let value = self.value.clone();
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::pin(async move {
             context.emit(value).await?;
             Ok(Value::Null)
@@ -144,10 +146,9 @@ impl maka_host_runtime::application::NativeOwner for IpcSubscription {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
     tokio::time::timeout(Duration::from_secs(20), async {
-        let expected = serde_json::json!({"text": "中🙂\"\\\n\0".repeat(8192), "tail": "尾"});
+        let expected = serde_json::json!({"text": "中🙂\"\\\n\0".repeat(160_000), "tail": "尾"});
         let encoded = serde_json::to_vec(&expected).unwrap();
-        assert!(encoded.len() > 64 * 1024);
-        assert!(encoded.len() < 1024 * 1024);
+        assert!(encoded.len() > 2 * 1024 * 1024);
         let directory = tempfile::tempdir().unwrap();
         maka_event_log::root::private_directory(directory.path()).unwrap();
         let namespaces = RootNamespaces {
@@ -176,7 +177,8 @@ async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
             *package = support::counter::package(&name, declaration, None);
             input.instances.get_mut(if name == "local.business" { "business" } else { "gateway" }).unwrap().package = package.application_ref().into();
         }
-        let provider = Arc::new(IpcSubscription { value: expected.clone() });
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Arc::new(IpcSubscription { value: expected.clone(), calls:calls.clone() });
         let mut native = NativeRegistry::default();
         native.insert("public.subscription".into(), Arc::new(move |_, _| {
             let provider = provider.clone();
@@ -202,14 +204,9 @@ async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
         let mut call = client.call("business", "read".into(), Value::Null, Default::default()).await.unwrap();
         call.start().await.unwrap();
         let subscribed = call.receive().await.unwrap();
-        let item = call.pull().await.unwrap();
-        match &item {
-            Reply::Item { value } => eprintln!("IPC subscription item encoded_bytes={} original_equal={}", serde_json::to_vec(value).unwrap().len(), value == &expected),
-            Reply::Finished { result, cleanup } => eprintln!("IPC subscription finished before item: error={:?} cleanup={cleanup:?}", result.as_ref().err()),
-            _ => eprintln!("IPC subscription returned an unexpected reply before item"),
-        }
-        let completion = if matches!(item, Reply::Item { .. }) { Some(call.pull().await.unwrap()) } else { None };
-        call.close().await.unwrap();
+        let item = call.pull().await;
+        let completion = if matches!(item, Ok(Reply::Item { .. })) { Some(call.pull().await) } else { None };
+        let call_cleanup = call.close().await;
         let cleanup_confirmed = call.cleanup_confirmed();
         client.close().await.unwrap();
         assert!(Client::retire(&address, host.epoch()).await.unwrap());
@@ -218,11 +215,14 @@ async fn public_ipc_pulls_large_subscription_original_and_confirms_cleanup() {
         drop(RootOwner::open(&root, &namespaces).unwrap());
         assert!(matches!(subscribed, Reply::Subscribed));
         match item {
-            Reply::Item { value } => assert!(value == expected, "large subscription original differs after IPC"),
-            _ => panic!("large subscription original did not cross IPC; see short reply metadata above"),
+            Ok(Reply::Item { value }) => assert!(value == expected, "large subscription original differs after IPC"),
+            Err(error) => panic!("large subscription frame failed: {error}; cleanup={call_cleanup:?}"),
+            _ => panic!("large subscription original did not cross IPC"),
         }
-        assert!(matches!(completion, Some(Reply::Finished { result: Ok(Value::Null), cleanup: Ok(()) })));
+        assert!(matches!(completion, Some(Ok(Reply::Finished { result: Ok(Value::Null), cleanup: Ok(()) }))));
+        call_cleanup.unwrap();
         assert!(cleanup_confirmed);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst),1);
     }).await.unwrap();
 }
 
@@ -1157,4 +1157,129 @@ async fn configured_native_grants_apply_live_survive_source_update_and_root_rest
     })
     .await
     .unwrap();
+}
+
+struct LargeIpc {
+    original: Value,
+    calls: std::sync::Mutex<Vec<(String, Value)>>,
+    effects: std::sync::atomic::AtomicUsize,
+    closed: std::sync::atomic::AtomicUsize,
+}
+impl maka_host_runtime::application::Handler for LargeIpc {
+    fn call(
+        &self,
+        method: String,
+        input: Value,
+        context: maka_host_runtime::application::Context,
+    ) -> futures_util::future::BoxFuture<'static, Result<Value, String>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((method.clone(), input.clone()));
+        let original = self.original.clone();
+        if method == "write" {
+            self.effects
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Box::pin(async move {
+            if method == "read" {
+                return Ok(input);
+            }
+            context.emit(original.clone()).await?;
+            Ok(original)
+        })
+    }
+}
+impl maka_host_runtime::application::NativeOwner for LargeIpc {
+    fn prepare_retirement(
+        &self,
+    ) -> Option<Box<dyn maka_host_runtime::application::NativeRetirement>> {
+        Some(Box::new(()))
+    }
+    fn close(&self) -> futures_util::future::BoxFuture<'static, Result<(), String>> {
+        self.closed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn public_ipc_preserves_large_query_progress_and_original_mutation_receipt() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let expected = serde_json::json!({"head":"原始", "text":"中🙂\"\\\n\0".repeat(160_000), "tail":"尾"});
+        assert!(serde_json::to_vec(&expected).unwrap().len() > 2 * 1024 * 1024);
+        let directory = tempfile::tempdir().unwrap();
+        maka_event_log::root::private_directory(directory.path()).unwrap();
+        let namespaces = RootNamespaces { ownership:directory.path().join("owners"), control:directory.path().join("control") };
+        let root = directory.path().join("root");
+        let store = Arc::new(EventLog::for_root(Arc::new(RootOwner::create(&root,&namespaces).unwrap())).await.unwrap());
+        let deployment = Uuid::new_v4();
+        let (mut input, mut packages) = support::native_host("public.large");
+        let mut contract = support::business();
+        let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface else { unreachable!() };
+        methods.get_mut("write").unwrap().progress = Some(serde_json::json!({"type":"object"}));
+        for package in &mut packages {
+            let name = package.manifest().id.clone();
+            if name != "local.business" && name != "local.gateway" { continue; }
+            let mut declaration = package.manifest().application.as_ref().unwrap().declaration().clone();
+            let entry = declaration.entries.get_mut(&maka_plugin_core::package::EntryTarget::Host).unwrap();
+            if name == "local.business" { entry.exports.get_mut("Counter").unwrap().contract = contract.clone(); }
+            else { entry.imports.get_mut("business").unwrap().contract = contract.clone(); }
+            *package = support::counter::package(&name,declaration,None);
+            input.instances.get_mut(if name == "local.business" { "business" } else { "gateway" }).unwrap().package = package.application_ref().into();
+        }
+        let provider = Arc::new(LargeIpc { original:expected.clone(), calls:Default::default(), effects:Default::default(), closed:Default::default() });
+        let mut native = NativeRegistry::default();
+        native.insert("public.large".into(),Arc::new({ let provider = provider.clone(); move |_,_| {
+            let provider = provider.clone(); let contract = contract.clone();
+            Box::pin(async move { maka_host_runtime::application::NativeActivation {
+                exports:Ok(BTreeMap::from([("Counter".into(),maka_plugin_core::runtime::Published { contract,value:provider.clone() as Arc<dyn maka_host_runtime::application::Handler> })])), owner:provider,
+            } })
+        } })).unwrap();
+        store.commit_application(deployment,0,input,vec![],packages).await.unwrap();
+        let host = Host::open(store.clone(),deployment,native,Some(maka_host_js::factory(Default::default())),BTreeMap::from([
+            ("business".into(),HostEndpoint { consumer:support::identity(13),import:"business".into(),grant:Grant { methods:["read".into(),"write".into()].into(),recovery:false } }),
+        ]),vec![]).await.unwrap();
+        #[cfg(unix)] let address = directory.path().join("large.sock");
+        #[cfg(windows)] let address = std::path::PathBuf::from(format!(r"\\.\pipe\maka-large-test-{}",Uuid::new_v4()));
+        let listener = LocalListener::bind(&address).unwrap();
+        let serving = tokio::spawn({ let host=host.clone(); async move { host.serve_local(listener,CancellationToken::new()).await } });
+        let mut client = Client::connect(&address,Some(host.epoch())).await.unwrap();
+        let mut query = client.call("business","read".into(),expected.clone(),Default::default()).await.unwrap();
+        let query_start = query.start().await;
+        let query_reply = if query_start.is_ok() { Some(query.receive().await) } else { None };
+        let query_cleanup = query.close().await;
+        let query_confirmed = query.cleanup_confirmed();
+        let mut write = client.call("business","write".into(),Value::Null,Default::default()).await.unwrap();
+        let write_start = write.start().await;
+        let prepared = if write_start.is_ok() { Some(write.receive().await) } else { None };
+        let reference = write.reference().cloned();
+        let progress = if matches!(prepared,Some(Ok(Reply::Prepared { .. }))) { Some(write.confirm().await) } else { None };
+        let completion = if matches!(progress,Some(Ok(Reply::Progress { .. }))) { Some(write.receive().await) } else { None };
+        let write_cleanup = write.close().await;
+        let write_confirmed = write.cleanup_confirmed();
+        let intent = if let Some(reference)=&reference { store.application_intent(deployment,support::identity(13),reference.operation).await.unwrap() } else { None };
+        let observation = if let Some(reference)=&reference { store.operation_observation(reference).await.unwrap() } else { None };
+        client.close().await.unwrap();
+        assert!(Client::retire_with_options(&address,host.epoch(),true,true).await.unwrap());
+        serving.await.unwrap().unwrap();
+        drop((query,write,client,host,store));
+        drop(RootOwner::open(&root,&namespaces).unwrap());
+        eprintln!("large IPC query_start={query_start:?} query_error={:?} progress_error={:?} final_error={:?} query_cleanup={query_cleanup:?} mutation_cleanup={write_cleanup:?}",query_reply.as_ref().and_then(|r|r.as_ref().err()),progress.as_ref().and_then(|r|r.as_ref().err()),completion.as_ref().and_then(|r|r.as_ref().err()));
+        assert!(query_start.is_ok(),"large query input failed before dispatch");
+        assert!(matches!(query_reply,Some(Ok(Reply::Finished { result:Ok(ref value),cleanup:Ok(()) })) if value==&expected),"large query original result missing");
+        assert!(matches!(progress,Some(Ok(Reply::Progress { ref value })) if value==&expected),"large mutation progress missing");
+        let Some(Ok(Reply::Mutation { reply,cleanup:Ok(()) }))=completion else { panic!("large original final receipt missing") };
+        assert_eq!(Some(&reply.reference),reference.as_ref());
+        let Receipt::Recorded { outcome:OperationOutcome::Returned { value },cleanup:OperationCleanup::Confirmed }=&reply.receipt else { panic!("confirmed returned receipt required") };
+        assert!(value==&expected,"original mutation outcome changed");
+        assert_eq!(intent.unwrap().reference,reply.reference);
+        let observed = observation.unwrap();
+        assert!(matches!(observed.outcome,OperationOutcome::Returned { ref value } if value==&expected));
+        assert_eq!(observed.cleanup,OperationCleanup::Confirmed);
+        assert!(*provider.calls.lock().unwrap()==vec![("read".into(),expected),("write".into(),Value::Null)],"original call sequence or input changed");
+        assert_eq!(provider.effects.load(std::sync::atomic::Ordering::SeqCst),1);
+        assert_eq!(provider.closed.load(std::sync::atomic::Ordering::SeqCst),1);
+        query_cleanup.unwrap();write_cleanup.unwrap();assert!(query_confirmed && write_confirmed);
+    }).await.unwrap();
 }

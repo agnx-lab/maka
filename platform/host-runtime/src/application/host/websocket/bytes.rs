@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded binary WebSocket messages carry the existing application byte stream.
+//! Binary WebSocket messages carry the existing application byte stream.
 use futures_util::{Sink, Stream};
 use hyper::body::Bytes;
 use std::{
@@ -30,8 +30,8 @@ use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
 pub(super) fn config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
-    config.max_message_size = Some(crate::application::transport::wire::FRAME_LIMIT + 4);
-    config.max_frame_size = config.max_message_size;
+    config.max_message_size = None;
+    config.max_frame_size = None;
     config.max_write_buffer_size = 2 * 1024 * 1024;
     config
 }

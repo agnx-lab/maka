@@ -35,4 +35,6 @@ The executable must be an absolute path to the trusted Maka CLI. The entry point
 
 Remote registration data describes available services. It cannot create permission, choose a different caller or retarget an accepted operation. Closing the UI waits for its original physical calls and locally owned cohost cleanup. Normal quit asks each public Host to stop if no other session remains, atomically with session admission. Explicit UI-only exit detaches and preserves background work.
 
+Local and WebSocket channels carry complete JSON frames with a four-byte unsigned length prefix. The codec has no separate 2 MiB quota; startup and opening callers retain their explicit bounds. Partial reads retain received bytes across cancellation and preserve following frames and raw resource chunks. Encoding and decoding still hold complete JSON values in memory; the prefix alone does not reserve the advertised body size.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

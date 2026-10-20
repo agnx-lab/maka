@@ -67,24 +67,33 @@ async fn send(socket: &mut Socket, value: Value) {
     socket.send(Message::Binary(frame.into())).await.unwrap();
 }
 async fn receive(socket: &mut Socket) -> Value {
+    receive_result(socket).await.unwrap()
+}
+async fn receive_result(socket: &mut Socket) -> Result<Value, String> {
     let mut bytes = Vec::new();
     loop {
-        match socket.next().await.unwrap().unwrap() {
+        match socket
+            .next()
+            .await
+            .ok_or("WebSocket ended before reply")?
+            .map_err(|error| error.to_string())?
+        {
             Message::Binary(chunk) => bytes.extend_from_slice(&chunk),
             Message::Ping(_) | Message::Pong(_) => continue,
-            frame => panic!("expected application bytes: {frame:?}"),
+            _ => return Err("WebSocket closed before application reply".into()),
         }
-        assert!(bytes.len() <= wire::FRAME_LIMIT + 4);
         if bytes.len() >= 4 {
             let length = u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize;
-            assert!(length <= wire::FRAME_LIMIT);
             if bytes.len() >= length + 4 {
-                assert_eq!(bytes.len(), length + 4);
-                return wire::Reader::new(bytes.as_slice()).read().await.unwrap();
+                if bytes.len() != length + 4 {
+                    return Err("application frame body length differs from prefix".into());
+                }
+                return wire::Reader::new(bytes.as_slice()).read().await;
             }
         }
     }
 }
+
 fn opening(epoch: Uuid, client: &str, request: Value) -> Value {
     json!({"version":1,"epoch":epoch,"client_instance":client,"request":request})
 }
@@ -235,5 +244,104 @@ async fn remote_pairing_binds_client_source_and_session_and_revokes_original_cha
         serving.await.unwrap().unwrap();
         drop((host, store));
         drop(RootOwner::open(&root, &namespaces).unwrap());
+    }).await.unwrap();
+}
+
+#[derive(Default)]
+struct RemoteEcho {
+    calls: std::sync::Mutex<Vec<Value>>,
+    closed: std::sync::atomic::AtomicUsize,
+}
+impl maka_host_runtime::application::Handler for RemoteEcho {
+    fn call(
+        &self,
+        _: String,
+        input: Value,
+        _: maka_host_runtime::application::Context,
+    ) -> futures_util::future::BoxFuture<'static, Result<Value, String>> {
+        self.calls.lock().unwrap().push(input.clone());
+        Box::pin(async move { Ok(input) })
+    }
+}
+impl maka_host_runtime::application::NativeOwner for RemoteEcho {
+    fn prepare_retirement(
+        &self,
+    ) -> Option<Box<dyn maka_host_runtime::application::NativeRetirement>> {
+        Some(Box::new(()))
+    }
+    fn close(&self) -> futures_util::future::BoxFuture<'static, Result<(), String>> {
+        self.closed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_pairing_preserves_large_original_query_and_cleanup() {
+    tokio::time::timeout(Duration::from_secs(30),async {
+        let expected=json!({"head":"原始","text":"中🙂\"\\\n\0".repeat(160_000),"tail":"尾"});
+        assert!(serde_json::to_vec(&expected).unwrap().len()>2*1024*1024);
+        let directory=tempfile::tempdir().unwrap();
+        maka_event_log::root::private_directory(directory.path()).unwrap();
+        let namespaces=RootNamespaces { ownership:directory.path().join("owners"),control:directory.path().join("control") };
+        let root=directory.path().join("root");
+        let store=Arc::new(EventLog::for_root(Arc::new(RootOwner::create(&root,&namespaces).unwrap())).await.unwrap());
+        let deployment=Uuid::new_v4();
+        let (input,packages)=support::native_host("remote.echo");
+        let provider=Arc::new(RemoteEcho::default());
+        let mut native=NativeRegistry::default();
+        native.insert("remote.echo".into(),Arc::new({ let provider=provider.clone();move |_,_| {
+            let provider=provider.clone();Box::pin(async move { maka_host_runtime::application::NativeActivation {
+                exports:Ok(BTreeMap::from([("Counter".into(),maka_plugin_core::runtime::Published { contract:support::business(),value:provider.clone() as Arc<dyn maka_host_runtime::application::Handler> })])),owner:provider,
+            } })
+        } })).unwrap();
+        store.commit_application(deployment,0,input,vec![],packages).await.unwrap();
+        let host=Host::open(store.clone(),deployment,native,Some(maka_host_js::factory(Default::default())),BTreeMap::from([
+            ("business".into(),HostEndpoint { consumer:support::identity(13),import:"business".into(),grant:Grant { methods:["read".into()].into(),recovery:false } }),
+        ]),vec![]).await.unwrap();
+        #[cfg(unix)] let local=directory.path().join("large.sock");
+        #[cfg(windows)] let local=std::path::PathBuf::from(format!(r"\\.\pipe\maka-large-remote-{}",Uuid::new_v4()));
+        let listener=LocalListener::bind(&local).unwrap();
+        let websocket=WebSocketListener::bind("127.0.0.1:0".parse().unwrap(),vec![]).await.unwrap();
+        let address=format!("ws://{}/runtime-host",websocket.local_addr().unwrap());
+        let stop=tokio_util::sync::CancellationToken::new();
+        let serving=tokio::spawn({ let host=host.clone();let stop=stop.clone();async move { host.serve(listener,Some(websocket),stop).await } });
+        let pairing=Client::prepare_access(&local,host.epoch(),"large".into()).await.unwrap();
+        finalized(&address,&pairing,host.epoch(),"large-client").await;
+        let (mut anchor,session)=connected(&address,&pairing,host.epoch(),"large-client").await;
+        let mut channel=socket(&address,&pairing,None).await.unwrap();
+        send(&mut channel,opening(host.epoch(),"large-client",json!({"kind":"call","session":session["session"]}))).await;
+        assert_eq!(receive(&mut channel).await["kind"],"accepted");
+        let open=json!({"endpoint":"business","registration_epoch":session["catalogue"]["endpoints"]["business"]["registration_epoch"],
+            "source":{"deployment":session["source"],"consumer":session["consumers"]["business"],"mount":session["session"],"request":Uuid::new_v4()},
+            "method":"read","input":expected});
+        // A real peer sends one complete WebSocket message. Use the unchanged
+        // u32 Application prefix directly so old local writer policy cannot
+        // conceal the server's independent WebSocket ingress refusal.
+        let body=serde_json::to_vec(&open).unwrap();
+        let length=u32::try_from(body.len()).unwrap();
+        let mut frame=length.to_be_bytes().to_vec();frame.extend_from_slice(&body);
+        let exchange:Result<Value,String>=async {
+            channel.send(Message::Binary(frame.into())).await.map_err(|error|error.to_string())?;
+            let mut descriptors=Vec::new();wire::write(&mut descriptors,&json!({})).await?;
+            channel.send(Message::Binary(descriptors.into())).await.map_err(|error|error.to_string())?;
+            let ready=receive_result(&mut channel).await?;
+            if ready["kind"]!="ready" { return Err("large query did not become ready".into()); }
+            receive_result(&mut channel).await
+        }.await;
+        let channel_close=channel.close(None).await;
+        send(&mut anchor,json!({"kind":"close"})).await;
+        let session_close=receive_result(&mut anchor).await;
+        stop.cancel();serving.await.unwrap().unwrap();
+        drop((channel,anchor,host,store));
+        drop(RootOwner::open(&root,&namespaces).unwrap());
+        eprintln!("remote large query bytes={length} error={:?} channel_close_ok={} session_close_ok={}",exchange.as_ref().err(),channel_close.is_ok(),session_close.is_ok());
+        let completed=exchange.expect("large paired WebSocket query must complete");
+        assert_eq!(completed["kind"],"finished");
+        assert!(completed["result"]["Ok"]==expected,"remote echo changed original Unicode/escaped input");
+        assert_eq!(completed["cleanup"],json!({"Ok":null}));
+        assert_eq!(session_close.unwrap()["kind"],"closed");
+        assert!(*provider.calls.lock().unwrap()==vec![expected],"remote original input/call count changed");
+        assert_eq!(provider.closed.load(std::sync::atomic::Ordering::SeqCst),1);
     }).await.unwrap();
 }
