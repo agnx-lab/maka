@@ -30,7 +30,7 @@ fn open(tui: &mut Pty) {
 }
 fn edit_below(tui: &mut Pty, label: &str, value: &str) {
     tui.wait_for(label);
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let (row, line) = screen
         .lines()
         .enumerate()

@@ -569,7 +569,9 @@ export default class MakaDesktop extends View {
       .when(!settings && this.workhub.open, (el) => this.workhubPane(el, cx))
       .when(!settings && this.search.open, (el) => this.searchPane(el, cx))
       .when(!settings && !this.workhub.open && !this.search.open, (el) => this.taskPane(el, cx));
+    // Native child state must outlive changes in the plate's node count.
     return h_flex()
+      .id('maka-root')
       .size_full()
       .items_start()
       .bg(m.canvas)

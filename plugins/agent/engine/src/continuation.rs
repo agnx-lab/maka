@@ -19,8 +19,6 @@
 
 use crate::{Inner, RunError, RunInput, model_attempt};
 use maka_agent_facts::continuation::ContinuationClaim;
-use maka_agent_facts::continuation::MAX_REPLAY_BYTES;
-use maka_agent_facts::continuation::MAX_REPLAY_EVENTS;
 use maka_agent_facts::continuation::REPLAY_VERSION;
 use maka_agent_facts::continuation::ReplayEvidence;
 use maka_agent_facts::continuation::RunBoundary;
@@ -127,7 +125,7 @@ pub(super) async fn inspect(
         InvocationInput::Message { .. } => {
             let base = inner
                 .log
-                .context_before_run(&source.invocation, MAX_REPLAY_EVENTS, MAX_REPLAY_BYTES)
+                .context_before_run(&source.invocation, usize::MAX, usize::MAX)
                 .await?;
             SessionBase {
                 high_water: base.source_evidence.high_water,
@@ -141,7 +139,7 @@ pub(super) async fn inspect(
     };
     let context = inner
         .log
-        .read_lineage_context(source, MAX_REPLAY_EVENTS, MAX_REPLAY_BYTES)
+        .read_lineage_context(source, usize::MAX, usize::MAX)
         .await?;
     let prompt = model_attempt::prompt(
         inner,

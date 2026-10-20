@@ -147,7 +147,7 @@ fn record_observed_checkpoint(
 ) {
     drain(tui);
     let metrics = measurement.finish(tui, visible_after);
-    let snapshot = tui.screen.snapshot().unwrap();
+    let snapshot = tui.screen.preview(usize::MAX).unwrap();
     assert!(snapshot.alternate_screen);
     let record = json!({
         "checkpoint": name,
@@ -387,14 +387,14 @@ fn default_product_preserves_frames_and_responsiveness() {
     // include its screen row because a one-line step may retain the same marker.
     tui.send(b"\x1b[<64;70;10M");
     tui.wait_until(scroll_return_visible);
-    let before = first_scroll_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+    let before = first_scroll_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
     tui.send(b"\x1b[<64;70;10M");
     tui.wait_until(|s| first_scroll_row(s).is_some_and(|row| row != before));
     for (name, event) in [
         ("08-wheel-up", b"\x1b[<64;70;10M"),
         ("09-wheel-down", b"\x1b[<65;70;10M"),
     ] {
-        let before = first_scroll_row(&tui.screen.snapshot().unwrap().screen).unwrap();
+        let before = first_scroll_row(&tui.screen.preview(usize::MAX).unwrap().screen).unwrap();
         let measure = Measurement::start(&tui);
         tui.send(event);
         tui.wait_until(|s| first_scroll_row(s).is_some_and(|row| row != before));
@@ -414,7 +414,7 @@ fn default_product_preserves_frames_and_responsiveness() {
     }
 
     let measure = Measurement::start(&tui);
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     // Resize may already clamp this short remaining distance to the tail.
     // Compare that frame above and record whether a return action was needed.
     let return_control_clicked = scroll_return_visible(&screen);
@@ -511,7 +511,7 @@ fn default_product_preserves_frames_and_responsiveness() {
     tui.finish();
     host_guard.stop();
     server.join().unwrap();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
 }
 
 #[test]
@@ -616,7 +616,7 @@ fn default_product_accepts_input_and_scroll_during_continuous_stream() {
         );
         input_conditions.push(condition);
     }
-    let before_wheel = tui.screen.snapshot().unwrap().screen;
+    let before_wheel = tui.screen.preview(usize::MAX).unwrap().screen;
     let mut previous = first_reading_marker(&before_wheel);
     let guest_visible_before = scroll_return_visible(&before_wheel);
     let measure = Measurement::start(&tui);
@@ -628,7 +628,7 @@ fn default_product_accepts_input_and_scroll_during_continuous_stream() {
     loop {
         tui.read();
         if tui.frames.ready() {
-            let screen = tui.screen.snapshot().unwrap().screen;
+            let screen = tui.screen.preview(usize::MAX).unwrap().screen;
             let current = first_reading_marker(&screen);
             if native.is_none()
                 && let (Some(before), Some(after)) = (&previous, &current)
@@ -697,7 +697,7 @@ fn default_product_accepts_input_and_scroll_during_continuous_stream() {
     writer.join().unwrap();
     server.join().unwrap();
     tui.wait_until(|s| !s.contains("Queue for next turn"));
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     if scroll_return_visible(&screen) {
         click(
             &mut tui,
@@ -718,7 +718,7 @@ fn default_product_accepts_input_and_scroll_during_continuous_stream() {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             tui.read();
-            let snapshot = tui.screen.snapshot().unwrap();
+            let snapshot = tui.screen.preview(usize::MAX).unwrap();
             if tui.frames.ready()
                 && snapshot.cursor.visible == cursor_visible
                 && snapshot.screen.contains("并发输出结束")
@@ -760,13 +760,13 @@ fn default_product_accepts_input_and_scroll_during_continuous_stream() {
         }),
     );
     assert!(
-        !tui.screen.snapshot().unwrap().cursor.visible,
+        !tui.screen.preview(usize::MAX).unwrap().cursor.visible,
         "copy palette did not restore the original source focus"
     );
     tui.send(b"\x11");
     tui.finish();
     host_guard.stop();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
 
     let native_ok = sent_at_wheel < FRAGMENTS
         && native

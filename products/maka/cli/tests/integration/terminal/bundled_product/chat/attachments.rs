@@ -185,6 +185,6 @@ fn nine_pasted_images_reach_the_actual_model_in_original_order_and_clear_the_dra
     tui.finish();
     host_guard.stop();
     server.join().unwrap();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     drop(RootOwner::open(&host, &namespaces).unwrap());
 }

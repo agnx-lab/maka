@@ -306,7 +306,7 @@ impl Pty {
         let deadline = Instant::now() + timeout;
         loop {
             self.read();
-            let snapshot = self.screen.snapshot().unwrap();
+            let snapshot = self.screen.preview(usize::MAX).unwrap();
             if self.frames.ready() && predicate(&snapshot.screen) {
                 return;
             }
@@ -367,7 +367,7 @@ impl Pty {
 impl Drop for Pty {
     fn drop(&mut self) {
         if std::thread::panicking()
-            && let Ok(snapshot) = self.screen.snapshot()
+            && let Ok(snapshot) = self.screen.preview(usize::MAX)
         {
             eprintln!("Final terminal frame:\n{}", snapshot.screen);
         }

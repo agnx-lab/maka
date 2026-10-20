@@ -60,8 +60,6 @@ pub struct ReplayEvidence {
 }
 
 pub const REPLAY_VERSION: u32 = 1;
-pub const MAX_REPLAY_EVENTS: usize = 10_000;
-pub const MAX_REPLAY_BYTES: usize = 8 * 1024 * 1024;
 
 impl ReplayEvidence {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {

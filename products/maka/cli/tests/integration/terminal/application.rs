@@ -148,7 +148,7 @@ fn plugin_application_uses_actual_foreground_transactions_and_restores_the_real_
     );
     assert_ne!(termios.c_lflag & libc::ICANON, 0);
     assert_ne!(termios.c_lflag & libc::ECHO, 0);
-    let snapshot = tui.screen.snapshot().unwrap();
+    let snapshot = tui.screen.preview(usize::MAX).unwrap();
     assert!(!snapshot.alternate_screen);
     assert!(snapshot.cursor.visible);
 }
@@ -166,7 +166,7 @@ fn enhanced_quit_keeps_the_terminal_until_its_fragmented_release_is_consumed() {
     while std::time::Instant::now() < until {
         tui.read();
         assert!(tui.child.try_wait().unwrap().is_none());
-        assert!(tui.screen.snapshot().unwrap().alternate_screen);
+        assert!(tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     }
     tui.send(b";5:3u");
     tui.finish();
@@ -179,7 +179,7 @@ fn enhanced_quit_keeps_the_terminal_until_its_fragmented_release_is_consumed() {
         !tui.output.windows(5).any(|bytes| bytes == b";5:3u"),
         "quit release was echoed after terminal restoration"
     );
-    let snapshot = tui.screen.snapshot().unwrap();
+    let snapshot = tui.screen.preview(usize::MAX).unwrap();
     assert!(!snapshot.alternate_screen);
     assert!(snapshot.cursor.visible);
 }
@@ -640,7 +640,7 @@ fn check_terminal_connections(unrelated_failure: bool, automatic: bool) {
         assert!(child.wait().unwrap().success());
     }
     drop(maka_event_log::root::RootOwner::open(&host_root, &ns).unwrap());
-    let snapshot = tui.screen.snapshot().unwrap();
+    let snapshot = tui.screen.preview(usize::MAX).unwrap();
     assert!(!snapshot.alternate_screen);
     assert!(snapshot.cursor.visible);
 }

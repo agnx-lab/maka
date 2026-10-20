@@ -26,7 +26,7 @@ fn capture(tui: &Pty, name: &str) {
         std::fs::write(directory.join(format!("{name}.ansi")), &tui.output).unwrap();
         std::fs::write(
             directory.join(format!("{name}.txt")),
-            tui.screen.snapshot().unwrap().screen,
+            tui.screen.preview(usize::MAX).unwrap().screen,
         )
         .unwrap();
     }
@@ -116,7 +116,7 @@ fn default_product_trace_preserves_parents_titles_and_inline_evidence() {
     });
     tui.wait_for("Exit code: 7");
     tui.wait_until(|screen| !screen.contains("Finished"));
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let rows: Vec<_> = screen.lines().collect();
     let first = rows
         .iter()
@@ -158,7 +158,7 @@ fn default_product_trace_preserves_parents_titles_and_inline_evidence() {
     tui.wait_for("↑ Hide details");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("⌄ Run tools"),
@@ -182,7 +182,7 @@ fn default_product_trace_preserves_parents_titles_and_inline_evidence() {
     tui.wait_until(|screen| !screen.contains("Loading conversation…"));
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Recorded process status:"),

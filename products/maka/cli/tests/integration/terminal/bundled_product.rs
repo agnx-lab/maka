@@ -29,7 +29,7 @@ mod host_logs;
 #[track_caller]
 fn click(tui: &mut Pty, label: &str) {
     tui.wait_for(label);
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let (row, line) = screen
         .lines()
         .enumerate()
@@ -49,7 +49,7 @@ fn click(tui: &mut Pty, label: &str) {
 }
 
 fn select_text(tui: &mut Pty, text: &str) {
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let (row, line) = screen
         .lines()
         .enumerate()
@@ -106,7 +106,7 @@ fn copy_selection(tui: &mut Pty, expected: &str) {
 
 fn edit_menu(tui: &mut Pty, label: &str) {
     tui.wait_for(label);
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     let (row, line) = screen
         .lines()
         .enumerate()
@@ -199,7 +199,7 @@ fn bundled_product_launch_initializes_and_reopens_original_roots_without_node() 
         tui.wait_until(|screen| !screen.contains("╭Skills"));
         tui.send(b"\x11");
         tui.finish();
-        assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+        assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
         if first {
             // No authoring input remains for reopening; the record selects the
             // committed deployment, whose user-updated head must remain authoritative.
@@ -647,11 +647,23 @@ fn first_install_trust_uses_one_terminal_and_cancel_has_no_product_effects() {
     ];
     let mut cancelled = Pty::spawn(&args);
     cancelled.wait_for("Trust this workspace?");
-    assert!(cancelled.screen.snapshot().unwrap().alternate_screen);
+    assert!(
+        cancelled
+            .screen
+            .preview(usize::MAX)
+            .unwrap()
+            .alternate_screen
+    );
     assert!(!root.join("host").exists());
     cancelled.send(b"\r");
     cancelled.finish();
-    assert!(!cancelled.screen.snapshot().unwrap().alternate_screen);
+    assert!(
+        !cancelled
+            .screen
+            .preview(usize::MAX)
+            .unwrap()
+            .alternate_screen
+    );
     assert!(!root.join("host").exists());
     let mut tui = Pty::spawn(&args);
     tui.wait_for("Trust this workspace?");
@@ -660,12 +672,12 @@ fn first_install_trust_uses_one_terminal_and_cancel_has_no_product_effects() {
         |screen| screen.contains("Settings"),
         Duration::from_secs(60),
     );
-    assert!(tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     // No alternate-screen teardown between confirmation and the actual product.
     assert!(!tui.output.windows(8).any(|bytes| bytes == b"\x1b[?1049l"));
     tui.send(b"\x11");
     tui.finish();
-    assert!(!tui.screen.snapshot().unwrap().alternate_screen);
+    assert!(!tui.screen.preview(usize::MAX).unwrap().alternate_screen);
     let mut reopened = Pty::spawn(&["application", "launch", "--root", root.to_str().unwrap()]);
     reopened.wait_until_with_timeout(
         |screen| screen.contains("Settings"),
@@ -703,7 +715,7 @@ fn first_install_failure_keeps_original_host_error_after_terminal_restoration() 
         |screen| screen.contains("Host local: plugin"),
         Duration::from_secs(60),
     );
-    let startup = tui.screen.snapshot().unwrap();
+    let startup = tui.screen.preview(usize::MAX).unwrap();
     assert!(startup.alternate_screen);
     assert!(
         startup.screen.contains("skills_configuration_invalid")
@@ -722,7 +734,7 @@ fn first_install_failure_keeps_original_host_error_after_terminal_restoration() 
         }
         assert!(Instant::now() < deadline, "failed startup did not settle");
     }
-    let snapshot = tui.screen.snapshot().unwrap();
+    let snapshot = tui.screen.preview(usize::MAX).unwrap();
     assert!(!snapshot.alternate_screen);
     assert!(
         snapshot.screen.contains("Host local: plugin"),
@@ -769,7 +781,7 @@ fn settings_evidence(tui: &Pty, name: &str) {
         std::fs::write(path.join(format!("{name}.ansi")), &tui.output).unwrap();
         std::fs::write(
             path.join(format!("{name}.txt")),
-            tui.screen.snapshot().unwrap().screen,
+            tui.screen.preview(usize::MAX).unwrap().screen,
         )
         .unwrap();
     }
@@ -788,7 +800,8 @@ fn resize_editor(tui: &mut Pty, label: &str, delta: i32) {
             })
     };
     tui.wait_until(|screen| grip(screen).is_some());
-    let (row, column) = grip(&tui.screen.snapshot().unwrap().screen).expect("visible resize grip");
+    let (row, column) =
+        grip(&tui.screen.preview(usize::MAX).unwrap().screen).expect("visible resize grip");
     let end = (row as i32 + delta) as usize;
     tui.send(
         format!(
@@ -843,7 +856,7 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         });
         assert!(
             tui.screen
-                .snapshot()
+                .preview(usize::MAX)
                 .unwrap()
                 .screen
                 .contains(".agents/AGENTS.md")
@@ -865,14 +878,18 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         }
         tui.wait_for("Compression prompt");
         assert!(
-            !editor_thumb(&tui.screen.snapshot().unwrap().screen, "Compression prompt").is_empty(),
+            !editor_thumb(
+                &tui.screen.preview(usize::MAX).unwrap().screen,
+                "Compression prompt"
+            )
+            .is_empty(),
             "partly clipped prompt must still show its scroll thumb"
         );
         settings_evidence(&tui, "settings-overview");
         // Scroll the settings pane until the entire prompt editor fits, then
         // keep wheeling inside it past both boundaries.
         for _ in 0..80 {
-            let screen = tui.screen.snapshot().unwrap().screen;
+            let screen = tui.screen.preview(usize::MAX).unwrap().screen;
             let (row, line) = screen
                 .lines()
                 .enumerate()
@@ -889,7 +906,7 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
                     != Some(row)
             });
         }
-        let screen = tui.screen.snapshot().unwrap().screen;
+        let screen = tui.screen.preview(usize::MAX).unwrap().screen;
         let (row, line) = screen
             .lines()
             .enumerate()
@@ -908,14 +925,17 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         tui.wait_for(&default_prompt.chars().take(32).collect::<String>());
         assert_eq!(
             tui.screen
-                .snapshot()
+                .preview(usize::MAX)
                 .unwrap()
                 .screen
                 .lines()
                 .position(|line| line.contains("Compression prompt")),
             Some(row)
         );
-        let top_thumb = editor_thumb(&tui.screen.snapshot().unwrap().screen, "Compression prompt");
+        let top_thumb = editor_thumb(
+            &tui.screen.preview(usize::MAX).unwrap().screen,
+            "Compression prompt",
+        );
         assert!(!top_thumb.is_empty());
         settings_evidence(&tui, "settings-prompt-top");
         tui.send(
@@ -926,8 +946,10 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         let ending: String = default_prompt.chars().rev().take(12).collect();
         let prompt_tail: String = ending.chars().rev().collect();
         tui.wait_for(&prompt_tail);
-        let bottom_thumb =
-            editor_thumb(&tui.screen.snapshot().unwrap().screen, "Compression prompt");
+        let bottom_thumb = editor_thumb(
+            &tui.screen.preview(usize::MAX).unwrap().screen,
+            "Compression prompt",
+        );
         assert!(!bottom_thumb.is_empty());
         assert_ne!(
             top_thumb, bottom_thumb,
@@ -936,14 +958,14 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         settings_evidence(&tui, "settings-prompt-bottom");
         assert_eq!(
             tui.screen
-                .snapshot()
+                .preview(usize::MAX)
                 .unwrap()
                 .screen
                 .lines()
                 .position(|line| line.contains("Compression prompt")),
             Some(row)
         );
-        let screen = tui.screen.snapshot().unwrap().screen;
+        let screen = tui.screen.preview(usize::MAX).unwrap().screen;
         let tail = screen
             .lines()
             .position(|line| line.contains(&prompt_tail))
@@ -987,7 +1009,7 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
         );
         tui.wait_until(|screen| !screen.contains("Select all"));
         settings_evidence(&tui, "settings");
-        let screen = tui.screen.snapshot().unwrap().screen;
+        let screen = tui.screen.preview(usize::MAX).unwrap().screen;
         let (row, line) = screen
             .lines()
             .enumerate()
@@ -1007,7 +1029,7 @@ fn bundled_assistant_preferences_opens_with_compaction_editor() {
             })
         };
         tui.wait_until(|screen| is_private(screen, false));
-        let screen = tui.screen.snapshot().unwrap().screen;
+        let screen = tui.screen.preview(usize::MAX).unwrap().screen;
         let (row, line) = screen
             .lines()
             .enumerate()
@@ -1083,7 +1105,7 @@ fn bundled_connections_search_scroll_click_and_chatgpt_credentials() {
         .unwrap();
     tui.frames.resize();
     tui.wait_until(|s| s.contains("ChatGPT Subscription") && s.contains('█'));
-    let before = tui.screen.snapshot().unwrap().screen;
+    let before = tui.screen.preview(usize::MAX).unwrap().screen;
     let row = before
         .lines()
         .position(|line| line.contains("ChatGPT Subscription"))
@@ -1116,7 +1138,7 @@ fn bundled_connections_search_scroll_click_and_chatgpt_credentials() {
         "provider selection to form: {:?}",
         selection_started.elapsed()
     );
-    let screen = tui.screen.snapshot().unwrap().screen;
+    let screen = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(screen.contains("Name"), "{screen}");
     assert!(!screen.contains("Next field"), "{screen}");
     assert!(!screen.contains("Connection ID"), "{screen}");
@@ -1124,7 +1146,7 @@ fn bundled_connections_search_scroll_click_and_chatgpt_credentials() {
     tui.wait_for("Sign in with ChatGPT");
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Enter an API key")

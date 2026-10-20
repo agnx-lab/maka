@@ -215,7 +215,7 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         tui.read();
-        if tui.frames.ready() && tui.screen.snapshot().unwrap().screen.contains("ready") {
+        if tui.frames.ready() && tui.screen.preview(usize::MAX).unwrap().screen.contains("ready") {
             break;
         }
         assert!(
@@ -228,13 +228,13 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
     // for its actual composer before using footer coordinates; the home action
     // has the same label at a different position.
     tui.wait_until(|screen| screen.contains("Message…") && screen.contains("Execution backend"));
-    let before = tui.screen.snapshot().unwrap().screen;
+    let before = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "[ Execution backend ]", accent);
     click(&mut tui, "[ fixture-backend ]", accent);
     click(&mut tui, "Backend default", accent);
     paste(&mut tui, "backend-model");
     tui.wait_for("backend-model");
-    let picker = tui.screen.snapshot().unwrap().screen;
+    let picker = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "[ Apply ]", accent);
     tui.wait_until(|screen| {
         screen.contains("Message…") && !screen.contains("Backend model (optional)")
@@ -243,7 +243,7 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
     tui.wait_until(|screen| {
         screen.contains("Backend model (optional)") && screen.contains("backend-model")
     });
-    let reopened = tui.screen.snapshot().unwrap().screen;
+    let reopened = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(
         reopened.contains("Close"),
         "compact settings must keep the closing control visible"
@@ -255,13 +255,13 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
     click(&mut tui, "Message…", accent);
     paste(&mut tui, upload.to_str().unwrap());
     tui.wait_until(|screen| screen.contains("executor-note.txt") && screen.contains("Ready"));
-    let attached = tui.screen.snapshot().unwrap().screen;
+    let attached = tui.screen.preview(usize::MAX).unwrap().screen;
     click(&mut tui, "Message…", accent);
     paste(&mut tui, "Run real external backend");
     tui.wait_for("Run real external backend");
     tui.send(b"\r");
     tui.wait_for("Live external answer");
-    let live = tui.screen.snapshot().unwrap().screen;
+    let live = tui.screen.preview(usize::MAX).unwrap().screen;
     assert!(live.contains("Inspecting external workspace"));
     assert!(!live.contains("Final external answer"));
     click(&mut tui, "Release external", accent);
@@ -279,7 +279,7 @@ fn executor_selection_and_composer_reach_production_timeline_before_backend_comp
         std::fs::write(Path::new(&path).join("live.txt"), live).unwrap();
         std::fs::write(
             Path::new(&path).join("completed.txt"),
-            tui.screen.snapshot().unwrap().screen,
+            tui.screen.preview(usize::MAX).unwrap().screen,
         )
         .unwrap();
         std::fs::write(Path::new(&path).join("terminal.ansi"), &tui.output).unwrap();

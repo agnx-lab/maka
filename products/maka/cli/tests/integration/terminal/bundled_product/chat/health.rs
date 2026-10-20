@@ -238,7 +238,7 @@ fn default_product_health_checks_process_and_independent_endpoint() {
     assert_eq!(endpoint_socket.read(&mut [0; 1]).unwrap(), 0);
     assert!(
         !tui.screen
-            .snapshot()
+            .preview(usize::MAX)
             .unwrap()
             .screen
             .contains("Approval needed")

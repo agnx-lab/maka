@@ -24,7 +24,6 @@ use maka_agent_facts::event::InvocationOutcome;
 use maka_agent_facts::event::RuntimeEvent;
 use sqlx::{Connection, SqliteConnection};
 
-mod budget;
 mod evidence;
 pub(crate) use evidence::validate as validate_history;
 mod cancel;
