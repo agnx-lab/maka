@@ -1307,15 +1307,19 @@ mod tests {
     fn vertical_wheel_leaves_trackpads_and_horizontal_wheels_to_the_scroller(
         cx: &mut TestAppContext,
     ) {
-        let (cx, strip, page) = vertical_wheel_test(cx);
+        {
+            let (cx, strip, page) = vertical_wheel_test(cx);
+
+            // A vertical trackpad swipe keeps the strip's axis lock.
+            wheel(cx, ScrollDelta::Pixels(point(px(0.), px(-20.))));
+            assert_eq!(strip.offset().x, px(0.));
+            assert_eq!(page.offset().y, px(-20.));
+        }
+
+        // A separate gesture reaches the strip's own horizontal listener,
+        // without inheriting the preceding trackpad gesture's native latch.
+        let (cx, strip, _) = vertical_wheel_test(cx);
         let line_height = cx.update(|window, _| window.line_height());
-
-        // A vertical trackpad swipe keeps the strip's axis lock.
-        wheel(cx, ScrollDelta::Pixels(point(px(0.), px(-20.))));
-        assert_eq!(strip.offset().x, px(0.));
-        assert_eq!(page.offset().y, px(-20.));
-
-        // A horizontal wheel reaches the strip's own listener.
         wheel(cx, ScrollDelta::Lines(point(-1., 0.)));
         assert_eq!(strip.offset().x, -line_height);
     }
