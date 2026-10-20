@@ -22,6 +22,11 @@
 use ::markdown::{ParseOptions, mdast::Node};
 use nsh_core::ui::prelude::*;
 
+// Formatting work is limited to eight normal 32 KiB history text windows.
+// This is a presentation budget, independent of the larger Host message limits:
+// longer documents stay complete literal source rather than parsing a prefix.
+const MAX_SOURCE_BYTES: usize = 256 * 1024;
+const SOURCE_TOO_LONG: &str = "Long response shown as original source.";
 const MAX_BLOCKS: usize = 48;
 const MAX_RUNS: usize = 2048;
 
@@ -83,6 +88,9 @@ pub fn registry() -> Registry {
 }
 
 fn parse_source(source: &str) -> Result<Vec<MarkdownBlock>, String> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(SOURCE_TOO_LONG.into());
+    }
     let root =
         ::markdown::to_mdast(source, &ParseOptions::gfm()).map_err(|error| error.to_string())?;
     let mut output = Presentation {
@@ -500,6 +508,21 @@ mod tests {
         assert_eq!(blocks[1].kind, MarkdownBlockKind::Literal);
         assert_eq!(blocks[1].text, source["Earlier\n\n".len()..]);
         assert!(blocks[1].text.ends_with("![image](retained.png)"));
+    }
+
+    #[test]
+    fn source_work_budget_accepts_the_boundary_and_rejects_the_whole_larger_document() {
+        let original = format!("**{}**", "a".repeat(262_140));
+        let blocks = parse_source(&original).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].runs[0].strong);
+        assert_eq!(blocks[0].runs[0].text, "a".repeat(262_140));
+        // The UI owns this entire original, not a misleading parsed prefix or
+        // another full-document copy transported back through native DTOs.
+        assert_eq!(
+            parse_source(&format!("{original}\n末尾")),
+            Err("Long response shown as original source.".into())
+        );
     }
 
     #[test]

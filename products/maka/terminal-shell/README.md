@@ -62,6 +62,8 @@ In a palette, type to search, use ↑/↓ to select, and Enter to activate. Sess
 
 Earlier messages load automatically as you scroll up, preserving your reading position. Each turn has its own bounded native activity panel with independent scrolling. It follows new activity near the bottom; scrolling up keeps your reading position. Completed turns collapse by default, with their final answer outside the panel. Activate a turn header to expand or collapse it. Completion and final-answer placement use the Host's recorded turn metadata, so an individual model response finishing does not prematurely close an ongoing turn. Thinking remains expanded when you reopen a turn. Tool details are read on demand; reopening a panel with expanded tool details reloads them from the top.
 
+Assistant responses format headings, emphasis, lists, quotes and code. **Source** switches to the exact selectable text. Partial history stays literal until its opening is loaded. Responses larger than 256 KiB remain complete selectable source to bound formatting work; this does not limit messages or content retained by the Host.
+
 **Todo** displays the Agent's actual checklist, including its current item and completed count. Token speed reports the **last request**; context figures mark approximate or last-known values. Unavailable metrics are omitted.
 
 The activity header follows the latest thinking, streamed tool arguments or running tool. A request waiting for your response takes priority. Long titles shorten at complete Unicode characters, and title updates preserve your position in the activity reader.

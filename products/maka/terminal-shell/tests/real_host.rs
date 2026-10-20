@@ -422,24 +422,33 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
         assert_eq!(response["text"], format!("{prefix}{suffix}"));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        // Exceed the formatter's document budget during a real open stream.
+        // The complete current source stays selectable instead of retaining
+        // a stale rich prefix or returning a second native copy of the document.
+        let sent = support::mutate(&client, "send", json!({
+            "sessionId":fixture.session,"message":"Keep a partial code source literal", "model":fixture.selection
+        })).await;
+        assert_eq!(sent["kind"], "started");
+        let mut request = fixture.next_request().await;
+        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
+        request.delta(&source).await;
+        let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
+        evidence("rich-response-over-formatting-budget", &over_budget);
+        support::click_text(&mut view, "[Source]");
+        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Formatted]") && !screen.contains("Formatting unavailable")).await;
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
         drop(view);
         bindings.close().await.unwrap();
 
         // A fresh history tail omits the opening fence. Its heading-looking
         // lines must stay original source until offset zero has been loaded.
         let client = fixture.client().await;
-        let sent = support::mutate(&client, "send", json!({
-            "sessionId":fixture.session,"message":"Keep a partial code source literal", "model":fixture.selection
-        })).await;
-        assert_eq!(sent["kind"], "started");
-        let mut request = fixture.next_request().await;
-        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(7000));
-        request.delta(&source).await;
-        request.finish().await;
-        fixture.idle(&client, &fixture.session).await;
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let tail = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let response = tail["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
+        assert_eq!(response["totalBytes"].as_u64(), Some(source.len() as u64));
+        assert!(source.ends_with(response["text"].as_str().unwrap()));
         assert!(response["offset"].as_u64().unwrap() > 0, "this history must omit the original opening fence");
         let (mut view, bindings) = fixture.view(client, Some(fixture.session.clone()));
         let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;

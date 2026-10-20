@@ -24,7 +24,7 @@ import type { MarkdownBlock } from 'maka/markdown';
 import { hasCompletePrefix, type Row } from './history';
 import { C } from './ui';
 
-type Input = { messageId: string; field: string; source: string; epoch: number };
+type Input = { messageId: string; field: string; source: string };
 type Projection = { input: Input; blocks: MarkdownBlock[] };
 const sameInput = (left: Input | null, right: Input | null) =>
   left === right ||
@@ -32,14 +32,12 @@ const sameInput = (left: Input | null, right: Input | null) =>
     right !== null &&
     left.messageId === right.messageId &&
     left.field === right.field &&
-    left.epoch === right.epoch &&
     left.source === right.source);
 
 export function MarkdownBody(props: { row: () => Row }) {
   const projection = signal<Projection | null>(null);
   const failure = signal<{ input: Input; message: string } | null>(null);
   let wanted: Input | null = null;
-  let sourceEpoch = 0;
   let preparing = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let nextStart = 0;
@@ -47,14 +45,13 @@ export function MarkdownBody(props: { row: () => Row }) {
   const input = (): Input | null => {
     const row = props.row();
     return hasCompletePrefix(row)
-      ? { messageId: row.messageId, field: row.field, source: row.text, epoch: sourceEpoch }
+      ? { messageId: row.messageId, field: row.field, source: row.text }
       : null;
   };
   const compatible = (parsed: Input, current: Input | null) =>
     current !== null &&
     current.messageId === parsed.messageId &&
     current.field === parsed.field &&
-    current.epoch === parsed.epoch &&
     current.source.startsWith(parsed.source);
   function schedule() {
     if (!alive || preparing || timer !== undefined || wanted === null) return;
@@ -99,11 +96,9 @@ export function MarkdownBody(props: { row: () => Row }) {
     }
   }
   effect(() => {
-    let current = input();
+    const current = input();
     if (sameInput(current, wanted)) return;
     if (wanted === null || !compatible(wanted, current)) {
-      sourceEpoch += 1;
-      if (current !== null) current = { ...current, epoch: sourceEpoch };
       projection.set(null);
     }
     wanted = current;
