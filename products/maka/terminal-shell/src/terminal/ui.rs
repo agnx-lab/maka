@@ -23,7 +23,7 @@ use super::{
     output::FrameWriter,
 };
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
-use nsh_core::{Command, MountBatch, MountItem, ROOT_ID};
+use nsh_core::{Command, MountBatch, MountItem, ROOT_ID, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
     CellMetrics, InputSnapshot, PressLease, ServiceOutput, ServiceRequest, Surface, SurfaceEvent,
@@ -123,6 +123,7 @@ pub(super) fn spawn(
 struct Session {
     engine: LocalEngine<TerminalTextEngine>,
     surface: Surface,
+    environment: Environment,
     sink: Sink,
     terminal: Terminal<CrosstermBackend<FrameWriter>>,
     area: Rect,
@@ -150,6 +151,7 @@ impl Session {
             .get_or_insert_with(|| Arc::new(crate::ApplicationAssets));
         surface.set_assets(Some(assets.clone()));
         let sink = Sink::default();
+        let environment = config.environment;
         let engine = LocalEngine::start(config, TerminalTextEngine::new(metrics), sink.clone())
             .ok_or("NSH UI engine failed to start")?;
         let terminal = Terminal::with_options(
@@ -162,6 +164,7 @@ impl Session {
         Ok(Self {
             engine,
             surface,
+            environment,
             sink,
             terminal,
             area,
@@ -214,7 +217,10 @@ impl Session {
         if let Some((columns, rows)) = command.resize {
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
-            self.engine.control().resize(self.surface.viewport());
+            self.environment.window = self.surface.viewport();
+            let control = self.engine.control();
+            control.resize(self.environment.window);
+            control.set_environment(self.environment);
             self.terminal
                 .resize(self.area)
                 .map_err(|error| error.to_string())?;
@@ -520,6 +526,41 @@ mod tests {
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
         config
+    }
+
+    #[test]
+    fn production_resize_updates_the_js_window_breakpoint() {
+        let mut options = config(
+            r#"
+            import { mount } from "nsh";
+            import { windowSize } from "nsh/device";
+            import { element, insert } from "nsh:rt";
+            mount(() => {
+                const label = element("text");
+                insert(label, () => windowSize().width >= 800 ? "WIDE_WINDOW" : "NARROW_WINDOW");
+                return label;
+            });
+            "#,
+        );
+        options.environment.window = options.viewport;
+        let mut session = Session::new(options).unwrap();
+        session.initial_frame().unwrap();
+        assert!(session.surface.snapshot().contains("NARROW_WINDOW"));
+        for (columns, rows, expected, absent) in [
+            (120, 40, "WIDE_WINDOW", "NARROW_WINDOW"),
+            (80, 24, "NARROW_WINDOW", "WIDE_WINDOW"),
+        ] {
+            session
+                .advance(Advance {
+                    inputs: Vec::new(),
+                    resize: Some((columns, rows)),
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            let screen = session.surface.snapshot();
+            assert!(screen.contains(expected), "{screen}");
+            assert!(!screen.contains(absent), "{screen}");
+        }
     }
 
     #[test]
