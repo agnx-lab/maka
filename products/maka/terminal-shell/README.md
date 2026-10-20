@@ -74,7 +74,7 @@ Assistant responses format headings, emphasis, lists, quotes and code. **Source*
 
 The activity header follows the latest thinking, streamed tool arguments or running tool. A request waiting for your response takes priority. Long titles shorten at complete Unicode characters, and title updates preserve your position in the activity reader.
 
-Expand a tool result containing an image to see its thumbnail, then activate **Open image** for a larger preview. Escape or **Close** returns to the conversation and restores focus without stopping the run. Both views use the original image retained by the Host, even if its workspace file changes. Images currently render as colored Unicode half and quadrant blocks; unsupported image formats show an error in the result.
+Expand a tool result containing an image to see its thumbnail, then activate **Open image** for a larger preview. Escape or **Close** returns to the conversation and restores focus without stopping the run. Both views use the original image retained by the Host, even if its workspace file changes. The shell detects Sixel support and cell pixel size at startup; otherwise, images automatically use colored Unicode half and quadrant blocks. After resizing the terminal, images use Unicode until the shell is restarted. Unsupported image formats show an error in the result.
 
 Open a pending request to review its original details:
 
