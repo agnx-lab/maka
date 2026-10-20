@@ -43,7 +43,7 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(root: &Path, session: &str) -> Self {
+    pub fn spawn(root: &Path, session: Option<&str>) -> Self {
         let mut master = -1;
         let mut slave = -1;
         let mut size = libc::winsize {
@@ -78,8 +78,11 @@ impl Pty {
             0
         );
         let mut command = Command::new(env!("CARGO_BIN_EXE_maka-terminal-shell"));
+        command.args(["--root", root.to_str().unwrap()]);
+        if let Some(session) = session {
+            command.args(["--session", session]);
+        }
         command
-            .args(["--root", root.to_str().unwrap(), "--session", session])
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
             .env_remove("NO_COLOR")

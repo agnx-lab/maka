@@ -206,9 +206,13 @@ impl Fixture {
                     endpoint(
                         "agent",
                         &[
+                            "list",
                             "directories",
                             "create",
+                            "selectBackend",
                             "send",
+                            "stop",
+                            "execution",
                             "observe",
                             "history",
                             "watch",
@@ -216,7 +220,10 @@ impl Fixture {
                         false,
                     ),
                 ),
-                ("settings".into(), endpoint("settings", &["models"], false)),
+                (
+                    "settings".into(),
+                    endpoint("settings", &["models", "resolveModel"], false),
+                ),
                 ("receipts".into(), endpoint("receipts", &["read"], true)),
             ]),
             vec![],
@@ -311,11 +318,11 @@ impl Fixture {
             .unwrap()
             .unwrap()
     }
-    pub async fn idle(&self, client: &Client) {
+    pub async fn idle(&self, client: &Client, session: &str) {
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 let observed = client
-                    .query("agent", "observe", json!({"sessionId":self.session}))
+                    .query("agent", "observe", json!({"sessionId":session}))
                     .await
                     .unwrap();
                 if observed["session"]["activity"] == "idle" {
@@ -336,11 +343,15 @@ impl Fixture {
             let text: String = (0..30).map(|row| format!("History {turn:02} paragraph {row:02}: original provider text with **bold** and `code`.\n\n")).collect();
             request.delta(&text).await;
             request.finish().await;
-            self.idle(&client).await;
+            self.idle(&client, &self.session).await;
         }
         client.close().await.unwrap();
     }
-    pub fn view(&self, client: Client) -> (AppView, maka_terminal_shell::bindings::Bindings) {
+    pub fn view(
+        &self,
+        client: Client,
+        initial_session: Option<String>,
+    ) -> (AppView, maka_terminal_shell::bindings::Bindings) {
         let bindings =
             maka_terminal_shell::bindings::Bindings::new(client, tokio::runtime::Handle::current());
         let mut view = AppView::new(AppOptions {
@@ -348,7 +359,7 @@ impl Fixture {
             data_dir: Some(self.directory.path().join("nsh")),
             ui_sets: Some(vec![
                 nsh_ui_mobile::registry(),
-                bindings.registry(Some(self.session.clone())),
+                bindings.registry(initial_session),
             ]),
             ..Default::default()
         });
@@ -375,7 +386,7 @@ async fn configure(owner: Arc<RootOwner>, base: &str) -> Value {
     );
     let provider = json!({"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai-compatible"});
     let CatalogMutationResult::Committed {connection:Some(connection),..} = config.create_connection(serde_json::from_value(json!({
-        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model"],"modelOverrides":{"fixture-model":{"contextWindow":200000}}}
+        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":{"fixture-model":{"contextWindow":200000},"fixture-model-alt":{"contextWindow":200000}}}
     })).unwrap()).await.unwrap() else { panic!("create fixture connection") };
     let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = config.prepare_oauth_login(serde_json::from_value(json!({
         "expectedCredential":null,"attemptId":Uuid::new_v4(),"target":{"kind":"existing","expected":{"connectionId":connection.connection_id,"revision":connection.revision,"provider":provider,"slug":"nsh-fixture","configuration":{"baseUrl":base}},"configuration":{"baseUrl":base}},
@@ -512,6 +523,24 @@ pub async fn wait_view(view: &mut AppView, predicate: impl Fn(&str) -> bool) -> 
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+}
+
+pub async fn wait_draft(client: &Client, session: &str, text: &str) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if client
+                .load_draft("agent", session, EDITOR)
+                .await
+                .unwrap()
+                .is_some_and(|draft| draft.text == text)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the editor did not persist its exact draft");
 }
 
 pub fn evidence(name: &str, snapshot: &str) {
