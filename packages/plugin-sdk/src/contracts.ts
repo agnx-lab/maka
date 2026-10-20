@@ -12363,17 +12363,6 @@ export const contracts = {
                     properties: {
                       kind: {
                         type: 'string',
-                        const: 'too_large',
-                      },
-                    },
-                    required: ['kind'],
-                    additionalProperties: false,
-                  },
-                  {
-                    type: 'object',
-                    properties: {
-                      kind: {
-                        type: 'string',
                         const: 'unchanged',
                       },
                     },
@@ -12437,12 +12426,9 @@ export const contracts = {
                       $ref: '#/$defs/GitStatusEntry',
                     },
                   },
-                  truncated: {
-                    type: 'boolean',
-                  },
                 },
                 additionalProperties: false,
-                required: ['head', 'entries', 'truncated'],
+                required: ['head', 'entries'],
               },
               GitStatusEntry: {
                 type: 'object',

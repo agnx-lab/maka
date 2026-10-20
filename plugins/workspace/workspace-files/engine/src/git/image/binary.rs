@@ -23,15 +23,12 @@ use std::io::{self, Write};
 const ALPHABET: &[u8; 85] =
     b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
-pub(super) fn literal(out: &mut Vec<u8>, bytes: &[u8], limit: usize) -> io::Result<()> {
+pub(super) fn literal(out: &mut Vec<u8>, bytes: &[u8]) -> io::Result<()> {
     writeln!(out, "literal {}", bytes.len())?;
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
     encoder.write_all(bytes)?;
     let compressed = encoder.finish()?;
     for line in compressed.chunks(52) {
-        if out.len().saturating_add(68) > limit {
-            return Err(crate::workspace::invalid("Git patch exceeds byte limit"));
-        }
         out.push(if line.len() <= 26 {
             b'A' + line.len() as u8 - 1
         } else {

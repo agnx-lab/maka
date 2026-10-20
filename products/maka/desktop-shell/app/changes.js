@@ -53,7 +53,6 @@ const KINDS = {
 /** What a diff that is not text says, by its kind; null is a folder that stopped being a repository. */
 const DIFF_NOTES = {
   binary: 'diffBinary',
-  too_large: 'diffTooLarge',
   unchanged: 'diffUnchanged',
   unsupported: 'diffUnsupported',
 };
@@ -130,7 +129,7 @@ export class Changes {
     /**
      * The status as last read: undefined before the first read lands, null
      * when the folder is not a Git repository, else `{ head, entries,
-     * truncated, groups, order, paths, kinds }` with the entries as the list
+     * groups, order, paths, kinds }` with the entries as the list
      * draws them (entryOf).
      */
     this.status = undefined;
@@ -265,7 +264,6 @@ export class Changes {
       }
       this.status = {
         head: status.head,
-        truncated: status.truncated,
         entries,
         groups,
         order: groups.flat(),
@@ -387,9 +385,8 @@ export class Changes {
   }
 
   /**
-   * The list's items: a heading for each area with changes, its entries, and
-   * the note when the status was cut short. Rebuilt only when the status or
-   * the marked entry changed.
+   * The list's items: a heading for each area with changes and its entries.
+   * Rebuilt only when the status or the marked entry changed.
    */
   items() {
     const status = this.status;
@@ -403,9 +400,6 @@ export class Changes {
       for (const entry of group) {
         items.push({ kind: 'entry', key: entry.key, entry, marked: entry.key === this.lastOpened });
       }
-    }
-    if (status?.truncated) {
-      items.push({ kind: 'truncated', key: 'truncated', count: status.entries.length });
     }
     this.view = { status, marked: this.lastOpened, items };
     return items;
@@ -525,13 +519,6 @@ function changesItem(item, cx) {
         .items_center()
         .child(text(t(item.heading), 'smallLabel', m.inkMuted))
         .child(text(String(item.count), 'small', m.inkMuted)),
-    );
-  }
-  if (item.kind === 'truncated') {
-    return row.child(
-      text(t('changesTruncated', { count: item.count }), 'small', m.inkMuted)
-        .px(8)
-        .truncate(),
     );
   }
   const entry = item.entry;

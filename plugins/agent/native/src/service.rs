@@ -280,12 +280,7 @@ impl Handler for Agent {
                 }
                 "forkReceipt" => encode(owner.fork_receipt(decode(input)?, context.scope()).await?),
                 "context" => encode(owner.context(decode(input)?, context.scope()).await?),
-                "gitStatus" => {
-                    let result = encode(owner.git_status(decode(input)?, context.scope()).await?)?;
-                    maka_plugin_core::json::check_delivery(&result, 512 * 1024)
-                        .map_err(|_| "agent_git_output_unavailable")?;
-                    Ok(result)
-                }
+                "gitStatus" => encode(owner.git_status(decode(input)?, context.scope()).await?),
                 "listFiles" => {
                     let result = encode(owner.list_files(decode(input)?, context.scope()).await?)?;
                     maka_plugin_core::json::check_delivery(&result, 512 * 1024)
@@ -293,12 +288,7 @@ impl Handler for Agent {
                     Ok(result)
                 }
                 "watchFiles" => owner.watch_files(decode(input)?, context).await,
-                "gitDiff" => {
-                    let result = encode(owner.git_diff(decode(input)?, context.scope()).await?)?;
-                    maka_plugin_core::json::check_delivery(&result, 512 * 1024)
-                        .map_err(|_| "agent_git_output_unavailable")?;
-                    Ok(result)
-                }
+                "gitDiff" => encode(owner.git_diff(decode(input)?, context.scope()).await?),
                 "snapshotPatch" => {
                     context.operation().ok_or("agent_mutation_required")?;
                     encode(

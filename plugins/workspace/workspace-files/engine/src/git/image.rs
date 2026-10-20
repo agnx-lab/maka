@@ -35,7 +35,6 @@ pub(crate) fn append(
     before: Option<&Image>,
     after: Option<&Image>,
     hash: gix::hash::Kind,
-    limit: usize,
 ) -> io::Result<()> {
     if before.map(|i| (i.mode, &i.bytes)) == after.map(|i| (i.mode, &i.bytes)) {
         return Ok(());
@@ -44,8 +43,8 @@ pub(crate) fn append(
     if let (Some(old), Some(new)) = (before, after)
         && (old.mode & 0o170000) != (new.mode & 0o170000)
     {
-        append(out, name, before, None, hash, limit)?;
-        return append(out, name, None, after, hash, limit);
+        append(out, name, before, None, hash)?;
+        return append(out, name, None, after, hash);
     }
     let a = quote(b"a/", name);
     let b = quote(b"b/", name);
@@ -82,8 +81,8 @@ pub(crate) fn append(
         || std::str::from_utf8(new).is_err()
     {
         writeln!(out, "GIT binary patch")?;
-        binary::literal(out, new, limit)?;
-        return binary::literal(out, old, limit);
+        binary::literal(out, new)?;
+        return binary::literal(out, old);
     }
     writeln!(
         out,
@@ -93,11 +92,11 @@ pub(crate) fn append(
     )?;
     let input = blob::InternedInput::new(old, new);
     let diff = blob::diff_with_slider_heuristics(blob::Algorithm::Histogram, &input);
-    blob::UnifiedDiff::new(&diff, &input, Hunks(out, limit), Default::default()).consume()?;
+    blob::UnifiedDiff::new(&diff, &input, Hunks(out), Default::default()).consume()?;
     Ok(())
 }
 
-struct Hunks<'a>(&'a mut Vec<u8>, usize);
+struct Hunks<'a>(&'a mut Vec<u8>);
 impl ConsumeHunk for Hunks<'_> {
     type Out = ();
     fn consume_hunk(
@@ -107,9 +106,6 @@ impl ConsumeHunk for Hunks<'_> {
     ) -> io::Result<()> {
         writeln!(self.0, "{header}")?;
         for (kind, line) in lines {
-            if self.0.len().saturating_add(line.len() + 32) > self.1 {
-                return Err(crate::workspace::invalid("Git patch exceeds byte limit"));
-            }
             self.0.push(kind.to_prefix() as u8);
             self.0.extend_from_slice(line);
             if !line.ends_with(b"\n") {

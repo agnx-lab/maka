@@ -150,7 +150,6 @@ fn git_failure(error: &io::Error) -> &'static str {
         "git_invalid_path" => "agent_git_invalid_path",
         "git_unsupported" => "agent_git_unsupported",
         "git_private" => "agent_git_private",
-        "git_too_large" => "agent_git_too_large",
         "git_cancelled" => "agent_git_cancelled",
         "git_changed" => "agent_git_changed",
         "git_unavailable" => "agent_git_unavailable",
