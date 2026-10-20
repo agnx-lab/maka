@@ -312,6 +312,33 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
             }
         }).await.expect("native browser scrolling did not load the second Host page");
         support::evidence_cells("workbench-automatic-browser-pagination", &view);
+
+        // Read at the end before a real external metadata commit. Renaming
+        // preserves this session's ID, timestamp and query membership, so a
+        // catalog revision must not remove the tail or move its screen row.
+        support::scroll_text(&mut view, target_title, MouseEventKind::ScrollDown);
+        support::tick(&mut view);
+        let tail_y = view.accessibility_snapshot().into_iter()
+            .find(|node| node.label == format!("Open conversation {target_title}"))
+            .unwrap().frame.origin.y.0;
+        let original = client.query("agent", "observe", json!({"sessionId":target_id})).await.unwrap();
+        let updated_title = format!("{target_title} v2");
+        let renamed = support::mutate(&client, "metadata", json!({
+            "sessionId":target_id,"expectedRevision":original["session"]["revision"],
+            "title":updated_title,"labels":original["session"]["labels"]
+        })).await;
+        assert_eq!(renamed["kind"], "committed");
+        assert_eq!(renamed["session"]["id"], target_id);
+        assert_eq!(renamed["session"]["updatedAt"], original["session"]["updatedAt"]);
+        // A new title proves the new revision reached this UI. No wheel or
+        // other navigation action is allowed to recover the original row.
+        wait_view(&mut view, |screen| screen.contains(&updated_title)).await;
+        let tail_after = view.accessibility_snapshot().into_iter()
+            .find(|node| node.label == format!("Open conversation {updated_title}"))
+            .unwrap().frame.origin.y.0;
+        assert_eq!(tail_after, tail_y);
+        support::evidence_cells("workbench-browser-revision-preserves-tail", &view);
+        let target_title = updated_title.as_str();
         support::click_text(&mut view, &format!("Open conversation {target_title}"));
         wait_view(&mut view, |screen| screen.lines().any(|line| line.contains("MAKA") && line.contains(target_title)) && screen.contains("Enter sends")).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));

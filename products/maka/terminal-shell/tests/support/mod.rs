@@ -247,6 +247,7 @@ impl Fixture {
                             "directories",
                             "create",
                             "selectBackend",
+                            "metadata",
                             "send",
                             "stop",
                             "execution",
