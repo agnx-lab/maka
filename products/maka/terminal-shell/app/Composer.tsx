@@ -426,9 +426,11 @@ export function Composer(props: {
           </Button>
         </View>
       </View>
-      <If when={blocked()}>
-        <Text style={{ color: C.warning, fontSize: 12, paddingTop: 8 }}>{blocked()}</Text>
-      </If>
+      <View style={{ minHeight: 24, paddingTop: 8 }}>
+        <If when={blocked()}>
+          <Text style={{ color: C.warning, fontSize: 12, lineHeight: 16 }}>{blocked()}</Text>
+        </If>
+      </View>
       <If when={props.session()?.metrics()}>
         <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>
           {props.session()?.metrics()}
