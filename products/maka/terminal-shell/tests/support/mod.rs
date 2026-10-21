@@ -1146,22 +1146,31 @@ pub fn painted_text(view: &AppView, prefix: &str, row: usize) -> String {
     text.trim_end().to_owned()
 }
 
-pub async fn wait_draft(client: &Client, session: &str, text: &str) {
-    tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            if client
-                .load_draft("agent", session, EDITOR)
-                .await
-                .unwrap()
-                .is_some_and(|draft| draft.text == text)
-            {
-                return;
+#[track_caller]
+pub fn wait_draft<'a>(
+    client: &'a Client,
+    session: &'a str,
+    text: &'a str,
+) -> impl std::future::Future<Output = ()> + 'a {
+    let caller = std::panic::Location::caller();
+    async move {
+        let mut last = None;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                last = client.load_draft("agent", session, EDITOR).await.unwrap();
+                if last.as_ref().is_some_and(|draft| draft.text == text) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("the editor did not persist its exact draft");
+        })
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "the editor did not persist its exact draft at {caller}: session={session:?}, expected={text:?}, actual={last:?}: {error}"
+            )
+        });
+    }
 }
 
 fn evidence_size() -> (u16, u16) {

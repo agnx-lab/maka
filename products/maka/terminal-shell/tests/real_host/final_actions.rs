@@ -27,6 +27,31 @@ async fn activate(view: &mut AppView, label: &str) {
     )));
 }
 
+async fn editable_composer(view: &mut AppView) {
+    tab_to_label(view, "Message composer").await;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            support::tick(view);
+            if view
+                .surface()
+                .input_context()
+                .is_some_and(|context| context.editable)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "the native composer did not become editable: {error}; context={:?}\n{}",
+            view.surface().input_context(),
+            view.snapshot()
+        )
+    });
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_active_turn() {
     tokio::time::timeout(Duration::from_secs(90), async {
@@ -81,8 +106,9 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| !screen.contains("Main model usage")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "View this turn's model usage"));
-        tab_to_label(&mut view, "Message composer").await;
-        view.handle_event(Event::Paste("父会话草稿 stays here".into()));
+        editable_composer(&mut view).await;
+        assert!(view.handle_event(Event::Paste("父会话草稿 stays here".into())));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("父会话草稿 stays here"));
         support::wait_draft(&client, &fixture.session, "父会话草稿 stays here").await;
 
         let second = support::mutate(&client, "send", json!({
@@ -116,7 +142,9 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         assert!(!copied.to_string().contains("LATER_B"));
         assert!(!copied.to_string().contains("ACTIVE_B"));
         support::wait_draft(&client, &fixture.session, "父会话草稿 stays here").await;
-        support::wait_draft(&client, &fork_id, "").await;
+        editable_composer(&mut view).await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""), "the fork's native editor must not inherit the parent's draft");
+        assert!(client.load_draft("agent", &fork_id, EDITOR).await.unwrap().is_none(), "a fork that has never been edited has no persisted draft");
         evidence("final-actions-fork-excludes-later-active-turn", &forked);
 
         view.resize(80, 24);
@@ -126,8 +154,9 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         assert!(!copied_usage.contains("Input tokens"), "copied history must not invent provider counters:\n{copied_usage}");
         evidence("final-actions-copied-history-usage-unavailable-80x24", &copied_usage);
         activate(&mut view, "Close turn usage").await;
-        tab_to_label(&mut view, "Message composer").await;
-        view.handle_event(Event::Paste("独立分支草稿".into()));
+        editable_composer(&mut view).await;
+        assert!(view.handle_event(Event::Paste("独立分支草稿".into())));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("独立分支草稿"));
         support::wait_draft(&client, &fork_id, "独立分支草稿").await;
         support::wait_draft(&client, &fixture.session, "父会话草稿 stays here").await;
         second_request.finish().await;
