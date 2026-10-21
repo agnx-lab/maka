@@ -115,6 +115,7 @@ impl Fixture {
     pub async fn reasoning_models() -> Self {
         Self::open_with_options(false, false, InitialCatalog::Configured { reasoning: true }).await
     }
+    #[cfg(not(unix))]
     pub async fn empty_settings() -> Self {
         Self::open_with_options(false, false, InitialCatalog::Empty).await
     }
