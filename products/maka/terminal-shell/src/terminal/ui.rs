@@ -220,14 +220,6 @@ impl Session {
 
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
         let mut changed = false;
-        if let Some(protocol) = command.image_protocol {
-            if protocol.protocol_type() != ProtocolType::Sixel {
-                return Err("this shell only negotiates stateless Sixel images".into());
-            }
-            self.surface.set_image_protocol(Some(protocol));
-            self.sixel = true;
-            changed = true;
-        }
         if command.cancel_pointer {
             self.cancel_pointer()?;
             changed = true;
@@ -245,6 +237,14 @@ impl Session {
             self.terminal
                 .resize(self.area)
                 .map_err(|error| error.to_string())?;
+            changed = true;
+        }
+        if let Some(protocol) = command.image_protocol {
+            if protocol.protocol_type() != ProtocolType::Sixel {
+                return Err("this shell only negotiates stateless Sixel images".into());
+            }
+            self.surface.set_image_protocol(Some(protocol));
+            self.sixel = true;
             changed = true;
         }
         for input in &command.inputs {
@@ -754,6 +754,50 @@ mod tests {
                 "the real Sixel encoder did not complete"
             );
             native = session
+                .advance(Advance {
+                    image_protocol: None,
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap()
+                .bytes
+                .unwrap_or_default();
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let resized = session
+            .advance(Advance {
+                image_protocol: None,
+                inputs: Vec::new(),
+                resize: Some((40, 8)),
+                cancel_pointer: false,
+            })
+            .unwrap()
+            .bytes
+            .unwrap();
+        assert!(!resized.windows(2).any(|bytes| bytes == b"\x1bP"));
+        assert!(
+            resized
+                .windows("▀".len())
+                .any(|bytes| bytes == "▀".as_bytes())
+        );
+        let mut restored = session
+            .advance(Advance {
+                image_protocol: Some(ImageProtocol::new(ProtocolType::Sixel, 24, 48).unwrap()),
+                inputs: Vec::new(),
+                resize: Some((40, 8)),
+                cancel_pointer: false,
+            })
+            .unwrap()
+            .bytes
+            .unwrap_or_default();
+        let deadline = Instant::now() + std::time::Duration::from_secs(3);
+        while !restored.windows(2).any(|bytes| bytes == b"\x1bP") {
+            assert!(
+                Instant::now() < deadline,
+                "Sixel did not resume after resize"
+            );
+            restored = session
                 .advance(Advance {
                     image_protocol: None,
                     inputs: Vec::new(),

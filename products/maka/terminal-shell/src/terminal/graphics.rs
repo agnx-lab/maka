@@ -24,13 +24,20 @@ use termina::{
     escape::csi::{Csi, Window},
 };
 
-/// A single startup negotiation. Neither reply carries a request identifier, so
-/// a resize cancels this probe permanently instead of accepting a stale reply
-/// as measurements for the new viewport.
+/// Neither reply carries a request identifier. A resized negotiation must
+/// consume both original replies before another query can measure the new cells.
 pub(super) const QUERY: &[u8] = b"\x1b[c\x1b[16t";
 const TIMEOUT: Duration = Duration::from_millis(250);
 
-pub(super) struct Probe(Option<Replies>);
+pub(super) struct Probe(State);
+
+enum State {
+    Pending(Replies),
+    Draining(Replies),
+    NeedQuery,
+    Complete,
+    Unavailable,
+}
 
 #[derive(Default)]
 struct Replies {
@@ -41,13 +48,15 @@ struct Replies {
 
 impl Default for Probe {
     fn default() -> Self {
-        Self(Some(Replies::default()))
+        Self(State::Pending(Replies::default()))
     }
 }
 
 impl Probe {
     pub fn flushed(&mut self, at: Instant) {
-        if let Some(replies) = &mut self.0 {
+        if let State::Pending(replies) | State::Draining(replies) = &mut self.0
+            && replies.deadline.is_none()
+        {
             let deadline = at + TIMEOUT;
             replies.deadline = Some(deadline);
             // Reader and writer run independently. A driver delayed in polling
@@ -58,12 +67,28 @@ impl Probe {
         }
     }
 
-    pub fn cancel(&mut self) {
-        self.0 = None;
+    pub fn resize(&mut self) {
+        let state = std::mem::replace(&mut self.0, State::Unavailable);
+        self.0 = match state {
+            State::Pending(replies) | State::Draining(replies) => State::Draining(replies),
+            State::NeedQuery | State::Complete => State::NeedQuery,
+            State::Unavailable => State::Unavailable,
+        };
+    }
+
+    /// Called only by the sole output owner while its previous frame is complete.
+    pub fn query(&mut self) -> Option<&'static [u8]> {
+        if !matches!(self.0, State::NeedQuery) {
+            return None;
+        }
+        self.0 = State::Pending(Replies::default());
+        Some(QUERY)
     }
 
     pub fn observe(&mut self, event: &Event, now: Instant) {
-        let Some(replies) = &mut self.0 else { return };
+        let (State::Pending(replies) | State::Draining(replies)) = &mut self.0 else {
+            return;
+        };
         if replies.deadline.is_some_and(|deadline| now > deadline) {
             return;
         }
@@ -90,16 +115,27 @@ impl Probe {
     }
 
     pub fn take_ready(&mut self, now: Instant) -> Option<ImageProtocol> {
-        let replies = self.0.as_ref()?;
+        let (replies, stale) = match &self.0 {
+            State::Pending(replies) => (replies, false),
+            State::Draining(replies) => (replies, true),
+            _ => return None,
+        };
         let deadline = replies.deadline?;
-        if matches!(replies.sixel, Some((true, _)))
+        if let Some((supported, _)) = replies.sixel
             && let Some((width, height, _)) = replies.cell
         {
-            self.0 = None;
-            return ImageProtocol::new(ProtocolType::Sixel, width, height).ok();
+            let protocol = (!stale && supported)
+                .then(|| ImageProtocol::new(ProtocolType::Sixel, width, height).ok())
+                .flatten();
+            self.0 = if stale {
+                State::NeedQuery
+            } else {
+                State::Complete
+            };
+            return protocol;
         }
-        if matches!(replies.sixel, Some((false, _))) || now >= deadline {
-            self.0 = None;
+        if now >= deadline {
+            self.0 = State::Unavailable;
         }
         None
     }
@@ -148,6 +184,46 @@ mod tests {
     }
 
     #[test]
+    fn resized_cells_are_measured_only_after_the_original_replies_are_consumed() {
+        let now = Instant::now();
+        let mut probe = Probe::default();
+        probe.flushed(now);
+        observe(&mut probe, b"\x1b[?61;4c\x1b[6;20;10t", now);
+        assert_eq!(probe.take_ready(now).unwrap().cell_size(), (10, 20));
+
+        probe.resize();
+        assert_eq!(probe.query(), Some(b"\x1b[c\x1b[16t".as_slice()));
+        let flushed = now + Duration::from_millis(1);
+        observe(&mut probe, b"\x1b[6;22;11t", flushed);
+        probe.resize();
+        probe.resize();
+        assert!(probe.take_ready(flushed).is_none());
+        assert!(probe.query().is_none());
+        probe.flushed(flushed);
+        observe(&mut probe, b"\x1b[?61;4c", flushed);
+        assert!(probe.take_ready(flushed).is_none());
+
+        assert_eq!(probe.query(), Some(b"\x1b[c\x1b[16t".as_slice()));
+        probe.flushed(flushed);
+        observe(&mut probe, b"\x1b[?61;4c\x1b[6;24;12t", flushed);
+        assert_eq!(probe.take_ready(flushed).unwrap().cell_size(), (12, 24));
+
+        probe.resize();
+        assert!(probe.query().is_some());
+        probe.flushed(flushed);
+        observe(&mut probe, b"\x1b[?61;14c", flushed);
+        assert!(probe.take_ready(flushed).is_none());
+        probe.resize();
+        assert!(probe.query().is_none(), "the old 16t reply is still owed");
+        let late = flushed + TIMEOUT + Duration::from_millis(1);
+        assert!(probe.take_ready(late).is_none());
+        observe(&mut probe, b"\x1b[6;32;16t", late);
+        probe.resize();
+        assert!(probe.query().is_none());
+        assert!(probe.take_ready(late).is_none());
+    }
+
+    #[test]
     fn unsupported_late_or_resized_negotiations_never_enable_graphics() {
         let now = Instant::now();
         for reply in [b"\x1b[?4;14c".as_slice(), b"\x1b[?62;14c"] {
@@ -164,7 +240,7 @@ mod tests {
             let mut probe = Probe::default();
             probe.flushed(now);
             if resize {
-                probe.cancel();
+                probe.resize();
             }
             let late = now + TIMEOUT + Duration::from_millis(1);
             observe(&mut probe, b"\x1b[?62;4c\x1b[6;16;8t", late);

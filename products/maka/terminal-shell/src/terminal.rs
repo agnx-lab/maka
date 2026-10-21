@@ -242,6 +242,10 @@ fn drive(
             let resize = inbox.resize.take();
             let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
             let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
+            if let Some(query) = inbox.graphics.query() {
+                output.submit(query.to_vec(), None)?;
+                setup = true;
+            }
             let command = ui::Advance {
                 image_protocol,
                 inputs,

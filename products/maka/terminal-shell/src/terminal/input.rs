@@ -93,7 +93,7 @@ impl Inbox {
             return;
         }
         if let Event::Resize(columns, rows) = event {
-            self.graphics.cancel();
+            self.graphics.resize();
             self.resize = Some((columns, rows));
             self.cancel_pointer = true;
             if let Some((epoch, _)) = self.last_frame.take() {
