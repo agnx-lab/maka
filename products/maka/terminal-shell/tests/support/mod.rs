@@ -134,7 +134,24 @@ impl Fixture {
     pub async fn registered_images() -> Self {
         Self::open_with_options(true, true, InitialCatalog::Configured { reasoning: false }).await
     }
+    pub async fn plugin_settings() -> Self {
+        Self::open_with_plugins(
+            false,
+            false,
+            InitialCatalog::Configured { reasoning: false },
+            true,
+        )
+        .await
+    }
     async fn open_with_options(registered: bool, images: bool, catalog: InitialCatalog) -> Self {
+        Self::open_with_plugins(registered, images, catalog, false).await
+    }
+    async fn open_with_plugins(
+        registered: bool,
+        images: bool,
+        catalog: InitialCatalog,
+        plugins: bool,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
         let workspace = directory.path().join("workspace");
@@ -181,6 +198,8 @@ impl Fixture {
         let setup_contract = maka_settings_native::contract::setup_contract();
         let receipts_contract = receipt_reader_contract();
         let files_contract = maka_workspace_api::files::contract();
+        let management_contract =
+            maka_plugin_core::deployment::management::deployment_manager_contract();
         let empty = json!({"type":"object","additionalProperties":false});
         let agent = package(
             "test.nsh.agent",
@@ -228,17 +247,29 @@ impl Fixture {
             json!({}),
             json!({"Receipts":{"contract":receipts_contract,"availability":"required"}}),
         );
+        let manager = package(
+            "test.nsh.management",
+            maka_host_runtime::application::management::DEPLOYMENT_MANAGER,
+            empty.clone(),
+            json!({}),
+            json!({"Management":{"contract":management_contract,"availability":"required"}}),
+        );
+        let mut gateway_imports = json!({
+            "agent":{"contract":agent_contract,"cardinality":{"kind":"one"}},
+            "settings":{"contract":settings_contract,"cardinality":{"kind":"one"}},
+            "authentication":{"contract":authentication_contract,"cardinality":{"kind":"one"}},
+            "setup":{"contract":setup_contract,"cardinality":{"kind":"one"}},
+            "receipts":{"contract":receipts_contract,"cardinality":{"kind":"one"}}
+        });
+        if plugins {
+            gateway_imports["management"] =
+                json!({"contract":management_contract,"cardinality":{"kind":"one"}});
+        }
         let gateway = package(
             "test.nsh.gateway",
             "maka.application.gateway",
             empty,
-            json!({
-                "agent":{"contract":agent_contract,"cardinality":{"kind":"one"}},
-                "settings":{"contract":settings_contract,"cardinality":{"kind":"one"}},
-                "authentication":{"contract":authentication_contract,"cardinality":{"kind":"one"}},
-                "setup":{"contract":setup_contract,"cardinality":{"kind":"one"}},
-                "receipts":{"contract":receipts_contract,"cardinality":{"kind":"one"}}
-            }),
+            gateway_imports,
             json!({}),
         );
         let node = |package: &Package, key: u128, configuration: Value, bindings: Value| {
@@ -262,7 +293,25 @@ impl Fixture {
                 "receipts":[{"kind":"instance","path":["receipts"],"export":"Receipts"}]
             }))
         }});
+        if plugins {
+            plan["instances"]["management"] = node(&manager, 8, json!({}), json!({}));
+            plan["instances"]["gateway"]["bindings"]["management"] =
+                json!([{"kind":"instance","path":["management"],"export":"Management"}]);
+            for index in 0..3 {
+                let mut optional = node(
+                    &agent,
+                    9 + index,
+                    json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":[],"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}),
+                    json!({}),
+                );
+                optional["disabled"] = json!(true);
+                plan["instances"][format!("optional-agent-{index}")] = optional;
+            }
+        }
         let mut packages = vec![agent, settings, authentication, setup, receipts, gateway];
+        if plugins {
+            packages.push(manager);
+        }
         if images {
             plan["instances"]["files"] = node(&files, 5, json!({}), json!({}));
             packages.push(files);
@@ -365,7 +414,19 @@ impl Fixture {
                     endpoint("setup", &["discoverModels"], false),
                 ),
                 ("receipts".into(), endpoint("receipts", &["read"], true)),
-            ]),
+            ])
+            .into_iter()
+            .chain(plugins.then(|| {
+                (
+                    "management".into(),
+                    endpoint(
+                        "management",
+                        &["instances", "readSettings", "setEnabled", "configure"],
+                        false,
+                    ),
+                )
+            }))
+            .collect(),
             if images {
                 vec![NativeGrant {
                     origin: InstanceId(vec![Uuid::from_u128(1)]),

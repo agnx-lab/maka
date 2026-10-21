@@ -146,11 +146,14 @@ fn require_contract(endpoint: &str, actual: &Contract) -> Result<(), String> {
         LazyLock::new(maka_settings_native::contract::authentication_contract);
     static SETUP_CONTRACT: LazyLock<Contract> =
         LazyLock::new(maka_settings_native::contract::setup_contract);
+    static MANAGEMENT_CONTRACT: LazyLock<Contract> =
+        LazyLock::new(maka_plugin_core::deployment::management::deployment_manager_contract);
     let expected: &Contract = match endpoint {
         "agent" => &AGENT_CONTRACT,
         "settings" => &SETTINGS_CONTRACT,
         "authentication" => &AUTHENTICATION_CONTRACT,
         "setup" => &SETUP_CONTRACT,
+        "management" => &MANAGEMENT_CONTRACT,
         // Generic plugin queries keep the raw native unknown result contract.
         _ => return Ok(()),
     };
@@ -264,6 +267,7 @@ impl ApplicationHost {
         drop(this);
         execute(owner.clone(), async move {
             let id = Uuid::new_v4();
+            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
             let mutation = owner
                 .client
                 .settings_mutation(id, &endpoint, &method, input, resources)

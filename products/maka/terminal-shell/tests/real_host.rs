@@ -29,6 +29,8 @@ mod interactions;
 mod keyboard;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
+#[path = "real_host/plugin_settings.rs"]
+mod plugin_settings;
 mod support;
 
 use crossterm::event::{

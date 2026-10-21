@@ -26,14 +26,17 @@ import { createNetworkSettings } from './networkSettings';
 import { ConnectionSettings } from './ConnectionSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { NetworkSettings } from './NetworkSettings';
+import { PluginSettings } from './PluginSettings';
+import { createPluginSettings } from './pluginSettings';
 import { C } from './ui';
 
-type Section = 'general' | 'connections' | 'network';
+type Section = 'general' | 'connections' | 'network' | 'plugins';
 type BackAction = { section: Section; identity: string };
 const sections: { id: Section; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'connections', label: 'Connections & models' },
   { id: 'network', label: 'Network' },
+  { id: 'plugins', label: 'Plugins' },
 ];
 
 // One native Dialog owns focus restoration. Forms keep their own canonical
@@ -48,7 +51,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   );
   const general = createGeneralSettings(operations, () => section() === 'general');
   const network = createNetworkSettings(operations, () => section() === 'network');
-  const pages = { connections, general, network };
+  const plugins = createPluginSettings(operations, () => section() === 'plugins');
+  const pages = { connections, general, network, plugins };
   let alive = true;
   cleanup(() => {
     alive = false;
@@ -82,7 +86,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   const recover = () =>
     operations.recover((original) => {
       const method = original.method;
-      if (method === 'updateAssistantPreferences') general.reset();
+      if (original.endpoint === 'management') plugins.reset();
+      else if (method === 'updateAssistantPreferences') general.reset();
       else if (method === 'updateNetwork') network.reset();
       else {
         connections.reset();
@@ -104,7 +109,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   const nested = () =>
     section() === 'connections'
       ? connections.page() !== 'connections' || !!connections.confirmation()
-      : section() === 'general' && general.title() !== 'General settings';
+      : section() === 'general' ? general.title() !== 'General settings'
+        : section() === 'plugins' && plugins.selected() !== null;
   return (
     <Dialog
       animation="none"
@@ -208,6 +214,9 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
         </If>
         <If when={section() === 'network'}>
           <NetworkSettings owner={network} />
+        </If>
+        <If when={section() === 'plugins'}>
+          <PluginSettings owner={plugins} />
         </If>
       </View>
     </Dialog>

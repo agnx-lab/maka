@@ -35,6 +35,7 @@ type Services = {
   settings: ServiceMethods['settings'];
   authentication: ServiceMethods['settingsAuthentication'];
   setup: ServiceMethods['settingsSetup'];
+  management: ServiceMethods['deploymentManager'];
 };
 type Endpoint = keyof Services;
 type Method<E extends Endpoint, Mode extends string> = {
