@@ -58,6 +58,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub const EDITOR: &str = "composer";
+pub const PROVIDER_KEY: &str = "nsh-real-provider-key";
 
 fn frame_time() -> f64 {
     static STARTED: OnceLock<Instant> = OnceLock::new();
@@ -82,10 +83,12 @@ pub mod pty;
 pub struct Fixture {
     pub address: PathBuf,
     pub store: Arc<EventLog>,
+    pub base_url: String,
     pub session: String,
     pub selection: Value,
     pub requests: mpsc::Receiver<ModelRequest>,
     pub request_count: Arc<AtomicUsize>,
+    pub discovery_count: Arc<AtomicUsize>,
     registration: Option<Registration>,
     host: Arc<Host>,
     server: JoinHandle<Result<(), String>>,
@@ -94,22 +97,40 @@ pub struct Fixture {
     pub directory: tempfile::TempDir,
 }
 
+#[derive(Clone, Copy)]
+enum InitialCatalog {
+    Configured { reasoning: bool },
+    Empty,
+}
+
 impl Fixture {
     pub async fn open() -> Self {
-        Self::open_with_options(false, false, false).await
+        Self::open_with_options(
+            false,
+            false,
+            InitialCatalog::Configured { reasoning: false },
+        )
+        .await
     }
     pub async fn reasoning_models() -> Self {
-        Self::open_with_options(false, false, true).await
+        Self::open_with_options(false, false, InitialCatalog::Configured { reasoning: true }).await
+    }
+    pub async fn empty_settings() -> Self {
+        Self::open_with_options(false, false, InitialCatalog::Empty).await
     }
     #[cfg(unix)]
     pub async fn registered() -> Self {
-        Self::open_with_options(true, false, false).await
+        Self::open_with_options(true, false, InitialCatalog::Configured { reasoning: false }).await
+    }
+    #[cfg(unix)]
+    pub async fn registered_empty_settings() -> Self {
+        Self::open_with_options(true, false, InitialCatalog::Empty).await
     }
     #[cfg(unix)]
     pub async fn registered_images() -> Self {
-        Self::open_with_options(true, true, false).await
+        Self::open_with_options(true, true, InitialCatalog::Configured { reasoning: false }).await
     }
-    async fn open_with_options(registered: bool, images: bool, reasoning: bool) -> Self {
+    async fn open_with_options(registered: bool, images: bool, catalog: InitialCatalog) -> Self {
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
         let workspace = directory.path().join("workspace");
@@ -126,7 +147,12 @@ impl Fixture {
             Arc::new(RootOwner::create(&directory.path().join("host"), &namespaces).unwrap());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}/v1", listener.local_addr().unwrap());
-        let selection = configure(owner.clone(), &base, images, reasoning).await;
+        let selection = match catalog {
+            InitialCatalog::Configured { reasoning } => {
+                configure(owner.clone(), &base, images, reasoning).await
+            }
+            InitialCatalog::Empty => Value::Null,
+        };
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
         let package = |id: &str,
                        implementation: &str,
@@ -147,6 +173,8 @@ impl Fixture {
         };
         let agent_contract = maka_agent_api::contract();
         let settings_contract = maka_settings_native::contract::contract();
+        let authentication_contract = maka_settings_native::contract::authentication_contract();
+        let setup_contract = maka_settings_native::contract::setup_contract();
         let receipts_contract = receipt_reader_contract();
         let files_contract = maka_workspace_api::files::contract();
         let empty = json!({"type":"object","additionalProperties":false});
@@ -175,6 +203,20 @@ impl Fixture {
             json!({}),
             json!({"Settings":{"contract":settings_contract,"availability":"required"}}),
         );
+        let authentication = package(
+            "test.nsh.authentication",
+            "maka.settings.authentication",
+            empty.clone(),
+            json!({}),
+            json!({"Authentication":{"contract":authentication_contract,"availability":"required"}}),
+        );
+        let setup = package(
+            "test.nsh.setup",
+            "maka.settings.setup",
+            empty.clone(),
+            json!({}),
+            json!({"Setup":{"contract":setup_contract,"availability":"required"}}),
+        );
         let receipts = package(
             "test.nsh.receipts",
             "maka.operations.receipts",
@@ -189,6 +231,8 @@ impl Fixture {
             json!({
                 "agent":{"contract":agent_contract,"cardinality":{"kind":"one"}},
                 "settings":{"contract":settings_contract,"cardinality":{"kind":"one"}},
+                "authentication":{"contract":authentication_contract,"cardinality":{"kind":"one"}},
+                "setup":{"contract":setup_contract,"cardinality":{"kind":"one"}},
                 "receipts":{"contract":receipts_contract,"cardinality":{"kind":"one"}}
             }),
             json!({}),
@@ -203,14 +247,18 @@ impl Fixture {
         let mut plan = json!({"environment":{"location":"host"},"instances":{
             "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":if images { json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}]) } else { json!([]) },"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), if images { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
             "settings":node(&settings, 2, json!({}), json!({})),
+            "authentication":node(&authentication, 6, json!({}), json!({})),
+            "setup":node(&setup, 7, json!({}), json!({})),
             "receipts":node(&receipts, 3, json!({}), json!({})),
             "gateway":node(&gateway, 4, json!({}), json!({
                 "agent":[{"kind":"instance","path":["agent"],"export":"agent"}],
                 "settings":[{"kind":"instance","path":["settings"],"export":"Settings"}],
+                "authentication":[{"kind":"instance","path":["authentication"],"export":"Authentication"}],
+                "setup":[{"kind":"instance","path":["setup"],"export":"Setup"}],
                 "receipts":[{"kind":"instance","path":["receipts"],"export":"Receipts"}]
             }))
         }});
-        let mut packages = vec![agent, settings, receipts, gateway];
+        let mut packages = vec![agent, settings, authentication, setup, receipts, gateway];
         if images {
             plan["instances"]["files"] = node(&files, 5, json!({}), json!({}));
             packages.push(files);
@@ -278,7 +326,33 @@ impl Fixture {
                 ),
                 (
                     "settings".into(),
-                    endpoint("settings", &["models", "resolveModel"], false),
+                    endpoint(
+                        "settings",
+                        &[
+                            "models",
+                            "resolveModel",
+                            "updateModelSettings",
+                            "connections",
+                            "connection",
+                            "providers",
+                            "create",
+                            "update",
+                            "remove",
+                            "credentialStatus",
+                            "saveCredential",
+                            "deleteCredential",
+                            "setDefault",
+                        ],
+                        false,
+                    ),
+                ),
+                (
+                    "authentication".into(),
+                    endpoint("authentication", &["provider"], false),
+                ),
+                (
+                    "setup".into(),
+                    endpoint("setup", &["discoverModels"], false),
                 ),
                 ("receipts".into(), endpoint("receipts", &["read"], true)),
             ]),
@@ -306,18 +380,23 @@ impl Fixture {
         });
         let (send, requests) = mpsc::channel(8);
         let request_count = Arc::new(AtomicUsize::new(0));
+        let discovery_count = Arc::new(AtomicUsize::new(0));
         let provider = tokio::spawn({
             let count = request_count.clone();
+            let discovery = discovery_count.clone();
             async move {
                 let mut connections = JoinSet::new();
                 loop {
                     tokio::select! {
                         accepted = listener.accept() => {
-                            let (stream, _) = accepted.unwrap(); let send = send.clone(); let count = count.clone();
+                            let (stream, _) = accepted.unwrap(); let send = send.clone(); let count = count.clone(); let discovery = discovery.clone();
                             connections.spawn(async move {
-                                let request = ModelRequest::read(stream).await;
-                                count.fetch_add(1, Ordering::SeqCst);
-                                send.send(request).await.unwrap();
+                                if let Some(request) = ModelRequest::read(stream).await {
+                                    count.fetch_add(1, Ordering::SeqCst);
+                                    send.send(request).await.unwrap();
+                                } else {
+                                    discovery.fetch_add(1, Ordering::SeqCst);
+                                }
                             });
                         }
                         Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap(); }
@@ -329,23 +408,27 @@ impl Fixture {
             directory,
             address,
             store,
+            base_url: base,
             session: String::new(),
             selection,
             requests,
             request_count,
+            discovery_count,
             registration,
             host,
             server,
             provider,
         };
-        let client = fixture.client().await;
-        let roots = client
-            .query("agent", "directories", json!({"kind":"roots"}))
-            .await
-            .unwrap();
-        let created = mutate(&client, "create", json!({"title":"NSH real Agent", "labels":[], "workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
-        fixture.session = created["session"]["id"].as_str().unwrap().to_owned();
-        client.close().await.unwrap();
+        if let InitialCatalog::Configured { .. } = catalog {
+            let client = fixture.client().await;
+            let roots = client
+                .query("agent", "directories", json!({"kind":"roots"}))
+                .await
+                .unwrap();
+            let created = mutate(&client, "create", json!({"title":"NSH real Agent", "labels":[], "workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
+            fixture.session = created["session"]["id"].as_str().unwrap().to_owned();
+            client.close().await.unwrap();
+        }
         fixture
     }
     pub async fn client(&self) -> Client {
@@ -466,14 +549,14 @@ async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool, reasoning: b
     })).unwrap()).await.unwrap() else { panic!("create fixture connection") };
     let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = config.prepare_oauth_login(serde_json::from_value(json!({
         "expectedCredential":null,"attemptId":Uuid::new_v4(),"target":{"kind":"existing","expected":{"connectionId":connection.connection_id,"revision":connection.revision,"provider":provider,"slug":"nsh-fixture","configuration":{"baseUrl":base}},"configuration":{"baseUrl":base}},
-        "authentication":{"method":"api-key","input":{"apiKey":"nsh-real-provider-key"}}
+        "authentication":{"method":"api-key","input":{"apiKey":PROVIDER_KEY}}
     })).unwrap()).await.unwrap() else { panic!("fixture credential") };
     assert!(login.claim().await.unwrap());
     assert!(matches!(
         login
             .complete(
                 maka_agent_facts::provider::Credential {
-                    secret: "nsh-real-provider-key".into(),
+                    secret: PROVIDER_KEY.into(),
                     refresh_at: None
                 },
                 1
@@ -518,7 +601,7 @@ pub struct ModelRequest {
     socket: TcpStream,
 }
 impl ModelRequest {
-    async fn read(mut socket: TcpStream) -> Self {
+    async fn read(mut socket: TcpStream) -> Option<Self> {
         let mut bytes = Vec::new();
         let boundary = loop {
             let mut buffer = [0; 4096];
@@ -532,13 +615,20 @@ impl ModelRequest {
         };
         let headers = String::from_utf8_lossy(&bytes[..boundary]);
         assert!(
-            headers.starts_with("POST /v1/chat/completions "),
-            "{headers}"
-        );
-        assert!(
             headers
                 .to_ascii_lowercase()
-                .contains("authorization: bearer nsh-real-provider-key")
+                .contains(&format!("authorization: bearer {PROVIDER_KEY}"))
+        );
+        if headers.starts_with("GET /v1/models ") {
+            let body = br#"{"data":[{"id":"fixture-discovered-model"}]}"#;
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+            socket.write_all(body).await.unwrap();
+            socket.flush().await.unwrap();
+            return None;
+        }
+        assert!(
+            headers.starts_with("POST /v1/chat/completions "),
+            "{headers}"
         );
         let length: usize = headers
             .lines()
@@ -556,7 +646,7 @@ impl ModelRequest {
         }
         let body = serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap();
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
-        Self { body, socket }
+        Some(Self { body, socket })
     }
     async fn packet(&mut self, value: Value) {
         let data = format!("data: {value}\n\n");
