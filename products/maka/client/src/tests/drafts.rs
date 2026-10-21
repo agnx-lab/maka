@@ -18,6 +18,11 @@
  */
 use super::*;
 
+// A legal Windows Unicode filename can exceed 512 UTF-8 bytes. Match the
+// original Host schema's 512-character bound, including the saved draft CAS.
+fn selected_name() -> String {
+    format!("{}.txt", "附".repeat(200))
+}
 struct SelectedFile;
 impl maka_capabilities::call::ReadResource for SelectedFile {
     fn resource_type(&self) -> maka_plugin_core::contract::ResourceType {
@@ -27,7 +32,7 @@ impl maka_capabilities::call::ReadResource for SelectedFile {
         b"actual selected bytes".len()
     }
     fn metadata(&self) -> Value {
-        json!({"name":"notes.txt","bytes":21,"digest":"sha256:9989a315c7fb6c07f91bd91de902109f14ed480e4ea7b04534e872abc81f1007"})
+        json!({"name":selected_name(),"bytes":21,"digest":"sha256:9989a315c7fb6c07f91bd91de902109f14ed480e4ea7b04534e872abc81f1007"})
     }
     fn read(&self, range: std::ops::Range<usize>) -> Result<Vec<u8>> {
         b"actual selected bytes"
@@ -102,7 +107,7 @@ async fn original_upload_receipts_and_complete_attachment_drafts_survive_restart
         );
         let attachment = DraftAttachment {
             id: "original-upload".into(),
-            name: "notes.txt".into(),
+            name: selected_name(),
             mime_type: "text/plain".into(),
             bytes: 21,
         };

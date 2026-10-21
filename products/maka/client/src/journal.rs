@@ -262,7 +262,7 @@ impl Journal {
                 attachment.id.is_empty()
                     || attachment.id.len() > 128
                     || attachment.name.is_empty()
-                    || attachment.name.len() > 512
+                    || attachment.name.chars().count() > 512
                     || attachment.mime_type.len() > 128
                     || attachment.bytes > 50 * 1024 * 1024
             })

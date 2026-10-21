@@ -319,7 +319,7 @@ impl Client {
         let metadata = resource.metadata();
         let name = metadata["name"]
             .as_str()
-            .filter(|name| !name.is_empty() && name.len() <= 512)
+            .filter(|name| !name.is_empty() && name.chars().count() <= 512)
             .ok_or("invalid selected filename")?
             .to_owned();
         let bytes = metadata["bytes"]
