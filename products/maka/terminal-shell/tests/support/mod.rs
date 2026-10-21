@@ -120,7 +120,7 @@ impl Fixture {
         Self::open_with_options(false, false, InitialCatalog::Empty).await
     }
     pub async fn images() -> Self {
-        Self::open_with_options(false, true, false).await
+        Self::open_with_options(false, true, InitialCatalog::Configured { reasoning: false }).await
     }
     #[cfg(unix)]
     pub async fn registered() -> Self {
