@@ -506,12 +506,22 @@ impl Fixture {
     ) -> (AppView, maka_terminal_shell::bindings::Bindings) {
         let bindings =
             maka_terminal_shell::bindings::Bindings::new(client, tokio::runtime::Handle::current());
+        let registry = bindings.registry(initial_session);
+        if let Some(directory) = std::env::var_os("MAKA_NSH_EVIDENCE") {
+            let directory = PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("host.d.ts"),
+                nsh_core::ui::declarations(&registry, &[]),
+            )
+            .unwrap();
+        }
         let mut view = AppView::new(AppOptions {
             size: evidence_size(),
             data_dir: Some(self.directory.path().join("nsh")),
             ui_sets: Some(vec![
                 nsh_base::registry(),
-                bindings.registry(initial_session),
+                registry,
                 maka_terminal_shell::markdown::registry(),
             ]),
             ..Default::default()
