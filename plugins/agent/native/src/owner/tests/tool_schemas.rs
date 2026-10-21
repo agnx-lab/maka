@@ -39,9 +39,10 @@ struct Captured {
     schemas: BTreeMap<String, Value>,
     violations: Vec<String>,
     results: Vec<Value>,
+    tool_choice: Value,
 }
 
-async fn read_wire(socket: &mut TcpStream) -> Value {
+pub(super) async fn read_wire(socket: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
     let boundary = loop {
         let mut chunk = [0; 4096];
@@ -72,6 +73,22 @@ async fn read_wire(socket: &mut TcpStream) -> Value {
 
 async fn send_body(socket: &mut TcpStream, status: &str, content_type: &str, body: String) {
     socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+}
+
+pub(super) async fn anthropic_text_reply(socket: &mut TcpStream, text: &str) {
+    let events = [
+        json!({"type":"message_start","message":{"id":"auxiliary-reply","type":"message","role":"assistant","model":"fixture-model","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}),
+        json!({"type":"message_stop"}),
+    ];
+    let body = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect();
+    send_body(socket, "200 OK", "text/event-stream", body).await;
 }
 
 async fn model_reply(socket: &mut TcpStream, wire: Wire, call: Option<(&str, &str, Value)>) {
@@ -156,6 +173,7 @@ async fn strict_provider(listener: TcpListener, wire: Wire) -> Captured {
         schemas: BTreeMap::new(),
         violations: Vec::new(),
         results: Vec::new(),
+        tool_choice: request["tool_choice"].clone(),
     };
     for tool in request["tools"].as_array().unwrap() {
         let (name, schema) = match wire {
@@ -279,6 +297,20 @@ async fn coordinator_catalog_completes(wire: Wire, provider: &str) {
             provider,
         )
         .await;
+        if matches!(wire, Wire::Anthropic) {
+            selection::edit(&fixture, |changes| {
+                changes.model_overrides = Patch::Set(BTreeMap::from([(
+                    "fixture-model".into(),
+                    ModelOverride {
+                        capabilities: Some(
+                            serde_json::from_value(json!({"parallelToolCalls":false})).unwrap(),
+                        ),
+                        ..Default::default()
+                    },
+                )]));
+            })
+            .await;
+        }
         workhub::activate_workers(&mut fixture, true, true, true).await;
         let ready =
             workhub::resolve(&fixture, workhub::selection(&fixture).await, Uuid::new_v4()).await;
@@ -314,6 +346,12 @@ async fn coordinator_catalog_completes(wire: Wire, provider: &str) {
         let captured = server.await.unwrap();
         fixture.app.shutdown().await.unwrap();
         fixture.config.shutdown().await.unwrap();
+        if matches!(wire, Wire::Anthropic) {
+            assert_eq!(
+                captured.tool_choice["disable_parallel_tool_use"], true,
+                "the actual Anthropic request must retain the declared parallel opt-out"
+            );
+        }
         for name in AFFECTED.into_iter().chain(EMPTY) {
             assert!(
                 captured.schemas.contains_key(name),

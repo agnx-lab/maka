@@ -29,15 +29,42 @@ pub(super) fn provider(
     connection_id: &str,
     provider: &str,
 ) {
-    let cause = match error {
+    let (cause, reason) = match error {
         ProviderError::Cancelled => return,
-        ProviderError::Unavailable => "provider_unavailable",
-        ProviderError::AuthenticationRequired => "provider_authentication_required",
-        ProviderError::Rejected(_) => "provider_rejected",
-        ProviderError::Invalid(_) => "provider_invalid",
-        ProviderError::OutcomeUnknown => "provider_outcome_unknown",
-        ProviderError::Transport(_) => "provider_transport",
-        ProviderError::Http(_) => "provider_http",
+        ProviderError::Unavailable => ("provider_unavailable", None),
+        ProviderError::AuthenticationRequired => ("provider_authentication_required", None),
+        ProviderError::Rejected(_) => ("provider_rejected", None),
+        ProviderError::Invalid(_) => ("provider_invalid", None),
+        ProviderError::OutcomeUnknown => ("provider_outcome_unknown", None),
+        ProviderError::Transport(_) => ("provider_transport", None),
+        ProviderError::Http(_) => ("provider_http", None),
+        ProviderError::InvalidConfiguration => ("provider_invalid", Some("invalid_configuration")),
+        ProviderError::InvalidModel => ("provider_invalid", Some("invalid_model")),
+        ProviderError::InvalidPreparedModel => ("provider_invalid", Some("invalid_prepared_model")),
+        ProviderError::SelectedModelChanged => ("provider_invalid", Some("selected_model_changed")),
+        ProviderError::UnsupportedThinkingLevel => {
+            ("provider_invalid", Some("unsupported_thinking_level"))
+        }
+        ProviderError::UnsupportedProtocol => ("provider_invalid", Some("unsupported_protocol")),
+        ProviderError::UnsupportedExecutionProfile => {
+            ("provider_invalid", Some("unsupported_execution_profile"))
+        }
+        ProviderError::InvalidEndpoint => ("provider_invalid", Some("invalid_endpoint")),
+        ProviderError::MissingResponsesContract => {
+            ("provider_invalid", Some("missing_responses_contract"))
+        }
+        ProviderError::UnsupportedParallelPolicy => {
+            ("provider_invalid", Some("unsupported_parallel_policy"))
+        }
+        ProviderError::InsufficientOutputBudget => {
+            ("provider_invalid", Some("insufficient_output_budget"))
+        }
+        ProviderError::ProviderFactsUnavailable => {
+            ("provider_invalid", Some("provider_facts_unavailable"))
+        }
+        ProviderError::UnsupportedProbeAuthentication => {
+            ("provider_invalid", Some("unsupported_probe_authentication"))
+        }
     };
     let status = match error {
         ProviderError::Http(status) => Some(*status),
@@ -46,6 +73,7 @@ pub(super) fn provider(
     tracing::warn!(
         stage,
         cause,
+        reason,
         connection_id,
         provider,
         status,
@@ -125,4 +153,75 @@ pub(super) fn network(stage: &'static str, error: &maka_network::Error, connecti
         maka_network::Error::Transport(_) => "network_transport",
     };
     tracing::warn!(stage, cause, connection_id, "Model preparation failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arbitrary_provider_error_strings_stay_private_at_diagnostic_boundary() {
+        use std::io::{Read, Seek};
+        let mut file = tempfile::tempfile().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(file.try_clone().unwrap())
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .without_time()
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        for (stage, error) in [
+            (
+                "boundary_invalid",
+                ProviderError::Invalid("PRIVATE_INVALID_VALIDATION_SENTINEL".into()),
+            ),
+            (
+                "boundary_rejected",
+                ProviderError::Rejected("PRIVATE_REJECTED_REMOTE_SENTINEL".into()),
+            ),
+            (
+                "boundary_transport",
+                ProviderError::Transport("PRIVATE_TRANSPORT_URL_KEY_SENTINEL".into()),
+            ),
+            ("boundary_thinking", ProviderError::UnsupportedThinkingLevel),
+            (
+                "boundary_profile",
+                ProviderError::UnsupportedExecutionProfile,
+            ),
+        ] {
+            provider(stage, &error, "original-connection", "kimi-coding-plan");
+        }
+        file.rewind().unwrap();
+        let mut log = String::new();
+        file.read_to_string(&mut log).unwrap();
+        for (stage, cause) in [
+            ("boundary_invalid", "provider_invalid"),
+            ("boundary_rejected", "provider_rejected"),
+            ("boundary_transport", "provider_transport"),
+        ] {
+            let line = log.lines().find(|line| line.contains(stage)).unwrap();
+            assert!(line.contains(&format!("cause=\"{cause}\"")), "{line}");
+            assert!(line.contains("original-connection"));
+            assert!(line.contains("kimi-coding-plan"));
+            assert!(!line.contains("reason="));
+        }
+        for (stage, reason) in [
+            ("boundary_thinking", "unsupported_thinking_level"),
+            ("boundary_profile", "unsupported_execution_profile"),
+        ] {
+            let line = log.lines().find(|line| line.contains(stage)).unwrap();
+            assert!(line.contains("cause=\"provider_invalid\""), "{line}");
+            assert!(line.contains(&format!("reason=\"{reason}\"")), "{line}");
+        }
+        for secret in [
+            "PRIVATE_INVALID_VALIDATION_SENTINEL",
+            "PRIVATE_REJECTED_REMOTE_SENTINEL",
+            "PRIVATE_TRANSPORT_URL_KEY_SENTINEL",
+        ] {
+            assert!(
+                !log.contains(secret),
+                "arbitrary provider error payload escaped sanitization"
+            );
+        }
+    }
 }

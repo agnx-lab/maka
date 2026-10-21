@@ -53,6 +53,122 @@ async fn attempts(f: &Fixture, session: &str) -> Vec<maka_agent_facts::accountin
         .unwrap()
         .attempts
 }
+
+#[tokio::test]
+async fn kimi_recap_uses_low_and_retains_original_session_operation() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let f = Fixture::configured_provider(
+        &format!("http://{}/v1", listener.local_addr().unwrap()),
+        None,
+        None,
+        None,
+        |settings| settings.recaps = true,
+        "kimi-coding-plan",
+    )
+    .await;
+    selection::edit(&f, |changes| {
+        changes.model_overrides = Patch::Set(BTreeMap::from([(
+            "fixture-model".into(),
+            ModelOverride {
+                thinking_levels: Some(vec![
+                    ThinkingLevel::Low,
+                    ThinkingLevel::High,
+                    ThinkingLevel::Max,
+                ]),
+                ..Default::default()
+            },
+        )]));
+    })
+    .await;
+    let session = f.create("Kimi recap source").await;
+    let sent = f.send(&session).await.unwrap();
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let main_request = tool_schemas::read_wire(&mut socket).await;
+    tool_schemas::anthropic_text_reply(&mut socket, "Tests passed; deployment is still pending.")
+        .await;
+    f.drained().await;
+    let operation = Uuid::new_v4();
+    let input = json!({"sessionId":session,"model":f.selection().await});
+    let generation = f.mutation(2, "generateRecap", input.clone(), operation);
+    tokio::pin!(generation);
+    // A preparation rejection completes the real mutation without sending HTTP.
+    // Collect either branch so baseline RED still settles every original resource.
+    let (result, recap_request) = tokio::select! {
+        result = &mut generation => (result, None),
+        accepted = listener.accept() => {
+            let (mut socket, _) = accepted.unwrap();
+            let body = tool_schemas::read_wire(&mut socket).await;
+            let pending = read(&f, &session).await;
+            tool_schemas::anthropic_text_reply(&mut socket, "Tests passed. Deployment is next.").await;
+            (generation.await, Some((body, pending)))
+        }
+    };
+    f.drained().await;
+    let cached = read(&f, &session).await;
+    let recovered = if result.is_ok() {
+        Some(f.mutation(2, "generateRecap", input, operation).await)
+    } else {
+        None
+    };
+    let by_id = match &result {
+        Ok(receipt) => Some(f.query("recap", json!({"sessionId":session,"operationId":receipt["operationId"]})).await.unwrap()),
+        Err(_) => None,
+    };
+    let physical = attempts(&f, &session).await;
+    let boundary = f
+        .store
+        .invocation_boundary(&session, sent["invocationId"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    f.app.shutdown().await.unwrap();
+    f.config.shutdown().await.unwrap();
+
+    assert!(main_request["output_config"]["effort"].is_null());
+    let result = result.expect("supported Kimi auxiliary Low must prepare and complete recap");
+    let (outgoing, pending) = recap_request.expect("recap must reach actual Anthropic HTTP");
+    assert_eq!(outgoing["output_config"]["effort"], "low");
+    assert_eq!(outgoing["max_tokens"], 1024);
+    assert!(
+        outgoing["system"]
+            .to_string()
+            .contains("The user is returning to this session")
+    );
+    assert!(
+        outgoing["messages"]
+            .to_string()
+            .contains("deployment is still pending")
+    );
+    assert_eq!(result["kind"], "ready");
+    assert_eq!(result["text"], "Tests passed. Deployment is next.");
+    assert_eq!(pending["kind"], "pending");
+    assert_eq!(result["operationId"], pending["operationId"]);
+    assert_eq!(by_id.unwrap(), result);
+    assert_eq!(cached, result);
+    assert_eq!(recovered.unwrap().unwrap(), result);
+    assert!(matches!(
+        boundary.state,
+        maka_event_log::turns::InvocationState::Ended {
+            outcome: maka_agent_facts::event::InvocationOutcome::Completed,
+            ..
+        }
+    ));
+    assert_eq!(physical.len(), 2);
+    let auxiliary = physical
+        .iter()
+        .find(|attempt| matches!(attempt.origin, Origin::Auxiliary { .. }))
+        .unwrap();
+    assert_eq!(auxiliary.session_id.as_deref(), Some(session.as_str()));
+    assert!(matches!(&auxiliary.origin, Origin::Auxiliary {
+        source: AuxiliarySource::ApplicationOperation { operation: original, .. }
+    } if *original == operation));
+    assert_eq!(auxiliary.outcome, Outcome::Success);
+    assert_eq!(auxiliary.usage.input_tokens, Some(1));
+    assert_eq!(auxiliary.usage.output_tokens, Some(2));
+    }).await.unwrap();
+}
 #[tokio::test]
 async fn recap_native_original_receipt_cached_access_accounting_and_restart() {
     tokio::time::timeout(Duration::from_secs(60), async {

@@ -28,8 +28,7 @@ pub(super) fn responses(
     let model = row.model.id.as_str();
     // Relay catalogs may have no models. Defaults and summaries follow canonical
     // OpenAI family facts, never the relay's declared thinking levels.
-    let facts = provider_facts("openai")
-        .map_err(|_| super::unavailable("OpenAI provider facts are unavailable"))?;
+    let facts = provider_facts("openai").map_err(|_| Error::ProviderFactsUnavailable)?;
     let mut options = super::openai(
         Wire::OpenaiResponses,
         level.or_else(|| super::default_medium(facts, model).then_some(ThinkingLevel::Medium)),

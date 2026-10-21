@@ -73,9 +73,7 @@ fn check_execution(adapter: &RuntimeAdapter, wire: Wire) -> Result<(), Error> {
         _ => false,
     };
     if !supported {
-        return Err(unavailable(
-            "Provider execution profile or semantic features are not supported",
-        ));
+        return Err(Error::UnsupportedExecutionProfile);
     }
     Ok(())
 }
@@ -96,9 +94,7 @@ impl Route<'_> {
                 ..
             }
         ) {
-            return Err(unavailable(
-                "Provider probe authentication is not supported",
-            ));
+            return Err(Error::UnsupportedProbeAuthentication);
         }
         Ok(())
     }
@@ -108,14 +104,10 @@ impl Route<'_> {
     }
 }
 
-fn unavailable(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
-
 fn adapter(value: &RuntimeAdapter) -> Result<&RuntimeAdapter, Error> {
     match value.kind {
         AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => {
-            Err(unavailable("Provider adapter or protocol is not supported"))
+            Err(Error::UnsupportedProtocol)
         }
         _ => Ok(value),
     }
@@ -168,9 +160,7 @@ pub(crate) fn resolve<'a>(
         }
     };
     if !supports(selected, wire) {
-        return Err(unavailable(
-            "Provider does not support the declared model protocol",
-        ));
+        return Err(Error::UnsupportedProtocol);
     }
     let resolved_endpoint = if row.base_url == facts.base_url && uses_override {
         override_
@@ -179,10 +169,9 @@ pub(crate) fn resolve<'a>(
     } else {
         row.base_url
     };
-    let mut url =
-        url::Url::parse(resolved_endpoint).map_err(|_| unavailable("Invalid provider endpoint"))?;
+    let mut url = url::Url::parse(resolved_endpoint).map_err(|_| Error::InvalidEndpoint)?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(unavailable("Invalid provider endpoint"));
+        return Err(Error::InvalidEndpoint);
     }
     let path = url.path().trim_end_matches('/');
     let normalize_base_url = match selected.kind {
@@ -233,7 +222,7 @@ pub(crate) fn resolve<'a>(
                     responses: Some(responses),
                     ..
                 } => responses,
-                _ => return Err(unavailable("Responses contract is not declared")),
+                _ => return Err(Error::MissingResponsesContract),
             };
             match responses {
                 ResponsesContract::Openai { .. } => ProviderKind::OpenaiResponses,

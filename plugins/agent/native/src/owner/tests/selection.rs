@@ -784,6 +784,8 @@ async fn unsupported_thinking_logs_original_provider_cause_without_admitting_exe
             .expect(
                 "actual typed provider rejection must be logged before its public cause is erased",
             );
+        assert!(cause.contains("reason=\"unsupported_thinking_level\""),
+            "the original deterministic preparation reason must survive public sanitization: {cause}");
         assert!(
             cause.contains("session_id=") && cause.contains(&session),
             "warning must identify the existing session: {cause}"
