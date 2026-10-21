@@ -69,21 +69,26 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
   if (result.kind !== 'completed' || !value) return null;
   if (processFamily(kind)) {
     if (!['terminal', 'shell_run'].includes(String(value.kind)) || typeof value.status !== 'string' ||
-      !['starting', 'running', 'completed', 'failed', 'timed_out', 'cancelled', 'orphaned'].includes(value.status)) return null;
+      !['starting', 'running', 'completed', 'failed', 'timed_out', 'cancelled', 'orphaned'].includes(value.status) ||
+      typeof value.cwd !== 'string' || typeof value.cmd !== 'string' ||
+      (value.exitCode !== undefined && !(typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode))) ||
+      (value.failureMessage !== undefined && typeof value.failureMessage !== 'string')) return null;
     const exit = typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode) ? value.exitCode : null;
     const sections: ToolSection[] = [{ label: 'Process status', text: `${value.status}${exit === null ? '' : ` · Exit ${exit}`}`,
       tone: value.status === 'cancelled' ? 'warning' : ['failed', 'timed_out', 'orphaned'].includes(value.status) || (exit !== null && exit !== 0) ? 'error' : undefined }];
-    if (typeof value.cwd === 'string') sections.push({ label: 'Working directory', text: value.cwd });
+    sections.push({ label: 'Recorded command', text: value.cmd }, { label: 'Working directory', text: value.cwd });
     if (typeof value.failureMessage === 'string') sections.push({ label: 'Process failure', text: value.failureMessage, tone: 'error' });
     const output = record(value.output);
     if (value.output !== undefined && value.output !== null && !output) return null;
     if (output?.mode === 'pipes') {
-      if (typeof output.stdout !== 'string' || typeof output.stderr !== 'string') return null;
+      if (typeof output.stdout !== 'string' || typeof output.stderr !== 'string' ||
+        typeof output.stdoutTruncated !== 'boolean' || typeof output.stderrTruncated !== 'boolean' || typeof output.redacted !== 'boolean') return null;
       sections.push({ label: 'stdout', text: output.stdout }, { label: 'stderr', text: output.stderr, tone: 'warning' });
       if (output.stdoutTruncated === true || output.stderrTruncated === true)
         sections.push({ label: 'Output notice', text: 'The recorded process output is truncated.', tone: 'warning' });
     } else if (output?.mode === 'pty') {
-      if (typeof output.scrollback !== 'string' || typeof output.screen !== 'string') return null;
+      if (typeof output.scrollback !== 'string' || typeof output.screen !== 'string' ||
+        typeof output.truncated !== 'boolean' || typeof output.redacted !== 'boolean') return null;
       sections.push({ label: 'Terminal scrollback', text: output.scrollback }, { label: 'Terminal screen', text: output.screen });
       if (output.truncated === true) sections.push({ label: 'Output notice', text: 'The recorded terminal output is truncated.', tone: 'warning' });
     } else if (output !== null) return null;
