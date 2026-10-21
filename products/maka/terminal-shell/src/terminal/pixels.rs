@@ -77,8 +77,16 @@ pub(super) fn select(
             }
             return Ok(decision);
         }
+        let wait = state
+            .pixel_probe
+            .next_deadline()
+            .map_or(super::TICK, |deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(super::TICK)
+            });
         drop(state);
-        thread::sleep(Duration::from_millis(2));
+        thread::park_timeout(wait);
     }
 }
 
@@ -247,7 +255,7 @@ pub(super) fn run(
                             {
                                 return Ok(());
                             }
-                            thread::sleep(Duration::from_millis(2));
+                            thread::park_timeout(super::TICK);
                         }
                         output.take_flushed();
                         {
@@ -340,7 +348,25 @@ pub(super) fn run(
                 }
             }
         }
-        thread::sleep(Duration::from_millis(2));
+        let measured = presentation
+            .state
+            .lock()
+            .unwrap()
+            .pixel_probe
+            .measurement
+            .next_deadline();
+        let deadline = match &phase {
+            Phase::Ack { deadline, .. } => Some(measured.map_or(*deadline, |at| at.min(*deadline))),
+            _ => measured,
+        };
+        // IO, input and producer completions wake this driver directly. The
+        // existing tick only bounds observation of external AtomicBool cancel.
+        let wait = deadline.map_or(super::TICK, |deadline| {
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(super::TICK)
+        });
+        thread::park_timeout(wait);
     }
 }
 

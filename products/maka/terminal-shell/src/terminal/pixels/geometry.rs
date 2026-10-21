@@ -42,6 +42,13 @@ pub(super) enum PixelSizeQuery {
 }
 
 impl PixelSizeQuery {
+    pub fn next_deadline(&self) -> Option<Instant> {
+        match self {
+            Self::Pending { deadline, .. } => *deadline,
+            Self::Idle | Self::Unavailable => None,
+        }
+    }
+
     pub fn begin(&mut self, geometry: u64) -> Result<bool, String> {
         match self {
             Self::Idle => {

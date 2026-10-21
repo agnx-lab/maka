@@ -46,6 +46,7 @@ pub(super) fn spawn(
             if let Err(error) = result {
                 presentation.state.lock().unwrap().error = Some(error);
             }
+            presentation.wake_driver();
         })
         .map(|_| startup)
         .map_err(|error| error.to_string())
@@ -72,6 +73,7 @@ fn run(
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
+    presentation.wake_driver();
     let snapshots = Rc::new(RefCell::new(HashMap::<FrameToken, InputSnapshot>::new()));
     let source = Rc::new(RefCell::new(InputSource::default()));
     let sampled = source.clone();
@@ -437,6 +439,7 @@ fn run(
                     .as_mut()
                     .unwrap()
                     .effects = Some(bytes);
+                presentation.wake_driver();
             }
             let input_pending = presentation
                 .state
@@ -541,6 +544,8 @@ fn encode_pending(presentation: &Presentation) -> bool {
     } else {
         inbox.encoded = Some(result);
     }
+    drop(state);
+    presentation.wake_driver();
     true
 }
 

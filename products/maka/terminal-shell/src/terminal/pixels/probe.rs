@@ -114,6 +114,10 @@ pub(crate) struct Probe {
 }
 
 impl Probe {
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
     pub fn query(&mut self) -> Result<Vec<u8>, String> {
         if !self.measurement.begin(1)? {
             return Err("terminal geometry query is already in flight".into());

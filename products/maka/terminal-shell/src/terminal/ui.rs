@@ -1049,6 +1049,7 @@ mod tests {
             state: state.clone(),
             presented: presented.clone(),
             stop: stop.clone(),
+            ..Default::default()
         };
         session.presentation = presentation.clone();
         let (commands, receive) = mpsc::sync_channel(1);

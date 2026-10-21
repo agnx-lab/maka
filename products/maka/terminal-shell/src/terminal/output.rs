@@ -37,6 +37,8 @@ enum Request {
 
 /// The only stdout owner. A receipt covers the original bytes and flush;
 /// abandoning observation never replaces a partially written ANSI frame.
+/// Frame receipts wake the creating driver thread; moving Output does not
+/// change that wake target.
 pub(super) struct Output {
     send: mpsc::SyncSender<Request>,
     pending: Option<mpsc::Receiver<io::Result<Instant>>>,
@@ -48,6 +50,7 @@ impl Output {
         // One frame plus one final cleanup, including before the worker has
         // picked up that frame. submit itself enforces a single frame.
         let (send, receive) = mpsc::sync_channel(2);
+        let driver = thread::current();
         thread::Builder::new()
             .name("maka-nsh-output".into())
             .spawn(move || {
@@ -64,6 +67,7 @@ impl Output {
                                 flushed
                             });
                             let _ = receipt.send(result);
+                            driver.unpark();
                             if failed {
                                 break;
                             }
@@ -223,11 +227,18 @@ mod tests {
         let before_flush = Instant::now();
         assert!(!output.poll().unwrap());
         assert!(output.take_flushed().is_none());
+        thread::park_timeout(Duration::ZERO);
         release.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
-        while !output.poll().unwrap() {
-            assert!(Instant::now() < deadline);
-            thread::yield_now();
+        loop {
+            thread::park_timeout(deadline.saturating_duration_since(Instant::now()));
+            assert!(
+                Instant::now() < deadline,
+                "the flush receipt must wake its driver"
+            );
+            if output.poll().unwrap() {
+                break;
+            }
         }
         assert!(output.take_flushed().unwrap() >= before_flush);
         assert!(output.take_flushed().is_none());

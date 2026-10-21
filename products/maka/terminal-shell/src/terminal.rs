@@ -56,9 +56,16 @@ struct Presentation {
     state: Arc<Mutex<Inbox>>,
     presented: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
+    driver: Option<thread::Thread>,
 }
 
 impl Presentation {
+    fn wake_driver(&self) {
+        if let Some(driver) = &self.driver {
+            driver.unpark();
+        }
+    }
+
     fn publish(&self, epoch: u64, snapshot: InputSnapshot) {
         let mut inbox = self.state.lock().unwrap();
         if !self.stop.load(Ordering::Acquire)
@@ -104,6 +111,7 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;
     let presentation = Presentation {
         stop: stop.clone(),
+        driver: Some(thread::current()),
         ..Default::default()
     };
     let setup = [SETUP, graphics::QUERY].concat();
@@ -177,6 +185,7 @@ fn drive(
         state,
         presented,
         stop,
+        ..
     } = presentation;
     let mut setup = true;
     let mut busy = true;
@@ -273,7 +282,8 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                 state,
                 presented,
                 stop,
-            } = presentation;
+                ..
+            } = &presentation;
             while !stop.load(Ordering::Acquire) {
                 {
                     let mut inbox = state.lock().unwrap();
@@ -295,9 +305,11 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                             Ok(None) => break,
                             Err(error) => {
                                 inbox.error = Some(error.to_string());
+                                presentation.wake_driver();
                                 return;
                             }
                         };
+                        presentation.wake_driver();
                         inbox.graphics.observe(&event, Instant::now());
                         #[cfg(target_os = "linux")]
                         {
@@ -332,6 +344,7 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                 }
                 thread::sleep(Duration::from_millis(2));
             }
+            presentation.wake_driver();
         })
         .map_err(|error| error.to_string())?;
     Ok(Reader {
@@ -413,6 +426,7 @@ mod tests {
             state: state.clone(),
             presented: presented.clone(),
             stop: stop.clone(),
+            ..Default::default()
         };
         thread::spawn(move || {
             let result = drive(&mut output, &presentation, &commands, &receive);
