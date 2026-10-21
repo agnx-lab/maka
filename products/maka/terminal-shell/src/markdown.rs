@@ -422,7 +422,7 @@ mod tests {
         let rich = &blocks[60];
         assert_eq!(rich.kind, MarkdownBlockKind::Paragraph);
         assert_eq!(rich.runs.len(), 2201);
-        assert!(rich.runs[..2200].chunks_exact(2).all(|pair| {
+        assert!(rich.runs[..2200].as_chunks::<2>().0.iter().all(|pair| {
             pair[0].strong && pair[0].text == "bold" && !pair[1].strong && pair[1].text == " plain "
         }));
         assert_eq!(rich.runs[2200].text, "last");
