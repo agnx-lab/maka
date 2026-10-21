@@ -25,7 +25,10 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         let mut fixture = Fixture::files("readText").await;
         let client = fixture.client().await;
         let path = fixture.directory.path().join("workspace/recorded.txt");
-        let original = format!("起点_原始\n{}终点_原始\n", "中文😀 retained line\n".repeat(700));
+        // Cross the 8192 UTF-8-byte source boundary while staying inside the
+        // real tool's 7500 UTF-16-unit model page, including its JSON envelope.
+        let line = format!("{}😀\n", "中文".repeat(10));
+        let original = format!("起点_原始\n{}终点_原始\n", line.repeat(200));
         assert!(original.len() > 8192, "the real result must require multiple source pages");
         std::fs::write(&path, &original).unwrap();
         let sent = support::mutate(&client, "send", json!({
