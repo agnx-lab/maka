@@ -1,7 +1,8 @@
 //! Device Control String (DCS) escape sequences.
 //!
 //! Device Control String sequences are framed by [`DCS`] and [`ST`]. Termina currently models the
-//! [DECRQSS] request and [DECRPSS] response forms used for terminal state queries.
+//! [DECRQSS] request and [DECRPSS] response forms used for terminal state queries, along with
+//! the XTVERSION name-and-version response.
 //!
 //! # Examples
 //!
@@ -31,6 +32,11 @@ use crate::escape::csi::Sgr;
 /// terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dcs {
+    /// The raw terminal name and version from an XTVERSION response (`DCS >|text ST`).
+    ///
+    /// The parser does not infer a terminal product or capabilities from this string.
+    TerminalNameAndVersion(String),
+
     /// Request a terminal setting with [DECRQSS] using a [`DcsRequest`] selector.
     ///
     /// For example, [`DcsRequest::GraphicRendition`] asks for the current [`Sgr`] state.
@@ -58,6 +64,7 @@ impl Display for Dcs {
         // DCS
         f.write_str(super::DCS)?;
         match self {
+            Self::TerminalNameAndVersion(value) => write!(f, ">|{value}")?,
             // DCS $ q D...D ST
             Self::Request(request) => write!(f, "$q{request}")?,
             // DCS Ps $ r D...D ST

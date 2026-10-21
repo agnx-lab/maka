@@ -122,6 +122,12 @@ pub enum Event {
 
     /// A complete Kitty graphics protocol response, received through the same input reader.
     KittyGraphicsResponse(KittyGraphicsResponse),
+
+    /// The raw feature string from an iTerm2 `OSC 1337;Capabilities=` reply.
+    ///
+    /// This may be empty. Feature-token interpretation belongs to the caller; in particular,
+    /// this event does not equate any one token with support for image transmission.
+    Iterm2Capabilities(String),
 }
 
 impl Event {
@@ -130,7 +136,11 @@ impl Event {
     pub fn is_escape(&self) -> bool {
         matches!(
             self,
-            Self::Csi(_) | Self::Dcs(_) | Self::Osc(_) | Self::KittyGraphicsResponse(_)
+            Self::Csi(_)
+                | Self::Dcs(_)
+                | Self::Osc(_)
+                | Self::KittyGraphicsResponse(_)
+                | Self::Iterm2Capabilities(_)
         )
     }
 }

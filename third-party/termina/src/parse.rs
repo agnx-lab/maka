@@ -128,7 +128,8 @@ impl Parser {
     /// escape sequence later. Set it to `false` when the buffer should be treated as complete for
     /// now; malformed or incomplete sequences can then be discarded instead of held indefinitely.
     ///
-    /// Incomplete `CSI ?` replies and APC strings are limited to 256 bytes and 100 milliseconds.
+    /// Incomplete `CSI ?`, APC, iTerm2 capability, and XTVERSION replies are limited to 256 bytes
+    /// and 100 milliseconds.
     /// Exceeding either limit returns an input error and leaves the parser failed; stop reading
     /// this input source rather than interpreting the remaining reply bytes as key presses.
     /// Numeric CSI prefixes retain their existing key/paste behavior and are not timed out.
@@ -176,7 +177,11 @@ impl Parser {
     }
 
     fn process_bytes_at(&mut self, maybe_more: bool, now: Instant) -> io::Result<()> {
-        if self.buffer.starts_with(b"\x1b[?") || self.buffer.starts_with(b"\x1b_") {
+        if self.buffer.starts_with(b"\x1b[?")
+            || self.buffer.starts_with(b"\x1b_")
+            || self.buffer.starts_with(b"\x1b]1337;Capabilities=")
+            || self.buffer.starts_with(b"\x1bP>|")
+        {
             self.reply_deadline
                 .get_or_insert(now + TERMINAL_REPLY_INPUT_TIMEOUT);
         }
@@ -515,6 +520,15 @@ fn parse_osc(buffer: &[u8]) -> Result<Option<Event>> {
         return Ok(None);
     };
     let s = str::from_utf8(&buffer[2..buffer.len()])?;
+    if let Some(features) = s.strip_prefix("1337;Capabilities=") {
+        if !features
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
+        {
+            bail!();
+        }
+        return Ok(Some(Event::Iterm2Capabilities(features.to_owned())));
+    }
     let mut split = s.split(';');
     let index = next_parsed::<u8>(&mut split)?;
     let Some(color_number) = osc::DynamicColorNumber::from_index(index) else {
@@ -1274,6 +1288,7 @@ fn parse_csi_mode(buffer: &[u8]) -> Result<Option<Event>> {
     let mut split = s.split(';');
 
     let mode = match parse_reply_parameter(split.next().ok_or(MalformedSequenceError)?)? {
+        80 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SixelDisplayMode),
         1016 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
         2026 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SynchronizedOutput),
         2027 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::GraphemeClustering),
@@ -1292,7 +1307,8 @@ fn parse_csi_mode(buffer: &[u8]) -> Result<Option<Event>> {
         3 if matches!(
             mode,
             csi::DecPrivateMode::Code(
-                csi::DecPrivateModeCode::GraphemeClustering
+                csi::DecPrivateModeCode::SixelDisplayMode
+                    | csi::DecPrivateModeCode::GraphemeClustering
                     | csi::DecPrivateModeCode::SGRPixelsMouse
             )
         ) =>
@@ -1315,6 +1331,19 @@ fn parse_dcs(buffer: &[u8]) -> Result<Option<Event>> {
     assert!(buffer.starts_with(escape::DCS.as_bytes()));
     if !buffer.ends_with(escape::ST.as_bytes()) {
         return Ok(None);
+    }
+    if let Some(value) = buffer.strip_prefix(b"\x1bP>|") {
+        let value = &value[..value.len() - escape::ST.len()];
+        if value.is_empty()
+            || !value
+                .iter()
+                .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+        {
+            bail!();
+        }
+        return Ok(Some(Event::Dcs(dcs::Dcs::TerminalNameAndVersion(
+            str::from_utf8(value)?.to_owned(),
+        ))));
     }
     match buffer[buffer.len() - 3] {
         // SGR response: DCS Ps $ r SGR m ST
@@ -1459,7 +1488,7 @@ mod test {
 
     #[test]
     fn graphics_replies_preserve_input_and_paste_at_every_byte_boundary() {
-        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b[?1016;2$y\x1b[?64;1;4;22c\x1b[6;16;8t\x1b[4;680;960t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[<288;-1;-20M\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
+        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b]1337;Capabilities=T3FFSxSy;future=1\x1b\\\x1bP>|XTerm(411)\x1b\\\x1b[?1016;2$y\x1b[?64;1;4;22c\x1b[6;16;8t\x1b[4;680;960t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[<288;-1;-20M\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
         let expected = vec![
             Event::Key(KeyCode::Char('你').into()),
             Event::KittyGraphicsResponse(KittyGraphicsResponse {
@@ -1468,6 +1497,8 @@ mod test {
                 placement_id: None,
                 result: Ok(()),
             }),
+            Event::Iterm2Capabilities("T3FFSxSy;future=1".to_owned()),
+            Event::Dcs(dcs::Dcs::TerminalNameAndVersion("XTerm(411)".to_owned())),
             Event::Csi(Csi::Mode(csi::Mode::ReportDecPrivateMode {
                 mode: csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
                 setting: csi::DecModeSetting::Reset,
@@ -1711,7 +1742,7 @@ mod test {
     }
 
     #[test]
-    fn apc_input_bounds_keep_completed_replies_and_never_replay_rejected_tails() {
+    fn terminal_metadata_bounds_keep_completed_replies_and_never_replay_rejected_tails() {
         let mut parser = Parser::default();
         let wire = format!("\x1b_Gi=31;{}\x1b\\", "E".repeat(246));
         assert_eq!(wire.len(), 256);
@@ -1724,7 +1755,13 @@ mod test {
         assert_eq!(parser.pop(), None);
 
         let start = Instant::now();
-        for prefix in [b"\x1b_".as_slice(), b"\x1b_Gi=31;OK\x1b", b"\x1b_unknown"] {
+        for prefix in [
+            b"\x1b_".as_slice(),
+            b"\x1b_Gi=31;OK\x1b",
+            b"\x1b_unknown",
+            b"\x1b]1337;Capabilities=FF",
+            b"\x1bP>|XTerm(411)",
+        ] {
             let mut parser = Parser::default();
             parser.parse_at(b"x", false, start).unwrap();
             parser.parse_at(prefix, false, start).unwrap();
@@ -1744,18 +1781,26 @@ mod test {
             assert_eq!(parser.pop(), None);
         }
 
+        for prefix in ["\x1b_Gi=31;", "\x1b]1337;Capabilities=", "\x1bP>|"] {
+            let mut parser = Parser::default();
+            let wire = format!("x{prefix}{}", "E".repeat(300));
+            assert_eq!(
+                parser.parse(wire.as_bytes(), true).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('x').into())));
+            assert!(parser.buffer.len() <= 256);
+            assert_eq!(
+                parser.parse(b"\x1b\\z", false).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert_eq!(parser.pop(), None);
+        }
+        // Other OSC 1337 replies retain their existing framing and resource behavior.
         let mut parser = Parser::default();
-        let wire = format!("x\x1b_Gi=31;{}", "E".repeat(300));
-        assert_eq!(
-            parser.parse(wire.as_bytes(), true).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
-        );
-        assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('x').into())));
-        assert!(parser.buffer.len() <= 256);
-        assert_eq!(
-            parser.parse(b"\x1b\\z", false).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
-        );
+        let wire = format!("\x1b]1337;ReportVariable={}\x1b\\z", "E".repeat(300));
+        parser.parse(wire.as_bytes(), false).unwrap();
+        assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('z').into())));
         assert_eq!(parser.pop(), None);
     }
 
@@ -1839,6 +1884,76 @@ mod test {
     }
 
     #[test]
+    fn iterm_capabilities_preserve_raw_features_and_complete_osc_framing() {
+        for (wire, features) in [
+            ("\x1b]1337;Capabilities=\x07", ""),
+            ("\x1b]1337;Capabilities=F\x07", "F"),
+            ("\x1b]1337;Capabilities=FFSxSy\x1b\\", "FFSxSy"),
+            ("\x1b]1337;Capabilities=F0F2;future !\x07", "F0F2;future !"),
+        ] {
+            let mut parser = Parser::default();
+            parser.parse(wire.as_bytes(), false).unwrap();
+            let event = parser.pop().unwrap();
+            assert!(event.is_escape());
+            assert_eq!(event, Event::Iterm2Capabilities(features.to_owned()));
+            assert_eq!(parser.pop(), None);
+        }
+        for invalid in [
+            "\x1b]1337;Capabilities\x07",
+            "\x1b]1337;capabilities=FF\x07",
+            "\x1b]1337;Capabilities=FF\u{1}\x07",
+            "\x1b]1337;Capabilities=图\x07",
+            "\x1b]1337;File=FF\x1b\\",
+        ] {
+            let mut parser = Parser::default();
+            let wire = format!("{invalid}你\x03");
+            parser.parse(wire.as_bytes(), false).unwrap();
+            assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('你').into())));
+            assert_eq!(
+                parser.pop(),
+                Some(Event::Key(KeyEvent::new(
+                    KeyCode::Char('c'),
+                    Modifiers::CONTROL
+                )))
+            );
+            assert_eq!(parser.pop(), None);
+        }
+    }
+
+    #[test]
+    fn terminal_version_reply_preserves_identity_without_parsing_a_product() {
+        for value in [
+            "XTerm(411)",
+            "kitty(0.45.0)",
+            "ghostty 1.3.0",
+            "Other terminal",
+        ] {
+            let wire = format!("\x1bP>|{value}\x1b\\");
+            let mut parser = Parser::default();
+            parser.parse(wire.as_bytes(), false).unwrap();
+            assert_eq!(
+                parser.pop(),
+                Some(Event::Dcs(dcs::Dcs::TerminalNameAndVersion(
+                    value.to_owned()
+                )))
+            );
+            assert_eq!(parser.pop(), None);
+        }
+        for invalid in [
+            "\x1bP>|\x1b\\",
+            "\x1bP>|XTerm\u{1}\x1b\\",
+            "\x1bP>|终端\x1b\\",
+            "\x1bP>!XTerm(411)\x1b\\",
+        ] {
+            let mut parser = Parser::default();
+            let wire = format!("{invalid}z");
+            parser.parse(wire.as_bytes(), false).unwrap();
+            assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('z').into())));
+            assert_eq!(parser.pop(), None);
+        }
+    }
+
+    #[test]
     fn parse_cursor_shape_query() {
         // CSI > SP q with no parameters is a query.
         let event = parse_event(b"\x1b[> q", false).unwrap().unwrap();
@@ -1908,25 +2023,30 @@ mod test {
     }
 
     #[test]
-    fn pixel_mouse_mode_reports_preserve_all_five_states() {
-        for (value, setting) in [
-            (0, csi::DecModeSetting::NotRecognized),
-            (1, csi::DecModeSetting::Set),
-            (2, csi::DecModeSetting::Reset),
-            (3, csi::DecModeSetting::PermanentlySet),
-            (4, csi::DecModeSetting::PermanentlyReset),
+    fn pixel_mouse_and_sixel_mode_reports_preserve_all_five_states() {
+        for (code, mode) in [
+            (80, csi::DecPrivateModeCode::SixelDisplayMode),
+            (1016, csi::DecPrivateModeCode::SGRPixelsMouse),
         ] {
-            let wire = format!("\x1b[?1016;{value}$y");
-            let mut parser = Parser::default();
-            parser.parse(wire.as_bytes(), false).unwrap();
-            assert_eq!(
-                parser.pop(),
-                Some(Event::Csi(Csi::Mode(csi::Mode::ReportDecPrivateMode {
-                    mode: csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
-                    setting,
-                })))
-            );
-            assert_eq!(parser.pop(), None);
+            for (value, setting) in [
+                (0, csi::DecModeSetting::NotRecognized),
+                (1, csi::DecModeSetting::Set),
+                (2, csi::DecModeSetting::Reset),
+                (3, csi::DecModeSetting::PermanentlySet),
+                (4, csi::DecModeSetting::PermanentlyReset),
+            ] {
+                let wire = format!("\x1b[?{code};{value}$y");
+                let mut parser = Parser::default();
+                parser.parse(wire.as_bytes(), false).unwrap();
+                assert_eq!(
+                    parser.pop(),
+                    Some(Event::Csi(Csi::Mode(csi::Mode::ReportDecPrivateMode {
+                        mode: csi::DecPrivateMode::Code(mode),
+                        setting,
+                    })))
+                );
+                assert_eq!(parser.pop(), None);
+            }
         }
         for invalid in [
             b"\x1b[?+1016;1$y".as_slice(),
