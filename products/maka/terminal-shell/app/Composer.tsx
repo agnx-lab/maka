@@ -21,7 +21,7 @@ import { cleanup, Input, inputAction, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
-import { windowSize } from 'nsh/device';
+import { platform, windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
 import { DraftAttachments } from './Attachments';
 import type { AttachmentDraft } from './attachmentDraft';
@@ -192,7 +192,15 @@ export function Composer(props: {
         </Text>
       </If>
       <If when={props.session()?.notice()}>
-        <Text style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>
+        <Text
+          style={{
+            color: C.muted,
+            fontSize: 12,
+            // A single line occupies 32 points: 16 of text, 8 above and 8 below.
+            // This keeps the next card's outward cell paint clear of the notice.
+            ...(platform.isTerminal ? { lineHeight: 16, paddingVertical: 8 } : { paddingTop: 4 }),
+          }}
+        >
           {props.session()?.notice()}
         </Text>
       </If>
