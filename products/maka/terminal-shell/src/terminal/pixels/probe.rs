@@ -186,10 +186,8 @@ impl Probe {
                 _ => {}
             },
             Event::Csi(Csi::PrimaryDeviceAttributes(attributes)) => {
-                self.sixel.get_or_insert((
-                    attributes.terminal_type >= 62 && attributes.attributes.contains(&4),
-                    now,
-                ));
+                self.sixel
+                    .get_or_insert((attributes.attributes.contains(&4), now));
             }
             Event::Dcs(Dcs::TerminalNameAndVersion(identity)) => {
                 self.identity.get_or_insert((pixel_origin(identity), now));
@@ -414,6 +412,26 @@ mod tests {
                 assert_eq!(probe.needs_static_sixel(), changed);
             }
         }
+        // Windows Terminal advertises Sixel with DA1 level 61, independently
+        // of its supported DECSDM and virtual Sixel pixel dimensions.
+        let mut probe = probe();
+        probe.flushed(now);
+        reply(
+            &mut probe,
+            b"\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c\x1b[?80;2$y\x1b[?1016;0$y\x1b[4;800;1200t",
+            now,
+        );
+        let caps = probe.decision(now + TIMEOUT, size()).unwrap().unwrap();
+        assert_eq!(caps.protocol, Some(Protocol::Sixel));
+        assert_eq!(caps.mouse, MouseCoordinates::Cells);
+        assert_eq!(
+            caps.viewport(),
+            Some(gpui::size(
+                gpui::DevicePixels(1200),
+                gpui::DevicePixels(800)
+            ))
+        );
+        assert!(probe.needs_static_sixel());
     }
 
     #[test]
