@@ -21,6 +21,7 @@
 
 mod assets;
 mod files;
+mod settings;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
 use nsh_core::{JsonValue, ui::prelude::*};
@@ -214,6 +215,73 @@ impl ApplicationHost {
             mutation.prepare().await?;
             let reply = mutation.confirm().await?;
             Ok(serde_json::json!({"operationId": id, "reply": reply}))
+        })
+        .await
+    }
+
+    /// Confirm one Settings mutation with an optional request-local secret resource.
+    pub async fn settings_mutation(
+        this: Instance<Self>,
+        endpoint: String,
+        method: String,
+        input: JsonValue,
+        secret: Option<String>,
+    ) -> Result<JsonValue, String> {
+        let resources = settings::attachments(&endpoint, &method, secret)?;
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        execute(owner.clone(), async move {
+            let id = Uuid::new_v4();
+            let mutation = owner
+                .client
+                .settings_mutation(id, &endpoint, &method, input, resources)
+                .await?;
+            mutation.prepare().await?;
+            let reply = mutation.confirm().await?;
+            Ok(serde_json::json!({"operationId": id, "reply": reply}))
+        })
+        .await
+    }
+
+    /// Unresolved Settings attempts, independent of the selected Agent session.
+    pub async fn pending_settings(this: Instance<Self>) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        execute(owner.clone(), async move {
+            let operations = owner.client.pending_settings().await?;
+            serde_json::to_value(operations).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Read a Settings attempt's original receipt without repeating its mutation.
+    pub async fn recover_setting(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(owner.clone(), async move {
+            owner.client.operation_for_settings(id).await?;
+            let reply = owner.client.recover(id).await?;
+            serde_json::to_value(reply).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Fence a Settings attempt only before its preparation has committed.
+    pub async fn abandon_setting(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(owner.clone(), async move {
+            owner.client.operation_for_settings(id).await?;
+            let operation = owner.client.abandon_unprepared(id).await?;
+            serde_json::to_value(operation).map_err(|error| error.to_string())
         })
         .await
     }

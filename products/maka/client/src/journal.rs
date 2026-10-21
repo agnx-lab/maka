@@ -18,7 +18,7 @@
  */
 
 //! Client-owned correlation and original receipts, independent of UI nodes.
-use crate::{CONTROL_KIND, CONTROL_METHODS, Result};
+use crate::{CONTROL_KIND, CONTROL_METHODS, Result, SETTINGS_KIND, SETTINGS_METHODS};
 use maka_plugin_core::{
     composition::InstanceId,
     deployment::DeploymentRef,
@@ -34,6 +34,9 @@ use sqlx::{
 };
 use std::path::Path;
 use uuid::Uuid;
+
+// Keep admission and pending observations on the same immutable Settings owner.
+const SETTINGS_OWNER: &str = "draft_owner IS NULL AND json_type(context,'$.draft')='null' AND json_type(context,'$.sessionId')='null' AND json_type(context,'$.correlation')='object' AND json_extract(context,'$.correlation')=? AND ((json_extract(context,'$.endpoint')='settings' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?))) OR (json_extract(context,'$.endpoint')='setup' AND json_extract(context,'$.method')='discoverModels'))";
 
 /// One user attempt. Neither this observation nor its original reference grants access.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -180,16 +183,7 @@ impl Journal {
         })
     }
     pub(crate) async fn reserve(&self, operation: &Operation) -> Result<()> {
-        if operation.id.is_nil()
-            || operation
-                .session_id
-                .as_ref()
-                .is_some_and(|id| id.is_empty() || id.len() > 256)
-        {
-            return Err("invalid client operation identity".into());
-        }
-        maka_plugin_core::json::check_delivery(&operation.correlation, 32 * 1024)?;
-        let context = serde_json::to_string(operation).map_err(error)?;
+        let context = encode_operation(operation)?;
         let inserted = sqlx::query(
             "INSERT OR IGNORE INTO operations (id,domain,deployment,context,draft_owner) VALUES (?,?,?,?,?)",
         )
@@ -203,6 +197,28 @@ impl Journal {
         .map_err(error)?;
         if inserted.rows_affected() != 1 {
             return Err("client operation already exists; recover the original attempt".into());
+        }
+        Ok(())
+    }
+    pub(crate) async fn reserve_settings(&self, operation: &Operation) -> Result<()> {
+        let context = encode_operation(operation)?;
+        let statement = format!(
+            "INSERT OR IGNORE INTO operations (id,domain,deployment,context,draft_owner) SELECT ?,?,?,?,NULL WHERE NOT EXISTS (SELECT 1 FROM operations WHERE domain=? AND deployment=? AND {SETTINGS_OWNER} AND receipt IS NULL AND abandoned=0)"
+        );
+        let inserted = sqlx::query(&statement)
+            .bind(operation.id.to_string())
+            .bind(&operation.host.state_domain)
+            .bind(operation.host.deployment.to_string())
+            .bind(context)
+            .bind(&operation.host.state_domain)
+            .bind(operation.host.deployment.to_string())
+            .bind(serde_json::json!({"kind": SETTINGS_KIND}).to_string())
+            .bind(serde_json::to_string(&SETTINGS_METHODS).map_err(error)?)
+            .execute(&self.0)
+            .await
+            .map_err(error)?;
+        if inserted.rows_affected() != 1 {
+            return Err("settings operation already exists or has an unresolved original".into());
         }
         Ok(())
     }
@@ -254,6 +270,20 @@ impl Journal {
             .bind(serde_json::to_string(&CONTROL_METHODS).map_err(error)?)
             .bind(&correlation).bind(&correlation).bind(&correlation)
             .fetch_all(&self.0).await.map_err(error)?;
+        rows.into_iter().map(decode_operation).collect()
+    }
+    pub(crate) async fn pending_settings(&self, host: &DeploymentRef) -> Result<Vec<Operation>> {
+        let statement = format!(
+            "SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND {SETTINGS_OWNER} AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128"
+        );
+        let rows = sqlx::query(&statement)
+            .bind(&host.state_domain)
+            .bind(host.deployment.to_string())
+            .bind(serde_json::json!({"kind": SETTINGS_KIND}).to_string())
+            .bind(serde_json::to_string(&SETTINGS_METHODS).map_err(error)?)
+            .fetch_all(&self.0)
+            .await
+            .map_err(error)?;
         rows.into_iter().map(decode_operation).collect()
     }
     pub(crate) async fn observe(&self, operation: &Operation, receipt: &Receipt) -> Result<()> {
@@ -316,6 +346,18 @@ impl Journal {
         }
         transaction.commit().await.map_err(error)
     }
+}
+fn encode_operation(operation: &Operation) -> Result<String> {
+    if operation.id.is_nil()
+        || operation
+            .session_id
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.len() > 256)
+    {
+        return Err("invalid client operation identity".into());
+    }
+    maka_plugin_core::json::check_delivery(&operation.correlation, 32 * 1024)?;
+    serde_json::to_string(operation).map_err(error)
 }
 fn decode_operation(row: SqliteRow) -> Result<Operation> {
     let mut operation: Operation =

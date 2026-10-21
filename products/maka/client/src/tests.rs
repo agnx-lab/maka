@@ -48,6 +48,7 @@ use std::{
 use tokio::sync::Notify;
 
 mod drafts;
+mod settings;
 
 #[derive(Default)]
 struct Counter {
@@ -57,6 +58,7 @@ struct Counter {
     release: Notify,
     watches_closed: AtomicUsize,
     messages: std::sync::Mutex<Vec<Value>>,
+    secrets: std::sync::Mutex<Vec<Vec<u8>>>,
 }
 struct CounterHandler(Arc<Counter>);
 impl Handler for CounterHandler {
@@ -70,8 +72,16 @@ impl Handler for CounterHandler {
         Box::pin(async move {
             match method.as_str() {
                 "read" => Ok(json!({"sent":owner.effects.load(Ordering::SeqCst)})),
-                "send" | "selectBackend" => {
+                "send" | "selectBackend" | "create" | "discoverModels" | "saveCredential" => {
                     owner.messages.lock().unwrap().push(input.clone());
+                    if method == "saveCredential" {
+                        let secret = &context.attachments()["secret"];
+                        owner
+                            .secrets
+                            .lock()
+                            .unwrap()
+                            .push(secret.read(0..secret.bytes())?);
+                    }
                     if input.get("message").and_then(Value::as_str) == Some("reject") {
                         return Ok(
                             json!({"kind":"rejected","sessionId":input["sessionId"],"reason":"skills_unavailable"}),
@@ -132,6 +142,9 @@ impl Fixture {
                 "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "stop":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "respond":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "create":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "discoverModels":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "saveCredential":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":false}}},
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
         })).unwrap();
@@ -165,6 +178,8 @@ impl Fixture {
             "maka.application.gateway",
             json!({
                 "agent":{"contract":contract,"cardinality":{"kind":"one"}},
+                "settings":{"contract":contract,"cardinality":{"kind":"one"}},
+                "setup":{"contract":contract,"cardinality":{"kind":"one"}},
                 "receipts":{"contract":receipt_reader_contract(),"cardinality":{"kind":"one"}}
             }),
             json!({}),
@@ -180,6 +195,8 @@ impl Fixture {
                 "business":node(&business,1,json!({})),"reader":node(&reader,2,json!({})),
                 "gateway":node(&gateway,3,json!({
                     "agent":[{"kind":"instance","path":["business"],"export":"Counter"}],
+                    "settings":[{"kind":"instance","path":["business"],"export":"Counter"}],
+                    "setup":[{"kind":"instance","path":["business"],"export":"Counter"}],
                     "receipts":[{"kind":"instance","path":["reader"],"export":"Receipts"}]
                 }))
             }
@@ -241,6 +258,28 @@ impl Fixture {
                                 "watch".into(),
                             ]
                             .into(),
+                            recovery: false,
+                        },
+                    },
+                ),
+                (
+                    "settings".into(),
+                    HostEndpoint {
+                        consumer: InstanceId(vec![Uuid::from_u128(3)]),
+                        import: "settings".into(),
+                        grant: Grant {
+                            methods: ["create".into(), "saveCredential".into()].into(),
+                            recovery: false,
+                        },
+                    },
+                ),
+                (
+                    "setup".into(),
+                    HostEndpoint {
+                        consumer: InstanceId(vec![Uuid::from_u128(3)]),
+                        import: "setup".into(),
+                        grant: Grant {
+                            methods: ["discoverModels".into()].into(),
                             recovery: false,
                         },
                     },

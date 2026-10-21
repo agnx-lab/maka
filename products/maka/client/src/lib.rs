@@ -20,12 +20,13 @@
 //! View-independent Maka calls. The launcher retains this scope until `close` succeeds.
 mod journal;
 pub use journal::{Draft, DraftKey, DraftReference, Journal, Operation};
-use maka_capabilities::call::Attachments;
+use maka_capabilities::call::{Attachments, ResourceEncoding};
 use maka_host_runtime::application::{
     host::{Client as HostClient, LocalCall},
     transport::{Description, wire::Reply},
 };
 use maka_plugin_core::{
+    contract::text_resource_type,
     deployment::DeploymentRef,
     operation::{OperationReply, RecoveryContract, receipt_reader_contract},
 };
@@ -45,6 +46,26 @@ pub type Result<T> = std::result::Result<T, String>;
 
 const CONTROL_METHODS: [&str; 4] = ["create", "selectBackend", "stop", "respond"];
 const CONTROL_KIND: &str = "agent-control";
+const SETTINGS_KIND: &str = "settings";
+const SETTINGS_METHODS: [&str; 7] = [
+    "create",
+    "update",
+    "remove",
+    "saveCredential",
+    "deleteCredential",
+    "updateModelSettings",
+    "setDefault",
+];
+fn settings_route(endpoint: &str, method: &str) -> bool {
+    (endpoint == "settings" && SETTINGS_METHODS.contains(&method))
+        || (endpoint == "setup" && method == "discoverModels")
+}
+fn settings_owner(operation: &Operation) -> bool {
+    operation.draft.is_none()
+        && operation.session_id.is_none()
+        && settings_route(&operation.endpoint, &operation.method)
+        && operation.correlation == serde_json::json!({"kind": SETTINGS_KIND})
+}
 fn control_correlation(method: &str, input: &Value) -> Result<Value> {
     let mut correlation = serde_json::json!({"kind": CONTROL_KIND});
     let key = match method {
@@ -204,8 +225,22 @@ impl Client {
             receipt: None,
         };
         self.0.journal.reserve(&operation).await?;
+        self.open_mutation(operation, input, resources).await
+    }
+    async fn open_mutation(
+        &self,
+        operation: Operation,
+        input: Value,
+        resources: Attachments,
+    ) -> Result<Mutation> {
         let (request, description) = self
-            .open(endpoint, method, input, resources, Some(id))
+            .open(
+                &operation.endpoint,
+                &operation.method,
+                input,
+                resources,
+                Some(operation.id),
+            )
             .await?;
         Ok(Mutation {
             client: self.clone(),
@@ -213,6 +248,46 @@ impl Client {
             operation,
             description,
         })
+    }
+    /// Reserve one Settings attempt across terminal launchers before opening it.
+    /// An unresolved original blocks new Settings writes, including after restart.
+    pub async fn settings_mutation(
+        &self,
+        id: Uuid,
+        endpoint: &str,
+        method: &str,
+        input: Value,
+        resources: Attachments,
+    ) -> Result<Mutation> {
+        if !settings_route(endpoint, method) {
+            return Err("unsupported settings mutation method".into());
+        }
+        if endpoint == "settings" && method == "saveCredential" {
+            if resources.len() != 1
+                || !resources.get("secret").is_some_and(|secret| {
+                    secret.resource_type() == text_resource_type()
+                        && secret.encoding() == ResourceEncoding::Utf8
+                })
+            {
+                return Err("settings credential requires one UTF-8 secret resource".into());
+            }
+        } else if !resources.is_empty() {
+            return Err("settings mutation does not accept resources".into());
+        }
+        let operation = Operation {
+            id,
+            host: self.0.source.clone(),
+            endpoint: endpoint.into(),
+            method: method.into(),
+            session_id: None,
+            correlation: serde_json::json!({"kind": SETTINGS_KIND}),
+            draft: None,
+            abandoned: false,
+            reference: None,
+            receipt: None,
+        };
+        self.0.journal.reserve_settings(&operation).await?;
+        self.open_mutation(operation, input, resources).await
     }
     /// Reserve a shell control attempt separately from composer draft sends.
     pub async fn control(&self, id: Uuid, method: &str, input: Value) -> Result<Mutation> {
@@ -355,6 +430,18 @@ impl Client {
     /// Only this shell's unsettled Agent controls on the current Host deployment.
     pub async fn pending_controls(&self) -> Result<Vec<Operation>> {
         self.0.journal.pending_controls(&self.0.source).await
+    }
+    /// A settled or abandoned Settings attempt retains its original owner.
+    pub async fn operation_for_settings(&self, id: Uuid) -> Result<Operation> {
+        let operation = self.operation(id).await?;
+        if !settings_owner(&operation) {
+            return Err("original client operation belongs to another settings owner".into());
+        }
+        Ok(operation)
+    }
+    /// Unsettled Settings attempts for this exact Host deployment.
+    pub async fn pending_settings(&self) -> Result<Vec<Operation>> {
+        self.0.journal.pending_settings(&self.0.source).await
     }
     /// Check the immutable product owner independently of a mutable pending list.
     /// A settled or abandoned original still belongs to the same draft editor.
