@@ -74,8 +74,8 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
             assert_eq!(values.len(), 1, "expected one visible {label} value:\n{usage}");
             let value = values[0];
             assert_eq!(value.label, expected, "{label} did not retain its exact counter");
-            let row = (value.frame.origin.y.0 / view.surface().metrics().height().0).floor() as usize;
-            assert_eq!(support::painted_text(&view, &value.label, row).trim(), expected, "{label} did not paint its exact counter:\n{usage}");
+            let row = (value.frame.origin.y.0 / view.surface().metrics().height().0 - 0.5).ceil() as usize;
+            assert_eq!(support::painted_text(&view, &value.label, row).trim(), expected, "{label} did not paint its exact counter: frame={:?}, metrics={:?}, row={row}\n{usage}", value.frame, view.surface().metrics());
         }
         evidence("final-actions-original-main-usage", &usage);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));

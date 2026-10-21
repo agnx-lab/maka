@@ -1034,7 +1034,8 @@ pub fn wait_view(
     }
 }
 
-// Read painted graphemes within the native Text frame, not its untruncated label.
+// Read painted graphemes within the native Text frame, using the renderer's
+// cell-center projection rather than flooring fractional layout coordinates.
 pub fn painted_text(view: &AppView, prefix: &str, row: usize) -> String {
     use ratatui::{buffer::CellWidth, layout::Rect};
     let metrics = view.surface().metrics();
@@ -1046,7 +1047,7 @@ pub fn painted_text(view: &AppView, prefix: &str, row: usize) -> String {
         .into_iter()
         .filter(|node| {
             node.label.starts_with(prefix)
-                && (node.frame.origin.y.0 / metrics.height().0).floor() == row as f32
+                && (node.frame.origin.y.0 / metrics.height().0 - 0.5).ceil() == row as f32
         })
         .collect();
     assert_eq!(
@@ -1055,10 +1056,10 @@ pub fn painted_text(view: &AppView, prefix: &str, row: usize) -> String {
         "expected one native Text {prefix:?} at row {row}"
     );
     let frame = matches[0].frame;
-    let mut x = (frame.origin.x.0 / metrics.width().0)
-        .floor()
+    let mut x = (frame.origin.x.0 / metrics.width().0 - 0.5)
+        .ceil()
         .clamp(0.0, f32::from(columns)) as u16;
-    let right = ((frame.origin.x.0 + frame.size.width.0) / metrics.width().0)
+    let right = ((frame.origin.x.0 + frame.size.width.0) / metrics.width().0 - 0.5)
         .ceil()
         .clamp(0.0, f32::from(columns)) as u16;
     assert!(
