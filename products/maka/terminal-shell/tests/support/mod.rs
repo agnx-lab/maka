@@ -907,8 +907,18 @@ fn click_node(view: &mut AppView, node: nsh_platform_tui::AccessibleNode) {
 
 // Hit rendered body text so nested scrolling is selected by the native pointer path.
 pub fn scroll_text(view: &mut AppView, text: &str, kind: crossterm::event::MouseEventKind) {
-    use crossterm::event::{Event, KeyModifiers, MouseEvent};
     let snapshot = view.snapshot();
+    scroll_snapshot_text(view, &snapshot, text, kind);
+}
+
+// The caller has just painted this scene and has not polled or ticked it since.
+pub fn scroll_snapshot_text(
+    view: &mut AppView,
+    snapshot: &str,
+    text: &str,
+    kind: crossterm::event::MouseEventKind,
+) {
+    use crossterm::event::{Event, KeyModifiers, MouseEvent};
     let (row, line) = snapshot
         .lines()
         .enumerate()

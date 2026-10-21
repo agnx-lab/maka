@@ -1342,7 +1342,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                     .find(|marker| line.contains(*marker))
                 })
                 .expect("the viewport must contain painted fixture transcript text");
-            support::scroll_text(view, text, MouseEventKind::ScrollUp);
+            support::scroll_snapshot_text(view, &screen, text, MouseEventKind::ScrollUp);
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
@@ -1361,11 +1361,11 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(view.surface().input_context().is_some(), "the history wheel must start with composer focus, so a missed pointer cannot scroll the focused List");
         // Wheel events over the conversation cross the actual history page boundary.
         let scrolling = std::time::Instant::now();
+        let mut screen = history;
         loop {
-            support::scroll_text(&mut view, "History ", MouseEventKind::ScrollUp);
-            view.poll().unwrap();
+            support::scroll_snapshot_text(&mut view, &screen, "History ", MouseEventKind::ScrollUp);
             support::tick(&mut view);
-            let screen = view.snapshot();
+            screen = view.snapshot();
             if screen.contains("History 00 paragraph") {
                 assert!(!screen.contains("Load earlier messages"));
                 evidence("history-automatically-prepended", &screen);
