@@ -941,6 +941,10 @@ impl ReplyGate {
     pub fn arm_times(&self, count: usize) {
         self.armed.store(count, Ordering::SeqCst);
     }
+    #[cfg(unix)]
+    pub fn remaining(&self) -> usize {
+        self.armed.load(Ordering::SeqCst)
+    }
     pub fn release(&self) {
         self.release.notify_one();
     }

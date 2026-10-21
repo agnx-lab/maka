@@ -2081,18 +2081,11 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         catchup.release();
         // Three real losses span more than four seconds. Returning service
         // still resumes automatically, with no mandatory Reconnect click.
-        for _ in 0..3 {
-            let started = Instant::now();
-            let dropped = watch.held.notified();
-            tokio::pin!(dropped);
-            loop {
-                terminal.read();
-                tokio::select! {
-                    () = &mut dropped => break,
-                    () = tokio::time::sleep(Duration::from_millis(2)) => {}
-                }
-                assert!(started.elapsed() < Duration::from_secs(20), "expected real watch disconnection did not occur");
-            }
+        let started = Instant::now();
+        while watch.remaining() != 0 {
+            terminal.read();
+            assert!(started.elapsed() < Duration::from_secs(20), "expected real watch disconnections did not occur");
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
         terminal.wait_for("Updates disconnected.").await;
         terminal.wait_for("Confirming send").await;
