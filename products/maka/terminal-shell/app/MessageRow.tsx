@@ -183,6 +183,7 @@ export function MessageRow({
                     else={
                       <View>
                         <Button
+                          accessibilityLabel={summary()}
                           selected={expanded()}
                           onPress={inputAction(setExpanded, {
                             sessionId,

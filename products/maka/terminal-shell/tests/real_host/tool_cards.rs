@@ -129,7 +129,6 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         // Return through the real control, expand the actual new reasoning
         // source, then explicitly resume following before its height grows.
         support::click_button(&mut view, "Return to latest").await;
-        wait_view(&mut view, |screen| screen.contains("Thinking · INNER_STREAM_A")).await;
         support::click_button(&mut view, "Thinking · INNER_STREAM_A").await;
         wait_enabled_node(&mut view, "INNER_STREAM_A").await;
         support::click_button(&mut view, "Return to latest").await;
