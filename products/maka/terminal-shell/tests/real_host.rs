@@ -286,7 +286,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         }).await.expect("the real provider inventory did not reveal Chat Completions");
         support::click_label(&mut view, "Connect Chat Completions");
         wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
-        fill(&mut view, "Connection name", "UI connection").await;
+        fill(&mut view, "Connection name", "UI 连接").await;
         fill(&mut view, "Connection ID", "ui-connection").await;
         fill(&mut view, "Base URL", &fixture.base_url).await;
         fill(&mut view, "API key", support::PROVIDER_KEY).await;
@@ -319,7 +319,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_view(&mut view, |screen| screen.contains("Default model saved.")).await;
         let catalog = client.query("settings", "connections", json!({"kind":"start"})).await.unwrap();
         assert_eq!(catalog["connections"].as_array().unwrap().len(), 1);
-        assert_eq!(catalog["connections"][0]["name"], "UI connection");
+        assert_eq!(catalog["connections"][0]["name"], "UI 连接");
         let basis = &catalog["connections"][0]["basis"];
         let target = json!({"connectionId":basis["connectionId"],"modelId":"manual-ui-agent"});
         assert_eq!(catalog["defaultTarget"], target);
