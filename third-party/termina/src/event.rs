@@ -65,6 +65,17 @@ pub enum Event {
     /// [`DecPrivateModeCode::AnyEventMouse`].
     Mouse(MouseEvent),
 
+    /// An SGR mouse report whose coordinates retain their signed wire values.
+    ///
+    /// The application that enabled mouse tracking owns whether these are one-based cells
+    /// (1006) or pixels (1016); the byte stream does not distinguish those modes.
+    SgrMouse(SgrMouseEvent),
+
+    /// The pointer left the window, as reported by Kitty's SGR-pixel extension.
+    ///
+    /// This event has no coordinates or button state. It is not a synthetic button release.
+    MouseLeave,
+
     /// The terminal window was resized to the given [`WindowSize`].
     WindowResized(WindowSize),
 
@@ -469,10 +480,9 @@ pub enum MediaKeyCode {
 
 /// Mouse input event with zero-based terminal cell coordinates.
 ///
-/// Terminal mouse protocols encode cell positions as one-based coordinates, but Termina converts
-/// them to zero-based `column` and `row` values for consistency with Rust indexing and the parser's
-/// existing event model. SGR pixel mouse reports are represented separately as
-/// [`crate::escape::csi::MouseReport::Sgr1016`].
+/// Legacy terminal mouse protocols encode cell positions as one-based coordinates, but Termina
+/// converts them to zero-based `column` and `row` values. SGR reports instead preserve their raw
+/// coordinates in [`SgrMouseEvent`], because the application owns the negotiated coordinate mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseEvent {
     /// The mouse action.
@@ -484,6 +494,23 @@ pub struct MouseEvent {
     /// The zero-based terminal row where the event occurred.
     pub row: u16,
 
+    /// The key modifiers active when the event occurred.
+    pub modifiers: Modifiers,
+}
+
+/// An SGR mouse report with signed, unmodified wire coordinates.
+///
+/// Mode 1006 uses one-based cells. Mode 1016 uses pixels; Kitty and Ghostty send zero-based pixels,
+/// including negative values for positions outside the viewport. This parser does not track the
+/// mode or convert coordinates. Applications interpret them using the mode they enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SgrMouseEvent {
+    /// The decoded mouse action.
+    pub kind: MouseEventKind,
+    /// The original horizontal coordinate.
+    pub x: i32,
+    /// The original vertical coordinate.
+    pub y: i32,
     /// The key modifiers active when the event occurred.
     pub modifiers: Modifiers,
 }

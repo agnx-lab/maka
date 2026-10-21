@@ -52,7 +52,7 @@ use crate::{
     },
     event::{
         KeyCode, KeyEvent, KeyEventKind, KeyEventState, KittyGraphicsResponse, MediaKeyCode,
-        ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseEventKind,
+        ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseEventKind, SgrMouseEvent,
     },
     style, Event,
 };
@@ -492,7 +492,7 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<Event>> {
                         b'~' => return parse_csi_special_key_code(buffer),
                         b'u' => return parse_csi_u_encoded_key_code(buffer),
                         b'R' => return parse_csi_cursor_position(buffer),
-                        b't' => return parse_csi_cell_size(buffer),
+                        b't' => return parse_csi_pixel_size(buffer),
                         _ => return parse_csi_modifier_key_code(buffer),
                     }
                 }
@@ -973,7 +973,7 @@ fn parse_csi_normal_mouse(buffer: &[u8]) -> Result<Option<Event>> {
 }
 
 fn parse_csi_sgr_mouse(buffer: &[u8]) -> Result<Option<Event>> {
-    // CSI < Cb ; Cx ; Cy (;) (M or m)
+    // CSI < Cb ; Cx ; Cy (M or m)
 
     assert!(buffer.starts_with(b"\x1B[<")); // CSI <
 
@@ -984,14 +984,22 @@ fn parse_csi_sgr_mouse(buffer: &[u8]) -> Result<Option<Event>> {
     let s = str::from_utf8(&buffer[3..buffer.len() - 1])?;
     let mut split = s.split(';');
 
-    let cb = next_parsed::<u8>(&mut split)?;
-    let (kind, modifiers) = parse_cb(cb)?;
-
-    // See http://www.xfree86.org/current/ctlseqs.html#Mouse%20Tracking
-    // The upper left character position on the terminal is denoted as 1,1.
-    // Subtract 1 to keep it synced with cursor
-    let cx = next_parsed::<u16>(&mut split)?.saturating_sub(1);
-    let cy = next_parsed::<u16>(&mut split)?.saturating_sub(1);
+    let cb = split.next().ok_or(MalformedSequenceError)?;
+    if cb.is_empty() || !cb.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!();
+    }
+    let cb = cb.parse::<u32>().map_err(|_| MalformedSequenceError)?;
+    let x = parse_sgr_coordinate(split.next().ok_or(MalformedSequenceError)?)?;
+    let y = parse_sgr_coordinate(split.next().ok_or(MalformedSequenceError)?)?;
+    if split.next().is_some() {
+        bail!();
+    }
+    // Kitty's leave extension ignores every other bit and both coordinates. Recognize it before
+    // interpreting button/modifier bits, without inventing a location or a button release.
+    if cb & (1 << 8) != 0 {
+        return Ok(Some(Event::MouseLeave));
+    }
+    let (kind, modifiers) = parse_cb(u8::try_from(cb).map_err(|_| MalformedSequenceError)?)?;
 
     // When button 3 in Cb is used to represent mouse release, you can't tell which button was
     // released. SGR mode solves this by having the sequence end with a lowercase m if it's a
@@ -1008,12 +1016,20 @@ fn parse_csi_sgr_mouse(buffer: &[u8]) -> Result<Option<Event>> {
         kind
     };
 
-    Ok(Some(Event::Mouse(MouseEvent {
+    Ok(Some(Event::SgrMouse(SgrMouseEvent {
         kind,
-        column: cx,
-        row: cy,
+        x,
+        y,
         modifiers,
     })))
+}
+
+fn parse_sgr_coordinate(parameter: &str) -> Result<i32> {
+    let digits = parameter.strip_prefix('-').unwrap_or(parameter);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!();
+    }
+    parameter.parse().map_err(|_| MalformedSequenceError)
 }
 
 /// Cb is the byte of a mouse input that contains the button being used, the key modifiers being
@@ -1184,12 +1200,10 @@ fn parse_csi_primary_device_attributes(buffer: &[u8]) -> Result<Option<Event>> {
     ))))
 }
 
-fn parse_csi_cell_size(buffer: &[u8]) -> Result<Option<Event>> {
+fn parse_csi_pixel_size(buffer: &[u8]) -> Result<Option<Event>> {
     let parameters = str::from_utf8(&buffer[2..buffer.len() - 1])?;
     let mut parameters = parameters.split(';');
-    if parameters.next() != Some("6") {
-        bail!();
-    }
+    let kind = parameters.next().ok_or(MalformedSequenceError)?;
     let height = parse_reply_parameter(parameters.next().ok_or(MalformedSequenceError)?)?;
     let width = parse_reply_parameter(parameters.next().ok_or(MalformedSequenceError)?)?;
     if height == 0 || width == 0 {
@@ -1198,12 +1212,18 @@ fn parse_csi_cell_size(buffer: &[u8]) -> Result<Option<Event>> {
     if parameters.next().is_some() {
         bail!();
     }
-    Ok(Some(Event::Csi(Csi::Window(Box::new(
-        csi::Window::ReportCellSizePixelsResponse {
+    let window = match kind {
+        "4" => csi::Window::ReportTextAreaSizePixelsResponse {
             width: Some(i64::from(width)),
             height: Some(i64::from(height)),
         },
-    )))))
+        "6" => csi::Window::ReportCellSizePixelsResponse {
+            width: Some(i64::from(width)),
+            height: Some(i64::from(height)),
+        },
+        _ => bail!(),
+    };
+    Ok(Some(Event::Csi(Csi::Window(Box::new(window)))))
 }
 
 fn parse_reply_parameter(parameter: &str) -> Result<u16> {
@@ -1239,6 +1259,7 @@ fn parse_csi_theme_mode(buffer: &[u8]) -> Result<Option<Event>> {
 }
 
 fn parse_csi_mode(buffer: &[u8]) -> Result<Option<Event>> {
+    // pixel mouse mode:       CSI ? 1016 ; 2 $ y
     // sync output mode:       CSI ? 2026 ; 0 $ y
     // grapheme clustering:    CSI ? 2027 ; 1 $ y
     assert!(buffer.starts_with(b"\x1B[?"));
@@ -1252,13 +1273,14 @@ fn parse_csi_mode(buffer: &[u8]) -> Result<Option<Event>> {
 
     let mut split = s.split(';');
 
-    let mode = match next_parsed::<u16>(&mut split)? {
+    let mode = match parse_reply_parameter(split.next().ok_or(MalformedSequenceError)?)? {
+        1016 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
         2026 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SynchronizedOutput),
         2027 => csi::DecPrivateMode::Code(csi::DecPrivateModeCode::GraphemeClustering),
         _ => bail!(),
     };
 
-    let setting = match next_parsed::<u8>(&mut split)? {
+    let setting = match parse_reply_parameter(split.next().ok_or(MalformedSequenceError)?)? {
         // For synchronized output specifically, 3 is undefined and 0 and 4 are treated as "not
         // supported."
         0 | 4 if mode == csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SynchronizedOutput) => {
@@ -1267,12 +1289,22 @@ fn parse_csi_mode(buffer: &[u8]) -> Result<Option<Event>> {
         0 => csi::DecModeSetting::NotRecognized,
         1 => csi::DecModeSetting::Set,
         2 => csi::DecModeSetting::Reset,
-        3 if mode == csi::DecPrivateMode::Code(csi::DecPrivateModeCode::GraphemeClustering) => {
+        3 if matches!(
+            mode,
+            csi::DecPrivateMode::Code(
+                csi::DecPrivateModeCode::GraphemeClustering
+                    | csi::DecPrivateModeCode::SGRPixelsMouse
+            )
+        ) =>
+        {
             csi::DecModeSetting::PermanentlySet
         }
         4 => csi::DecModeSetting::PermanentlyReset,
         _ => bail!(),
     };
+    if split.next().is_some() {
+        bail!();
+    }
 
     Ok(Some(Event::Csi(Csi::Mode(
         csi::Mode::ReportDecPrivateMode { mode, setting },
@@ -1427,7 +1459,7 @@ mod test {
 
     #[test]
     fn graphics_replies_preserve_input_and_paste_at_every_byte_boundary() {
-        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b[?64;1;4;22c\x1b[6;16;8t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
+        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b[?1016;2$y\x1b[?64;1;4;22c\x1b[6;16;8t\x1b[4;680;960t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[<288;-1;-20M\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
         let expected = vec![
             Event::Key(KeyCode::Char('你').into()),
             Event::KittyGraphicsResponse(KittyGraphicsResponse {
@@ -1436,6 +1468,10 @@ mod test {
                 placement_id: None,
                 result: Ok(()),
             }),
+            Event::Csi(Csi::Mode(csi::Mode::ReportDecPrivateMode {
+                mode: csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
+                setting: csi::DecModeSetting::Reset,
+            })),
             Event::Csi(Csi::PrimaryDeviceAttributes(csi::PrimaryDeviceAttributes {
                 terminal_type: 64,
                 attributes: vec![1, 4, 22],
@@ -1446,24 +1482,31 @@ mod test {
                     height: Some(16),
                 },
             ))),
+            Event::Csi(Csi::Window(Box::new(
+                csi::Window::ReportTextAreaSizePixelsResponse {
+                    width: Some(960),
+                    height: Some(680),
+                },
+            ))),
             Event::KittyGraphicsResponse(KittyGraphicsResponse {
                 image_id: 32,
                 image_number: None,
                 placement_id: Some(1),
                 result: Err("ENOENT: missing image".to_owned()),
             }),
-            Event::Mouse(MouseEvent {
+            Event::SgrMouse(SgrMouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: 3,
-                row: 4,
+                x: 4,
+                y: 5,
                 modifiers: Modifiers::NONE,
             }),
-            Event::Mouse(MouseEvent {
+            Event::SgrMouse(SgrMouseEvent {
                 kind: MouseEventKind::Up(MouseButton::Left),
-                column: 3,
-                row: 4,
+                x: 4,
+                y: 5,
                 modifiers: Modifiers::NONE,
             }),
+            Event::MouseLeave,
             Event::Paste("literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\".to_string()),
             Event::Key(KeyCode::Char('z').into()),
         ];
@@ -1565,6 +1608,12 @@ mod test {
             b"\x1b[6;16;0t",
             b"\x1b[6;16;65536t",
             b"\x1b[6;16;8;1t",
+            b"\x1b[4;0;960t",
+            b"\x1b[4;680;0t",
+            b"\x1b[4;+680;960t",
+            b"\x1b[4;680;+960t",
+            b"\x1b[4;680;65536t",
+            b"\x1b[4;680;960;1t",
         ] {
             assert!(parse_event(invalid, false).is_err(), "{invalid:?}");
         }
@@ -1856,6 +1905,140 @@ mod test {
                 setting: csi::DecModeSetting::Set,
             }))
         );
+    }
+
+    #[test]
+    fn pixel_mouse_mode_reports_preserve_all_five_states() {
+        for (value, setting) in [
+            (0, csi::DecModeSetting::NotRecognized),
+            (1, csi::DecModeSetting::Set),
+            (2, csi::DecModeSetting::Reset),
+            (3, csi::DecModeSetting::PermanentlySet),
+            (4, csi::DecModeSetting::PermanentlyReset),
+        ] {
+            let wire = format!("\x1b[?1016;{value}$y");
+            let mut parser = Parser::default();
+            parser.parse(wire.as_bytes(), false).unwrap();
+            assert_eq!(
+                parser.pop(),
+                Some(Event::Csi(Csi::Mode(csi::Mode::ReportDecPrivateMode {
+                    mode: csi::DecPrivateMode::Code(csi::DecPrivateModeCode::SGRPixelsMouse),
+                    setting,
+                })))
+            );
+            assert_eq!(parser.pop(), None);
+        }
+        for invalid in [
+            b"\x1b[?+1016;1$y".as_slice(),
+            b"\x1b[?1016;+1$y",
+            b"\x1b[?1016;5$y",
+            b"\x1b[?1016;;1$y",
+            b"\x1b[?1016;1;2$y",
+        ] {
+            assert!(parse_event(invalid, false).is_err(), "{invalid:?}");
+        }
+        assert_eq!(
+            Csi::Window(Box::new(csi::Window::ReportTextAreaSizePixelsResponse {
+                width: Some(960),
+                height: Some(680),
+            }))
+            .to_string(),
+            "\x1b[4;680;960t"
+        );
+    }
+
+    #[test]
+    fn sgr_mouse_keeps_signed_wire_positions_and_legacy_mouse_keeps_cells() {
+        let mut parser = Parser::default();
+        parser
+            .parse(
+                b"\x1b[<0;0;1M\x1b[<0;1;0m\x1b[<35;-17;70000M\x1b[<60;-2147483648;2147483647M\x1b[<64;10;20M\x1b[32;33;34M\x1b[M !!",
+                false,
+            )
+            .unwrap();
+        let actual: Vec<_> = std::iter::from_fn(|| parser.pop()).collect();
+        assert_eq!(
+            actual,
+            vec![
+                Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    x: 0,
+                    y: 1,
+                    modifiers: Modifiers::NONE,
+                }),
+                Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::Up(MouseButton::Left),
+                    x: 1,
+                    y: 0,
+                    modifiers: Modifiers::NONE,
+                }),
+                Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::Moved,
+                    x: -17,
+                    y: 70000,
+                    modifiers: Modifiers::NONE,
+                }),
+                Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::Drag(MouseButton::Left),
+                    x: i32::MIN,
+                    y: i32::MAX,
+                    modifiers: Modifiers::SHIFT | Modifiers::ALT | Modifiers::CONTROL,
+                }),
+                Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::ScrollUp,
+                    x: 10,
+                    y: 20,
+                    modifiers: Modifiers::NONE,
+                }),
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 32,
+                    row: 33,
+                    modifiers: Modifiers::NONE,
+                }),
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 0,
+                    row: 0,
+                    modifiers: Modifiers::NONE,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn pixel_mouse_leave_ignores_button_bits_and_coordinates_but_not_bad_framing() {
+        for cb in [256, 288, 511, u32::MAX] {
+            let mut parser = Parser::default();
+            let wire = format!("\x1b[<{cb};-17;-99M\x1b[<0;0;1m");
+            parser.parse(wire.as_bytes(), false).unwrap();
+            assert_eq!(parser.pop(), Some(Event::MouseLeave));
+            assert_eq!(
+                parser.pop(),
+                Some(Event::SgrMouse(SgrMouseEvent {
+                    kind: MouseEventKind::Up(MouseButton::Left),
+                    x: 0,
+                    y: 1,
+                    modifiers: Modifiers::NONE,
+                }))
+            );
+            assert_eq!(parser.pop(), None);
+        }
+        for invalid in [
+            b"\x1b[<+288;0;0M".as_slice(),
+            b"\x1b[<-288;0;0M",
+            b"\x1b[<4294967296;0;0M",
+            b"\x1b[<288;;0M",
+            b"\x1b[<288;0M",
+            b"\x1b[<288;0;0;1M",
+            b"\x1b[<288;0;+1M",
+            b"\x1b[<288;0;-M",
+            b"\x1b[<288;0;2147483648M",
+            b"\x1b[<288;-2147483649;0M",
+            b"\x1b[<512;0;0M",
+        ] {
+            assert!(parse_event(invalid, false).is_err(), "{invalid:?}");
+        }
     }
 
     #[test]
