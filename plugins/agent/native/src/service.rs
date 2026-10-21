@@ -499,6 +499,38 @@ impl Handler for Agent {
                         .map_err(|_| "agent_history_unavailable")?;
                     Ok(result)
                 }
+                "historyLandmarks" => {
+                    let input: HistoryLandmarksRead = decode(input)?;
+                    owner.session(&input.session_id).await?;
+                    if input.through > *owner.store.subscribe_commits().borrow() {
+                        return Err("agent_cursor_invalid".into());
+                    }
+                    let landmarks = owner
+                        .store
+                        .navigation_landmarks(&input.session_id, input.through, 64, None)
+                        .await
+                        .map_err(|_| "agent_history_unavailable")?;
+                    let result = HistoryLandmarks {
+                        through: input.through,
+                        landmarks: landmarks
+                            .into_iter()
+                            .map(|landmark| HistoryLandmark {
+                                turn_id: landmark.turn_id,
+                                position: landmark.position,
+                                last_position: landmark.last_position,
+                                label: landmark.label,
+                            })
+                            .collect(),
+                    };
+                    owner.session(&input.session_id).await?;
+                    if context.scope().cancellation.is_cancelled() {
+                        return Err("agent_observation_cancelled".into());
+                    }
+                    let result = encode(result)?;
+                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                        .map_err(|_| "agent_history_unavailable")?;
+                    Ok(result)
+                }
                 "historyPrompt" => {
                     let input: HistoryPromptRead = decode(input)?;
                     owner.session(&input.session_id).await?;

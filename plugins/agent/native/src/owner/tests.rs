@@ -1006,6 +1006,43 @@ async fn canonical_history_is_bounded_utf8_and_keeps_its_original_fence() {
         assert!(reverse_done);
         assert_eq!(reverse_user, message);
         assert_eq!(reverse_assistant, reply);
+        // Sampled navigation uses the same canonical rows and immutable fence.
+        let empty = fixture.query("historyLandmarks", json!({"sessionId":session,"through":0})).await.unwrap();
+        assert_eq!(empty, json!({"through":0,"landmarks":[]}));
+        let landmarks = fixture.query("historyLandmarks", json!({"sessionId":session,"through":event_fence})).await.unwrap();
+        assert_eq!(landmarks["through"], event_fence);
+        assert!(serde_json::to_vec(&landmarks).unwrap().len() <= 64 * 1024);
+        let original_landmarks = landmarks["landmarks"].as_array().unwrap();
+        assert_eq!(original_landmarks.len(), 1);
+        let start = fixture.query("history", json!({"sessionId":session,"through":event_fence,"position":{"kind":"start"}})).await.unwrap();
+        assert_eq!(original_landmarks[0]["turnId"], start["chunks"][0]["turnId"]);
+        assert_eq!(original_landmarks[0]["position"], start["chunks"][0]["position"]);
+        assert_eq!(original_landmarks[0]["label"], "\0".repeat(96));
+        let current = fixture.query("historyLandmarks", json!({"sessionId":session,"through":newer_fence.unwrap()})).await.unwrap();
+        assert_eq!(current["through"], newer_fence.unwrap());
+        assert!(serde_json::to_vec(&current).unwrap().len() <= 64 * 1024);
+        let current_landmarks = current["landmarks"].as_array().unwrap();
+        assert_eq!(current_landmarks.len(), 2);
+        assert_eq!(current_landmarks[0], original_landmarks[0]);
+        let raw = fixture.store.session_events(&session, 0, newer_fence.unwrap(), 512, 1024 * 1024).await.unwrap();
+        assert!(raw.next_after.is_none());
+        let endings = raw.events.iter().filter(|stored| matches!(&stored.event.fact, maka_agent_facts::event::Fact::InvocationEnded {outcome:maka_agent_facts::event::InvocationOutcome::Completed})).collect::<Vec<_>>();
+        assert_eq!(endings.len(), 2);
+        // Successful settlement adds a raw turn_state row that conversation
+        // pages omit; the returned bound must retain that canonical endpoint.
+        for (landmark, ending) in current_landmarks.iter().zip(endings) {
+            assert_eq!(landmark["turnId"], ending.event.invocation.turn_id);
+            assert_eq!(landmark["lastPosition"], json!({"sourceSequence":ending.sequence,"itemIndex":0}));
+        }
+        assert_eq!(current_landmarks[1]["label"], "Hello");
+        assert_eq!(current_landmarks[1]["turnId"], located["chunks"][0]["turnId"]);
+        assert!(current_landmarks[1]["position"]["sourceSequence"].as_u64().unwrap() > event_fence);
+        let anchored = fixture.query("history", json!({"sessionId":session,"through":newer_fence.unwrap(),"position":{"kind":"row","position":current_landmarks[1]["position"],"field":"body"}})).await.unwrap();
+        assert_eq!(anchored["chunks"][0]["text"], "Hello");
+        assert_eq!(anchored["chunks"][0]["turnId"], current_landmarks[1]["turnId"]);
+        let future = *fixture.store.subscribe_commits().borrow() + 1;
+        assert!(fixture.query("historyLandmarks", json!({"sessionId":session,"through":future})).await.is_err());
+        assert!(fixture.query("historyLandmarks", json!({"sessionId":"foreign_session","through":event_fence})).await.is_err());
         assert!(fixture.query("history", json!({"sessionId":session,"position":{"kind":"after","cursor":{"position":{"sourceSequence":0,"itemIndex":0},"offset":0}}})).await.is_err());
         assert!(fixture.query("history", json!({"sessionId":"foreign_session","position":{"kind":"start"}})).await.is_err());
         server.await.unwrap();

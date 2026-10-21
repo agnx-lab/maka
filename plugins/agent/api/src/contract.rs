@@ -1227,6 +1227,40 @@ pub use maka_agent_ports::session::history::Prompt as HistoryPrompt;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentHistoryLandmarksRead")]
+pub struct HistoryLandmarksRead {
+    #[schemars(length(min = 1, max = 128))]
+    pub session_id: String,
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
+    pub through: u64,
+}
+
+/// Sampled canonical display positions, not a complete Turn outline or an
+/// execution grant.
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentHistoryLandmarks")]
+pub struct HistoryLandmarks {
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
+    pub through: u64,
+    #[schemars(length(max = 64))]
+    pub landmarks: Vec<HistoryLandmark>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentHistoryLandmark")]
+pub struct HistoryLandmark {
+    #[schemars(length(min = 1, max = 128))]
+    pub turn_id: String,
+    pub position: RowPosition,
+    pub last_position: RowPosition,
+    #[schemars(length(max = 96))]
+    pub label: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryPromptRead")]
 pub struct HistoryPromptRead {
     #[schemars(length(min = 1, max = 128))]
@@ -1619,6 +1653,10 @@ pub fn contract() -> Contract {
                 (
                     "history".into(),
                     method::<History, HistoryPage>(MethodMode::Query),
+                ),
+                (
+                    "historyLandmarks".into(),
+                    method::<HistoryLandmarksRead, HistoryLandmarks>(MethodMode::Query),
                 ),
                 (
                     "historyPrompt".into(),
