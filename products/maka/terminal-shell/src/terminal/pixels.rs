@@ -22,10 +22,7 @@ mod mapping;
 mod probe;
 mod session;
 
-use super::{
-    Presentation,
-    output::{Output, PixelUpload},
-};
+use super::{Presentation, output::Output};
 pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
 pub(super) use probe::Capabilities;
@@ -87,13 +84,19 @@ pub(super) fn select(
 enum Phase {
     Setup,
     Idle,
-    Upload,
+    Upload(PixelUpload),
     Ack {
         upload: PixelUpload,
         deadline: Instant,
     },
     Retire(input::Offer),
     Effect,
+}
+
+struct PixelUpload {
+    offer: input::Offer,
+    image: u32,
+    retire: Vec<u8>,
 }
 
 /// Drives only terminal transport. GPU work runs on its native UI thread, so
@@ -104,7 +107,6 @@ pub(super) fn run(
     config: EngineConfig,
     caps: Capabilities,
 ) -> Result<(), String> {
-    let slots = presentation.state.lock().unwrap().pixel_probe.slots;
     let mut setup = b"\x1b[?1003h\x1b[?1004h".to_vec();
     if caps.pixel_mouse {
         setup.extend_from_slice(b"\x1b[?1016h");
@@ -113,7 +115,6 @@ pub(super) fn run(
     let startup = session::spawn(config, presentation.clone())?;
     let mut starting = true;
     let mut phase = Phase::Setup;
-    let mut displayed = None;
     loop {
         if presentation.stop.load(Ordering::Acquire) {
             return Ok(());
@@ -135,18 +136,14 @@ pub(super) fn run(
         if let Some(at) = flushed {
             phase = match phase {
                 Phase::Setup | Phase::Effect => Phase::Idle,
-                Phase::Upload => Phase::Ack {
-                    upload: output
-                        .take_pixels()
-                        .ok_or("terminal pixel upload receipt is missing")?,
+                Phase::Upload(upload) => Phase::Ack {
+                    upload,
                     deadline: at + Duration::from_millis(250),
                 },
                 Phase::Retire(offer) => {
                     let mut state = presentation.state.lock().unwrap();
                     let inbox = state.pixels.as_mut().unwrap();
-                    if offer.geometry == inbox.geometry {
-                        inbox.ready = Some(offer);
-                    }
+                    inbox.ready = Some(offer);
                     if let Some(wake) = &inbox.wake {
                         wake.unpark();
                     }
@@ -174,11 +171,15 @@ pub(super) fn run(
                     );
                 }
                 result.map_err(|error| format!("terminal rejected the pixel frame: {error}"))?;
-                displayed = Some(upload.image);
-                let offer = input::Offer {
-                    token: upload.token.clone(),
-                    geometry: upload.geometry,
-                };
+                presentation
+                    .state
+                    .lock()
+                    .unwrap()
+                    .pixels
+                    .as_mut()
+                    .unwrap()
+                    .displayed_image = Some(upload.image);
+                let offer = upload.offer.clone();
                 output.submit(upload.retire.clone(), None)?;
                 phase = Phase::Retire(offer);
             } else if Instant::now() >= *deadline {
@@ -245,30 +246,29 @@ pub(super) fn run(
             if let Some(bytes) = inbox.effects.take() {
                 output.submit(bytes, None)?;
                 phase = Phase::Effect;
-            } else if inbox.resize.is_none()
-                && let Some(candidate) = inbox.pending.take()
-                && candidate.geometry == inbox.geometry
-            {
-                let image = if displayed == Some(slots.first) {
-                    slots.second
-                } else {
-                    slots.first
-                };
+            } else if let Some(encoded) = inbox.encoded.take() {
+                let encoded = encoded?;
+                if encoded.geometry != inbox.geometry {
+                    if inbox.in_flight.as_ref() == Some(&encoded.frame.token()) {
+                        inbox.in_flight = None;
+                    }
+                    continue;
+                }
+                let image = encoded.frame.image_id();
                 // Arm before the first byte; the reader can receive the ACK
                 // before this driver observes the writer's flush receipt.
                 inbox.expected_ack = Some(image);
                 inbox.ack = None;
-                inbox.in_flight = Some(candidate.frame.token());
-                let size = inbox.capabilities.size;
-                output.submit_pixels(
-                    candidate.frame,
+                let upload = PixelUpload {
+                    offer: input::Offer {
+                        token: encoded.frame.token(),
+                        geometry: encoded.geometry,
+                    },
                     image,
-                    displayed,
-                    size.cols,
-                    size.rows,
-                    candidate.geometry,
-                )?;
-                phase = Phase::Upload;
+                    retire: encoded.frame.retire_previous().to_vec(),
+                };
+                output.submit(encoded.frame.upload().to_vec(), None)?;
+                phase = Phase::Upload(upload);
             }
         }
         thread::sleep(Duration::from_millis(2));

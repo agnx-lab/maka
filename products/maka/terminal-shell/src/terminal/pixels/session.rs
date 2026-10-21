@@ -227,14 +227,20 @@ fn run(
                     let inbox = state.pixels.as_mut().unwrap();
                     if inbox.resize.is_none() && inbox.geometry == offer.geometry {
                         inbox.keyboard = Some(offer.token.clone());
-                        inbox.published = Some(offer.token);
+                        inbox.published = Some(offer.token.clone());
                     }
+                }
+                let mut state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_mut().unwrap();
+                if inbox.in_flight.as_ref() == Some(&offer.token) {
+                    inbox.in_flight = None;
                 }
             }
             // Mount/focus work can precede its next draw. Complete the
             // foreground/draw barrier before admitting any opaque callback;
             // no pump occurs between this check and its actual dispatch.
             platform.pump();
+            encode_pending(presentation);
             let exact_ready = !platform.has_pending();
             if let Some(input) = input {
                 let token = input
@@ -259,6 +265,10 @@ fn run(
                             if let Event::Paste(text) = event {
                                 if source.borrow().editor_matches(&snapshot) {
                                     platform.paste(text).map_err(|error| error.to_string())?;
+                                    let mut state = presentation.state.lock().unwrap();
+                                    let inbox = state.pixels.as_mut().unwrap();
+                                    inbox.reject_through =
+                                        inbox.reject_through.max(token.sequence());
                                 }
                             } else if let Some(event) = mapping.input(event, caps) {
                                 let (floor, current_geometry) = {
@@ -271,29 +281,31 @@ fn run(
                                         || input.geometry != current_geometry);
                                 if !stale {
                                     let disposition = source.borrow().dispatch(&snapshot, &event);
-                                    match disposition {
-                                        InputDisposition::Handled => {}
-                                        InputDisposition::Rejected => continue,
+                                    let admitted = match disposition {
+                                        InputDisposition::Handled => true,
+                                        InputDisposition::Rejected => commit_text(
+                                            &platform,
+                                            &source.borrow(),
+                                            &snapshot,
+                                            &event,
+                                        )?,
                                         InputDisposition::ExactFallback => {
-                                            if !(exact_ready
+                                            (exact_ready
                                                 && input.geometry == current_geometry
                                                 && platform.dispatch_input_exact(
                                                     token.clone(),
                                                     event.clone(),
                                                 ))
-                                                && let PlatformInput::KeyDown(key) = &event
-                                                && !key.keystroke.modifiers.control
-                                                && !key.keystroke.modifiers.alt
-                                                && !key.keystroke.modifiers.platform
-                                                && !key.keystroke.modifiers.function
-                                                && let Some(text) = &key.keystroke.key_char
-                                                && source.borrow().editor_matches(&snapshot)
-                                            {
-                                                platform
-                                                    .paste(text)
-                                                    .map_err(|error| error.to_string())?;
-                                            }
+                                                || commit_text(
+                                                    &platform,
+                                                    &source.borrow(),
+                                                    &snapshot,
+                                                    &event,
+                                                )?
                                         }
+                                    };
+                                    if !admitted {
+                                        continue;
                                     }
                                     if matches!(
                                         event,
@@ -374,4 +386,84 @@ fn run(
     drop(application);
     platform.shutdown();
     result
+}
+
+/// Pure encoding cannot hold the terminal writer behind CPU work. It shares
+/// this existing GPUI worker with GPU readback; the independent driver can
+/// always abandon an unstarted candidate and flush terminal restoration.
+fn encode_pending(presentation: &Presentation) {
+    if presentation.stop.load(Ordering::Acquire) {
+        return;
+    }
+    let work = {
+        let mut state = presentation.state.lock().unwrap();
+        if state.quit {
+            return;
+        }
+        let slots = state.pixel_probe.slots;
+        let inbox = state.pixels.as_mut().unwrap();
+        if inbox.in_flight.is_some() || inbox.encoded.is_some() || inbox.resize.is_some() {
+            return;
+        }
+        let Some(candidate) = inbox.pending.take() else {
+            return;
+        };
+        if candidate.geometry != inbox.geometry {
+            return;
+        }
+        let previous = inbox.displayed_image;
+        let image = if previous == Some(slots.first) {
+            slots.second
+        } else {
+            slots.first
+        };
+        inbox.in_flight = Some(candidate.frame.token());
+        (candidate, image, previous, inbox.capabilities.size)
+    };
+    let (candidate, image, previous, size) = work;
+    let result = nsh_gpui_terminal::kitty::KittyFrame::encode(
+        &candidate.frame,
+        image,
+        previous,
+        size.cols,
+        size.rows,
+    )
+    .map(|frame| super::input::Encoded {
+        frame,
+        geometry: candidate.geometry,
+    })
+    .map_err(|error| error.to_string());
+    let mut state = presentation.state.lock().unwrap();
+    let cancelled = state.quit || presentation.stop.load(Ordering::Acquire);
+    let inbox = state.pixels.as_mut().unwrap();
+    if cancelled || inbox.geometry != candidate.geometry {
+        if inbox.in_flight.as_ref() == Some(&candidate.frame.token()) {
+            inbox.in_flight = None;
+        }
+    } else {
+        inbox.encoded = Some(result);
+    }
+}
+
+fn commit_text(
+    platform: &TerminalPlatform,
+    source: &InputSource,
+    snapshot: &InputSnapshot,
+    event: &PlatformInput,
+) -> Result<bool, String> {
+    let PlatformInput::KeyDown(key) = event else {
+        return Ok(false);
+    };
+    let modifiers = key.keystroke.modifiers;
+    if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+        return Ok(false);
+    }
+    let Some(text) = &key.keystroke.key_char else {
+        return Ok(false);
+    };
+    if !source.editor_matches(snapshot) {
+        return Ok(false);
+    }
+    platform.paste(text).map_err(|error| error.to_string())?;
+    Ok(true)
 }

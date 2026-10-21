@@ -43,6 +43,11 @@ pub(super) struct Candidate {
     pub geometry: u64,
 }
 
+pub(super) struct Encoded {
+    pub frame: nsh_gpui_terminal::kitty::KittyFrame,
+    pub geometry: u64,
+}
+
 /// Send-only terminal state. GPUI snapshots stay on their native owner thread.
 pub(crate) struct Inbox {
     pub capabilities: Capabilities,
@@ -52,6 +57,8 @@ pub(crate) struct Inbox {
     pub keyboard: Option<FrameToken>,
     capture: Option<FrameToken>,
     pub pending: Option<Candidate>,
+    pub encoded: Option<Result<Encoded, String>>,
+    pub displayed_image: Option<u32>,
     pub in_flight: Option<FrameToken>,
     pub ready: Option<Offer>,
     pub geometry: u64,
@@ -74,6 +81,8 @@ impl Inbox {
             keyboard: None,
             capture: None,
             pending: None,
+            encoded: None,
+            displayed_image: None,
             in_flight: None,
             ready: None,
             geometry: 1,
