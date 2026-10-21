@@ -5181,7 +5181,7 @@ export interface ClientOperation {
   draft?: ClientDraftReference | null;
   upload?: ClientUploadReference | null;
   /**
-   * Durable fence for an attempt abandoned before preparation committed.
+   * Durable fence proving that this attempt did not dispatch.
    */
   abandoned?: boolean;
   /**

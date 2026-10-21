@@ -90,7 +90,8 @@ Open a pending request to review its original details:
 - Tool approval supports **Allow** or **Deny** for that call. Read all original arguments before allowing.
 - Additional permissions support **Allow** or **Deny**, with the available call, turn or session scope.
 - Questions support the listed choices, **Other answer** and an explicit **Skip**.
-- Forms support explicit **Decline** or **Cancel request**. Fill full forms and handle capability requests in the existing client; those editors are not available here.
+- Forms let you edit and submit the requested fields, with validation and masked sensitive values, or explicitly **Decline** or **Cancel request**.
+- Computer-access requests show the original target and boundary before an explicit allow or deny decision.
 
 Use Tab to move between request controls and Enter to activate. For approvals, permissions and questions, Ctrl+Enter allows or submits answers; Ctrl+R refreshes the recorded status. Escape only closes the request view and leaves an unanswered request pending. The displayed recorded outcome is authoritative if another client answered first.
 
