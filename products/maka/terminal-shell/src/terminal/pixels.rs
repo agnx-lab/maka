@@ -64,6 +64,13 @@ pub(super) fn select(
         if let Some(decision) = state.pixel_probe.decision(Instant::now(), size) {
             if let Some(capabilities) = decision {
                 state.pixels.as_mut().unwrap().capabilities = capabilities;
+                if let Some(trace) = &mut state.trace {
+                    trace.protocol = capabilities.protocol.map(|protocol| match protocol {
+                        probe::Protocol::Kitty => "kitty",
+                        probe::Protocol::Sixel => "sixel",
+                        probe::Protocol::Iterm2 => "iterm2",
+                    });
+                }
             } else if let Some(pixels) = state.pixels.take() {
                 let (events, resize) = pixels.into_startup();
                 for event in events {
@@ -121,7 +128,7 @@ pub(super) fn run(
     if matches!(caps.mouse, MouseCoordinates::Pixels(_)) {
         setup.extend_from_slice(b"\x1b[?1016h");
     }
-    {
+    let tracing = {
         let mut state = presentation.state.lock().unwrap();
         if caps.protocol == Some(probe::Protocol::Sixel) && state.pixel_probe.needs_static_sixel() {
             setup.extend_from_slice(b"\x1b[?80h");
@@ -129,7 +136,8 @@ pub(super) fn run(
             // this complete setup even if cancellation races its receipt.
             state.pixels.as_mut().unwrap().restore_sixel_mode = true;
         }
-    }
+        state.trace.is_some()
+    };
     output.submit(setup, None)?;
     let startup = session::spawn(config, presentation.clone())?;
     let mut starting = true;
@@ -165,12 +173,29 @@ pub(super) fn run(
                         .flushed(at);
                     Phase::Idle
                 }
-                Phase::Upload(upload) => Phase::Ack {
-                    upload,
-                    deadline: at + Duration::from_secs(5),
-                },
+                Phase::Upload(upload) => {
+                    if tracing {
+                        let mut state = presentation.state.lock().unwrap();
+                        if let Some(trace) = &mut state.trace {
+                            let sample = trace.record(&upload.offer.token, upload.offer.geometry, "upload_flushed", at, at);
+                            sample.image = Some(upload.image);
+                        }
+                    }
+                    Phase::Ack {
+                        upload,
+                        deadline: at + Duration::from_secs(5),
+                    }
+                }
                 Phase::Publish(offer) => {
                     let mut state = presentation.state.lock().unwrap();
+                    if let Some(trace) = &mut state.trace {
+                        let stage = if caps.protocol == Some(probe::Protocol::Kitty) {
+                            "retire_flushed"
+                        } else {
+                            "upload_flushed"
+                        };
+                        trace.record(&offer.token, offer.geometry, stage, at, at);
+                    }
                     let inbox = state.pixels.as_mut().unwrap();
                     inbox.ready = Some(offer);
                     if let Some(wake) = &inbox.wake {
@@ -204,15 +229,18 @@ pub(super) fn run(
             }
         }
         if let Phase::Ack { upload, deadline } = &phase {
-            let ack = presentation
-                .state
-                .lock()
-                .unwrap()
-                .pixels
-                .as_mut()
-                .unwrap()
-                .ack
-                .take();
+            let ack = {
+                let mut state = presentation.state.lock().unwrap();
+                let ack = state.pixels.as_mut().unwrap().ack.take();
+                if let Some((at, result)) = &ack
+                    && let Some(trace) = &mut state.trace
+                {
+                    let sample = trace.record(&upload.offer.token, upload.offer.geometry, "matching_ack", *at, *at);
+                    sample.image = Some(upload.image);
+                    sample.outcome = if result.is_ok() { "ok" } else { "error" };
+                }
+                ack
+            };
             if let Some((at, result)) = ack {
                 if at > *deadline {
                     return Err(
@@ -220,14 +248,15 @@ pub(super) fn run(
                     );
                 }
                 result.map_err(|error| format!("terminal rejected the pixel frame: {error}"))?;
-                presentation
-                    .state
-                    .lock()
-                    .unwrap()
-                    .pixels
-                    .as_mut()
-                    .unwrap()
-                    .displayed_image = Some(upload.image);
+                let mut state = presentation.state.lock().unwrap();
+                state.pixels.as_mut().unwrap().displayed_image = Some(upload.image);
+                if let Some(trace) = &mut state.trace {
+                    let at = Instant::now();
+                    let sample = trace.record(&upload.offer.token, upload.offer.geometry, "retire_submit_begin", at, at);
+                    sample.bytes = Some(upload.retire.len());
+                    sample.image = Some(upload.image);
+                }
+                drop(state);
                 let offer = upload.offer.clone();
                 output.submit(upload.retire.clone(), None)?;
                 phase = Phase::Publish(offer);
@@ -324,6 +353,14 @@ pub(super) fn run(
                     token: encoded.frame.token(),
                     geometry: encoded.geometry,
                 };
+                let sample = tracing.then(|| {
+                    let at = Instant::now();
+                    let (bytes, image) = match &encoded.frame {
+                        input::WireFrame::Kitty(frame) => (frame.upload().len(), Some(frame.image_id())),
+                        input::WireFrame::Inline(frame) => (frame.bytes().len(), None),
+                    };
+                    (offer.clone(), at, bytes, image)
+                });
                 match encoded.frame {
                     input::WireFrame::Kitty(frame) => {
                         let image = frame.image_id();
@@ -345,6 +382,13 @@ pub(super) fn run(
                         output.submit(frame.bytes().to_vec(), None)?;
                         phase = Phase::Publish(offer);
                     }
+                }
+                if let Some((offer, at, bytes, image)) = sample
+                    && let Some(trace) = &mut state.trace
+                {
+                    let sample = trace.record(&offer.token, offer.geometry, "upload_submit_begin", at, at);
+                    sample.bytes = Some(bytes);
+                    sample.image = image;
                 }
             }
         }

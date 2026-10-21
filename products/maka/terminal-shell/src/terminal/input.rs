@@ -71,6 +71,8 @@ pub(super) struct Inbox {
     pub pixel_probe: super::pixels::Probe,
     #[cfg(target_os = "linux")]
     pub pixels: Option<super::pixels::Inbox>,
+    #[cfg(target_os = "linux")]
+    pub trace: Option<super::frame_trace::Trace>,
 }
 
 impl Inbox {

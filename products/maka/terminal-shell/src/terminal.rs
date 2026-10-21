@@ -22,6 +22,8 @@
 //! the input owner from cancelling and returning to that Host scope.
 
 mod adapter;
+#[cfg(target_os = "linux")]
+mod frame_trace;
 mod graphics;
 mod input;
 mod output;
@@ -119,6 +121,7 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     let setup = {
         let mut setup = setup;
         let mut state = presentation.state.lock().unwrap();
+        state.trace = frame_trace::Trace::from_env();
         state.pixels = Some(pixels::Inbox::new(pixels::Capabilities {
             size,
             mouse: pixels::MouseCoordinates::Cells,
@@ -168,11 +171,25 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
             }
         }
     });
-    match (result, cleanup) {
+    let result = match (result, cleanup) {
         (Ok(()), result) => result,
         (Err(error), Ok(())) => Err(error),
         (Err(error), Err(cleanup)) => Err(format!("{error}; {cleanup}")),
+    };
+    drop(terminal);
+    #[cfg(target_os = "linux")]
+    {
+        let trace = presentation.state.lock().unwrap().trace.take();
+        if let Some(trace) = trace {
+            let saved = trace.write(&result);
+            return match (result, saved) {
+                (Ok(()), saved) => saved,
+                (Err(error), Ok(())) => Err(error),
+                (Err(error), Err(trace)) => Err(format!("{error}; {trace}")),
+            };
+        }
     }
+    result
 }
 
 fn drive(

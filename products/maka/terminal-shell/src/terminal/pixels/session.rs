@@ -67,9 +67,21 @@ fn run(
             return Ok(());
         }
     };
-    if presentation.stop.load(Ordering::Acquire) || presentation.state.lock().unwrap().quit {
-        return Ok(());
-    }
+    let tracing = {
+        let mut state = presentation.state.lock().unwrap();
+        if presentation.stop.load(Ordering::Acquire) || state.quit {
+            return Ok(());
+        }
+        if let Some(trace) = &mut state.trace {
+            trace.gpu = renderer.gpu_specs().map(|gpu| serde_json::json!({
+                "is_software_emulated": gpu.is_software_emulated,
+                "device_name": gpu.device_name,
+                "driver_name": gpu.driver_name,
+                "driver_info": gpu.driver_info,
+            }));
+        }
+        state.trace.is_some()
+    };
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
@@ -83,12 +95,27 @@ fn run(
     let drawn_geometry = geometry.clone();
     let owner = thread::current();
     let waker = owner.clone();
+    let pump_started = tracing.then(|| Rc::new(Cell::new(None::<Instant>)));
+    let drawing_started = pump_started.clone();
     let platform = TerminalPlatform::new(
         Box::new(renderer),
         Box::new(move |frame| {
-            if let Some(snapshot) = sampled.borrow().sample() {
+            let timing = drawing_started
+                .as_ref()
+                .and_then(|started| started.get())
+                .map(|start| {
+                    (start, Instant::now(), frame.token(), frame.pixels().len(), frame.size())
+                });
+            let snapshot = sampled.borrow().sample();
+            let has_snapshot = snapshot.is_some();
+            if let Some(snapshot) = snapshot {
                 retained.borrow_mut().insert(frame.token(), snapshot);
-                if let Some(inbox) = &mut delivered.state.lock().unwrap().pixels
+            }
+            if has_snapshot || timing.is_some() {
+                let mut state = delivered.state.lock().unwrap();
+                let mut admitted = false;
+                if has_snapshot
+                    && let Some(inbox) = &mut state.pixels
                     && drawn_geometry.get() == inbox.geometry
                     && inbox.resize.is_none()
                     && inbox.pending.is_none()
@@ -97,6 +124,15 @@ fn run(
                         frame,
                         geometry: drawn_geometry.get(),
                     });
+                    admitted = true;
+                }
+                if let Some((start, end, token, bytes, size)) = timing
+                    && let Some(trace) = &mut state.trace
+                {
+                    let sample = trace.record(&token, drawn_geometry.get(), "pump_until_candidate", start, end);
+                    sample.bytes = Some(bytes);
+                    sample.pixel_size = Some((size.width.0, size.height.0));
+                    sample.outcome = if admitted { "admitted" } else { "discarded" };
                 }
             }
         }),
@@ -244,6 +280,10 @@ fn run(
                     if inbox.resize.is_none() && inbox.geometry == offer.geometry {
                         inbox.keyboard = Some(offer.token.clone());
                         inbox.published = Some(offer.token.clone());
+                        if let Some(trace) = &mut state.trace {
+                            let at = Instant::now();
+                            trace.record(&offer.token, offer.geometry, "published", at, at);
+                        }
                     }
                 }
                 let mut state = presentation.state.lock().unwrap();
@@ -407,7 +447,13 @@ fn run(
                     && geometry.get() == inbox.geometry
                     && inbox.capabilities.viewport().is_some()
             };
+            if let Some(started) = &pump_started {
+                started.set(allow_draw.then(Instant::now));
+            }
             worked |= platform.pump_with_draw(allow_draw);
+            if let Some(started) = &pump_started {
+                started.set(None);
+            }
             worked |= encode_pending(presentation);
             let retained = presentation
                 .state
@@ -485,6 +531,7 @@ fn encode_pending(presentation: &Presentation) -> bool {
             return false;
         }
         let slots = state.pixel_probe.slots;
+        let tracing = state.trace.is_some();
         let inbox = state.pixels.as_mut().unwrap();
         if inbox.in_flight.is_some() || inbox.encoded.is_some() || inbox.resize.is_some() {
             return false;
@@ -502,12 +549,13 @@ fn encode_pending(presentation: &Presentation) -> bool {
             slots.first
         };
         inbox.in_flight = Some(candidate.frame.token());
-        (candidate, image, previous, inbox.capabilities)
+        (candidate, image, previous, inbox.capabilities, tracing)
     };
-    let (candidate, image, previous, caps) = work;
+    let (candidate, image, previous, caps, tracing) = work;
     let size = caps.size;
     use super::{input::WireFrame, probe::Protocol};
     use nsh_gpui_terminal::inline::{InlineFrame, InlineProtocol};
+    let started = tracing.then(Instant::now);
     let result = match caps.protocol.expect("negotiated pixel transport") {
         Protocol::Kitty => nsh_gpui_terminal::kitty::KittyFrame::encode(
             &candidate.frame,
@@ -534,15 +582,32 @@ fn encode_pending(presentation: &Presentation) -> bool {
         geometry: candidate.geometry,
     })
     .map_err(|error| error.to_string());
+    let ended = started.map(|_| Instant::now());
+    let bytes = if tracing {
+        result.as_ref().ok().map(|encoded| match &encoded.frame {
+            WireFrame::Kitty(frame) => frame.upload().len(),
+            WireFrame::Inline(frame) => frame.bytes().len(),
+        })
+    } else {
+        None
+    };
+    let failed = result.is_err();
     let mut state = presentation.state.lock().unwrap();
     let cancelled = state.quit || presentation.stop.load(Ordering::Acquire);
     let inbox = state.pixels.as_mut().unwrap();
-    if cancelled || inbox.geometry != candidate.geometry {
+    let discarded = cancelled || inbox.geometry != candidate.geometry;
+    if discarded {
         if inbox.in_flight.as_ref() == Some(&candidate.frame.token()) {
             inbox.in_flight = None;
         }
     } else {
         inbox.encoded = Some(result);
+    }
+    if let (Some(start), Some(end), Some(trace)) = (started, ended, &mut state.trace) {
+        let sample = trace.record(&candidate.frame.token(), candidate.geometry, "codec", start, end);
+        sample.bytes = bytes;
+        sample.image = (caps.protocol == Some(Protocol::Kitty)).then_some(image);
+        sample.outcome = if failed { "error" } else if discarded { "discarded" } else { "ok" };
     }
     drop(state);
     presentation.wake_driver();
