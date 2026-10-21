@@ -2,9 +2,9 @@
 //!
 //! [`Event`] is the typed output of [`Parser`], [`EventReader`], and the optional `EventStream`.
 //! Termina reports ordinary input events such as keys, mouse input, focus changes, resize events,
-//! and bracketed paste. It also keeps terminal responses such as CSI, OSC, and DCS in the same
-//! public enum so callers can issue a query and read the response without a second internal event
-//! model.
+//! and bracketed paste. It also keeps terminal responses such as CSI, OSC, DCS, and Kitty graphics
+//! in the same public enum so callers can issue a query and read the response without a second
+//! internal event model.
 //!
 //! Use [`EventReader::read`] or [`Terminal::read`] when reading from a process terminal. Use
 //! [`Parser::pop`] when parsing bytes from a PTY, terminal multiplexer, or other caller-owned
@@ -108,14 +108,39 @@ pub enum Event {
     /// Applications see this when the terminal answers a Device Control String query, such as
     /// DECRQSS.
     Dcs(Dcs),
+
+    /// A complete Kitty graphics protocol response, received through the same input reader.
+    KittyGraphicsResponse(KittyGraphicsResponse),
 }
 
 impl Event {
-    /// Returns `true` for CSI, OSC, and DCS protocol responses.
+    /// Returns `true` for terminal protocol responses.
     #[inline]
     pub fn is_escape(&self) -> bool {
-        matches!(self, Self::Csi(_) | Self::Dcs(_) | Self::Osc(_))
+        matches!(
+            self,
+            Self::Csi(_) | Self::Dcs(_) | Self::Osc(_) | Self::KittyGraphicsResponse(_)
+        )
     }
+}
+
+/// An identified response from the [Kitty graphics protocol].
+///
+/// These fields preserve the terminal's identifiers; matching them to an outstanding query or
+/// placement belongs to the caller. A successful result reports protocol acceptance, not that a
+/// frame has reached the screen. The parser accepts at most 256 bytes for the entire reply.
+///
+/// [Kitty graphics protocol]: https://sw.kovidgoyal.net/kitty/graphics-protocol/
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KittyGraphicsResponse {
+    /// The image identifier from the response's `i` field.
+    pub image_id: u32,
+    /// The original image number, when the terminal also reports an `I` field.
+    pub image_number: Option<u32>,
+    /// The placement identifier, when the terminal reports a `p` field.
+    pub placement_id: Option<u32>,
+    /// `Ok(())` for an exact `OK`; otherwise the terminal's nonempty printable ASCII message.
+    pub result: Result<(), String>,
 }
 
 /// A key event plus modifiers and protocol state.

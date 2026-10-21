@@ -35,11 +35,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-// These are input resource limits, not limits imposed by the CSI specification.
+// These are input resource limits, not limits imposed by the terminal protocols.
 // Numeric CSI key prefixes are deliberately excluded: they are ambiguous until
 // the final byte and have no finite wire-length limit in the existing grammar.
-const MAX_CSI_REPLY_BYTES: usize = 256;
-const CSI_REPLY_INPUT_TIMEOUT: Duration = Duration::from_millis(100);
+const MAX_TERMINAL_REPLY_BYTES: usize = 256;
+const TERMINAL_REPLY_INPUT_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[cfg(doc)]
 use crate::EventReader;
@@ -51,8 +51,8 @@ use crate::{
         dcs, osc,
     },
     event::{
-        KeyCode, KeyEvent, KeyEventKind, KeyEventState, MediaKeyCode, ModifierKeyCode, Modifiers,
-        MouseButton, MouseEvent, MouseEventKind,
+        KeyCode, KeyEvent, KeyEventKind, KeyEventState, KittyGraphicsResponse, MediaKeyCode,
+        ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseEventKind,
     },
     style, Event,
 };
@@ -128,9 +128,9 @@ impl Parser {
     /// escape sequence later. Set it to `false` when the buffer should be treated as complete for
     /// now; malformed or incomplete sequences can then be discarded instead of held indefinitely.
     ///
-    /// Incomplete `CSI ?` replies are limited to 256 bytes and 100 milliseconds. Exceeding
-    /// either limit returns an input error and leaves the parser failed; stop reading this
-    /// input source rather than interpreting the remaining reply bytes as key presses.
+    /// Incomplete `CSI ?` replies and APC strings are limited to 256 bytes and 100 milliseconds.
+    /// Exceeding either limit returns an input error and leaves the parser failed; stop reading
+    /// this input source rather than interpreting the remaining reply bytes as key presses.
     /// Numeric CSI prefixes retain their existing key/paste behavior and are not timed out.
     pub fn parse(&mut self, bytes: &[u8], maybe_more: bool) -> io::Result<()> {
         self.parse_at(bytes, maybe_more, Instant::now())
@@ -155,10 +155,10 @@ impl Parser {
                 "pending input exceeded its byte limit",
             );
         }
-        if self.reply_deadline.is_some() && self.buffer.len() >= MAX_CSI_REPLY_BYTES {
+        if self.reply_deadline.is_some() && self.buffer.len() >= MAX_TERMINAL_REPLY_BYTES {
             return self.fail(
                 io::ErrorKind::InvalidData,
-                "CSI reply exceeded its input byte limit",
+                "terminal reply exceeded its input byte limit",
             );
         }
         self.buffer.push(byte);
@@ -176,9 +176,9 @@ impl Parser {
     }
 
     fn process_bytes_at(&mut self, maybe_more: bool, now: Instant) -> io::Result<()> {
-        if self.buffer.starts_with(b"\x1b[?") {
+        if self.buffer.starts_with(b"\x1b[?") || self.buffer.starts_with(b"\x1b_") {
             self.reply_deadline
-                .get_or_insert(now + CSI_REPLY_INPUT_TIMEOUT);
+                .get_or_insert(now + TERMINAL_REPLY_INPUT_TIMEOUT);
         }
         self.expire_reply_at(now)?;
         match parse_event(&self.buffer, maybe_more) {
@@ -218,16 +218,16 @@ impl Parser {
             );
         }
         if let Some(deadline) = self.reply_deadline {
-            if self.buffer.len() > MAX_CSI_REPLY_BYTES {
+            if self.buffer.len() > MAX_TERMINAL_REPLY_BYTES {
                 return self.fail(
                     io::ErrorKind::InvalidData,
-                    "CSI reply exceeded its input byte limit",
+                    "terminal reply exceeded its input byte limit",
                 );
             }
             if now >= deadline {
                 return self.fail(
                     io::ErrorKind::TimedOut,
-                    "incomplete CSI reply exceeded its input deadline",
+                    "incomplete terminal reply exceeded its input deadline",
                 );
             }
         }
@@ -303,6 +303,7 @@ fn parse_event(buffer: &[u8], maybe_more: bool) -> Result<Option<Event>> {
                     b'[' => parse_csi(buffer),
                     b']' => parse_osc(buffer),
                     b'P' => parse_dcs(buffer),
+                    b'_' => parse_kitty_graphics_response(buffer),
                     b'\x1B' => Ok(Some(Event::Key(KeyCode::Escape.into()))),
                     _ => parse_event(&buffer[1..], maybe_more).map(|event_option| {
                         event_option.map(|event| {
@@ -344,6 +345,55 @@ fn parse_event(buffer: &[u8], maybe_more: bool) -> Result<Option<Event>> {
             })
         }),
     }
+}
+
+fn parse_kitty_graphics_response(buffer: &[u8]) -> Result<Option<Event>> {
+    // Keep the whole APC until ST, including malformed or unknown strings. Rejecting an early
+    // byte would let the rest of a terminal response escape into ordinary keyboard input.
+    if !buffer.ends_with(b"\x1b\\") {
+        return Ok(None);
+    }
+    let body = buffer
+        .strip_prefix(b"\x1b_G")
+        .and_then(|body| body.strip_suffix(b"\x1b\\"))
+        .ok_or(MalformedSequenceError)?;
+    let (control, message) = str::from_utf8(body)?
+        .split_once(';')
+        .ok_or(MalformedSequenceError)?;
+    if message.is_empty()
+        || !message
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
+    {
+        bail!();
+    }
+    let (mut image_id, mut image_number, mut placement_id) = (None, None, None);
+    for field in control.split(',') {
+        let (key, value) = field.split_once('=').ok_or(MalformedSequenceError)?;
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            bail!();
+        }
+        let value = value.parse::<u32>().map_err(|_| MalformedSequenceError)?;
+        let target = match key {
+            "i" => &mut image_id,
+            "I" => &mut image_number,
+            "p" => &mut placement_id,
+            _ => bail!(),
+        };
+        if target.replace(value).is_some() {
+            bail!();
+        }
+    }
+    Ok(Some(Event::KittyGraphicsResponse(KittyGraphicsResponse {
+        image_id: image_id.ok_or(MalformedSequenceError)?,
+        image_number,
+        placement_id,
+        result: if message == "OK" {
+            Ok(())
+        } else {
+            Err(message.to_owned())
+        },
+    })))
 }
 
 fn parse_utf8_char(buffer: &[u8]) -> Result<Option<char>> {
@@ -1376,10 +1426,16 @@ mod test {
     use super::*;
 
     #[test]
-    fn graphics_csi_replies_preserve_input_and_paste_at_every_byte_boundary() {
-        let wire = "你\x1b[?64;1;4;22c\x1b[6;16;8t\x1b[<0;4;5M\x1b[<0;4;5m\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t\x1b[201~z";
+    fn graphics_replies_preserve_input_and_paste_at_every_byte_boundary() {
+        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b[?64;1;4;22c\x1b[6;16;8t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
         let expected = vec![
             Event::Key(KeyCode::Char('你').into()),
+            Event::KittyGraphicsResponse(KittyGraphicsResponse {
+                image_id: 31,
+                image_number: None,
+                placement_id: None,
+                result: Ok(()),
+            }),
             Event::Csi(Csi::PrimaryDeviceAttributes(csi::PrimaryDeviceAttributes {
                 terminal_type: 64,
                 attributes: vec![1, 4, 22],
@@ -1390,6 +1446,12 @@ mod test {
                     height: Some(16),
                 },
             ))),
+            Event::KittyGraphicsResponse(KittyGraphicsResponse {
+                image_id: 32,
+                image_number: None,
+                placement_id: Some(1),
+                result: Err("ENOENT: missing image".to_owned()),
+            }),
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: 3,
@@ -1402,7 +1464,7 @@ mod test {
                 row: 4,
                 modifiers: Modifiers::NONE,
             }),
-            Event::Paste("literal \x1b[?64;4c \x1b[6;16;8t".to_string()),
+            Event::Paste("literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\".to_string()),
             Event::Key(KeyCode::Char('z').into()),
         ];
         for split in 0..=wire.len() {
@@ -1420,6 +1482,74 @@ mod test {
             .to_string(),
             "\x1b[?64;1;4;22c"
         );
+    }
+
+    #[test]
+    fn kitty_graphics_reply_preserves_identifiers_and_exact_status() {
+        let mut parser = Parser::default();
+        parser
+            .parse(
+                b"\x1b_GI=13,p=4294967295,i=0;OK\x1b\\\x1b_Gi=99;OK extra\x1b\\",
+                false,
+            )
+            .unwrap();
+        let response = parser.pop().unwrap();
+        assert!(response.is_escape());
+        assert_eq!(
+            response,
+            Event::KittyGraphicsResponse(KittyGraphicsResponse {
+                image_id: 0,
+                image_number: Some(13),
+                placement_id: Some(u32::MAX),
+                result: Ok(()),
+            })
+        );
+        assert_eq!(
+            parser.pop(),
+            Some(Event::KittyGraphicsResponse(KittyGraphicsResponse {
+                image_id: 99,
+                image_number: None,
+                placement_id: None,
+                result: Err("OK extra".to_owned()),
+            }))
+        );
+        assert_eq!(parser.pop(), None);
+    }
+
+    #[test]
+    fn malformed_or_unknown_apc_never_becomes_keys_and_keeps_following_input() {
+        for invalid in [
+            "unknown APC",
+            "G;OK",
+            "GI=13;OK",
+            "Gi=1,i=2;OK",
+            "Gi=1,p=2,p=3;OK",
+            "Gi=1,I=2,I=3;OK",
+            "Gi=+1;OK",
+            "Gi=-1;OK",
+            "Gi=4294967296;OK",
+            "Gi=;OK",
+            "Gi=1,;OK",
+            "Gi=1,x=2;OK",
+            "Gi=1;",
+            "Gi=1;不行",
+            "Gi=1;bad\x07message",
+            "Gi=1;bad\x1b[Amesssage",
+        ] {
+            let wire = format!("\x1b_{invalid}\x1b\\你\x1b[A\x03");
+            let mut parser = Parser::default();
+            parser.parse(wire.as_bytes(), false).unwrap();
+            let actual: Vec<_> = std::iter::from_fn(|| parser.pop()).collect();
+            assert_eq!(
+                actual,
+                vec![
+                    Event::Key(KeyCode::Char('你').into()),
+                    Event::Key(KeyCode::Up.into()),
+                    Event::Key(KeyEvent::new(KeyCode::Char('c'), Modifiers::CONTROL)),
+                ],
+                "{invalid:?}"
+            );
+        }
     }
 
     #[test]
@@ -1529,6 +1659,55 @@ mod test {
             .parse_at(b"c\x1b[201~", false, start + Duration::from_secs(1))
             .unwrap();
         assert_eq!(parser.pop(), Some(Event::Paste("\x1b[?64;4c".to_string())));
+    }
+
+    #[test]
+    fn apc_input_bounds_keep_completed_replies_and_never_replay_rejected_tails() {
+        let mut parser = Parser::default();
+        let wire = format!("\x1b_Gi=31;{}\x1b\\", "E".repeat(245));
+        assert_eq!(wire.len(), 256);
+        parser.parse(wire.as_bytes(), false).unwrap();
+        assert!(matches!(
+            parser.pop(),
+            Some(Event::KittyGraphicsResponse(KittyGraphicsResponse { image_id: 31, result: Err(message), .. }))
+                if message.len() == 245
+        ));
+        assert_eq!(parser.pop(), None);
+
+        let start = Instant::now();
+        for prefix in [b"\x1b_".as_slice(), b"\x1b_Gi=31;OK\x1b", b"\x1b_unknown"] {
+            let mut parser = Parser::default();
+            parser.parse_at(b"x", false, start).unwrap();
+            parser.parse_at(prefix, false, start).unwrap();
+            assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('x').into())));
+            assert_eq!(parser.pop(), None);
+            assert_eq!(
+                parser
+                    .expire_reply_at(start + Duration::from_millis(100))
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::TimedOut
+            );
+            assert_eq!(
+                parser.parse(b"\\z", false).unwrap_err().kind(),
+                io::ErrorKind::TimedOut
+            );
+            assert_eq!(parser.pop(), None);
+        }
+
+        let mut parser = Parser::default();
+        let wire = format!("x\x1b_Gi=31;{}", "E".repeat(300));
+        assert_eq!(
+            parser.parse(wire.as_bytes(), true).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(parser.pop(), Some(Event::Key(KeyCode::Char('x').into())));
+        assert!(parser.buffer.len() <= 256);
+        assert_eq!(
+            parser.parse(b"\x1b\\z", false).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(parser.pop(), None);
     }
 
     #[test]
