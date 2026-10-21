@@ -28,7 +28,7 @@ mod uploads;
 pub use mutation::OriginalMutation;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
-use maka_plugin_core::contract::Contract;
+use maka_plugin_core::contract::{Contract, Interface};
 use nsh_core::{JsonValue, ui::prelude::*};
 use std::{
     future::Future,
@@ -138,10 +138,10 @@ async fn execute<T: Send + 'static>(
         .map_err(|error| format!("Host task failed: {error}"))?
 }
 
-// The typed application transport describes these exact public contracts.
-// Host output validation alone checks the catalogue's contract, which could
-// otherwise be a different service under the same endpoint alias.
-fn require_contract(endpoint: &str, actual: &Contract) -> Result<(), String> {
+// Validate the exact typed method, including its nominal service identity.
+// An unrelated added method must not invalidate an existing Host's unchanged
+// methods. Host output validation still checks the captured actual descriptor.
+fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(), String> {
     static AGENT_CONTRACT: LazyLock<Contract> = LazyLock::new(maka_agent_api::contract);
     static SETTINGS_CONTRACT: LazyLock<Contract> =
         LazyLock::new(maka_settings_native::contract::contract);
@@ -160,8 +160,29 @@ fn require_contract(endpoint: &str, actual: &Contract) -> Result<(), String> {
         // Generic plugin queries keep the raw native unknown result contract.
         _ => return Ok(()),
     };
+    if actual.name != expected.name
+        || actual.version != expected.version
+        || actual.transport != expected.transport
+    {
+        return Err(format!(
+            "Host {endpoint}.{method} has an incompatible service contract; update this Host to use this feature"
+        ));
+    }
+    let (Interface::Service { methods: expected }, Interface::Service { methods: actual }) =
+        (&expected.interface, &actual.interface)
+    else {
+        return Err(format!("Host {endpoint}.{method} is not a service method"));
+    };
+    let expected = expected
+        .get(method)
+        .ok_or_else(|| format!("Unknown typed Host method {endpoint}.{method}"))?;
+    let actual = actual.get(method).ok_or_else(|| {
+        format!("Host does not support {endpoint}.{method}; update this Host to use this feature")
+    })?;
     if actual != expected {
-        return Err(format!("Unsupported {endpoint} service contract"));
+        return Err(format!(
+            "Host {endpoint}.{method} has an incompatible method contract; update this Host to use this feature"
+        ));
     }
     Ok(())
 }
@@ -204,7 +225,11 @@ impl ApplicationHost {
         let owner = this.with(|host| host.owner.clone());
         drop(this);
         execute(owner.clone(), async move {
-            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
+            require_contract(
+                &endpoint,
+                &method,
+                &owner.client.describe(&endpoint).await?.contract,
+            )?;
             owner.client.query(&endpoint, &method, input).await
         })
         .await
@@ -227,7 +252,11 @@ impl ApplicationHost {
             SubscriptionKind::Events
         };
         let subscription = execute(owner.clone(), async move {
-            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
+            require_contract(
+                &endpoint,
+                &method,
+                &owner.client.describe(&endpoint).await?.contract,
+            )?;
             let subscription = owner.client.subscribe(&endpoint, &method, input).await?;
             Ok(ScopedSubscription {
                 owner,
@@ -270,7 +299,11 @@ impl ApplicationHost {
         drop(this);
         execute(owner.clone(), async move {
             let id = Uuid::new_v4();
-            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
+            require_contract(
+                &endpoint,
+                &method,
+                &owner.client.describe(&endpoint).await?.contract,
+            )?;
             let mutation = owner
                 .client
                 .settings_mutation(id, &endpoint, &method, input, resources)
@@ -294,7 +327,11 @@ impl ApplicationHost {
         let owner = this.with(|host| host.owner.clone());
         drop(this);
         let original = execute(owner.clone(), async move {
-            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
+            require_contract(
+                &endpoint,
+                &method,
+                &owner.client.describe(&endpoint).await?.contract,
+            )?;
             let mutation = owner
                 .client
                 .settings_mutation(Uuid::new_v4(), &endpoint, &method, input, resources)
@@ -647,5 +684,43 @@ impl ScopedSubscription {
             this.with(|item| (item.owner.clone(), item.subscription.clone()));
         drop(this);
         execute(owner, async move { subscription.close().await }).await
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::require_contract;
+    use maka_plugin_core::contract::{Interface, MethodMode};
+
+    #[test]
+    fn old_host_methods_stay_usable_without_admitting_missing_or_changed_methods() {
+        let mut old = maka_agent_api::contract();
+        let Interface::Service { methods } = &mut old.interface else {
+            panic!("Agent must be a service");
+        };
+        assert!(methods.remove("historyLandmarks").is_some());
+        assert!(require_contract("agent", "list", &old).is_ok());
+        assert_eq!(
+            require_contract("agent", "historyLandmarks", &old).unwrap_err(),
+            "Host does not support agent.historyLandmarks; update this Host to use this feature"
+        );
+        assert_eq!(
+            require_contract("agent", "missing", &old).unwrap_err(),
+            "Unknown typed Host method agent.missing"
+        );
+
+        let Interface::Service { methods } = &mut old.interface else {
+            unreachable!();
+        };
+        methods.get_mut("list").unwrap().mode = MethodMode::Mutation;
+        assert_eq!(
+            require_contract("agent", "list", &old).unwrap_err(),
+            "Host agent.list has an incompatible method contract; update this Host to use this feature"
+        );
+        old.name = "other.Agent".into();
+        assert_eq!(
+            require_contract("agent", "list", &old).unwrap_err(),
+            "Host agent.list has an incompatible service contract; update this Host to use this feature"
+        );
     }
 }

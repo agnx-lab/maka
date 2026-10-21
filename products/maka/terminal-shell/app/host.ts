@@ -28,7 +28,7 @@ import type {
   ServiceMethods,
 } from '../../../../packages/plugin-sdk/src/index.js';
 
-// Native checks these exact contracts before querying or subscribing. The Host
+// Native checks each exact method contract before querying or subscribing. The Host
 // validates their returned values; callers cannot choose an unrelated result T.
 type Services = {
   agent: ServiceMethods['agent'];
