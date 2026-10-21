@@ -2230,6 +2230,7 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         let before_resize = terminal.wire().len();
         terminal.resize(80, 40);
         terminal.wait_for_wire(b"\x1b[?2026l", before_resize).await;
+        terminal.wait_for_wire(b"\x1b[c\x1b[16t", before_resize).await;
         // Keep height unchanged: Screen's local resize cannot scroll away the
         // old left sidebar. New complete output must remove this control.
         terminal.wait_for_absent("Search sessions…").await;
@@ -2245,17 +2246,25 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
                 line.chars().skip(column).take(40).filter(|character| *character == '▀').count() >= 8)
         };
         assert!(has_image_cells(&narrow), "resize must paint the actual image through Unicode");
-        let after_resize = terminal.wire().len();
-        terminal.send(b"\x1b[?62;4c\x1b[6;17;9t");
+        // Leave the second measurement unanswered while resizing again. Its
+        // original replies must be drained before another untagged query.
         let before_wide = terminal.wire().len();
         terminal.resize(120, 40);
         terminal.wait_for_wire(b"\x1b[?2026l", before_wide).await;
         terminal.wait_for("Search sessions…").await;
         let wide = terminal.wait_for("Open image · 64 × 48").await;
         assert!(has_image_cells(&wide));
-        assert!(!terminal.wire()[after_resize..].windows(SIXEL.len()).any(|bytes| bytes == SIXEL), "late replies must not restore native images after resize");
-        assert_eq!(terminal.wire().windows(3).filter(|bytes| *bytes == b"\x1b[c").count(), 1, "resize must not issue an unidentifiable second DA1 query");
-        assert_eq!(terminal.wire().windows(5).filter(|bytes| *bytes == b"\x1b[16t").count(), 1);
+        assert_eq!(terminal.wire().windows(3).filter(|bytes| *bytes == b"\x1b[c").count(), 2, "resize must not issue a new query before consuming the original replies");
+        assert_eq!(terminal.wire().windows(5).filter(|bytes| *bytes == b"\x1b[16t").count(), 2);
+        let after_resize = terminal.wire().len();
+        terminal.send(b"\x1b[?62;4c\x1b[6;17;9t");
+        terminal.wait_for_wire(b"\x1b[c\x1b[16t", after_resize).await;
+        assert!(!terminal.wire()[after_resize..].windows(SIXEL.len()).any(|bytes| bytes == SIXEL), "late original replies must not restore native images after resize");
+        let before_fresh = terminal.wire().len();
+        terminal.send(b"\x1b[?61;4c\x1b[6;21;11t");
+        terminal.wait_for_wire(SIXEL, before_fresh).await;
+        assert_eq!(terminal.wire().windows(3).filter(|bytes| *bytes == b"\x1b[c").count(), 3);
+        assert_eq!(terminal.wire().windows(5).filter(|bytes| *bytes == b"\x1b[16t").count(), 3);
         support::wait_draft(&terminal_client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
         evidence("production-sixel-resize-wire", std::str::from_utf8(&terminal.wire()[after_resize..]).unwrap());
         evidence("production-sixel-resize-unicode", &wide);
