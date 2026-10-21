@@ -384,6 +384,11 @@ export interface ServiceMethods {
       input: Runtime.AgentHistoryRead;
       output: Runtime.AgentHistoryPage;
     };
+    historyLandmarks: {
+      mode: 'query';
+      input: Runtime.AgentHistoryLandmarksRead;
+      output: Runtime.AgentHistoryLandmarks;
+    };
     historyPrompt: {
       mode: 'query';
       input: Runtime.AgentHistoryPromptRead;
@@ -828,6 +833,110 @@ export interface ServiceMethods {
         | {
             kind: 'superseded';
           };
+    };
+  };
+  deploymentManager: {
+    bindingCandidates: {
+      mode: 'query';
+      input: Runtime.BindingCandidatesRead;
+      output: Runtime.BindingCandidatesPage;
+    };
+    configure: {
+      mode: 'mutation';
+      input: Runtime.InstanceConfigure;
+      output: Runtime.ManagementResultForDeploymentRef;
+    };
+    editComposition: {
+      mode: 'mutation';
+      input: Runtime.CompositionEdit;
+      output: Runtime.ManagementResultForDeploymentRef;
+    };
+    exportPackage: {
+      mode: 'subscription';
+      /**
+       * An immutable package from one committed revision, including binary files.
+       */
+      input: {
+        source: Runtime.DeploymentRef;
+        package: Runtime.PackageRef;
+      };
+      /**
+       * Bundle JSON already encodes file bytes; text chunks add no second base64 layer.
+       */
+      output:
+        | {
+            offset: number;
+            totalBytes: number;
+            text: string;
+            kind: 'chunk';
+          }
+        | {
+            kind: 'complete';
+          };
+    };
+    install: {
+      mode: 'mutation';
+      input: Runtime.PackageInstall;
+      output: Runtime.ManagementResultForPackageInstalled;
+    };
+    installSource: {
+      mode: 'mutation';
+      input: Runtime.PackageSourceInstall;
+      output: Runtime.ManagementResultForPackageInstalled;
+    };
+    installUrl: {
+      mode: 'mutation';
+      input: Runtime.PackageUrlInstall;
+      output: Runtime.ManagementResultForPackageInstalled;
+    };
+    instances: {
+      mode: 'query';
+      input: Runtime.DeploymentInstances;
+      output: Runtime.ManagedInstancesPage;
+    };
+    packageSettings: {
+      mode: 'query';
+      input: Runtime.PackageSettingsRead;
+      output: Runtime.PackageSettingsPage;
+    };
+    read: {
+      mode: 'query';
+      input: Runtime.DeploymentRead;
+      output: Runtime.ManagedDeployment;
+    };
+    readDocument: {
+      mode: 'query';
+      input: Runtime.DeploymentDocumentRead;
+      output: Runtime.DeploymentDocumentChunk;
+    };
+    readPackage: {
+      mode: 'query';
+      input: Runtime.PackageSourceRead;
+      output: {
+        paths: string[];
+        text?: string | null;
+        next?: number | null;
+      };
+    };
+    readSettings: {
+      mode: 'query';
+      input: Runtime.InstanceSettingsRead;
+      output: Runtime.InstanceSettingsPage;
+    };
+    replace: {
+      mode: 'mutation';
+      input: Runtime.DeploymentReplace;
+      output: Runtime.ManagementResultForDeploymentRef;
+    };
+    replaceSource: {
+      mode: 'mutation';
+      input: Runtime.DeploymentSourceReplace;
+      output: Runtime.ManagementResultForDeploymentRef;
+    };
+    setEnabled: {
+      mode: 'mutation';
+      input: Runtime.InstanceSetEnabled;
+      output: Runtime.ManagementResultForDeploymentRef;
     };
   };
 }

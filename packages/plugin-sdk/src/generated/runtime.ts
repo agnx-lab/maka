@@ -351,6 +351,9 @@ export type RuntimeProtocol =
   | AgentDiagnosticChange
   | AgentSessionRead
   | AgentHistoryRead
+  | AgentHistoryLandmarksRead
+  | AgentHistoryLandmarks
+  | AgentHistoryLandmark
   | AgentHistoryPromptRead
   | AgentHistoryPrompt
   | AgentDeliveryPage
@@ -10287,6 +10290,27 @@ export interface Cursor {
   field?: HistoryField & string;
   position: HistoryRowPosition;
   offset: number;
+}
+export interface AgentHistoryLandmarksRead {
+  sessionId: string;
+  through: number;
+}
+/**
+ * Sampled canonical display positions, not a complete Turn outline or an
+ * execution grant.
+ */
+export interface AgentHistoryLandmarks {
+  through: number;
+  /**
+   * @maxItems 64
+   */
+  landmarks: AgentHistoryLandmark[];
+}
+export interface AgentHistoryLandmark {
+  turnId: string;
+  position: HistoryRowPosition;
+  lastPosition: HistoryRowPosition;
+  label: string;
 }
 export interface AgentHistoryPromptRead {
   sessionId: string;

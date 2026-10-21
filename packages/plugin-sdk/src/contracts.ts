@@ -13838,6 +13838,99 @@ export const contracts = {
           },
           resources: {},
         },
+        historyLandmarks: {
+          mode: 'query',
+          input: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentHistoryLandmarksRead',
+            type: 'object',
+            properties: {
+              sessionId: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 128,
+              },
+              through: {
+                type: 'integer',
+                format: 'uint64',
+                minimum: 0,
+                maximum: 9007199254740991,
+              },
+            },
+            additionalProperties: false,
+            required: ['sessionId', 'through'],
+          },
+          output: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentHistoryLandmarks',
+            description:
+              'Sampled canonical display positions, not a complete Turn outline or an\nexecution grant.',
+            type: 'object',
+            properties: {
+              through: {
+                type: 'integer',
+                format: 'uint64',
+                minimum: 0,
+                maximum: 9007199254740991,
+              },
+              landmarks: {
+                type: 'array',
+                items: {
+                  $ref: '#/$defs/AgentHistoryLandmark',
+                },
+                maxItems: 64,
+              },
+            },
+            additionalProperties: false,
+            required: ['through', 'landmarks'],
+            $defs: {
+              AgentHistoryLandmark: {
+                type: 'object',
+                properties: {
+                  turnId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
+                  },
+                  position: {
+                    $ref: '#/$defs/HistoryRowPosition',
+                  },
+                  lastPosition: {
+                    $ref: '#/$defs/HistoryRowPosition',
+                  },
+                  label: {
+                    type: 'string',
+                    maxLength: 96,
+                  },
+                },
+                additionalProperties: false,
+                required: ['turnId', 'position', 'lastPosition', 'label'],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
+          },
+          resources: {},
+        },
         historyPrompt: {
           mode: 'query',
           input: {
