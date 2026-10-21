@@ -53,6 +53,8 @@ const CLEANUP: &[u8] =
     b"\x1b[?2026l\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l";
 const TICK: Duration = Duration::from_millis(16);
 
+pub(crate) type GpuWorker = thread::JoinHandle<Result<(), String>>;
+
 #[derive(Clone, Default)]
 struct Presentation {
     state: Arc<Mutex<Inbox>>,
@@ -93,7 +95,11 @@ impl Presentation {
 /// success means the cleanup bytes were flushed, rather than merely queued.
 /// The embedding process may request graceful cancellation without acquiring
 /// any UI or IO lock by setting `stop`.
-pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String> {
+pub(crate) fn run(
+    mut config: EngineConfig,
+    stop: Arc<AtomicBool>,
+    _gpu_worker: &mut Option<GpuWorker>,
+) -> Result<(), String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("the terminal shell requires a terminal on stdin and stdout".into());
     }
@@ -143,7 +149,13 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
                 return Ok(());
             }
             if let Some(capabilities) = capabilities {
-                return pixels::run(&mut output, &presentation, config, capabilities);
+                return pixels::run(
+                    &mut output,
+                    &presentation,
+                    config,
+                    capabilities,
+                    _gpu_worker,
+                );
             }
         }
         let (commands, frames) =

@@ -119,20 +119,60 @@ impl Args {
         let mut config = configuration(bindings.registry(self.session), runtime);
         config.data_dir = Some(client_directory);
         config.assets = Some(bindings.assets());
-        let result = if stop.load(Ordering::Acquire) {
+        let (result, gpu_worker) = if stop.load(Ordering::Acquire) {
+            (Ok(()), None)
+        } else {
+            tokio::task::spawn_blocking(move || {
+                let mut gpu_worker = None;
+                // Keep the native renderer owner outside the same panic boundary
+                // that Tokio previously supplied for this blocking terminal task.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    terminal::run(config, stop.clone(), &mut gpu_worker)
+                }));
+                stop.store(true, Ordering::Release);
+                if let Some(worker) = &gpu_worker {
+                    worker.thread().unpark();
+                }
+                let result = result.unwrap_or_else(|panic| {
+                    let message = panic
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("unknown panic");
+                    Err(format!("terminal worker panicked: {message}"))
+                });
+                (result, gpu_worker)
+            })
+            .await
+            .unwrap_or_else(|error| (Err(format!("terminal worker: {error}")), None))
+        };
+        // Terminal restoration precedes Host-scope cleanup. A blocked GPU must
+        // not retain that scope, but its native resources must finish before
+        // the runtime and process can exit.
+        let cleanup = bindings
+            .close()
+            .await
+            .map_err(|error| format!("terminal Host cleanup: {error}"));
+        let gpu_cleanup = if let Some(worker) = gpu_worker {
+            tokio::task::spawn_blocking(move || {
+                worker
+                    .join()
+                    .map_err(|_| "terminal GPUI worker panicked".to_owned())?
+            })
+            .await
+            .map_err(|error| format!("terminal GPUI join: {error}"))
+            .and_then(|result| result)
+        } else {
+            Ok(())
+        };
+        let errors: Vec<_> = [result, cleanup, gpu_cleanup]
+            .into_iter()
+            .filter_map(Result::err)
+            .collect();
+        if errors.is_empty() {
             Ok(())
         } else {
-            tokio::task::spawn_blocking(move || terminal::run(config, stop))
-                .await
-                .map_err(|error| format!("terminal worker: {error}"))
-                .and_then(|result| result)
-        };
-        let cleanup = bindings.close().await;
-        match (result, cleanup) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) => Err(error),
-            (Ok(()), Err(error)) => Err(format!("terminal Host cleanup: {error}")),
-            (Err(error), Err(cleanup)) => Err(format!("{error}; terminal Host cleanup: {cleanup}")),
+            Err(errors.join("; "))
         }
     }
 }

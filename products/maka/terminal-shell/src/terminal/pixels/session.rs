@@ -37,19 +37,26 @@ use termina::{Event, event::KeyEventKind};
 pub(super) fn spawn(
     config: EngineConfig,
     presentation: Presentation,
-) -> Result<mpsc::Receiver<Result<(), EngineConfig>>, String> {
+) -> Result<
+    (
+        mpsc::Receiver<Result<(), EngineConfig>>,
+        super::super::GpuWorker,
+    ),
+    String,
+> {
     let (ready, startup) = mpsc::sync_channel(1);
-    thread::Builder::new()
+    let worker = thread::Builder::new()
         .name("maka-nsh-gpui".into())
         .spawn(move || {
             let result = run(config, &presentation, ready);
-            if let Err(error) = result {
-                presentation.state.lock().unwrap().error = Some(error);
+            if let Err(error) = &result {
+                presentation.state.lock().unwrap().error = Some(error.clone());
             }
             presentation.wake_driver();
+            result
         })
-        .map(|_| startup)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok((startup, worker))
 }
 
 fn run(

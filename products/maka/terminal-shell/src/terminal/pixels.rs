@@ -123,6 +123,7 @@ pub(super) fn run(
     presentation: &Presentation,
     config: EngineConfig,
     caps: Capabilities,
+    worker: &mut Option<super::GpuWorker>,
 ) -> Result<(), String> {
     let mut setup = b"\x1b[?1003h\x1b[?1004h".to_vec();
     if matches!(caps.mouse, MouseCoordinates::Pixels(_)) {
@@ -139,7 +140,8 @@ pub(super) fn run(
         state.trace.is_some()
     };
     output.submit(setup, None)?;
-    let startup = session::spawn(config, presentation.clone())?;
+    let (startup, handle) = session::spawn(config, presentation.clone())?;
+    *worker = Some(handle);
     let mut starting = true;
     let mut phase = Phase::Setup;
     loop {
