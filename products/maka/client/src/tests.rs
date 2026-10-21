@@ -87,9 +87,17 @@ impl Handler for CounterHandler {
                         "name":input["name"],"bytes":input["bytes"],"mimeType":"text/plain"
                     }}))
                 }
-                "send" | "selectBackend" | "create" | "discoverModels" | "saveCredential" => {
+                "send"
+                | "selectBackend"
+                | "create"
+                | "discoverModels"
+                | "saveCredential"
+                | "updateAssistantPreferences"
+                | "updateNetwork" => {
                     owner.messages.lock().unwrap().push(input.clone());
-                    if method == "saveCredential" {
+                    if method == "saveCredential"
+                        || (method == "updateNetwork" && input["credential"] == "replace")
+                    {
                         let secret = &context.attachments()["secret"];
                         owner
                             .secrets
@@ -163,6 +171,8 @@ impl Fixture {
                 "create":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "discoverModels":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "saveCredential":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":false}}},
+                "updateAssistantPreferences":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "updateNetwork":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":true}}},
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
         })).unwrap();
@@ -300,7 +310,13 @@ impl Fixture {
                         consumer: InstanceId(vec![Uuid::from_u128(3)]),
                         import: "settings".into(),
                         grant: Grant {
-                            methods: ["create".into(), "saveCredential".into()].into(),
+                            methods: [
+                                "create".into(),
+                                "saveCredential".into(),
+                                "updateAssistantPreferences".into(),
+                                "updateNetwork".into(),
+                            ]
+                            .into(),
                             recovery: false,
                         },
                     },

@@ -25,15 +25,30 @@ use std::{ops::Range, sync::Arc};
 pub(super) fn attachments(
     endpoint: &str,
     method: &str,
+    input: &Value,
     secret: Option<String>,
 ) -> Result<Attachments, String> {
-    match (endpoint == "settings" && method == "saveCredential", secret) {
+    let (required, error) = match (endpoint, method) {
+        ("settings", "updateNetwork") => (
+            match input.get("credential").and_then(Value::as_str) {
+                Some("replace") => true,
+                Some("keep" | "delete") => false,
+                _ => return Err("settings network credential action is invalid".into()),
+            },
+            "settings.updateNetwork accepts a required secret only when replacing its credential",
+        ),
+        _ => (
+            endpoint == "settings" && method == "saveCredential",
+            "only settings.saveCredential accepts a required secret",
+        ),
+    };
+    match (required, secret) {
         (true, Some(secret)) => Ok(Attachments::from([(
             "secret".into(),
             Arc::new(Text(secret)) as Arc<dyn ReadResource>,
         )])),
         (false, None) => Ok(Attachments::new()),
-        _ => Err("only settings.saveCredential accepts a required secret".into()),
+        _ => Err(error.into()),
     }
 }
 

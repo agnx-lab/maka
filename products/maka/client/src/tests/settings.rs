@@ -22,7 +22,7 @@ use maka_capabilities::call::ReadResource;
 use maka_plugin_core::contract::ResourceType;
 use std::ops::Range;
 
-struct Secret(&'static str);
+struct Secret(Vec<u8>);
 impl ReadResource for Secret {
     fn encoding(&self) -> ResourceEncoding {
         ResourceEncoding::Utf8
@@ -39,7 +39,7 @@ impl ReadResource for Secret {
     fn read(&self, range: Range<usize>) -> Result<Vec<u8>> {
         self.0
             .get(range)
-            .map(|text| text.as_bytes().to_vec())
+            .map(<[u8]>::to_vec)
             .ok_or_else(|| "invalid secret range".into())
     }
 }
@@ -50,18 +50,36 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         let fixture = Fixture::new().await;
         let first = fixture.client().await;
         let second = fixture.client().await;
-        let secret = || -> Attachments {
+        let resource = |bytes| -> Attachments {
             Attachments::from([(
                 "secret".into(),
-                Arc::new(Secret("k€y\\\"raw")) as Arc<dyn ReadResource>,
+                Arc::new(Secret(bytes)) as Arc<dyn ReadResource>,
             )])
         };
+        let secret = || resource("k€y\\\"raw".as_bytes().to_vec());
         for (endpoint, method, resources, expected) in [
             ("settings-setup", "discoverModels", Attachments::new(), "unsupported settings mutation method"),
             ("settings", "create", secret(), "settings mutation does not accept resources"),
             ("settings", "saveCredential", Attachments::new(), "settings credential requires one UTF-8 secret resource"),
         ] {
             assert_eq!(first.settings_mutation(Uuid::new_v4(), endpoint, method, Value::Null, resources).await.err().unwrap(), expected);
+        }
+        let mut extra = secret();
+        extra.insert("extra".into(), Arc::new(Secret(vec![b'x'])));
+        for (input, resources, expected) in [
+            (Value::Null, Attachments::new(), "settings network credential action is invalid"),
+            (json!({"credential":"unknown"}), Attachments::new(), "settings network credential action is invalid"),
+            (json!({"credential":"keep"}), secret(), "settings mutation does not accept resources"),
+            (json!({"credential":"delete"}), secret(), "settings mutation does not accept resources"),
+            (json!({"credential":"replace"}), Attachments::new(), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+            (json!({"credential":"replace"}), extra, "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+            (json!({"credential":"replace"}), resource(vec![]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+            (json!({"credential":"replace"}), resource(vec![0xff]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+            (json!({"credential":"replace"}), resource(vec![b'x'; 10241]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+        ] {
+            let id = Uuid::new_v4();
+            assert_eq!(first.settings_mutation(id, "settings", "updateNetwork", input, resources).await.err().unwrap(), expected);
+            assert_eq!(first.operation(id).await.unwrap_err(), "original client operation not found for this Host");
         }
         for (endpoint, method, session, correlation) in [
             ("agent", "selectBackend", Some("session-one".into()), json!({"kind":"agent-control"})),
@@ -75,7 +93,7 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         }
         assert!(first.pending_settings().await.unwrap().is_empty());
         let (left, right) = tokio::join!(
-            first.settings_mutation(Uuid::new_v4(), "settings", "create", json!({"name":"private settings input"}), Attachments::new()),
+            first.settings_mutation(Uuid::new_v4(), "settings", "updateAssistantPreferences", json!({"expectedRevision":0,"mutation":{"kind":"personalization","displayName":"private settings input","assistantTone":""}}), Attachments::new()),
             second.settings_mutation(Uuid::new_v4(), "setup", "discoverModels", json!({"connectionId":"one"}), Attachments::new()),
         );
         let admitted = match (left, right) {
@@ -115,7 +133,7 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         drop(confirmation);
         saved.disconnect().await;
         drop(saved);
-        assert_eq!(second.settings_mutation(Uuid::new_v4(), "settings", "create", Value::Null, Attachments::new()).await.err().unwrap(), "settings operation already exists or has an unresolved original");
+        assert_eq!(second.settings_mutation(Uuid::new_v4(), "settings", "updateNetwork", json!({"credential":"keep"}), Attachments::new()).await.err().unwrap(), "settings operation already exists or has an unresolved original");
         fixture.counter.release.notify_one();
         loop {
             let recovered = restarted.recover(id).await.unwrap();
@@ -130,18 +148,45 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         assert_eq!(first.pending_requests().await, 1, "receipt recovery does not acknowledge physical cleanup");
         assert_eq!(second.operation_for_settings(id).await.unwrap().id, id);
         assert!(second.pending_settings().await.unwrap().is_empty());
-        let contexts = sqlx::query_scalar::<_, String>("SELECT context FROM operations")
-            .fetch_all(&restarted.0.journal.0).await.unwrap();
-        for context in contexts {
-            assert!(!context.contains("k€y"));
-            assert!(!context.contains("private settings input"));
-        }
         assert_eq!(second.settings_mutation(id, "setup", "discoverModels", Value::Null, Attachments::new()).await.err().unwrap(), "settings operation already exists or has an unresolved original");
         fixture.counter.blocked.store(false, Ordering::SeqCst);
         let next = second.settings_mutation(Uuid::new_v4(), "setup", "discoverModels", Value::Null, Attachments::new()).await.unwrap();
         next.prepare().await.unwrap();
         assert!(matches!(next.confirm().await.unwrap().receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":2})));
         assert_eq!(restarted.query("agent", "read", Value::Null).await.unwrap(), json!({"sent":2}));
+        let preferences = json!({"expectedRevision":0,"mutation":{"kind":"language","preference":"zh-CN"}});
+        let update = second.settings_mutation(Uuid::new_v4(), "settings", "updateAssistantPreferences", preferences.clone(), Attachments::new()).await.unwrap();
+        update.prepare().await.unwrap();
+        assert!(matches!(update.confirm().await.unwrap().receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":3})));
+        let network = json!({"expectedPolicyRevision":0,"expectedCredential":null,"networkProxy":{"enabled":true,"protocol":"http","host":"proxy.test","port":8080,"authEnabled":true,"username":"user","bypassList":[],"autoBypassDomains":[]},"credential":"replace"});
+        let password = format!("{}x", "密".repeat(3413)).into_bytes();
+        let update = first.settings_mutation(Uuid::new_v4(), "settings", "updateNetwork", network.clone(), resource(password.clone())).await.unwrap();
+        let prepared = update.prepare().await.unwrap();
+        update.confirm().await.unwrap();
+        let recovered = restarted.recover(update.id()).await.unwrap();
+        assert_eq!(recovered.reference, prepared.reference.unwrap());
+        assert!(matches!(recovered.receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":4})));
+        for (index, action) in ["keep", "delete"].into_iter().enumerate() {
+            let mut input = network.clone();
+            input["credential"] = json!(action);
+            if action == "delete" {
+                input["networkProxy"]["authEnabled"] = json!(false);
+            }
+            let update = second.settings_mutation(Uuid::new_v4(), "settings", "updateNetwork", input, Attachments::new()).await.unwrap();
+            update.prepare().await.unwrap();
+            assert!(matches!(update.confirm().await.unwrap().receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":index + 5})));
+        }
+        assert_eq!(&fixture.counter.messages.lock().unwrap()[2..4], &[preferences, network]);
+        assert_eq!(fixture.counter.secrets.lock().unwrap().as_slice(), &["k€y\\\"raw".as_bytes().to_vec(), password]);
+        let contexts = sqlx::query_scalar::<_, String>("SELECT context FROM operations")
+            .fetch_all(&restarted.0.journal.0).await.unwrap();
+        for context in contexts {
+            assert!(!context.contains("k€y"));
+            assert!(!context.contains("密密"));
+            assert!(!context.contains("private settings input"));
+        }
+        assert!(restarted.pending_settings().await.unwrap().is_empty());
+        assert_eq!(restarted.query("agent", "read", Value::Null).await.unwrap(), json!({"sent":6}));
         first.close().await.unwrap();
         second.close().await.unwrap();
         restarted.close().await.unwrap();

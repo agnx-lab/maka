@@ -231,7 +231,7 @@ impl ApplicationHost {
         input: JsonValue,
         secret: Option<String>,
     ) -> Result<JsonValue, String> {
-        let resources = settings::attachments(&endpoint, &method, secret)?;
+        let resources = settings::attachments(&endpoint, &method, &input, secret)?;
         let owner = this.with(|host| host.owner.clone());
         drop(this);
         execute(owner.clone(), async move {

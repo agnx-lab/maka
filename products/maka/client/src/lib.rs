@@ -58,7 +58,7 @@ const CONTROL_METHODS: [&str; 7] = [
 ];
 const CONTROL_KIND: &str = "agent-control";
 const SETTINGS_KIND: &str = "settings";
-const SETTINGS_METHODS: [&str; 7] = [
+const SETTINGS_METHODS: [&str; 9] = [
     "create",
     "update",
     "remove",
@@ -66,6 +66,8 @@ const SETTINGS_METHODS: [&str; 7] = [
     "deleteCredential",
     "updateModelSettings",
     "setDefault",
+    "updateAssistantPreferences",
+    "updateNetwork",
 ];
 fn settings_route(endpoint: &str, method: &str) -> bool {
     (endpoint == "settings" && SETTINGS_METHODS.contains(&method))
@@ -323,6 +325,29 @@ impl Client {
                 })
             {
                 return Err("settings credential requires one UTF-8 secret resource".into());
+            }
+        } else if endpoint == "settings" && method == "updateNetwork" {
+            match input.get("credential").and_then(Value::as_str) {
+                Some("replace") => {
+                    if resources.len() != 1
+                        || !resources.get("secret").is_some_and(|secret| {
+                            let bytes = secret.bytes();
+                            secret.resource_type() == text_resource_type()
+                                && secret.encoding() == ResourceEncoding::Utf8
+                                && (1..=10240).contains(&bytes)
+                                && secret.read(0..bytes).is_ok_and(|value| {
+                                    value.len() == bytes && std::str::from_utf8(&value).is_ok()
+                                })
+                        })
+                    {
+                        return Err("settings network credential requires one UTF-8 secret resource within 10 KiB".into());
+                    }
+                }
+                Some("keep" | "delete") if resources.is_empty() => {}
+                Some("keep" | "delete") => {
+                    return Err("settings mutation does not accept resources".into());
+                }
+                _ => return Err("settings network credential action is invalid".into()),
             }
         } else if !resources.is_empty() {
             return Err("settings mutation does not accept resources".into());
