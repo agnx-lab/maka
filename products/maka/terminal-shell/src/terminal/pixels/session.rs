@@ -173,7 +173,7 @@ fn run(
                 let inbox = state.pixels.as_mut().expect("selected pixel presentation");
                 (
                     inbox.resize.take(),
-                    std::mem::take(&mut inbox.cancel_capture),
+                    std::mem::take(&mut inbox.cancel_pointer),
                     inbox.ready.take(),
                     inbox.pop(),
                     inbox.capabilities,
@@ -189,7 +189,7 @@ fn run(
                 return Err(error);
             }
             if cancel {
-                source.borrow().cancel_capture();
+                source.borrow().cancel_pointer();
             }
             if resize.is_some() {
                 geometry.set(generation);
@@ -207,6 +207,8 @@ fn run(
                     .as_mut()
                     .unwrap()
                     .pending = None;
+            }
+            if cancel || resize.is_some() {
                 application.update(|cx| {
                     if let Some(window) = window.borrow().as_ref() {
                         let _ = window.update(cx, |_, window, cx| {
@@ -253,6 +255,7 @@ fn run(
             let exact_ready = !platform.has_pending();
             if let Some(input) = input {
                 let mut refresh = false;
+                let mut release_pending = super::input::released(&input.event);
                 let token = input
                     .token
                     .or_else(|| input.startup.then(|| platform.presented()).flatten());
@@ -265,7 +268,7 @@ fn run(
                     }
                     Event::FocusOut => {
                         refresh = true;
-                        source.borrow().cancel_capture();
+                        source.borrow().cancel_pointer();
                         platform
                             .set_active(false)
                             .map_err(|error| error.to_string())?;
@@ -318,6 +321,9 @@ fn run(
                                         }
                                     };
                                     refresh |= admitted;
+                                    if admitted {
+                                        release_pending = false;
+                                    }
                                     if admitted
                                         && matches!(
                                             event,
@@ -333,6 +339,10 @@ fn run(
                             }
                         }
                     }
+                }
+                if release_pending {
+                    source.borrow().cancel_pointer();
+                    refresh = true;
                 }
                 if refresh {
                     application.update(|cx| {

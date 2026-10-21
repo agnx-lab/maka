@@ -107,7 +107,7 @@ impl Mapping {
                 mouse.modifiers,
                 cell_centre(mouse.column, mouse.row, caps)?,
             )),
-            Event::MouseLeave => Some(PlatformInput::MouseExited(gpui::MouseExitEvent::default())),
+            Event::MouseLeave => None,
             Event::WindowResized(_)
             | Event::FocusIn
             | Event::FocusOut

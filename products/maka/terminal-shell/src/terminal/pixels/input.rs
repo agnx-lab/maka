@@ -63,7 +63,7 @@ pub(crate) struct Inbox {
     pub ready: Option<Offer>,
     pub geometry: u64,
     pub resize: Option<WindowSize>,
-    pub cancel_capture: bool,
+    pub cancel_pointer: bool,
     pub expected_ack: Option<u32>,
     pub ack: Option<(std::time::Instant, Result<(), String>)>,
     pub reject_through: u64,
@@ -87,7 +87,7 @@ impl Inbox {
             ready: None,
             geometry: 1,
             resize: None,
-            cancel_capture: false,
+            cancel_pointer: false,
             expected_ack: None,
             ack: None,
             reject_through: 0,
@@ -121,7 +121,7 @@ impl Inbox {
             self.published = None;
             self.pending = None;
             self.capture = None;
-            self.cancel_capture = true;
+            self.cancel_pointer = true;
             self.events.retain(|input| !pointer(&input.event));
             self.bytes = self.events.iter().map(|input| bytes(&input.event)).sum();
             return Ok(false);
@@ -131,7 +131,7 @@ impl Inbox {
         }
         if matches!(event, Event::MouseLeave | Event::FocusOut) {
             self.capture = None;
-            self.cancel_capture = true;
+            self.cancel_pointer = true;
         }
         let token = match &event {
             Event::SgrMouse(mouse) => match mouse.kind {
@@ -148,6 +148,9 @@ impl Inbox {
             Event::Key(_) | Event::Paste(_) => self.keyboard.clone(),
             _ => self.published.clone(),
         };
+        if matches!(event, Event::MouseLeave) {
+            return Ok(false);
+        }
         if pointer(&event)
             && (token.is_none()
                 || self.resize.is_some()
@@ -155,6 +158,9 @@ impl Inbox {
                     .as_ref()
                     .is_some_and(|token| token.sequence() <= self.reject_through))
         {
+            if released(&event) {
+                self.cancel_pointer = true;
+            }
             return Ok(false);
         }
         let length = bytes(&event);
@@ -219,5 +225,13 @@ fn bytes(event: &Event) -> usize {
     match event {
         Event::Paste(text) => text.len(),
         _ => std::mem::size_of::<Event>(),
+    }
+}
+
+pub(super) fn released(event: &Event) -> bool {
+    match event {
+        Event::SgrMouse(mouse) => matches!(mouse.kind, MouseEventKind::Up(_)),
+        Event::Mouse(mouse) => matches!(mouse.kind, MouseEventKind::Up(_)),
+        _ => false,
     }
 }
