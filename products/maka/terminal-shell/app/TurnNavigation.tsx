@@ -17,12 +17,47 @@
  * under the License.
  */
 
-import { effect, inputAction, signal, Text, View } from 'nsh';
+import { Canvas, effect, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
+import { platform } from 'nsh/device';
 import type { Position } from './history';
-import { C } from './ui';
+import { C, controlStyle, captionTextStyle } from './ui';
+import { Icon } from './Icon';
+
+function TurnMark(props: { active: boolean; busy: boolean }) {
+  const color = () => (props.active ? C.accent : C.muted);
+  if (platform.isTerminal)
+    return (
+      <Text
+        pointerEvents="none"
+        accessibilityElementsHidden
+        style={{ width: 16, height: 16, lineHeight: 16, textAlign: 'center', color: color() }}
+      >
+        {props.busy ? '◌' : props.active ? '●' : '━'}
+      </Text>
+    );
+  return (
+    <Canvas
+      pointerEvents="none"
+      accessibilityElementsHidden
+      style={{ width: 16, height: 16 }}
+      draw={(cx) => {
+        cx.strokeStyle = color();
+        cx.lineWidth = props.active ? 3 : 2;
+        cx.lineCap = 'round';
+        cx.beginPath();
+        if (props.busy) cx.arc(8, 8, 4, 0, Math.PI * 2);
+        else {
+          cx.moveTo(props.active ? 2 : 4, 8);
+          cx.lineTo(props.active ? 14 : 12, 8);
+        }
+        cx.stroke();
+      }}
+    />
+  );
+}
 
 export type TurnNavigationItem = {
   turnId: string;
@@ -64,7 +99,7 @@ export function TurnNavigation(props: {
         accessibilityLabel="Turn navigation"
         each={props.items()}
         keyExtractor={(item) => item.turnId}
-        estimatedItemSize={16}
+        estimatedItemSize={24}
         style={{ flex: 1, minHeight: 0 }}
       >
         {(item) => (
@@ -73,21 +108,14 @@ export function TurnNavigation(props: {
               accessibilityLabel={`Jump to turn: ${item().label || 'Recorded turn'}`}
               selected={props.active() === item().turnId}
               onPress={inputAction(props.navigate, item())}
-              style={{ height: 16, width: 24, alignItems: 'center' }}
+              style={{ height: 24, width: 24, alignItems: 'center', justifyContent: 'center' }}
               hoverStyle={{ backgroundColor: C.surface }}
               focusStyle={{ backgroundColor: C.raised }}
             >
-              <Text
-                style={{
-                  color: props.active() === item().turnId ? C.accent : C.muted,
-                }}
-              >
-                {props.busy() === item().turnId
-                  ? '◌'
-                  : props.active() === item().turnId
-                    ? '●'
-                    : '━'}
-              </Text>
+              <TurnMark
+                active={props.active() === item().turnId}
+                busy={props.busy() === item().turnId}
+              />
             </Button>
           </View>
         )}
@@ -113,10 +141,20 @@ export function TurnNavigation(props: {
       <If when={props.busy()}>
         <Button
           accessibilityLabel="Cancel turn navigation"
+          tooltip="Cancel navigation"
           onPress={props.cancel}
-          style={{ position: 'absolute', right: 0, bottom: 0, backgroundColor: C.raised }}
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: 24,
+            height: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: C.raised,
+          }}
         >
-          <Text style={{ color: C.secondary }}>×</Text>
+          <Icon name="close" color={C.secondary} />
         </Button>
       </If>
     </View>
@@ -130,16 +168,20 @@ export function ReturnToLatest(props: { visible: boolean; activate(): void }) {
         accessibilityLabel="Return to latest"
         onPress={props.activate}
         style={{
+          ...controlStyle,
           position: 'absolute',
           right: 32,
           bottom: 8,
-          paddingHorizontal: 8,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
           backgroundColor: C.raised,
         }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.accent }}
       >
-        <Text style={{ color: C.text }}>↓ Latest</Text>
+        <Icon name="latest" color={C.secondary} />
+        <Text style={{ ...captionTextStyle, color: C.text }}>Latest</Text>
       </Button>
     </If>
   );

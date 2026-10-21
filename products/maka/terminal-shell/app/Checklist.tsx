@@ -24,7 +24,9 @@ import { windowSize } from 'nsh/device';
 import { host } from './host';
 import type { Subscription } from './history';
 import type { AgentChecklist, AgentTodoItem } from '../../../../packages/plugin-sdk/src/index.js';
-import { C } from './ui';
+import { C, bodyTextStyle, captionTextStyle, controlStyle } from './ui';
+import { Icon } from './Icon';
+import { ChoiceIndicator } from './ChoiceIndicator';
 
 export function Checklist(props: { sessionId: string }) {
   const sessionId = props.sessionId;
@@ -37,8 +39,6 @@ export function Checklist(props: { sessionId: string }) {
   let alive = true;
   let generation = 0;
   let stream: Subscription | null = null;
-  const marker = (item: AgentTodoItem) =>
-    item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '›' : '·';
   const setExpanded = (action: { sessionId: string; open: boolean }) => {
     const page = snapshot();
     if (!alive || action.sessionId !== sessionId || !page?.enabled || page.total === 0) return;
@@ -110,17 +110,19 @@ export function Checklist(props: { sessionId: string }) {
         style={{ backgroundColor: C.surface, borderRadius: 8 }}
       >
         <Button
+          accessibilityLabel="Toggle conversation todo"
           selected={expanded()}
           onPress={inputAction(setExpanded, { sessionId, open: !expanded() })}
-          style={{ height: 16, paddingHorizontal: 16, flexDirection: 'row', gap: 8 }}
+          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
           hoverStyle={{ backgroundColor: C.raised }}
           focusStyle={{ backgroundColor: C.line }}
           activeStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ color: C.text }}>
-            {expanded() ? '▾' : '▸'} Todo {snapshot()!.completed}/{snapshot()!.total}
+          <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.text }}>
+            Todo {snapshot()!.completed}/{snapshot()!.total}
           </Text>
-          <Text numberOfLines={1} style={{ flex: 1, color: C.muted }}>
+          <Text numberOfLines={1} style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
             {snapshot()!.current?.content ??
               (snapshot()!.completed === snapshot()!.total
                 ? 'All items complete'
@@ -131,27 +133,45 @@ export function Checklist(props: { sessionId: string }) {
           <List
             each={items()}
             onLoadMore={() => void loadMore()}
-            estimatedItemSize={16}
+            estimatedItemSize={32}
             keyExtractor={(_, index) => String(index)}
             style={{
-              height:
-                Math.min(
-                  items().length,
-                  Math.max(2, Math.min(6, Math.floor(windowSize().height / 48))),
-                ) * 16,
+              height: Math.min(items().length * 32, Math.max(32, windowSize().height / 4)),
             }}
           >
             {(item) => (
-              <Text
-                numberOfLines={1}
+              <View
                 style={{
-                  height: 16,
-                  paddingHorizontal: 16,
-                  color: item().status === 'in_progress' ? C.accent : C.secondary,
+                  minHeight: 32,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  gap: 8,
                 }}
               >
-                {marker(item())} {item().content}
-              </Text>
+                <If
+                  when={item().status === 'in_progress'}
+                  else={<ChoiceIndicator kind="checkbox" checked={item().status === 'completed'} />}
+                >
+                  <Icon name="activity" color={C.accent} />
+                </If>
+                <Text
+                  selectable
+                  style={{
+                    ...bodyTextStyle,
+                    flex: 1,
+                    color:
+                      item().status === 'in_progress'
+                        ? C.accent
+                        : item().status === 'completed'
+                          ? C.muted
+                          : C.secondary,
+                  }}
+                >
+                  {item().content}
+                </Text>
+              </View>
             )}
           </List>
           <If when={error()}>

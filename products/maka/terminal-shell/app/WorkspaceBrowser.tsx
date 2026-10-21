@@ -503,24 +503,32 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                     hoverStyle={{ backgroundColor: C.line }}
                     focusStyle={{ backgroundColor: C.raised }}
                   >
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        color:
-                          props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
-                      }}
+                    <View
+                      pointerEvents="none"
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
                     >
-                      {session()?.hasUnread ? '● ' : ''}
-                      {session()?.title || 'Untitled conversation'}
-                    </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color:
+                            props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
+                          flex: 1,
+                        }}
+                      >
+                        {session()?.title || 'Untitled conversation'}
+                      </Text>
+                      <If when={session()?.hasUnread}>
+                        <Icon name="unread" color={C.accent} />
+                      </If>
+                    </View>
                     <Text
                       numberOfLines={1}
                       style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}
                     >
                       {session()?.activity === 'working'
-                        ? '● Working · '
+                        ? 'Working · '
                         : session()?.activity === 'waiting'
-                          ? '◇ Waiting · '
+                          ? 'Waiting · '
                           : ''}
                       {session()?.workspace.path.split('/').filter(Boolean).at(-1) ||
                         session()?.workspace.path}
@@ -546,7 +554,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
                   >
-                    <Text style={{ color: C.muted }}>…</Text>
+                    <Icon name="more" color={C.muted} />
                   </Button>
                 </View>
               );
@@ -559,7 +567,12 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       </If>
       <If when={navigationNotice()}>
         <Text style={{ color: C.warning }}>{navigationNotice()}</Text>
-        <Button onPress={inputAction(props.close, null)}>
+        <Button
+          onPress={inputAction(props.close, null)}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+        >
           <Text style={{ color: C.accent }}>Return to draft</Text>
         </Button>
       </If>
@@ -567,7 +580,12 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         <Text selectable style={{ color: C.danger }}>
           {browser.error() || browser.projectError()}
         </Text>
-        <Button onPress={inputAction(refresh, null)}>
+        <Button
+          onPress={inputAction(refresh, null)}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+        >
           <Text style={{ color: C.accent }}>Refresh browser</Text>
         </Button>
       </If>
@@ -605,7 +623,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
           >
-            <Text style={{ color: C.muted }}>‹</Text>
+            <Icon name="back" color={C.muted} />
           </Button>
           <Button
             onPress={props.resize ? inputAction(props.resize, 2) : undefined}
@@ -620,7 +638,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
           >
-            <Text style={{ color: C.muted }}>›</Text>
+            <Icon name="right" color={C.muted} />
           </Button>
         </If>
       </View>

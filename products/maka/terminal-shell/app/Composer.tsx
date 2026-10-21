@@ -214,7 +214,9 @@ export function Composer(props: {
                 <Button
                   disabled={owner.recovering()}
                   onPress={inputAction(owner.recover, null)}
-                  style={{ paddingVertical: 16 }}
+                  style={controlStyle}
+                  hoverStyle={{ backgroundColor: C.raised }}
+                  focusStyle={{ backgroundColor: C.line }}
                 >
                   <Text style={{ color: C.warning }}>
                     {owner.recovering()
@@ -228,7 +230,9 @@ export function Composer(props: {
                   <Button
                     disabled={owner.recovering()}
                     onPress={inputAction(owner.abandon, id())}
-                    style={{ paddingVertical: 16 }}
+                    style={controlStyle}
+                    hoverStyle={{ backgroundColor: C.raised }}
+                    focusStyle={{ backgroundColor: C.line }}
                   >
                     <Text style={{ color: C.warning }}>
                       Abandon unconfirmed send · {id().slice(0, 8)}
@@ -295,6 +299,7 @@ export function Composer(props: {
           <Button
             onPress={inputAction(props.commands, { sessionId: props.session()?.sessionId ?? null })}
             accessibilityLabel="Open commands"
+            tooltip="Commands · Ctrl+P"
             style={{
               width: 32,
               height: 32,
@@ -308,12 +313,36 @@ export function Composer(props: {
           >
             <Icon name="plus" color={C.secondary} />
           </Button>
+          <If when={props.session() !== null}>
+            <Button
+              accessibilityLabel="Attach files"
+              tooltip="Attach files · Ctrl+U"
+              disabled={props.session()!.attachments.restoring()}
+              onPress={inputAction(props.session()!.attachments.open, {
+                owner: props.session()!.sessionId,
+                value: !props.session()!.attachments.picker(),
+              })}
+              style={{
+                width: 32,
+                height: 32,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 16,
+              }}
+              hoverStyle={{ backgroundColor: C.line }}
+              focusStyle={{ backgroundColor: C.line }}
+              activeStyle={{ backgroundColor: C.surface }}
+            >
+              <Icon name="paperclip" color={C.secondary} />
+            </Button>
+          </If>
           <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>
             {props.session()?.permissions()}
           </Text>
           <If when={props.session() !== null}>
             <Button
               accessibilityLabel="Choose model and effort"
+              tooltip="Choose model and effort · Ctrl+G"
               onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
               style={{
                 ...controlStyle,
@@ -348,6 +377,7 @@ export function Composer(props: {
             <Button
               disabled={props.session()!.stopping()}
               accessibilityLabel="Stop response"
+              tooltip="Stop response · Esc"
               onPress={inputAction(props.session()!.stop, props.session()!.invocation())}
               style={{
                 width: 32,
@@ -367,6 +397,7 @@ export function Composer(props: {
           </If>
           <Button
             accessibilityLabel="Send message"
+            tooltip="Send message · Enter"
             disabled={cannotSend()}
             onPress={
               props.session()

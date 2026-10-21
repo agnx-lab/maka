@@ -23,7 +23,7 @@ import type { AgentHistorySourceRead } from '../../../../packages/plugin-sdk/src
 import { sameValue } from '../../../../plugins/shared/value';
 import { host } from './host';
 import { messageBytes, type Position } from './history';
-import { C } from './ui';
+import { C, captionTextStyle, codeTextStyle, controlStyle } from './ui';
 
 export type ToolSourceRef = {
   key: string;
@@ -137,8 +137,8 @@ export function OriginalToolSource(props: { source: ToolSource; label: string })
   const source = props.source;
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ color: C.muted }}>{props.label}</Text>
-      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+      <Text style={{ ...captionTextStyle, color: C.muted }}>{props.label}</Text>
+      <Text selectable style={{ color: C.text, ...codeTextStyle }}>
         {source.content()}
       </Text>
       <If when={source.error()}>
@@ -147,6 +147,9 @@ export function OriginalToolSource(props: { source: ToolSource; label: string })
       <If when={!source.complete()}>
         <Button
           disabled={!source.error()}
+          style={controlStyle}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
           onPress={inputAction(source.read, {
             sessionId: source.original.sessionId,
             key: source.original.key,

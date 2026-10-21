@@ -21,7 +21,8 @@ import { cleanup, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import type { ModelUsage, UsageModelAttempt } from '../../../../packages/plugin-sdk/src/index.js';
 import { host } from './host';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
+import { Icon } from './Icon';
 
 type Reading =
   | { kind: 'loading'; checked: number }
@@ -165,6 +166,9 @@ export function TurnUsage(props: {
           padding: 16,
           gap: 16,
           backgroundColor: C.surface,
+          borderWidth: 1,
+          borderColor: C.line,
+          borderRadius: 16,
         }}
       >
         <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
@@ -172,8 +176,13 @@ export function TurnUsage(props: {
           <Button
             ref={(node) => node.focus()}
             accessibilityLabel="Close turn usage"
+            tooltip="Close"
             onPress={props.close}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
           >
+            <Icon name="close" color={C.secondary} />
             <Text style={{ color: C.accent }}>Close</Text>
           </Button>
         </View>
@@ -196,6 +205,9 @@ export function TurnUsage(props: {
               </Text>
               <Button
                 accessibilityLabel="Retry original turn usage"
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
                 onPress={inputAction(read, {
                   sessionId: props.sessionId,
                   turnId: props.turnId,

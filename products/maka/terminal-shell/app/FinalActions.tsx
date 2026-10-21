@@ -25,7 +25,7 @@ import type { Position, Row } from './history';
 import { MessageCopy } from './MessageCopy';
 import { forkTitle, type SessionAction } from './sessionLifecycle';
 import { TurnUsage } from './TurnUsage';
-import { C, controlStyle } from './ui';
+import { C, captionTextStyle, controlStyle } from './ui';
 
 type Target = {
   sessionId: string;
@@ -149,7 +149,9 @@ export function FinalActions(props: {
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ color: C.muted }}>{pending() ? 'Forking…' : 'Fork from here'}</Text>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            {pending() ? 'Forking…' : 'Fork from here'}
+          </Text>
         </Button>
         <Button
           ref={(node) => {
@@ -162,7 +164,7 @@ export function FinalActions(props: {
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ color: C.muted }}>Usage</Text>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>Usage</Text>
         </Button>
         <If when={details()}>
           <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>{details()}</Text>

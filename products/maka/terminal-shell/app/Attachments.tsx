@@ -24,7 +24,8 @@ import type { AgentHistoryAttachment } from '../../../../packages/plugin-sdk/src
 import type { AttachmentDraft } from './attachmentDraft';
 import type { Position } from './history';
 import { ImageThumbnail, type ImagePreview } from './ImageThumbnail';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
+import { Icon } from './Icon';
 
 const image = (mime: string) =>
   ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'].includes(mime);
@@ -42,25 +43,20 @@ export function DraftAttachments(props: {
   const owner = props.draft;
   return (
     <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-        <Button
-          accessibilityLabel="Attach files"
-          disabled={owner.restoring()}
-          onPress={inputAction(owner.open, { owner: owner.sessionId, value: !owner.picker() })}
-          hoverStyle={{ backgroundColor: C.line }}
-          focusStyle={{ backgroundColor: C.line }}
-        >
-          <Text style={{ color: C.accent }}>＋ Attach files · Ctrl+U</Text>
-        </Button>
-        <If when={owner.picker()}>
+      <If when={owner.picker()}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Button
             accessibilityLabel="Close attachment picker"
             onPress={inputAction(owner.open, { owner: owner.sessionId, value: false })}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            hoverStyle={{ backgroundColor: C.line }}
+            focusStyle={{ backgroundColor: C.line }}
           >
-            <Text style={{ color: C.muted }}>Close picker</Text>
+            <Icon name="close" color={C.secondary} />
+            <Text style={{ color: C.secondary }}>Close picker</Text>
           </Button>
-        </If>
-      </View>
+        </View>
+      </If>
       {/* Keep this native owner mounted. Hiding only closes its private picker;
         the original selected path and in-flight resource retain their owner. */}
       <AttachmentPicker
@@ -103,8 +99,11 @@ export function DraftAttachments(props: {
                           owner: owner.sessionId,
                           id: original.id,
                         })}
+                        style={controlStyle}
+                        hoverStyle={{ backgroundColor: C.line }}
+                        focusStyle={{ backgroundColor: C.line }}
                       >
-                        <Text style={{ color: C.muted }}>× Remove</Text>
+                        <Text style={{ color: C.muted }}>Remove</Text>
                       </Button>
                     </View>
                   </View>
@@ -140,6 +139,9 @@ export function DraftAttachments(props: {
                           owner: owner.sessionId,
                           id: row().id,
                         })}
+                        style={controlStyle}
+                        hoverStyle={{ backgroundColor: C.line }}
+                        focusStyle={{ backgroundColor: C.line }}
                       >
                         <Text style={{ color: C.accent }}>
                           {row().original ? 'Recover original upload' : 'Check original upload'}
@@ -152,6 +154,9 @@ export function DraftAttachments(props: {
                             owner: owner.sessionId,
                             id: row().id,
                           })}
+                          style={controlStyle}
+                          hoverStyle={{ backgroundColor: C.line }}
+                          focusStyle={{ backgroundColor: C.line }}
                         >
                           <Text style={{ color: C.warning }}>Abandon unconfirmed upload</Text>
                         </Button>
@@ -164,8 +169,11 @@ export function DraftAttachments(props: {
                           owner: owner.sessionId,
                           id: row().id,
                         })}
+                        style={controlStyle}
+                        hoverStyle={{ backgroundColor: C.line }}
+                        focusStyle={{ backgroundColor: C.line }}
                       >
-                        <Text style={{ color: C.muted }}>× Remove</Text>
+                        <Text style={{ color: C.muted }}>Remove</Text>
                       </Button>
                     </If>
                   </View>
@@ -179,7 +187,12 @@ export function DraftAttachments(props: {
         <Text selectable style={{ color: C.danger }}>
           {owner.error()}
         </Text>
-        <Button onPress={owner.retry}>
+        <Button
+          onPress={owner.retry}
+          style={controlStyle}
+          hoverStyle={{ backgroundColor: C.line }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
           <Text style={{ color: C.accent }}>Retry attachment updates</Text>
         </Button>
       </If>

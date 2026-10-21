@@ -23,7 +23,16 @@ import { host } from './host';
 import type { BrowserSession } from './browsing';
 import { forkTitle, SessionRevisionConflict } from './sessionLifecycle';
 import type { SessionAction } from './sessionLifecycle';
-import { C } from './ui';
+import {
+  C,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+  inputTextStyle,
+  inputBorderRadius,
+} from './ui';
+import { Icon } from './Icon';
 
 type Page = 'actions' | 'rename' | 'fork' | 'remove';
 export function SessionActions(props: {
@@ -115,12 +124,18 @@ export function SessionActions(props: {
           maxWidth: 560,
           maxHeight: '100%',
           padding: 16,
-          gap: 8,
+          gap: 16,
           backgroundColor: C.surface,
+          borderWidth: 1,
+          borderColor: C.line,
+          borderRadius: 16,
         }}
       >
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Text numberOfLines={2} style={{ flex: 1, color: C.accent, fontWeight: '700' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text
+            numberOfLines={2}
+            style={{ flex: 1, color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}
+          >
             {page() === 'rename'
               ? 'Rename conversation'
               : page() === 'fork'
@@ -132,14 +147,18 @@ export function SessionActions(props: {
           <Button
             disabled={pending()}
             accessibilityLabel="Back from conversation actions"
+            tooltip={page() === 'actions' ? 'Close · Esc' : 'Back · Esc'}
             onPress={inputAction(back, page())}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>
-              {page() === 'actions' ? 'Close · Esc' : 'Back · Esc'}
-            </Text>
+            <Icon name={page() === 'actions' ? 'close' : 'back'} color={C.secondary} />
+            <Text style={{ color: C.muted }}>{page() === 'actions' ? 'Close' : 'Back'}</Text>
           </Button>
         </View>
-        <Scroll style={{ flexShrink: 1 }}>
+        <Scroll style={{ flexShrink: 1, minHeight: 0 }}>
           <View style={{ gap: 8 }}>
             <Text selectable style={{ color: C.text }}>
               {session().title || 'Untitled conversation'}
@@ -162,6 +181,10 @@ export function SessionActions(props: {
               <Button
                 disabled={pending() || session().archived}
                 accessibilityLabel="Rename conversation"
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(edit, { to: 'rename', original: session() })}
               >
                 <Text style={{ color: C.text }}>Rename</Text>
@@ -169,6 +192,10 @@ export function SessionActions(props: {
               <Button
                 disabled={pending()}
                 accessibilityLabel="Fork conversation"
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(edit, { to: 'fork', original: session() })}
               >
                 <Text style={{ color: C.text }}>Fork into a new conversation</Text>
@@ -178,6 +205,10 @@ export function SessionActions(props: {
                 accessibilityLabel={
                   session().archived ? 'Restore conversation' : 'Archive conversation'
                 }
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(submit, {
                   kind: session().archived ? 'restore' : 'archive',
                   session: session(),
@@ -188,6 +219,10 @@ export function SessionActions(props: {
               <Button
                 disabled={pending()}
                 accessibilityLabel="Delete conversation"
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(edit, { to: 'remove', original: session() })}
               >
                 <Text style={{ color: C.danger }}>Delete…</Text>
@@ -211,7 +246,12 @@ export function SessionActions(props: {
                   color: C.text,
                   backgroundColor: C.background,
                   paddingHorizontal: 8,
+                  borderWidth: 1,
+                  borderColor: C.line,
+                  borderRadius: inputBorderRadius,
+                  ...inputTextStyle,
                 }}
+                focusStyle={{ borderColor: C.accent }}
               />
               <If when={page() === 'fork'}>
                 <Text style={{ color: C.muted }}>
@@ -227,6 +267,10 @@ export function SessionActions(props: {
                 accessibilityLabel={
                   page() === 'fork' ? 'Create conversation fork' : 'Save conversation title'
                 }
+                style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
+                hoverStyle={{ backgroundColor: C.accentHover }}
+                focusStyle={{ backgroundColor: C.accentHover }}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(
                   submit,
                   page() === 'fork'
@@ -234,7 +278,7 @@ export function SessionActions(props: {
                     : { kind: 'rename', session: session(), title: title() },
                 )}
               >
-                <Text style={{ color: C.accent }}>
+                <Text style={{ color: C.background }}>
                   {page() === 'fork' ? 'Create fork' : 'Save title'}
                 </Text>
               </Button>
@@ -247,11 +291,22 @@ export function SessionActions(props: {
               <Button
                 disabled={pending()}
                 accessibilityLabel="Confirm delete conversation"
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
                 onPress={inputAction(submit, { kind: 'remove', session: session() })}
               >
                 <Text style={{ color: C.danger }}>Delete permanently</Text>
               </Button>
-              <Button disabled={pending()} onPress={inputAction(back, 'remove')}>
+              <Button
+                disabled={pending()}
+                onPress={inputAction(back, 'remove')}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
+              >
                 <Text style={{ color: C.text }}>Keep conversation</Text>
               </Button>
             </If>

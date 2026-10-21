@@ -176,14 +176,12 @@ export function Palette(props: {
                           flex: 1,
                         }}
                       >
-                        {matches()[index()]?.id === entry().id ? '› ' : '  '}
                         {entry().title}
                       </Text>
                       <Text style={{ color: C.muted }}>{entry().hint ?? ''}</Text>
                     </View>
                     <If when={entry().detail}>
                       <Text numberOfLines={1} style={{ color: C.muted }}>
-                        {'  '}
                         {entry().detail}
                       </Text>
                     </If>
@@ -196,7 +194,6 @@ export function Palette(props: {
         <If when={!matches().length}>
           <Text style={{ color: C.muted }}>No matches.</Text>
         </If>
-        <Text style={{ color: C.muted }}>Type to filter · ↑↓ to navigate</Text>
       </View>
     </Dialog>
   );
