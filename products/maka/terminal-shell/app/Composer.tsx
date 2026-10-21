@@ -96,7 +96,12 @@ export function Composer(props: {
   };
   const workspaceLabel = () => {
     const path = props.session()?.workspace();
-    return path ? (path.split('/').filter(Boolean).at(-1) ?? path) : 'Choose workspace';
+    return path
+      ? (path
+          .split(path.startsWith('/') ? '/' : /[\\/]/)
+          .filter(Boolean)
+          .at(-1) ?? path)
+      : 'Choose workspace';
   };
   return (
     <View
