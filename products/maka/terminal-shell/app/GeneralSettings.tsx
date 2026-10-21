@@ -217,6 +217,7 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
         />
         <Button
           disabled={owner.disabled()}
+          accessibilityLabel="Use Host default"
           onPress={inputAction(owner.useDefault, request)}
           focusStyle={{ backgroundColor: C.line }}
         >
@@ -234,6 +235,7 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
         </Button>
         <Button
           disabled={owner.busy()}
+          accessibilityLabel="Cancel"
           onPress={inputAction(owner.cancel, request)}
           focusStyle={{ backgroundColor: C.line }}
         >
