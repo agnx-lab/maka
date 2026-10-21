@@ -219,10 +219,10 @@ fn run(
             if let Some(offer) = ready {
                 // Resize invalidates the receipt immediately, even while GPU
                 // readback or an old output transaction is still finishing.
-                if resize.is_none()
-                    && offer.geometry == generation
-                    && platform.mark_presented(offer.token.clone()).is_ok()
-                {
+                if resize.is_none() && offer.geometry == generation {
+                    platform
+                        .mark_presented(offer.token.clone())
+                        .map_err(|error| error.to_string())?;
                     let mut state = presentation.state.lock().unwrap();
                     let inbox = state.pixels.as_mut().unwrap();
                     if inbox.resize.is_none() && inbox.geometry == offer.geometry {
@@ -241,18 +241,30 @@ fn run(
             // no pump occurs between this check and its actual dispatch.
             platform.pump();
             encode_pending(presentation);
+            {
+                let state = presentation.state.lock().unwrap();
+                if presentation.stop.load(Ordering::Acquire) || state.quit {
+                    return Ok(());
+                }
+                if let Some(error) = &state.error {
+                    return Err(error.clone());
+                }
+            }
             let exact_ready = !platform.has_pending();
             if let Some(input) = input {
+                let mut refresh = false;
                 let token = input
                     .token
                     .or_else(|| input.startup.then(|| platform.presented()).flatten());
                 match &input.event {
                     Event::FocusIn => {
+                        refresh = true;
                         platform
                             .set_active(true)
                             .map_err(|error| error.to_string())?;
                     }
                     Event::FocusOut => {
+                        refresh = true;
                         source.borrow().cancel_capture();
                         platform
                             .set_active(false)
@@ -264,6 +276,7 @@ fn run(
                         {
                             if let Event::Paste(text) = event {
                                 if source.borrow().editor_matches(&snapshot) {
+                                    refresh = true;
                                     platform.paste(text).map_err(|error| error.to_string())?;
                                     let mut state = presentation.state.lock().unwrap();
                                     let inbox = state.pixels.as_mut().unwrap();
@@ -304,13 +317,13 @@ fn run(
                                                 )?
                                         }
                                     };
-                                    if !admitted {
-                                        continue;
-                                    }
-                                    if matches!(
-                                        event,
-                                        PlatformInput::MouseUp(_) | PlatformInput::KeyDown(_)
-                                    ) {
+                                    refresh |= admitted;
+                                    if admitted
+                                        && matches!(
+                                            event,
+                                            PlatformInput::MouseUp(_) | PlatformInput::KeyDown(_)
+                                        )
+                                    {
                                         let mut state = presentation.state.lock().unwrap();
                                         let inbox = state.pixels.as_mut().unwrap();
                                         inbox.reject_through =
@@ -321,14 +334,16 @@ fn run(
                         }
                     }
                 }
-                application.update(|cx| {
-                    if let Some(window) = window.borrow().as_ref() {
-                        let _ = window.update(cx, |_, window, cx| {
-                            window.refresh();
-                            cx.notify();
-                        });
-                    }
-                });
+                if refresh {
+                    application.update(|cx| {
+                        if let Some(window) = window.borrow().as_ref() {
+                            let _ = window.update(cx, |_, window, cx| {
+                                window.refresh();
+                                cx.notify();
+                            });
+                        }
+                    });
+                }
             }
             platform.pump();
             let retained = presentation

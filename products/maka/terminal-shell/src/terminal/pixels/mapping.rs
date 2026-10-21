@@ -96,8 +96,8 @@ impl Mapping {
                 let position = if caps.pixel_mouse {
                     point(px(mouse.x as f32), px(mouse.y as f32))
                 } else {
-                    let x = u16::try_from(mouse.x).ok()?.saturating_sub(1);
-                    let y = u16::try_from(mouse.y).ok()?.saturating_sub(1);
+                    let x = u16::try_from(mouse.x).ok()?.checked_sub(1)?;
+                    let y = u16::try_from(mouse.y).ok()?.checked_sub(1)?;
                     cell_centre(x, y, caps)?
                 };
                 Some(self.mouse(mouse.kind, mouse.modifiers, position))
@@ -186,6 +186,9 @@ impl Mapping {
 }
 
 fn cell_centre(x: u16, y: u16, caps: Capabilities) -> Option<gpui::Point<gpui::Pixels>> {
+    if caps.size.cols == 0 || caps.size.rows == 0 {
+        return None;
+    }
     Some(point(
         px((f32::from(x) + 0.5) * f32::from(caps.size.pixel_width?) / f32::from(caps.size.cols)),
         px((f32::from(y) + 0.5) * f32::from(caps.size.pixel_height?) / f32::from(caps.size.rows)),
@@ -255,6 +258,17 @@ mod tests {
         assert_eq!(
             (f32::from(event.position.x), f32::from(event.position.y)),
             (4.0, 8.0)
+        );
+        assert!(
+            mapping
+                .input(
+                    &raw(0, 1),
+                    Capabilities {
+                        pixel_mouse: false,
+                        ..caps
+                    }
+                )
+                .is_none()
         );
     }
 }
