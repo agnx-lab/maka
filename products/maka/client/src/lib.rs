@@ -179,6 +179,19 @@ impl Client {
         &self.0.source
     }
 
+    /// Read the descriptor captured by this original Host connection.
+    /// This does not open a request or grant access to its service.
+    pub async fn describe(&self, endpoint: &str) -> Result<Description> {
+        Ok(self
+            .0
+            .host
+            .lock()
+            .await
+            .catalogue()
+            .describe(endpoint)?
+            .clone())
+    }
+
     async fn open(
         &self,
         endpoint: &str,

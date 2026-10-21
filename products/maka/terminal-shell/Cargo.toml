@@ -34,6 +34,7 @@ maka-capabilities.workspace = true
 maka-event-log.workspace = true
 maka-host-runtime.workspace = true
 maka-plugin-core.workspace = true
+maka-settings-native.workspace = true
 maka-ui-runtime.workspace = true
 nsh-core.workspace = true
 nsh-engine.workspace = true
@@ -67,6 +68,5 @@ maka-agent-native.workspace = true
 maka-files-native.workspace = true
 maka-workspace-api.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
-maka-settings-native.workspace = true
 maka-config.workspace = true
 maka-packages.workspace = true

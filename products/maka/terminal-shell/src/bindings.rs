@@ -25,10 +25,11 @@ mod settings;
 mod uploads;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
+use maka_plugin_core::contract::Contract;
 use nsh_core::{JsonValue, ui::prelude::*};
 use std::{
     future::Future,
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, LazyLock, Mutex as StdMutex},
 };
 use tokio::runtime::Handle;
 use tokio_util::task::TaskTracker;
@@ -134,6 +135,31 @@ async fn execute<T: Send + 'static>(
         .map_err(|error| format!("Host task failed: {error}"))?
 }
 
+// The typed application transport describes these exact public contracts.
+// Host output validation alone checks the catalogue's contract, which could
+// otherwise be a different service under the same endpoint alias.
+fn require_contract(endpoint: &str, actual: &Contract) -> Result<(), String> {
+    static AGENT_CONTRACT: LazyLock<Contract> = LazyLock::new(maka_agent_api::contract);
+    static SETTINGS_CONTRACT: LazyLock<Contract> =
+        LazyLock::new(maka_settings_native::contract::contract);
+    static AUTHENTICATION_CONTRACT: LazyLock<Contract> =
+        LazyLock::new(maka_settings_native::contract::authentication_contract);
+    static SETUP_CONTRACT: LazyLock<Contract> =
+        LazyLock::new(maka_settings_native::contract::setup_contract);
+    let expected: &Contract = match endpoint {
+        "agent" => &AGENT_CONTRACT,
+        "settings" => &SETTINGS_CONTRACT,
+        "authentication" => &AUTHENTICATION_CONTRACT,
+        "setup" => &SETUP_CONTRACT,
+        // Generic plugin queries keep the raw native unknown result contract.
+        _ => return Ok(()),
+    };
+    if actual != expected {
+        return Err(format!("Unsupported {endpoint} service contract"));
+    }
+    Ok(())
+}
+
 #[class]
 impl ApplicationHost {
     /// Display only. Keep the original opaque WorkspacePath for every Host call.
@@ -172,6 +198,7 @@ impl ApplicationHost {
         let owner = this.with(|host| host.owner.clone());
         drop(this);
         execute(owner.clone(), async move {
+            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
             owner.client.query(&endpoint, &method, input).await
         })
         .await
@@ -194,6 +221,7 @@ impl ApplicationHost {
             SubscriptionKind::Events
         };
         let subscription = execute(owner.clone(), async move {
+            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
             let subscription = owner.client.subscribe(&endpoint, &method, input).await?;
             Ok(ScopedSubscription {
                 owner,
