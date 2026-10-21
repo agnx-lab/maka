@@ -18,7 +18,7 @@
  */
 
 import { batch, cleanup, signal } from 'nsh';
-import { host } from 'maka/host';
+import { host } from './host';
 import type {
   LanguagePreference,
   SettingsAssistantPreferences,

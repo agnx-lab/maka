@@ -18,7 +18,7 @@
  */
 
 import { cleanup, signal } from 'nsh';
-import { host } from 'maka/host';
+import { host } from './host';
 import type {
   CredentialStatus,
   CredentialVersionBasis,
