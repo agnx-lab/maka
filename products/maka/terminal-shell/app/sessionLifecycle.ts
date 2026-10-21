@@ -21,7 +21,8 @@ import type { AgentSession } from '../../../../packages/plugin-sdk/src/index.js'
 import type { Control } from './Conversation';
 
 export type SessionAction =
-  | { kind: 'rename' | 'fork'; session: AgentSession; title: string }
+  | { kind: 'rename'; session: AgentSession; title: string }
+  | { kind: 'fork'; session: AgentSession; title: string; turnId: string | null }
   | { kind: 'archive' | 'restore' | 'remove'; session: AgentSession };
 export type SessionActionResult =
   | { kind: 'updated' | 'forked'; session: AgentSession }
@@ -32,6 +33,9 @@ export class SessionRevisionConflict extends Error {
     super('This conversation changed. Review its current details, then try the action again.');
   }
 }
+
+export const forkTitle = (title: string) =>
+  [...`Fork of ${title || 'Untitled conversation'}`].slice(0, 128).join('');
 
 // The captured Session is the user's original revision and labels. A conflict
 // requires another explicit action; never silently replace its CAS identity.
@@ -47,7 +51,7 @@ export async function performSessionAction(
       : action.kind === 'fork'
         ? await control('fork', {
             ...identity,
-            turnId: null,
+            turnId: action.turnId,
             title: action.title,
             labels: [...session.labels],
           })
@@ -55,9 +59,13 @@ export async function performSessionAction(
   if (result.kind === 'revision_conflict') throw new SessionRevisionConflict();
   if (result.kind === 'rejected') {
     const reason =
-      result.reason === 'busy'
-        ? 'This conversation is working, has queued messages, or still needs your input. Finish it before changing its lifecycle.'
-        : `Conversation action rejected: ${result.reason}`;
+      action.kind === 'fork' && result.reason === 'history_unavailable'
+        ? 'The Host cannot copy this history yet. Fork a completed turn, or wait for the current turn to finish.'
+        : action.kind === 'fork' && result.reason === 'managed_session'
+          ? 'WorkHub manages this conversation. Its history cannot be forked here.'
+          : result.reason === 'busy'
+            ? 'This conversation is working, has queued messages, or still needs your input. Finish it before changing its lifecycle.'
+            : `Conversation action rejected: ${result.reason}`;
     throw new Error(reason);
   }
   if (result.kind === 'removed') return { kind: 'removed', sessionId: result.sessionId };

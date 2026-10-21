@@ -548,6 +548,7 @@ function App() {
               client={host.session(id())}
               presentation={presentation}
               control={control}
+              fork={(action) => changeBrowsedSession(action, id())}
               commands={inputAction(open, { kind: 'commands', sessionId: id() })}
               browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
               files={inputAction(resources.openFiles, { sessionId: id() })}

@@ -17,7 +17,11 @@
  * under the License.
  */
 
-import type { AgentHistoryAttachment } from '../../../../packages/plugin-sdk/src/index.js';
+import type {
+  AgentHistoryAttachment,
+  HistoryModel,
+  HistoryTurnTiming,
+} from '../../../../packages/plugin-sdk/src/index.js';
 
 export type Position = { sourceSequence: number; itemIndex: number };
 type Fragment = { offset: number; text: string };
@@ -35,8 +39,8 @@ export type Row = {
   attachments?: AgentHistoryAttachment[];
   turnId?: string;
   timestamp?: number;
-  timing?: any;
-  model?: any;
+  timing?: HistoryTurnTiming;
+  model?: HistoryModel;
   finalOutput?: boolean;
   metadataThrough?: number;
   invocationId?: string;

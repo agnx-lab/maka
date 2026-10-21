@@ -18,6 +18,7 @@
  */
 
 import { computed, inputAction, signal, Text, View } from 'nsh';
+import type { JSX } from 'nsh';
 import { Button } from 'nsh/base';
 import { messageKey, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
@@ -46,6 +47,7 @@ export function MessageRow({
   onExpand,
   ownerKey,
   reasoningPreview,
+  finalActions,
 }: {
   item: () => Row;
   sessionId: string;
@@ -55,6 +57,7 @@ export function MessageRow({
   onExpand?(key: string): void;
   ownerKey?: () => string;
   reasoningPreview?: () => boolean;
+  finalActions?(row: () => Row, ownerKey: () => string): JSX.Element;
 }) {
   const rowKey = (row: Row) => ownerKey?.() ?? messageKey(row);
   return (
@@ -141,12 +144,19 @@ export function MessageRow({
                             row().position
                           }
                         >
-                          <MessageCopy
-                            row={row}
-                            ownerKey={() => rowKey(row())}
-                            sessionId={sessionId}
-                            through={through}
-                          />
+                          <If
+                            when={finalActions}
+                            else={
+                              <MessageCopy
+                                row={row}
+                                ownerKey={() => rowKey(row())}
+                                sessionId={sessionId}
+                                through={through}
+                              />
+                            }
+                          >
+                            {finalActions?.(row, () => rowKey(row()))}
+                          </If>
                         </If>
                         <Button
                           selected={sourceMode()}

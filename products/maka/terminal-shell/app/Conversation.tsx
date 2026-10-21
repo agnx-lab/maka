@@ -39,6 +39,8 @@ import type { ComposerSession, SendAction } from './Composer';
 import { sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { MessageRow, type MessageViewState } from './MessageRow';
+import { FinalActions } from './FinalActions';
+import type { SessionAction } from './sessionLifecycle';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
 import { projectProcessGroups, stableRowId } from './processGroups';
@@ -75,6 +77,7 @@ type ConversationProps = {
   client: ScopedHost;
   presentation: PresentationSettings;
   control: Control;
+  fork(action: Extract<SessionAction, { kind: 'fork' }>): Promise<void>;
   commands(): void;
   browse(): void;
   files(): void;
@@ -1762,6 +1765,15 @@ export function Conversation(props: ConversationProps) {
                         through={() => latestKnown}
                         previewImage={props.previewImage}
                         onExpand={reveal}
+                        finalActions={(row, ownerKey) => (
+                          <FinalActions
+                            row={row}
+                            ownerKey={ownerKey}
+                            sessionId={sessionId}
+                            through={() => latestKnown}
+                            fork={props.fork}
+                          />
+                        )}
                       />
                     </View>
                   );

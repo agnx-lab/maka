@@ -23,6 +23,8 @@ mod attachment_draft;
 mod attachment_intake;
 #[path = "real_host/attachments.rs"]
 mod attachments;
+#[path = "real_host/final_actions.rs"]
+mod final_actions;
 #[path = "real_host/interactions.rs"]
 mod interactions;
 #[path = "real_host/keyboard.rs"]

@@ -21,7 +21,7 @@ import { cleanup, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from './host';
 import type { BrowserSession } from './browsing';
-import { SessionRevisionConflict } from './sessionLifecycle';
+import { forkTitle, SessionRevisionConflict } from './sessionLifecycle';
 import type { SessionAction } from './sessionLifecycle';
 import { C } from './ui';
 
@@ -55,11 +55,7 @@ export function SessionActions(props: {
   const edit = ({ to, original }: { to: Page; original: BrowserSession }) => {
     if (!active() || pending() || page() !== 'actions' || !sameSession(original)) return;
     error.set('');
-    title.set(
-      to === 'fork'
-        ? [...`Fork of ${original.title || 'Untitled conversation'}`].slice(0, 128).join('')
-        : original.title,
-    );
+    title.set(to === 'fork' ? forkTitle(original.title) : original.title);
     page.set(to);
   };
   const submit = async (action: SessionAction) => {
@@ -231,11 +227,12 @@ export function SessionActions(props: {
                 accessibilityLabel={
                   page() === 'fork' ? 'Create conversation fork' : 'Save conversation title'
                 }
-                onPress={inputAction(submit, {
-                  kind: page() === 'fork' ? 'fork' : 'rename',
-                  session: session(),
-                  title: title(),
-                })}
+                onPress={inputAction(
+                  submit,
+                  page() === 'fork'
+                    ? { kind: 'fork', session: session(), title: title(), turnId: null }
+                    : { kind: 'rename', session: session(), title: title() },
+                )}
               >
                 <Text style={{ color: C.accent }}>
                   {page() === 'fork' ? 'Create fork' : 'Save title'}
