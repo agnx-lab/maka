@@ -17,7 +17,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/gpui", "crates/gpui_macos", "crates/gpui_windows", "crates/gpui_linux", "crates/scheduler"]
+members = ["crates/gpui", "crates/gpui_macos", "crates/gpui_windows", "crates/gpui_linux", "crates/gpui_wgpu", "crates/scheduler"]
 
 # Standalone native tests use the same adapted owners as the application.
 [patch.crates-io]
@@ -25,6 +25,7 @@ gpui-fast = { path = "crates/gpui" }
 gpui-fast-macos = { path = "crates/gpui_macos" }
 gpui-fast-windows = { path = "crates/gpui_windows" }
 gpui-fast-linux = { path = "crates/gpui_linux" }
+gpui-fast-wgpu = { path = "crates/gpui_wgpu" }
 gpui-pre-scheduler = { path = "crates/scheduler" }
 async-io = { path = "../async-io" }
 
