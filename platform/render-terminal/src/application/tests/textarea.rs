@@ -609,56 +609,227 @@ fn terminal_row_limits_resize_the_original_editor_and_reject_inverted_ranges() {
 }
 
 #[test]
-fn full_capacity_reset_captures_every_byte_and_oversize_reset_preserves_original_draft() {
+fn complete_large_reset_edits_and_reader_capture_preserve_original_text() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     let (_runtime, mut tui) = presenter();
-    draw(&mut tui, 50, 20);
-    let original = observation(&tui);
-    let text = "中".repeat(21845) + "x";
-    assert_eq!(text.len(), 65536);
-    dispatch(
-        &mut tui,
-        "configure",
-        json!({"command":{
-            "owner":original["snapshot"]["text"]["owner"],"sequence":1,
-            "basedOn":original["revision"],"edit":{"kind":"reset","text":text}
-        }}),
-    );
-    let full = observation(&tui);
-    assert_eq!(full["receipt"]["outcome"]["status"], "applied");
-    assert_eq!(full["snapshot"]["text"]["bytes"], 65536);
-    dispatch(
-        &mut tui,
-        "read",
-        json!({"end":65536,"capture":{
-            "kind":"at_revision","owner":full["snapshot"]["text"]["owner"],"revision":full["revision"]
-        }}),
-    );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while tui.application.frame(&tui.root).unwrap().state["outcome"].is_null() {
-        assert!(std::time::Instant::now() < deadline);
-        tui.pump_settled().unwrap();
-        std::thread::yield_now();
-    }
-    assert_eq!(
-        tui.application.frame(&tui.root).unwrap().state["outcome"]["value"]["text"],
-        text
-    );
-    // Within the schema's character budget but above the native UTF-8 byte budget.
-    dispatch(
-        &mut tui,
-        "configure",
-        json!({"command":{
-            "owner":full["snapshot"]["text"]["owner"],"sequence":2,
-            "basedOn":full["revision"],"edit":{"kind":"reset","text":"中".repeat(21846)}
-        }}),
-    );
-    let kept = observation(&tui);
-    assert_eq!(
-        kept["receipt"]["outcome"],
-        json!({"status":"conflict","reason":"representation"})
-    );
-    assert_eq!(kept["snapshot"], full["snapshot"]);
+    let completed = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+        draw(&mut tui, 50, 20);
+        let original = observation(&tui);
+        let text = format!(
+            "中😀 COMPLETE START\n{}COMPLETE END",
+            "保留中文😀原文。\n".repeat(50_000)
+        );
+        assert!(text.len() > 1024 * 1024);
+        // Schema errors can include the entire command: keep original RED diagnostics bounded.
+        let bounded = |error: Error| error.to_string().chars().take(240).collect::<String>();
+        let revision = tui.application.frame(&tui.root).unwrap().revision;
+        tui.application
+            .dispatch(
+                &tui.root,
+                revision,
+                "configure",
+                json!({"command":{
+                    "owner":original["snapshot"]["text"]["owner"],"sequence":1,
+                    "basedOn":original["revision"],"edit":{"kind":"reset","text":text}
+                }}),
+            )
+            .map_err(bounded)?;
+        tui.pump_settled().map_err(bounded)?;
+        let initialized = observation(&tui);
+        assert_eq!(initialized["receipt"]["outcome"]["status"], "applied");
+        assert_eq!(
+            initialized["snapshot"]["text"]["owner"],
+            original["snapshot"]["text"]["owner"]
+        );
+        assert_eq!(initialized["snapshot"]["text"]["bytes"], text.len());
+        draw(&mut tui, 50, 20);
+        tui.input_settled(Event::Paste(" native尾😀".into()))
+            .map_err(bounded)?;
+        let expected = format!("{text} native尾😀");
+        let edited = observation(&tui);
+        assert_eq!(edited["snapshot"]["text"]["bytes"], expected.len());
+        assert_eq!(
+            edited["snapshot"]["text"]["owner"],
+            initialized["snapshot"]["text"]["owner"]
+        );
+        for (sequence, based_on, edit, reason) in [
+            (
+                2,
+                original["revision"].clone(),
+                json!({"kind":"reset","text":"STALE"}),
+                "revision",
+            ),
+            (
+                3,
+                edited["revision"].clone(),
+                json!({"kind":"replace_range",
+                "range":{"start":2,"end":3},"text":"split emoji"}),
+                "representation",
+            ),
+        ] {
+            dispatch(
+                &mut tui,
+                "configure",
+                json!({"command":{
+                    "owner":edited["snapshot"]["text"]["owner"],"sequence":sequence,
+                    "basedOn":based_on,"edit":edit
+                }}),
+            );
+            let kept = observation(&tui);
+            assert_eq!(
+                kept["receipt"]["outcome"],
+                json!({"status":"conflict","reason":reason})
+            );
+            assert_eq!(kept["snapshot"], edited["snapshot"]);
+        }
+        // The original resource must reject a byte range inside the opening Chinese glyph.
+        dispatch(
+            &mut tui,
+            "read",
+            json!({"start":1,"end":2,"capture":{
+                "kind":"at_revision","owner":edited["snapshot"]["text"]["owner"],"revision":edited["revision"]
+            }}),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tui.application.frame(&tui.root).unwrap().state["outcome"].is_null() {
+            assert!(std::time::Instant::now() < deadline);
+            tui.pump_settled().map_err(bounded)?;
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            tui.application.frame(&tui.root).unwrap().state["outcome"]["status"],
+            "failed"
+        );
+        dispatch(
+            &mut tui,
+            "read",
+            json!({"end":expected.len(),"capture":{
+                "kind":"at_revision","owner":edited["snapshot"]["text"]["owner"],"revision":edited["revision"]
+            }}),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tui.application.frame(&tui.root).unwrap().state["outcome"]["status"] != "succeeded" {
+            assert!(std::time::Instant::now() < deadline);
+            tui.pump_settled().map_err(bounded)?;
+            std::thread::yield_now();
+        }
+        let frame = tui.application.frame(&tui.root).unwrap();
+        let value = &frame.state["outcome"]["value"];
+        assert_eq!(value["metadata"], edited["snapshot"]["text"]);
+        let captured = value["text"].as_str().unwrap();
+        assert!(
+            captured.as_bytes() == expected.as_bytes(),
+            "full Reader capture differs: got {} bytes, expected {}",
+            captured.len(),
+            expected.len()
+        );
+        assert_eq!(observation(&tui)["snapshot"], edited["snapshot"]);
+        Ok(())
+    }));
     close(&mut tui);
+    let result = completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(
+        result.is_ok(),
+        "complete native reset failed: {}",
+        result.err().unwrap_or_default()
+    );
+}
+
+#[test]
+fn large_bracketed_paste_keeps_one_undo_step_and_saturates_intrinsic_rows() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let (_runtime, mut tui) = presenter();
+    let completed = catch_unwind(AssertUnwindSafe(|| {
+        draw(&mut tui, 50, 20);
+        let original = observation(&tui);
+        let mount = draft(&tui);
+        dispatch(
+            &mut tui,
+            "configure",
+            json!({"terminalRows":{"min":1,"max":8}}),
+        );
+        tui.input_settled(Event::Key(KeyEvent::new(
+            KeyCode::Char('a'),
+            KeyModifiers::CONTROL,
+        )))
+        .unwrap();
+        // Exactly 65,536 newlines exercise the old row-count wrap as well as the buffer gate.
+        let text = format!(
+            "PASTE START {}PASTE END",
+            "中文😀 retained paste\n".repeat(65_536)
+        );
+        assert!(text.len() > 1024 * 1024);
+        tui.input_settled(Event::Paste(text.clone())).unwrap();
+        let pasted = observation(&tui);
+        assert_eq!(
+            pasted["snapshot"]["text"]["owner"],
+            original["snapshot"]["text"]["owner"]
+        );
+        assert_eq!(pasted["snapshot"]["text"]["bytes"], text.len());
+        draw(&mut tui, 50, 20);
+        let owner = editor_owner(&*tui.resources.owners[&mount.id()].state);
+        assert!(
+            owner.editor.text().as_bytes() == text.as_bytes(),
+            "paste lost original bytes"
+        );
+        assert!(
+            owner.editor.cursor_position().is_some(),
+            "the final caret must remain visible"
+        );
+        let area = tui
+            .scene
+            .iter()
+            .find(|target| target.mount == mount)
+            .unwrap()
+            .area;
+        assert_eq!(
+            area.height, 10,
+            "full document rows must clamp to eight text rows plus insets"
+        );
+        tui.input_settled(Event::Key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL,
+        )))
+        .unwrap();
+        let undone = editor_owner(&*tui.resources.owners[&mount.id()].state)
+            .editor
+            .text();
+        assert!(
+            undone == "Start",
+            "undo must restore the five original bytes; got {} bytes",
+            undone.len()
+        );
+        tui.input_settled(Event::Key(KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::CONTROL,
+        )))
+        .unwrap();
+        assert!(
+            editor_owner(&*tui.resources.owners[&mount.id()].state)
+                .editor
+                .text()
+                .as_bytes()
+                == text.as_bytes(),
+            "redo lost the complete original paste"
+        );
+        let redone = observation(&tui);
+        assert_eq!(
+            redone["snapshot"]["text"]["owner"],
+            pasted["snapshot"]["text"]["owner"]
+        );
+        assert_eq!(redone["snapshot"]["text"]["bytes"], text.len());
+        assert_eq!(
+            redone["snapshot"]["selection"],
+            pasted["snapshot"]["selection"]
+        );
+        assert_eq!(
+            redone["snapshot"]["reversed"],
+            pasted["snapshot"]["reversed"]
+        );
+        assert!(redone["revision"].as_u64().unwrap() > pasted["revision"].as_u64().unwrap());
+    }));
+    close(&mut tui);
+    completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 }
 fn draft(tui: &Presenter) -> Mount {
     let composer = tui.application.child_mount(&tui.root, "editor").unwrap();

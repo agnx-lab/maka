@@ -20,6 +20,7 @@
 //! Separate prototype database; does not open or migrate old Maka State Roots.
 
 mod append;
+mod application_inspection;
 pub mod applications;
 pub mod archive;
 pub mod artifacts;
@@ -168,11 +169,29 @@ pub struct EventLog {
     shell_changes: tokio::sync::broadcast::Sender<shell_runs::ShellChange>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenPurpose {
+    Execution,
+    ApplicationInspection,
+}
+
 impl EventLog {
     pub async fn for_root(owner: Arc<root::RootOwner>) -> Result<Self, StoreError> {
         owner.validate_current()?;
         let path = owner.canonical_path().join(root::ROOT_DATABASE);
-        Self::open_owned(&path, Some(owner)).await
+        Self::open_owned(&path, Some(owner), OpenPurpose::Execution).await
+    }
+
+    /// Inspect saved application state without migrations, derived initialization
+    /// or stored member/byte changes. Retains the original Root and database lease until
+    /// SQL close. Only application SELECT APIs using the owned connection belong
+    /// to this opening; it is not a general-purpose read-only EventLog.
+    pub async fn for_application_inspection(
+        owner: Arc<root::RootOwner>,
+    ) -> Result<Self, StoreError> {
+        owner.validate_current()?;
+        let path = owner.canonical_path().join(root::ROOT_DATABASE);
+        Self::open_owned(&path, Some(owner), OpenPurpose::ApplicationInspection).await
     }
 
     /// Reuse the actual owned Root for another trusted native store. This is a
@@ -192,17 +211,21 @@ impl EventLog {
     }
 
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
-        Self::open_owned(path, None).await
+        Self::open_owned(path, None, OpenPurpose::Execution).await
     }
 
     async fn open_owned(
         path: &Path,
         root_owner: Option<Arc<root::RootOwner>>,
+        purpose: OpenPurpose,
     ) -> Result<Self, StoreError> {
         // A symlink alias must share the same lease and SQLite sidecars.
         let path = match path.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if purpose == OpenPurpose::ApplicationInspection {
+                    return Err(error.into());
+                }
                 if path.symlink_metadata().is_ok() {
                     return Err(StoreError::InvalidTransition(
                         "dangling database symlink is unsupported".into(),
@@ -236,26 +259,39 @@ impl EventLog {
         // byte-range locks on the database. Never unlink it while in use.
         let mut lock_path = path.as_os_str().to_os_string();
         lock_path.push(".writer.lock");
-        let lease = match root::FileLease::acquire(Path::new(&lock_path)) {
+        let acquired = match purpose {
+            OpenPurpose::Execution => root::FileLease::acquire(Path::new(&lock_path)),
+            OpenPurpose::ApplicationInspection => {
+                root::FileLease::acquire_existing(Path::new(&lock_path))
+            }
+        };
+        let lease = match acquired {
             Ok(lease) => Arc::new(lease),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 return Err(StoreError::WriterBusy);
             }
             Err(error) => return Err(StoreError::Io(error)),
         };
-        let connection = OwnedConnection::open(
-            SqliteConnectOptions::new()
-                .filename(path)
+        let options = match purpose {
+            OpenPurpose::Execution => SqliteConnectOptions::new()
+                .filename(&path)
                 .create_if_missing(true),
+            OpenPurpose::ApplicationInspection => application_inspection::options(&path)?,
+        };
+        let connection = OwnedConnection::open(
+            options,
             ConnectionAuthority::Writer {
                 lease,
                 root: root_owner.clone(),
             },
-            |connection| {
-                Box::pin(async move {
-                    schema::initialize_connection(connection).await?;
-                    transcript::directory::initialize(connection).await
-                })
+            match purpose {
+                OpenPurpose::Execution => |connection| {
+                    Box::pin(async move {
+                        schema::initialize_connection(connection).await?;
+                        transcript::directory::initialize(connection).await
+                    })
+                },
+                OpenPurpose::ApplicationInspection => application_inspection::initialize,
             },
         )
         .await?;
@@ -264,7 +300,9 @@ impl EventLog {
         let high_water = connection
             .run(move |connection| {
                 Box::pin(async move {
-                    install.install(connection).await?;
+                    if purpose == OpenPurpose::Execution {
+                        install.install(connection).await?;
+                    }
                     sequence_number(
                         sqlx::query_scalar::<_, i64>(
                             "SELECT COALESCE(MAX(sequence), 0) FROM event_log",

@@ -311,7 +311,6 @@ async fn discovery_survives_persistence_and_verification_does_not_require_stream
 
 #[tokio::test]
 async fn compiled_definition_authenticates_without_legacy_registration_or_secret_diagnostics() {
-    use maka_agent_ports::provider::Error;
     use maka_agent_ports::provider::authentication::Authenticate;
     let definition = ApiProviders::definition("openai-compatible").unwrap();
     let transport = Arc::new(Exchange::default());
@@ -339,23 +338,31 @@ async fn compiled_definition_authenticates_without_legacy_registration_or_secret
         .unwrap();
     assert_eq!(result.secret, key);
     assert_eq!(result.refresh_at, None);
-    for (method, input, configuration) in [
+    for (method, input, configuration, error_kind) in [
         (
             "unknown",
             json!({"apiKey":key}),
             connection.configuration.clone(),
+            "invalid",
         ),
         (
             "api-key",
             json!({"apiKey":key,"unknown":key}),
             connection.configuration.clone(),
+            "invalid",
         ),
         (
             "api-key",
             json!({"apiKey":format!("{key}\n{key}")}),
             connection.configuration.clone(),
+            "invalid",
         ),
-        ("api-key", json!({"apiKey":key}), json!({"unknown":key})),
+        (
+            "api-key",
+            json!({"apiKey":key}),
+            json!({"unknown":key}),
+            "invalid_configuration",
+        ),
     ] {
         let error = match definition
             .authenticate(
@@ -374,7 +381,7 @@ async fn compiled_definition_authenticates_without_legacy_registration_or_secret
             Ok(_) => panic!("invalid authentication admitted"),
             Err(error) => error,
         };
-        assert!(matches!(error, Error::Invalid(_)));
+        assert_eq!(serde_json::to_value(&error).unwrap()["kind"], error_kind);
         assert!(!error.to_string().contains(key));
         assert!(!serde_json::to_string(&error).unwrap().contains(key));
     }

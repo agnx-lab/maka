@@ -37,6 +37,8 @@ use serde_json::json;
 mod discovery;
 #[path = "api/effects.rs"]
 mod effects;
+#[path = "api/policy.rs"]
+mod policy;
 
 fn binding(name: &str) -> Definition {
     ApiProviders::definition(name).unwrap()
@@ -192,7 +194,10 @@ async fn account_metadata_and_reply_capacity_survive_plugin_policy_resolution() 
     );
     assert_eq!(model.main_output_limit, Some(2976));
     input.overrides.as_mut().unwrap().max_output_tokens = Some(1000);
-    assert!(anthropic.prepare(input).await.is_err());
+    assert_eq!(
+        serde_json::to_value(anthropic.prepare(input).await.unwrap_err()).unwrap(),
+        json!({"kind":"insufficient_output_budget"})
+    );
     let openai = binding("openai");
     for (id, label) in [("gpt-6-sol", "GPT-6 Sol"), ("gpt-6-luna", "GPT-6 Luna")] {
         let mut input = request(&openai, id, ModelOverride::default());
@@ -300,23 +305,55 @@ async fn selectable_thinking_choices_respect_native_encoder_and_invalid_default(
         input.overrides.clone(),
     )
     .unwrap();
-    assert!(metadata.thinking_levels.is_empty());
+    assert_eq!(metadata.thinking_levels, [High]);
     assert_eq!(metadata.default_thinking_level, None);
-    binding.prepare(input.clone()).await.unwrap();
+    assert_eq!(
+        binding
+            .prepare(input.clone())
+            .await
+            .unwrap()
+            .provider_options,
+        json!({"anthropic":{"cacheControl":{"type":"ephemeral"}}})
+    );
     input.thinking_level = Some(High);
-    assert!(binding.prepare(input.clone()).await.is_err());
+    assert_eq!(
+        binding
+            .prepare(input.clone())
+            .await
+            .unwrap()
+            .provider_options,
+        json!({"anthropic":{"cacheControl":{"type":"ephemeral"},"effort":"high"}})
+    );
     input.overrides.as_mut().unwrap().default_thinking_level = Some(High);
+    let metadata = ApiProviders::model_metadata(
+        "anthropic-compatible",
+        input.connection.clone(),
+        input.model.clone(),
+        input.overrides.clone(),
+    )
+    .unwrap();
+    assert_eq!(metadata.thinking_levels, [High]);
+    assert_eq!(metadata.default_thinking_level, Some(High));
+    input.thinking_level = None;
+    assert_eq!(
+        binding
+            .prepare(input.clone())
+            .await
+            .unwrap()
+            .provider_options,
+        json!({"anthropic":{"cacheControl":{"type":"ephemeral"},"effort":"high"}})
+    );
+    input.overrides.as_mut().unwrap().thinking_levels = Some(vec![Low]);
     assert!(
         ApiProviders::model_metadata(
             "anthropic-compatible",
             input.connection.clone(),
             input.model.clone(),
-            input.overrides.clone()
+            input.overrides.clone(),
         )
         .is_err()
     );
-    input.overrides.as_mut().unwrap().thinking_levels = Some(vec![Low]);
-    // Invalid configured defaults are also rejected for encoders that do support thinking.
+    // A default outside the declared choices is invalid on either protocol.
     assert!(
         ApiProviders::model_metadata(
             "openai-compatible",

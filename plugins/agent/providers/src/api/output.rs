@@ -18,7 +18,7 @@
  */
 
 use super::Selection;
-use super::{Wire, unavailable};
+use super::Wire;
 use maka_agent_ports::provider::Error;
 use serde_json::Value;
 
@@ -64,5 +64,5 @@ fn subtract_budget(limit: u64, options: &Value) -> Result<u64, Error> {
     limit
         .checked_sub(fixed)
         .filter(|limit| *limit > 0)
-        .ok_or_else(|| unavailable("Model output limit does not leave a positive text budget"))
+        .ok_or(Error::InsufficientOutputBudget)
 }

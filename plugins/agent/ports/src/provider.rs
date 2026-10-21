@@ -60,6 +60,32 @@ pub enum Error {
     Rejected(String),
     #[error("invalid provider input or output: {0}")]
     Invalid(String),
+    #[error("invalid provider configuration")]
+    InvalidConfiguration,
+    #[error("invalid selected model")]
+    InvalidModel,
+    #[error("invalid prepared model")]
+    InvalidPreparedModel,
+    #[error("provider changed the selected model identity")]
+    SelectedModelChanged,
+    #[error("unsupported model thinking level")]
+    UnsupportedThinkingLevel,
+    #[error("provider execution profile or semantic features are not supported")]
+    UnsupportedExecutionProfile,
+    #[error("provider adapter or protocol is not supported")]
+    UnsupportedProtocol,
+    #[error("invalid provider endpoint")]
+    InvalidEndpoint,
+    #[error("Responses contract is not declared")]
+    MissingResponsesContract,
+    #[error("provider protocol does not expose parallel-call policy")]
+    UnsupportedParallelPolicy,
+    #[error("model output limit does not leave a positive text budget")]
+    InsufficientOutputBudget,
+    #[error("provider facts are unavailable")]
+    ProviderFactsUnavailable,
+    #[error("provider probe authentication is not supported")]
+    UnsupportedProbeAuthentication,
     #[error("provider request outcome is unknown")]
     OutcomeUnknown,
     #[error("provider transport failed: {0}")]
@@ -156,9 +182,7 @@ impl Definition {
     /// stored connection never substitutes a newer plugin's endpoint or defaults.
     pub fn configure(&self, input: serde_json::Value) -> Result<serde_json::Value, Error> {
         let serde_json::Value::Object(input) = input else {
-            return Err(Error::Invalid(
-                "provider configuration must be an object".into(),
-            ));
+            return Err(Error::InvalidConfiguration);
         };
         let mut configuration = self
             .descriptor
@@ -176,14 +200,12 @@ impl Definition {
     /// drain its actual implementation owner; this value is not an admission grant.
     pub async fn prepare(&self, request: Resolve) -> Result<Model, Error> {
         self.validate_configuration(&request.connection.configuration)?;
-        request.model.validate().map_err(Error::Invalid)?;
+        request.model.validate().map_err(|_| Error::InvalidModel)?;
         let expected = request.model.id.clone();
         let model = self.implementation.resolve(request).await?;
-        model.validate()?;
+        model.validate().map_err(|_| Error::InvalidPreparedModel)?;
         if model.info.id != expected {
-            return Err(Error::Invalid(
-                "provider changed the selected model identity".into(),
-            ));
+            return Err(Error::SelectedModelChanged);
         }
         Ok(model)
     }
@@ -271,14 +293,12 @@ impl Definition {
 
     pub fn validate_configuration(&self, configuration: &serde_json::Value) -> Result<(), Error> {
         if serde_json::to_vec(configuration)
-            .map_err(|_| Error::Invalid("invalid configuration".into()))?
+            .map_err(|_| Error::InvalidConfiguration)?
             .len()
             > 64 * 1024
             || !self.configuration.is_valid(configuration)
         {
-            return Err(Error::Invalid(
-                "provider configuration does not satisfy its schema".into(),
-            ));
+            return Err(Error::InvalidConfiguration);
         }
         Ok(())
     }

@@ -119,10 +119,9 @@ use ratatui::{
 use std::{any::Any, collections::BTreeMap, rc::Rc, sync::Arc};
 
 fn representable(text: &str) -> bool {
-    text.len() <= 64 * 1024
-        && !text
-            .chars()
-            .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+    !text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
 }
 fn color(color: maka_ui_runtime::appearance::Color) -> Color {
     let n = color.0;
@@ -165,13 +164,7 @@ impl Widget for Recipe {
                 context.budget.clone(),
             )
         });
-        let mut edit = EditorOwner::new(
-            Editor::bounded(
-                maka_ui_runtime::textarea::MAX_BUFFER_BYTES,
-                "composer-too-large",
-            ),
-            &self.props.initial_text,
-        );
+        let mut edit = EditorOwner::new(Editor::default(), &self.props.initial_text);
         edit.editor.set_inline_tokens(&self.props.inline_tokens);
         edit.clipboard(context.clone());
         Box::new(Owner {

@@ -29,7 +29,7 @@ use crate::{
 use maka_capabilities::call::Resources;
 use maka_event_log::{
     EventLog,
-    applications::checkpoints::{Checkpoints, MAX_CONTENT, MAX_METADATA, MAX_SOURCE},
+    applications::checkpoints::{Checkpoints, MAX_METADATA, MAX_SOURCE},
 };
 use maka_plugin_core::{composition::InstanceId, runtime::Mount};
 use schemars::JsonSchema;
@@ -351,16 +351,18 @@ impl EditorCheckpoint {
             return;
         }
         let result = (|| {
-            if snapshot.text.bytes > MAX_CONTENT {
-                return Err("editor checkpoint content exceeds 1 MiB".to_owned());
-            }
             let bytes = serde_json::to_vec(&saved).map_err(|error| error.to_string())?;
             if bytes.len() > MAX_METADATA {
                 return Err("editor checkpoint metadata exceeds 32 KiB".into());
             }
+            let size = snapshot
+                .text
+                .bytes
+                .checked_add(bytes.len())
+                .ok_or("editor checkpoint size overflow")?;
             let memory = self
                 .budget
-                .reserve(Kind::Encoded, snapshot.text.bytes + bytes.len())
+                .reserve(Kind::Encoded, size)
                 .map_err(|error| error.to_string())?;
             let text = text();
             if text.len() != snapshot.text.bytes {

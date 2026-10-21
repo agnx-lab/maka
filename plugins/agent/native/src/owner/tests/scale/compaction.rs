@@ -268,7 +268,11 @@ async fn phase(
     )
 }
 
-fn user_prompt(cycle: usize, cycles: usize, prompt_bytes: usize) -> String {
+pub(in crate::owner::tests) fn user_prompt(
+    cycle: usize,
+    cycles: usize,
+    prompt_bytes: usize,
+) -> String {
     if cycle == cycles {
         return "K32_FINAL_PROBE".into();
     }
@@ -281,7 +285,7 @@ fn user_prompt(cycle: usize, cycles: usize, prompt_bytes: usize) -> String {
     )
 }
 
-fn main_answer(cycle: usize, cycles: usize) -> String {
+pub(in crate::owner::tests) fn main_answer(cycle: usize, cycles: usize) -> String {
     if cycle == cycles {
         "K32_FINAL_DONE".into()
     } else {

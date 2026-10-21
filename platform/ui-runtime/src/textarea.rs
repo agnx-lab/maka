@@ -20,8 +20,6 @@
 //! Native editor protocol. Snapshots are observations, never writable buffers.
 use crate::editor::*;
 use crate::file::{FileCapture, FileChoose, FileObservation};
-/// Maximum retained editable buffer; individual commands remain at 64 KiB.
-pub const MAX_BUFFER_BYTES: usize = 1024 * 1024;
 use maka_plugin_core::contract::{Capture, Contract, Interface, Transport};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -67,7 +65,6 @@ pub struct TextareaProps {
     #[serde(default)]
     pub auto_focus: bool,
     #[serde(default)]
-    #[schemars(length(max = 65536))]
     pub initial_text: String,
     #[serde(default)]
     #[schemars(length(max = 512))]

@@ -23,4 +23,6 @@
 
 Supplies compiled model-provider definitions. `api` covers API-backed providers and `codex` implements the Codex provider integration. The native service selects a definition explicitly. Provider transport and credentials use the caller's capabilities and configuration.
 
+API request options follow the resolved protocol, including provider aliases, model overrides and protocol alternates. Declared thinking choices use the same preparation policy for selectable metadata, main requests, automatic titles and recaps. An explicit Anthropic parallel-tool opt-out is encoded in the request. Native preparation diagnostics retain fixed local rejection reasons while keeping arbitrary provider error text private.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

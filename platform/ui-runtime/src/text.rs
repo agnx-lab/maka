@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded asynchronous UTF-8 reads through explicit request-local resources.
+//! Asynchronous UTF-8 range reads through explicit request-local resources.
 use super::actions::{NativeService, ServiceCompletion, ServiceFuture, ServiceRequest};
 use maka_plugin_core::contract::{Contract, Interface, Method, MethodMode, Transport};
 use schemars::JsonSchema;
@@ -73,20 +73,17 @@ impl NativeService for Reader {
                     return Err("unknown text reader method".into());
                 }
                 let range: ReadText = serde_json::from_value(input).map_err(|e| e.to_string())?;
-                if range
+                let length = range
                     .end
                     .checked_sub(range.start)
-                    .is_none_or(|n| n > 64 * 1024)
-                {
-                    return Err("text read exceeds 64 KiB or range invalid".into());
-                }
+                    .ok_or("invalid text range")?;
                 let resource = resources.remove("text").ok_or("missing text resource")?;
                 if resource.resource_type() != text_resource_type() {
                     return Err("text resource type mismatch".into());
                 }
                 let bytes = resource.read(range.start..range.end)?;
-                if bytes.len() > 64 * 1024 {
-                    return Err("text resource returned oversized chunk".into());
+                if bytes.len() != length {
+                    return Err("text resource returned an incorrect byte count".into());
                 }
                 let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
                 serde_json::to_value(TextChunk {

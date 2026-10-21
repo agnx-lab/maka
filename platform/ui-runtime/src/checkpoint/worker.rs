@@ -129,16 +129,25 @@ async fn run(
                     if checkpoints.is_none() {
                         checkpoints = Some(scope.open(&store).map_err(diagnostic)?);
                     }
-                    let mut memory = budget
-                        .reserve(Kind::Encoded, MAX_CONTENT + MAX_METADATA + MAX_SOURCE + 128)
-                        .map_err(diagnostic)?;
+                    let budget = budget.clone();
                     let record = checkpoints
                         .as_ref()
                         .unwrap()
-                        .read(&policy.key)
+                        .read(&policy.key, move |content_bytes| {
+                            let size = content_bytes
+                                .checked_add(MAX_METADATA + MAX_SOURCE + 128)
+                                .ok_or_else(|| {
+                                maka_event_log::StoreError::InvalidTransition(
+                                    "editor checkpoint size overflow".into(),
+                                )
+                            })?;
+                            budget.reserve(Kind::Encoded, size).map_err(|error| {
+                                maka_event_log::StoreError::InvalidTransition(error.to_string())
+                            })
+                        })
                         .await
                         .map_err(diagnostic)?;
-                    let Some(record) = record else {
+                    let Some((record, mut memory)) = record else {
                         return Ok(None);
                     };
                     if record.format != policy.stored_format()

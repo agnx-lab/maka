@@ -51,6 +51,18 @@ impl FileLease {
 
     pub fn acquire(path: &Path) -> io::Result<Self> {
         let file = open_regular(path, true)?;
+        Self::lock(file, path)
+    }
+
+    /// Acquire the same stable lease without creating or repairing its file.
+    pub fn acquire_existing(path: &Path) -> io::Result<Self> {
+        let file = open_regular(path, false)?;
+        #[cfg(unix)]
+        validate_private_file(&file)?;
+        Self::lock(file, path)
+    }
+
+    fn lock(file: File, path: &Path) -> io::Result<Self> {
         file.try_lock().map_err(io::Error::from)?;
         let lease = Self {
             file,
@@ -72,8 +84,12 @@ pub(super) fn identity(metadata: &Metadata) -> io::Result<(u64, u64)> {
 }
 
 pub(super) fn open_regular(path: &Path, create: bool) -> io::Result<File> {
+    open_regular_with(path, create, create)
+}
+
+fn open_regular_with(path: &Path, create: bool, write: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    options.read(true).write(create).create(create);
+    options.read(true).write(write).create(create);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -129,6 +145,19 @@ pub(super) fn acquire(path: &Path) -> io::Result<File> {
         use std::os::unix::fs::PermissionsExt;
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
+    lock_root(file, path)
+}
+
+pub(super) fn acquire_existing(path: &Path) -> io::Result<File> {
+    // Linux's original OFD write-range lock requires a write-capable descriptor,
+    // even though inspection never writes or repairs the coordination file.
+    let file = open_regular_with(path, false, true)?;
+    #[cfg(unix)]
+    validate_private_file(&file)?;
+    lock_root(file, path)
+}
+
+fn lock_root(file: File, path: &Path) -> io::Result<File> {
     #[cfg(any(target_os = "macos", windows))]
     file.try_lock().map_err(io::Error::from)?;
     #[cfg(target_os = "linux")]
@@ -144,6 +173,56 @@ pub(super) fn acquire(path: &Path) -> io::Result<File> {
     }
     stable(&file, path)?;
     Ok(file)
+}
+
+#[cfg(unix)]
+fn validate_private_file(file: &File) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "existing Root authority file must be private to this account",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn existing_private_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = path.symlink_metadata().map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "existing Root coordination directory {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+        if !metadata.is_dir()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.mode() & 0o077 != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "existing Root coordination directory must be private to this account",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let file = super::windows::open_nofollow(path, false)?;
+        if !file.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "existing Root coordination directory required",
+            ));
+        }
+        super::windows::validate_private(&file)
+    }
 }
 
 pub fn private_directory(path: &Path) -> io::Result<()> {

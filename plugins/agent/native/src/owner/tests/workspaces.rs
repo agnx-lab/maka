@@ -190,6 +190,148 @@ async fn published_directories_are_readonly_paged_and_create_only_observed_works
 }
 
 #[tokio::test]
+async fn published_directory_depth_65_creates_only_the_observed_leaf() {
+    use futures_util::FutureExt;
+    use std::panic::AssertUnwindSafe;
+
+    let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let completed = AssertUnwindSafe(async {
+        let mut physical = vec![
+            maka_fs_tools::directory::capture(&fixture.workspace)
+                .map_err(|error| error.to_string())?,
+        ];
+        for _ in 0..65 {
+            let path = physical.last().unwrap().0.join("d");
+            std::fs::create_dir(&path).map_err(|error| error.to_string())?;
+            physical
+                .push(maka_fs_tools::directory::capture(&path).map_err(|error| error.to_string())?);
+        }
+        let leaf = maka_fs_tools::workspace::project::host_path(&physical[65].0)
+            .map_err(|error| error.to_string())?;
+        if leaf.len() > 4096 {
+            return Err("physical depth-65 fixture exceeds the Host path bound".to_owned());
+        }
+        let base = maka_fs_tools::workspace::project::host_path(&physical[0].0)
+            .map_err(|error| error.to_string())?;
+        let roots = fixture
+            .query("directories", json!({"kind":"roots"}))
+            .await?;
+        let root = roots["roots"]
+            .as_array()
+            .ok_or("missing published roots")?
+            .iter()
+            .find(|root| root["path"] == base)
+            .cloned()
+            .ok_or("physical workspace root was not published")?;
+        let mut selection = root["selection"].clone();
+        let mut directory = root.clone();
+        let mut pages = Vec::new();
+        for depth in 0..65 {
+            let input = json!({"kind":"children","selection":selection,"after":null});
+            let path = maka_fs_tools::workspace::project::host_path(&physical[depth + 1].0)
+                .map_err(|error| error.to_string())?;
+            let child = json!({"name":"d","path":path,
+                "selection":{"rootId":"root-1","segments":vec!["d"; depth + 1],
+                "directoryIdentity":physical[depth + 1].1}});
+            let expected = json!({"kind":"children","directory":directory,
+                "children":[child],"after":null});
+            if depth == 64 {
+                eprintln!(
+                    "depth65 base={:?} leaf={leaf} query_bytes={} expected_page_bytes={}",
+                    physical[0].0,
+                    serde_json::to_vec(&input).unwrap().len(),
+                    serde_json::to_vec(&expected).unwrap().len()
+                );
+            }
+            let page = fixture
+                .query("directories", input.clone())
+                .await
+                .map_err(|error| format!("published children at depth {depth}: {error}"))?;
+            selection = page["children"]
+                .as_array()
+                .and_then(|children| children.first())
+                .and_then(|child| child.get("selection"))
+                .cloned()
+                .ok_or_else(|| format!("depth {depth} did not return an actual child selection"))?;
+            pages.push((input, page, expected));
+            directory = child;
+        }
+        let query_markers: Vec<_> = physical
+            .iter()
+            .map(|(path, _)| path.join(MARKER_FILE).exists())
+            .collect();
+        let create_input = json!({"title":"Deep published leaf","labels":[],
+            "workspace":{"kind":"directory","selection":selection}});
+        let created = fixture
+            .mutation(2, "create", create_input.clone(), Uuid::new_v4())
+            .await?;
+        Ok::<_, String>((physical, root, pages, query_markers, create_input, created))
+    })
+    .catch_unwind()
+    .await;
+    fixture.drained().await;
+    let app_shutdown = fixture.app.shutdown().await;
+    let config_shutdown = fixture.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    let completed = completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    let (physical, root, pages, query_markers, create_input, created) = completed
+        .expect("public browsing must return the actual depth-65 selection before creating it");
+    assert_eq!(
+        root["selection"],
+        json!({"rootId":"root-1","segments":[],
+        "directoryIdentity":physical[0].1})
+    );
+    assert_eq!(
+        maka_fs_tools::workspace::project::host_path(&physical[65].0)
+            .unwrap()
+            .len(),
+        maka_fs_tools::workspace::project::host_path(&physical[0].0)
+            .unwrap()
+            .len()
+            + 130
+    );
+    for (depth, (input, page, expected)) in pages.iter().enumerate() {
+        assert_eq!(
+            page, expected,
+            "wrong published page at parent depth {depth}"
+        );
+        assert!(serde_json::to_vec(input).unwrap().len() < 48 * 1024);
+        assert!(serde_json::to_vec(page).unwrap().len() < 48 * 1024);
+    }
+    assert!(
+        query_markers.iter().all(|exists| !exists),
+        "browsing created a marker"
+    );
+    assert!(serde_json::to_vec(&create_input).unwrap().len() < 48 * 1024);
+    assert_eq!(created["kind"], "created");
+    assert_eq!(
+        created["session"]["workspace"]["path"],
+        json!(maka_fs_tools::workspace::project::host_path(&physical[65].0).unwrap())
+    );
+    assert_eq!(
+        created["session"]["workspace"]["directoryIdentity"],
+        json!(physical[65].1)
+    );
+    assert_eq!(
+        created["session"]["workspace"]["identity"],
+        json!(maka_fs_tools::workspace::read_identity(&physical[65].0).unwrap())
+    );
+    for (depth, (path, identity)) in physical.iter().enumerate() {
+        assert_eq!(
+            maka_fs_tools::directory::capture(path).unwrap(),
+            (path.clone(), identity.clone())
+        );
+        assert_eq!(
+            path.join(MARKER_FILE).exists(),
+            depth == 65,
+            "only the selected leaf may have a workspace marker"
+        );
+    }
+    assert!(!fixture.root.join(MARKER_FILE).exists());
+}
+
+#[tokio::test]
 async fn malformed_existing_marker_is_a_recorded_refusal_without_repair() {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let input = fixture.create_input("Malformed workspace").await;

@@ -847,51 +847,55 @@ impl Setup {
         }
     }
     pub(super) fn policy(&self) -> Arc<maka_transport::transport::PeerPolicy> {
-        use maka_transport::transport::{NativeGrant, PeerPolicy};
         Arc::new(
-            PeerPolicy::with_native_grants(if self.granted {
-                let mut grants = vec![NativeGrant {
-                    origin: id(1),
-                    consumer: id(1),
-                    provider: id(21),
-                    export: self.export().into(),
-                    methods: self
-                        .selections()
-                        .into_iter()
-                        .map(|tool| tool.method)
-                        .chain(
-                            self.prepare_skills
-                                .then_some(["prepare".into(), "search".into()])
-                                .into_iter()
-                                .flatten(),
-                        )
-                        .chain(self.web.then(|| "capture".into()))
-                        .chain(self.computer.then(|| "state".into()))
-                        .chain(
-                            self.protocol
-                                .then_some(["run".to_owned(), "input".to_owned()])
-                                .into_iter()
-                                .flatten(),
-                        )
-                        .collect(),
-                    recovery: true,
-                }];
-                if self.health {
-                    grants.push(NativeGrant {
-                        origin: id(1),
-                        consumer: id(21),
-                        provider: id(22),
-                        export: maka_web_api::EXPORT.into(),
-                        methods: ["probe".into()].into_iter().collect(),
-                        recovery: true,
-                    });
-                }
-                grants
-            } else {
-                vec![]
-            })
-            .unwrap(),
+            maka_transport::transport::PeerPolicy::with_native_grants(self.native_grants())
+                .unwrap(),
         )
+    }
+
+    fn native_grants(&self) -> Vec<maka_transport::transport::NativeGrant> {
+        use maka_transport::transport::NativeGrant;
+        if self.granted {
+            let mut grants = vec![NativeGrant {
+                origin: id(1),
+                consumer: id(1),
+                provider: id(21),
+                export: self.export().into(),
+                methods: self
+                    .selections()
+                    .into_iter()
+                    .map(|tool| tool.method)
+                    .chain(
+                        self.prepare_skills
+                            .then_some(["prepare".into(), "search".into()])
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .chain(self.web.then(|| "capture".into()))
+                    .chain(self.computer.then(|| "state".into()))
+                    .chain(
+                        self.protocol
+                            .then_some(["run".to_owned(), "input".to_owned()])
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .collect(),
+                recovery: true,
+            }];
+            if self.health {
+                grants.push(NativeGrant {
+                    origin: id(1),
+                    consumer: id(21),
+                    provider: id(22),
+                    export: maka_web_api::EXPORT.into(),
+                    methods: ["probe".into()].into_iter().collect(),
+                    recovery: true,
+                });
+            }
+            grants
+        } else {
+            vec![]
+        }
     }
 }
 async fn tool_response(socket: &mut TcpStream) {

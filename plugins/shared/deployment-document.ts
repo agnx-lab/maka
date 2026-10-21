@@ -28,7 +28,6 @@ import { copy } from './locale-catalogs/deployment-document.js';
 import { sameValue } from './value.js';
 import { type Presentation, type Node } from './view.js';
 
-export const documentLimit = 1024 * 1024;
 export interface DocumentEditor {
   source: DeploymentRef;
   phase: 'loading' | 'ready' | 'failed';
@@ -85,7 +84,6 @@ export function acceptDocumentChunk(editor: DocumentEditor, chunk: DeploymentDoc
     /[\uD800-\uDFFF]/u.test(chunk.text) ||
     bytes === 0 ||
     bytes > 65536 ||
-    chunk.totalBytes > documentLimit ||
     end > chunk.totalBytes ||
     (editor.total !== null && editor.total !== chunk.totalBytes) ||
     chunk.next !== (end === chunk.totalBytes ? null : end)
@@ -132,8 +130,7 @@ export function canSaveDocument(editor: DocumentEditor, busy: boolean) {
     !busy &&
     !!editor.observation &&
     !editor.observation.snapshot.marked &&
-    editor.observation.snapshot.text.bytes > 0 &&
-    editor.observation.snapshot.text.bytes <= documentLimit
+    editor.observation.snapshot.text.bytes > 0
   );
 }
 export function documentView<N extends Node>(
@@ -188,15 +185,6 @@ export function documentView<N extends Node>(
             : []),
           ...(editor.phase === 'failed'
             ? [ui.text('deployment-document-failed', text.deploymentLoadFailed, props.theme.muted)]
-            : []),
-          ...(editor.observation && editor.observation.snapshot.text.bytes > documentLimit
-            ? [
-                ui.text(
-                  'deployment-document-too-large',
-                  text.deploymentDocumentTooLarge,
-                  props.theme.muted,
-                ),
-              ]
             : []),
           ...(editor.conflict && notice !== text.deploymentConflict
             ? [ui.text('deployment-document-conflict', text.deploymentConflict, props.theme.muted)]

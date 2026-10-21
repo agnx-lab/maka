@@ -160,8 +160,17 @@ async fn final_coalesced_snapshot_flushes_before_cleanup_and_restores_after_root
     until(&mut editor, &policy, EditorCheckpoint::accepts_input).await;
     let blocker = rusqlite::Connection::open(dir.path().join("root").join(ROOT_DATABASE)).unwrap();
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let final_body = format!(
+        "{text}100\n{}FINAL COMPLETE DRAFT",
+        "保留中文😀 draft bytes.\n".repeat(50_000)
+    );
+    assert!(final_body.len() > 1024 * 1024);
     for revision in 2..=100 {
-        let body = format!("{text}{revision}");
+        let body = if revision == 100 {
+            final_body.clone()
+        } else {
+            format!("{text}{revision}")
+        };
         editor.save(
             &snapshot("old-owner", revision, &body),
             &body,
@@ -217,7 +226,12 @@ async fn final_coalesced_snapshot_flushes_before_cleanup_and_restores_after_root
     let Phase::Restore(loaded) = &editor.phase else {
         unreachable!()
     };
-    assert_eq!(loaded.text, format!("{text}100"));
+    assert!(
+        loaded.text.as_bytes() == final_body.as_bytes(),
+        "reopened checkpoint differs: got {} bytes, expected {}",
+        loaded.text.len(),
+        final_body.len()
+    );
     assert_eq!(loaded.saved.metadata, policy.metadata);
     assert_eq!(loaded.saved.snapshot.text.revision, 100);
     assert_eq!(
@@ -231,27 +245,129 @@ async fn final_coalesced_snapshot_flushes_before_cleanup_and_restores_after_root
         clear_text: false,
     });
     assert!(editor.restoration("other-owner", &policy).is_none());
-    assert_eq!(
-        editor.restoration("new-owner", &policy).unwrap().text(),
-        format!("{text}100")
+    assert!(
+        editor
+            .restoration("new-owner", &policy)
+            .unwrap()
+            .text()
+            .as_bytes()
+            == final_body.as_bytes(),
+        "restoration must retain every original draft byte"
     );
     editor.restored();
     assert!(!editor.accepts_input());
-    let body = format!("{text}100");
-    editor.save(&snapshot("new-owner", 1, &body), &body, &policy.metadata);
+    editor.save(
+        &snapshot("new-owner", 1, &final_body),
+        &final_body,
+        &policy.metadata,
+    );
     until(&mut editor, &policy, EditorCheckpoint::accepts_input).await;
     editor.close();
     drop(editor);
     resources.finish().await.unwrap();
-    let saved = store
+    let (saved, ()) = store
         .ui_checkpoints(&source, &instance())
         .await
         .unwrap()
-        .read(&policy.key)
+        .read(&policy.key, |_| Ok(()))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(saved.metadata["snapshot"]["text"]["owner"], "new-owner");
+    assert!(
+        saved.content.as_slice() == final_body.as_bytes(),
+        "new owner must persist the complete restored draft"
+    );
+    assert_eq!(budget.usage(), (0, 0, 0));
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn checkpoint_load_admits_actual_content_and_preserves_records_when_budget_is_exhausted() {
+    let (_dir, store) = store().await;
+    let source = source(&store, Uuid::new_v4(), 0).await;
+    let policy = policy();
+    let checkpoints = store.ui_checkpoints(&source, &instance()).await.unwrap();
+    let large = format!("甲👩‍💻z{}COMPLETE END", "保留中文😀。\n".repeat(70_000));
+    assert!(large.len() > 1024 * 1024);
+    let mut version = None;
+    for (body, fits) in [("甲👩‍💻z", true), (large.as_str(), false)] {
+        let saved = Saved {
+            snapshot: snapshot("stored-owner", 1, body),
+            metadata: policy.metadata.clone(),
+        };
+        version = Some(
+            checkpoints
+                .write(
+                    &policy.key,
+                    version,
+                    &policy.stored_format(),
+                    &policy.data_source,
+                    &serde_json::to_value(&saved).unwrap(),
+                    body.as_bytes().to_vec(),
+                )
+                .await
+                .unwrap(),
+        );
+        let resources = Arc::new(Resources::default());
+        let budget = NativeBudget::new(crate::budget::BudgetLimits {
+            encoded_bytes: 128 * 1024,
+            ..Default::default()
+        });
+        let mut editor = EditorCheckpoint::new(
+            Some(scope(&store, &source).await),
+            &policy,
+            &resources,
+            budget.clone(),
+        );
+        until(&mut editor, &policy, |e| !matches!(e.phase, Phase::Loading)).await;
+        let loaded = match &editor.phase {
+            Phase::Restore(value) => {
+                Some((value.text.as_bytes() == body.as_bytes(), value.version))
+            }
+            _ => None,
+        };
+        let failed = match &editor.phase {
+            Phase::Failed {
+                writing,
+                diagnostic,
+            } => Some((*writing, diagnostic.clone())),
+            _ => None,
+        };
+        let retained_bytes = budget.usage().0;
+        editor.close();
+        drop(editor);
+        resources.finish().await.unwrap();
+        assert_eq!(budget.usage(), (0, 0, 0));
+        if fits {
+            assert_eq!(
+                loaded,
+                Some((true, version.unwrap())),
+                "a small checkpoint must not reserve the former whole-content ceiling"
+            );
+            assert_eq!(failed, None);
+            assert!(retained_bytes > 0 && retained_bytes < 128 * 1024);
+        } else {
+            assert_eq!(loaded, None);
+            assert!(
+                matches!(failed, Some((false, ref diagnostic))
+                if diagnostic.contains("native resource budget exhausted")),
+                "large checkpoint load must fail its actual native admission: {failed:?}"
+            );
+            assert_eq!(retained_bytes, 0);
+        }
+        let (record, ()) = checkpoints
+            .read(&policy.key, |_| Ok(()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.revision, version.unwrap());
+        assert!(
+            record.content.as_slice() == body.as_bytes(),
+            "load admission changed stored draft bytes"
+        );
+        assert_eq!(record.metadata, serde_json::to_value(&saved).unwrap());
+    }
     store.shutdown().await.unwrap();
 }
 
@@ -272,7 +388,7 @@ async fn an_older_ack_cannot_hide_a_newer_capture_failure_and_retry_accounts_for
     let body = "甲👩‍💻z";
     editor.save(&snapshot("owner", 1, body), body, &policy.metadata);
     let mut invalid = snapshot("owner", 2, body);
-    invalid.text.bytes = MAX_CONTENT + 1;
+    invalid.text.bytes = body.len() + 1;
     editor.save(&invalid, body, &policy.metadata);
     until(&mut editor, &policy, |e| e.saved_sequence == 1).await;
     assert!(!editor.accepts_input());
@@ -344,10 +460,11 @@ async fn source_mismatch_and_conflicting_writers_cannot_overwrite_saved_content(
             .ui_checkpoints(&source, &instance())
             .await
             .unwrap()
-            .read(&policy.key)
+            .read(&policy.key, |_| Ok(()))
             .await
             .unwrap()
             .unwrap()
+            .0
             .metadata["snapshot"]["text"]["owner"],
         "first"
     );
@@ -370,7 +487,10 @@ async fn concurrent_preference_reads_are_not_rejected_by_a_worker_count() {
     let source = source(&store, Uuid::new_v4(), 0).await;
     let recipe_scope = scope(&store, &source).await;
     let resources = Arc::new(Resources::default());
-    let budget = NativeBudget::default();
+    let budget = NativeBudget::new(crate::budget::BudgetLimits {
+        encoded_bytes: 128 * 1024,
+        ..Default::default()
+    });
     let mut preferences: Vec<_> = (0..16)
         .map(|index| {
             ValueCheckpoint::new(
@@ -490,7 +610,11 @@ async fn preference_busy_keeps_the_original_write_result_and_retirement_drains_i
     };
     assert_eq!(value, Some(json!({"original": true})));
     let checkpoints = scope.open(&store).unwrap();
-    let saved = checkpoints.read(&props.key).await.unwrap().unwrap();
+    let (saved, ()) = checkpoints
+        .read(&props.key, |_| Ok(()))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(saved.revision, revision);
     assert_eq!(
         serde_json::from_slice::<Value>(&saved.content).unwrap(),
@@ -510,7 +634,11 @@ async fn preference_busy_keeps_the_original_write_result_and_retirement_drains_i
     blocker.execute_batch("COMMIT").unwrap();
     resources.finish().await.unwrap();
     assert_eq!(budget.usage(), (0, 0, 0));
-    let saved = checkpoints.read(&props.key).await.unwrap().unwrap();
+    let (saved, ()) = checkpoints
+        .read(&props.key, |_| Ok(()))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         serde_json::from_slice::<Value>(&saved.content).unwrap(),
         json!({"retired": true})

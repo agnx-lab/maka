@@ -29,7 +29,13 @@ const valid = new Ajv({ strict: false, formats: { uint64: true } }).compile(
 for (const target of ['tui'])
   test(`Assistant ${target} mounts independently addressable preference editors`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
     const out = component.mount(props, {});
     const editors = new Set();
     const visit = (node) => {
@@ -48,80 +54,149 @@ for (const target of ['tui'])
   });
 
 for (const target of ['tui'])
-  test(`Assistant ${target} privacy recovers the original operation without overwriting editor drafts`, async () => {
-    const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
-    let out = component.mount(props, {});
-    const event = (input) => (out = component.event(out.frame.state, input, props, {}));
-    const raw = (key) => event({ kind: 'raw', key, event: {} });
-    const finish = (value) =>
-      event({ kind: 'action', key: out.actions[0].key, event: { status: 'succeeded', value } });
-    const saved = {
-      revision: 4,
-      displayName: 'Saved',
-      assistantTone: '',
-      compactionPrompt: 'Default compression prompt',
-      defaultCompactionPrompt: 'Default compression prompt',
-      workspaceInstructions: true,
-      incognitoActive: false,
-      shellTitles: true,
-      language: 'en',
-      resolvedLanguage: 'en',
-    };
-    finish([]);
-    finish(saved);
-    const fields = structuredClone(out.frame.state.fields);
-    raw('privacy');
-    const action = out.actions[0];
-    assert.ok(valid(action.input), JSON.stringify(valid.errors));
-    assert.deepEqual(action.input, {
-      expectedRevision: 4,
-      mutation: { kind: 'privacy', incognitoActive: true },
+  for (const historyRecovery of ['emitted', 'omitted'])
+    test(`Assistant ${target} privacy recovers ${historyRecovery} metadata without overwriting editor drafts`, async () => {
+      const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
+      const props = {
+        theme,
+        locale: 'en',
+        open: true,
+        busy: false,
+        shell: { back: 0 },
+      };
+      let out = component.mount(props, {});
+      const event = (input) => (out = component.event(out.frame.state, input, props, {}));
+      const raw = (key) => event({ kind: 'raw', key, event: {} });
+      const finish = (value) =>
+        event({
+          kind: 'action',
+          key: out.actions[0].key,
+          event: { status: 'succeeded', value },
+        });
+      const saved = {
+        revision: 4,
+        displayName: 'Saved',
+        assistantTone: '',
+        compactionPrompt: 'Default compression prompt',
+        defaultCompactionPrompt: 'Default compression prompt',
+        workspaceInstructions: true,
+        incognitoActive: false,
+        shellTitles: true,
+        language: 'en',
+        resolvedLanguage: 'en',
+      };
+      finish([]);
+      finish(saved);
+      const name = (text, revision, receipt = null) =>
+        event({
+          kind: 'component',
+          child: 'assistant-name',
+          name: 'changed',
+          event: {
+            revision,
+            snapshot: {
+              text: {
+                owner: 'privacy-name',
+                revision,
+                bytes: Buffer.byteLength(text),
+              },
+              marked: null,
+            },
+            receipt,
+          },
+        });
+      name('', 0);
+      const reset = out.frame.state.fields.name.command;
+      name('Saved', 1, {
+        owner: reset.owner,
+        sequence: reset.sequence,
+        outcome: { status: 'applied' },
+      });
+      name('Unsaved name 中文', 2);
+      const fields = structuredClone(out.frame.state.fields);
+      raw('privacy');
+      const action = out.actions[0];
+      assert.deepEqual(action.recovery, { reset: false });
+      assert.ok(valid(action.input), JSON.stringify(valid.errors));
+      assert.deepEqual(action.input, {
+        expectedRevision: 4,
+        mutation: { kind: 'privacy', incognitoActive: true },
+      });
+      event({
+        kind: 'action',
+        key: action.key,
+        event: { status: 'failed', diagnostic: 'response interrupted' },
+      });
+      raw('privacy');
+      assert.equal(out.actions.length, 0);
+      raw('history');
+      const reference = {
+        contract: { name: 'maka.settings.Settings', version: 1 },
+        method: 'updateAssistantPreferences',
+        operation: 'original-privacy-toggle',
+      };
+      finish([
+        {
+          cursor: 2,
+          reference,
+          ...(historyRecovery === 'emitted' ? { recovery: action.recovery } : {}),
+        },
+      ]);
+      assert.equal(out.frame.state.current.reset, false);
+      finish([]);
+      assert.equal(out.actions[0].method, 'read');
+      assert.deepEqual(out.actions[0].input, reference);
+      finish({ reference, receipt: { kind: 'recorded', outcome: { kind: 'unknown' } } });
+      raw('privacy');
+      assert.equal(out.actions.length, 0, 'an unknown original operation blocks another mutation');
+      raw('receipt');
+      assert.equal(out.actions[0].method, 'read');
+      assert.deepEqual(out.actions[0].input, reference);
+      finish({
+        reference,
+        receipt: {
+          kind: 'recorded',
+          cleanup: { kind: 'confirmed' },
+          outcome: {
+            kind: 'returned',
+            value: { kind: 'committed', revision: 5 },
+          },
+        },
+      });
+      assert.equal(out.actions[0].method, 'assistantPreferences');
+      finish({
+        ...saved,
+        revision: 6,
+        incognitoActive: true,
+        displayName: 'Changed elsewhere',
+      });
+      assert.equal(out.frame.state.saved.revision, 6);
+      assert.deepEqual(
+        out.frame.state.fields,
+        fields,
+        'a policy toggle must retain the existing editor state',
+      );
     });
-    event({
-      kind: 'action',
-      key: action.key,
-      event: { status: 'failed', diagnostic: 'response interrupted' },
-    });
-    raw('privacy');
-    assert.equal(out.actions.length, 0);
-    raw('history');
-    const reference = {
-      contract: { name: 'maka.settings.Settings', version: 1 },
-      method: 'updateAssistantPreferences',
-      operation: 'original-privacy-toggle',
-    };
-    finish([{ cursor: 2, reference, recovery: action.recovery }]);
-    finish([]);
-    assert.equal(out.actions[0].method, 'read');
-    assert.deepEqual(out.actions[0].input, reference);
-    finish({
-      reference,
-      receipt: {
-        kind: 'recorded',
-        cleanup: { kind: 'confirmed' },
-        outcome: { kind: 'returned', value: { kind: 'committed', revision: 5 } },
-      },
-    });
-    assert.equal(out.actions[0].method, 'assistantPreferences');
-    finish({ ...saved, revision: 6, incognitoActive: true, displayName: 'Changed elsewhere' });
-    assert.equal(out.frame.state.saved.revision, 6);
-    assert.deepEqual(
-      out.frame.state.fields,
-      fields,
-      'a policy toggle must retain the existing editor state',
-    );
-  });
 
 for (const target of ['tui'])
   test(`Assistant ${target} shell titles toggle saves the observed preference revision`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
     let out = component.mount(props, {});
     const finish = (value) => {
       out = component.event(
         out.frame.state,
-        { kind: 'action', key: out.actions[0].key, event: { status: 'succeeded', value } },
+        {
+          kind: 'action',
+          key: out.actions[0].key,
+          event: { status: 'succeeded', value },
+        },
         props,
         {},
       );
@@ -154,7 +229,10 @@ for (const target of ['tui'])
       [
         {
           method: 'updateAssistantPreferences',
-          input: { expectedRevision: 7, mutation: { kind: 'shell_titles', enabled: false } },
+          input: {
+            expectedRevision: 7,
+            mutation: { kind: 'shell_titles', enabled: false },
+          },
         },
       ],
     );
@@ -175,7 +253,10 @@ for (const target of ['tui'])
             receipt: {
               kind: 'recorded',
               cleanup: { kind: 'confirmed' },
-              outcome: { kind: 'returned', value: { kind: 'committed', revision: 8 } },
+              outcome: {
+                kind: 'returned',
+                value: { kind: 'committed', revision: 8 },
+              },
             },
           },
         },
@@ -194,12 +275,22 @@ for (const target of ['tui'])
 for (const target of ['tui'])
   test(`Assistant ${target} saves a custom compression prompt and restores the built-in default`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
     let out = component.mount(props, {});
     const event = (input) => (out = component.event(out.frame.state, input, props, {}));
     const raw = (key) => event({ kind: 'raw', key, event: {} });
     const finish = (value) =>
-      event({ kind: 'action', key: out.actions[0].key, event: { status: 'succeeded', value } });
+      event({
+        kind: 'action',
+        key: out.actions[0].key,
+        event: { status: 'succeeded', value },
+      });
     const observed = (text, revision, receipt = null) => ({
       revision,
       snapshot: {
@@ -209,7 +300,12 @@ for (const target of ['tui'])
       receipt,
     });
     const field = (value) =>
-      event({ kind: 'component', child: 'assistant-compaction', name: 'changed', event: value });
+      event({
+        kind: 'component',
+        child: 'assistant-compaction',
+        name: 'changed',
+        event: value,
+      });
     const saved = {
       revision: 4,
       displayName: 'Saved',
@@ -226,7 +322,10 @@ for (const target of ['tui'])
     finish(saved);
     field(observed('', 0));
     const initial = out.frame.state.fields.compaction.command;
-    assert.deepEqual(initial.edit, { kind: 'reset', text: 'Built-in instructions' });
+    assert.deepEqual(initial.edit, {
+      kind: 'reset',
+      text: 'Built-in instructions',
+    });
     field(
       observed('Built-in instructions', 1, {
         owner: initial.owner,
@@ -234,15 +333,19 @@ for (const target of ['tui'])
         outcome: { status: 'applied' },
       }),
     );
-    const draft = observed('Keep 中文 decisions', 2);
+    const content = 'Compression start 中文\n' + '中'.repeat(13_650) + '\nCompression end 😀';
+    assert.ok(Buffer.byteLength(content) > 32 * 1024 && Buffer.byteLength(content) < 64 * 1024);
+    const draft = observed(content, 2);
     field(draft);
     raw('save-compaction');
     assert.equal(out.actions[0].resources.text.child, 'assistant-compaction');
-    finish({ metadata: draft.snapshot.text, text: 'Keep 中文 decisions' });
-    assert.deepEqual(out.actions[0].input, {
-      expectedRevision: 4,
-      mutation: { kind: 'compaction_prompt', prompt: 'Keep 中文 decisions' },
-    });
+    finish({ metadata: draft.snapshot.text, text: content });
+    const input = out.actions[0].input;
+    assert.deepEqual(Object.keys(input).sort(), ['expectedRevision', 'mutation']);
+    assert.equal(input.expectedRevision, 4);
+    assert.deepEqual(Object.keys(input.mutation).sort(), ['kind', 'prompt']);
+    assert.equal(input.mutation.kind, 'compaction_prompt');
+    assert.ok(input.mutation.prompt === content, 'save must retain every custom-prompt byte');
     assert.equal(valid(out.actions[0].input), true, JSON.stringify(valid.errors));
     const commit = (revision) =>
       event({
@@ -258,16 +361,24 @@ for (const target of ['tui'])
             },
             receipt: {
               kind: 'recorded',
-              outcome: { kind: 'returned', value: { kind: 'committed', revision } },
+              outcome: {
+                kind: 'returned',
+                value: { kind: 'committed', revision },
+              },
             },
           },
         },
       });
     const unrelated = structuredClone(out.frame.state.fields.name);
     commit(5);
-    finish({ ...saved, revision: 5, compactionPrompt: 'Keep 中文 decisions' });
+    finish({ ...saved, revision: 5, compactionPrompt: content });
     assert.deepEqual(out.frame.state.fields.name, unrelated);
     const savedReset = out.frame.state.fields.compaction.command;
+    assert.equal(savedReset.edit.kind, 'reset');
+    assert.ok(
+      savedReset.edit.text === content,
+      'saved reset must contain the complete custom prompt',
+    );
     field(
       observed(savedReset.edit.text, 3, {
         owner: savedReset.owner,
@@ -283,7 +394,10 @@ for (const target of ['tui'])
     commit(6);
     finish({ ...saved, revision: 6 });
     const pending = out.frame.state.fields.compaction.command;
-    assert.deepEqual(pending.edit, { kind: 'reset', text: 'Built-in instructions' });
+    assert.deepEqual(pending.edit, {
+      kind: 'reset',
+      text: 'Built-in instructions',
+    });
     field(
       observed(pending.edit.text, 4, {
         owner: pending.owner,
@@ -295,9 +409,15 @@ for (const target of ['tui'])
   });
 
 for (const target of ['tui']) {
-  const globalFixture = async () => {
+  const globalFixture = async (initialContent = 'Original 中文') => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
     let out = component.mount(props, {});
     const event = (input) => (out = component.event(out.frame.state, input, props, {}));
     const raw = (key) => event({ kind: 'raw', key, event: {} });
@@ -309,17 +429,25 @@ for (const target of ['tui']) {
       });
     const observed = (content, revision, receipt = null, owner = 'global-editor') => ({
       revision,
-      snapshot: { text: { owner, revision, bytes: Buffer.byteLength(content) }, marked: null },
+      snapshot: {
+        text: { owner, revision, bytes: Buffer.byteLength(content) },
+        marked: null,
+      },
       receipt,
     });
     const field = (value) =>
-      event({ kind: 'component', child: 'assistant-global', name: 'changed', event: value });
+      event({
+        kind: 'component',
+        child: 'assistant-global',
+        name: 'changed',
+        event: value,
+      });
     const source = {
       kind: 'available',
       source: 'agents',
       path: '/remote/home/.agents/AGENTS.md',
       revision: 'source-v1',
-      content: 'Original 中文',
+      content: initialContent,
       exists: true,
     };
     const ack = (revision) => {
@@ -336,6 +464,11 @@ for (const target of ['tui']) {
     assert.equal(out.actions[0].method, 'globalInstructions');
     finish(source);
     field(observed('', 0));
+    assert.ok(out.frame.state.global.command, 'available global source must initialize the editor');
+    assert.ok(
+      out.frame.state.global.command.edit.text === initialContent,
+      'initial global reset must retain every source byte',
+    );
     ack(1);
     const reply = (
       kind,
@@ -346,12 +479,16 @@ for (const target of ['tui']) {
       },
     ) => ({
       reference,
-      receipt: { kind: 'recorded', outcome: { kind: 'returned', value: { kind } } },
+      receipt: {
+        kind: 'recorded',
+        outcome: { kind: 'returned', value: { kind } },
+      },
     });
     return {
       get out() {
         return out;
       },
+      remount: () => (out = component.mount(props, {})),
       event,
       raw,
       finish,
@@ -364,13 +501,18 @@ for (const target of ['tui']) {
   };
 
   test(`Assistant ${target} global instructions save exact source bytes and preserve unrelated preferences`, async () => {
-    const f = await globalFixture();
+    const original = 'Original global first\n' + '中😀 '.repeat(140_000) + '\nOriginal global last';
+    const f = await globalFixture(original);
     const preferences = structuredClone(f.out.frame.state.fields);
-    const content = 'Keep all 中文 instructions.\n' + 'x'.repeat(1200);
+    const content = 'Global start 中文\n' + '中'.repeat(400_000) + '\nGlobal end 😀';
+    assert.ok(Buffer.byteLength(content) > 1024 * 1024);
     const draft = f.observed(content, 2);
     f.field(draft);
     f.raw('global-save');
-    assert.deepEqual(f.out.actions[0].input, { start: 0, end: Buffer.byteLength(content) });
+    assert.deepEqual(f.out.actions[0].input, {
+      start: 0,
+      end: Buffer.byteLength(content),
+    });
     assert.deepEqual(f.out.actions[0].resources.text.input, {
       kind: 'at_revision',
       owner: 'global-editor',
@@ -380,15 +522,21 @@ for (const target of ['tui']) {
     const action = f.out.actions[0];
     assert.equal(action.binding, 'agent');
     assert.equal(action.method, 'updateGlobalInstructions');
-    assert.deepEqual(action.input, { source: 'agents', revision: 'source-v1', content });
-    assert.equal(action.recovery.kind, 'assistant-global-instructions/v1');
+    assert.deepEqual(Object.keys(action.input).sort(), ['content', 'revision', 'source']);
+    assert.equal(action.input.source, 'agents');
+    assert.equal(action.input.revision, 'source-v1');
+    assert.ok(action.input.content === content, 'global save must retain every draft byte');
+    assert.ok(action.recovery === undefined, 'global recovery must not duplicate the action input');
     f.event({
       kind: 'action',
       key: action.key,
       event: { status: 'operation', reply: f.reply('saved') },
     });
     f.finish({ ...f.source, revision: 'source-v2', content });
-    assert.equal(f.out.frame.state.global.command.edit.text, content);
+    assert.ok(
+      f.out.frame.state.global.command.edit.text === content,
+      'saved global reset must contain the complete draft',
+    );
     assert.deepEqual(f.out.frame.state.fields, preferences);
     assert.equal(f.out.frame.state.global.saved.path, f.source.path);
   });
@@ -422,7 +570,7 @@ for (const target of ['tui']) {
     assert.equal(f.out.frame.state.global.conflict, false);
   });
 
-  test(`Assistant ${target} unknown global save recovers its original receipt without another write`, async () => {
+  test(`Assistant ${target} unknown global save recovers its original receipt after remount without another write`, async () => {
     const f = await globalFixture();
     const draft = f.observed('Draft', 2);
     f.field(draft);
@@ -436,23 +584,50 @@ for (const target of ['tui']) {
     });
     f.raw('global-save');
     assert.equal(f.out.actions.length, 0);
-    f.raw('global-history');
+    f.remount();
     const reply = f.reply('saved');
     f.finish([{ cursor: 1, reference: reply.reference, recovery: action.recovery }]);
     f.finish([]);
-    assert.equal(f.out.actions[0].binding, 'receipts');
-    assert.deepEqual(f.out.actions[0].input, reply.reference);
-    f.finish(reply);
-    f.finish({ ...f.source, revision: 'saved', content: 'Draft' });
-    assert.equal(f.out.frame.state.global.current, null);
-  });
-
-  test(`Assistant ${target} rejects oversized and stale global drafts without truncation`, async () => {
-    const f = await globalFixture();
-    f.field(f.observed('中'.repeat(22000), 2));
+    const receipt = () => {
+      assert.equal(f.out.actions[0].binding, 'receipts');
+      assert.equal(f.out.actions[0].method, 'read');
+      assert.deepEqual(f.out.actions[0].input, reply.reference);
+    };
+    receipt();
+    f.event({
+      kind: 'action',
+      key: f.out.actions[0].key,
+      event: { status: 'failed', diagnostic: 'receipt unavailable' },
+    });
+    assert.deepEqual(f.out.frame.state.global.current.reference, reply.reference);
     f.raw('global-save');
     assert.equal(f.out.actions.length, 0);
-    assert.equal(f.out.frame.state.global.notice, 'assistant-global-limit');
+    f.raw('global-receipt');
+    receipt();
+    f.finish({
+      ...reply,
+      receipt: { kind: 'recorded', outcome: { kind: 'unknown' } },
+    });
+    assert.deepEqual(f.out.frame.state.global.current.reference, reply.reference);
+    f.raw('global-save');
+    assert.equal(f.out.actions.length, 0);
+    f.raw('global-receipt');
+    receipt();
+    f.finish(reply);
+    assert.equal(f.out.actions[0].method, 'globalInstructions');
+    f.finish({ ...f.source, revision: 'saved', content: 'Draft' });
+    assert.equal(f.out.frame.state.global.current, null);
+    f.field(f.observed('', 0));
+    assert.deepEqual(f.out.frame.state.global.command.edit, {
+      kind: 'reset',
+      text: 'Draft',
+    });
+    f.ack(1);
+    assert.equal(f.out.frame.state.global.ready, true);
+  });
+
+  test(`Assistant ${target} rejects stale global drafts without truncation`, async () => {
+    const f = await globalFixture();
     const draft = f.observed('first', 3);
     f.field(draft);
     f.raw('global-save');
@@ -464,7 +639,13 @@ for (const target of ['tui']) {
 
   test(`Assistant ${target} name save clears the legacy tone without reading another editor`, async () => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
-    const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
     let out = component.mount(props, {});
     const event = (input) => (out = component.event(out.frame.state, input, props, {}));
     const finish = (value) =>
@@ -488,11 +669,19 @@ for (const target of ['tui']) {
     });
     const observed = (text, revision, receipt = null) => ({
       revision,
-      snapshot: { text: { owner: 'name', revision, bytes: Buffer.byteLength(text) }, marked: null },
+      snapshot: {
+        text: { owner: 'name', revision, bytes: Buffer.byteLength(text) },
+        marked: null,
+      },
       receipt,
     });
     const field = (value) =>
-      event({ kind: 'component', child: 'assistant-name', name: 'changed', event: value });
+      event({
+        kind: 'component',
+        child: 'assistant-name',
+        name: 'changed',
+        event: value,
+      });
     field(observed('', 0));
     const command = out.frame.state.fields.name.command;
     field(
@@ -508,7 +697,11 @@ for (const target of ['tui']) {
     finish({ metadata: draft.snapshot.text, text: 'New' });
     assert.deepEqual(out.actions[0].input, {
       expectedRevision: 7,
-      mutation: { kind: 'personalization', displayName: 'New', assistantTone: '' },
+      mutation: {
+        kind: 'personalization',
+        displayName: 'New',
+        assistantTone: '',
+      },
     });
   });
 }
@@ -525,16 +718,156 @@ const languageSaved = {
   incognitoActive: false,
   shellTitles: true,
 };
+for (const reset of ['compaction', 'personalization']) {
+  test(`Assistant tui initializes both editors after fresh ${reset} receipt recovery`, async () => {
+    const { component } = await import('../dist/packages/assistant-preferences/tui.js');
+    const props = {
+      theme,
+      locale: 'en',
+      open: true,
+      busy: false,
+      shell: { back: 0 },
+    };
+    let out = component.mount(props, {});
+    const event = (input) => (out = component.event(out.frame.state, input, props, {}));
+    const raw = (key) => event({ kind: 'raw', key, event: {} });
+    const finish = (value) =>
+      event({
+        kind: 'action',
+        key: out.frame.state.pending.key,
+        event: { status: 'succeeded', value },
+      });
+    const field = (name, text, revision, receipt = null) =>
+      event({
+        kind: 'component',
+        child: `assistant-${name}`,
+        name: 'changed',
+        event: {
+          revision,
+          snapshot: {
+            text: {
+              owner: `editor-${name}`,
+              revision,
+              bytes: Buffer.byteLength(text),
+            },
+            marked: null,
+          },
+          receipt,
+        },
+      });
+    const acknowledge = (name, text) => {
+      const command = out.frame.state.fields[name].command;
+      field(name, text, 1, {
+        owner: command.owner,
+        sequence: command.sequence,
+        outcome: { status: 'applied' },
+      });
+    };
+    finish([]);
+    finish(languageSaved);
+    for (const [name, text] of [
+      ['name', languageSaved.displayName],
+      ['compaction', languageSaved.compactionPrompt],
+    ]) {
+      field(name, '', 0);
+      acknowledge(name, text);
+    }
+    if (reset === 'compaction') raw('reset-compaction');
+    else {
+      field('name', 'Recovered name 中文', 2);
+      raw('save');
+      finish({
+        metadata: out.frame.state.fields.name.observation.snapshot.text,
+        text: 'Recovered name 中文',
+      });
+    }
+    const action = out.actions[0];
+    assert.equal(action.method, 'updateAssistantPreferences');
+    event({
+      kind: 'action',
+      key: action.key,
+      event: { status: 'failed', diagnostic: 'interrupted before receipt' },
+    });
+    // A genuinely new component has no saved preference snapshot or editor state.
+    out = component.mount(props, {});
+    assert.equal(out.frame.state.saved, null);
+    const reference = {
+      contract: { name: 'maka.settings.Settings', version: 1 },
+      method: 'updateAssistantPreferences',
+      operation: `original-${reset}`,
+    };
+    // Reuse the actual emitted metadata on both original and candidate source.
+    finish([{ cursor: 1, reference, recovery: action.recovery }]);
+    finish([]);
+    assert.equal(out.actions[0].binding, 'receipts');
+    assert.equal(out.actions[0].method, 'read');
+    assert.deepEqual(out.actions[0].input, reference);
+    finish({
+      reference,
+      receipt: {
+        kind: 'recorded',
+        cleanup: { kind: 'confirmed' },
+        outcome: {
+          kind: 'returned',
+          value: { kind: 'committed', revision: 13 },
+        },
+      },
+    });
+    assert.equal(out.actions[0].method, 'assistantPreferences');
+    const saved = {
+      ...languageSaved,
+      revision: 14,
+      displayName: 'Recovered name 中文',
+      compactionPrompt: 'Recovered compression 中文',
+    };
+    finish(saved);
+    assert.equal(out.frame.state.current, null);
+    assert.equal(
+      out.frame.state.fields.name.reset,
+      saved.displayName,
+      'fresh recovery must initialize the name even for a compression operation',
+    );
+    assert.equal(
+      out.frame.state.fields.compaction.reset,
+      saved.compactionPrompt,
+      'fresh recovery must initialize compression even for a name operation',
+    );
+    assert.deepEqual(action.recovery, { reset });
+    for (const [name, text] of [
+      ['name', saved.displayName],
+      ['compaction', saved.compactionPrompt],
+    ]) {
+      field(name, '', 0);
+      assert.deepEqual(out.frame.state.fields[name].command.edit, {
+        kind: 'reset',
+        text,
+      });
+      acknowledge(name, text);
+      assert.equal(out.frame.state.fields[name].ready, true);
+    }
+  });
+}
+
 const preferenceNodes = (node) =>
   node && typeof node === 'object' ? [node, ...Object.values(node).flatMap(preferenceNodes)] : [];
 test('reopening Assistant preferences preserves unsaved drafts after an external language change', async () => {
   const { component } = await import('../dist/packages/assistant-preferences/tui.js');
-  const props = { theme, locale: 'en', open: true, busy: false, shell: { back: 0 } };
+  const props = {
+    theme,
+    locale: 'en',
+    open: true,
+    busy: false,
+    shell: { back: 0 },
+  };
   let out = component.mount(props, {});
   const finish = (value) => {
     out = component.event(
       out.frame.state,
-      { kind: 'action', key: out.frame.state.pending.key, event: { status: 'succeeded', value } },
+      {
+        kind: 'action',
+        key: out.frame.state.pending.key,
+        event: { status: 'succeeded', value },
+      },
       props,
       {},
     );
@@ -549,7 +882,10 @@ test('reopening Assistant preferences preserves unsaved drafts after an external
       name: 'changed',
       event: {
         revision: 9,
-        snapshot: { text: { owner: 'draft-name', revision: 9, bytes: 11 }, marked: null },
+        snapshot: {
+          text: { owner: 'draft-name', revision: 9, bytes: 11 },
+          marked: null,
+        },
         receipt: null,
       },
     },
@@ -563,7 +899,12 @@ test('reopening Assistant preferences preserves unsaved drafts after an external
   );
   out = component.update(out.frame.state, { ...props, open: false }, {});
   out = component.update(out.frame.state, props, {});
-  finish({ ...languageSaved, revision: 13, language: 'zh-TW', resolvedLanguage: 'zh-TW' });
+  finish({
+    ...languageSaved,
+    revision: 13,
+    language: 'zh-TW',
+    resolvedLanguage: 'zh-TW',
+  });
   assert.deepEqual(out.frame.state.fields, fields);
   assert.deepEqual(out.events, [{ name: 'changed', value: {} }]);
 });

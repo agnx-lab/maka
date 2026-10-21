@@ -39,17 +39,21 @@ mod protocol;
 use protocol::Options;
 
 #[derive(Clone)]
-struct Picture {
-    name: String,
-    bytes: usize,
-    digest: String,
+pub(in crate::owner::tests) struct Picture {
+    pub(in crate::owner::tests) name: String,
+    pub(in crate::owner::tests) bytes: usize,
+    pub(in crate::owner::tests) digest: String,
     rgba_digest: String,
-    descriptor: Value,
-    reference: Value,
-    operation: Uuid,
+    pub(in crate::owner::tests) descriptor: Value,
+    pub(in crate::owner::tests) reference: Value,
+    pub(in crate::owner::tests) operation: Uuid,
 }
 
-fn generate(path: &std::path::Path, side: u32, index: usize) -> Picture {
+pub(in crate::owner::tests) fn generate(
+    path: &std::path::Path,
+    side: u32,
+    index: usize,
+) -> Picture {
     let count = (side as usize)
         .checked_mul(side as usize)
         .and_then(|n| n.checked_mul(4))
@@ -149,7 +153,7 @@ async fn upload(f: &Fixture, session: &str, picture: &mut Picture) -> Value {
     value
 }
 
-async fn artifact(f: &Fixture, session: &str, picture: &Picture) {
+pub(in crate::owner::tests) async fn artifact(f: &Fixture, session: &str, picture: &Picture) {
     let id = picture.descriptor["id"].as_str().unwrap();
     let path = f._dir.path().join(&picture.name);
     let picture = picture.clone();

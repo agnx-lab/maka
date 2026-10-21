@@ -117,8 +117,7 @@ impl Owner {
                 let mut global = Vec::new();
                 if let Some(home) = home {
                     if let Ok(source) = global_instructions::selected(&home)
-                        && let Ok(Some(text)) =
-                            global_instructions::read_selected(&home, source, 1024 * 1024)
+                        && let Ok(Some(text)) = global_instructions::read_selected(&home, source)
                     {
                         global_instruction = parse_instruction_files([(
                             InstructionFile::Agents,

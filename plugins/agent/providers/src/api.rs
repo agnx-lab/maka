@@ -128,11 +128,11 @@ struct Configuration {
 impl Configuration {
     fn read(connection: &Connection) -> Result<Self, Error> {
         let mut configuration: Self = serde_json::from_value(connection.configuration.clone())
-            .map_err(|_| Error::Invalid("invalid API provider configuration".into()))?;
+            .map_err(|_| Error::InvalidConfiguration)?;
         configuration.base_url = maka_agent_facts::configuration::validation::normalize_base_url(
             &configuration.base_url,
         )
-        .map_err(Error::Invalid)?;
+        .map_err(|_| Error::InvalidConfiguration)?;
         Ok(configuration)
     }
 }
@@ -144,10 +144,6 @@ struct Selection<'a> {
     base_url: &'a str,
     model: &'a ModelInfo,
     overrides: Option<&'a ModelOverride>,
-}
-
-fn unavailable(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
 }
 
 impl ApiProvider {
@@ -218,7 +214,7 @@ impl ApiProvider {
         route.check_execution()?;
         let level = request.thinking_level.or(default_thinking_level);
         if level.is_some_and(|level| !thinking_levels.contains(&level)) {
-            return Err(Error::Invalid("unsupported model thinking level".into()));
+            return Err(Error::UnsupportedThinkingLevel);
         }
         let options = options::resolve(&selection, self.facts, level, &route)?;
         let output = output::resolve(&selection, route.wire, &options)?;
@@ -243,7 +239,7 @@ impl ApiProvider {
             provider_options: options,
             main_output_limit: output,
         };
-        model.validate()?;
+        model.validate().map_err(|_| Error::InvalidPreparedModel)?;
         Ok(model)
     }
 }

@@ -131,15 +131,10 @@ pub struct DeploymentSourceReplace {
     pub document: DeploymentDocument,
 }
 
-// Complete product sources include each remote capability's frozen contract.
-// The standard Agent/WorkHub source exceeds 1 MiB before any user additions.
-pub const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentDocumentRead {
     pub source: DeploymentRef,
-    #[schemars(range(max = MAX_DOCUMENT_BYTES))]
     pub offset: usize,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

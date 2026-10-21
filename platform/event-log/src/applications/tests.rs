@@ -19,7 +19,7 @@
 
 use super::*;
 use crate::root::{RootNamespaces, RootOwner};
-use maka_plugin_core::composition::{Environment, ExecutionLocation};
+use maka_plugin_core::composition::{Environment, ExecutionLocation, InstanceId};
 use std::sync::Arc;
 
 pub(super) fn input() -> Input {
@@ -105,7 +105,7 @@ async fn exact_source_cas_and_domain() {
 }
 
 #[tokio::test]
-async fn oversized_source_is_rejected_before_materialization() {
+async fn malformed_typed_source_is_rejected_when_loading() {
     let (_dir, store) = store().await;
     let id = Uuid::new_v4();
     store
@@ -113,13 +113,12 @@ async fn oversized_source_is_rejected_before_materialization() {
         .await
         .unwrap();
     store.connection.run(move |conn| Box::pin(async move {
-        sqlx::query("UPDATE application_sources SET input_json = json_object('huge', printf('%.*c', ?, 'x')) WHERE deployment = ?")
-            .bind(MAX_JSON as i64).bind(id.to_string()).execute(conn).await?;
+        sqlx::query("UPDATE application_sources SET input_json = json_object('environment', 'invalid') WHERE deployment = ?")
+            .bind(id.to_string()).execute(conn).await?;
         Ok(())
     })).await.unwrap();
     let error = store.load_application(id).await.err().unwrap().to_string();
-    assert!(error.contains("document byte limit"), "{error}");
-    assert!(encode(&"x".repeat(MAX_JSON), MAX_JSON).is_err());
+    assert!(error.contains("invalid type"), "{error}");
     store.close().await.unwrap();
 }
 
@@ -645,7 +644,7 @@ async fn prepared_commit_snapshot_cannot_cross_reopened_root_lease() {
 }
 
 #[tokio::test]
-async fn batch_budget_counts_each_sources_selected_packages() {
+async fn selected_shared_package_pool_preserves_complete_source_and_original_selection() {
     let (_directory, store) = store().await;
     let first = package("export default 'first';");
     let second = package("export default 'second';");
@@ -656,39 +655,16 @@ async fn batch_budget_counts_each_sources_selected_packages() {
         .unwrap()
         .configuration
         .values
-        .insert("padding".into(), serde_json::json!(""));
-    let selected_refs = vec![first.application_ref()];
-    let overhead = serde_json::to_vec(&DeploymentDocument {
-        input: source.clone(),
-        remote_exports: vec![],
-        packages: selected_refs.clone(),
-    })
-    .unwrap()
-    .len();
-    source
-        .instances
-        .get_mut("view")
-        .unwrap()
-        .configuration
-        .values
         .insert(
             "padding".into(),
-            serde_json::json!("x".repeat(MAX_JSON - overhead)),
+            serde_json::json!("甲🙂z".repeat((2 * 1024 * 1024 + 128 * 1024) / 8)),
         );
-    assert_eq!(
-        serde_json::to_vec(&DeploymentDocument {
-            input: source.clone(),
-            remote_exports: vec![],
-            packages: selected_refs,
-        })
-        .unwrap()
-        .len(),
-        MAX_JSON
-    );
     validate_application(&source, &[], std::slice::from_ref(&first)).unwrap();
     let pool = vec![first.clone(), second.clone()];
-    // An ordinary commit still counts every explicitly supplied package.
-    assert!(PreparedApplication::new(source.clone(), vec![], pool.clone()).is_err());
+    // Ordinary preparation retains all explicitly supplied packages, while the
+    // shared-pool path below selects only the packages used by each source.
+    let complete = PreparedApplication::new(source.clone(), vec![], pool.clone()).unwrap();
+    assert_eq!(complete.packages().len(), 2);
     let other = selected(&second);
     let mut prepared = prepare_applications(&[(&source, &[]), (&other, &[])], &pool).unwrap();
     assert_eq!(prepared[0].packages().len(), 1);
@@ -707,32 +683,27 @@ async fn batch_budget_counts_each_sources_selected_packages() {
         .unwrap();
     let loaded = store.load_application(id).await.unwrap().unwrap();
     assert_eq!(loaded.source().reference, committed.source().reference);
-    assert_eq!(loaded.source().input, source);
+    assert!(
+        loaded.source().input == source,
+        "complete source changed during commit"
+    );
     assert_eq!(loaded.packages().len(), 1);
-    // Recovery decodes all immutable bytes again, then applies the same budget
-    // to each selected source instead of the union written in the pending record.
+    // Recovery decodes all immutable bytes again and retains each source's
+    // original package selection from the shared pool.
     let recovered_pool: Vec<_> = pool
         .iter()
         .map(|package| Package::from_bundle(&package.to_bundle()).unwrap())
         .collect();
     let recovered =
         prepare_applications(&[(&source, &[]), (&other, &[])], &recovered_pool).unwrap();
+    assert!(
+        recovered[0].input() == &source,
+        "recovery lost the complete original source"
+    );
     assert_eq!(
         recovered[0].packages()[0].files(),
         loaded.packages()[0].files()
     );
-    let mut oversized = source;
-    let padding = oversized
-        .instances
-        .get_mut("view")
-        .unwrap()
-        .configuration
-        .values
-        .get_mut("padding")
-        .unwrap();
-    *padding = serde_json::json!(format!("{}x", padding.as_str().unwrap()));
-    assert!(validate_application(&oversized, &[], std::slice::from_ref(&first)).is_err());
-    assert!(prepare_applications(&[(&oversized, &[])], &pool).is_err());
     assert_eq!(
         store
             .read_application_metadata(id)
@@ -745,4 +716,86 @@ async fn batch_budget_counts_each_sources_selected_packages() {
         1
     );
     store.drain().await;
+}
+
+#[tokio::test]
+async fn complete_source_over_two_mib_survives_commit_and_original_root_reopen() {
+    let (directory, store) = store().await;
+    let package = package("export default {}; // complete source");
+    let mut expected = selected(&package);
+    let padding = "甲🙂z".repeat(3 * 1024 * 1024 / 8);
+    expected
+        .instances
+        .get_mut("view")
+        .unwrap()
+        .configuration
+        .values
+        .insert("padding".into(), serde_json::json!(padding));
+    let deployment = Uuid::new_v4();
+    let committed = store
+        .commit_application(
+            deployment,
+            0,
+            expected.clone(),
+            vec![],
+            vec![package.clone()],
+        )
+        .await;
+    store.shutdown().await.unwrap();
+    drop(store);
+    // Close the original owner before checking the commit and acquiring a new lease.
+    assert!(
+        committed.is_ok(),
+        "complete source commit failed: {committed:?}"
+    );
+    let original = committed.unwrap();
+    let namespaces = RootNamespaces {
+        ownership: directory.path().join("owners"),
+        control: directory.path().join("control"),
+    };
+    let reopened = EventLog::for_root(Arc::new(
+        RootOwner::open(&directory.path().join("root"), &namespaces).unwrap(),
+    ))
+    .await
+    .unwrap();
+    let loaded = reopened.load_application_at(&original).await;
+    let metadata = reopened.read_application_metadata_at(&original).await;
+    let stale = reopened
+        .commit_application(
+            deployment,
+            0,
+            expected.clone(),
+            vec![],
+            vec![package.clone()],
+        )
+        .await;
+    let mut foreign = original.clone();
+    foreign.state_domain = "0".repeat(64);
+    let foreign_rejected = reopened.load_application_at(&foreign).await.is_err();
+    reopened.shutdown().await.unwrap();
+
+    assert_eq!(original.deployment, deployment);
+    assert_eq!(original.revision, 1);
+    let loaded = loaded.unwrap().unwrap();
+    assert_eq!(loaded.source().reference, original);
+    assert!(
+        loaded.source().input == expected,
+        "reopened source lost original configuration bytes"
+    );
+    assert!(loaded.source().remote_exports.is_empty());
+    assert_eq!(loaded.packages()[0].files(), package.files());
+    assert_eq!(loaded.plan().instances().len(), 1);
+    assert!(
+        loaded.plan().instances()[&InstanceId(vec![Uuid::from_u128(1)])].configuration["padding"]
+            == serde_json::json!(padding),
+        "reopened plan lost complete configuration"
+    );
+    let metadata = metadata.unwrap().unwrap();
+    assert_eq!(metadata.source.reference, original);
+    assert!(
+        metadata.source.input == expected,
+        "metadata read lost original configuration bytes"
+    );
+    assert!(matches!(stale, Err(StoreError::RevisionConflict { .. })));
+    assert!(foreign_rejected);
 }

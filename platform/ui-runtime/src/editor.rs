@@ -37,24 +37,20 @@ pub struct EditorCommand {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditorEdit {
-    /// Replace a bounded UTF-16 range in the current revision, preserving its suffix.
+    /// Replace a UTF-16 range in the current revision, preserving its suffix.
     ReplaceRange {
         range: TextRange,
-        #[schemars(length(max = 65536))]
         text: String,
     },
     Replace {
-        #[schemars(length(max = 65536))]
         text: String,
     },
     Reset {
-        #[schemars(length(max = 65536))]
         text: String,
     },
     /// Continue initialization after Reset, without creating undo history.
-    /// Each chunk is bounded; the same native owner retains the full buffer.
+    /// The same native owner retains the complete buffer.
     Append {
-        #[schemars(length(max = 65536))]
         text: String,
     },
 }
@@ -94,15 +90,8 @@ impl TextRange {
     }
 }
 impl EditorEdit {
-    /// Prospective native buffer, bounded per command and checked before mutation.
+    /// Prospective native buffer, checked before mutation.
     pub fn replacement(&self, current: &str) -> Option<String> {
-        let (Self::ReplaceRange { text, .. }
-        | Self::Replace { text }
-        | Self::Reset { text }
-        | Self::Append { text }) = self;
-        if text.len() > 65536 {
-            return None;
-        }
         match self {
             Self::ReplaceRange { range, text } => {
                 let range = range.utf8_range(current)?;
@@ -170,16 +159,6 @@ pub fn observation_schema() -> serde_json::Value {
         .expect("editor observation schema")
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum EditorReadError {
-    #[error("editor resource is closed or belongs to another owner")]
-    Owner,
-    #[error("editor revision changed")]
-    Revision,
-    #[error("invalid editor UTF-8 byte range or range exceeds 64 KiB")]
-    Range,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditorCapture {
@@ -224,13 +203,15 @@ mod tests {
             assert!(range.utf8_range(current).is_none());
         }
         assert_eq!(TextRange { start: 0, end: 0 }.utf8_range(""), Some(0..0));
+        let text = "中".repeat(30_000);
         assert!(
             EditorEdit::ReplaceRange {
                 range: TextRange { start: 0, end: 0 },
-                text: "x".repeat(65537),
+                text: text.clone(),
             }
             .replacement(current)
-            .is_none()
+            .as_deref()
+                == Some(format!("{text}{current}").as_str())
         );
     }
 }

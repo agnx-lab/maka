@@ -98,15 +98,10 @@ const terminalMessages = {
     '源文件已更改，草稿已保留。请重新加载源文件后再保存。',
     '來源檔案已變更，草稿已保留。請重新載入來源檔案後再儲存。',
   ],
-  'assistant-global-limit': [
-    'Global instructions must be at most 64 KiB. Your draft has not been saved.',
-    '全局指令最多 64 KiB。草稿尚未保存。',
-    '全域指令最多 64 KiB。草稿尚未儲存。',
-  ],
   'assistant-global-unavailable': [
-    'Source unavailable or larger than 64 KiB. Reload to try again.',
-    '源文件不可用或超过 64 KiB。可重新加载以重试。',
-    '來源檔案無法使用或超過 64 KiB。可重新載入以重試。',
+    'Source unavailable. Reload to try again.',
+    '源文件不可用。可重新加载以重试。',
+    '來源檔案無法使用。可重新載入以重試。',
   ],
   'assistant-unavailable': tui_assistant_unavailable,
   'assistant-unknown': tui_assistant_unknown,

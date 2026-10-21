@@ -23,7 +23,7 @@ import { Image } from 'nsh/image';
 import { List } from 'nsh/list';
 import { host, type FileView } from './host';
 import type { AgentFileChange } from '../../../../packages/plugin-sdk/src/index.js';
-import type { WorkspaceFileTarget } from './workspaceFiles';
+import type { WorkspaceFileTarget } from './workspaceFileState';
 import { C } from './ui';
 
 type FileState =

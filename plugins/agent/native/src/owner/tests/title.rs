@@ -75,6 +75,125 @@ async fn attempts(f: &Fixture, session: &str) -> Vec<maka_agent_facts::accountin
 }
 
 #[tokio::test]
+async fn kimi_automatic_title_uses_low_without_defaulting_main_thinking() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let f = Fixture::configured_provider(
+        &format!("http://{}/v1", listener.local_addr().unwrap()),
+        None,
+        None,
+        None,
+        |settings| settings.automatic_titles = true,
+        "kimi-coding-plan",
+    )
+    .await;
+    selection::edit(&f, |changes| {
+        changes.model_overrides = Patch::Set(BTreeMap::from([(
+            "fixture-model".into(),
+            ModelOverride {
+                thinking_levels: Some(vec![
+                    ThinkingLevel::Low,
+                    ThinkingLevel::High,
+                    ThinkingLevel::Max,
+                ]),
+                ..Default::default()
+            },
+        )]));
+    })
+    .await;
+    let session = automatic(&f).await;
+    let mut commits = f.store.subscribe_commits();
+    let sent = f.send(&session).await.unwrap();
+    let mut main_request = None;
+    let mut title_request = None;
+    // Baseline rejects auxiliary Low before HTTP. Observe that durable failure
+    // instead of waiting for a second request which cannot arrive.
+    loop {
+        commits.borrow_and_update();
+        let diagnostics = f
+            .query(
+                "diagnostics",
+                json!({"sessionId":session,"position":{"kind":"latest"}}),
+            )
+            .await
+            .unwrap();
+        let failed = diagnostics["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["detail"]["kind"] == "session_title");
+        if main_request.is_some() && (title_request.is_some() || failed) {
+            break;
+        }
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (mut socket, _) = accepted.unwrap();
+                let body = tool_schemas::read_wire(&mut socket).await;
+                if body["system"].to_string().contains("Generate a short session title") {
+                    tool_schemas::anthropic_text_reply(&mut socket, "Kimi auxiliary title").await;
+                    title_request = Some(body);
+                } else {
+                    tool_schemas::anthropic_text_reply(&mut socket, "Kimi main completed").await;
+                    main_request = Some(body);
+                }
+            }
+            changed = commits.changed() => { changed.unwrap(); }
+        }
+    }
+    f.drained().await;
+    let record = f.owner.session(&session).await.unwrap();
+    let physical = attempts(&f, &session).await;
+    let diagnostics = f
+        .query(
+            "diagnostics",
+            json!({"sessionId":session,"position":{"kind":"latest"}}),
+        )
+        .await
+        .unwrap();
+    let boundary = f
+        .store
+        .invocation_boundary(&session, sent["invocationId"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    f.app.shutdown().await.unwrap();
+    f.config.shutdown().await.unwrap();
+
+    assert!(main_request.unwrap()["output_config"]["effort"].is_null());
+    assert_eq!(
+        record.configuration.title, "Kimi auxiliary title",
+        "auxiliary preparation must succeed: {diagnostics}"
+    );
+    assert!(!record.configuration.title_is_manual);
+    let title_request = title_request.expect("supported Kimi Low must reach actual Anthropic HTTP");
+    assert_eq!(title_request["output_config"]["effort"], "low");
+    assert_eq!(title_request["max_tokens"], 2048);
+    assert!(title_request["tools"].is_null() || title_request["tools"] == json!([]));
+    assert_eq!(diagnostics["entries"], json!([]));
+    assert!(matches!(
+        boundary.state,
+        maka_event_log::turns::InvocationState::Ended {
+            outcome: maka_agent_facts::event::InvocationOutcome::Completed,
+            ..
+        }
+    ));
+    assert_eq!(physical.len(), 2);
+    let auxiliary = physical
+        .iter()
+        .find(|attempt| matches!(attempt.origin, Origin::Auxiliary { .. }))
+        .unwrap();
+    assert_eq!(auxiliary.session_id.as_deref(), Some(session.as_str()));
+    assert!(matches!(&auxiliary.origin, Origin::Auxiliary {
+        source: AuxiliarySource::SessionTitle { invocation }
+    } if invocation == &boundary.invocation));
+    assert_eq!(auxiliary.outcome, Outcome::Success);
+    assert_eq!(auxiliary.usage.input_tokens, Some(1));
+    assert_eq!(auxiliary.usage.output_tokens, Some(2));
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn title_survives_main_completion_between_metadata_read_and_write() {
     verify_title_metadata_conflict(false).await;
 }

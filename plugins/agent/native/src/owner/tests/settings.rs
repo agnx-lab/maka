@@ -797,15 +797,39 @@ async fn compaction_preferences_accept_custom_prompt_and_reset_to_default() {
 }
 
 #[tokio::test]
-async fn global_instruction_editor_and_admission_share_one_selected_file() {
-    tokio::time::timeout(Duration::from_secs(60), async {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let f = Fixture::configured(
-            &format!("http://{}/v1", listener.local_addr().unwrap()), None, None, None,
-            |settings| settings.assistant = Some(AssistantConfiguration {
-                home: Some(settings.workspace_roots[0].path.parent().unwrap().to_str().unwrap().into()),
-            }),
-        ).await;
+async fn global_instruction_api_and_admission_share_one_selected_file() {
+    use futures_util::FutureExt;
+    use std::panic::AssertUnwindSafe;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let f = Fixture::configured(
+        &format!("http://{}/v1", listener.local_addr().unwrap()),
+        None,
+        None,
+        None,
+        |settings| {
+            settings.assistant = Some(AssistantConfiguration {
+                home: Some(
+                    settings.workspace_roots[0]
+                        .path
+                        .parent()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .into(),
+                ),
+            })
+        },
+    )
+    .await;
+    let completed = tokio::time::timeout(Duration::from_secs(60), AssertUnwindSafe(async {
+        // Declare the controlled HTTP model's capacity for the full-file prompt.
+        // Ordinary model context admission remains active.
+        selection::edit(&f, |changes| {
+            changes.model_overrides = Patch::Set(BTreeMap::from([("fixture-model".into(), ModelOverride {
+                context_window: Some(1_000_000), input_limit: Some(900_000), ..Default::default()
+            })]));
+        }).await;
         let home = f._dir.path();
         std::fs::create_dir(home.join(".agents")).unwrap();
         std::fs::create_dir(home.join(".maka")).unwrap();
@@ -861,12 +885,56 @@ async fn global_instruction_editor_and_admission_share_one_selected_file() {
         assert_eq!(f.mutation(2,"updateGlobalInstructions",input.clone(),operation).await.unwrap(),saved);
         assert_eq!(std::fs::read_to_string(home.join(".maka/AGENTS.md")).unwrap(),"EXTERNAL CHANGE");
         assert_eq!(f.mutation(2,"updateGlobalInstructions",input,Uuid::new_v4()).await.unwrap()["kind"],"changed");
-        let large = format!("LARGE GLOBAL UNIQUE{}", "x".repeat(65536));
-        std::fs::write(home.join(".maka/AGENTS.md"),large).unwrap();
-        assert_eq!(f.query("globalInstructions",json!({})).await.unwrap()["kind"],"unavailable");
-        let prompt = f.owner.capture_behavior(&workspace, &policy, language).await.unwrap().unwrap().text;
-        assert!(prompt.contains("LARGE GLOBAL UNIQUE"));
-        assert!(!prompt.contains("FALLBACK UNIQUE"));
-        f.app.shutdown().await.unwrap(); f.config.shutdown().await.unwrap();
-    }).await.unwrap();
+        // One selected, valid UTF-8 file beyond both former editor and prompt limits.
+        let large = format!("# GLOBAL ORIGINAL START\n{}GLOBAL ORIGINAL END",
+            "Preserve 中文😀 exactly.\n".repeat(40_000));
+        assert!(large.len() > 1024 * 1024);
+        let path = home.join(".maka/AGENTS.md");
+        std::fs::write(&path, &large).unwrap();
+        let available = f.query("globalInstructions", json!({})).await.unwrap();
+        assert_eq!(available["kind"], "available", "the full selected file must be available through the native API");
+        assert_eq!(available["source"], "maka");
+        assert_eq!(available["path"], path.to_str().unwrap());
+        assert_eq!(available["exists"], true);
+        let content = available["content"].as_str().unwrap();
+        assert!(content.as_bytes() == large.as_bytes(),
+            "complete read differs: got {} bytes, expected {}", content.len(), large.len());
+        assert!(std::fs::read(&path).unwrap() == large.as_bytes(), "reading changed the selected file");
+        let edited = large.replace("ORIGINAL START", "EDITED START").replace("ORIGINAL END", "EDITED END");
+        let saved = f.mutation(2, "updateGlobalInstructions", json!({
+            "source":available["source"], "revision":available["revision"], "content":edited
+        }), Uuid::new_v4()).await.unwrap();
+        assert_eq!(saved["kind"], "saved");
+        assert!(std::fs::read(&path).unwrap() == edited.as_bytes(), "update did not save every edited byte");
+        let updated = f.query("globalInstructions", json!({})).await.unwrap();
+        assert_eq!(updated["kind"], "available");
+        let content = updated["content"].as_str().unwrap();
+        assert!(content.as_bytes() == edited.as_bytes(),
+            "complete saved read differs: got {} bytes, expected {}", content.len(), edited.len());
+        assert_eq!(f.send(&session).await.unwrap()["kind"], "started");
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let sent = request(&mut socket).await;
+        response(&mut socket).await;
+        f.drained().await;
+        let system = sent["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "system")
+            .map(|m| m["content"].as_str().unwrap()).collect::<Vec<_>>().join("\n");
+        let global = system.strip_prefix("You are [Maka](https://github.com/apache/maka), an AI agent.\n\n<global_instruction>\n")
+            .and_then(|body| body.split_once("\n</global_instruction>")).expect("selected global instruction block").0;
+        assert!(global.as_bytes() == edited.as_bytes(),
+            "HTTP global instructions differ: got {} bytes, expected {}", global.len(), edited.len());
+        assert_eq!(system.matches("<global_instruction>").count(), 1);
+        assert!(system.contains("OTHER GLOBAL GUIDANCE") && system.contains("PROJECT GUIDANCE"));
+        assert!(!system.contains("<workspace-instructions file=\"AGENTS.md\" scope=\"global\">"));
+        assert!(!system.contains("FALLBACK UNIQUE"));
+        assert_eq!(std::fs::read_to_string(home.join(".agents/AGENTS.md")).unwrap(), "FALLBACK UNIQUE");
+        assert_eq!(std::fs::read_to_string(home.join(".maka/CLAUDE.md")).unwrap(), "OTHER GLOBAL GUIDANCE");
+        assert_eq!(std::fs::read_to_string(f.workspace.join("AGENTS.md")).unwrap(), "PROJECT GUIDANCE");
+    }).catch_unwind()).await;
+    let app_shutdown = f.app.shutdown().await;
+    let config_shutdown = f.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    completed
+        .expect("global instruction API and prompt sequence timed out")
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
 }

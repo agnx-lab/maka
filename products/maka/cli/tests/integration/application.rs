@@ -17,6 +17,8 @@
  * under the License.
  */
 
+mod inspection;
+
 use maka_event_log::root::{RootNamespaces, RootOwner};
 use maka_plugin_core::composition::{Environment, ExecutionLocation, Input};
 use serde_json::Value;

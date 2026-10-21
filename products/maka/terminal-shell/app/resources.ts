@@ -19,7 +19,7 @@
 
 import { cleanup, effect, signal, untracked } from 'nsh';
 import type { YNode } from 'nsh';
-import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFiles';
+import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFileState';
 import { createCurrentFile, type CurrentFileModel } from './CurrentFile';
 import { createCurrentDiff, type CurrentDiffTarget, type CurrentDiffModel } from './CurrentDiff';
 import type { ImagePreview } from './ImageThumbnail';

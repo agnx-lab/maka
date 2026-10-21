@@ -3782,7 +3782,6 @@ export const contracts = {
           },
           initialText: {
             type: 'string',
-            maxLength: 65536,
             default: '',
           },
           placeholder: {
@@ -4475,7 +4474,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -4483,7 +4482,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4498,7 +4496,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4513,7 +4510,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4525,12 +4521,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6056,7 +6051,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -6064,7 +6059,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6079,7 +6073,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6094,7 +6087,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6106,12 +6098,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6938,7 +6929,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -6946,7 +6937,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6961,7 +6951,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6976,7 +6965,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6988,12 +6976,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -9723,7 +9710,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -10570,7 +10556,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -10658,7 +10643,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14176,7 +14160,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14413,7 +14396,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14808,7 +14790,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14896,7 +14877,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -15258,7 +15238,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19641,7 +19620,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19794,7 +19772,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19879,7 +19856,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -20027,7 +20003,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -26203,7 +26178,6 @@ export const contracts = {
               },
               content: {
                 type: 'string',
-                maxLength: 65536,
               },
             },
             additionalProperties: false,
@@ -26247,17 +26221,6 @@ export const contracts = {
                   kind: {
                     type: 'string',
                     const: 'unavailable',
-                  },
-                },
-                required: ['kind'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  kind: {
-                    type: 'string',
-                    const: 'rejected',
                   },
                 },
                 required: ['kind'],
@@ -29661,7 +29624,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -31064,7 +31026,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -31148,7 +31109,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -50935,7 +50895,6 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint',
                 minimum: 0,
-                maximum: 2097152,
               },
             },
             additionalProperties: false,
@@ -52933,7 +52892,6 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 2097152,
                   },
                 },
                 additionalProperties: false,
@@ -54188,7 +54146,6 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 2097152,
                   },
                 },
                 additionalProperties: false,

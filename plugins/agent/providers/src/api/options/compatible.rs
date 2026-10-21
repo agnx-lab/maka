@@ -26,8 +26,7 @@ pub(super) fn chat(
     level: Option<ThinkingLevel>,
     parallel: Option<bool>,
 ) -> Result<Value, Error> {
-    let facts = provider_facts("openai")
-        .map_err(|_| super::unavailable("OpenAI provider facts are unavailable"))?;
+    let facts = provider_facts("openai").map_err(|_| Error::ProviderFactsUnavailable)?;
     let level =
         level.or_else(|| super::default_medium(facts, model).then_some(ThinkingLevel::Medium));
     let mut options = json!({});

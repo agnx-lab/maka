@@ -24,7 +24,6 @@ mod serve;
 pub(crate) use product::{Launch, Roots, open_host, select_committed_host};
 
 use std::{
-    io::Read,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -195,11 +194,10 @@ impl Command {
                 println!("{}", serde_json::to_string_pretty(&source)?);
             }
             Self::Read(args) => {
-                let store = open_store(args.root).await?;
+                let store = open_application_inspection(args.root).await?;
                 let result = store.load_application(args.deployment).await;
-                let closed = store.close().await;
+                store.drain().await;
                 let loaded = result?.ok_or("deployment not found")?;
-                closed?;
                 println!("{}", serde_json::to_string_pretty(&loaded.source())?);
             }
             Self::Run(args) => {
@@ -273,17 +271,9 @@ impl Check {
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(source: &Path) -> Result<T, HostError> {
-    // A bundled product's remote declarations are part of its editable source
-    // and can exceed 512 KiB. Use the same bound as deployment documents.
-    const LIMIT: usize = maka_plugin_core::deployment::management::MAX_DOCUMENT_BYTES;
-    let mut bytes = Vec::new();
-    std::fs::File::open(source)?
-        .take((LIMIT + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > LIMIT {
-        return Err(format!("application input exceeds {LIMIT} bytes").into());
-    }
-    Ok(serde_json::from_slice(&bytes)?)
+    Ok(serde_json::from_reader(std::io::BufReader::new(
+        std::fs::File::open(source)?,
+    ))?)
 }
 
 async fn open_store(root: PathBuf) -> Result<maka_event_log::EventLog, HostError> {
@@ -295,6 +285,17 @@ async fn open_store(root: PathBuf) -> Result<maka_event_log::EventLog, HostError
     })
     .await??;
     Ok(maka_transport::open_store(std::sync::Arc::new(owner)).await?)
+}
+
+async fn open_application_inspection(root: PathBuf) -> Result<maka_event_log::EventLog, HostError> {
+    let owner = tokio::task::spawn_blocking(move || {
+        maka_event_log::root::RootOwner::open_existing(
+            &root,
+            &maka_event_log::root::RootNamespaces::for_current_account()?,
+        )
+    })
+    .await??;
+    Ok(maka_transport::open_application_inspection(std::sync::Arc::new(owner)).await?)
 }
 
 async fn run_tui(
@@ -411,22 +412,22 @@ mod source_input_tests {
     use super::*;
 
     #[test]
-    fn authoring_reads_large_contract_documents_with_the_deployment_bound() {
+    fn authoring_reads_complete_contract_documents_and_rejects_malformed_json() {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("remote-exports.json");
-        let value = serde_json::json!({"contract": "x".repeat(1152 * 1024)});
+        let value =
+            serde_json::json!({"contract": format!("甲{}🙂 END", "x".repeat(3 * 1024 * 1024))});
         std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
-        assert_eq!(read_json::<serde_json::Value>(&file).unwrap(), value);
-        std::fs::write(
-            &file,
-            vec![b' '; maka_plugin_core::deployment::management::MAX_DOCUMENT_BYTES + 1],
-        )
-        .unwrap();
+        assert!(
+            read_json::<serde_json::Value>(&file).unwrap() == value,
+            "authoring must read the complete original contract JSON"
+        );
+        std::fs::write(&file, b"{\"contract\":").unwrap();
         assert!(
             read_json::<serde_json::Value>(&file)
                 .unwrap_err()
                 .to_string()
-                .contains("application input exceeds")
+                .contains("EOF while parsing")
         );
     }
 }

@@ -2057,11 +2057,6 @@ export const msg_deploymentDocument: Message = [
   '产品组合来源',
   '產品組合來源',
 ];
-export const msg_deploymentDocumentTooLarge: Message = [
-  'This draft exceeds 1 MiB. Reduce it before saving.',
-  '草稿超过 1 MiB，请缩减后再保存。',
-  '草稿超過 1 MiB，請縮減後再儲存。',
-];
 export const msg_deploymentDocumentRejected: Message = [
   'Could not save this composition. Review the validation details.',
   '无法保存这份组合，请查看校验详情。',

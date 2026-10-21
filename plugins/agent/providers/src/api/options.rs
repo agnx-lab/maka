@@ -17,8 +17,8 @@
  * under the License.
  */
 
+use super::Wire;
 use super::{Selection, route::Route};
-use super::{Wire, unavailable};
 use crate::facts::{ProviderFacts, ThinkingOffBehavior};
 use maka_agent_facts::execution::ThinkingLevel;
 use maka_agent_ports::model::ProviderKind;
@@ -55,51 +55,47 @@ pub(super) fn resolve(
                 .and_then(|item| item.metadata.capabilities)
                 .and_then(|caps| caps.parallel_tool_calls)
         });
-    if let ProviderKind::OpenResponses(contract) = &route.kind {
-        if parallel == Some(false) {
-            return Err(unavailable(
-                "Open Responses does not expose parallel-call policy",
-            ));
+    match &route.kind {
+        ProviderKind::Anthropic => Ok(anthropic(facts, model, thinking_level, parallel)),
+        ProviderKind::OpenaiResponses if row.provider == "openai-responses-compatible" => {
+            relay::responses(row, thinking_level, parallel.unwrap_or(true))
         }
-        let mut options = json!({});
-        if let Some(level) = thinking_level {
-            options["reasoningEffort"] = if level == ThinkingLevel::Off {
-                json!("none")
-            } else {
-                json!(level)
-            };
+        ProviderKind::OpenaiChat | ProviderKind::OpenaiResponses => {
+            // An explicit account capability can opt out; it never gates rendering.
+            let summary = stored
+                .and_then(|model| model.supports_reasoning_summary)
+                .unwrap_or(false);
+            Ok(openai(
+                wire,
+                thinking_level,
+                summary,
+                parallel.unwrap_or(true),
+            ))
         }
-        if contract.reasoning_replay
-            == maka_agent_facts::model::PlaintextReasoningReplay::PlaintextSummary
-            && thinking_level != Some(ThinkingLevel::Off)
-        {
-            options["reasoningSummary"] = json!("auto");
+        ProviderKind::OpenaiCompatible { name } => {
+            compatible::chat(name, model, thinking_level, parallel)
         }
-        return Ok(json!({"openResponses":options}));
-    }
-    if row.provider == "anthropic" {
-        return Ok(anthropic(facts, model, thinking_level));
-    }
-    if row.provider == "openai-responses-compatible" && wire == Wire::OpenaiResponses {
-        return relay::responses(row, thinking_level, parallel.unwrap_or(true));
-    }
-    if let ProviderKind::OpenaiCompatible { name } = &route.kind {
-        return compatible::chat(name, model, thinking_level, parallel);
-    }
-    if row.provider != "openai" {
-        if thinking_level.is_some() || parallel == Some(false) {
-            return Err(unavailable(
-                "Thinking or parallel-call policy is not supported for this provider",
-            ));
+        ProviderKind::OpenResponses(contract) => {
+            if parallel == Some(false) {
+                return Err(Error::UnsupportedParallelPolicy);
+            }
+            let mut options = json!({});
+            if let Some(level) = thinking_level {
+                options["reasoningEffort"] = if level == ThinkingLevel::Off {
+                    json!("none")
+                } else {
+                    json!(level)
+                };
+            }
+            if contract.reasoning_replay
+                == maka_agent_facts::model::PlaintextReasoningReplay::PlaintextSummary
+                && thinking_level != Some(ThinkingLevel::Off)
+            {
+                options["reasoningSummary"] = json!("auto");
+            }
+            Ok(json!({"openResponses":options}))
         }
-        return Ok(json!({}));
     }
-    // An explicit account capability can opt out; it never gates rendering.
-    let summary = stored
-        .and_then(|model| model.supports_reasoning_summary)
-        .unwrap_or(false);
-    let options = openai(wire, thinking_level, summary, parallel.unwrap_or(true));
-    Ok(options)
 }
 
 fn default_medium(facts: &ProviderFacts, model: &str) -> bool {
@@ -127,7 +123,12 @@ fn openai(wire: Wire, level: Option<ThinkingLevel>, summary: bool, parallel: boo
     json!({"openai": options})
 }
 
-fn anthropic(facts: &ProviderFacts, model: &str, level: Option<ThinkingLevel>) -> Value {
+fn anthropic(
+    facts: &ProviderFacts,
+    model: &str,
+    level: Option<ThinkingLevel>,
+    parallel: Option<bool>,
+) -> Value {
     let family = claude_family(model);
     let known = facts.models.get(model);
     let family_facts = facts.models.get(family.as_ref());
@@ -154,6 +155,9 @@ fn anthropic(facts: &ProviderFacts, model: &str, level: Option<ThinkingLevel>) -
                 == Some(true)
             || bare_legacy);
     let mut options = json!({"cacheControl":{"type":"ephemeral"}});
+    if parallel == Some(false) {
+        options["disableParallelToolUse"] = json!(true);
+    }
     if level == Some(ThinkingLevel::Off)
         && thinking.and_then(|thinking| thinking.off_behavior)
             == Some(ThinkingOffBehavior::AnthropicThinkingDisabled)

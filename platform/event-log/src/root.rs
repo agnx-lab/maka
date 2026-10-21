@@ -146,7 +146,7 @@ pub fn repair_after_remount(
     next.root_identity = identity;
     // Use the same ownership lock as normal Host startup, not executor.lock
     // or FileLease: Linux OFD locks are distinct from flock.
-    let owner = RootOwner::acquire(canonical_path, next, namespaces)?;
+    let owner = RootOwner::acquire(canonical_path, next, namespaces, false)?;
     let validate = || {
         owner.check_directory()?;
         owner.validate_leases()?;
@@ -237,7 +237,16 @@ impl RootOwner {
     /// Open only a marked Rust prototype root, rejecting legacy layouts before database access.
     pub fn open(path: &Path, namespaces: &RootNamespaces) -> io::Result<Self> {
         let (canonical_path, marker) = inspect(path)?;
-        let owner = Self::acquire(canonical_path, marker, namespaces)?;
+        let owner = Self::acquire(canonical_path, marker, namespaces, false)?;
+        owner.validate_current()?;
+        Ok(owner)
+    }
+
+    /// Acquire an existing Root without creating or repairing coordination state.
+    /// Uses the same exclusive ownership protocol as ordinary startup.
+    pub fn open_existing(path: &Path, namespaces: &RootNamespaces) -> io::Result<Self> {
+        let (canonical_path, marker) = inspect(path)?;
+        let owner = Self::acquire(canonical_path, marker, namespaces, true)?;
         owner.validate_current()?;
         Ok(owner)
     }
@@ -246,15 +255,25 @@ impl RootOwner {
         canonical_path: PathBuf,
         marker: Marker,
         namespaces: &RootNamespaces,
+        existing_only: bool,
     ) -> io::Result<Self> {
-        lock::private_directory(&namespaces.ownership)?;
+        let directory = if existing_only {
+            lock::existing_private_directory
+        } else {
+            lock::private_directory
+        };
+        directory(&namespaces.ownership)?;
         let lock_path = namespaces
             .ownership
             .join(format!("{}.lock", marker.root_id));
-        let durable_lease = lock::acquire(&lock_path)?;
-        lock::private_directory(&namespaces.control)?;
+        let durable_lease = if existing_only {
+            lock::acquire_existing(&lock_path)?
+        } else {
+            lock::acquire(&lock_path)?
+        };
+        directory(&namespaces.control)?;
         let control_directory = namespaces.control.join(&marker.root_id);
-        lock::private_directory(&control_directory)?;
+        directory(&control_directory)?;
         let control_identity = directory_identity(&control_directory)?;
         Ok(Self {
             canonical_path,

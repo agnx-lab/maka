@@ -9296,6 +9296,7 @@ dependencies = [
  "maka-ui-runtime",
  "maka-workspace-api",
  "reqwest",
+ "rusqlite",
  "schemars 1.2.2",
  "semver",
  "serde",

@@ -273,13 +273,6 @@ impl ReadResource for Frozen {
         self.descriptor.metadata.clone()
     }
     fn read(&self, range: Range<usize>) -> Result<Vec<u8>> {
-        if range
-            .end
-            .checked_sub(range.start)
-            .is_none_or(|n| n > RESOURCE_CHUNK_LIMIT)
-        {
-            return Err("invalid resource read range".into());
-        }
         if self.descriptor.encoding == ResourceEncoding::Utf8
             && [range.start, range.end]
                 .iter()

@@ -56,7 +56,7 @@ pub(super) async fn select(client: &Client, cwd: &Path) -> Result<DirectorySelec
         .filter(|root| cwd.starts_with(&root.path))
         .max_by_key(|root| root.path.len())
         .ok_or("Workspace cwd is outside published Host roots")?;
-    for _ in 0..65 {
+    loop {
         if Path::new(&current.path) == cwd {
             return Ok(current.selection);
         }
@@ -77,10 +77,14 @@ pub(super) async fn select(client: &Client, cwd: &Path) -> Result<DirectorySelec
             else {
                 return Err("Host omitted workspace children".into());
             };
-            if let Some(child) = children
-                .into_iter()
-                .find(|child| cwd.starts_with(&child.path))
-            {
+            if let Some(child) = children.into_iter().find(|child| {
+                let path = Path::new(&child.path);
+                // Canonical aliases may point back to this directory or an
+                // ancestor. Every step must consume part of the target path.
+                path != Path::new(&current.path)
+                    && path.starts_with(&current.path)
+                    && cwd.starts_with(path)
+            }) {
                 break child;
             }
             let Some(next) = next else {
@@ -92,7 +96,6 @@ pub(super) async fn select(client: &Client, cwd: &Path) -> Result<DirectorySelec
             after = Some(next);
         };
     }
-    Err("Workspace cwd exceeds the supported directory depth".into())
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

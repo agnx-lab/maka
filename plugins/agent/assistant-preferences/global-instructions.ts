@@ -21,7 +21,6 @@ import type {
   Action,
   ActionOutcome,
   AgentGlobalInstructionsView,
-  AgentGlobalInstructionsUpdate,
   AgentGlobalInstructionsUpdated,
   CallerIntent,
   ComponentInput,
@@ -47,7 +46,7 @@ export interface GlobalInstructionsState {
   serial: number;
   saved: Extract<AgentGlobalInstructionsView, { kind: 'available' }> | null;
   pending: { key: string; request: Request } | null;
-  current: { input: AgentGlobalInstructionsUpdate; reference: RecoveryRef | null } | null;
+  current: { reference: RecoveryRef | null } | null;
   restoring: boolean;
   observation: EditorObservation | null;
   command: EditorCommand | null;
@@ -125,9 +124,7 @@ function settle(state: GlobalInstructionsState, reply: OperationReply, actions: 
       ? 'assistant-global-saved'
       : result.kind === 'changed'
         ? 'assistant-global-conflict'
-        : result.kind === 'rejected'
-          ? 'assistant-global-limit'
-          : 'assistant-unavailable';
+        : 'assistant-unavailable';
   if (result.kind === 'changed') state.conflict = true;
   if (result.kind === 'saved' || result.kind === 'changed')
     read(state, actions, result.kind === 'saved');
@@ -180,17 +177,11 @@ export function globalInstructionsEvent(
       }
       const items = result.value as CallerIntent[];
       for (const item of items) {
-        const recovery = item.recovery as {
-          kind?: string;
-          input?: AgentGlobalInstructionsUpdate;
-        } | null;
         if (
           item.reference.contract.name === 'maka.agent.Agent' &&
-          item.reference.method === 'updateGlobalInstructions' &&
-          recovery?.kind === 'assistant-global-instructions/v1' &&
-          recovery.input
+          item.reference.method === 'updateGlobalInstructions'
         )
-          state.current = { input: recovery.input, reference: item.reference };
+          state.current = { reference: item.reference };
       }
       const last = items.at(-1);
       if (last && last.cursor > r.after) history(state, actions, last.cursor);
@@ -204,7 +195,7 @@ export function globalInstructionsEvent(
     } else if (r.kind === 'read') {
       const view =
         result.status === 'succeeded' ? (result.value as AgentGlobalInstructionsView) : null;
-      if (view?.kind !== 'available' || new TextEncoder().encode(view.content).length > 65536) {
+      if (view?.kind !== 'available') {
         state.saved = null;
         state.ready = false;
         state.notice = 'assistant-global-unavailable';
@@ -224,8 +215,7 @@ export function globalInstructionsEvent(
         !state.saved ||
         !sameValue(chunk.metadata, r.observed.snapshot.text) ||
         !sameValue(state.observation?.snapshot.text, r.observed.snapshot.text) ||
-        new TextEncoder().encode(chunk.text).length !== r.observed.snapshot.text.bytes ||
-        r.observed.snapshot.text.bytes > 65536
+        new TextEncoder().encode(chunk.text).length !== r.observed.snapshot.text.bytes
       ) {
         state.notice = 'assistant-invalid';
         return;
@@ -235,10 +225,9 @@ export function globalInstructionsEvent(
         revision: state.saved.revision,
         content: chunk.text,
       };
-      state.current = { input: update, reference: null };
+      state.current = { reference: null };
       state.notice = null;
       request(state, actions, { kind: 'save' }, 'agent', 'updateGlobalInstructions', update);
-      actions.at(-1)!.recovery = { kind: 'assistant-global-instructions/v1', input: update };
     } else if (r.kind === 'save') {
       if (result.status === 'operation') settle(state, result.reply, actions);
       else if (result.status === 'not_accepted') {
@@ -271,10 +260,6 @@ export function globalInstructionsEvent(
       ) {
         const observed = state.observation;
         if (!observed || observed.snapshot.marked) return;
-        if (observed.snapshot.text.bytes > 65536) {
-          state.notice = 'assistant-global-limit';
-          return;
-        }
         request(
           state,
           actions,

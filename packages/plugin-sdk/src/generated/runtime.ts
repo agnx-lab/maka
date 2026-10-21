@@ -1506,9 +1506,6 @@ export type AgentGlobalInstructionsUpdated =
     }
   | {
       kind: 'unavailable';
-    }
-  | {
-      kind: 'rejected';
     };
 export type Language = 'en' | 'zh-CN' | 'zh-TW';
 export type ExecutorSetupAction =
@@ -7640,9 +7637,6 @@ export interface WorkHubResolve {
 }
 export interface AgentDirectorySelection {
   rootId: string;
-  /**
-   * @maxItems 64
-   */
   segments: string[];
   directoryIdentity: string;
 }

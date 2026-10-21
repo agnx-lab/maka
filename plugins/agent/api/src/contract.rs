@@ -342,7 +342,6 @@ pub enum WorkspaceSelection {
 pub struct DirectorySelection {
     #[schemars(length(min = 1, max = 64))]
     pub root_id: String,
-    #[schemars(length(max = 64))]
     pub segments: Vec<String>,
     #[schemars(with = "String", regex(pattern = "^sha256:[a-f0-9]{64}$"))]
     pub directory_identity: DirectoryIdentity,
@@ -482,7 +481,6 @@ pub struct GlobalInstructionsRead {}
 pub struct GlobalInstructionsUpdate {
     pub source: GlobalInstructionSource,
     pub revision: String,
-    #[schemars(length(max = 65536))]
     pub content: String,
 }
 #[derive(Serialize, JsonSchema)]
@@ -492,7 +490,6 @@ pub enum GlobalInstructionsUpdated {
     Saved,
     Changed,
     Unavailable,
-    Rejected,
 }
 
 /// Read-only suggestions resolved against the session's actual skill context.
