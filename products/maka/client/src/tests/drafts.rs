@@ -43,6 +43,8 @@ async fn original_upload_receipts_and_complete_attachment_drafts_survive_restart
     tokio::time::timeout(Duration::from_secs(20), async {
         let fixture = Fixture::new().await;
         let client = fixture.client().await;
+        let observer = client.clone();
+        let mut updates = observer.watch_uploads();
         let upload = client
             .upload_attachment(
                 Uuid::new_v4(),
@@ -52,6 +54,15 @@ async fn original_upload_receipts_and_complete_attachment_drafts_survive_restart
             )
             .await
             .unwrap();
+        updates.changed().await.unwrap();
+        assert_eq!(
+            observer
+                .pending_uploads("session-one", "composer")
+                .await
+                .unwrap()[0]
+                .id,
+            upload.id()
+        );
         upload.prepare().await.unwrap();
         upload.confirm().await.unwrap();
         assert!(

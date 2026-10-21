@@ -98,6 +98,7 @@ struct Scope {
     journal: Journal,
     requests: Mutex<BTreeMap<Uuid, Arc<Request>>>,
     closing: AtomicBool,
+    upload_updates: tokio::sync::watch::Sender<()>,
 }
 struct Request {
     id: Uuid,
@@ -133,6 +134,7 @@ impl Client {
             receipts,
             requests: Mutex::new(BTreeMap::new()),
             closing: AtomicBool::new(false),
+            upload_updates: tokio::sync::watch::channel(()).0,
         })))
     }
     pub fn source(&self) -> &DeploymentRef {
@@ -237,6 +239,9 @@ impl Client {
         resources: Attachments,
     ) -> Result<Mutation> {
         self.0.journal.reserve(&operation).await?;
+        if operation.upload.is_some() {
+            self.notify_uploads();
+        }
         self.open_mutation(operation, input, resources).await
     }
     async fn open_mutation(
@@ -362,6 +367,14 @@ impl Client {
         let key = self.draft_key("agent", session, editor).await?;
         self.0.journal.pending_uploads(&self.0.source, &key).await
     }
+    /// In-process invalidation only. Read the original journal after every wake.
+    /// Subscribe before the first read; a new ScopedHost shares this same sender.
+    pub fn watch_uploads(&self) -> tokio::sync::watch::Receiver<()> {
+        self.0.upload_updates.subscribe()
+    }
+    fn notify_uploads(&self) {
+        self.0.upload_updates.send_replace(());
+    }
     pub async fn operation_for_upload(
         &self,
         session: &str,
@@ -430,10 +443,16 @@ impl Client {
         edit: DraftEdit,
     ) -> Result<Draft> {
         let key = self.draft_key(endpoint, session, editor).await?;
-        self.0
+        let adopted = !edit.settled_uploads.is_empty();
+        let saved = self
+            .0
             .journal
             .save_draft(&key, expected_revision, edit)
-            .await
+            .await?;
+        if adopted {
+            self.notify_uploads();
+        }
+        Ok(saved)
     }
     /// Read the exact saved text in Rust. UI callers provide only its revision
     /// and model selection; editing a subsequent revision remains independent.
@@ -560,6 +579,9 @@ impl Client {
     /// This never authorizes resending the same ID or acknowledges physical cleanup.
     pub async fn abandon_unprepared(&self, id: Uuid) -> Result<Operation> {
         let operation = self.0.journal.abandon(&self.0.source, id).await?;
+        if operation.upload.is_some() {
+            self.notify_uploads();
+        }
         if operation.abandoned {
             let requests: Vec<_> = self
                 .0
@@ -607,6 +629,9 @@ impl Client {
             return Err("Host receipt differs from the original client operation".into());
         }
         self.0.journal.observe(&operation, &reply.receipt).await?;
+        if operation.upload.is_some() {
+            self.notify_uploads();
+        }
         Ok(reply)
     }
     pub async fn subscribe(
@@ -705,6 +730,7 @@ impl Mutation {
                     return Err("Host preparation belongs to another draft owner".into());
                 }
                 self.client.0.journal.prepared(self.operation.id, &reference).await?;
+                if self.operation.upload.is_some() { self.client.notify_uploads(); }
                 state.phase = Phase::Prepared;
                 self.client.operation(self.operation.id).await
             } => result,
@@ -735,6 +761,7 @@ impl Mutation {
                         Reply::Mutation { reply, cleanup } => {
                             let operation = self.client.operation(self.operation.id).await?;
                             self.client.0.journal.observe(&operation, &reply.receipt).await?;
+                            if operation.upload.is_some() { self.client.notify_uploads(); }
                             state.phase = Phase::Complete;
                             cleanup?;
                             return Ok(*reply);

@@ -277,11 +277,12 @@ impl Journal {
         // A save queued before a send receipt may still follow its consumption
         // at this same revision, as text edits already can. Keep its verified
         // metadata available for that CAS; consumed load still returns [].
-        let previous: Option<String> = sqlx::query_scalar("SELECT attachments FROM drafts WHERE owner=?")
-        .bind(&encoded_key)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(error)?;
+        let previous: Option<String> =
+            sqlx::query_scalar("SELECT attachments FROM drafts WHERE owner=?")
+                .bind(&encoded_key)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(error)?;
         let mut admitted: Vec<DraftAttachment> = previous
             .as_deref()
             .map(serde_json::from_str)
