@@ -21,6 +21,7 @@ import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { host } from './host';
+import { sameValue } from '../../../../plugins/shared/value';
 import type { Position, Row } from './history';
 import { MessageCopy } from './MessageCopy';
 import { forkTitle, type SessionAction } from './sessionLifecycle';
@@ -102,8 +103,8 @@ export function FinalActions(props: {
   const showUsage = (original: Target | null) => {
     if (original && owns(original)) usage.set(original);
   };
-  const closeUsage = () => {
-    if (!alive) return;
+  const closeUsage = (original: Target | null) => {
+    if (!alive || original === null || !sameValue(usage(), original)) return;
     usage.set(null);
     usageButton?.focus();
   };
@@ -181,7 +182,7 @@ export function FinalActions(props: {
           turnId={usage()!.turnId}
           through={usage()!.through}
           current={() => usage() !== null && owns(usage()!)}
-          close={closeUsage}
+          close={inputAction(closeUsage, usage())}
         />
       </If>
     </View>

@@ -66,6 +66,7 @@ export type ConversationHandle = ComposerSession & {
   activityTurn(): string | null;
   flushDraft(): Promise<boolean>;
   focus(): void;
+  /** A null target follows the current live turn. */
   jumpLatest(turnId: string | null): void;
   refresh(): Promise<any>;
   focusHistory(): void;
@@ -479,8 +480,8 @@ export function Conversation(props: ConversationProps) {
         .finally(() => attachmentMetadataReads.delete(key));
     }
   };
-  const retryAttachmentMetadata = () => {
-    if (!alive) return;
+  const retryAttachmentMetadata = (owner: string) => {
+    if (!alive || owner !== sessionId) return;
     attachmentMetadataFailed.set(false);
     hydrateAttachmentMetadata();
   };
@@ -900,7 +901,8 @@ export function Conversation(props: ConversationProps) {
       });
     return olderTask;
   };
-  const cancelTurnNavigation = () => {
+  const cancelTurnNavigation = (turnId = navigatingTurn()) => {
+    if (!alive || turnId !== navigatingTurn()) return;
     turnJump = null;
     navigatingTurn.set(null);
   };
@@ -1429,10 +1431,12 @@ export function Conversation(props: ConversationProps) {
       } else list?.focus();
     },
     jumpLatest(turnId) {
+      if (!alive) return;
       cancelTurnNavigation();
       awayFromLatest.set(false);
+      const targetTurn = turnId ?? runTurn();
       const group = projection().entries.findLast(
-        (entry) => entry.kind === 'process' && entry.turnId === turnId,
+        (entry) => entry.kind === 'process' && entry.turnId === targetTurn,
       );
       if (group?.kind === 'process') {
         const state = groupState(group.key);
@@ -1490,7 +1494,7 @@ export function Conversation(props: ConversationProps) {
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
       <If when={attachmentMetadataFailed()}>
-        <Button onPress={retryAttachmentMetadata}>
+        <Button onPress={inputAction(retryAttachmentMetadata, sessionId)}>
           <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
         </Button>
       </If>
@@ -1584,7 +1588,7 @@ export function Conversation(props: ConversationProps) {
             ref={list}
             onLayout={(frame) => readingSize.set(frame.size)}
             each={displayKeys()}
-            onScrollDragStart={cancelTurnNavigation}
+            onScrollDragStart={() => cancelTurnNavigation()}
             onViewableItemsChange={(event) =>
               visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
             }
@@ -1746,12 +1750,12 @@ export function Conversation(props: ConversationProps) {
               navigate={(item) => {
                 void navigateTurn(item).catch(report);
               }}
-              cancel={cancelTurnNavigation}
+              cancel={inputAction(cancelTurnNavigation, navigatingTurn())}
             />
           </If>
           <ReturnToLatest
             visible={awayFromLatest() || innerReader() !== null}
-            activate={() => ownHandle.jumpLatest(runTurn())}
+            activate={inputAction(ownHandle.jumpLatest, null)}
           />
         </View>
         <If when={interactions().entries.length > 0}>

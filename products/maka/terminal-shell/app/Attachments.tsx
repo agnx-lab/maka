@@ -188,7 +188,7 @@ export function DraftAttachments(props: {
           {owner.error()}
         </Text>
         <Button
-          onPress={owner.retry}
+          onPress={inputAction(owner.retry, owner.sessionId)}
           style={controlStyle}
           hoverStyle={{ backgroundColor: C.line }}
           focusStyle={{ backgroundColor: C.line }}
