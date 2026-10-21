@@ -47,9 +47,9 @@ use std::{
     about = "Maka terminal application using NSH"
 )]
 struct Args {
-    /// Business Host Root to connect to or start through the native launcher.
+    /// Business Host Root (default: ~/.maka/application/host).
     #[arg(long)]
-    root: PathBuf,
+    root: Option<PathBuf>,
     /// Existing Agent session to display initially; otherwise open the session picker.
     #[arg(long)]
     session: Option<String>,
@@ -90,6 +90,20 @@ fn report(error: String) {
 }
 
 impl Args {
+    fn root_path(&self) -> Result<PathBuf, String> {
+        if let Some(root) = &self.root {
+            return std::path::absolute(root).map_err(|error| error.to_string());
+        }
+        #[cfg(unix)]
+        let home = std::env::var_os("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from)
+            .ok_or("home directory unavailable; select --root")?;
+        #[cfg(windows)]
+        let home = root::windows::account_home().map_err(|error| error.to_string())?;
+        Ok(home.join(".maka/application/host"))
+    }
+
     async fn run(self) -> Result<(), String> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err("the terminal shell requires a terminal on stdin and stdout".into());
@@ -104,7 +118,7 @@ impl Args {
         let stop = Arc::new(AtomicBool::new(false));
         // Install before opening any Host session or entering terminal modes.
         let mut signals = Signals::watch(stop.clone()).map_err(|error| error.to_string())?;
-        let path = std::path::absolute(&self.root).map_err(|error| error.to_string())?;
+        let path = self.root_path()?;
         let launcher = std::env::current_exe()
             .map_err(|error| error.to_string())?
             .with_file_name(if cfg!(windows) { "maka.exe" } else { "maka" });
@@ -219,5 +233,48 @@ impl Signals {
 impl Drop for Signals {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_root_selects_the_default_host_and_preserves_explicit_paths() {
+        const CHILD: &str = "MAKA_TERMINAL_DEFAULT_ROOT_TEST";
+        if std::env::var_os(CHILD).is_some() {
+            let select = |args: &[&str]| Args::try_parse_from(args).unwrap().root_path().unwrap();
+            assert_eq!(
+                select(&["maka-terminal-shell"]),
+                PathBuf::from("/isolated-maka-home/.maka/application/host")
+            );
+            assert_eq!(
+                select(&["maka-terminal-shell", "--root", "custom-host"]),
+                std::env::current_dir().unwrap().join("custom-host")
+            );
+            assert_eq!(
+                select(&["maka-terminal-shell", "--root", "/explicit-host"]),
+                PathBuf::from("/explicit-host")
+            );
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::optional_root_selects_the_default_host_and_preserves_explicit_paths",
+            ])
+            .env(CHILD, "1")
+            .env("HOME", "/isolated-maka-home")
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
