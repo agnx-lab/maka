@@ -190,6 +190,31 @@ pub enum ConnectionsPage {
         next: Option<usize>,
     },
 }
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "SettingsConnectionRead")]
+pub struct ConnectionRead {
+    pub connection_id: String,
+    pub revision: u64,
+    /// Opt in to the bounded editing projection; credential reads stay narrow.
+    #[serde(default)]
+    pub include_editing_facts: bool,
+}
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "SettingsConnectionEditingFacts")]
+pub struct ConnectionEditingFacts {
+    #[schemars(length(max = 512))]
+    pub enabled_model_ids: Vec<String>,
+    #[schemars(
+        with = "maka_plugin_core::wire_schema::RequiredNullable<BTreeMap<String, maka_agent_facts::configuration::ModelOverride>>"
+    )]
+    pub model_overrides: Option<BTreeMap<String, maka_agent_facts::configuration::ModelOverride>>,
+    #[schemars(
+        with = "maka_plugin_core::wire_schema::RequiredNullable<BTreeMap<String, serde_json::Value>>"
+    )]
+    pub request_body_overlay: Option<serde_json::Value>,
+}
 #[derive(Serialize, JsonSchema)]
 #[serde(
     tag = "kind",
@@ -210,6 +235,9 @@ pub enum ConnectionDetail {
         name: String,
         enabled: bool,
         enabled_model_count: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "ConnectionEditingFacts")]
+        editing: Option<ConnectionEditingFacts>,
     },
 }
 #[derive(Deserialize, JsonSchema)]
@@ -439,10 +467,7 @@ pub fn contract() -> Contract {
                 ),
                 (
                     "connection".into(),
-                    method::<
-                        maka_agent_facts::configuration::ConnectionVersionBasis,
-                        ConnectionDetail,
-                    >(MethodMode::Query),
+                    method::<ConnectionRead, ConnectionDetail>(MethodMode::Query),
                 ),
                 (
                     "providers".into(),

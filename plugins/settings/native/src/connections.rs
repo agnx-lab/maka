@@ -86,7 +86,7 @@ pub(crate) async fn page(store: &ConfigurationStore, input: Value) -> Result<Val
     })
 }
 pub(crate) async fn detail(store: &ConfigurationStore, input: Value) -> Result<Value, String> {
-    let expected: ConnectionVersionBasis =
+    let expected: ConnectionRead =
         serde_json::from_value(input).map_err(|_| "settings_input_invalid")?;
     let catalog = store
         .catalog()
@@ -108,6 +108,13 @@ pub(crate) async fn detail(store: &ConfigurationStore, input: Value) -> Result<V
             name: row.name,
             enabled: row.enabled,
             enabled_model_count: row.enabled_model_ids.len(),
+            editing: expected
+                .include_editing_facts
+                .then_some(ConnectionEditingFacts {
+                    enabled_model_ids: row.enabled_model_ids,
+                    model_overrides: row.model_overrides,
+                    request_body_overlay: row.request_body_overlay,
+                }),
         }),
         actual => encode(ConnectionDetail::Stale {
             actual: actual.map(|row| ConnectionVersionBasis {

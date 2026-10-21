@@ -226,8 +226,15 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
     let page = query(&fixture, "connections", json!({"kind":"start"})).await;
     assert_eq!(page["connections"].as_array().unwrap().len(), 1);
     let original = page["connections"][0]["basis"].clone();
-    let detail = query(&fixture, "connection", original).await;
+    let detail = query(&fixture, "connection", original.clone()).await;
     assert_eq!(detail["kind"], "ready");
+    assert!(detail.get("editing").is_none());
+    let editable = query(&fixture, "connection", json!({"connectionId":original["connectionId"],"revision":original["revision"],"includeEditingFacts":true})).await;
+    assert_eq!(editable["target"], detail["target"]);
+    assert_eq!(
+        editable["editing"],
+        json!({"enabledModelIds":["fixture-model"],"modelOverrides":null,"requestBodyOverlay":null})
+    );
     let locator = json!({"scope":"connection","connectionId":detail["target"]["connectionId"],"kind":"provider"});
     let status = query(&fixture, "credentialStatus", json!({"locator":locator})).await;
     let expected: CredentialStatus = serde_json::from_value(status["status"].clone()).unwrap();
@@ -302,8 +309,24 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
         stale,
         json!({"kind":"rejected","reason":"credential_changed"})
     );
-    let renamed = mutate(&fixture,"update",json!({"expected":page["connections"][0]["basis"],"changes":{"name":"Renamed from plugin"}}),None).await.0;
+    let renamed = mutate(&fixture,"update",json!({"expected":page["connections"][0]["basis"],"changes":{"name":"Renamed from plugin","enabledModelIds":["fixture-model","manual-other"],"modelOverrides":{"fixture-model":{"codeMode":false,"thinkingLevels":["high"]},"manual-other":{"displayName":"Kept manual declaration","contextWindow":12345}},"requestBodyOverlay":{"provider":{"only":["openrouter","deepseek"]},"temperature":0.22}}}),None).await.0;
     assert_eq!(renamed["kind"], "committed");
+    let stale = query(&fixture, "connection", json!({"connectionId":detail["target"]["connectionId"],"revision":detail["target"]["revision"],"includeEditingFacts":true})).await;
+    assert_eq!(
+        stale,
+        json!({"kind":"stale","actual":renamed["connection"]})
+    );
+    let editable = query(&fixture, "connection", json!({"connectionId":renamed["connection"]["connectionId"],"revision":renamed["connection"]["revision"],"includeEditingFacts":true})).await;
+    assert_eq!(
+        editable["target"]["revision"],
+        renamed["connection"]["revision"]
+    );
+    assert_eq!(editable["name"], "Renamed from plugin");
+    assert_eq!(editable["enabledModelCount"], 2);
+    assert_eq!(
+        editable["editing"],
+        json!({"enabledModelIds":["fixture-model","manual-other"],"modelOverrides":{"fixture-model":{"codeMode":false,"thinkingLevels":["high"]},"manual-other":{"displayName":"Kept manual declaration","contextWindow":12345}},"requestBodyOverlay":{"provider":{"only":["openrouter","deepseek"]},"temperature":0.22}})
+    );
     let row = fixture
         .config
         .catalog()
@@ -312,7 +335,7 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
         .connections
         .remove(0);
     assert_eq!(row.name, "Renamed from plugin");
-    assert_eq!(row.enabled_model_ids, vec!["fixture-model"]);
+    assert_eq!(row.enabled_model_ids, vec!["fixture-model", "manual-other"]);
     let basis = json!({"connectionId":row.connection_id,"revision":row.revision});
     for changes in [
         json!({"name":null}),
@@ -348,6 +371,11 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
     .await
     .0;
     assert_eq!(cleared["kind"], "committed");
+    let editable = query(&fixture, "connection", json!({"connectionId":cleared["connection"]["connectionId"],"revision":cleared["connection"]["revision"],"includeEditingFacts":true})).await;
+    assert_eq!(
+        editable["editing"],
+        json!({"enabledModelIds":["fixture-model","manual-other"],"modelOverrides":null,"requestBodyOverlay":null})
+    );
     let providers = query(&fixture, "providers", json!({"offset":0})).await;
     assert!(!providers["providers"].as_array().unwrap().is_empty());
     assert!(serde_json::to_vec(&providers).unwrap().len() <= 128 * 1024);
@@ -376,6 +404,47 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
     .await
     .0;
     assert_eq!(removed["kind"], "committed");
+    // A valid large catalog may exceed the editing projection's wire budget.
+    // Its original narrow read must still support actual credential replacement.
+    selection::edit(&fixture, |changes| {
+        changes.model_overrides = Patch::Set(
+            (0..128)
+                .map(|index| {
+                    (
+                        format!("manual-{index}"),
+                        ModelOverride {
+                            description: Some("x".repeat(1024)),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect(),
+        );
+    })
+    .await;
+    let page = query(&fixture, "connections", json!({"kind":"start"})).await;
+    let basis = page["connections"][0]["basis"].clone();
+    let detail = query(&fixture, "connection", basis.clone()).await;
+    assert_eq!(detail["kind"], "ready");
+    assert!(detail.get("editing").is_none());
+    let error = fixture.app.client().start(
+        binding(&fixture).await,
+        "connection".into(),
+        json!({"connectionId":basis["connectionId"],"revision":basis["revision"],"includeEditingFacts":true}),
+        scope(&fixture.issuer, true),
+        Attachments::new().into(),
+    ).await.unwrap().result().await.unwrap_err();
+    assert_eq!(error, "settings_output_budget");
+    let status = query(&fixture, "credentialStatus", json!({"locator":locator})).await;
+    let current: CredentialStatus = serde_json::from_value(status["status"].clone()).unwrap();
+    let (saved, _) = mutate(
+        &fixture,
+        "saveCredential",
+        json!({"expected":detail["target"],"expectedCredential":current.basis()}),
+        Some(KEY),
+    )
+    .await;
+    assert_eq!(saved["kind"], "saved");
     // Read the actual persisted operation/caller/enrollment rows, excluding the
     // vault table where storing the credential envelope is the intended effect.
     for (database, sql) in [
