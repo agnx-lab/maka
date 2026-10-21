@@ -2388,6 +2388,9 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let composer = view.surface().focused().unwrap();
         view.handle_event(Event::Paste("IMAGE_VIEWER_UNSENT_DRAFT".into()));
         support::wait_draft(&client, &fixture.session, "IMAGE_VIEWER_UNSENT_DRAFT").await;
+        // The composer remains editable while history loads. Wait for the
+        // actual activity target before asking the shortcut to focus it.
+        wait_enabled_node(&mut view, "Process group").await;
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         support::click_button(&mut view, "Toggle tool Read").await;
