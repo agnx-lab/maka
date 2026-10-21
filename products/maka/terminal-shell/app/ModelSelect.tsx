@@ -98,7 +98,7 @@ export function ModelSelect(props: {
       popupStyle={{
         width: 420,
         maxWidth: Math.max(0, windowSize().width - 16),
-        maxHeight: Math.max(0, windowSize().height - 16),
+        maxHeight: Math.min(360, Math.max(0, windowSize().height - 16)),
         minHeight: 0,
         padding: 8,
         backgroundColor: C.surface,
@@ -307,9 +307,7 @@ function ModelMenu(props: {
           next: result.next,
           choices: [...(previousPage?.choices ?? []), ...result.choices],
         });
-        // A scan page may contain no matches while its exact query continues.
-        // Native load-more is rearmed by new rows, so advance empty pages here.
-        if (result.choices.length > 0 || !result.next) break;
+        break;
       } while (active() && reading === generation);
     } catch (reason) {
       if (active() && reading === generation)
