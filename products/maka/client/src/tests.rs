@@ -92,6 +92,9 @@ impl Handler for CounterHandler {
                 | "selectBackend"
                 | "create"
                 | "discoverModels"
+                | "setEnabled"
+                | "configure"
+                | "loginCredential"
                 | "saveCredential"
                 | "updateAssistantPreferences"
                 | "updateNetwork" => {
@@ -183,6 +186,9 @@ impl Fixture {
                 "fork":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "create":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "discoverModels":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "setEnabled":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "configure":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "loginCredential":{"mode":"mutation","input":{},"output":{},"progress":{},"resources":{}},
                 "saveCredential":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":false}}},
                 "updateAssistantPreferences":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "updateNetwork":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":true}}},
@@ -234,6 +240,8 @@ impl Fixture {
                 "agent":{"contract":contract,"cardinality":{"kind":"one"}},
                 "settings":{"contract":contract,"cardinality":{"kind":"one"}},
                 "setup":{"contract":contract,"cardinality":{"kind":"one"}},
+                "management":{"contract":contract,"cardinality":{"kind":"one"}},
+                "authentication":{"contract":contract,"cardinality":{"kind":"one"}},
                 "receipts":{"contract":receipt_reader_contract(),"cardinality":{"kind":"one"}}
             }),
             json!({}),
@@ -251,6 +259,8 @@ impl Fixture {
                     "agent":[{"kind":"instance","path":["business"],"export":"Counter"}],
                     "settings":[{"kind":"instance","path":["business"],"export":"Counter"}],
                     "setup":[{"kind":"instance","path":["business"],"export":"Counter"}],
+                    "management":[{"kind":"instance","path":["business"],"export":"Counter"}],
+                    "authentication":[{"kind":"instance","path":["business"],"export":"Counter"}],
                     "receipts":[{"kind":"instance","path":["reader"],"export":"Receipts"}]
                 }))
             }
@@ -341,6 +351,28 @@ impl Fixture {
                         import: "setup".into(),
                         grant: Grant {
                             methods: ["discoverModels".into()].into(),
+                            recovery: false,
+                        },
+                    },
+                ),
+                (
+                    "management".into(),
+                    HostEndpoint {
+                        consumer: InstanceId(vec![Uuid::from_u128(3)]),
+                        import: "management".into(),
+                        grant: Grant {
+                            methods: ["setEnabled".into(), "configure".into()].into(),
+                            recovery: false,
+                        },
+                    },
+                ),
+                (
+                    "authentication".into(),
+                    HostEndpoint {
+                        consumer: InstanceId(vec![Uuid::from_u128(3)]),
+                        import: "authentication".into(),
+                        grant: Grant {
+                            methods: ["loginCredential".into()].into(),
                             recovery: false,
                         },
                     },

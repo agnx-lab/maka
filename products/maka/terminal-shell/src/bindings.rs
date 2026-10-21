@@ -21,8 +21,11 @@
 
 mod assets;
 mod files;
+mod mutation;
 mod settings;
 mod uploads;
+
+pub use mutation::OriginalMutation;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
 use maka_plugin_core::contract::Contract;
@@ -277,6 +280,30 @@ impl ApplicationHost {
             Ok(serde_json::json!({"operationId": id, "reply": reply}))
         })
         .await
+    }
+
+    /// Prepare one Settings attempt whose progress and cancellation keep the original Call.
+    pub async fn begin_setting(
+        this: Instance<Self>,
+        endpoint: String,
+        method: String,
+        input: JsonValue,
+        secret: Option<String>,
+    ) -> Result<Instance<OriginalMutation>, String> {
+        let resources = settings::attachments(&endpoint, &method, &input, secret)?;
+        let owner = this.with(|host| host.owner.clone());
+        drop(this);
+        let original = execute(owner.clone(), async move {
+            require_contract(&endpoint, &owner.client.describe(&endpoint).await?.contract)?;
+            let mutation = owner
+                .client
+                .settings_mutation(Uuid::new_v4(), &endpoint, &method, input, resources)
+                .await?;
+            mutation.prepare().await?;
+            Ok(OriginalMutation::new(owner, mutation))
+        })
+        .await?;
+        Ok(Instance::new(original))
     }
 
     /// Unresolved Settings attempts, independent of the selected Agent session.

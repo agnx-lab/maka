@@ -60,6 +60,8 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         for (endpoint, method, resources, expected) in [
             ("settings-setup", "discoverModels", Attachments::new(), "unsupported settings mutation method"),
             ("settings", "create", secret(), "settings mutation does not accept resources"),
+            ("authentication", "loginCredential", secret(), "settings mutation does not accept resources"),
+            ("management", "configure", secret(), "settings mutation does not accept resources"),
             ("settings", "saveCredential", Attachments::new(), "settings credential requires one UTF-8 secret resource"),
         ] {
             assert_eq!(first.settings_mutation(Uuid::new_v4(), endpoint, method, Value::Null, resources).await.err().unwrap(), expected);
@@ -86,6 +88,8 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
             ("settings", "create", Some("session-one".into()), json!({"kind":"settings"})),
             ("settings", "create", None, json!({"kind":"settings","extra":true})),
             ("settings", "create", None, json!("{\"kind\":\"settings\"}")),
+            ("authentication", "saveCredential", None, json!({"kind":"settings"})),
+            ("management", "remove", None, json!({"kind":"settings"})),
         ] {
             let other = first.mutation(Uuid::new_v4(), endpoint, method, Value::Null, Attachments::new(), session, correlation).await.unwrap();
             assert_eq!(first.operation_for_settings(other.id()).await.unwrap_err(), "original client operation belongs to another settings owner");
@@ -187,6 +191,19 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         }
         assert!(restarted.pending_settings().await.unwrap().is_empty());
         assert_eq!(restarted.query("agent", "read", Value::Null).await.unwrap(), json!({"sent":6}));
+        for (index, (endpoint, method)) in [("management", "setEnabled"), ("management", "configure"), ("authentication", "loginCredential")].into_iter().enumerate() {
+            let id = Uuid::new_v4();
+            let mutation = first.settings_mutation(id, endpoint, method, Value::Null, Attachments::new()).await.unwrap();
+            let pending = restarted.pending_settings().await.unwrap();
+            assert_eq!(pending.iter().map(|operation| operation.id).collect::<Vec<_>>(), [id]);
+            assert_eq!(restarted.operation_for_settings(id).await.unwrap().endpoint, endpoint);
+            assert_eq!(second.settings_mutation(Uuid::new_v4(), "settings", "create", Value::Null, Attachments::new()).await.err().unwrap(), "settings operation already exists or has an unresolved original");
+            let prepared = mutation.prepare().await.unwrap();
+            let reply = mutation.confirm().await.unwrap();
+            assert!(matches!(reply.receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":index + 7})));
+            assert_eq!(restarted.recover(id).await.unwrap().reference, prepared.reference.unwrap());
+            assert!(second.pending_settings().await.unwrap().is_empty());
+        }
         first.close().await.unwrap();
         second.close().await.unwrap();
         restarted.close().await.unwrap();

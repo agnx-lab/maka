@@ -113,6 +113,14 @@ function fileView(value: unknown): FileView {
 }
 
 type Attempt = { operationId: string; reply: unknown };
+export type OriginalMutationEvent =
+  | { kind: 'progress'; value: unknown }
+  | { kind: 'finished'; reply: OperationReply; cleanupError: string | null };
+export type OriginalMutation = {
+  readonly operationId: string;
+  next(): Promise<OriginalMutationEvent | null>;
+  cancel(): void;
+};
 function attempt(value: unknown): Attempt {
   if (!object(value) || typeof value.operationId !== 'string' || !('reply' in value))
     throw new Error('Invalid native operation observation.');
@@ -171,6 +179,14 @@ export const host = {
   },
   async settingsMutation(endpoint: string, method: string, input: unknown, secret?: string | null) {
     return attempt(await nativeHost.settingsMutation(endpoint, method, input, secret));
+  },
+  beginSetting<E extends Exclude<Endpoint, 'agent'>, M extends Method<E, 'mutation'>>(
+    endpoint: E,
+    method: M,
+    input: Input<E, M>,
+    secret?: string | null,
+  ): Promise<OriginalMutation> {
+    return nativeHost.beginSetting(endpoint, method, input, secret) as Promise<OriginalMutation>;
   },
   pendingSettings: () => nativeHost.pendingSettings() as Promise<ClientOperation[]>,
   recoverSetting: (id: string) => nativeHost.recoverSetting(id) as Promise<OperationReply>,

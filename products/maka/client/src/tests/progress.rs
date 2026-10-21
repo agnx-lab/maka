@@ -27,7 +27,7 @@ async fn progress_cancellation_and_scope_drain_preserve_saved_business_receipts(
             fixture.counter.blocked.store(true, Ordering::SeqCst);
             let client = fixture.client().await;
             let id = Uuid::new_v4();
-            let mutation = client.mutation(id, "agent", "send", json!({"progress":true,"cleanupFailure":cleanup_failure}), Attachments::new(), None, Value::Null).await.unwrap();
+            let mutation = client.settings_mutation(id, "authentication", "loginCredential", json!({"progress":true,"cleanupFailure":cleanup_failure}), Attachments::new()).await.unwrap();
             let prepared = mutation.prepare().await.unwrap();
             match mutation.next().await.unwrap().unwrap() {
                 MutationEvent::Progress(value) => assert_eq!(value, json!({"url":"https://auth.openai.com/codex/device","userCode":"ABCD-EFGH"})),
@@ -52,7 +52,7 @@ async fn progress_cancellation_and_scope_drain_preserve_saved_business_receipts(
                 "client" => client.close().await.unwrap(),
                 _ => unreachable!(),
             }
-            let original = client.operation(id).await.unwrap();
+            let original = client.operation_for_settings(id).await.unwrap();
             assert_eq!(original.reference, prepared.reference);
             assert!(matches!(&original.receipt, Some(Receipt::Recorded { outcome: OperationOutcome::Returned { value }, .. }) if value == &json!({"kind":"saved"})), "finish={finish}, cleanup_failure={cleanup_failure}, original={original:?}");
             assert_eq!(fixture.counter.effects.load(Ordering::SeqCst), 1);
