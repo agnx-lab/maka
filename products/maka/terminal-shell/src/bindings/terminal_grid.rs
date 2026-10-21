@@ -343,12 +343,13 @@ mod tests {
         let bytes = "\x1b[31m中e\u{301}\x1b[0m\x1b[?1002h\x1b[?1006h".as_bytes();
         for cut in 1..bytes.len() {
             let size = json!({"cols":8,"rows":2});
-            let mut grid = TerminalGrid::new(size.clone()).unwrap();
+            let mut grid = TerminalGrid::new(json!({"cols":80,"rows":24})).unwrap();
             let first = data(1, &bytes[..cut], size.clone());
             grid.apply(first.clone()).unwrap();
             grid.apply(first).unwrap();
             grid.apply(data(2, &bytes[cut..], size.clone())).unwrap();
             let frame = grid.display(0, 2).unwrap();
+            assert_eq!(frame["metadata"]["size"], json!({"cols":8,"rows":2}));
             assert_eq!(
                 grid.display(0, 24).unwrap()["rows"]
                     .as_array()

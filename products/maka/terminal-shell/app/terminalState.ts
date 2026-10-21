@@ -309,7 +309,6 @@ function createTerminal(
   let alive = true;
   let active = false;
   let after = 0;
-  let parsed = false;
   let reading: Watch<unknown> | null = null;
   let observing: Watch<unknown> | null = null;
   let retained: Watch<unknown> | null = null;
@@ -446,10 +445,6 @@ function createTerminal(
           if (!alive || !active || run.closed || reading !== run) return;
           if (!value) throw new Error('The Host closed output without an end marker.');
           const event = completed(value);
-          if (!parsed && event.kind !== 'unavailable') {
-            grid.reset(event.initialSize);
-            parsed = true;
-          }
           const applied = grid.apply(event) as { after: number; status: string };
           after = applied.after;
           version.set(version() + 1);
@@ -643,7 +638,6 @@ function createTerminal(
           retained = null;
           grid.reset(DEFAULT_SIZE);
           after = 0;
-          parsed = false;
           state.set('idle');
           if (entry().result.mode === 'pipes' && !observing) observe();
           follow();
