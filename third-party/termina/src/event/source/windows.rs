@@ -43,14 +43,13 @@ impl EventSource for WindowsEventSource {
             .map(|timeout| {
                 // Windows waits in whole milliseconds. Round up without turning a finite
                 // parser deadline into INFINITE or repeatedly polling its final fraction.
-                let millis = timeout.as_millis()
-                    + u128::from(timeout.subsec_nanos() % 1_000_000 != 0);
+                let millis =
+                    timeout.as_millis() + u128::from(timeout.subsec_nanos() % 1_000_000 != 0);
                 millis.min(u128::from(INFINITE - 1)) as u32
             })
             .unwrap_or(INFINITE);
-        let result = unsafe {
-            WaitForMultipleObjects(handles.len() as u32, handles.as_mut_ptr(), 0, wait)
-        };
+        let result =
+            unsafe { WaitForMultipleObjects(handles.len() as u32, handles.as_mut_ptr(), 0, wait) };
         match result {
             WAIT_OBJECT_0 | WAIT_TIMEOUT => Ok(()),
             value if value == WAIT_OBJECT_0 + 1 => Err(io::Error::new(

@@ -281,10 +281,12 @@ mod tests {
             let _ = finished.send(waiting.wait_ready());
         });
         // A deadlock watchdog, not an input-latency expectation. Wake before unwinding on failure.
-        let result = result.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|error| {
-            let _ = reader.waker().wake();
-            panic!("readiness wait did not finish: {error}");
-        });
+        let result = result
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap_or_else(|error| {
+                let _ = reader.waker().wake();
+                panic!("readiness wait did not finish: {error}");
+            });
         task.join().unwrap();
         result
     }
@@ -292,7 +294,9 @@ mod tests {
     #[test]
     fn readiness_preserves_os_input_and_both_buffered_event_queues() {
         let (reader, mut peer, mut probe) = fixture();
-        probe.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        probe
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         peer.write_all("你好".as_bytes()).unwrap();
         wait(&reader).unwrap();
         let mut bytes = [0; 6];
@@ -302,10 +306,16 @@ mod tests {
         peer.write_all(b"ab").unwrap();
         assert!(reader.poll(Some(Duration::ZERO), |_| true).unwrap());
         wait(&reader).unwrap();
-        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('a').into()));
+        assert_eq!(
+            reader.read(|_| true).unwrap(),
+            Event::Key(KeyCode::Char('a').into())
+        );
         // The OS bytes and reader queue are now empty, but the parser still owns 'b'.
         wait(&reader).unwrap();
-        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('b').into()));
+        assert_eq!(
+            reader.read(|_| true).unwrap(),
+            Event::Key(KeyCode::Char('b').into())
+        );
         assert!(!reader.poll(Some(Duration::ZERO), |_| true).unwrap());
     }
 
@@ -313,7 +323,10 @@ mod tests {
     fn readiness_accepts_prewake_and_concurrent_cancel_without_reader_lock() {
         let (reader, _peer, _probe) = fixture();
         reader.waker().wake().unwrap();
-        assert_eq!(wait(&reader).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert_eq!(
+            wait(&reader).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
 
         let waiting = reader.clone();
         let (started, starting) = mpsc::channel();
@@ -325,10 +338,12 @@ mod tests {
         starting.recv().unwrap();
         // This also permits cancellation to win the check-to-wait race.
         reader.waker().wake().unwrap();
-        let result = result.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|error| {
-            let _ = reader.waker().wake();
-            panic!("cancel did not finish the readiness wait: {error}");
-        });
+        let result = result
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap_or_else(|error| {
+                let _ = reader.waker().wake();
+                panic!("cancel did not finish the readiness wait: {error}");
+            });
         task.join().unwrap();
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
     }
@@ -342,7 +357,10 @@ mod tests {
         assert!(!reader.poll(None, |_| false).unwrap());
         wait(&reader).unwrap();
         reader.poll(Some(Duration::ZERO), |_| true).unwrap();
-        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('a').into()));
+        assert_eq!(
+            reader.read(|_| true).unwrap(),
+            Event::Key(KeyCode::Char('a').into())
+        );
     }
 
     #[test]
@@ -352,13 +370,19 @@ mod tests {
         assert!(!reader.poll(Some(Duration::ZERO), |_| true).unwrap());
         wait(&reader).unwrap();
         assert_eq!(
-            reader.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            reader
+                .poll(Some(Duration::ZERO), |_| true)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::TimedOut
         );
         // The sticky failure is also ready; waiting must not restart its original deadline.
         wait(&reader).unwrap();
         assert_eq!(
-            reader.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            reader
+                .poll(Some(Duration::ZERO), |_| true)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::TimedOut
         );
 
@@ -366,7 +390,10 @@ mod tests {
         drop(peer);
         wait(&closed).unwrap();
         assert_eq!(
-            closed.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            closed
+                .poll(Some(Duration::ZERO), |_| true)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::UnexpectedEof
         );
     }

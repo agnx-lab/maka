@@ -221,10 +221,10 @@ fn poll(fds: [BorrowedFd<'_>; 3], timeout: Option<Duration>) -> std::io::Result<
 
         rustix::event::poll(&mut fds, timeout)?;
 
-        if fds.iter().any(|fd| {
-            fd.revents()
-                .intersects(PollFlags::ERR | PollFlags::NVAL)
-        }) {
+        if fds
+            .iter()
+            .any(|fd| fd.revents().intersects(PollFlags::ERR | PollFlags::NVAL))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "terminal event descriptor failed",
