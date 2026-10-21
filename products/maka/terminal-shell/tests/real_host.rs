@@ -1809,11 +1809,14 @@ async fn live_markdown_source_mode_survives_canonical_handoff() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_source() {
+    use base64::Engine as _;
+    use nsh_platform_tui::ServiceOutput;
     use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        view.surface_mut().set_host_services_enabled(true);
         wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
         let sent = support::mutate(&client, "send", json!({
             "sessionId":fixture.session,"message":"Render the original Markdown", "model":fixture.selection
@@ -1848,7 +1851,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
             }).unwrap_or_else(|| panic!("formatted token {token} is not visible:\n{rendered}"));
             assert!((0..token.len()).all(|index| buffer[(cells.0 + index as u16, cells.1)].modifier.contains(expected)), "terminal cells for {token} lost {expected:?}");
         }
-        let suffix = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n```txt\nRICH_CODE_BLOCK\n```";
+        let suffix = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n```txt\nRICH_CODE_BLOCK 中文原文\n```";
         request.delta(suffix).await;
         // The stream remains physically open: parsing cannot wait for final.
         wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
@@ -1871,6 +1874,18 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
         assert_eq!(response["text"], format!("{prefix}{suffix}"));
+        wait_mode_layout(&mut view).await;
+        view.drain_service_output().for_each(drop);
+        support::click_button(&mut view, "Copy message").await;
+        let sent_to_clipboard = wait_view(&mut view, |screen| screen.contains("Sent to terminal clipboard")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "one copy action must emit exactly one native clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied, &format!("{prefix}{suffix}"));
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("the real clipboard effect must encode a complete OSC 52 command");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), format!("{prefix}{suffix}").as_bytes());
+        evidence("rich-response-copies-exact-original-source", &sent_to_clipboard);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         // Exceed the formatter's document budget during a real open stream.
         // The complete current source stays selectable instead of retaining
@@ -1902,8 +1917,15 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         assert!(source.ends_with(response["text"].as_str().unwrap()));
         assert!(response["offset"].as_u64().unwrap() > 0, "this history must omit the original opening fence");
         let (mut view, bindings) = fixture.view(client, Some(fixture.session.clone()));
+        view.surface_mut().set_host_services_enabled(true);
         let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
         evidence("rich-response-incomplete-history", &literal);
+        wait_mode_layout(&mut view).await;
+        view.drain_service_output().for_each(drop);
+        support::click_button(&mut view, "Copy message").await;
+        let too_large = wait_view(&mut view, |screen| screen.contains("64 KiB")).await;
+        assert!(!view.drain_service_output().any(|effect| matches!(effect, ServiceOutput::Clipboard(_))), "an oversized original body must not copy its loaded tail or a truncated prefix");
+        evidence("rich-response-copy-rejects-oversized-source", &too_large);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         drop(view);
         bindings.close().await.unwrap();

@@ -25,6 +25,7 @@ import { MarkdownBody } from './MarkdownBody';
 import { C } from './ui';
 import { HistoryAttachments } from './Attachments';
 import { ToolImage } from './ToolImage';
+import { MessageCopy } from './MessageCopy';
 import type { ImagePreview } from './ImageThumbnail';
 
 export type MessageViewState = {
@@ -268,19 +269,44 @@ export function MessageRow({
                           {text()}
                         </Text>
                       </If>
-                      <Button
-                        selected={sourceMode()}
-                        onPress={inputAction(setSourceMode, {
-                          sessionId,
-                          key: rowKey(row()),
-                          value: !sourceMode(),
-                        })}
-                        style={{ height: 16, alignSelf: 'flex-end' }}
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          flexWrap: 'wrap',
+                          alignSelf: 'flex-end',
+                          alignItems: 'center',
+                          gap: 16,
+                        }}
                       >
-                        <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                          {sourceMode() ? '[Formatted]' : '[Source]'}
-                        </Text>
-                      </Button>
+                        <If
+                          when={
+                            row().finalOutput &&
+                            row().role === 'assistant' &&
+                            row().field === 'body' &&
+                            row().position
+                          }
+                        >
+                          <MessageCopy
+                            row={row}
+                            ownerKey={() => rowKey(row())}
+                            sessionId={sessionId}
+                            through={through}
+                          />
+                        </If>
+                        <Button
+                          selected={sourceMode()}
+                          onPress={inputAction(setSourceMode, {
+                            sessionId,
+                            key: rowKey(row()),
+                            value: !sourceMode(),
+                          })}
+                          style={{ height: 16, alignSelf: 'flex-end' }}
+                        >
+                          <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                            {sourceMode() ? '[Formatted]' : '[Source]'}
+                          </Text>
+                        </Button>
+                      </View>
                     </View>
                   }
                 >
