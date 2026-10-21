@@ -26,7 +26,7 @@ import { platform } from 'nsh/device';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import type { ProcessGroup, TurnPresentation } from './processGroups';
-import { C, controlStyle } from './ui';
+import { C, captionTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 import type { ImagePreview } from './ToolImage';
 import { toolActivitySummary, type ToolActivity } from './toolActivity';
@@ -448,12 +448,14 @@ export function TurnPanel(props: {
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"
-          style={{ flex: 1, color: active() ? C.secondary : C.muted }}
+          style={{ ...captionTextStyle, flex: 1, color: active() ? C.secondary : C.muted }}
         >
           {active() ? stableTitle() : desiredTitle()}
         </Text>
         <If when={active()}>
-          <Text style={{ color: C.muted }}>{duration(props.turn(), clock())}</Text>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            {duration(props.turn(), clock())}
+          </Text>
         </If>
       </Button>
       <If when={props.state.open() && props.group().rowIds.length > 0}>

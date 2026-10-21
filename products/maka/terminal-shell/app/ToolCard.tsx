@@ -31,7 +31,7 @@ import {
   toolResult,
   type ToolSection,
 } from './toolCards';
-import { C, codeTextStyle, controlStyle } from './ui';
+import { C, captionTextStyle, codeTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 
 const detailsGap = 8;
@@ -104,7 +104,7 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
   return (
     <If
       when={status.complete() && !status.error()}
-      else={<Text style={{ color: C.muted }}>Recorded</Text>}
+      else={<Text style={{ ...captionTextStyle, color: C.muted }}>Recorded</Text>}
     >
       <Each of={[status.content()]}>
         {(value) => {
@@ -130,7 +130,10 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
           };
           return (
             <Text
-              style={{ color: phase === 'cancelled' ? C.warning : failed() ? C.danger : C.muted }}
+              style={{
+                ...captionTextStyle,
+                color: phase === 'cancelled' ? C.warning : failed() ? C.danger : C.muted,
+              }}
             >
               {label()}
               {typeof code() === 'number' ? ` · Exit ${code()}` : ''}
@@ -147,19 +150,21 @@ function Outcome(props: { reference: ToolSourceRef; sessionId: string; through: 
   return (
     <If
       when={kind.complete() && !kind.error()}
-      else={<Text style={{ color: C.muted }}>Recorded</Text>}
+      else={<Text style={{ ...captionTextStyle, color: C.muted }}>Recorded</Text>}
     >
       <If
         when={kind.content() === 'completed'}
         else={
-          <Text style={{ color: kind.content() === 'failed' ? C.danger : C.muted }}>
+          <Text
+            style={{ ...captionTextStyle, color: kind.content() === 'failed' ? C.danger : C.muted }}
+          >
             {kind.content() === 'failed' ? 'Error' : 'Recorded'}
           </Text>
         }
       >
         <If
           when={processFamily(cardFamily(props.reference.presentation))}
-          else={<Text style={{ color: C.muted }}>OK</Text>}
+          else={<Text style={{ ...captionTextStyle, color: C.muted }}>OK</Text>}
         >
           <ProcessOutcome
             reference={props.reference}
@@ -279,7 +284,9 @@ export function ToolCard(props: {
               !tool()?.result?.isError
             }
             else={
-              <Text style={{ color: tool()?.result?.isError ? C.danger : C.muted }}>
+              <Text
+                style={{ ...captionTextStyle, color: tool()?.result?.isError ? C.danger : C.muted }}
+              >
                 {fallbackState()}
               </Text>
             }
@@ -308,7 +315,7 @@ export function ToolCard(props: {
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.line }}
           >
-            <Text numberOfLines={1} style={{ color: C.accent }}>
+            <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.accent }}>
               {props.original() ? 'Readable card' : 'Original details'}
             </Text>
           </Button>
