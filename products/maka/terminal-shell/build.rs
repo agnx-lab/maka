@@ -22,7 +22,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../desktop-shell/app/patch.js");
     // Describe the runtime export without constructing a Host client at build time.
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
-    host.native_values(&["host", "AttachmentPicker"]);
+    host.native_values(&["host", "AttachmentPicker", "TerminalGrid"]);
     let mut markdown = nsh_core::ui::Registry::ui_set("maka/markdown");
     markdown.native_values(&["markdown"]);
     let ui_sets = vec![nsh_base::registry().into(), host.into(), markdown.into()];

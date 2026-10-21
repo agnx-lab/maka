@@ -54,7 +54,7 @@ fn terminal_fixture() {
         source.join("../desktop-shell/app/patch.js").display()
     );
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
-    host.native_values(&["host", "AttachmentPicker"]);
+    host.native_values(&["host", "AttachmentPicker", "TerminalGrid"]);
     let mut markdown = nsh_core::ui::Registry::ui_set("maka/markdown");
     markdown.native_values(&["markdown"]);
     let module = nsh_bundler::bundle(&nsh_bundler::BundleOptions {

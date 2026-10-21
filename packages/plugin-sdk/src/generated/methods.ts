@@ -232,6 +232,87 @@ export type SettingsUsageOutput_RejectionKind =
   | 'exclusive_conflict'
   | 'cancelled';
 export type SettingsUsageOutput_UsageToolStatus = 'success' | 'error' | 'unknown';
+export type TerminalControlInput_RawAction =
+  | {
+      text: string;
+      type: 'text';
+    }
+  | {
+      text: string;
+      type: 'paste';
+    }
+  | {
+      key: string;
+      modifiers?: TerminalControlInput_TerminalModifiers;
+      type: 'key';
+    }
+  | {
+      event: TerminalControlInput_RawEvent;
+      x: number;
+      y: number;
+      button?: TerminalControlInput_MouseButton;
+      direction?: TerminalControlInput_ScrollDirection;
+      modifiers?: TerminalControlInput_TerminalModifiers;
+      type: 'mouse';
+    };
+/**
+ * @maxItems 3
+ */
+export type TerminalControlInput_TerminalModifiers =
+  | []
+  | [TerminalControlInput_Modifier]
+  | [TerminalControlInput_Modifier, TerminalControlInput_Modifier]
+  | [TerminalControlInput_Modifier, TerminalControlInput_Modifier, TerminalControlInput_Modifier];
+export type TerminalControlInput_Modifier = 'ctrl' | 'alt' | 'shift';
+export type TerminalControlInput_RawEvent = 'click' | 'press' | 'release' | 'move' | 'scroll';
+export type TerminalControlInput_MouseButton = 'left' | 'middle' | 'right';
+export type TerminalControlInput_ScrollDirection = 'up' | 'down';
+/**
+ * A finite transfer of one captured durable display. End installs it; these
+ * parts never claim an original-output cursor or a parser continuation point.
+ */
+export type TerminalReadDisplayOutput_TerminalDisplayPart =
+  | {
+      revision: number;
+      metadata: TerminalReadDisplayOutput_Metadata;
+      scrollbackRows: number;
+      lastAlternateSize?: TerminalReadDisplayOutput_TerminalSize | null;
+      kind: 'begin';
+    }
+  | {
+      parts: TerminalReadDisplayOutput_RowPart[];
+      kind: 'rows';
+    }
+  | {
+      kind: 'end';
+    };
+export type TerminalReadDisplayOutput_CursorShape =
+  | 'block'
+  | 'underline'
+  | 'beam'
+  | 'hollow_block'
+  | 'hidden';
+export type TerminalReadDisplayOutput_MouseTracking = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
+export type TerminalReadDisplayOutput_MouseEncoding = 'default' | 'sgr' | 'sgr_pixels';
+export type TerminalReadDisplayOutput_Buffer = 'scrollback' | 'screen' | 'last_alternate';
+/**
+ * Named colors retain their ANSI role (including default foreground/background),
+ * while indexed colors retain their exact palette entry even under bold/dim.
+ */
+export type TerminalReadDisplayOutput_Color =
+  | {
+      named: number;
+    }
+  | {
+      indexed: number;
+    }
+  | {
+      /**
+       * @minItems 3
+       * @maxItems 3
+       */
+      rgb: [number, number, number];
+    };
 
 export interface ServiceMethods {
   agent: {
@@ -939,6 +1020,84 @@ export interface ServiceMethods {
       output: Runtime.ManagementResultForDeploymentRef;
     };
   };
+  terminal: {
+    acquire: {
+      mode: 'subscription';
+      input: Runtime.TerminalTarget;
+      output: Runtime.TerminalOutcome_TerminalLeaseUpdate;
+    };
+    control: {
+      mode: 'mutation';
+      input: {
+        controller: TerminalControlInput_TerminalController;
+        sequence: number;
+        /**
+         * @maxItems 64
+         */
+        actions?: TerminalControlInput_RawAction[];
+        size?: TerminalControlInput_TerminalSize | null;
+      };
+      output: Runtime.TerminalOutcome_TerminalControlReceipt;
+    };
+    list: {
+      mode: 'query';
+      input: Runtime.TerminalList;
+      output: Runtime.TerminalOutcome_TerminalPage;
+    };
+    read: {
+      mode: 'query';
+      input: Runtime.TerminalTarget;
+      output: Runtime.TerminalOutcome_ResourceUpdate;
+    };
+    readDisplay: {
+      mode: 'subscription';
+      input: Runtime.TerminalTarget;
+      output:
+        | {
+            value: TerminalReadDisplayOutput_TerminalDisplayPart;
+            kind: 'completed';
+          }
+        | {
+            message: string;
+            kind: 'failed';
+          };
+    };
+    readOutput: {
+      mode: 'query';
+      input: Runtime.TerminalOutputRequest;
+      output: Runtime.TerminalOutcome_TerminalOutputEvent;
+    };
+    release: {
+      mode: 'mutation';
+      input: Runtime.TerminalController;
+      output: Runtime.TerminalOutcome_TerminalReleased;
+    };
+    start: {
+      mode: 'mutation';
+      input: Runtime.TerminalStart;
+      output: Runtime.TerminalOutcome_ResourceUpdate;
+    };
+    stop: {
+      mode: 'mutation';
+      input: Runtime.TerminalTarget;
+      output: Runtime.TerminalOutcome_TerminalStopped;
+    };
+    watch: {
+      mode: 'subscription';
+      input: Runtime.TerminalTarget;
+      output: Runtime.TerminalOutcome_ResourceUpdate;
+    };
+    watchList: {
+      mode: 'subscription';
+      input: Runtime.TerminalList;
+      output: Runtime.TerminalOutcome_TerminalPage;
+    };
+    watchOutput: {
+      mode: 'subscription';
+      input: Runtime.TerminalOutputRequest;
+      output: Runtime.TerminalOutcome_TerminalOutputEvent;
+    };
+  };
 }
 /**
  * Canonical physical execution receipt, independent of the current Session tip.
@@ -1246,4 +1405,77 @@ export interface SettingsAuthenticationProviderOutput_Method {
     [k: string]: unknown | undefined;
   };
   interactive: boolean;
+}
+export interface TerminalControlInput_TerminalController {
+  target: TerminalControlInput_TerminalTarget;
+  controllerId: string;
+}
+export interface TerminalControlInput_TerminalTarget {
+  sessionId: string;
+  ref: string;
+}
+/**
+ * Shared by native PTY allocation, input validation and screen rendering.
+ */
+export interface TerminalControlInput_TerminalSize {
+  cols: number;
+  rows: number;
+}
+export interface TerminalReadDisplayOutput_Metadata {
+  size: TerminalReadDisplayOutput_TerminalSize;
+  cursor: TerminalReadDisplayOutput_TerminalCursor;
+  cursorShape: TerminalReadDisplayOutput_CursorShape;
+  cursorBlinking: boolean;
+  alternateScreen: boolean;
+  truncated: boolean;
+  input: TerminalReadDisplayOutput_TerminalInputModes;
+  /**
+   * Palette overrides only; absence preserves the viewing client's theme.
+   */
+  palette: [unknown, unknown][];
+}
+/**
+ * Shared by native PTY allocation, input validation and screen rendering.
+ */
+export interface TerminalReadDisplayOutput_TerminalSize {
+  cols: number;
+  rows: number;
+}
+export interface TerminalReadDisplayOutput_TerminalCursor {
+  x: number;
+  y: number;
+  visible: boolean;
+}
+export interface TerminalReadDisplayOutput_TerminalInputModes {
+  applicationCursorKeysMode: boolean;
+  mouseTrackingMode: TerminalReadDisplayOutput_MouseTracking;
+  mouseEncoding: TerminalReadDisplayOutput_MouseEncoding;
+}
+export interface TerminalReadDisplayOutput_RowPart {
+  buffer: TerminalReadDisplayOutput_Buffer;
+  row: number;
+  column: number;
+  runs: TerminalReadDisplayOutput_Run[];
+}
+/**
+ * Consecutive cells with the same style. `text` includes every blank and
+ * combining character. Empty `lengths` means one Unicode scalar per cell;
+ * otherwise each entry is the scalar count of one cell, including its base.
+ */
+export interface TerminalReadDisplayOutput_Run {
+  style: TerminalReadDisplayOutput_Style;
+  text: string;
+  lengths?: number[];
+}
+/**
+ * Cell flags use the terminal's fixed bit layout: inverse=1, bold=2, italic=4,
+ * underline=8, wrap=16, wide=32, wide spacer=64, dim=128, hidden=256,
+ * strike=512, leading wide spacer=1024, double/curl/dotted/dashed underline
+ * =2048/4096/8192/16384. Geometry flags remain attached to their original cell.
+ */
+export interface TerminalReadDisplayOutput_Style {
+  foreground: TerminalReadDisplayOutput_Color;
+  background: TerminalReadDisplayOutput_Color;
+  flags: number;
+  underline?: TerminalReadDisplayOutput_Color | null;
 }
