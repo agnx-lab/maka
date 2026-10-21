@@ -849,6 +849,9 @@ impl ReplyGate {
     pub fn start(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "send", "mutation")
     }
+    pub fn directories(directory: &Path, target: PathBuf) -> Self {
+        Self::for_method(directory, target, "directories", "finished")
+    }
     #[cfg(unix)]
     pub fn history(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "history", "finished")

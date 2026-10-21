@@ -20,7 +20,6 @@
 import { cleanup, computed, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
-import { host } from 'maka/host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
@@ -33,36 +32,19 @@ export type PaletteEntry = {
   hint?: string;
   run(): void;
 };
-export type PaletteKind = 'commands' | 'workspaces';
 
 export function Palette(props: {
-  kind: PaletteKind;
   instance: number;
   commands: PaletteEntry[];
   close(instance: number): boolean;
-  create(workspace: any): Promise<void>;
 }) {
   const query = signal('');
   const selected = signal(0);
-  const entries = signal<PaletteEntry[]>([]);
-  const loading = signal(false);
-  const error = signal('');
-  const note = signal('');
-  let alive = true;
-  let generation = 0;
   let removeSearchKeys = () => {};
-  const create = ({ instance, selection }: { instance: number; selection: any }) => {
-    if (props.close(instance)) void props.create({ kind: 'directory', selection });
-  };
-  cleanup(() => {
-    alive = false;
-    generation += 1;
-    removeSearchKeys();
-  });
+  cleanup(() => removeSearchKeys());
   const matches = computed(() => {
     const needle = query().toLowerCase().trim();
-    const available = props.kind === 'commands' ? props.commands : entries();
-    return available.filter((entry) =>
+    return props.commands.filter((entry) =>
       `${entry.title} ${entry.detail ?? ''}`.toLowerCase().includes(needle),
     );
   });
@@ -81,35 +63,6 @@ export function Palette(props: {
     if (!entry) return;
     entry.run();
   };
-  const load = async () => {
-    const reading = ++generation;
-    loading.set(true);
-    error.set('');
-    try {
-      const result = await host.query('agent', 'directories', { kind: 'roots' });
-      if (!alive || reading !== generation) return;
-      entries.set(
-        result.roots.map((directory: any) => ({
-          id: directory.path,
-          title: directory.name,
-          detail: directory.path,
-          run: inputAction(create, { instance: props.instance, selection: directory.selection }),
-        })),
-      );
-      note.set(
-        result.roots.length
-          ? 'Choose where the new conversation can work'
-          : 'No workspaces are published by this Host.',
-      );
-    } catch (reason) {
-      if (alive && reading === generation)
-        error.set(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      if (alive && reading === generation) loading.set(false);
-    }
-  };
-  if (props.kind === 'workspaces') void load();
-  const label = () => ({ commands: 'Commands', workspaces: 'Workspaces' })[props.kind];
   return (
     <Dialog
       animation="none"
@@ -136,7 +89,7 @@ export function Palette(props: {
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ color: C.accent, fontWeight: '700' }}>{label()}</Text>
+          <Text style={{ color: C.accent, fontWeight: '700' }}>Commands</Text>
           <Button onPress={inputAction(props.close, props.instance)}>
             <Text style={{ color: C.muted }}>Close · Esc</Text>
           </Button>
@@ -159,7 +112,7 @@ export function Palette(props: {
             query.set(text);
             list?.scrollToIndex({ index: 0, animated: false });
           }}
-          placeholder={`Search ${props.kind}…`}
+          placeholder="Search commands…"
           style={{
             placeholderColor: C.muted,
             color: C.text,
@@ -217,16 +170,10 @@ export function Palette(props: {
             </Each>
           )}
         </List>
-        <If when={loading()}>
-          <Text style={{ color: C.muted }}>Loading…</Text>
-        </If>
-        <If when={!loading() && !matches().length}>
+        <If when={!matches().length}>
           <Text style={{ color: C.muted }}>No matches.</Text>
         </If>
-        <If when={error()}>
-          <Text style={{ color: C.danger }}>{error()}</Text>
-        </If>
-        <Text style={{ color: C.muted }}>{note() || 'Type to filter · ↑↓ to navigate'}</Text>
+        <Text style={{ color: C.muted }}>Type to filter · ↑↓ to navigate</Text>
         <Text style={{ color: C.muted }}>Enter selects · Esc closes</Text>
       </View>
     </Dialog>

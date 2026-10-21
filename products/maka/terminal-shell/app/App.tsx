@@ -27,7 +27,8 @@ import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
-import type { PaletteEntry, PaletteKind } from './Palette';
+import type { PaletteEntry } from './Palette';
+import { WorkspacePicker } from './WorkspacePicker';
 import { ModelSelect } from './ModelSelect';
 import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
@@ -40,7 +41,7 @@ import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 
 type Overlay = { instance: number } & (
-  | { kind: PaletteKind | 'models' | 'sessions'; sessionId: string | null }
+  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions'; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
 );
 type CommandContext = { instance: number; sessionId: string | null };
@@ -140,7 +141,7 @@ function App() {
     kind,
     sessionId,
   }: {
-    kind: PaletteKind | 'models' | 'sessions';
+    kind: 'commands' | 'workspaces' | 'models' | 'sessions';
     sessionId: string | null;
   }) => {
     if (!alive || selected() !== sessionId) return;
@@ -219,6 +220,9 @@ function App() {
   const commandNew = (context: CommandContext) => {
     if (closeCommand(context)) newConversation(context.sessionId);
   };
+  const commandWorkspace = (context: CommandContext) => {
+    if (closeCommand(context)) open({ kind: 'workspaces', sessionId: context.sessionId });
+  };
   const commandModels = (context: CommandContext) => {
     if (closeCommand(context)) open({ kind: 'models', sessionId: context.sessionId });
   };
@@ -252,6 +256,12 @@ function App() {
       detail: 'A fresh start in your workspace',
       hint: 'Ctrl+N',
       run: inputAction(commandNew, context),
+    },
+    {
+      id: 'workspace',
+      title: 'Choose workspace',
+      detail: 'Start a conversation in another folder',
+      run: inputAction(commandWorkspace, context),
     },
     {
       id: 'models',
@@ -588,13 +598,22 @@ function App() {
                 }}
               </Each>
             );
+          if (current.kind === 'workspaces')
+            return (
+              <WorkspacePicker
+                instance={current.instance}
+                current={() =>
+                  overlay()?.instance === current.instance && selected() === current.sessionId
+                }
+                close={closeOverlay}
+                create={(workspace) => create(workspace, current.sessionId)}
+              />
+            );
           return (
             <Palette
-              kind={current.kind}
               instance={current.instance}
               commands={commands({ instance: current.instance, sessionId: current.sessionId })}
               close={closeOverlay}
-              create={(workspace) => create(workspace, current.sessionId)}
             />
           );
         }}

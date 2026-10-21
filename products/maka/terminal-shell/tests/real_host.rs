@@ -135,6 +135,8 @@ async fn wait_focused_input(view: &mut AppView, label: &str) {
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
     let footer = if placeholder == "Search models…" {
         "Enter selects · Tab moves · Esc back"
+    } else if placeholder == "Search workspaces…" {
+        "Enter opens · Ctrl+Enter uses folder · Alt+↑ parent · Esc closes"
     } else {
         "Enter selects · Esc closes"
     };
@@ -142,6 +144,8 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         wait_focused_input(view, "Search session titles").await;
     } else if placeholder == "Search models…" {
         wait_focused_input(view, "Search models").await;
+    } else if placeholder == "Search workspaces…" {
+        wait_focused_input(view, "Search workspace folders").await;
     } else {
         wait_view(view, |screen| {
             screen.contains(placeholder) && screen.contains(footer)
@@ -169,12 +173,27 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         screen.contains(&format!("› {choice}"))
             && screen.contains(footer)
             && !screen.contains("Loading…")
+            && !screen.contains("Loading folders…")
     })
     .await;
     view.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Enter,
         KeyModifiers::NONE,
     )));
+}
+
+async fn open_workspace_picker(view: &mut AppView) {
+    shortcut(view, 'p');
+    select_palette(view, "Search commands…", "Choose workspace", "Choose workspace").await;
+    wait_focused_input(view, "Search workspace folders").await;
+}
+
+async fn browse_workspace_folder(view: &mut AppView, name: &str) {
+    select_palette(view, "Search workspaces…", name, name).await;
+    let folder = format!("Folder · {name}");
+    wait_view(view, |screen| screen.contains(&folder) && !screen.contains("Loading folders…")).await;
+    wait_enabled_node(view, "Use this workspace folder").await;
+    wait_focused_input(view, "Search workspace folders").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -590,6 +609,123 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let fixture = Fixture::open().await;
+        let workspace = fixture.directory.path().join("workspace");
+        for index in 0..36 {
+            std::fs::create_dir(workspace.join(format!("ascii-{index:02}"))).unwrap();
+        }
+        let child_path = workspace.join("中文工程/子目录");
+        std::fs::create_dir_all(&child_path).unwrap();
+        let client = fixture.client().await;
+        let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
+        let first = client.query("agent", "directories", json!({"kind":"children","selection":roots["roots"][0]["selection"],"after":null})).await.unwrap();
+        assert_eq!(first["children"].as_array().unwrap().len(), 32);
+        assert!(!first["children"].as_array().unwrap().iter().any(|entry| entry["name"] == "中文工程"));
+        let second = client.query("agent", "directories", json!({"kind":"children","selection":roots["roots"][0]["selection"],"after":first["after"]})).await.unwrap();
+        let project = second["children"].as_array().unwrap().iter().find(|entry| entry["name"] == "中文工程").unwrap().clone();
+        let old_child_page = client.query("agent", "directories", json!({"kind":"children","selection":project["selection"],"after":null})).await.unwrap();
+        let old_identity = old_child_page["children"][0]["selection"]["directoryIdentity"].clone();
+        const DRAFT: &str = "ORIGINAL_FOLDER_DRAFT_你好";
+        client.save_draft("agent", &fixture.session, EDITOR, None, DRAFT.into()).await.unwrap();
+        let gate = ReplyGate::directories(fixture.directory.path(), fixture.address.clone());
+        let gated = fixture.client_at(&gate.address).await;
+        let (mut view, bindings) = fixture.view(gated, Some(fixture.session.clone()));
+        view.resize(120, 40);
+        wait_view(&mut view, |screen| screen.contains(DRAFT) && screen.contains("Enter sends")).await;
+        wait_focused_input(&mut view, "Message composer").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+        let editor = view.surface().focused().unwrap();
+        let selection = view.surface().input_context().unwrap().selection;
+
+        open_workspace_picker(&mut view).await;
+        wait_enabled_node(&mut view, "Browse folder Workspace").await;
+        gate.arm();
+        support::click_label(&mut view, "Browse folder Workspace");
+        wait_view(&mut view, |screen| screen.contains("Folder · Workspace") && screen.contains("Loading folders…")).await;
+        tokio::time::timeout(Duration::from_secs(20), gate.held.notified()).await.expect("the real child-directory reply did not reach its gate");
+        assert!(view.accessibility_snapshot().iter().find(|node| node.label == "Use this workspace folder").unwrap().state.disabled);
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
+        support::click_label(&mut view, "Use this workspace folder");
+        assert_eq!(client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(), 1);
+        support::click_label(&mut view, "Workspace locations");
+        wait_enabled_node(&mut view, "Browse folder Workspace").await;
+        gate.release();
+        browse_workspace_folder(&mut view, "Workspace").await;
+        // A Chinese match after the first 32 real Host children must load
+        // automatically; Enter only browses, never creates a conversation.
+        browse_workspace_folder(&mut view, "中文工程").await;
+        browse_workspace_folder(&mut view, "子目录").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)));
+        wait_enabled_node(&mut view, "Browse folder 子目录").await;
+        for (columns, rows) in [(80, 24), (120, 40)] {
+            view.resize(columns, rows);
+            wait_view(&mut view, |screen| screen.contains("Folder · 中文工程") && screen.contains("子目录") && screen.contains("Ctrl+Enter uses folder")).await;
+            wait_focused_input(&mut view, "Search workspace folders").await;
+        }
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_focused_input(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(editor));
+        let restored = view.surface().input_context().unwrap();
+        assert_eq!(restored.text.as_deref(), Some(DRAFT));
+        assert_eq!(restored.selection, selection);
+
+        open_workspace_picker(&mut view).await;
+        for name in ["Workspace", "中文工程", "子目录"] {
+            browse_workspace_folder(&mut view, name).await;
+        }
+        // Keep the observed inode alive under another name, then replace
+        // its path. The original opaque selection must not retarget it.
+        std::fs::rename(&child_path, workspace.join("retired-child")).unwrap();
+        std::fs::create_dir(&child_path).unwrap();
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
+        wait_view(&mut view, |screen| screen.contains("workspace_unavailable") && screen.contains(DRAFT)).await;
+        assert_eq!(client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(), 1);
+        wait_focused_input(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(editor));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+
+        let fresh_page = client.query("agent", "directories", json!({"kind":"children","selection":project["selection"],"after":null})).await.unwrap();
+        let fresh_child = fresh_page["children"].as_array().unwrap().iter().find(|entry| entry["name"] == "子目录").unwrap();
+        assert_ne!(fresh_child["selection"]["directoryIdentity"], old_identity);
+        open_workspace_picker(&mut view).await;
+        for name in ["Workspace", "中文工程", "子目录"] {
+            browse_workspace_folder(&mut view, name).await;
+        }
+        support::click_label(&mut view, "Use this workspace folder");
+        wait_focused_input(&mut view, "Search models").await;
+        let catalog = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
+        let sessions = catalog["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        let created = sessions.iter().find(|session| session["id"] != fixture.session).unwrap();
+        assert_eq!(created["workspace"]["path"], fresh_child["path"]);
+        assert_eq!(
+            std::fs::canonicalize(created["workspace"]["path"].as_str().unwrap()).unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        assert_eq!(created["workspace"]["directoryIdentity"], fresh_child["selection"]["directoryIdentity"]);
+        let created_id = created["id"].as_str().unwrap();
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_enabled_node(&mut view, "Close model selection").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_focused_input(&mut view, "Message composer").await;
+        assert_ne!(view.surface().focused(), Some(editor));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
+        view.handle_event(Event::Paste("NEW_FOLDER_DRAFT".into()));
+        support::wait_draft(&client, created_id, "NEW_FOLDER_DRAFT").await;
+        support::wait_draft(&client, &fixture.session, DRAFT).await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        support::evidence_cells("workspace-picker-deep-directory-and-draft-isolation", &view);
+        drop(view);
+        bindings.close().await.unwrap();
+        client.close().await.unwrap();
+        drop(gate);
+        fixture.finish().await;
+    }).await.expect("real Host workspace folder selection timed out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let mut fixture = Fixture::open().await;
@@ -624,6 +760,13 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
 
         support::click_text(&mut view, "Choose composer workspace");
         select_palette(&mut view, "Search workspaces…", root_name, root_name).await;
+        wait_enabled_node(&mut view, "Use this workspace folder").await;
+        assert_eq!(
+            client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(),
+            1,
+            "opening a folder must not create a conversation"
+        );
+        support::click_label(&mut view, "Use this workspace folder");
         wait_view(&mut view, |screen| {
             screen.contains("Search models…") && screen.contains("Enter selects")
         })
@@ -1764,6 +1907,104 @@ async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_
         drop(gate);
         fixture.finish().await;
     }).await.expect("real original-receipt recovery timed out");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_terminal() {
+    use maka_app_client::{Client, Journal};
+    use maka_host_runtime::application::host::Client as HostClient;
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let fixture = Fixture::registered().await;
+        let child_path = fixture.directory.path().join("workspace/中文工程/子目录");
+        std::fs::create_dir_all(&child_path).unwrap();
+        let client = fixture.client().await;
+        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        terminal.wait_for("Enter sends").await;
+        terminal.wait_for("Message or run a task…").await;
+        terminal.click_text("Message or run a task…");
+        terminal.paste("PTY_FOLDER_DRAFT_你好");
+        terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
+        let terminal_client = Client::new(
+            HostClient::connect(&fixture.address, None).await.unwrap(),
+            Journal::open(&fixture.directory.path().join("host/clients/terminal.sqlite")).await.unwrap(),
+            "receipts".into(),
+        ).unwrap();
+        support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
+
+        for choose in [false, true] {
+            terminal.send(b"\x10");
+            terminal.wait_for("Search commands…").await;
+            terminal.wait_for("Enter selects · Esc closes").await;
+            terminal.paste("Choose workspace");
+            terminal.wait_for("› Choose workspace").await;
+            terminal.send(b"\r");
+            terminal.wait_for("Search workspaces…").await;
+            terminal.wait_for("Enter opens · Ctrl+Enter uses folder").await;
+            terminal.wait_for("› Workspace /").await;
+            terminal.click_text("Workspace /");
+            terminal.wait_for("Folder · Workspace").await;
+            terminal.wait_for("Use this folder").await;
+            // Click the actual new native search field before typing. A first
+            // paint alone does not authorize Enter against its predecessor.
+            terminal.wait_for("Search workspaces…").await;
+            terminal.click_text("Search workspaces…");
+            terminal.paste("中文工程");
+            terminal.wait_for("› 中文工程 /").await;
+            terminal.send(b"\r");
+            terminal.wait_for("Folder · 中文工程").await;
+            terminal.wait_for("子目录 /").await;
+            terminal.click_text("子目录 /");
+            terminal.wait_for("Folder · 子目录").await;
+            terminal.wait_for("This folder has no subfolders.").await;
+            if choose {
+                terminal.click_text("Use this folder");
+            } else {
+                terminal.send(b"\x1b[1;3A");
+                terminal.wait_for("Folder · 中文工程").await;
+                terminal.wait_for("子目录 /").await;
+                terminal.click_text("子目录 /");
+                terminal.wait_for("Folder · 子目录").await;
+                for (columns, rows) in [(80, 24), (120, 40)] {
+                    let before = terminal.wire().len();
+                    terminal.resize(columns, rows);
+                    terminal.wait_for_wire(b"\x1b[?2026l", before).await;
+                    terminal.wait_for("Folder · 子目录").await;
+                }
+                terminal.send(b"\x1b");
+                terminal.wait_for_absent("Close · Esc").await;
+                terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
+                support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
+                assert_eq!(client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(), 1);
+            }
+        }
+        terminal.wait_for("Search models…").await;
+        let catalog = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
+        let sessions = catalog["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        let created = sessions.iter().find(|session| session["id"] != fixture.session).unwrap();
+        assert_eq!(
+            std::fs::canonicalize(created["workspace"]["path"].as_str().unwrap()).unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        terminal.send(b"\x1b");
+        terminal.wait_for("Close · Esc").await;
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Close · Esc").await;
+        terminal.wait_for("Message or run a task…").await;
+        terminal.click_text("Message or run a task…");
+        terminal.paste("PTY_NEW_FOLDER_DRAFT");
+        terminal.wait_for("PTY_NEW_FOLDER_DRAFT").await;
+        support::wait_draft(&terminal_client, created["id"].as_str().unwrap(), "PTY_NEW_FOLDER_DRAFT").await;
+        support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        evidence("production-workspace-picker-deep-folder", &terminal.snapshot());
+        terminal.send(b"\x11");
+        terminal.finish().await;
+        terminal_client.close().await.unwrap();
+        client.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("production workspace folder selection timed out");
 }
 
 #[cfg(unix)]
