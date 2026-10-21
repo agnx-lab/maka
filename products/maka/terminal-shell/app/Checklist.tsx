@@ -23,35 +23,21 @@ import { List } from 'nsh/list';
 import { windowSize } from 'nsh/device';
 import { host } from './host';
 import type { Subscription } from './history';
+import type { AgentChecklist, AgentTodoItem } from '../../../../packages/plugin-sdk/src/index.js';
 import { C } from './ui';
-
-type ChecklistItem = {
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-};
-type ChecklistPage = {
-  enabled: boolean;
-  revision: number | null;
-  total: number;
-  completed: number;
-  current: ChecklistItem | null;
-  offset: number;
-  items: ChecklistItem[];
-  nextOffset: number | null;
-};
 
 export function Checklist(props: { sessionId: string }) {
   const sessionId = props.sessionId;
-  const snapshot = signal<ChecklistPage | null>(null);
-  const items = signal<ChecklistItem[]>([]);
-  const nextOffset = signal<number | null>(null);
+  const snapshot = signal<AgentChecklist | null>(null);
+  const items = signal<AgentTodoItem[]>([]);
+  const nextOffset = signal<AgentChecklist['nextOffset']>(null);
   const expanded = signal(false);
   const loading = signal(false);
   const error = signal('');
   let alive = true;
   let generation = 0;
   let stream: Subscription | null = null;
-  const marker = (item: ChecklistItem) =>
+  const marker = (item: AgentTodoItem) =>
     item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '›' : '·';
   const setExpanded = (action: { sessionId: string; open: boolean }) => {
     const page = snapshot();
@@ -61,12 +47,12 @@ export function Checklist(props: { sessionId: string }) {
   const loadMore = async () => {
     const page = snapshot();
     const offset = nextOffset();
-    if (!alive || loading() || !page || offset === null) return;
+    if (!alive || loading() || !page || offset === null || offset === undefined) return;
     const currentGeneration = generation;
     loading.set(true);
     error.set('');
     try {
-      const next: ChecklistPage = await host.query('agent', 'checklist', { sessionId, offset });
+      const next: AgentChecklist = await host.query('agent', 'checklist', { sessionId, offset });
       // A replacement invalidates every previously loaded page. Never stitch
       // pages from two checklist revisions; the watch supplies the new head.
       if (!alive || currentGeneration !== generation || next.revision !== page.revision) return;
@@ -95,7 +81,7 @@ export function Checklist(props: { sessionId: string }) {
     stream = opened;
     try {
       for (;;) {
-        const page: ChecklistPage | null = await opened.next();
+        const page: AgentChecklist | null = await opened.next();
         if (!alive) return;
         if (page === null) throw new Error('Checklist updates ended. Reopen the conversation.');
         if (snapshot() && page.revision === snapshot()!.revision) continue;

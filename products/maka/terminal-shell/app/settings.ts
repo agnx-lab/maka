@@ -25,6 +25,7 @@ import type {
   CredentialStatus,
   ModelOverride,
   SettingsConnectionDetail,
+  SettingsConnectionsRead,
   SettingsConnectionSummary,
   SettingsProvider,
   SettingsProviderSummary,
@@ -150,13 +151,12 @@ export function createModelSettings(
       let version = revision();
       let restarted = false;
       for (;;) {
-        const result = await host.query(
-          'settings',
-          'connections',
-          cursor === null
-            ? { kind: 'start' }
-            : { kind: 'continue', revision: version, offset: cursor },
-        );
+        let request: SettingsConnectionsRead = { kind: 'start' };
+        if (cursor !== null) {
+          if (version === null) throw new Error('The connection catalog revision is missing.');
+          request = { kind: 'continue', revision: version, offset: cursor };
+        }
+        const result = await host.query('settings', 'connections', request);
         if (!alive || !active() || generation !== read) return;
         if (result.kind === 'changed') {
           if (restarted)
@@ -186,14 +186,13 @@ export function createModelSettings(
     }
   };
   const loadProviders = async (more = false) => {
-    if (!alive || !active() || loading() || (more && providerNext() === null)) return;
+    const offset = more ? providerNext() : 0;
+    if (!alive || !active() || loading() || offset === null) return;
     const generation = ++read;
     loading.set(true);
     error.set('');
     try {
-      const result = await host.query('settings', 'providers', {
-        offset: more ? providerNext() : 0,
-      });
+      const result = await host.query('settings', 'providers', { offset });
       if (!alive || !active() || generation !== read) return;
       providers.set(more ? [...providers(), ...result.providers] : result.providers);
       providerNext.set(result.next);

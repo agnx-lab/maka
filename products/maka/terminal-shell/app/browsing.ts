@@ -26,6 +26,7 @@ import type {
   AgentSessionPage,
   AgentProject,
   AgentProjectsPage,
+  AgentProjectsRead,
   AgentProjectCursor,
   AgentWorkspaceSelection,
   AgentSessionPosition,
@@ -290,7 +291,7 @@ export function createBrowsing(): Browsing {
           const next: ProjectsPage = await host.query('agent', 'projects', {
             kind: 'list',
             cursor,
-          });
+          } satisfies AgentProjectsRead);
           if (!alive || projectRead !== reading) return;
           if (next.kind === 'changed') break;
           if (next.kind !== 'projects') throw new Error('Projects are unavailable.');

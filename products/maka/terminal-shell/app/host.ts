@@ -53,11 +53,9 @@ type Output<E extends Endpoint, M extends string> = M extends keyof Services[E]
   : never;
 type Subscription<T> = { next(): Promise<T | null>; close(): Promise<void> };
 type FileSubscription = { readFile(): Promise<FileView>; close(): Promise<void> };
-type Opened<E extends Endpoint, M extends string> = E extends 'agent'
-  ? M extends 'readFile'
-    ? FileSubscription
-    : Subscription<Output<E, M>>
-  : Subscription<Output<E, M>>;
+type StreamMethod<E extends Endpoint> = E extends 'agent'
+  ? Exclude<Method<E, 'subscription'>, 'readFile'>
+  : Method<E, 'subscription'>;
 
 // This is the native collector's presentation, not agent.readFile's wire stream.
 export type FileView =
@@ -127,20 +125,30 @@ async function query<E extends Endpoint, M extends Method<E, 'query'>>(
 ): Promise<Output<E, M>> {
   return nativeHost.query(endpoint, method, input) as Promise<Output<E, M>>;
 }
-async function subscribe<E extends Endpoint, M extends Method<E, 'subscription'>>(
+function subscribe(
+  endpoint: 'agent',
+  method: 'readFile',
+  input: Input<'agent', 'readFile'>,
+): Promise<FileSubscription>;
+function subscribe<E extends Endpoint, M extends StreamMethod<E>>(
   endpoint: E,
   method: M,
   input: Input<E, M>,
-): Promise<Opened<E, M>> {
+): Promise<Subscription<Output<E, M>>>;
+async function subscribe(
+  endpoint: Endpoint,
+  method: string,
+  input: unknown,
+): Promise<FileSubscription | Subscription<unknown>> {
   const opened = await nativeHost.subscribe(endpoint, method, input);
   if (endpoint === 'agent' && method === 'readFile') {
     return {
       readFile: async () => fileView(await opened.readFile()),
       close: () => opened.close(),
-    } as Opened<E, M>;
+    };
   }
   // Keep the original native subscription and its cleanup, without a handle table.
-  return opened as Opened<E, M>;
+  return opened;
 }
 
 // Local journal methods serialize these actual Rust DTOs. Their receipt business
@@ -174,9 +182,12 @@ export const host = {
 // Session methods take the original native Instance. In particular, the same
 // instance still goes directly into AttachmentPicker.client.
 export type { ScopedHost };
-export const loadDraft = (scope: ScopedHost) => scope.loadDraft() as Promise<ClientDraft>;
+// The schema also accepts old inputs without attachments. These native methods
+// serialize Draft without skipping that field, including [] for an empty draft.
+type SavedDraft = ClientDraft & Required<Pick<ClientDraft, 'attachments'>>;
+export const loadDraft = (scope: ScopedHost) => scope.loadDraft() as Promise<SavedDraft>;
 export const saveDraft = (scope: ScopedHost, revision: number, edit: ClientDraftEdit) =>
-  scope.saveDraft(revision, edit) as Promise<ClientDraft>;
+  scope.saveDraft(revision, edit) as Promise<SavedDraft>;
 export async function sendDraft(scope: ScopedHost, revision: number, selection: unknown) {
   return attempt(await scope.send(revision, selection));
 }

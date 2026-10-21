@@ -99,7 +99,7 @@ function MessageSource({
         source.role !== (original.field === 'arguments' ? 'tool_call' : 'tool_result') ||
         tool?.toolUseId !== original.toolUseId ||
         !samePosition(owned?.position, original.position) ||
-        (original.field === 'arguments' && tool.call.name !== original.name) ||
+        (original.field === 'arguments' && (!tool?.call || tool.call.name !== original.name)) ||
         source.offset !== offset ||
         messageBytes(content()) !== offset ||
         !Number.isSafeInteger(source.totalBytes) ||

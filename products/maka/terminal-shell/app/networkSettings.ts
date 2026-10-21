@@ -116,7 +116,7 @@ export function createNetworkSettings(operations: SettingsOperations, active: ()
             : 'replace'
           : 'delete',
       });
-    else
+    else if (request.kind === 'credential')
       draft.set({
         ...value,
         credential: request.value,

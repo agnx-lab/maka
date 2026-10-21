@@ -251,7 +251,8 @@ export function InteractionPanel({
         source.path != null ||
         source.offset !== offset ||
         source.tool?.toolUseId !== original.toolUseId ||
-        call?.name !== original.toolName ||
+        !call ||
+        call.name !== original.toolName ||
         !equalPosition(source.position, call.position) ||
         (argumentPosition && !equalPosition(source.position, argumentPosition)) ||
         (argumentTotal() !== null && source.totalBytes !== argumentTotal()) ||
