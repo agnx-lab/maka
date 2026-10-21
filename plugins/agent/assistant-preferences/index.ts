@@ -71,7 +71,10 @@ interface State extends PageState {
   saved: SettingsAssistantPreferences | null;
   fields: Record<Name, Field>;
   pending: { key: string; request: Request } | null;
-  current: { input: SettingsPreferencesUpdate; reference: RecoveryRef | null } | null;
+  current: {
+    reset: 'compaction' | 'personalization' | false;
+    reference: RecoveryRef | null;
+  } | null;
   capture: { name: EditorObservation } | null;
   compactionCapture: EditorObservation | null;
   restoring: boolean;
@@ -131,10 +134,16 @@ function disabled(state: State, props: ProjectsProps) {
   );
 }
 function mutate(state: State, actions: Action[], input: SettingsPreferencesUpdate) {
-  state.current = { input, reference: null };
+  const reset =
+    input.mutation.kind === 'compaction_prompt'
+      ? 'compaction'
+      : input.mutation.kind === 'personalization'
+        ? 'personalization'
+        : false;
+  state.current = { reset, reference: null };
   state.notice = null;
   request(state, actions, { kind: 'mutate' }, 'settings', 'updateAssistantPreferences', input);
-  actions.at(-1)!.recovery = { kind: 'assistant-preferences/v1', input };
+  actions.at(-1)!.recovery = { reset };
 }
 function settle(state: State, reply: OperationReply, actions: Action[]) {
   if (
@@ -148,12 +157,7 @@ function settle(state: State, reply: OperationReply, actions: Action[]) {
     return;
   }
   const result = reply.receipt.outcome.value as SettingsPreferencesUpdated;
-  const reset =
-    state.current.input.mutation.kind === 'compaction_prompt'
-      ? 'compaction'
-      : state.current.input.mutation.kind === 'personalization'
-        ? 'personalization'
-        : !state.saved;
+  const reset = !state.saved || state.current.reset;
   state.current = null;
   state.notice =
     result.kind === 'committed'
@@ -393,17 +397,18 @@ export function assistantPreferences<N extends Node>(
             else {
               const items = result.value as CallerIntent[];
               for (const item of items) {
-                const recovery = item.recovery as {
-                  kind?: string;
-                  input?: SettingsPreferencesUpdate;
-                } | null;
+                const recovery = item.recovery as { reset?: unknown } | null;
                 if (
                   item.reference.method === 'updateAssistantPreferences' &&
-                  item.reference.contract.name === 'maka.settings.Settings' &&
-                  recovery?.kind === 'assistant-preferences/v1' &&
-                  recovery.input
+                  item.reference.contract.name === 'maka.settings.Settings'
                 )
-                  state.current = { input: recovery.input, reference: item.reference };
+                  state.current = {
+                    reset:
+                      recovery?.reset === 'compaction' || recovery?.reset === 'personalization'
+                        ? recovery.reset
+                        : false,
+                    reference: item.reference,
+                  };
               }
               const last = items.at(-1);
               if (last && last.cursor > r.after) history(state, actions, last.cursor);

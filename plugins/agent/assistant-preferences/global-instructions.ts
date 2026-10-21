@@ -21,7 +21,6 @@ import type {
   Action,
   ActionOutcome,
   AgentGlobalInstructionsView,
-  AgentGlobalInstructionsUpdate,
   AgentGlobalInstructionsUpdated,
   CallerIntent,
   ComponentInput,
@@ -47,7 +46,7 @@ export interface GlobalInstructionsState {
   serial: number;
   saved: Extract<AgentGlobalInstructionsView, { kind: 'available' }> | null;
   pending: { key: string; request: Request } | null;
-  current: { input: AgentGlobalInstructionsUpdate; reference: RecoveryRef | null } | null;
+  current: { reference: RecoveryRef | null } | null;
   restoring: boolean;
   observation: EditorObservation | null;
   command: EditorCommand | null;
@@ -178,17 +177,11 @@ export function globalInstructionsEvent(
       }
       const items = result.value as CallerIntent[];
       for (const item of items) {
-        const recovery = item.recovery as {
-          kind?: string;
-          input?: AgentGlobalInstructionsUpdate;
-        } | null;
         if (
           item.reference.contract.name === 'maka.agent.Agent' &&
-          item.reference.method === 'updateGlobalInstructions' &&
-          recovery?.kind === 'assistant-global-instructions/v1' &&
-          recovery.input
+          item.reference.method === 'updateGlobalInstructions'
         )
-          state.current = { input: recovery.input, reference: item.reference };
+          state.current = { reference: item.reference };
       }
       const last = items.at(-1);
       if (last && last.cursor > r.after) history(state, actions, last.cursor);
@@ -233,10 +226,9 @@ export function globalInstructionsEvent(
         revision: state.saved.revision,
         content: chunk.text,
       };
-      state.current = { input: update, reference: null };
+      state.current = { reference: null };
       state.notice = null;
       request(state, actions, { kind: 'save' }, 'agent', 'updateGlobalInstructions', update);
-      actions.at(-1)!.recovery = { kind: 'assistant-global-instructions/v1', input: update };
     } else if (r.kind === 'save') {
       if (result.status === 'operation') settle(state, result.reply, actions);
       else if (result.status === 'not_accepted') {
