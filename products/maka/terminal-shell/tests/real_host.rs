@@ -1438,7 +1438,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         support::click_label(&mut view, "Close workspace preview");
         wait_view(&mut view, |screen| !screen.contains("Captured image") && !screen.contains("Close · Esc")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse workspace files"));
-        tab_to_label(&mut view, "Message composer");
+        tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("UNSENT_PREVIEW_DRAFT"));
         request.delta("WORKSPACE_RUN_CONTINUES").await;
