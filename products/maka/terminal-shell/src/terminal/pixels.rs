@@ -302,6 +302,9 @@ pub(super) fn run(
                 output.submit(bytes, None)?;
                 phase = Phase::Effect;
             } else if let Some(encoded) = inbox.encoded.take() {
+                if let Some(wake) = &inbox.wake {
+                    wake.unpark();
+                }
                 let encoded = encoded?;
                 if encoded.geometry != inbox.geometry {
                     if inbox.in_flight.as_ref() == Some(&encoded.frame.token()) {

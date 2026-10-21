@@ -89,6 +89,7 @@ fn run(
                 if let Some(inbox) = &mut delivered.state.lock().unwrap().pixels
                     && drawn_geometry.get() == inbox.geometry
                     && inbox.resize.is_none()
+                    && inbox.pending.is_none()
                 {
                     inbox.pending = Some(super::input::Candidate {
                         frame,
@@ -249,11 +250,10 @@ fn run(
                     inbox.in_flight = None;
                 }
             }
-            // Mount/focus work can precede its next draw. Complete the
-            // foreground/draw barrier before admitting any opaque callback;
-            // no pump occurs between this check and its actual dispatch.
-            platform.pump();
-            encode_pending(presentation);
+            // Apply mount/focus work before admitting input. Deferred drawing
+            // stays visible to has_pending(), so an opaque callback cannot
+            // pass the exact-presentation barrier ahead of that work.
+            let mut worked = platform.pump_with_draw(false);
             let (input, late_cancel) = {
                 let mut state = presentation.state.lock().unwrap();
                 if presentation.stop.load(Ordering::Acquire) || state.quit {
@@ -396,7 +396,17 @@ fn run(
                     });
                 }
             }
-            platform.pump();
+            let allow_draw = {
+                let state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_ref().unwrap();
+                inbox.pending.is_none()
+                    && inbox.encoded.is_none()
+                    && inbox.resize.is_none()
+                    && geometry.get() == inbox.geometry
+                    && inbox.capabilities.viewport().is_some()
+            };
+            worked |= platform.pump_with_draw(allow_draw);
+            worked |= encode_pending(presentation);
             let retained = presentation
                 .state
                 .lock()
@@ -436,7 +446,7 @@ fn run(
                 .as_ref()
                 .unwrap()
                 .has_pending_input();
-            if !platform.has_pending() && !input_pending {
+            if !worked && !input_pending {
                 let wait = platform
                     .next_deadline()
                     .map_or(Duration::from_millis(16), |deadline| {
@@ -462,25 +472,25 @@ fn run(
 /// Pure encoding cannot hold the terminal writer behind CPU work. It shares
 /// this existing GPUI worker with GPU readback; the independent driver can
 /// always abandon an unstarted candidate and flush terminal restoration.
-fn encode_pending(presentation: &Presentation) {
+fn encode_pending(presentation: &Presentation) -> bool {
     if presentation.stop.load(Ordering::Acquire) {
-        return;
+        return false;
     }
     let work = {
         let mut state = presentation.state.lock().unwrap();
         if state.quit {
-            return;
+            return false;
         }
         let slots = state.pixel_probe.slots;
         let inbox = state.pixels.as_mut().unwrap();
         if inbox.in_flight.is_some() || inbox.encoded.is_some() || inbox.resize.is_some() {
-            return;
+            return false;
         }
         let Some(candidate) = inbox.pending.take() else {
-            return;
+            return false;
         };
         if candidate.geometry != inbox.geometry {
-            return;
+            return false;
         }
         let previous = inbox.displayed_image;
         let image = if previous == Some(slots.first) {
@@ -531,6 +541,7 @@ fn encode_pending(presentation: &Presentation) {
     } else {
         inbox.encoded = Some(result);
     }
+    true
 }
 
 fn commit_text(
