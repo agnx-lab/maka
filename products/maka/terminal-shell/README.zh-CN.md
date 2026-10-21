@@ -28,10 +28,10 @@
 ```sh
 npm run build --workspace @maka-agent/product
 cargo build -p maka-cli --bin maka
-cargo run -p maka-terminal-shell -- --root /path/to/root
+cargo run -p maka-terminal-shell
 ```
 
-终端先发现并验证指定 Root 的在线 Host；没有在线 Host 时，使用同目录的 `maka` 原生启动器按既有部署配置启动。无需另开终端运行 `host serve`。启动器不会从 `PATH` 查找。`--root` 指定业务 Host Root；默认产品的业务 Root 通常为 `~/.maka/application/host`。
+终端先发现并验证指定 Root 的在线 Host；没有在线 Host 时，使用同目录的 `maka` 原生启动器按既有部署配置启动。无需另开终端运行 `host serve`。启动器不会从 `PATH` 查找。默认业务 Host Root 为 `~/.maka/application/host`，可用 `--root /path/to/root` 指定其他路径。
 
 省略 `--session` 时，居中的输入区域会显示 **Choose workspace**，选择工作区后即可开始对话。添加 `--session SESSION_ID` 可直接打开已有会话。Host 必须提供 `agent`、`settings` 和 `receipts`。退出终端只关闭自己的连接，Host 按既有生命周期和空闲策略退出。
 

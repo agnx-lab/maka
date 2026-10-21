@@ -28,10 +28,10 @@ From the workspace root, build the product bundle and sibling native launcher, t
 ```sh
 npm run build --workspace @maka-agent/product
 cargo build -p maka-cli --bin maka
-cargo run -p maka-terminal-shell -- --root /path/to/root
+cargo run -p maka-terminal-shell
 ```
 
-The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. `--root` selects the business Host Root; the default product normally uses `~/.maka/application/host`.
+The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. The default business Host Root is `~/.maka/application/host`; use `--root /path/to/root` to select another.
 
 Without `--session`, the centered composer offers **Choose workspace** before editing. Add `--session SESSION_ID` to open an existing conversation directly. The Host must provide `agent`, `settings` and `receipts`. Exiting closes only the shell's own connection; the Host follows its existing lifecycle and idle policy.
 
