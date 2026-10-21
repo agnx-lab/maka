@@ -20,6 +20,13 @@
 // Generated from Rust runtime schemas. Run npm run schema:generate -w @maka-agent/plugin-sdk.
 
 export type RuntimeProtocol =
+  | ClientDraft
+  | ClientDraftEdit
+  | ClientDraftAttachment
+  | ClientDraftKey
+  | ClientDraftReference
+  | ClientUploadReference
+  | ClientOperation
   | HostLogRequest
   | HostLogPage
   | UiAuthoringCommand
@@ -373,6 +380,55 @@ export type RuntimeProtocol =
   | ResourceMetadata
   | MarkdownTextInput
   | MarkdownTextResult;
+/**
+ * Hierarchical, stable source keys. Display aliases never become data identities.
+ */
+export type InstanceId = string[];
+export type Transport = 'local' | 'remote';
+export type RecoveryProtocol = 'journal_v1';
+/**
+ * A caller's receipt observation, never an execution grant. Unavailable makes
+ * no claim about the journal's contents or physical cleanup.
+ */
+export type Receipt =
+  | {
+      kind: 'not_recorded';
+    }
+  | {
+      outcome: OperationOutcome;
+      cleanup: OperationCleanup;
+      kind: 'recorded';
+    }
+  | {
+      diagnostic: string;
+      kind: 'unavailable';
+    };
+/**
+ * Unresolved means no durable result is known, including after process loss.
+ */
+export type OperationOutcome =
+  | {
+      kind: 'unresolved';
+    }
+  | {
+      value: unknown;
+      kind: 'returned';
+    }
+  | {
+      diagnostic: string;
+      kind: 'unknown';
+    };
+export type OperationCleanup =
+  | {
+      kind: 'unconfirmed';
+    }
+  | {
+      kind: 'confirmed';
+    }
+  | {
+      diagnostic: string;
+      kind: 'failed';
+    };
 export type HostLogPosition =
   | {
       kind: 'tail';
@@ -458,10 +514,6 @@ export type DeploymentInstances =
       after?: InstanceId | null;
       kind: 'continue';
     };
-/**
- * Hierarchical, stable source keys. Display aliases never become data identities.
- */
-export type InstanceId = string[];
 export type ExecutionLocation = 'host' | 'ui';
 export type PresentationTarget = 'tui';
 /**
@@ -493,7 +545,6 @@ export type Target =
       export: string;
       kind: 'remote';
     };
-export type Transport = 'local' | 'remote';
 export type Interface =
   | {
       methods: {
@@ -1005,50 +1056,6 @@ export type ActionOutcome =
        */
       caller: CallerConfirmation | null;
       status: 'operation';
-    };
-export type RecoveryProtocol = 'journal_v1';
-/**
- * A caller's receipt observation, never an execution grant. Unavailable makes
- * no claim about the journal's contents or physical cleanup.
- */
-export type Receipt =
-  | {
-      kind: 'not_recorded';
-    }
-  | {
-      outcome: OperationOutcome;
-      cleanup: OperationCleanup;
-      kind: 'recorded';
-    }
-  | {
-      diagnostic: string;
-      kind: 'unavailable';
-    };
-/**
- * Unresolved means no durable result is known, including after process loss.
- */
-export type OperationOutcome =
-  | {
-      kind: 'unresolved';
-    }
-  | {
-      value: unknown;
-      kind: 'returned';
-    }
-  | {
-      diagnostic: string;
-      kind: 'unknown';
-    };
-export type OperationCleanup =
-  | {
-      kind: 'unconfirmed';
-    }
-  | {
-      kind: 'confirmed';
-    }
-  | {
-      diagnostic: string;
-      kind: 'failed';
     };
 export type FontFamily = string;
 /**
@@ -5118,13 +5125,101 @@ export type MarkdownTextResult =
       kind: 'too_large';
     };
 
-export interface HostLogRequest {
-  position: HostLogPosition;
+export interface ClientDraft {
+  revision: number;
+  text: string;
+  attachments?: ClientDraftAttachment[];
+}
+/**
+ * Display metadata for an immutable Host upload in this exact draft owner.
+ */
+export interface ClientDraftAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+}
+/**
+ * One complete editor revision, including the upload receipts it has handled.
+ */
+export interface ClientDraftEdit {
+  text: string;
+  attachments?: ClientDraftAttachment[];
+  settledUploads?: string[];
+}
+/**
+ * Stable product owner, independent of endpoint aliases, VM instances and UI nodes.
+ */
+export interface ClientDraftKey {
+  stateDomain: string;
+  deployment: string;
+  namespace: InstanceId;
+  export: string;
+  sessionId: string;
+  editorId: string;
+}
+export interface ClientDraftReference {
+  key: ClientDraftKey;
+  revision: number;
+}
+export interface ClientUploadReference {
+  key: ClientDraftKey;
+  name: string;
+  bytes: number;
+  digest: string;
+}
+/**
+ * One user attempt. Neither this observation nor its original reference grants access.
+ */
+export interface ClientOperation {
+  id: string;
+  host: DeploymentRef;
+  endpoint: string;
+  method: string;
+  sessionId?: string | null;
+  correlation: unknown;
+  draft?: ClientDraftReference | null;
+  upload?: ClientUploadReference | null;
+  /**
+   * Durable fence for an attempt abandoned before preparation committed.
+   */
+  abandoned?: boolean;
+  /**
+   * Present only after original preparation has been durably recorded.
+   */
+  reference?: RecoveryRef | null;
+  /**
+   * A known returned business outcome; absent is never proof that it did not run.
+   */
+  receipt?: Receipt | null;
 }
 export interface DeploymentRef {
   stateDomain: string;
   deployment: string;
   revision: number;
+}
+export interface RecoveryRef {
+  source: DeploymentRef;
+  namespace: InstanceId;
+  export: string;
+  method: string;
+  operation: string;
+  fingerprint: string;
+  contract: RecoveryContract;
+  recovery: RecoveryProtocol;
+}
+/**
+ * Contract identity for a journal lookup. The original request retains the
+ * complete contract; a receipt carries only its digest.
+ */
+export interface RecoveryContract {
+  name: string;
+  version: number;
+  transport: Transport;
+  digest: string;
+}
+export interface HostLogRequest {
+  position: HostLogPosition;
 }
 export interface DeploymentDocumentRead {
   source: DeploymentRef;
@@ -6085,26 +6180,6 @@ export interface TerminalAnimationFrame {
 export interface OperationReply {
   reference: RecoveryRef;
   receipt: Receipt;
-}
-export interface RecoveryRef {
-  source: DeploymentRef;
-  namespace: InstanceId;
-  export: string;
-  method: string;
-  operation: string;
-  fingerprint: string;
-  contract: RecoveryContract;
-  recovery: RecoveryProtocol;
-}
-/**
- * Contract identity for a journal lookup. The original request retains the
- * complete contract; a receipt carries only its digest.
- */
-export interface RecoveryContract {
-  name: string;
-  version: number;
-  transport: Transport;
-  digest: string;
 }
 /**
  * Peer attestation excludes caller-local recovery data. The receiving Host
