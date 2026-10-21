@@ -74,7 +74,7 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
       (value.exitCode !== undefined && !(typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode))) ||
       (value.failureMessage !== undefined && typeof value.failureMessage !== 'string')) return null;
     const exit = typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode) ? value.exitCode : null;
-    const sections: ToolSection[] = [{ label: 'Process status', text: `${value.status}${exit === null ? '' : ` · Exit ${exit}`}`,
+    const sections: ToolSection[] = [{ label: 'Recorded process status', text: `${value.status}${exit === null ? '' : ` · Exit ${exit}`}`,
       tone: value.status === 'cancelled' ? 'warning' : ['failed', 'timed_out', 'orphaned'].includes(value.status) || (exit !== null && exit !== 0) ? 'error' : undefined }];
     sections.push({ label: 'Recorded command', text: value.cmd }, { label: 'Working directory', text: value.cwd });
     if (typeof value.failureMessage === 'string') sections.push({ label: 'Process failure', text: value.failureMessage, tone: 'error' });

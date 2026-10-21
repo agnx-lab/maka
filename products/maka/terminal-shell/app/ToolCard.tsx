@@ -125,7 +125,8 @@ export function ToolCard(props: {
   const fallbackState = () => {
     const value = tool();
     if (value?.result) return value.result.settlement === 'unknown' ? 'Unknown' : value.result.isError || value.result.settlement === 'failed' ? 'Error' : value.result.settlement === 'rejected' ? 'Rejected' : 'Recorded';
-    return value?.call?.pending ? value.call.dispatched ? 'Running' : 'Preparing' : 'Not completed';
+    // History references describe their fence, never current execution liveness.
+    return value?.call ? value.call.dispatched ? 'Dispatched' : 'Input recorded' : 'Not completed';
   };
   return (
     <View style={{ width: '100%', minWidth: 0 }}>
