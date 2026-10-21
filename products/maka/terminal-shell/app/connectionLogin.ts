@@ -128,7 +128,9 @@ export function createConnectionLogin(
     try {
       await Clipboard.writeText(action.value);
       if (alive && state()?.occurrence === action.occurrence)
-        operations.notice.set(action.field === 'url' ? 'Sign-in URL copied.' : 'Sign-in code copied.');
+        operations.notice.set(
+          action.field === 'url' ? 'Sign-in URL copied.' : 'Sign-in code copied.',
+        );
     } catch (reason) {
       if (alive && state()?.occurrence === action.occurrence) operations.report(reason);
     }

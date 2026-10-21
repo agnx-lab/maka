@@ -34,8 +34,7 @@ export class SessionRevisionConflict extends Error {
   }
 }
 
-export const forkTitle = (title: string) =>
-  `Fork of ${title || 'Untitled conversation'}`;
+export const forkTitle = (title: string) => `Fork of ${title || 'Untitled conversation'}`;
 
 // The captured Session is the user's original revision and labels. A conflict
 // requires another explicit action; never silently replace its CAS identity.
