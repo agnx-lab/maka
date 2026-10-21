@@ -1328,7 +1328,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 started.elapsed() < Duration::from_secs(20),
                 "history wheel did not reveal {marker:?}:\n{screen}"
             );
-            // These phases are flat or folded. Exclude the fixed checklist's
+            // Exclude the fixed checklist's
             // NATIVE_TODO labels so the pointer always hits transcript content.
             let text = screen
                 .lines()
@@ -1340,8 +1340,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                         "TITLE_",
                         "NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS",
                         "REAL_PROVIDER_STREAM_VISIBLE",
-                        "NEXT_INPUT_FOLDS_PREVIOUS_PROCESS",
-                        "SECOND_POLICY_TURN_FINAL",
+                        "NEXT_MESSAGE_AFTER_COMPLETED_PROCESS",
+                        "SECOND_TURN_FINAL",
                         "> todo_write",
                         "Completed",
                     ]
@@ -1424,23 +1424,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             .join("\n");
         request.thinking(&thinking).await;
         let grouped = wait_view(&mut view, |screen| screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
-        evidence("standard-live-group-collapsed", &grouped);
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("On completion") && screen.contains("Verbose")).await;
-        support::click_text(&mut view, "Compact");
-        let compact = wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("Analyzing the request") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
-        evidence("compact-live-process", &compact);
-        support::click_text(&mut view, "Detailed");
-        let detailed = wait_view(&mut view, |screen| screen.contains("Details · Detailed") && screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && !screen.contains("Analyzing the request")).await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("detailed-live-flat-process", &detailed);
-        support::click_text(&mut view, "Verbose");
-        wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && !screen.contains("Analyzing the request")).await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        support::click_text(&mut view, "Standard");
-        wait_view(&mut view, |screen| screen.contains("Details · Standard") && screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| !screen.contains("On completion")).await;
+        evidence("live-group-collapsed", &grouped);
+        assert!(!grouped.contains("Details ·"));
         // The one live group's button has a stable semantic label; its text
         // includes a disclosure glyph before the source-backed activity title.
         support::click_text(&mut view, "Process group");
@@ -1597,32 +1582,17 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         evidence("committed", &committed);
         support::evidence_cells("committed", &view);
 
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("On completion")).await;
-        support::click_text(&mut view, "Compact");
-        support::click_text(&mut view, "Details ·");
-        shortcut(&mut view, 'l');
-        wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("› Completed") && !screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("On completion")).await;
-        support::click_text(&mut view, "Detailed");
-        support::click_text(&mut view, "Details ·");
-        shortcut(&mut view, 'l');
-        wait_view(&mut view, |screen| screen.contains("Details · Detailed") && screen.contains("› Completed")).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Next input")).await;
-        support::click_text(&mut view, "Next input");
-        support::click_text(&mut view, "Details ·");
-        shortcut(&mut view, 'l');
-        let deferred_tail = wait_view(&mut view, |screen| screen.contains("Details · Detailed") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1).await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("detailed-next-input-final-outside-process", &deferred_tail);
-        let deferred_body = wheel_history_up_to(&mut view, "NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS").await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("detailed-next-input-intermediate-flat", &deferred_body);
-        let deferred = wheel_history_up_to(&mut view, "⌃ Completed").await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("detailed-next-input-keeps-completed-process-flat", &deferred);
+        // Completion folds the work immediately. Manual reopening retains the
+        // original thinking disclosure and starts the independent activity at top.
+        let folded = wheel_history_up_to(&mut view, "› Completed").await;
+        assert_eq!(folded.matches("REAL_PROVIDER_STREAM_VISIBLE").count(), 1);
+        assert!(!folded.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS"));
+        support::click_text(&mut view, "› Completed");
+        wait_view(&mut view, |screen| screen.contains("› 1 thought")).await;
+        support::click_text(&mut view, "› 1 thought");
+        let reopened = wait_view(&mut view, &at_source_start).await;
+        evidence("completed-activity-source-reopened-at-top", &reopened);
+        support::evidence_cells("completed-activity-source-reopened-at-top", &view);
         shortcut(&mut view, 'l');
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().input_context().is_none() {
@@ -1630,8 +1600,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.expect("Jump latest did not focus the composer");
-        view.handle_event(Event::Paste("NEXT_INPUT_FOLDS_PREVIOUS_PROCESS".into()));
-        support::wait_draft(&client, &fixture.session, "NEXT_INPUT_FOLDS_PREVIOUS_PROCESS").await;
+        view.handle_event(Event::Paste("NEXT_MESSAGE_AFTER_COMPLETED_PROCESS".into()));
+        support::wait_draft(&client, &fixture.session, "NEXT_MESSAGE_AFTER_COMPLETED_PROCESS").await;
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 support::tick(&mut view);
@@ -1643,68 +1613,16 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         }).await.expect("the next presented Send button did not become enabled");
         support::click_text(&mut view, "Send");
         let mut next = fixture.next_request().await;
-        let next_user = wait_view(&mut view, |screen| screen.contains("NEXT_INPUT_FOLDS_PREVIOUS_PROCESS") && !screen.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS")).await;
-        evidence("next-input-message", &next_user);
-        let next_input = wheel_history_up_to(&mut view, "› Completed").await;
-        assert_eq!(next_input.matches("REAL_PROVIDER_STREAM_VISIBLE").count(), 1);
-        assert!(!next_input.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS"));
-        evidence("next-input-folds-previous-process", &next_input);
-        shortcut(&mut view, 'l');
-        next.delta("SECOND_POLICY_TURN_FINAL").await;
+        wait_view(&mut view, |screen| screen.contains("NEXT_MESSAGE_AFTER_COMPLETED_PROCESS")).await;
+        next.delta("SECOND_TURN_FINAL").await;
         next.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        wait_view(&mut view, |screen| screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
 
-        // This older group is now closed: each manual opening starts at the
-        // top. The row's small disclosure state still belongs to its source id.
-        let older_turn = wheel_history_up_to(&mut view, "› Completed").await;
-        assert_eq!(older_turn.matches("REAL_PROVIDER_STREAM_VISIBLE").count(), 1);
-        support::click_text(&mut view, "› Completed");
-        wait_view(&mut view, |screen| screen.contains("› 1 thought")).await;
-        support::click_text(&mut view, "› 1 thought");
-        let reopened = wait_view(&mut view, &at_source_start).await;
-        evidence("completed-activity-source-reopened-at-top", &reopened);
-        support::evidence_cells("completed-activity-source-reopened-at-top", &view);
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Verbose") && screen.contains("Next input")).await;
-        support::click_text(&mut view, "Compact");
-        support::click_text(&mut view, "Details ·");
-        let compact_settled = wait_view(&mut view, |screen| screen.contains("Details · Compact") && screen.contains("◇ Think") && !screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST") && screen.matches("NATIVE_THINK_SOURCE_FIRST").count() == 1).await;
-        evidence("compact-settled-thinking-without-preview", &compact_settled);
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Standard") && screen.contains("Next input")).await;
-        support::click_text(&mut view, "Standard");
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Details · Standard") && at_source_start(screen)).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Detailed") && screen.contains("Next input")).await;
-        support::click_text(&mut view, "Detailed");
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Details · Detailed") && at_source_start(screen)).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Verbose") && screen.contains("Next input")).await;
-        support::click_text(&mut view, "Verbose");
-        support::click_text(&mut view, "Details ·");
-        shortcut(&mut view, 'l');
-        let verbose_tail = wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("verbose-final-outside-process", &verbose_tail);
-        let verbose_tool = wheel_history_up_to(&mut view, "> todo_write").await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("verbose-settled-tool-flat", &verbose_tool);
-        let verbose = wheel_history_up_to(&mut view, "NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS").await;
-        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Turn activity"));
-        evidence("verbose-settled-process-flat", &verbose);
-        shortcut(&mut view, 'l');
-        wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
         support::load_application(&mut view);
-        let persisted = wait_view(&mut view, |screen| screen.contains("Details · Verbose") && screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| screen.contains("Fold:")).await;
-        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "Fold work details: Next input" && node.state.selected));
-        evidence("process-policy-survives-reload", &persisted);
-        support::click_text(&mut view, "Details ·");
-        wait_view(&mut view, |screen| !screen.contains("Fold:") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
+        let reloaded = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
+        assert!(!reloaded.contains("Details ·") && !reloaded.contains("NATIVE_THINK_SOURCE_FIRST"));
+        evidence("single-work-presentation-after-reload", &reloaded);
         // Reload starts with a fresh tail window. The first real Turn is not in
         // that page, so its rail mark must navigate across unloaded history.
         let current = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
@@ -1744,7 +1662,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(!jumped.contains("Load earlier messages"));
         evidence("turn-rail-loads-unloaded-history", &jumped);
         support::click_button(&mut view, "Return to latest").await;
-        let returned = wait_view(&mut view, |screen| screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
+        let returned = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != Some(composer) || view.surface().input_context().is_none() {
                 support::tick(&mut view);
@@ -2583,7 +2501,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
                 .to_string()
                 .contains("Production PTY user message")
         );
-        request.thinking("PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
+        request.thinking("PRODUCTION_PTY_REASONING").await;
         request.delta("REAL_PRODUCTION_PTY_STREAM").await;
         let streamed = terminal.wait_for("REAL_PRODUCTION_PTY_STREAM").await;
         evidence("production-pty-streaming", &streamed);
@@ -2595,27 +2513,24 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         fixture.idle(&control, &fixture.session).await;
         control.close().await.unwrap();
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
-        terminal.click_text("Details · Standard");
-        terminal.wait_for("On completion").await;
-        terminal.click_text("Detailed");
-        terminal.wait_for("Details · Detailed").await;
-        terminal.click_text("Next input");
-        let selected = terminal.wait_for("◇ Think · PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
-        assert!(selected.contains("REAL_PRODUCTION_PTY_STREAM"));
-        evidence("production-pty-selected-process-policy", &selected);
-        terminal.click_text("Details · Detailed");
+        terminal.wait_for("› Completed").await;
+        assert!(!terminal.snapshot().contains("◇ Think · PRODUCTION_PTY_REASONING"));
         terminal.send(b"\x11");
         terminal.finish().await;
         drop(terminal);
-        // This is a new OS process using the same selected Root, not an
-        // AppView reload with a test-only data_dir. Detailed plus next-input
-        // must keep the completed reasoning flat beside its original answer.
+        // A new OS process uses the same original Root and the same single
+        // presentation: completed work is folded, and the source opens on request.
         let mut restarted = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
-        restarted.wait_for("Details · Detailed").await;
-        let persisted = restarted.wait_for("◇ Think · PRODUCTION_PTY_SAVED_POLICY_REASONING").await;
-        assert!(persisted.contains("REAL_PRODUCTION_PTY_STREAM") && persisted.contains("completed."));
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "loading presentation settings must not send another message");
-        evidence("production-pty-process-policy-after-restart", &persisted);
+        let folded = restarted.wait_for("REAL_PRODUCTION_PTY_STREAM").await;
+        assert!(folded.contains("completed.") && !folded.contains("Details ·"));
+        restarted.wait_for("› Completed").await;
+        restarted.click_text("› Completed");
+        restarted.wait_for("› 1 thought").await;
+        restarted.click_text("› 1 thought");
+        let reopened = restarted.wait_for("◇ Think · PRODUCTION_PTY_REASONING").await;
+        assert!(reopened.contains("REAL_PRODUCTION_PTY_STREAM"));
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "reopening recorded work must not send another message");
+        evidence("production-pty-work-after-restart", &reopened);
         restarted.send(b"\x11");
         restarted.finish().await;
         drop(restarted);

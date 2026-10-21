@@ -45,12 +45,10 @@ import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
 import { projectProcessGroups, stableRowId } from './processGroups';
 import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
-import type { PresentationSettings } from './presentation';
-import { PresentationControls } from './PresentationControls';
 import { ReturnToLatest, TurnNavigation } from './TurnNavigation';
 import type { TurnNavigationItem } from './TurnNavigation';
 import type { ImagePreview } from './ImageThumbnail';
-import { latestToolActivity, toolActivitySummary, updateToolActivity } from './toolActivity';
+import { latestToolActivity, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
 import type {
   AgentHistoryAttachment,
@@ -75,7 +73,6 @@ export type ConversationHandle = ComposerSession & {
 };
 type ConversationProps = {
   client: ScopedHost;
-  presentation: PresentationSettings;
   control: Control;
   fork(action: Extract<SessionAction, { kind: 'fork' }>): Promise<void>;
   commands(): void;
@@ -210,14 +207,6 @@ export function Conversation(props: ConversationProps) {
       detail: (paragraph ?? '').replaceAll('**', '').replace(/\s+/g, ' ').trim(),
     };
   });
-  const reasoningPreview = (id: string) =>
-    props.presentation.policy().settledReasoningPreview ||
-    parts().some(
-      (part) =>
-        part.invocationId === invocation() &&
-        part.field === 'thinking' &&
-        `${part.messageId}/${part.field}` === id,
-    );
   let previousGroups: ProcessEntry[] = [];
   const projection = computed(() => {
     // Canonical position and live PartStarted sequence are source order. A send
@@ -240,47 +229,20 @@ export function Conversation(props: ConversationProps) {
     previousGroups = next.entries;
     return next;
   });
-  const latestExchangeTurns = computed(() => {
-    const latest = new Set<string>();
-    // This is logical exchange membership, never whether the reader is at
-    // the viewport bottom. Queued receipt echoes do not start an exchange.
-    if (pendingMessages().some((row) => row.placement === 'transcript')) return latest;
-    for (const entry of projection().entries) {
-      if (entry.kind === 'process') latest.add(entry.turnId);
-      else {
-        const row = projection().rowsById.get(entry.rowId);
-        if (row?.role === 'user') latest.clear();
-        else if (row?.turnId) latest.add(row.turnId);
-      }
-    }
-    return latest;
-  });
-  const latestExchange = (turnId: string) => latestExchangeTurns().has(turnId);
   const canFoldTurn = (turn: TurnPresentation) =>
     turnOutcome(turn) === 'completed' &&
     !turn.active &&
-    !turn.interleavedInput &&
-    props.presentation.policy().foldCompletedTurns;
+    !turn.interleavedInput;
   const turnExpanded = (turn: TurnPresentation) => {
     if (!canFoldTurn(turn)) return true;
     const stored = turnState(turn.turnId).expanded();
     if (stored && stored.answerKey === turn.answerKey) return stored.open;
-    return props.presentation.collapseTiming() === 'next-input' && latestExchange(turn.turnId);
-  };
-  const grouped = (turn: TurnPresentation) => {
-    const policy = props.presentation.policy();
-    return (
-      policy.stepGrouping === 'collapsed' ||
-      (policy.stepGrouping === 'history' &&
-        !turn.active &&
-        !(policy.collapseTiming === 'next-input' && latestExchange(turn.turnId)))
-    );
+    return false;
   };
   type DisplayEntry =
     | { kind: 'summary'; key: string; turnId: string }
     | { kind: 'process'; key: string; group: ProcessGroup }
-    | { kind: 'row'; key: string; rowId: string }
-    | { kind: 'activity'; key: string; group: ProcessGroup };
+    | { kind: 'row'; key: string; rowId: string };
   const display = computed<DisplayEntry[]>(() => {
     const result: DisplayEntry[] = [];
     const summaries = new Set<string>();
@@ -299,13 +261,7 @@ export function Conversation(props: ConversationProps) {
       }
       if (entry.kind === 'process') {
         if (!turn || !turnExpanded(turn)) continue;
-        if (grouped(turn)) result.push({ kind: 'process', key: entry.key, group: entry });
-        else {
-          // Flat members are native outer List seats, preserving virtualization.
-          for (const rowId of entry.rowIds) result.push({ kind: 'row', key: rowId, rowId });
-          if (entry.members.some((member) => member.kind === 'activity'))
-            result.push({ kind: 'activity', key: `activity/${entry.key}`, group: entry });
-        }
+        result.push({ kind: 'process', key: entry.key, group: entry });
       } else if (row) {
         if (entry.processTurnId && turn && !turnExpanded(turn)) continue;
         if (
@@ -377,7 +333,7 @@ export function Conversation(props: ConversationProps) {
   const entryTurn = (key: string) => {
     const entry = displayByKey().get(key);
     if (entry?.kind === 'summary') return entry.turnId;
-    if (entry?.kind === 'process' || entry?.kind === 'activity') return entry.group.turnId;
+    if (entry?.kind === 'process') return entry.group.turnId;
     return entry?.kind === 'row' ? (projection().rowsById.get(entry.rowId)?.turnId ?? null) : null;
   };
   let list: YNode | undefined;
@@ -1466,15 +1422,12 @@ export function Conversation(props: ConversationProps) {
         state.following.set(!group.closed);
       }
       state.open.set(true);
-      const target = grouped(turn) ? group.key : group.rowIds.at(-1);
-      const index = displayKeys().indexOf(target ?? '');
+      const index = displayKeys().indexOf(group.key);
       if (index >= 0) list?.scrollToIndex({ index, viewPosition: 0 });
-      if (grouped(turn)) {
-        state.requestFocus = true;
-        if (state.list) {
-          state.requestFocus = false;
-          state.list.focus();
-        } else list?.focus();
+      state.requestFocus = true;
+      if (state.list) {
+        state.requestFocus = false;
+        state.list.focus();
       } else list?.focus();
     },
     jumpLatest(turnId) {
@@ -1613,7 +1566,6 @@ export function Conversation(props: ConversationProps) {
             Trajectory
           </Text>
         </Button>
-        <PresentationControls settings={props.presentation} />
       </View>
       <View
         style={{
@@ -1693,10 +1645,10 @@ export function Conversation(props: ConversationProps) {
                       />
                     );
                   }
-                  if (initial.kind === 'process' || initial.kind === 'activity') {
+                  if (initial.kind === 'process') {
                     const group = () => {
                       const latest = entry();
-                      return latest.kind === 'process' || latest.kind === 'activity'
+                      return latest.kind === 'process'
                         ? latest.group
                         : initial.group;
                     };
@@ -1709,32 +1661,14 @@ export function Conversation(props: ConversationProps) {
                         invocation(),
                         group().turnId,
                       );
-                    if (initial.kind === 'activity')
-                      return (
-                        <ActivityStatus
-                          title={() => {
-                            const current = tool();
-                            return current
-                              ? toolActivitySummary(
-                                  props.presentation.policy().liveProcessDetail
-                                    ? current
-                                    : { ...current, title: undefined, detail: '' },
-                                )
-                              : 'Working…';
-                          }}
-                          active={() => turn().active}
-                        />
-                      );
                     return (
                       <TurnPanel
                         group={group}
                         turn={turn}
                         toolActivity={tool}
                         state={groupState(initial.group.key)}
-                        policy={props.presentation.policy}
                         row={(id) => projection().rowsById.get(id)}
                         rowState={rowState}
-                        reasoningPreview={reasoningPreview}
                         sessionId={sessionId}
                         through={() => latestKnown}
                         previewImage={props.previewImage}
@@ -1771,7 +1705,6 @@ export function Conversation(props: ConversationProps) {
                         item={row}
                         ownerKey={() => initial.rowId}
                         viewState={rowState(initial.rowId)}
-                        reasoningPreview={() => reasoningPreview(initial.rowId)}
                         sessionId={sessionId}
                         through={() => latestKnown}
                         previewImage={props.previewImage}

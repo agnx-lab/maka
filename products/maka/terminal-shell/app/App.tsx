@@ -35,7 +35,6 @@ import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
 import type { ImagePreview } from './ImageThumbnail';
 import { createResources } from './resources';
-import { createPresentationSettings } from './presentation';
 import { createBrowsing } from './browsing';
 import type { BrowserWorkspace } from './browsing';
 import { Workbench, canDockBrowser } from './Workbench';
@@ -51,7 +50,6 @@ type Overlay = { instance: number } & (
 );
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
-  const presentation = createPresentationSettings();
   const browsing = createBrowsing();
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
@@ -546,7 +544,6 @@ function App() {
           {(id) => (
             <Conversation
               client={host.session(id())}
-              presentation={presentation}
               control={control}
               fork={(action) => changeBrowsedSession(action, id())}
               commands={inputAction(open, { kind: 'commands', sessionId: id() })}

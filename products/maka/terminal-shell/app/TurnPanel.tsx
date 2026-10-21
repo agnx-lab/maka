@@ -25,7 +25,6 @@ import { List } from 'nsh/list';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import type { ProcessGroup, TurnPresentation } from './processGroups';
-import type { PresentationPolicy } from './presentation';
 import { C } from './ui';
 import type { ImagePreview } from './ToolImage';
 import { toolActivitySummary, type ToolActivity } from './toolActivity';
@@ -146,7 +145,6 @@ function ActivityLog(props: {
   group: () => ProcessGroup;
   row(id: string): Row | undefined;
   rowState(id: string): MessageViewState;
-  reasoningPreview(id: string): boolean;
   state: GroupViewState;
   sessionId: string;
   through: () => number;
@@ -295,7 +293,6 @@ function ActivityLog(props: {
                       item={() => props.row(ownedId()) ?? first}
                       ownerKey={ownedId}
                       viewState={props.rowState(ownedId())}
-                      reasoningPreview={() => props.reasoningPreview(ownedId())}
                       toolBodyMaxHeight={() => Math.max(16, bodyMaxHeight() - 32)}
                       onToolReading={(key) => {
                         if (
@@ -341,10 +338,8 @@ export function TurnPanel(props: {
   turn: () => TurnPresentation;
   toolActivity: () => ToolActivity | undefined;
   state: GroupViewState;
-  policy: () => PresentationPolicy;
   row(id: string): Row | undefined;
   rowState(id: string): MessageViewState;
-  reasoningPreview(id: string): boolean;
   sessionId: string;
   through: () => number;
   viewport: () => { width: number; height: number };
@@ -382,16 +377,13 @@ export function TurnPanel(props: {
     const activity = props.activity();
     if (activity.kind === 'waiting') return 'Waiting for your response';
     const tool = props.toolActivity();
-    if (tool)
-      return toolActivitySummary(
-        props.policy().liveProcessDetail ? tool : { ...tool, title: undefined, detail: '' },
-      );
+    if (tool) return toolActivitySummary(tool);
     if (
       activity.kind === 'thinking' &&
       activity.rowId &&
       props.group().rowIds.includes(activity.rowId)
     )
-      return `Analyzing the request${props.policy().liveProcessDetail && activity.detail ? ` · ${activity.detail}` : ''}`;
+      return `Analyzing the request${activity.detail ? ` · ${activity.detail}` : ''}`;
     return 'Working…';
   });
   const stableTitle = stableActivityTitle(desiredTitle, active);

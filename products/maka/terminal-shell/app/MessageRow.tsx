@@ -46,7 +46,6 @@ export function MessageRow({
   previewImage,
   onExpand,
   ownerKey,
-  reasoningPreview,
   toolBodyMaxHeight,
   onToolReading,
   finalActions,
@@ -58,7 +57,6 @@ export function MessageRow({
   previewImage(image: ImagePreview): void;
   onExpand?(key: string): void;
   ownerKey?: () => string;
-  reasoningPreview?: () => boolean;
   toolBodyMaxHeight?: () => number;
   onToolReading?(key: string): void;
   finalActions?(row: () => Row, ownerKey: () => string): JSX.Element;
@@ -91,7 +89,7 @@ export function MessageRow({
         const compact = () => thinking() || isTool();
         const user = () => row().role === 'user';
         const summary = () =>
-          `◇ Think${reasoningPreview?.() !== false && preview() ? ` · ${preview()}` : ''}`;
+          `◇ Think${preview() ? ` · ${preview()}` : ''}`;
         const timestamp = () => {
           const value = (row() as Row & { timestamp?: number }).timestamp;
           if (typeof value !== 'number') return '';
