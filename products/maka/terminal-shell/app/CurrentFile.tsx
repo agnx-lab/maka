@@ -17,8 +17,9 @@
  * under the License.
  */
 
-import { cleanup, inputAction, Scroll, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
+import { Clipboard } from 'nsh/clipboard';
 import { Image } from 'nsh/image';
 import { List } from 'nsh/list';
 import { host, type FileView } from './host';
@@ -227,6 +228,65 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
 export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: OpenImageViewer }) {
   const model = props.model;
   const view = () => captured(model.state());
+  const textCapture = computed(
+    () => {
+      const value = view();
+      return value?.kind === 'text' ? value : null;
+    },
+    { equals: (left, right) => left === right },
+  );
+  const copying = signal(false);
+  const copyReceipt = signal<{
+    version: string;
+    digest: string;
+    failed: boolean;
+    message: string;
+  } | null>(null);
+  let mounted = true;
+  cleanup(() => {
+    mounted = false;
+  });
+  const copyAction = computed(() => {
+    const original = textCapture();
+    if (original === null) return undefined;
+    const owns = () => mounted && textCapture() === original;
+    const copy = async () => {
+      if (!owns() || copying()) return;
+      copying.set(true);
+      copyReceipt.set(null);
+      try {
+        await Clipboard.writeText(original.rows.map((row) => row.text).join(''));
+        if (owns())
+          copyReceipt.set({
+            version: original.version,
+            digest: original.digest,
+            failed: false,
+            message: 'File copied',
+          });
+      } catch (reason) {
+        if (owns())
+          copyReceipt.set({
+            version: original.version,
+            digest: original.digest,
+            failed: true,
+            message: message(reason),
+          });
+      } finally {
+        if (mounted) copying.set(false);
+      }
+    };
+    return inputAction(copy, null);
+  });
+  const copied = () => {
+    const receipt = copyReceipt();
+    const original = textCapture();
+    return receipt &&
+      original &&
+      receipt.version === original.version &&
+      receipt.digest === original.digest
+      ? receipt
+      : null;
+  };
   const readable = () => {
     const value = view();
     return value?.kind === 'image' || (value?.kind === 'text' && value.bytes > 0);
@@ -275,6 +335,21 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
           {model.target.title}
         </Text>
         <Button
+          accessibilityLabel="Copy captured file"
+          disabled={textCapture() === null}
+          onPress={copyAction()}
+          tooltip={copying() ? 'Copying captured file…' : copied()?.message || 'Copy captured file'}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
+        >
+          <Icon
+            name={copied() && !copied()!.failed ? 'check' : 'copy'}
+            color={copied()?.failed ? C.danger : C.secondary}
+          />
+        </Button>
+        <Button
           disabled={model.state().kind === 'loading'}
           accessibilityLabel="Refresh current file"
           onPress={inputAction(model.refresh, null)}
@@ -288,17 +363,36 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
         </Button>
       </View>
       <If when={view()}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <Text style={{ ...captionTextStyle, color: C.muted }}>
-            Current file · Captured contents
-          </Text>
-          <If when={version()}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0, gap: 8 }}>
+          <If
+            when={version()}
+            else={
+              <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
+                Captured contents
+              </Text>
+            }
+          >
             <Text
               selectable
               numberOfLines={1}
-              style={{ ...captionTextStyle, maxWidth: '100%', color: C.muted }}
+              accessibilityLabel={`Captured version ${version()}`}
+              tooltip={`Captured version ${version()}`}
+              style={{ ...captionTextStyle, flex: 1, minWidth: 0, color: C.muted }}
             >
               Captured version {version()}
+            </Text>
+          </If>
+          <If when={copied()}>
+            <Text
+              accessibilityLabel={copied()!.message}
+              tooltip={copied()!.message}
+              style={{
+                ...captionTextStyle,
+                flexShrink: 0,
+                color: copied()!.failed ? C.danger : C.muted,
+              }}
+            >
+              {copied()!.failed ? 'Copy failed' : 'File copied'}
             </Text>
           </If>
         </View>

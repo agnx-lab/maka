@@ -2231,7 +2231,9 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn current_workspace_previews_keep_real_contents_drafts_and_session_ownership() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    use nsh_platform_tui::ServiceOutput;
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
@@ -2246,7 +2248,8 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
             let output = std::process::Command::new("git").args(arguments).current_dir(&workspace).output().unwrap();
             assert!(output.status.success(), "git fixture failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        std::fs::write(&text_path, "AFTER_CURRENT_EDIT\n").unwrap();
+        let captured_contents = format!("AFTER_CURRENT_EDIT\r\n原文\t保留空白  \r\n{}\r\n", "capture 中文\t".repeat(30));
+        std::fs::write(&text_path, &captured_contents).unwrap();
         let pixels: Vec<u8> = (0..64 * 48).flat_map(|index| if index % 64 < 32 { [255, 64, 32, 255] } else { [32, 220, 96, 255] }).collect();
         let mut png_bytes = Vec::new();
         png::PngEncoder::new(&mut png_bytes).write_image(&pixels, 64, 48, ExtendedColorType::Rgba8).unwrap();
@@ -2256,6 +2259,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let invocation = observed["run"]["invocationId"].clone();
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        view.surface_mut().set_host_services_enabled(true);
         view.resize(120, 40);
         wait_focused_input(&mut view, "Message composer").await;
         tokio::time::timeout(Duration::from_secs(20), async {
@@ -2341,10 +2345,29 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         std::fs::write(&text_path, "REFRESHED_CURRENT_EDIT\n").unwrap();
         wait_view(&mut view, |screen| screen.contains("workspace may have changed")).await;
         assert!(view.snapshot().contains("AFTER_CURRENT_EDIT"), "a capture must not silently become current contents");
+        // Copy the complete original capture even after the workspace has changed.
+        // One physical click emits one native clipboard effect, without rereading.
+        view.drain_service_output().for_each(drop);
+        let copy = support::wait_enabled_button(&mut view, "Copy captured file").await.id;
+        support::click_button(&mut view, "Copy captured file").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("File copied") && view.accessibility_snapshot().iter().any(|node| node.id == copy && node.focused && !node.state.disabled)).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "one captured-file copy must emit exactly one native clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied.as_bytes(), captured_contents.as_bytes());
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("captured-file copy must encode one complete OSC52 sequence");
+        assert_eq!(STANDARD.decode(payload).unwrap(), captured_contents.as_bytes());
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == reader && node.label == "Captured file text"));
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == first_version));
+        support::wait_draft(&client, &fixture.session, "UNSENT_PREVIEW_DRAFT").await;
         support::click_label(&mut view, "Refresh current file");
         wait_view(&mut view, |screen| screen.contains("REFRESHED_CURRENT_EDIT") && !screen.contains("Reading current file…")).await;
         let next_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
         assert_ne!(first_version, next_version);
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == copy && !node.state.disabled));
+        assert!(!view.snapshot().contains("File copied"), "copy feedback must belong to its captured version");
         support::click_label(&mut view, "Browse current changes");
         wait_view(&mut view, |screen| screen.contains("Current changes") && screen.contains("000-preview.txt") && !screen.contains("Reading current changes…")).await;
         support::click_label(&mut view, "Open Worktree diff: 000-preview.txt");
@@ -2366,6 +2389,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         evidence("workspace-current-image-dialog", &image);
         support::evidence_cells("workspace-current-image-dialog", &view);
         let captured_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "Copy captured file" && node.state.disabled), "an image must not advertise text-copy capability");
         support::click_button(&mut view, "Open image full screen").await;
         wait_view_state(&mut view, |view, screen| screen.contains('▀') && view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
         let viewer = view.accessibility_snapshot().into_iter().find(|node| node.label == "Full screen image viewer").unwrap().id;
