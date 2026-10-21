@@ -136,8 +136,6 @@ test('CLI builds use the requested target and artifact path', async (t) => {
       'maka-cli',
       '-p',
       'maka-desktop-shell',
-      '-p',
-      'maka-terminal-shell',
       '--target-dir',
       directory,
       '--release',
@@ -166,8 +164,6 @@ test('CLI builds use the requested target and artifact path', async (t) => {
     'maka-cli',
     '-p',
     'maka-desktop-shell',
-    '-p',
-    'maka-terminal-shell',
     '--target-dir',
     join(root, 'target'),
   ]);

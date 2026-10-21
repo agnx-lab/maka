@@ -23,17 +23,16 @@ An experimental Agent workbench built with NSH, supporting mouse and keyboard in
 
 ## Start
 
-From the workspace root, build the product bundle and sibling native launcher, then start the shell:
+From the workspace root, build the product bundle and start the terminal interface in the Maka CLI:
 
 ```sh
 npm run build --workspace @maka-agent/product
-cargo build -p maka-cli -p maka-terminal-shell --bins
-target/debug/maka terminal-shell
+cargo run -p maka-cli -- terminal-shell
 ```
 
-The shell discovers and verifies the selected Root's live Host. If none is running, it uses the sibling `maka` native launcher and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The launcher is resolved beside the shell executable. The default business Host Root is `~/.maka/application/host`; use `--root /path/to/root` to select another.
+The shell discovers and verifies the selected Root's live Host. If none is running, it uses the same `maka` executable and the existing deployment policy to start one. A separate `host serve` terminal is unnecessary. The default business Host Root is `~/.maka/application/host`; use `--root /path/to/root` to select another.
 
-Native preview packages include both executables, so installed users can run `maka terminal-shell`. Options such as `--root`, `--session`, `--help` and `--version` pass directly to the shell; relative Root paths use the caller's working directory.
+Installed users can run `maka terminal-shell` from the same Maka executable. Use `--root`, `--session` or `--help` to select a Root, open an existing conversation or inspect the options. Relative Root paths use the caller's working directory.
 
 At startup, the shell negotiates image transport and display geometry. On Linux, including WSL, the required capabilities enable the entire interface to use GPU-rendered pixel frames through Kitty, Sixel or iTerm2. Otherwise, the same application uses Unicode rendering. Both presentations support mouse and keyboard interaction.
 

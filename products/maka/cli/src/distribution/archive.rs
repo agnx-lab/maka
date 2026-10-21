@@ -63,7 +63,6 @@ struct Member {
 
 fn allowed(target: Target, name: &str) -> bool {
     required(target).any(|member| member == name)
-        || name == target.terminal_executable()
         || matches!(name, "README.md" | "README.zh-CN.md")
         || (in_app(target, name) && maka_packages::validate_path(name).is_ok())
 }
@@ -122,8 +121,6 @@ pub(super) fn cached(
     if receipt.target != target
         || receipt.version != version
         || required(target).any(|name| !receipt.files.contains_key(name))
-        || (directory.join(target.terminal_executable()).try_exists()?
-            && !receipt.files.contains_key(target.terminal_executable()))
     {
         return Err("native package cache identity or file set changed".into());
     }
@@ -440,11 +437,6 @@ fn validate_package(directory: &Path, target: Target, version: &str) -> Result<(
         &mut regular_file(&directory.join(target.desktop_executable()), MAX_FILE_BYTES)?,
         true,
     )?;
-    // Older native packages remain usable as Hosts without the new UI binary.
-    let terminal = directory.join(target.terminal_executable());
-    if terminal.try_exists()? {
-        target.validate_binary(&mut regular_file(&terminal, MAX_FILE_BYTES)?, false)?;
-    }
     if let Some(service) = target.service_executable() {
         target.validate_binary(
             &mut regular_file(&directory.join(service), MAX_FILE_BYTES)?,

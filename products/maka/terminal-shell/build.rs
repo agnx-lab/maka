@@ -19,7 +19,6 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=app");
-    println!("cargo:rerun-if-changed=tests/fixtures/attachment-draft.tsx");
     println!("cargo:rerun-if-changed=../desktop-shell/app/patch.js");
     // Describe the runtime export without constructing a Host client at build time.
     let mut host = nsh_core::ui::Registry::ui_set("maka/host");
@@ -31,7 +30,7 @@ fn main() {
         entry: "app/App.tsx".into(),
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets,
     })
     .expect("bundle terminal application");
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
@@ -52,16 +51,4 @@ fn main() {
     }
     assets.push_str("]\n");
     std::fs::write(output.join("assets.rs"), assets).expect("write terminal assets");
-
-    // Keep the regression's actual app imports without linking the full bundler
-    // into the test binary. Only the test includes this separate output.
-    let fixture = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
-        entry: "tests/fixtures/attachment-draft.tsx".into(),
-        minify: false,
-        split: false,
-        ui_sets,
-    })
-    .expect("bundle attachment draft fixture");
-    std::fs::write(output.join("attachment-draft-fixture.js"), fixture.code)
-        .expect("write attachment draft fixture");
 }

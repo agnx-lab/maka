@@ -27,7 +27,7 @@
 
 [源码](src/main.rs) · [Cargo 配置](Cargo.toml)
 
-运行 `maka terminal-shell` 打开 [NSH 终端工作台](../terminal-shell/README.zh-CN.md)。默认使用 `~/.maka/application/host`，支持 `--root DIRECTORY` 和 `--session SESSION_ID`。同目录的 `maka-terminal-shell` 负责 Host 发现、启动和终端清理，原生预览包会包含它。`maka terminal-shell --help` 可查看参数。
+运行 `maka terminal-shell` 打开 [NSH 终端工作台](../terminal-shell/README.zh-CN.md)。默认使用 `~/.maka/application/host`，支持 `--root DIRECTORY` 和 `--session SESSION_ID`。终端界面及其 Host 发现、启动和终端清理都在同一个 `maka` 可执行文件中运行。`maka terminal-shell --help` 可查看参数。
 
 首次安装会在 TUI 内确认工作目录信任，然后才启动 Host、启用项目技能与工具。Tab 或方向键选择，Enter 确认，Esc 退出；默认选中退出。确认后在同一终端画面中初始化并进入产品。再次打开使用已保存的安装，不重复询问。
 

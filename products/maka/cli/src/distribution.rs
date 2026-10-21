@@ -595,7 +595,6 @@ mod tests {
             }
         }
         append(target.executable(), &binary);
-        append(target.terminal_executable(), &binary);
         if let Some(gui) = desktop_gui {
             if target == Target::Win32X64 {
                 binary[156..158].copy_from_slice(&(if gui { 2_u16 } else { 3_u16 }).to_le_bytes());
@@ -715,16 +714,6 @@ mod tests {
             let app = |name: &str| format!("{}/{name}", target.desktop_app());
             assert_eq!(artifact.integrity, integrity);
             assert!(artifact.executable.is_file());
-            let terminal = artifact.directory.join(target.terminal_executable());
-            assert_eq!(std::fs::read(&terminal).unwrap().len(), 256);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                assert_eq!(
-                    std::fs::metadata(&terminal).unwrap().permissions().mode() & 0o777,
-                    0o500
-                );
-            }
             let desktop = artifact.directory.join(target.desktop_executable());
             assert!(desktop.is_file());
             assert_eq!(
@@ -984,27 +973,6 @@ mod tests {
             assert_eq!(result.is_ok(), accepted, "{directory}: {result:?}");
             assert_eq!(destination.exists(), accepted);
         }
-    }
-
-    #[tokio::test]
-    async fn previous_native_packages_remain_usable_without_a_terminal_shell() {
-        let target = Target::LinuxX64Gnu;
-        let root = tempfile::tempdir().unwrap();
-        let bytes = package(target, None, Some(true), Some(target.terminal_executable()));
-        let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
-        let origin = registry(target, bytes, integrity).await;
-        let client = Client::builder().no_proxy().build().unwrap();
-        let original = request(target, root.path())
-            .resolve(client.clone(), origin)
-            .await
-            .unwrap();
-        let reused = request(target, root.path())
-            .resolve(client, Url::parse("http://127.0.0.1:1/").unwrap())
-            .await
-            .unwrap();
-        assert_eq!(reused.directory, original.directory);
-        assert_eq!(std::fs::read(reused.executable).unwrap().len(), 256);
-        assert!(!reused.directory.join(target.terminal_executable()).exists());
     }
 
     #[tokio::test]

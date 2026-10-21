@@ -27,7 +27,6 @@ mod desktop;
 mod local_fixture;
 mod sandbox;
 mod terminal;
-#[cfg(unix)]
 mod terminal_shell;
 #[path = "../../src/tests.rs"]
 mod unwind;

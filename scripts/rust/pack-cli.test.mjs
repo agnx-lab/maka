@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { packNativeCli } from './pack-cli.mjs';
 
-test('native archives carry the shell and exact authored app rather than a stale build sidecar', async () => {
+test('native archives carry the CLI and authored desktop app without a terminal sidecar', async () => {
   const root = await mkdtemp(join(tmpdir(), 'maka-shell-package-'));
   const previous = process.cwd();
   try {
@@ -57,8 +57,6 @@ test('native archives carry the shell and exact authored app rather than a stale
       'maka.exe',
       'maka-desktop-shell',
       'maka-desktop-shell.exe',
-      'maka-terminal-shell',
-      'maka-terminal-shell.exe',
       'maka-service.exe',
     ])
       await writeFile(join(root, 'build', name), name + ' bytes');
@@ -75,9 +73,8 @@ test('native archives carry the shell and exact authored app rather than a stale
       const archive = value('--archive');
       const files = execFileSync('tar', ['-tzf', archive], {encoding:'utf8'}).trim().split('\n');
       const windows = value('--target') === 'win32-x64';
-      const terminal = 'package/bin/' + (windows ? 'maka-terminal-shell.exe' : 'maka-terminal-shell');
-      assert.equal(execFileSync('tar', ['-xOf', archive, terminal], {encoding:'utf8'}), (windows ? 'maka-terminal-shell.exe' : 'maka-terminal-shell') + ' bytes');
-      if (process.platform !== 'win32') assert.match(execFileSync('tar', ['-tvzf', archive, terminal], {encoding:'utf8'}), /^-rwx/);
+      assert.ok(!files.includes('package/bin/maka-terminal-shell'));
+      assert.ok(!files.includes('package/bin/maka-terminal-shell.exe'));
       const macos = value('--target') === 'darwin-arm64';
       const bundle = 'package/bin/Maka.app/Contents/';
       const app = macos ? bundle + 'Resources/app/' : 'package/bin/app/';

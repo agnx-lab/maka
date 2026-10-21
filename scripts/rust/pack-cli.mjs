@@ -64,13 +64,6 @@ export async function packNativeCli({
     const executable = platform.os === 'win32' ? 'maka.exe' : 'maka';
     await copyRegular(resolve(binary), join(directory, 'bin', executable), 512 * 1024 * 1024);
     await chmod(join(directory, 'bin', executable), 0o755);
-    const terminal = platform.os === 'win32' ? 'maka-terminal-shell.exe' : 'maka-terminal-shell';
-    await copyRegular(
-      join(dirname(resolve(binary)), terminal),
-      join(directory, 'bin', terminal),
-      512 * 1024 * 1024,
-    );
-    await chmod(join(directory, 'bin', terminal), 0o755);
     const desktop = platform.os === 'win32' ? 'maka-desktop-shell.exe' : 'maka-desktop-shell';
     if (platform.os === 'darwin') {
       await stageDesktopBundle(

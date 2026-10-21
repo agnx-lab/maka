@@ -126,16 +126,7 @@ impl Target {
     pub fn is_executable(self, name: &str) -> bool {
         name == self.executable()
             || name == self.desktop_executable()
-            || name == self.terminal_executable()
             || Some(name) == self.service_executable()
-    }
-
-    pub fn terminal_executable(self) -> &'static str {
-        if self == Self::Win32X64 {
-            "bin/maka-terminal-shell.exe"
-        } else {
-            "bin/maka-terminal-shell"
-        }
     }
 
     pub fn service_executable(self) -> Option<&'static str> {

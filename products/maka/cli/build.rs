@@ -21,6 +21,7 @@ mod product;
 
 fn main() {
     product::bundle();
+    terminal_fixture();
     println!("cargo:rerun-if-env-changed=MAKA_NATIVE_PACKAGE_VERSION");
     if let Ok(version) = std::env::var("MAKA_NATIVE_PACKAGE_VERSION") {
         assert!(
@@ -36,4 +37,34 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
+}
+
+// The real terminal integration target belongs to this package so its PTY
+// launches the same `maka` executable that users run.
+fn terminal_fixture() {
+    let source = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("package directory"),
+    )
+    .join("../terminal-shell");
+    let fixture = source.join("tests/fixtures/attachment-draft.tsx");
+    println!("cargo:rerun-if-changed={}", fixture.display());
+    println!("cargo:rerun-if-changed={}", source.join("app").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        source.join("../desktop-shell/app/patch.js").display()
+    );
+    let mut host = nsh_core::ui::Registry::ui_set("maka/host");
+    host.native_values(&["host", "AttachmentPicker"]);
+    let mut markdown = nsh_core::ui::Registry::ui_set("maka/markdown");
+    markdown.native_values(&["markdown"]);
+    let module = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry: fixture,
+        minify: false,
+        split: false,
+        ui_sets: vec![nsh_base::registry().into(), host.into(), markdown.into()],
+    })
+    .expect("bundle attachment draft fixture");
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("build output"));
+    std::fs::write(output.join("attachment-draft-fixture.js"), module.code)
+        .expect("write attachment draft fixture");
 }

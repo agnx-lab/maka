@@ -200,7 +200,7 @@ export async function releaseNativeCli({ source, keys, target, validator, output
         timeout: 15_000,
         windowsHide: true,
       });
-      if (terminal.stdout.trim() !== 'maka-terminal-shell ' + candidate.version)
+      if (!terminal.stdout.trim().endsWith(' ' + candidate.version))
         throw new Error('Built terminal shell reports another source version');
       const executables = [
         binary,
