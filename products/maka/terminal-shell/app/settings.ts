@@ -37,6 +37,7 @@ import {
   settingsRejection as rejection,
   type SettingsOperations,
 } from './settingsOperations';
+import { createConnectionLogin, type LoginAction } from './connectionLogin';
 
 type Detail = Extract<SettingsConnectionDetail, { kind: 'ready' }>;
 export type ConnectionEditor = {
@@ -224,11 +225,11 @@ export function createModelSettings(
       if (
         !provider.descriptor.anonymous &&
         !provider.descriptor.authentication.some(
-          (method) => method.id === 'api-key' && !method.interactive,
+          (method) => (method.id === 'api-key' && !method.interactive) || method.interactive,
         )
       )
         throw new Error(
-          'This provider requires interactive sign-in. Use an OpenAI-compatible API-key provider here.',
+          'This provider does not offer an API key or interactive sign-in supported here.',
         );
       const configuration = provider.descriptor.configurationDefaults as Record<
         string,
@@ -478,6 +479,52 @@ export function createModelSettings(
       await loadConnections();
     });
   };
+  const login = createConnectionLogin(operations, {
+    accepts(request: LoginAction) {
+      const form = editor();
+      return !!(
+        form?.baseline &&
+        current({ editor: request.editor, revision: request.input.expected.revision }) &&
+        form.baseline.target.connectionId === request.input.expected.connectionId &&
+        JSON.stringify(credentialBasis(credential())) ===
+          JSON.stringify(request.input.expectedCredential) &&
+        form.provider.descriptor.authentication.some(
+          (method) => method.interactive && method.id === request.input.method,
+        ) &&
+        !dirty()
+      );
+    },
+    async saved(request, result) {
+      const target = request.input.expected;
+      if (
+        result.connection.connectionId !== target.connectionId ||
+        result.connection.slug !== target.slug ||
+        JSON.stringify(result.connection.provider) !== JSON.stringify(target.provider)
+      )
+        throw new Error(
+          'The sign-in receipt refers to another connection. Reload before continuing.',
+        );
+      if (
+        !alive ||
+        editor()?.instance !== request.editor ||
+        editor()?.baseline?.target.revision !== target.revision
+      )
+        return;
+      await adopt(
+        { connectionId: target.connectionId, revision: target.revision },
+        request.editor,
+        'committed',
+      );
+    },
+  });
+  const loginAction = (method: string): LoginAction => ({
+    editor: editor()!.instance,
+    input: {
+      expected: editor()!.baseline!.target,
+      expectedCredential: credentialBasis(credential()),
+      method,
+    },
+  });
   const toggleEnabled = (request: ConnectionAction & { enabled: boolean }) => {
     const form = editor();
     if (current(request) && form && !busy()) editor.set({ ...form, enabled: request.enabled });
@@ -487,11 +534,13 @@ export function createModelSettings(
     return run(async () => {
       const form = editor();
       if (!form?.baseline || dirty())
-        throw new Error('Save the connection and API key before fetching models.');
+        throw new Error('Save the connection changes before fetching models.');
+      if (!form.provider.descriptor.anonymous && !credential()?.configured)
+        throw new Error('Add an API key or finish provider sign-in before fetching models.');
       const result = await mutate('setup', 'discoverModels', form.baseline.target);
       if (result.kind === 'failed')
         throw new Error(
-          'Could not fetch models. Check the saved base URL, API key and network access, or add a model manually.',
+          'Could not fetch models. Check the provider credential, endpoint and network, or add a model manually.',
         );
       if (result.kind !== 'ready') throw rejection(result);
       await adopt(result.connection, form.instance);
@@ -659,7 +708,7 @@ export function createModelSettings(
         });
         if (result.kind !== 'committed') throw rejection(result);
         if (!(await adopt(basis(form.baseline), form.instance, 'committed'))) return;
-        if (alive) notice.set('API key removed.');
+        if (alive) notice.set('Stored provider credential removed.');
       } else if (kind === 'model') {
         const current = model();
         if (!current?.originalId) return;
@@ -747,6 +796,10 @@ export function createModelSettings(
     confirmation,
     dirty,
     action,
+    login,
+    loginAction,
+    editableBaseUrl: () =>
+      !!editor()?.provider.descriptor.customEndpoint || 'baseUrl' in configuration(editor()!),
     modelAction,
     removalAction,
     loadConnections,

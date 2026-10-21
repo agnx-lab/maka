@@ -21,6 +21,7 @@ import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
+import { ConnectionLogin } from './ConnectionLogin';
 import { C } from './ui';
 
 export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
@@ -47,13 +48,15 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           readonly={!!form().baseline}
           hint="A unique lowercase name, such as openrouter-work. It stays fixed after creation."
         />
-        <SettingsField
-          label="Base URL"
-          value={form().baseUrl}
-          change={(text) => owner.edit('baseUrl', text)}
-          disabled={disabled()}
-          hint="Use the OpenAI-compatible API endpoint supplied by your provider."
-        />
+        <If when={owner.editableBaseUrl()}>
+          <SettingsField
+            label="Base URL"
+            value={form().baseUrl}
+            change={(text) => owner.edit('baseUrl', text)}
+            disabled={disabled()}
+            hint="Use the API endpoint supplied by your provider."
+          />
+        </If>
         <Button
           disabled={disabled()}
           selected={form().enabled}
@@ -78,26 +81,28 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             disabled={disabled()}
             hint={
               owner.credential()?.configured
-                ? 'A key is stored. Leave blank to keep it; enter a replacement to change it.'
+                ? 'A provider credential is stored. Leave blank to keep it; enter a key to replace it.'
                 : 'The key is saved in the Host credential vault and is never read back here.'
             }
           />
-          <If when={owner.credential()?.configured}>
-            <Button
-              disabled={disabled() || owner.dirty()}
-              onPress={inputAction(owner.confirm, {
-                ...owner.action(),
-                kind: 'key',
-                modelId: null,
-              })}
-            >
-              <Text style={{ color: C.danger }}>Remove stored API key</Text>
-            </Button>
-            <If when={owner.dirty()}>
-              <Text style={{ color: C.muted }}>
-                Save or discard connection edits before removing the stored key.
-              </Text>
-            </If>
+        </If>
+        <ConnectionLogin owner={owner} disabled={disabled()} />
+        <If when={owner.credential()?.configured}>
+          <Button
+            disabled={disabled() || owner.dirty()}
+            accessibilityLabel="Remove stored provider credential"
+            onPress={inputAction(owner.confirm, {
+              ...owner.action(),
+              kind: 'key',
+              modelId: null,
+            })}
+          >
+            <Text style={{ color: C.danger }}>Remove stored provider credential</Text>
+          </Button>
+          <If when={owner.dirty()}>
+            <Text style={{ color: C.muted }}>
+              Save or discard connection edits before removing the stored credential.
+            </Text>
           </If>
         </If>
         <SettingsField

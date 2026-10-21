@@ -36,9 +36,9 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         <View style={{ gap: 16, padding: 16, backgroundColor: C.background }}>
           <Text style={{ color: C.text }}>
             {owner.confirmation() === 'connection'
-              ? 'Delete this connection, its saved API key and model settings? Existing conversations keep their saved selection.'
+              ? 'Delete this connection, its stored provider credential and model settings? Existing conversations keep their saved selection.'
               : owner.confirmation() === 'key'
-                ? 'Remove the stored API key? This connection may stop working.'
+                ? 'Remove the stored provider credential? This connection may stop working.'
                 : 'Remove this model from the connection?'}
           </Text>
           <Button
