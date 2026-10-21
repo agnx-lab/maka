@@ -40,7 +40,9 @@ fn assert_colored_output(view: &AppView) {
         "中文终端"
     );
     assert!(
-        cells.iter().all(|cell| cell.fg == Color::Rgb(163, 215, 165)),
+        cells
+            .iter()
+            .all(|cell| cell.fg == Color::Rgb(163, 215, 165)),
         "the original PTY's SGR green must reach the actual Unicode cells"
     );
 }
@@ -67,12 +69,18 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 support::tick(&mut view);
-                if view.surface().input_context().is_some_and(|context| context.editable) {
+                if view
+                    .surface()
+                    .input_context()
+                    .is_some_and(|context| context.editable)
+                {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-        }).await.expect("the composer did not finish loading its saved draft");
+        })
+        .await
+        .expect("the composer did not finish loading its saved draft");
         view.handle_event(Event::Paste("WORKBENCH_UNSENT_DRAFT".into()));
         support::wait_draft(&client, &fixture.session, "WORKBENCH_UNSENT_DRAFT").await;
         let composer = view.surface().focused().unwrap();
@@ -83,7 +91,10 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
         support::click_button(&mut view, "Focus terminal input").await;
         wait_focused_input(&mut view, "Terminal keyboard input").await;
         wait_view(&mut view, |screen| screen.contains("input held")).await;
-        let listed = client.query("terminal", "list", json!({"sessionId":fixture.session})).await.unwrap();
+        let listed = client
+            .query("terminal", "list", json!({"sessionId":fixture.session}))
+            .await
+            .unwrap();
         assert_eq!(listed["kind"], "completed", "{listed}");
         let resources = listed["value"]["resources"].as_array().unwrap();
         assert_eq!(resources.len(), 1);
@@ -101,48 +112,93 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
             r"printf '\033[32m\344\270\255\346\226\207\347\273\210\347\253\257\033[0m\n'".into(),
         ));
         let (committed, received) = tokio::sync::oneshot::channel();
-        view.control().unwrap().advance_clock(Duration::ZERO, move || {
-            let _ = committed.send(());
-        });
-        tokio::time::timeout(Duration::from_secs(20), received).await.unwrap().unwrap();
-        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        view.control()
+            .unwrap()
+            .advance_clock(Duration::ZERO, move || {
+                let _ = committed.send(());
+            });
+        tokio::time::timeout(Duration::from_secs(20), received)
+            .await
+            .unwrap()
+            .unwrap();
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
         let output = wait_view(&mut view, |screen| screen.contains("中文终端")).await;
         assert_colored_output(&view);
         evidence("terminal-workbench-original-pty", &output);
 
         support::click_button(&mut view, "Close workspace preview").await;
-        wait_view(&mut view, |screen| !screen.contains("Close · Esc") && screen.contains("WORKBENCH_UNSENT_DRAFT")).await;
+        wait_view(&mut view, |screen| {
+            !screen.contains("Close · Esc") && screen.contains("WORKBENCH_UNSENT_DRAFT")
+        })
+        .await;
         tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
-        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("WORKBENCH_UNSENT_DRAFT"));
-        let hidden = client.query("terminal", "read", target.clone()).await.unwrap();
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some("WORKBENCH_UNSENT_DRAFT")
+        );
+        let hidden = client
+            .query("terminal", "read", target.clone())
+            .await
+            .unwrap();
         assert_eq!(hidden["kind"], "completed", "{hidden}");
         assert_eq!(hidden["value"]["result"]["ref"], target["ref"]);
-        assert_eq!(hidden["value"]["result"]["status"], "running", "hiding a pane must not stop its process");
+        assert_eq!(
+            hidden["value"]["result"]["status"], "running",
+            "hiding a pane must not stop its process"
+        );
 
         support::click_button(&mut view, "Browse workspace files").await;
         support::click_button(&mut view, "Show conversation terminals").await;
         support::click_button(&mut view, &format!("Open terminal: {command}")).await;
         wait_view(&mut view, |screen| screen.contains("中文终端")).await;
         assert_colored_output(&view);
-        let reopened = client.query("terminal", "list", json!({"sessionId":fixture.session})).await.unwrap();
+        let reopened = client
+            .query("terminal", "list", json!({"sessionId":fixture.session}))
+            .await
+            .unwrap();
         assert_eq!(reopened["kind"], "completed", "{reopened}");
         assert_eq!(reopened["value"]["resources"].as_array().unwrap().len(), 1);
-        assert_eq!(reopened["value"]["resources"][0]["result"]["ref"], target["ref"], "reopening must reuse the original PTY");
+        assert_eq!(
+            reopened["value"]["resources"][0]["result"]["ref"], target["ref"],
+            "reopening must reuse the original PTY"
+        );
 
-        let before_stop = client.query("terminal", "read", target.clone()).await.unwrap();
+        let before_stop = client
+            .query("terminal", "read", target.clone())
+            .await
+            .unwrap();
         assert_eq!(before_stop["kind"], "completed", "{before_stop}");
         assert_eq!(before_stop["value"]["result"]["status"], "running");
         stop_evidence(&view, "open-stop-confirmation", &before_stop);
         support::click_button(&mut view, "Stop terminal process").await;
-        wait_view(&mut view, |screen| screen.contains("Stop this terminal and its running process?")).await;
-        let confirming = client.query("terminal", "read", target.clone()).await.unwrap();
+        wait_view(&mut view, |screen| {
+            screen.contains("Stop this terminal and its running process?")
+        })
+        .await;
+        let confirming = client
+            .query("terminal", "read", target.clone())
+            .await
+            .unwrap();
         assert_eq!(confirming["kind"], "completed", "{confirming}");
-        assert_eq!(confirming["value"]["result"]["status"], "running", "opening confirmation must not stop the process");
+        assert_eq!(
+            confirming["value"]["result"]["status"], "running",
+            "opening confirmation must not stop the process"
+        );
         stop_evidence(&view, "confirm-stop", &confirming);
         support::click_button(&mut view, "Confirm stop terminal process").await;
-        wait_view(&mut view, |screen| screen.contains("cancelled") && !screen.contains("Stop this terminal and its running process?")).await;
-        let stopped = client.query("terminal", "read", target.clone()).await.unwrap();
+        wait_view(&mut view, |screen| {
+            screen.contains("cancelled")
+                && !screen.contains("Stop this terminal and its running process?")
+        })
+        .await;
+        let stopped = client
+            .query("terminal", "read", target.clone())
+            .await
+            .unwrap();
         assert_eq!(stopped["kind"], "completed", "{stopped}");
         assert_eq!(stopped["value"]["result"]["ref"], target["ref"]);
         assert_eq!(stopped["value"]["result"]["status"], "cancelled");
@@ -150,12 +206,27 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
         support::click_button(&mut view, "Close workspace preview").await;
         tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
-        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("WORKBENCH_UNSENT_DRAFT"));
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some("WORKBENCH_UNSENT_DRAFT")
+        );
         support::wait_draft(&client, &fixture.session, "WORKBENCH_UNSENT_DRAFT").await;
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0, "terminal input must not submit a model turn");
+        assert_eq!(
+            fixture.request_count.load(Ordering::SeqCst),
+            0,
+            "terminal input must not submit a model turn"
+        );
         drop(view);
         bindings.close().await.unwrap();
-        assert!(client.pending_terminals(&fixture.session).await.unwrap().is_empty());
+        assert!(
+            client
+                .pending_terminals(&fixture.session)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         fixture.finish().await;
-    }).await.expect("real Host terminal workbench workflow timed out");
+    })
+    .await
+    .expect("real Host terminal workbench workflow timed out");
 }
