@@ -1419,10 +1419,28 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
                     )
                     .await
                     .unwrap();
+                if chunks.is_empty() && !reverse && pages > 1 {
+                    // InvocationOpened also records a non-visible running state.
+                    // A one-chunk window can leave that terminal boundary to read.
+                    assert_eq!(actual, conversation);
+                    assert_eq!(after, None);
+                    assert_eq!(
+                        before,
+                        Some(maka_agent_ports::session::history::Cursor {
+                            position: RowPosition {
+                                source_sequence: sequence.source_sequence,
+                                item_index: 1,
+                            },
+                            field: maka_agent_ports::session::history::HistoryField::Body,
+                            offset: 0,
+                        })
+                    );
+                    break;
+                }
                 assert_eq!(
                     chunks.len(),
                     1,
-                    "attachment-only conversation rows remain visible"
+                    "attachment-only conversation rows remain visible: session={session}, reverse={reverse}, page={pages}, before={before:?}, after={after:?}"
                 );
                 let chunk = &chunks[0];
                 assert_eq!(chunk.total_bytes, conversation.len() as u64);
