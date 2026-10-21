@@ -18,7 +18,7 @@
  */
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
-use nsh_platform_tui::{InputSnapshot, PressLease};
+use nsh_platform_tui::{InputSnapshot, PressLease, WheelLease};
 use std::{collections::VecDeque, sync::Arc};
 
 pub(super) const MAX_EVENTS: usize = 128;
@@ -27,8 +27,8 @@ pub(super) const MAX_BYTES: usize = 64 * 1024;
 #[derive(Debug)]
 pub(super) struct Input {
     pub event: Event,
-    /// Keys follow the focused editor. A pointer either requires the exact
-    /// frame or names a sealed action from the last completed output.
+    /// Keys follow the focused editor. Pointers use the exact frame, a sealed
+    /// press action, or the native scroll owner in the last completed output.
     pub pointer: Option<Pointer>,
 }
 
@@ -36,12 +36,13 @@ pub(super) struct Input {
 pub(super) enum Pointer {
     Exact(u64),
     Press { epoch: u64, lease: Arc<PressLease> },
+    Wheel { epoch: u64, lease: Arc<WheelLease> },
 }
 
 impl Pointer {
     fn epoch(&self) -> u64 {
         match self {
-            Self::Exact(epoch) | Self::Press { epoch, .. } => *epoch,
+            Self::Exact(epoch) | Self::Press { epoch, .. } | Self::Wheel { epoch, .. } => *epoch,
         }
     }
 }
@@ -140,6 +141,24 @@ impl Inbox {
                         _ => return,
                     }
                 }
+                MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+                    if !mouse.modifiers.contains(KeyModifiers::CONTROL)
+                        && self.capture.is_none()
+                        && self.resize.is_none() =>
+                {
+                    self.last_frame.as_ref().and_then(|(offered, snapshot)| {
+                        (*offered > self.reject_through)
+                            .then(|| snapshot.wheel_at(mouse.column, mouse.row))
+                            .flatten()
+                            .map(|lease| Pointer::Wheel {
+                                epoch: *offered,
+                                lease: Arc::new(lease),
+                            })
+                    })
+                }
                 _ => None,
             };
             if let Some(captured) = captured {
@@ -174,7 +193,9 @@ impl Inbox {
             self.bytes -= event_bytes(&input.event);
             let stale = match &input.pointer {
                 Some(Pointer::Exact(offered)) => *offered != epoch,
-                Some(Pointer::Press { epoch, .. }) => *epoch <= self.reject_through,
+                Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. }) => {
+                    *epoch <= self.reject_through
+                }
                 None => false,
             };
             if stale {
@@ -387,5 +408,83 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Event::Paste("z".repeat(MAX_BYTES))]
         );
+    }
+
+    #[test]
+    fn native_wheels_keep_the_queue_bound_and_actions_and_resize_revoke_them() {
+        use nsh_core::{Bounds, MountBatch, MountItem, Point, Size, ViewKind, geometry::px};
+        use nsh_platform_tui::{CellMetrics, Surface, SurfaceEvent};
+        let mut surface = Surface::new(40, 12, CellMetrics::default());
+        surface.apply(MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::Scroll,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(
+                        Point::new(px(0.0), px(0.0)),
+                        Size::new(px(160.0), px(96.0)),
+                    ),
+                },
+                MountItem::Insert {
+                    parent: 0,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::ScrollContent {
+                    id: 2,
+                    size: Size::new(px(160.0), px(10000.0)),
+                },
+            ],
+        });
+        surface.drain_events().for_each(drop);
+        let mut inbox = Inbox {
+            last_frame: Some((7, surface.input_snapshot())),
+            ..Default::default()
+        };
+        for _ in 0..MAX_EVENTS {
+            inbox.push(pointer(MouseEventKind::ScrollDown), 0);
+        }
+        let inputs = inbox.pop_batch(8);
+        assert_eq!(inputs.len(), 128);
+        let Some(Pointer::Wheel { lease, .. }) = &inputs[0].pointer else {
+            panic!("native scroll lease required")
+        };
+        let Event::Mouse(mouse) = inputs[0].event else {
+            unreachable!()
+        };
+        assert_eq!(
+            surface.handle_presented_wheel(mouse, inputs.len() as u16, lease),
+            Some(128)
+        );
+        let offsets: Vec<_> = surface
+            .drain_events()
+            .filter_map(|event| match event {
+                SurfaceEvent::Scroll(id, offset, _) => Some((id, offset.y)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(offsets, [(2, px(6144.0))]);
+        inbox.push(Event::Paste("z".repeat(MAX_BYTES)), 8);
+        assert!(
+            matches!(inbox.pop(8).unwrap().event, Event::Paste(text) if text.len() == MAX_BYTES)
+        );
+        inbox.push(pointer(MouseEventKind::ScrollUp), 0);
+        inbox.reject_through = 7;
+        assert!(
+            inbox.pop(8).is_none(),
+            "an earlier application action revokes the old owner"
+        );
+        inbox.last_frame = Some((9, surface.input_snapshot()));
+        inbox.push(pointer(MouseEventKind::ScrollUp), 0);
+        inbox.push(Event::Resize(41, 12), 0);
+        assert!(
+            inbox.pop(0).is_none(),
+            "resize revokes even an already queued wheel lease"
+        );
+        assert!(inbox.last_frame.is_none());
+        assert_eq!(inbox.resize, Some((41, 12)));
     }
 }
