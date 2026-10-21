@@ -56,7 +56,7 @@ cargo run -p maka-cli -- terminal-shell
 | Ctrl+N | 新建会话 |
 | Ctrl+L | 跳到最新消息 |
 | Alt+↑ | 聚焦会话，滚动整个对话 |
-| Alt+↓ | 展开并聚焦最新的过程组，或相应的平铺内容 |
+| Alt+↓ | 展开并聚焦最新的过程组 |
 | Tab | 切换控件 |
 | Enter | 在消息输入框中发送、选择搜索结果，或激活已聚焦的控件 |
 | Shift+Enter | 在输入框中换行 |
