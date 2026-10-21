@@ -71,7 +71,12 @@ pub(super) struct Outcome {
 }
 impl Update {
     pub(crate) async fn run(self) -> Result<(), HostError> {
-        let store = launch::open(super::root_path(self.root)?, false, None).await?;
+        let root = super::root_path(self.root)?;
+        let store = if self.apply {
+            launch::open(root, false, None).await?
+        } else {
+            super::super::open_application_inspection(root).await?
+        };
         let result = async {
             let record = store
                 .application_launch()

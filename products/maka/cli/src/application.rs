@@ -195,11 +195,10 @@ impl Command {
                 println!("{}", serde_json::to_string_pretty(&source)?);
             }
             Self::Read(args) => {
-                let store = open_store(args.root).await?;
+                let store = open_application_inspection(args.root).await?;
                 let result = store.load_application(args.deployment).await;
-                let closed = store.close().await;
+                store.drain().await;
                 let loaded = result?.ok_or("deployment not found")?;
-                closed?;
                 println!("{}", serde_json::to_string_pretty(&loaded.source())?);
             }
             Self::Run(args) => {
@@ -295,6 +294,17 @@ async fn open_store(root: PathBuf) -> Result<maka_event_log::EventLog, HostError
     })
     .await??;
     Ok(maka_transport::open_store(std::sync::Arc::new(owner)).await?)
+}
+
+async fn open_application_inspection(root: PathBuf) -> Result<maka_event_log::EventLog, HostError> {
+    let owner = tokio::task::spawn_blocking(move || {
+        maka_event_log::root::RootOwner::open_existing(
+            &root,
+            &maka_event_log::root::RootNamespaces::for_current_account()?,
+        )
+    })
+    .await??;
+    Ok(maka_transport::open_application_inspection(std::sync::Arc::new(owner)).await?)
 }
 
 async fn run_tui(

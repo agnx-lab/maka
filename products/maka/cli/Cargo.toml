@@ -80,6 +80,7 @@ tempfile.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "tracing-log"] }
 
 [dev-dependencies]
+rusqlite.workspace = true
 log = "0.4"
 unicode-width.workspace = true
 schemars.workspace = true
