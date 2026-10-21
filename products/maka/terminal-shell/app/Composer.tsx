@@ -29,7 +29,7 @@ import type { ImagePreview } from './ImageThumbnail';
 import { Checklist } from './Checklist';
 import { effortCaption, modelCaption } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
-import { C, compact, controlStyle } from './ui';
+import { C, bodyTextStyle, compact, controlStyle } from './ui';
 import { Icon } from './Icon';
 import logo from './assets/maka.png';
 
@@ -259,8 +259,7 @@ export function Composer(props: {
                     maxHeight: compact() ? 64 : 144,
                     color: C.text,
                     placeholderColor: C.muted,
-                    fontSize: 14,
-                    lineHeight: 24,
+                    ...bodyTextStyle,
                   }}
                 />
               </View>

@@ -22,7 +22,7 @@ import type { JSX } from 'nsh';
 import { Button } from 'nsh/base';
 import { messageKey, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
-import { C, controlStyle } from './ui';
+import { C, bodyTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 import { HistoryAttachments } from './Attachments';
 import { ToolCard } from './ToolCard';
@@ -116,7 +116,7 @@ export function MessageRow({
                             else={
                               <Text
                                 selectable
-                                style={{ color: C.text, fontSize: 14, lineHeight: 24 }}
+                                style={{ color: C.text, ...bodyTextStyle }}
                               >
                                 {text()}
                               </Text>
@@ -126,7 +126,7 @@ export function MessageRow({
                           </If>
                         }
                       >
-                        <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
+                        <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
                           {text()}
                         </Text>
                       </If>
@@ -207,7 +207,7 @@ export function MessageRow({
                           <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
                             <Text
                               selectable
-                              style={{ color: C.muted, fontSize: 14, lineHeight: 24 }}
+                              style={{ color: C.muted, ...bodyTextStyle }}
                             >
                               {text()}
                             </Text>
@@ -245,7 +245,7 @@ export function MessageRow({
                   backgroundColor: C.surface,
                 }}
               >
-                <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
+                <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
                   {text()}
                 </Text>
                 <If when={(row().attachments?.length ?? 0) > 0}>

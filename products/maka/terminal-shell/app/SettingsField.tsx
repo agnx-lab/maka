@@ -18,7 +18,7 @@
  */
 
 import { Input, Text, View } from 'nsh';
-import { C, compact } from './ui';
+import { C, compact, inputTextStyle } from './ui';
 
 export function SettingsField(props: {
   label: string;
@@ -51,8 +51,7 @@ export function SettingsField(props: {
           color: C.text,
           paddingHorizontal: 12,
           paddingVertical: compact() ? 4 : 8,
-          fontSize: 14,
-          lineHeight: 20,
+          ...inputTextStyle,
           opacity: props.disabled ? 0.5 : 1,
         }}
         focusStyle={{ borderColor: C.accent }}

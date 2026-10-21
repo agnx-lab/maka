@@ -145,7 +145,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
         }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: compact() ? 48 : 64, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: C.line }}>
-          <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18 }}>{title()}</Text>
+          <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18, lineHeight: 24 }}>{title()}</Text>
           <Button
             disabled={operations.busy()}
             accessibilityLabel={

@@ -20,7 +20,7 @@
 import { signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
-import { windowSize } from 'nsh/device';
+import { platform, windowSize } from 'nsh/device';
 import { Icon } from './Icon';
 
 export const C = {
@@ -37,6 +37,14 @@ export const C = {
   line: '#37393e',
 };
 
+// Cells have a fixed 16-point row; native pixels retain the prose leading.
+export const bodyTextStyle = { fontSize: 14, lineHeight: platform.isTerminal ? 16 : 24 };
+export const inputTextStyle = { fontSize: 14, lineHeight: platform.isTerminal ? 16 : 20 };
+export const codeTextStyle = {
+  fontFamily: 'monospace',
+  fontSize: 13,
+  lineHeight: platform.isTerminal ? 16 : 20,
+};
 export const compact = () => windowSize().height < 480;
 export const controlStyle = {
   minHeight: 32,

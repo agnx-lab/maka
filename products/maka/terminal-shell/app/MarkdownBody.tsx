@@ -22,7 +22,7 @@ import { windowSize } from 'nsh/device';
 import { markdown } from 'maka/markdown';
 import type { MarkdownBlock } from 'maka/markdown';
 import { hasCompletePrefix, type Row } from './history';
-import { C } from './ui';
+import { C, bodyTextStyle, codeTextStyle } from './ui';
 
 type Input = { messageId: string; field: string; source: string };
 type Projection = { input: Input; blocks: MarkdownBlock[] };
@@ -120,7 +120,7 @@ export function MarkdownBody(props: { row: () => Row }) {
       when={blocks()}
       else={
         <View style={{ gap: 0 }}>
-          <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
+          <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
             {props.row().text}
           </Text>
           <If when={failure()}>
@@ -185,7 +185,7 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
             style={{
               color: block().quote > 0 ? C.secondary : C.text,
               fontSize: block().kind === 'heading' ? 18 : 14,
-              lineHeight: 24,
+              lineHeight: bodyTextStyle.lineHeight,
               fontWeight: block().kind === 'heading' ? '700' : '400',
             }}
           >
@@ -211,7 +211,7 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
       <View style={{ backgroundColor: C.surface, borderRadius: 12, padding: 16, gap: 8 }}>
         <Text style={{ color: C.muted, fontSize: 12 }}>{block().language || 'code'}</Text>
         <Scroll horizontal>
-          <Text selectable style={{ color: C.text, fontFamily: 'monospace', fontSize: 13, lineHeight: 20 }}>
+          <Text selectable style={{ color: C.text, ...codeTextStyle }}>
             {block().text}
           </Text>
         </Scroll>

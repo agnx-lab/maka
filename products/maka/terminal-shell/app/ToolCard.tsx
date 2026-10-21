@@ -32,7 +32,7 @@ import {
   toolResult,
   type ToolSection,
 } from './toolCards';
-import { C, controlStyle } from './ui';
+import { C, codeTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 
 function reference(tool: HistoryTool, field: 'arguments' | 'result'): ToolSourceRef | null {
@@ -83,9 +83,7 @@ function Sections(props: { items: ToolSection[] }) {
                       : section().tone === 'added'
                         ? '#78d7a1'
                         : C.text,
-                fontFamily: 'monospace',
-                fontSize: 13,
-                lineHeight: 20,
+                ...codeTextStyle,
               }}
             >
               {section().text || '(empty)'}
