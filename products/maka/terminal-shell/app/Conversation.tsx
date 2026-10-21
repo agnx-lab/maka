@@ -1644,9 +1644,16 @@ export function Conversation(props: ConversationProps) {
             onScroll={(event) => {
               awayFromLatest.set(event.y < Math.max(0, event.contentHeight - event.height) - 32);
               const reader = innerReader();
+              const row = reader === null ? undefined : projection().rowsById.get(reader);
+              const toolReader =
+                reader !== null &&
+                displayByKey().get(reader)?.kind === 'row' &&
+                (row?.tool != null || row?.role === 'tool_call' || row?.role === 'tool_result') &&
+                rowStates.get(reader)?.expanded() === true;
               if (
                 reader !== null &&
                 !groupStates.get(reader)?.list &&
+                !toolReader &&
                 event.y >= Math.max(0, event.contentHeight - event.height) - 1
               )
                 innerReader.set(null);
@@ -1769,6 +1776,14 @@ export function Conversation(props: ConversationProps) {
                         through={() => latestKnown}
                         previewImage={props.previewImage}
                         onExpand={reveal}
+                        onToolReading={(key) => {
+                          if (
+                            !alive || key !== initial.rowId ||
+                            displayByKey().get(key)?.kind !== 'row' ||
+                            !rowStates.get(key)?.expanded()
+                          ) return;
+                          innerReader.set(key);
+                        }}
                         finalActions={(row, ownerKey) => (
                           <FinalActions
                             row={row}
