@@ -351,7 +351,10 @@ mod tests {
         assert_eq!(inbox.capabilities.size.pixel_height, Some(800));
         assert_eq!(
             inbox.capabilities.viewport(),
-            Some(gpui::size(gpui::DevicePixels(1000), gpui::DevicePixels(800)))
+            Some(gpui::size(
+                gpui::DevicePixels(1000),
+                gpui::DevicePixels(800)
+            ))
         );
         assert!(inbox.published.is_none());
         assert!(inbox.capture.is_none());
@@ -382,7 +385,10 @@ mod tests {
         assert_eq!(inbox.capabilities.size.pixel_width, Some(1400));
         assert_eq!(
             inbox.capabilities.viewport(),
-            Some(gpui::size(gpui::DevicePixels(1000), gpui::DevicePixels(800)))
+            Some(gpui::size(
+                gpui::DevicePixels(1000),
+                gpui::DevicePixels(800)
+            ))
         );
         size.cols = 80;
         size.pixel_width = Some(800);
@@ -420,7 +426,9 @@ mod tests {
                     y,
                 ))
                 .unwrap();
-            inbox.push(pointer(MouseEventKind::ScrollDown, x, y)).unwrap();
+            inbox
+                .push(pointer(MouseEventKind::ScrollDown, x, y))
+                .unwrap();
             assert_eq!(inbox.capture, Some(token.clone()));
             assert!(!inbox.cancel_pointer);
             inbox.push(pointer(MouseEventKind::Moved, x, y)).unwrap();

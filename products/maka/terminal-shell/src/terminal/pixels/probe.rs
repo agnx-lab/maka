@@ -26,7 +26,8 @@ use termina::{
     Event, WindowSize,
     escape::{
         csi::{
-            Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, GraphicsAttributeResponse, Mode,
+            Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, GraphicsAttributeResponse,
+            Mode,
         },
         dcs::Dcs,
     },
@@ -507,10 +508,26 @@ mod tests {
             (b"".as_slice(), SixelGeometry::Unknown, true),
             (b"\x1b[?2;0;0;0S".as_slice(), SixelGeometry::Unbounded, true),
             (b"\x1b[?2;0;1200;800S".as_slice(), finite, true),
-            (b"\x1b[?2;1S".as_slice(), SixelGeometry::Unavailable(1), true),
-            (b"\x1b[?2;2S".as_slice(), SixelGeometry::Unavailable(2), true),
-            (b"\x1b[?2;3S".as_slice(), SixelGeometry::Unavailable(3), true),
-            (b"\x1b[?1;0;1000;1000S".as_slice(), SixelGeometry::Unknown, true),
+            (
+                b"\x1b[?2;1S".as_slice(),
+                SixelGeometry::Unavailable(1),
+                true,
+            ),
+            (
+                b"\x1b[?2;2S".as_slice(),
+                SixelGeometry::Unavailable(2),
+                true,
+            ),
+            (
+                b"\x1b[?2;3S".as_slice(),
+                SixelGeometry::Unavailable(3),
+                true,
+            ),
+            (
+                b"\x1b[?1;0;1000;1000S".as_slice(),
+                SixelGeometry::Unknown,
+                true,
+            ),
             (b"\x1b[?2;0;0;800S".as_slice(), SixelGeometry::Unknown, true),
             (
                 b"\x1b[?2;0;1000;1000S".as_slice(),
