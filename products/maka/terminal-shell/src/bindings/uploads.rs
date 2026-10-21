@@ -223,7 +223,7 @@ pub(super) fn AttachmentPicker(
             });
         });
     });
-    view().child(If::new(props.visible, move || {
+    view().child(when(props.visible, move || {
         let submit = begin.clone();
         let click = begin.clone();
         view()
