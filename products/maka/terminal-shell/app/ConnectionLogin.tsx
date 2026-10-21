@@ -20,7 +20,7 @@
 import { inputAction, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { ModelSettingsOwner } from './settings';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: boolean }) {
   const owner = props.owner;
@@ -46,6 +46,10 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
                 accessibilityLabel={method().label}
                 disabled={props.disabled || owner.dirty()}
                 onPress={inputAction(owner.login.start, owner.loginAction(method().id))}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
                 <Text style={{ color: C.accent }}>{method().label}</Text>
               </Button>
@@ -84,6 +88,10 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
                   field: 'url',
                   value: login()!.prompt!.url,
                 })}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
                 <Text style={{ color: C.accent }}>Copy URL</Text>
               </Button>
@@ -95,6 +103,10 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
                     field: 'userCode',
                     value: login()!.prompt!.userCode,
                   })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>Copy code</Text>
                 </Button>
@@ -105,6 +117,10 @@ export function ConnectionLogin(props: { owner: ModelSettingsOwner; disabled: bo
             accessibilityLabel="Cancel provider sign-in"
             disabled={login()!.cancelling}
             onPress={inputAction(owner.login.cancel, login()!.occurrence)}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.warning }}>Cancel sign-in</Text>
           </Button>

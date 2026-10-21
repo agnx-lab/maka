@@ -22,7 +22,7 @@ import { Button } from 'nsh/base';
 import type { ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
 import { ConnectionLogin } from './ConnectionLogin';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
   const owner = props.settings;
@@ -65,6 +65,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             ...owner.action(),
             enabled: !form().enabled,
           })}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.text }}>{form().enabled ? '✓ Enabled' : '○ Disabled'}</Text>
         </Button>
@@ -96,6 +100,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               kind: 'key',
               modelId: null,
             })}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.danger }}>Remove stored provider credential</Text>
           </Button>
@@ -119,8 +127,12 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           disabled={disabled()}
           accessibilityLabel="Save connection"
           onPress={inputAction(owner.saveConnection, owner.action())}
+          style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
+          hoverStyle={{ backgroundColor: C.accentHover }}
+          focusStyle={{ backgroundColor: C.accentHover }}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>{owner.busy() ? 'Saving…' : 'Save connection'}</Text>
+          <Text style={{ color: C.background, fontWeight: '500' }}>{owner.busy() ? 'Saving…' : 'Save connection'}</Text>
         </Button>
         <If when={form().baseline}>
           <View style={{ height: 1, backgroundColor: C.line }} />
@@ -130,6 +142,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               disabled={disabled() || owner.dirty()}
               accessibilityLabel="Add model manually"
               onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.accent }}>Add model</Text>
             </Button>
@@ -138,6 +154,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
                 disabled={disabled() || owner.dirty()}
                 accessibilityLabel="Fetch models"
                 onPress={inputAction(owner.discover, owner.action())}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
                 <Text style={{ color: C.accent }}>Fetch models</Text>
               </Button>
@@ -152,6 +172,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             disabled={disabled() || owner.dirty()}
             accessibilityLabel="Manage models"
             onPress={inputAction(owner.showModels, owner.action())}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.accent }}>Manage models · {models().length}</Text>
           </Button>
@@ -162,6 +186,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             <Button
               disabled={disabled()}
               onPress={inputAction(owner.setDefault, { ...owner.action(), id: null })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.muted }}>Clear default model</Text>
             </Button>
@@ -173,6 +201,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
                 connectionId: form().baseline!.target.connectionId,
                 revision: form().baseline!.target.revision,
               })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.muted }}>Discard changes and reload</Text>
             </Button>
@@ -183,6 +215,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
                 kind: 'connection',
                 modelId: null,
               })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.danger }}>Delete connection</Text>
             </Button>

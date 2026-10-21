@@ -30,7 +30,7 @@ import type {
   AgentDirectorySelection,
   AgentWorkspaceSelection,
 } from '../../../../packages/plugin-sdk/src/index.js';
-import { C } from './ui';
+import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 type Location = {
   id: number;
@@ -219,17 +219,22 @@ export function WorkspacePicker(props: {
                 backgroundColor: C.surface,
                 padding: 16,
                 gap: 8,
-                borderWidth: 8,
+                borderWidth: 1,
+          borderRadius: 16,
                 borderColor: C.line,
               }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: C.accent, fontWeight: '700' }}>Choose workspace</Text>
+                <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Choose workspace</Text>
                 <Button
                   accessibilityLabel="Close workspace picker"
                   onPress={inputAction(props.close, props.instance)}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.muted }}>Close · Esc</Text>
+                  <Text style={{ color: C.muted }}>Close</Text>
                 </Button>
               </View>
               <Text numberOfLines={1} style={{ color: C.text }}>
@@ -245,6 +250,10 @@ export function WorkspacePicker(props: {
                   disabled={!read.trail.length}
                   accessibilityLabel="Parent workspace folder"
                   onPress={inputAction(back, { location: read.id })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>↑ Parent</Text>
                 </Button>
@@ -252,6 +261,10 @@ export function WorkspacePicker(props: {
                   disabled={!read.trail.length}
                   accessibilityLabel="Workspace locations"
                   onPress={inputAction(back, { location: read.id, roots: true })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>Locations</Text>
                 </Button>
@@ -266,6 +279,10 @@ export function WorkspacePicker(props: {
                         })
                       : undefined
                   }
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: currentDirectory(read) && !error() ? C.accent : C.muted }}>
                     Use this folder
@@ -303,9 +320,11 @@ export function WorkspacePicker(props: {
                 style={{
                   placeholderColor: C.muted,
                   color: C.text,
-                  height: 32,
+                  height: compact() ? 32 : 40,
                   backgroundColor: C.background,
-                  paddingHorizontal: 8,
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  fontSize: 14,
                 }}
               />
               <List
@@ -337,9 +356,9 @@ export function WorkspacePicker(props: {
                     }}
                     hoverStyle={{ backgroundColor: C.raised }}
                     focusStyle={{ backgroundColor: C.raised }}
+                    disabledStyle={controlDisabledStyle}
                   >
                     <Text numberOfLines={1} style={{ color: C.text }}>
-                      {isSelected(entry()) ? '› ' : '  '}
                       {entry().name} /
                     </Text>
                   </Button>
@@ -369,13 +388,14 @@ export function WorkspacePicker(props: {
                     },
                     { location: read.id },
                   )}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>Retry folder</Text>
                 </Button>
               </If>
-              <Text style={{ color: C.muted }}>
-                Enter opens · Ctrl+Enter uses folder · Alt+↑ parent · Esc closes
-              </Text>
             </View>
           );
         }}

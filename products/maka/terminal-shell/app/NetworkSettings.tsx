@@ -22,7 +22,7 @@ import { Button } from 'nsh/base';
 import type { ProxyProtocol } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { SettingsField } from './SettingsField';
 import type { NetworkSettingsOwner } from './networkSettings';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
   const owner = props.owner;
@@ -50,6 +50,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 kind: 'enabled',
                 value: !value().proxy.enabled,
               })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.text }}>
                 {value().proxy.enabled ? '✓ Proxy enabled' : '○ Proxy disabled'}
@@ -67,6 +71,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                       kind: 'protocol',
                       value: protocol(),
                     })}
+                    style={controlStyle}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
+                    disabledStyle={controlDisabledStyle}
                   >
                     <Text style={{ color: C.accent }}>{protocol()}</Text>
                   </Button>
@@ -95,6 +103,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 kind: 'authentication',
                 value: !value().proxy.authEnabled,
               })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.text }}>
                 {value().proxy.authEnabled
@@ -122,6 +134,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     kind: 'credential',
                     value: 'keep',
                   })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>Keep stored password</Text>
                 </Button>
@@ -134,6 +150,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     kind: 'credential',
                     value: 'replace',
                   })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text style={{ color: C.accent }}>Replace password</Text>
                 </Button>
@@ -171,6 +191,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               disabled={disabled()}
               accessibilityLabel="Save network settings"
               onPress={inputAction(owner.save, owner.action())}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.accent }}>Save network settings</Text>
             </Button>
@@ -178,6 +202,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               disabled={disabled()}
               accessibilityLabel="Reload network settings"
               onPress={inputAction(owner.reload, owner.action())}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.muted }}>Discard edits and reload</Text>
             </Button>
@@ -188,6 +216,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
         <Button
           accessibilityLabel="Reload network settings"
           onPress={inputAction(owner.reload, owner.action())}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Reload network settings</Text>
         </Button>

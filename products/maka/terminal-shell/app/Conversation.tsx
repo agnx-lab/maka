@@ -32,7 +32,7 @@ import {
   abandonSend,
   type ScopedHost,
 } from './host';
-import { C, Header } from './ui';
+import { C, Header, controlStyle } from './ui';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
 import type { Row, Position, Subscription } from './history';
 import type { ComposerSession, SendAction } from './Composer';
@@ -1492,7 +1492,8 @@ export function Conversation(props: ConversationProps) {
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
       <If when={attachmentMetadataFailed()}>
-        <Button onPress={retryAttachmentMetadata}>
+        <Button onPress={retryAttachmentMetadata}
+        >
           <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
         </Button>
       </If>
@@ -1527,14 +1528,16 @@ export function Conversation(props: ConversationProps) {
           flexDirection: 'row',
           flexWrap: 'wrap',
           paddingHorizontal: 16,
-          gap: 24,
-          borderBottomWidth: 16,
+          gap: 8,
+          paddingVertical: 4,
+          borderBottomWidth: 1,
           borderBottomColor: C.surface,
         }}
       >
         <Button
           role="tab"
           selected={reading() === 'chat'}
+          style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'chat' })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
@@ -1552,6 +1555,7 @@ export function Conversation(props: ConversationProps) {
         <Button
           role="tab"
           selected={reading() === 'trajectory'}
+          style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'trajectory' })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}

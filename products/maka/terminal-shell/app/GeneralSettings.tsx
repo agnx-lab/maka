@@ -25,7 +25,7 @@ import {
   type GeneralSettingsOwner,
 } from './generalSettings';
 import { SettingsField } from './SettingsField';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlDisabledStyle } from './ui';
 
 export function GeneralSettings(props: { owner: GeneralSettingsOwner }) {
   const owner = props.owner;
@@ -57,6 +57,9 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
         onPress={inputAction(owner.reload, request)}
         accessibilityLabel="Refresh general preferences"
         focusStyle={{ backgroundColor: C.line }}
+        style={controlStyle}
+        hoverStyle={controlHoverStyle}
+        disabledStyle={controlDisabledStyle}
       >
         <Text style={{ color: C.accent }}>Refresh preferences</Text>
       </Button>
@@ -77,9 +80,10 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
                   disabled={owner.disabled()}
                   accessibilityLabel={`Assistant language: ${language().label}`}
                   onPress={inputAction(owner.language, { request, preference: language().value })}
-                  style={{ paddingHorizontal: 8 }}
+                  style={controlStyle}
                   hoverStyle={{ backgroundColor: C.raised }}
                   focusStyle={{ backgroundColor: C.line }}
+                  disabledStyle={controlDisabledStyle}
                 >
                   <Text
                     style={{
@@ -123,7 +127,8 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           accessibilityLabel="Edit personalization"
           hoverStyle={{ backgroundColor: C.raised }}
           focusStyle={{ backgroundColor: C.line }}
-          style={{ padding: 8 }}
+          style={controlStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Personalization ›</Text>
           <Text numberOfLines={1} style={{ color: C.muted }}>
@@ -136,7 +141,8 @@ function GeneralRoot(props: { owner: GeneralSettingsOwner; request: GeneralActio
           accessibilityLabel="Edit compaction prompt"
           hoverStyle={{ backgroundColor: C.raised }}
           focusStyle={{ backgroundColor: C.line }}
-          style={{ padding: 8 }}
+          style={controlStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Compaction prompt ›</Text>
           <Text style={{ color: C.muted }}>
@@ -161,9 +167,10 @@ function PreferenceToggle(props: {
       disabled={props.owner.disabled()}
       accessibilityLabel={`${props.label}: ${props.enabled ? 'On' : 'Off'}`}
       onPress={inputAction(props.owner.toggle, { request: props.request, kind: props.kind })}
-      style={{ padding: 8, flexDirection: 'row', gap: 8 }}
+      style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
       hoverStyle={{ backgroundColor: C.raised }}
       focusStyle={{ backgroundColor: C.line }}
+      disabledStyle={controlDisabledStyle}
     >
       <Text style={{ color: props.enabled ? C.accent : C.muted }}>{props.enabled ? '☑' : '☐'}</Text>
       <Text style={{ color: C.text, flex: 1 }}>{props.label}</Text>
@@ -220,6 +227,9 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
           accessibilityLabel="Use Host default"
           onPress={inputAction(owner.useDefault, request)}
           focusStyle={{ backgroundColor: C.line }}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Use Host default</Text>
         </Button>
@@ -230,14 +240,20 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
           onPress={inputAction(owner.save, request)}
           accessibilityLabel="Save this preference"
           focusStyle={{ backgroundColor: C.line }}
+          style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
+          hoverStyle={{ backgroundColor: C.accentHover }}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Save</Text>
+          <Text style={{ color: C.background, fontWeight: '500' }}>Save</Text>
         </Button>
         <Button
           disabled={owner.busy()}
           accessibilityLabel="Cancel"
           onPress={inputAction(owner.cancel, request)}
           focusStyle={{ backgroundColor: C.line }}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.muted }}>Cancel</Text>
         </Button>

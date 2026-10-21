@@ -18,7 +18,7 @@
  */
 
 import { Input, Text, View } from 'nsh';
-import { C } from './ui';
+import { C, compact } from './ui';
 
 export function SettingsField(props: {
   label: string;
@@ -31,8 +31,8 @@ export function SettingsField(props: {
   disabled?: boolean;
 }) {
   return (
-    <View style={{ gap: 4 }}>
-      <Text style={{ color: C.text }}>{props.label}</Text>
+    <View style={{ gap: 8 }}>
+      <Text style={{ color: C.secondary, fontSize: 13, fontWeight: '500' }}>{props.label}</Text>
       <Input
         accessibilityLabel={props.label}
         value={props.value}
@@ -43,16 +43,22 @@ export function SettingsField(props: {
         autoCapitalize="none"
         autoCorrect={false}
         style={{
-          height: props.multiline ? 112 : 32,
+          height: props.multiline ? (compact() ? 96 : 120) : compact() ? 32 : 40,
+          borderWidth: 1,
+          borderColor: C.line,
+          borderRadius: 8,
           backgroundColor: C.background,
           color: C.text,
-          paddingHorizontal: 8,
-          paddingVertical: 4,
+          paddingHorizontal: 12,
+          paddingVertical: compact() ? 4 : 8,
           fontSize: 14,
+          lineHeight: 20,
+          opacity: props.disabled ? 0.5 : 1,
         }}
+        focusStyle={{ borderColor: C.accent }}
       />
       <If when={props.hint}>
-        <Text style={{ color: C.muted, fontSize: 12 }}>{props.hint}</Text>
+        <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>{props.hint}</Text>
       </If>
     </View>
   );

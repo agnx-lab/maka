@@ -25,7 +25,8 @@ import { List } from 'nsh/list';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import type { ProcessGroup, TurnPresentation } from './processGroups';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
+import { Icon } from './Icon';
 import type { ImagePreview } from './ToolImage';
 import { toolActivitySummary, type ToolActivity } from './toolActivity';
 
@@ -91,16 +92,16 @@ export function TurnSummary(props: {
         answerKey: props.turn().answerKey,
         open: !props.expanded(),
       })}
-      style={{ height: 16, flexDirection: 'row', gap: 8, marginTop: 16 }}
+      style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}
       hoverStyle={{ backgroundColor: C.surface }}
       focusStyle={{ backgroundColor: C.raised }}
       activeStyle={{ backgroundColor: C.line }}
     >
+      <If when={props.canFold()}><Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} /></If>
       <Text
         numberOfLines={1}
         style={{ flex: 1, color: turnOutcome(props.turn()) === 'failed' ? C.danger : C.muted }}
       >
-        {props.canFold() ? (props.expanded() ? '⌃ ' : '› ') : ''}
         {label()}
       </Text>
       <If when={turnOutcome(props.turn()) === 'completed'}>
@@ -187,7 +188,7 @@ function ActivityLog(props: {
     const viewport = props.viewport();
     const measured = props.group().rowIds.reduce((height, id) => {
       const row = state.measured.get(id);
-      return height + (row?.width === viewport.width ? row.height : 16);
+      return height + (row?.width === viewport.width ? row.height : 32);
     }, 0);
     return Math.min(bodyMaxHeight(), Math.max(16, measured));
   };
@@ -216,7 +217,7 @@ function ActivityLog(props: {
         <List
           accessibilityLabel="Turn activity"
           each={props.group().rowIds}
-          estimatedItemSize={16}
+          estimatedItemSize={32}
           scrollValue={state.offset}
           contentOffset={initial()!}
           maintainVisibleContentPosition={
@@ -294,7 +295,7 @@ function ActivityLog(props: {
                       item={() => props.row(ownedId()) ?? first}
                       ownerKey={ownedId}
                       viewState={props.rowState(ownedId())}
-                      toolBodyMaxHeight={() => Math.max(16, bodyMaxHeight() - 32)}
+                      toolBodyMaxHeight={() => Math.max(24, bodyMaxHeight() - 64)}
                       onToolReading={(key) => {
                         if (
                           !alive || lease !== state.lease || key !== ownedId() ||
@@ -404,7 +405,7 @@ export function TurnPanel(props: {
     if (action.open) props.reveal();
   };
   return (
-    <View style={{ paddingVertical: 16, gap: 0 }}>
+    <View style={{ marginVertical: 8, gap: 8, padding: 8, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 12 }}>
       <Button
         accessibilityLabel="Process group"
         disabled={props.group().rowIds.length === 0}
@@ -414,17 +415,17 @@ export function TurnPanel(props: {
           key: props.group().key,
           open: !props.state.open(),
         })}
-        style={{ height: 16, flexDirection: 'row', gap: 8 }}
+        style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
         activeStyle={{ backgroundColor: C.line }}
       >
+        <Icon name={props.state.open() ? 'down' : 'right'} color={C.secondary} />
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"
           style={{ flex: 1, color: active() ? C.secondary : C.muted }}
         >
-          {props.group().rowIds.length ? (props.state.open() ? '⌃ ' : '› ') : '… '}
           {active() ? stableTitle() : desiredTitle()}
         </Text>
         <If when={active()}>

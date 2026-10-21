@@ -22,7 +22,7 @@ import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { host } from './host';
 import { messageBytes, type Position, type Row } from './history';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
 
 type OriginalMessage = {
   sessionId: string;
@@ -125,7 +125,7 @@ export function MessageCopy(props: {
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
       <If when={notice()}>
-        <Text style={{ color: failed() ? C.danger : C.muted, fontSize: 16, lineHeight: 16 }}>
+        <Text style={{ color: failed() ? C.danger : C.muted, fontSize: 12, lineHeight: 16 }}>
           {notice()}
         </Text>
       </If>
@@ -133,12 +133,12 @@ export function MessageCopy(props: {
         accessibilityLabel="Copy message"
         disabled={busy()}
         onPress={inputAction(copy, target())}
-        style={{ height: 16 }}
+        style={controlStyle}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
       >
-        <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-          {busy() ? 'Reading…' : '[Copy]'}
+        <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
+          {busy() ? 'Reading…' : 'Copy'}
         </Text>
       </Button>
     </View>

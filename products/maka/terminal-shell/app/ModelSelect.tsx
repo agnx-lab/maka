@@ -27,7 +27,7 @@ import { host } from './host';
 import type { ConversationHandle } from './Conversation';
 import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
-import { C } from './ui';
+import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 type Pane = 'root' | 'models' | 'effort';
 type SelectionAction = {
@@ -245,12 +245,13 @@ export function ModelSelect(props: {
           backgroundColor: C.surface,
           padding: 16,
           gap: 16,
-          borderWidth: 8,
+          borderWidth: 1,
+          borderRadius: 16,
           borderColor: C.line,
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-          <Text style={{ color: C.accent, fontWeight: '700' }}>Models</Text>
+          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Models</Text>
           <Button
             disabled={pending()}
             accessibilityLabel={
@@ -261,9 +262,13 @@ export function ModelSelect(props: {
                 ? inputAction(close, { instance: props.instance, from: pane() })
                 : inputAction(changePane, { instance: props.instance, from: pane(), to: 'root' })
             }
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.muted }}>
-              {pane() === 'root' ? 'Close · Esc' : 'Back · Esc'}
+              {pane() === 'root' ? 'Close' : 'Back'}
             </Text>
           </Button>
         </View>
@@ -277,9 +282,10 @@ export function ModelSelect(props: {
               from: 'root',
               to: 'models',
             })}
-            style={{ backgroundColor: C.background, padding: 8 }}
+            style={{ ...controlStyle, backgroundColor: C.background, gap: 8 }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.raised }}
+            disabledStyle={controlDisabledStyle}
           >
             <Text numberOfLines={1} style={{ color: C.text }}>
               Model · {modelCaption(owner.backend(), owner.modelDetails())} ▸
@@ -299,9 +305,10 @@ export function ModelSelect(props: {
               from: 'root',
               to: 'effort',
             })}
-            style={{ backgroundColor: C.background, padding: 8 }}
+            style={{ ...controlStyle, backgroundColor: C.background, gap: 8 }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.raised }}
+            disabledStyle={controlDisabledStyle}
           >
             <Text numberOfLines={1} style={{ color: C.text }}>
               Effort · {effortCaption(owner.backend(), owner.modelDetails())} ▸
@@ -334,12 +341,14 @@ export function ModelSelect(props: {
             }}
             placeholder="Search models…"
             maxLength={256}
-            style={{
+                        style={{
               placeholderColor: C.muted,
               color: C.text,
-              height: 32,
+              height: compact() ? 32 : 40,
               backgroundColor: C.background,
-              paddingHorizontal: 8,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              fontSize: 14,
             }}
           />
           <List
@@ -375,9 +384,9 @@ export function ModelSelect(props: {
                       }}
                       hoverStyle={{ backgroundColor: C.raised }}
                       focusStyle={{ backgroundColor: C.raised }}
+                      disabledStyle={controlDisabledStyle}
                     >
                       <Text numberOfLines={1} style={{ color: C.text }}>
-                        {choices()[index()] && routeId(choices()[index()]) === key() ? '› ' : '  '}
                         {choice().label}
                         {sameRoute(owner.backend(), choice().selection) ? ' ✓' : ''}
                       </Text>
@@ -430,6 +439,7 @@ export function ModelSelect(props: {
                         }}
                         hoverStyle={{ backgroundColor: C.raised }}
                         focusStyle={{ backgroundColor: C.raised }}
+                        disabledStyle={controlDisabledStyle}
                       >
                         <Text style={{ color: C.text }}>
                           {owner.backend()?.thinkingLevel === level() ? '✓ ' : '  '}
@@ -453,6 +463,10 @@ export function ModelSelect(props: {
             disabled={pending()}
             onPress={inputAction(retry, { instance: props.instance, from: pane() })}
             accessibilityLabel="Retry model policy"
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.accent }}>Retry</Text>
           </Button>
@@ -461,6 +475,10 @@ export function ModelSelect(props: {
           disabled={pending()}
           accessibilityLabel="Manage connections and models"
           onPress={inputAction(props.manage, null)}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Manage connections & models</Text>
         </Button>
@@ -471,18 +489,18 @@ export function ModelSelect(props: {
               disabled={pending()}
               onPress={inputAction(retry, { instance: props.instance, from: pane() })}
               accessibilityLabel="Retry model catalog"
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.accent }}>Retry</Text>
             </Button>
           </If>
         </If>
-        <Text style={{ color: C.muted }}>
-          {pending()
-            ? 'Saving selection…'
-            : pane() === 'models'
-              ? 'Enter selects · Tab moves · Esc back'
-              : 'Tab moves · Enter selects · Esc back'}
-        </Text>
+        <If when={pending()}>
+          <Text style={{ color: C.muted }}>Saving selection…</Text>
+        </If>
       </View>
     </Dialog>
   );

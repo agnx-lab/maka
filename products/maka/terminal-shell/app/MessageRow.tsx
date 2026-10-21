@@ -22,7 +22,8 @@ import type { JSX } from 'nsh';
 import { Button } from 'nsh/base';
 import { messageKey, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
+import { Icon } from './Icon';
 import { HistoryAttachments } from './Attachments';
 import { ToolCard } from './ToolCard';
 import { MessageCopy } from './MessageCopy';
@@ -89,7 +90,7 @@ export function MessageRow({
         const compact = () => thinking() || isTool();
         const user = () => row().role === 'user';
         const summary = () =>
-          `◇ Think${preview() ? ` · ${preview()}` : ''}`;
+          `Thinking${preview() ? ` · ${preview()}` : ''}`;
         const timestamp = () => {
           const value = (row() as Row & { timestamp?: number }).timestamp;
           if (typeof value !== 'number') return '';
@@ -106,7 +107,7 @@ export function MessageRow({
                 <If
                   when={compact()}
                   else={
-                    <View style={{ gap: 0 }}>
+                    <View style={{ gap: 8 }}>
                       <If
                         when={sourceMode()}
                         else={
@@ -115,7 +116,7 @@ export function MessageRow({
                             else={
                               <Text
                                 selectable
-                                style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
+                                style={{ color: C.text, fontSize: 14, lineHeight: 24 }}
                               >
                                 {text()}
                               </Text>
@@ -125,7 +126,7 @@ export function MessageRow({
                           </If>
                         }
                       >
-                        <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                        <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
                           {text()}
                         </Text>
                       </If>
@@ -167,10 +168,12 @@ export function MessageRow({
                             key: rowKey(row()),
                             value: !sourceMode(),
                           })}
-                          style={{ height: 16, alignSelf: 'flex-end' }}
+                          style={{ ...controlStyle, alignSelf: 'flex-end' }}
+                          hoverStyle={{ backgroundColor: C.surface }}
+                          focusStyle={{ backgroundColor: C.raised }}
                         >
-                          <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                            {sourceMode() ? '[Formatted]' : '[Source]'}
+                          <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
+                            {sourceMode() ? 'Formatted' : 'Source'}
                           </Text>
                         </Button>
                       </View>
@@ -188,11 +191,14 @@ export function MessageRow({
                             key: rowKey(row()),
                             value: !expanded(),
                           })}
-                          style={{ height: 16, paddingVertical: 0 }}
+                          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                          hoverStyle={{ backgroundColor: C.raised }}
+                          focusStyle={{ backgroundColor: C.line }}
                         >
+                          <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
                           <Text
                             numberOfLines={1}
-                            style={{ height: 16, color: C.muted, fontSize: 16, lineHeight: 16 }}
+                            style={{ flex: 1, color: C.muted, fontSize: 13, lineHeight: 16 }}
                           >
                             {summary()}
                           </Text>
@@ -201,7 +207,7 @@ export function MessageRow({
                           <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
                             <Text
                               selectable
-                              style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}
+                              style={{ color: C.muted, fontSize: 14, lineHeight: 24 }}
                             >
                               {text()}
                             </Text>
@@ -235,11 +241,11 @@ export function MessageRow({
                   maxWidth: '78%',
                   paddingHorizontal: 16,
                   paddingVertical: 16,
-                  borderRadius: 16,
+                  borderRadius: 20,
                   backgroundColor: C.surface,
                 }}
               >
-                <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
                   {text()}
                 </Text>
                 <If when={(row().attachments?.length ?? 0) > 0}>
@@ -254,7 +260,7 @@ export function MessageRow({
               </View>
               <If when={timestamp()}>
                 <Text
-                  style={{ alignSelf: 'flex-end', color: C.muted, fontSize: 16, lineHeight: 16 }}
+                  style={{ alignSelf: 'flex-end', color: C.muted, fontSize: 12, lineHeight: 16, paddingTop: 4 }}
                 >
                   {timestamp()}
                 </Text>

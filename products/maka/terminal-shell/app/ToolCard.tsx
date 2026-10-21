@@ -32,7 +32,8 @@ import {
   toolResult,
   type ToolSection,
 } from './toolCards';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
+import { Icon } from './Icon';
 
 function reference(tool: HistoryTool, field: 'arguments' | 'result'): ToolSourceRef | null {
   const position = (field === 'arguments' ? tool.call : tool.result)?.position;
@@ -82,8 +83,9 @@ function Sections(props: { items: ToolSection[] }) {
                       : section().tone === 'added'
                         ? '#78d7a1'
                         : C.text,
-                fontSize: 16,
-                lineHeight: 16,
+                fontFamily: 'monospace',
+                fontSize: 13,
+                lineHeight: 20,
               }}
             >
               {section().text || '(empty)'}
@@ -250,13 +252,16 @@ export function ToolCard(props: {
           key: props.ownerKey(),
           value: !props.expanded(),
         })}
-        style={{ height: 16, paddingVertical: 0, flexDirection: 'row', gap: 8 }}
+        style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+        hoverStyle={{ backgroundColor: C.raised }}
+        focusStyle={{ backgroundColor: C.line }}
       >
+        <Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} />
         <Text
           numberOfLines={1}
-          style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 16, lineHeight: 16 }}
+          style={{ flex: 1, minWidth: 0, color: C.secondary, fontSize: 13, lineHeight: 16 }}
         >
-          {props.expanded() ? 'v' : '>'} {tool()?.call?.name ?? 'Tool'}
+          {tool()?.call?.name ?? 'Tool'}
           {tool()?.call?.title?.fallback ? ` · ${tool()!.call!.title!.fallback}` : ''}
         </Text>
         <If
@@ -284,7 +289,7 @@ export function ToolCard(props: {
         </If>
       </Button>
       <If when={props.expanded()}>
-        <View style={{ paddingLeft: 16 }}>
+        <View style={{ paddingLeft: 16, gap: 8 }}>
           <Button
             accessibilityLabel="Toggle original tool details"
             selected={props.original()}
@@ -293,7 +298,9 @@ export function ToolCard(props: {
               key: props.ownerKey(),
               value: !props.original(),
             })}
-            style={{ alignSelf: 'flex-start', height: 16, paddingVertical: 0 }}
+            style={{ ...controlStyle, alignSelf: 'flex-start' }}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.line }}
           >
             <Text style={{ color: C.accent }}>
               {props.original() ? 'Readable card' : 'Original details'}

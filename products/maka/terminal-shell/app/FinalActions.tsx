@@ -25,7 +25,7 @@ import type { Position, Row } from './history';
 import { MessageCopy } from './MessageCopy';
 import { forkTitle, type SessionAction } from './sessionLifecycle';
 import { TurnUsage } from './TurnUsage';
-import { C } from './ui';
+import { C, controlStyle } from './ui';
 
 type Target = {
   sessionId: string;
@@ -142,6 +142,7 @@ export function FinalActions(props: {
           through={props.through}
         />
         <Button
+          style={controlStyle}
           accessibilityLabel="Fork from this turn"
           disabled={pending() || target() === null}
           onPress={inputAction(fork, target())}
@@ -154,6 +155,7 @@ export function FinalActions(props: {
           ref={(node) => {
             usageButton = node;
           }}
+          style={controlStyle}
           accessibilityLabel="View this turn's model usage"
           disabled={target() === null}
           onPress={inputAction(showUsage, target())}
@@ -163,7 +165,7 @@ export function FinalActions(props: {
           <Text style={{ color: C.muted }}>Usage</Text>
         </Button>
         <If when={details()}>
-          <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>{details()}</Text>
+          <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>{details()}</Text>
         </If>
       </View>
       <If when={notice()}>

@@ -21,7 +21,7 @@ import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { thinkingLevels, type ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
   const owner = props.settings;
@@ -50,6 +50,10 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           disabled={disabled()}
           selected={model().thinkingLevels === null}
           onPress={inputAction(owner.useProviderThinking, owner.modelAction())}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Use provider defaults</Text>
         </Button>
@@ -64,6 +68,10 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
                   ...owner.modelAction(),
                   level: level(),
                 })}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
                 <Text
                   style={{ color: model().thinkingLevels?.includes(level()) ? C.accent : C.muted }}
@@ -83,6 +91,10 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           disabled={disabled()}
           selected={model().defaultThinkingLevel === null}
           onPress={inputAction(owner.defaultThinking, { ...owner.modelAction(), level: null })}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.accent }}>Provider default</Text>
         </Button>
@@ -97,6 +109,10 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
                   ...owner.modelAction(),
                   level: level(),
                 })}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
                 <Text style={{ color: C.accent }}>{level()}</Text>
               </Button>
@@ -107,8 +123,12 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           disabled={disabled()}
           accessibilityLabel="Save model"
           onPress={inputAction(owner.saveModel, owner.modelAction())}
+          style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
+          hoverStyle={{ backgroundColor: C.accentHover }}
+          focusStyle={{ backgroundColor: C.accentHover }}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>{owner.busy() ? 'Saving…' : 'Save model'}</Text>
+          <Text style={{ color: C.background, fontWeight: '500' }}>{owner.busy() ? 'Saving…' : 'Save model'}</Text>
         </Button>
         <If when={model().originalId !== null}>
           <Button
@@ -118,6 +138,10 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
               kind: 'model',
               modelId: model().originalId,
             })}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
             <Text style={{ color: C.danger }}>Remove model</Text>
           </Button>

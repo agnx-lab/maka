@@ -23,7 +23,7 @@ import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
-import { C } from './ui';
+import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export type PaletteEntry = {
   id: string;
@@ -84,14 +84,20 @@ export function Palette(props: {
           backgroundColor: C.surface,
           padding: 16,
           gap: 16,
-          borderWidth: 8,
+          borderWidth: 1,
+          borderRadius: 16,
           borderColor: C.line,
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ color: C.accent, fontWeight: '700' }}>Commands</Text>
-          <Button onPress={inputAction(props.close, props.instance)}>
-            <Text style={{ color: C.muted }}>Close · Esc</Text>
+          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Commands</Text>
+          <Button onPress={inputAction(props.close, props.instance)}
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
+          >
+            <Text style={{ color: C.muted }}>Close</Text>
           </Button>
         </View>
         <Input
@@ -116,9 +122,11 @@ export function Palette(props: {
           style={{
             placeholderColor: C.muted,
             color: C.text,
-            height: 32,
+            height: compact() ? 32 : 40,
             backgroundColor: C.background,
-            paddingHorizontal: 8,
+            borderRadius: 8,
+            paddingHorizontal: 12,
+            fontSize: 14,
           }}
         />
         <List
@@ -144,6 +152,9 @@ export function Palette(props: {
                       paddingHorizontal: 8,
                       backgroundColor: matches()[index()]?.id === entry().id ? C.line : C.surface,
                     }}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
+                    disabledStyle={controlDisabledStyle}
                   >
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
                       <Text
@@ -174,7 +185,6 @@ export function Palette(props: {
           <Text style={{ color: C.muted }}>No matches.</Text>
         </If>
         <Text style={{ color: C.muted }}>Type to filter · ↑↓ to navigate</Text>
-        <Text style={{ color: C.muted }}>Enter selects · Esc closes</Text>
       </View>
     </Dialog>
   );

@@ -24,7 +24,7 @@ import { sameValue } from '../../../../plugins/shared/value';
 import { pluginTitle, settingCaption } from './pluginSettings';
 import type { PluginSettingsOwner, PluginAction } from './pluginSettings';
 import { SettingsField } from './SettingsField';
-import { C } from './ui';
+import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
 
 export function PluginSettings(props: { owner: PluginSettingsOwner }) {
   const owner = props.owner;
@@ -34,6 +34,10 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
         disabled={owner.loading() || owner.busy()}
         accessibilityLabel="Refresh plugin configuration"
         onPress={inputAction(owner.reload, owner.action())}
+        style={controlStyle}
+        hoverStyle={controlHoverStyle}
+        focusStyle={controlFocusStyle}
+        disabledStyle={controlDisabledStyle}
       >
         <Text style={{ color: C.accent }}>
           {owner.editor() ? 'Discard edit and refresh plugins' : 'Refresh plugins'}
@@ -84,6 +88,9 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                             instance: instance().instance,
                           })}
                           style={{ padding: 8, backgroundColor: C.raised }}
+                          hoverStyle={controlHoverStyle}
+                          focusStyle={controlFocusStyle}
+                          disabledStyle={controlDisabledStyle}
                         >
                           <Text style={{ color: C.text }}>{pluginTitle(instance())}</Text>
                           <Text style={{ color: C.muted }}>
@@ -125,6 +132,10 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                           request,
                           enabled: owner.selected()!.disabled,
                         })}
+                        style={controlStyle}
+                        hoverStyle={controlHoverStyle}
+                        focusStyle={controlFocusStyle}
+                        disabledStyle={controlDisabledStyle}
                       >
                         <Text style={{ color: owner.selected()!.disabled ? C.accent : C.warning }}>
                           {owner.selected()!.disabled ? 'Enable plugin' : 'Disable plugin'}
@@ -164,6 +175,9 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                                     : inputAction(owner.edit, { request, key: field().key })
                                 }
                                 style={{ padding: 8, backgroundColor: C.raised }}
+                                hoverStyle={controlHoverStyle}
+                                focusStyle={controlFocusStyle}
+                                disabledStyle={controlDisabledStyle}
                               >
                                 <Text style={{ color: C.text }}>
                                   {field().label}
@@ -219,6 +233,10 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
               selected={sameValue(value(), choice())}
               accessibilityLabel={`Choose plugin setting ${settingCaption(choice())}`}
               onPress={inputAction(owner.change, { request, value: choice() })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.text }}>{settingCaption(choice())}</Text>
             </Button>
@@ -256,6 +274,10 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
                 request,
                 value: { kind: 'boolean', value: choice() },
               })}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
             >
               <Text style={{ color: C.text }}>{choice() ? 'On' : 'Off'}</Text>
             </Button>
@@ -267,6 +289,10 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
           disabled={owner.disabled()}
           selected={value()?.kind === 'null'}
           onPress={inputAction(owner.change, { request, value: { kind: 'null' } })}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.text }}>Set null</Text>
         </Button>
@@ -276,6 +302,10 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
           disabled={owner.disabled()}
           selected={value() === null}
           onPress={inputAction(owner.change, { request, value: null })}
+          style={controlStyle}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
           <Text style={{ color: C.text }}>Remove explicit value</Text>
         </Button>
@@ -284,6 +314,10 @@ function PluginField(props: { owner: PluginSettingsOwner; request: PluginAction 
         disabled={owner.disabled()}
         accessibilityLabel="Save Host plugin setting"
         onPress={inputAction(owner.save, { request, value: value() })}
+        style={controlStyle}
+        hoverStyle={controlHoverStyle}
+        focusStyle={controlFocusStyle}
+        disabledStyle={controlDisabledStyle}
       >
         <Text style={{ color: C.accent }}>Save plugin setting</Text>
       </Button>

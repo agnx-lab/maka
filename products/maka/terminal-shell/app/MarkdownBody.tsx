@@ -120,7 +120,7 @@ export function MarkdownBody(props: { row: () => Row }) {
       when={blocks()}
       else={
         <View style={{ gap: 0 }}>
-          <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+          <Text selectable style={{ color: C.text, fontSize: 14, lineHeight: 24 }}>
             {props.row().text}
           </Text>
           <If when={failure()}>
@@ -151,7 +151,7 @@ function MarkdownBlockView(props: { block: () => MarkdownBlock }) {
           flexDirection: 'row',
           gap: 8,
           paddingLeft: inset(),
-          borderLeftWidth: block().quote > 0 ? 8 : 0,
+          borderLeftWidth: block().quote > 0 ? 2 : 0,
           borderLeftColor: C.line,
         }}
       >
@@ -184,8 +184,8 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
             selectable
             style={{
               color: block().quote > 0 ? C.secondary : C.text,
-              fontSize: 16,
-              lineHeight: 16,
+              fontSize: block().kind === 'heading' ? 18 : 14,
+              lineHeight: 24,
               fontWeight: block().kind === 'heading' ? '700' : '400',
             }}
           >
@@ -208,10 +208,10 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
         </If>
       }
     >
-      <View style={{ backgroundColor: C.surface, paddingHorizontal: 8, paddingVertical: 16 }}>
-        <Text style={{ color: C.muted }}>{block().language || 'code'}</Text>
+      <View style={{ backgroundColor: C.surface, borderRadius: 12, padding: 16, gap: 8 }}>
+        <Text style={{ color: C.muted, fontSize: 12 }}>{block().language || 'code'}</Text>
         <Scroll horizontal>
-          <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+          <Text selectable style={{ color: C.text, fontFamily: 'monospace', fontSize: 13, lineHeight: 20 }}>
             {block().text}
           </Text>
         </Scroll>

@@ -19,6 +19,7 @@
 
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
+import { windowSize } from 'nsh/device';
 import { createSettingsOperations } from './settingsOperations';
 import { createModelSettings } from './settings';
 import { createGeneralSettings } from './generalSettings';
@@ -28,7 +29,8 @@ import { GeneralSettings } from './GeneralSettings';
 import { NetworkSettings } from './NetworkSettings';
 import { PluginSettings } from './PluginSettings';
 import { createPluginSettings } from './pluginSettings';
-import { C } from './ui';
+import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import { Icon } from './Icon';
 
 type Section = 'general' | 'connections' | 'network' | 'plugins';
 type BackAction = { section: Section; identity: string };
@@ -43,6 +45,7 @@ const sections: { id: Section; label: string }[] = [
 // snapshot and unsaved edits; all writes share the original native journal.
 export function ModelSettings(props: { close(): void; changed(): void }) {
   const section = signal<Section>('connections');
+  const rail = () => windowSize().width >= 880 && !compact();
   const operations = createSettingsOperations();
   const connections = createModelSettings(
     props.changed,
@@ -130,18 +133,19 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
       <View
         style={{
           width: '100%',
-          maxWidth: 768,
+          maxWidth: 880,
           height: '100%',
           maxHeight: 800,
-          padding: 8,
-          gap: 8,
+          minHeight: 0,
           backgroundColor: C.surface,
-          borderWidth: 8,
+          borderRadius: compact() ? 12 : 24,
+          overflow: 'hidden',
+          borderWidth: 1,
           borderColor: C.line,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ flex: 1, color: C.accent, fontWeight: '700' }}>{title()}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: compact() ? 48 : 64, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: C.line }}>
+          <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18 }}>{title()}</Text>
           <Button
             disabled={operations.busy()}
             accessibilityLabel={
@@ -150,75 +154,89 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                 : `Back from ${section()} settings`
             }
             onPress={inputAction(back, backAction())}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>{nested() ? 'Back · Esc' : 'Close · Esc'}</Text>
+            <Text style={{ color: C.secondary }}>{nested() ? 'Back' : 'Close'}</Text>
+            <Icon name={nested() ? 'back' : 'close'} color={C.secondary} />
           </Button>
         </View>
-        <View style={{ flexDirection: 'row', gap: 16 }}>
-          <Each of={sections} key={(item) => item.id}>
-            {(item) => (
-              <Button
-                disabled={operations.busy()}
-                selected={section() === item().id}
-                accessibilityLabel={`Settings section ${item().label}`}
-                onPress={inputAction(choose, { from: section(), to: item().id })}
-              >
-                <Text style={{ color: section() === item().id ? C.accent : C.muted }}>
-                  {item().label}
-                </Text>
-              </Button>
-            )}
-          </Each>
-        </View>
-        <If when={operations.error()}>
-          <Text selectable style={{ color: C.danger }}>
-            {operations.error()}
-          </Text>
-        </If>
-        <If when={operations.notice()}>
-          <Text style={{ color: C.muted }}>{operations.notice()}</Text>
-        </If>
-        <If when={!operations.pendingKnown() || operations.pending().length > 0}>
-          <View style={{ gap: 4 }}>
-            <Text style={{ color: C.warning }}>
-              Earlier settings actions must be resolved before another change.
-            </Text>
-            <Button
-              disabled={operations.busy()}
-              accessibilityLabel="Recover settings actions"
-              onPress={inputAction(recover, null)}
-            >
-              <Text style={{ color: C.accent }}>
-                {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
-              </Text>
-            </Button>
-            <Each
-              of={operations.pending().filter((item) => !item.reference)}
-              key={(item) => item.id}
-            >
+        <View style={{ flex: 1, minHeight: 0, flexDirection: rail() ? 'row' : 'column' }}>
+          <View style={{ flexDirection: rail() ? 'column' : 'row', flexWrap: rail() ? 'nowrap' : 'wrap', width: rail() ? 184 : '100%', flexShrink: 0, padding: rail() ? 16 : 8, gap: 4, borderRightWidth: rail() ? 1 : 0, borderRightColor: C.line }}>
+            <Each of={sections} key={(item) => item.id}>
               {(item) => (
                 <Button
                   disabled={operations.busy()}
-                  onPress={inputAction(operations.abandon, item().id)}
+                  selected={section() === item().id}
+                  accessibilityLabel={`Settings section ${item().label}`}
+                  onPress={inputAction(choose, { from: section(), to: item().id })}
+                  style={{ ...controlStyle, minHeight: rail() ? 40 : 32 }}
+                  selectedStyle={{ backgroundColor: C.raised }}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
+                  <Text style={{ color: section() === item().id ? C.text : C.muted, fontSize: 13 }}>
+                    {item().label}
+                  </Text>
                 </Button>
               )}
             </Each>
           </View>
-        </If>
-        <If when={section() === 'connections'}>
-          <ConnectionSettings owner={connections} />
-        </If>
-        <If when={section() === 'general'}>
-          <GeneralSettings owner={general} />
-        </If>
-        <If when={section() === 'network'}>
-          <NetworkSettings owner={network} />
-        </If>
-        <If when={section() === 'plugins'}>
-          <PluginSettings owner={plugins} />
-        </If>
+          <View style={{ flex: 1, minWidth: 0, minHeight: 0, padding: compact() ? 8 : 16, gap: 16 }}>
+          <If when={operations.error()}>
+            <Text selectable style={{ color: C.danger }}>
+              {operations.error()}
+            </Text>
+          </If>
+          <If when={operations.notice()}>
+            <Text style={{ color: C.muted }}>{operations.notice()}</Text>
+          </If>
+          <If when={!operations.pendingKnown() || operations.pending().length > 0}>
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: C.warning }}>
+                Earlier settings actions must be resolved before another change.
+              </Text>
+              <Button
+                disabled={operations.busy()}
+                accessibilityLabel="Recover settings actions"
+                onPress={inputAction(recover, null)}
+              >
+                <Text style={{ color: C.accent }}>
+                  {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
+                </Text>
+              </Button>
+              <Each
+                of={operations.pending().filter((item) => !item.reference)}
+                key={(item) => item.id}
+              >
+                {(item) => (
+                  <Button
+                    disabled={operations.busy()}
+                    onPress={inputAction(operations.abandon, item().id)}
+                  >
+                    <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
+                  </Button>
+                )}
+              </Each>
+            </View>
+          </If>
+          <If when={section() === 'connections'}>
+            <ConnectionSettings owner={connections} />
+          </If>
+          <If when={section() === 'general'}>
+            <GeneralSettings owner={general} />
+          </If>
+          <If when={section() === 'network'}>
+            <NetworkSettings owner={network} />
+          </If>
+          <If when={section() === 'plugins'}>
+            <PluginSettings owner={plugins} />
+          </If>
+          </View>
+        </View>
       </View>
     </Dialog>
   );
