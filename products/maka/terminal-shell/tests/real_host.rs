@@ -2101,6 +2101,67 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let first = wait_view(&mut view, |screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version") && !screen.contains("Reading current file…")).await;
         assert!(!first.contains("BEFORE_CURRENT_EDIT"));
         let first_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
+
+        // Resize the actual right divider with both side panes docked. Its
+        // drag changes layout without replacing the captured reader or editor.
+        view.resize(160, 40);
+        wait_view_state(&mut view, |view, screen| screen.contains("AFTER_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.label == "Resize session browser")).await;
+        tab_to_label(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(composer));
+        let selection = view.surface().input_context().unwrap().selection;
+        let reader = view.accessibility_snapshot().into_iter().find(|node| node.label == "Captured file text").unwrap().id;
+        for delta in [-4_i16, 4] {
+            let nodes = view.accessibility_snapshot();
+            let divider = nodes.iter().find(|node| node.label == "Resize workspace preview").unwrap().frame;
+            let browser = nodes.iter().find(|node| node.label == "Resize session browser").unwrap().frame;
+            let editor = nodes.iter().find(|node| node.id == composer).unwrap().frame;
+            let column = (divider.origin.x.0 / 8.0).round() as u16;
+            let target = (column as i16 + delta) as u16;
+            for (kind, column) in [
+                (MouseEventKind::Down(MouseButton::Left), column),
+                (MouseEventKind::Drag(MouseButton::Left), target),
+                (MouseEventKind::Up(MouseButton::Left), target),
+            ] {
+                view.handle_event(Event::Mouse(MouseEvent {kind,column,row:1,modifiers:KeyModifiers::NONE}));
+            }
+            wait_view_state(&mut view, |view, screen| screen.contains("AFTER_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.label == "Resize workspace preview" && node.frame.origin.x.0 == divider.origin.x.0 + f32::from(delta) * 8.0)).await;
+            let nodes = view.accessibility_snapshot();
+            let resized = nodes.iter().find(|node| node.id == composer).unwrap().frame;
+            assert_eq!(resized.origin.x.0, editor.origin.x.0);
+            assert_eq!(resized.size.width.0, editor.size.width.0 + f32::from(delta) * 8.0);
+            assert_eq!(nodes.iter().find(|node| node.label == "Resize session browser").unwrap().frame, browser);
+            assert!(nodes.iter().any(|node| node.id == reader && node.label == "Captured file text"));
+            assert!(nodes.iter().any(|node| node.label == first_version));
+            assert_eq!(view.surface().focused(), Some(composer));
+            let context = view.surface().input_context().unwrap();
+            assert_eq!(context.text.as_deref(), Some("UNSENT_PREVIEW_DRAFT"));
+            assert_eq!(context.selection, selection);
+        }
+        support::evidence_cells("workspace-preview-physical-divider", &view);
+
+        // A viewport change invalidates the captured drag origin. Continuing
+        // that old physical gesture must not overwrite the width preference.
+        let divider = view.accessibility_snapshot().into_iter().find(|node| node.label == "Resize workspace preview").unwrap().frame;
+        let column = (divider.origin.x.0 / 8.0).round() as u16;
+        view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::Down(MouseButton::Left),column,row:1,modifiers:KeyModifiers::NONE}));
+        let (committed, received) = tokio::sync::oneshot::channel();
+        view.control().unwrap().advance_clock(Duration::ZERO, move || { let _ = committed.send(()); });
+        received.await.unwrap();
+        view.resize(152, 40);
+        wait_view_state(&mut view, |view, screen| screen.contains("AFTER_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.label == "Resize workspace preview" && node.frame.origin.x.0 == 840.0)).await;
+        let before_move = view.accessibility_snapshot().into_iter().find(|node| node.label == "Resize workspace preview").unwrap().frame;
+        for kind in [MouseEventKind::Drag(MouseButton::Left), MouseEventKind::Up(MouseButton::Left)] {
+            view.handle_event(Event::Mouse(MouseEvent {kind,column:column + 4,row:1,modifiers:KeyModifiers::NONE}));
+        }
+        let (committed, received) = tokio::sync::oneshot::channel();
+        view.control().unwrap().advance_clock(Duration::ZERO, move || { let _ = committed.send(()); });
+        received.await.unwrap();
+        support::tick(&mut view);
+        assert_eq!(view.accessibility_snapshot().into_iter().find(|node| node.label == "Resize workspace preview").unwrap().frame, before_move);
+        assert_eq!(view.surface().focused(), Some(composer));
+        assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        view.resize(120, 40);
+        wait_view(&mut view, |screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version")).await;
         std::fs::write(&text_path, "REFRESHED_CURRENT_EDIT\n").unwrap();
         wait_view(&mut view, |screen| screen.contains("workspace may have changed")).await;
         assert!(view.snapshot().contains("AFTER_CURRENT_EDIT"), "a capture must not silently become current contents");

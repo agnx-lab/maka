@@ -44,6 +44,7 @@ export function Workbench(props: {
   children: JSX.Element;
 }) {
   const preferredWidth = signal(32 * CELL);
+  const preferredPreviewWidth = signal(48 * CELL);
   const preview = () => props.resources.shown() && canDockPreview();
   const browser = () =>
     canDockBrowser() &&
@@ -54,8 +55,9 @@ export function Workbench(props: {
       preferredWidth(),
       windowSize().width - CENTER_MIN - CELL - (preview() ? PREVIEW_MIN + CELL : 0),
     );
-  const previewWidth = () =>
-    Math.min(48 * CELL, windowSize().width - CENTER_MIN - CELL - (browser() ? width() + CELL : 0));
+  const availablePreviewWidth = () =>
+    windowSize().width - CENTER_MIN - CELL - (browser() ? width() + CELL : 0);
+  const previewWidth = () => Math.min(preferredPreviewWidth(), availablePreviewWidth());
   const clamp = (value: number) =>
     Math.max(
       BROWSER_MIN,
@@ -65,7 +67,23 @@ export function Workbench(props: {
         Math.round(value / CELL) * CELL,
       ),
     );
-  let drag: { x: number; width: number; viewport: number } | null = null;
+  let drag: {
+    side: 'browser' | 'preview';
+    x: number;
+    width: number;
+    viewport: number;
+  } | null = null;
+  const moveDivider = (x: number) => {
+    if (!drag || drag.viewport !== windowSize().width) return;
+    if (drag.side === 'browser' && browser()) preferredWidth.set(clamp(drag.width + x - drag.x));
+    else if (drag.side === 'preview' && preview())
+      preferredPreviewWidth.set(
+        Math.max(
+          PREVIEW_MIN,
+          Math.min(availablePreviewWidth(), Math.round(drag.width + drag.x - x)),
+        ),
+      );
+  };
   const content = signal<YNode | null>(null);
   effect(() => {
     const stop = props.stopAction();
@@ -75,6 +93,8 @@ export function Workbench(props: {
   effect(() => {
     windowSize().width;
     windowSize().height;
+    browser();
+    preview();
     drag = null;
   });
   const resize = (delta: number) => preferredWidth.set(clamp(width() + delta * CELL));
@@ -101,14 +121,17 @@ export function Workbench(props: {
           accessibilityLabel="Resize session browser"
           onStartShouldSetResponder={() => true}
           onResponderGrant={(event) => {
-            drag = { x: event.pageX, width: width(), viewport: windowSize().width };
+            drag = {
+              side: 'browser',
+              x: event.pageX,
+              width: width(),
+              viewport: windowSize().width,
+            };
             return true;
           }}
-          onResponderMove={(event) => {
-            if (drag && drag.viewport === windowSize().width && canDockBrowser())
-              preferredWidth.set(clamp(drag.width + event.pageX - drag.x));
-          }}
-          onResponderRelease={() => {
+          onResponderMove={(event) => moveDivider(event.pageX)}
+          onResponderRelease={(event) => {
+            moveDivider(event.pageX);
             drag = null;
           }}
           onResponderTerminate={() => {
@@ -119,6 +142,7 @@ export function Workbench(props: {
             flexShrink: 0,
             alignItems: 'center',
             backgroundColor: C.background,
+            cursor: 'col-resize',
           }}
           hoverStyle={{ backgroundColor: C.line }}
         >
@@ -132,7 +156,40 @@ export function Workbench(props: {
         {props.children}
       </View>
       <If when={preview()}>
-        <View style={{ width: CELL, backgroundColor: C.line }} />
+        <View
+          accessibilityLabel="Resize workspace preview"
+          onStartShouldSetResponder={() => true}
+          onResponderGrant={(event) => {
+            drag = {
+              side: 'preview',
+              x: event.pageX,
+              width: previewWidth(),
+              viewport: windowSize().width,
+            };
+            return true;
+          }}
+          onResponderMove={(event) => moveDivider(event.pageX)}
+          onResponderRelease={(event) => {
+            moveDivider(event.pageX);
+            drag = null;
+          }}
+          onResponderTerminate={() => {
+            drag = null;
+          }}
+          style={{
+            width: CELL,
+            flexShrink: 0,
+            alignItems: 'center',
+            backgroundColor: C.background,
+            cursor: 'col-resize',
+          }}
+          hoverStyle={{ backgroundColor: C.line }}
+        >
+          <View
+            pointerEvents="none"
+            style={{ width: 1, height: '100%', backgroundColor: C.line }}
+          />
+        </View>
         <View style={{ width: previewWidth(), flexShrink: 0, minHeight: 0 }}>
           <ResourcePane resources={props.resources} docked />
         </View>
