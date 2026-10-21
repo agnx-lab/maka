@@ -53,7 +53,12 @@ use anyhow::{Context as _, Result};
 use async_task::Runnable;
 use collections::FxHashMap;
 use futures::channel::oneshot;
-#[cfg(any(test, feature = "test-support", feature = "bench-support"))]
+#[cfg(any(
+    test,
+    feature = "test-support",
+    feature = "bench-support",
+    feature = "offscreen"
+))]
 use image::RgbaImage;
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder as _, DynamicImage, Frame};
@@ -1438,7 +1443,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
 }
 
 /// A renderer for headless windows that can produce real rendered output.
-#[cfg(any(test, feature = "test-support", feature = "bench-support"))]
+#[cfg(any(
+    test,
+    feature = "test-support",
+    feature = "bench-support",
+    feature = "offscreen"
+))]
 pub trait PlatformHeadlessRenderer {
     /// Render a scene and return the result as an RGBA image.
     fn render_scene_to_image(
@@ -1446,6 +1456,42 @@ pub trait PlatformHeadlessRenderer {
         scene: &Scene,
         size: Size<DevicePixels>,
     ) -> Result<RgbaImage>;
+
+    /// Render into tightly packed, top-to-bottom RGBA8 pixels.
+    ///
+    /// The destination must contain exactly four bytes per requested pixel.
+    /// Its contents describe a completed frame only when this method succeeds.
+    /// This may wait for GPU readback; it does not present the frame to a display.
+    /// Renderers may override this image-based default to reuse readback storage.
+    fn render_scene_to_pixels(
+        &mut self,
+        scene: &Scene,
+        size: Size<DevicePixels>,
+        pixels: &mut [u8],
+    ) -> Result<()> {
+        anyhow::ensure!(
+            size.width.0 > 0 && size.height.0 > 0,
+            "invalid offscreen size: {size:?}"
+        );
+        let width = u32::try_from(size.width.0)?;
+        let height = u32::try_from(size.height.0)?;
+        let length = usize::try_from(width)?
+            .checked_mul(usize::try_from(height)?)
+            .and_then(|length| length.checked_mul(4))
+            .ok_or_else(|| anyhow::anyhow!("offscreen pixel size exceeds addressable memory"))?;
+        anyhow::ensure!(
+            pixels.len() == length,
+            "offscreen destination length must be {length}, got {}",
+            pixels.len()
+        );
+        let image = self.render_scene_to_image(scene, size)?;
+        anyhow::ensure!(
+            image.dimensions() == (width, height),
+            "offscreen image dimensions do not match {size:?}"
+        );
+        pixels.copy_from_slice(&image.as_raw()[..length]);
+        Ok(())
+    }
 
     /// Render a scene to an offscreen target without reading the result back.
     ///

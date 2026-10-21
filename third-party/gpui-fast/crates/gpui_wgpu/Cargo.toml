@@ -45,6 +45,7 @@ bench-support = [
 ]
 default = []
 font-kit = ["dep:font-kit"]
+offscreen = ["gpui/offscreen", "dep:image"]
 test-support = [
     "gpui/test-support",
     "dep:image",
