@@ -200,25 +200,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [profile.dev]
 # Keep useful backtraces without embedding hundreds of MiB of dependency types.
 debug = "line-tables-only"
-# Keep application code quick to rebuild; optimize frame encoding below.
+# Favor fast development builds; reserve optimization for release builds.
 opt-level = 0
-
-# Full-scene encoding is on the interactive path even in `cargo run`.
-# Its private writer also instantiates the generic PNG/deflate loops here.
-[profile.dev.package.nsh-gpui-terminal]
-opt-level = 2
-
-[profile.dev.package."png:0.18.1"]
-opt-level = 2
-
-[profile.dev.package."base64:0.22.1"]
-opt-level = 2
-
-[profile.dev.package.simd-adler32]
-opt-level = 2
-
-[profile.dev.package.crc32fast]
-opt-level = 2
 
 [patch.crates-io]
 image-webp = { path = "third-party/image-webp" }
