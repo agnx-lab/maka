@@ -37,9 +37,11 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         assert_eq!(sent["kind"], "started", "{sent}");
         fixture.next_request().await.tool("WorkspaceDocument", json!({"path":"recorded.txt"})).await;
         let mut continuation = fixture.next_request().await;
-        let result: Value = serde_json::from_str(continuation.body["messages"].as_array().unwrap()
+        let tool_result = continuation.body["messages"].as_array().unwrap()
             .iter().rev().find(|message| message["role"] == "tool").unwrap()["content"]
-            .as_str().unwrap()).unwrap();
+            .as_str().unwrap();
+        let result: Value = serde_json::from_str(tool_result)
+            .unwrap_or_else(|error| panic!("actual readText tool result was not JSON: {error}: {tool_result}"));
         assert_eq!(result["kind"], "completed", "{result}");
         assert_eq!(result["value"]["content"], original);
         // The card must use the original Host source rather than reopen this path.
@@ -109,9 +111,11 @@ async fn tool_cards_show_recorded_search_changes_and_business_failures_without_i
             assert_eq!(sent["kind"], "started", "{method}: {sent}");
             fixture.next_request().await.tool("WorkspaceDocument", input).await;
             let continuation = fixture.next_request().await;
-            let result: Value = serde_json::from_str(continuation.body["messages"].as_array().unwrap()
+            let tool_result = continuation.body["messages"].as_array().unwrap()
                 .iter().rev().find(|message| message["role"] == "tool").unwrap()["content"]
-                .as_str().unwrap()).unwrap();
+                .as_str().unwrap();
+            let result: Value = serde_json::from_str(tool_result)
+                .unwrap_or_else(|error| panic!("actual {method} tool result was not JSON: {error}: {tool_result}"));
             if method == "readText" {
                 assert_eq!(result["kind"], "failed", "{result}");
             } else {

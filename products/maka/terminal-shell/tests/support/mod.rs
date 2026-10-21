@@ -503,13 +503,18 @@ impl Fixture {
                 )
             }))
             .collect(),
-            if images {
+            if has_files {
                 vec![NativeGrant {
                     origin: InstanceId(vec![Uuid::from_u128(1)]),
                     consumer: InstanceId(vec![Uuid::from_u128(1)]),
                     provider: InstanceId(vec![Uuid::from_u128(5)]),
                     export: maka_workspace_api::files::EXPORT.into(),
-                    methods: ["readImage".into()].into_iter().collect(),
+                    methods: [file_tool
+                        .as_ref()
+                        .map_or("readImage", |tool| tool["method"].as_str().unwrap())
+                        .into()]
+                    .into_iter()
+                    .collect(),
                     recovery: false,
                 }]
             } else {
