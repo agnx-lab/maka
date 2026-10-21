@@ -1713,13 +1713,13 @@ mod test {
     #[test]
     fn apc_input_bounds_keep_completed_replies_and_never_replay_rejected_tails() {
         let mut parser = Parser::default();
-        let wire = format!("\x1b_Gi=31;{}\x1b\\", "E".repeat(245));
+        let wire = format!("\x1b_Gi=31;{}\x1b\\", "E".repeat(246));
         assert_eq!(wire.len(), 256);
         parser.parse(wire.as_bytes(), false).unwrap();
         assert!(matches!(
             parser.pop(),
             Some(Event::KittyGraphicsResponse(KittyGraphicsResponse { image_id: 31, result: Err(message), .. }))
-                if message.len() == 245
+                if message.len() == 246
         ));
         assert_eq!(parser.pop(), None);
 
