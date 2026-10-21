@@ -1588,6 +1588,7 @@ export function Conversation(props: ConversationProps) {
       >
         <Button
           role="tab"
+          accessibilityLabel="Chat"
           selected={reading() === 'chat'}
           style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'chat' })}
@@ -1606,6 +1607,7 @@ export function Conversation(props: ConversationProps) {
         </Button>
         <Button
           role="tab"
+          accessibilityLabel="Trajectory"
           selected={reading() === 'trajectory'}
           style={controlStyle}
           onPress={inputAction(chooseReading, { owner: sessionId, mode: 'trajectory' })}
