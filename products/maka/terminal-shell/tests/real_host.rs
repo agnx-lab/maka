@@ -280,6 +280,15 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             .unwrap()
             .unwrap();
     }
+    async fn assert_input(view: &mut AppView, label: &str, value: &str) {
+        tab_to_label(view, label).await;
+        wait_focused_input(view, label).await;
+        assert_eq!(
+            view.surface().input_context().unwrap().text.as_deref(),
+            Some(value),
+            "the native {label:?} draft changed"
+        );
+    }
     tokio::time::timeout(Duration::from_secs(90), async {
         #[cfg(unix)]
         let mut fixture = Fixture::registered_empty_settings().await;
@@ -388,6 +397,78 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         editable(&mut view, "Message composer").await;
         view.handle_event(Event::Paste("Use my new connection exactly once".into()));
         support::wait_draft(&client, &session, "Use my new connection exactly once").await;
+        let composer = view.surface().focused().unwrap();
+        shortcut(&mut view, 'p');
+        select_palette(&mut view, "Search commands…", "Connections & models", "Connections & models").await;
+        activate(&mut view, "Settings section General").await;
+        wait_view(&mut view, |screen| screen.contains("General settings") && !screen.contains("Reading preferences…")).await;
+        let original_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        activate(&mut view, "Edit personalization").await;
+        fill(&mut view, "Display name", "界面草稿用户").await;
+        fill(&mut view, "Assistant tone", "请简明作答").await;
+        activate(&mut view, "Settings section Network").await;
+        wait_view(&mut view, |screen| screen.contains("Network settings") && !screen.contains("Loading network settings…")).await;
+        let initial_network = client.query("settings", "network", json!({})).await.unwrap();
+        assert_eq!(initial_network["proxy"]["enabled"], false);
+        assert_eq!(initial_network["proxy"]["authEnabled"], false);
+        assert!(!support::wait_enabled_button(&mut view, "Enable Host proxy").await.state.selected);
+        activate(&mut view, "Proxy protocol http").await;
+        fill(&mut view, "Proxy host", "proxy.invalid").await;
+        fill(&mut view, "Proxy port", "8080").await;
+        activate(&mut view, "Enable proxy authentication").await;
+        fill(&mut view, "Proxy username", "proxy-user").await;
+        activate(&mut view, "Replace proxy password").await;
+        let proxy_secret = "代理密码原值";
+        fill(&mut view, "Proxy password", proxy_secret).await;
+        assert!(!view.snapshot().contains(proxy_secret), "the proxy password was painted by the form");
+        activate(&mut view, "Save network settings").await;
+        wait_view(&mut view, |screen| screen.contains("Network settings saved.") && !screen.contains("Loading network settings…")).await;
+        let saved_network = client.query("settings", "network", json!({})).await.unwrap();
+        let mut expected_proxy = initial_network["proxy"].clone();
+        expected_proxy["protocol"] = json!("http");
+        expected_proxy["host"] = json!("proxy.invalid");
+        expected_proxy["port"] = json!(8080);
+        expected_proxy["authEnabled"] = json!(true);
+        expected_proxy["username"] = json!("proxy-user");
+        assert_eq!(saved_network["proxy"], expected_proxy);
+        assert_eq!(saved_network["credential"]["configured"], true);
+        assert!(!saved_network.to_string().contains(proxy_secret));
+        assert!(saved_network["revision"].as_u64().unwrap() > original_preferences["revision"].as_u64().unwrap());
+        activate(&mut view, "Settings section General").await;
+        wait_view(&mut view, |screen| screen.contains("Personalization") && screen.contains("Display name")).await;
+        assert_input(&mut view, "Display name", "界面草稿用户").await;
+        assert_input(&mut view, "Assistant tone", "请简明作答").await;
+        activate(&mut view, "Save this preference").await;
+        wait_view(&mut view, |screen| screen.contains("Preferences changed elsewhere.")).await;
+        assert_input(&mut view, "Display name", "界面草稿用户").await;
+        assert_input(&mut view, "Assistant tone", "请简明作答").await;
+        let conflicted = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        assert_eq!(conflicted["revision"], saved_network["revision"]);
+        assert_eq!(conflicted["displayName"], original_preferences["displayName"]);
+        assert_eq!(conflicted["assistantTone"], original_preferences["assistantTone"]);
+        // Cancel explicitly discards this stale draft and reads the Host's
+        // current shared policy before another personalization edit is opened.
+        activate(&mut view, "Cancel").await;
+        activate(&mut view, "Edit personalization").await;
+        fill(&mut view, "Display name", "已保存的中文用户").await;
+        fill(&mut view, "Assistant tone", "请用简洁清楚的方式回答").await;
+        activate(&mut view, "Save this preference").await;
+        wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("Preferences saved.")).await;
+        activate(&mut view, "Assistant language: 简体中文").await;
+        wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("● 简体中文")).await;
+        let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
+        assert_eq!(saved_preferences["displayName"], "已保存的中文用户");
+        assert_eq!(saved_preferences["assistantTone"], "请用简洁清楚的方式回答");
+        assert_eq!(saved_preferences["language"], "zh-CN", "assistant language changes Host prompts while the terminal interface stays English");
+        let final_network = client.query("settings", "network", json!({})).await.unwrap();
+        assert_eq!(final_network["proxy"], saved_network["proxy"]);
+        assert_eq!(final_network["credential"], saved_network["credential"]);
+        assert!(!final_network.to_string().contains(proxy_secret));
+        activate(&mut view, "Back from general settings").await;
+        editable(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(composer), "settings replaced the resident native composer");
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Use my new connection exactly once"));
+        support::wait_draft(&client, &session, "Use my new connection exactly once").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         let mut request = fixture.next_request().await;
         assert_eq!(request.body["model"], "manual-ui-agent");
@@ -413,6 +494,13 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             terminal.wait_for("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
             let restored = terminal.wait_for("Manual UI Agent · Default · high · Ctrl+G").await;
             assert!(!restored.contains(support::PROVIDER_KEY));
+            assert!(!restored.contains(proxy_secret));
+            let restarted = fixture.client().await;
+            assert_eq!(restarted.query("settings", "assistantPreferences", json!({})).await.unwrap(), saved_preferences);
+            let persisted_network = restarted.query("settings", "network", json!({})).await.unwrap();
+            assert_eq!(persisted_network, final_network);
+            assert!(!persisted_network.to_string().contains(proxy_secret));
+            restarted.close().await.unwrap();
             assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "restoring the configured session must not resend");
             assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 1, "restoring the configured session must not rediscover models");
             evidence("settings-real-pty-restores-manual-model", &restored);
