@@ -21,7 +21,6 @@ import { cleanup, computed, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
-import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
 import {
   C,
@@ -57,7 +56,6 @@ export function Palette(props: {
     );
   });
   const index = () => Math.min(selected(), Math.max(0, matches().length - 1));
-  const count = () => Math.max(1, Math.min(8, Math.floor((windowSize().height / 16 - 14) / 3)));
   const byId = computed(() => new Map(matches().map((entry) => [entry.id, entry])));
   const ids = computed(() => matches().map((entry) => entry.id));
   let list: YNode | undefined;
@@ -89,6 +87,7 @@ export function Palette(props: {
         style={{
           width: '100%',
           maxWidth: 640,
+          maxHeight: '100%',
           backgroundColor: C.surface,
           padding: 16,
           gap: 16,
@@ -147,7 +146,8 @@ export function Palette(props: {
             list = node;
           }}
           estimatedItemSize={48}
-          style={{ height: count() * 48 }}
+          style={{ height: Math.max(1, ids().length) * 48, flexShrink: 1, minHeight: 0 }}
+          empty={<Text style={{ color: C.muted }}>No matches.</Text>}
         >
           {(id) => (
             <Each of={[id()]} key={(key: string) => key}>
@@ -191,9 +191,6 @@ export function Palette(props: {
             </Each>
           )}
         </List>
-        <If when={!matches().length}>
-          <Text style={{ color: C.muted }}>No matches.</Text>
-        </If>
       </View>
     </Dialog>
   );
