@@ -169,6 +169,10 @@ version = "=30.0.1"
 features = ["webgl"]
 default-features = false
 
+[dev-dependencies.naga]
+version = "=30.0.1"
+features = ["wgsl-in"]
+
 [lints.rust.unexpected_cfgs]
 level = "allow"
 priority = 0
