@@ -1008,6 +1008,17 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::tick(&mut view);
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(missing_tail.as_str()));
         wait_view(&mut view, |screen| screen.contains("No matching conversations.") && !screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
+        let original_search = view.surface().focused();
+        support::click_button(&mut view, "Clear session search").await;
+        wait_focused_input(&mut view, "Search session titles").await;
+        assert_eq!(view.surface().focused(), original_search, "clearing must retain the resident search input");
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
+        wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("No matching conversations.") && !screen.contains("Loading…")).await;
+        assert!(view.accessibility_snapshot().iter().all(|node| node.label != "Clear session search"));
+        // Preserve the original keyboard-clear path after exercising the
+        // mouse affordance through the same real title-search subscription.
+        view.handle_event(Event::Paste(missing_tail.clone()));
+        wait_view(&mut view, |screen| screen.contains("No matching conversations.") && !screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
         shortcut(&mut view, 'a');
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("No matching conversations.") && !screen.contains("Loading…")).await;

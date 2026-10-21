@@ -243,6 +243,22 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
   const refresh = () => {
     void browser.refresh();
   };
+  const changeQuery = (text: string) => {
+    if (!alive || choosingWorkspace()) return;
+    batch(() => {
+      selectedRow.set(null);
+      browser.setTitleQuery(text);
+    });
+    list?.scrollToIndex({ index: 0, animated: false });
+  };
+  const clearSearch = computed(() => {
+    const original = browser.titleQuery();
+    return inputAction(() => {
+      if (!alive || choosingWorkspace() || browser.titleQuery() !== original) return;
+      changeQuery('');
+      search?.focus();
+    }, null);
+  });
   return (
     <View
       ref={(node) => {
@@ -341,13 +357,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           autoFocus={!props.docked}
           value={choosingWorkspace() ? '' : browser.titleQuery()}
           readonly={choosingWorkspace()}
-          onChange={(text) => {
-            batch(() => {
-              selectedRow.set(null);
-              browser.setTitleQuery(text);
-            });
-            list?.scrollToIndex({ index: 0, animated: false });
-          }}
+          onChange={changeQuery}
           placeholder={choosingWorkspace() ? 'Choose a workspace below' : 'Search sessions…'}
           style={{
             color: C.text,
@@ -358,6 +368,24 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
             height: 32,
           }}
         />
+        <If when={!choosingWorkspace() && browser.titleQuery() !== ''}>
+          <Button
+            accessibilityLabel="Clear session search"
+            tooltip="Clear search"
+            onPress={clearSearch()}
+            style={{
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 8,
+            }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+          >
+            <Icon name="close" color={C.secondary} />
+          </Button>
+        </If>
       </View>
       <View
         style={{
@@ -498,7 +526,12 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                       paddingHorizontal: 8,
                       justifyContent: 'center',
                       borderRadius: 8,
-                      backgroundColor: currentRow() === key() ? C.line : C.surface,
+                      backgroundColor:
+                        props.selected() === key()
+                          ? C.line
+                          : currentRow() === key()
+                            ? C.raised
+                            : C.surface,
                     }}
                     hoverStyle={{ backgroundColor: C.line }}
                     focusStyle={{ backgroundColor: C.raised }}
