@@ -409,7 +409,7 @@ for (const target of ['tui'])
   });
 
 for (const target of ['tui']) {
-  const globalFixture = async () => {
+  const globalFixture = async (initialContent = 'Original 中文') => {
     const { component } = await import(`../dist/packages/assistant-preferences/${target}.js`);
     const props = {
       theme,
@@ -447,7 +447,7 @@ for (const target of ['tui']) {
       source: 'agents',
       path: '/remote/home/.agents/AGENTS.md',
       revision: 'source-v1',
-      content: 'Original 中文',
+      content: initialContent,
       exists: true,
     };
     const ack = (revision) => {
@@ -464,6 +464,11 @@ for (const target of ['tui']) {
     assert.equal(out.actions[0].method, 'globalInstructions');
     finish(source);
     field(observed('', 0));
+    assert.ok(out.frame.state.global.command, 'available global source must initialize the editor');
+    assert.ok(
+      out.frame.state.global.command.edit.text === initialContent,
+      'initial global reset must retain every source byte',
+    );
     ack(1);
     const reply = (
       kind,
@@ -496,10 +501,11 @@ for (const target of ['tui']) {
   };
 
   test(`Assistant ${target} global instructions save exact source bytes and preserve unrelated preferences`, async () => {
-    const f = await globalFixture();
+    const original = 'Original global first\n' + '中😀 '.repeat(140_000) + '\nOriginal global last';
+    const f = await globalFixture(original);
     const preferences = structuredClone(f.out.frame.state.fields);
-    const content = 'Global start 中文\n' + '中'.repeat(13_650) + '\nGlobal end 😀';
-    assert.ok(Buffer.byteLength(content) > 32 * 1024 && Buffer.byteLength(content) < 64 * 1024);
+    const content = 'Global start 中文\n' + '中'.repeat(400_000) + '\nGlobal end 😀';
+    assert.ok(Buffer.byteLength(content) > 1024 * 1024);
     const draft = f.observed(content, 2);
     f.field(draft);
     f.raw('global-save');
@@ -620,12 +626,8 @@ for (const target of ['tui']) {
     assert.equal(f.out.frame.state.global.ready, true);
   });
 
-  test(`Assistant ${target} rejects oversized and stale global drafts without truncation`, async () => {
+  test(`Assistant ${target} rejects stale global drafts without truncation`, async () => {
     const f = await globalFixture();
-    f.field(f.observed('中'.repeat(22000), 2));
-    f.raw('global-save');
-    assert.equal(f.out.actions.length, 0);
-    assert.equal(f.out.frame.state.global.notice, 'assistant-global-limit');
     const draft = f.observed('first', 3);
     f.field(draft);
     f.raw('global-save');

@@ -254,13 +254,6 @@ impl maka_capabilities::call::ReadResource for Snapshot {
         json!({"owner":self.owner,"revision":self.revision,"bytes":self.text.len()})
     }
     fn read(&self, range: Range<usize>) -> Result<Vec<u8>, String> {
-        if range
-            .end
-            .checked_sub(range.start)
-            .is_none_or(|n| n > 64 * 1024)
-        {
-            return Err("invalid text range or chunk exceeds 64 KiB".into());
-        }
         self.text
             .get(range)
             .map(|text| text.as_bytes().to_vec())
@@ -321,11 +314,8 @@ mod tests {
     }
 
     #[test]
-    fn initialization_chunks_keep_one_native_owner_and_reject_stale_or_over_budget_append() {
-        let mut owner = Owner::new(
-            Editor::bounded(maka_ui_runtime::textarea::MAX_BUFFER_BYTES, "too-large"),
-            "",
-        );
+    fn initialization_keeps_one_native_owner_and_rejects_stale_append() {
+        let mut owner = Owner::new(Editor::default(), "");
         let identity = owner.id.clone();
         let chunk = "中🌟".repeat(9000);
         for sequence in 1..=8 {
@@ -383,10 +373,8 @@ mod tests {
         });
         assert_eq!(
             owner.receipt.as_ref().unwrap().outcome,
-            EditorOutcome::Conflict {
-                reason: EditorConflict::Representation
-            }
+            EditorOutcome::Applied
         );
-        assert_eq!(owner.editor.text(), before);
+        assert!(owner.editor.text() == format!("{before}{}", "x".repeat(65537)));
     }
 }

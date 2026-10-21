@@ -56,6 +56,21 @@ impl Handler for Probe {
         Box::pin(async move {
             calls.fetch_add(1, Ordering::SeqCst);
             let resource = &context.attachments()["text"];
+            if input == "whole" {
+                let empty_valid = resource.read(0..0)?.is_empty();
+                let split_rejected = resource.read(1..2).is_err();
+                let empty_split_rejected = resource.read(1..1).is_err();
+                let outside_rejected = resource.read(0..resource.bytes() + 1).is_err();
+                let text = String::from_utf8(resource.read(0..resource.bytes())?)
+                    .map_err(|error| error.to_string())?;
+                return Ok(json!(serde_json::to_string(&json!({
+                    "metadata":resource.metadata(), "length":resource.bytes(),
+                    "encoding":resource.encoding(), "identity":context.scope().identity,
+                    "emptyValid":empty_valid, "splitRejected":split_rejected,
+                    "emptySplitRejected":empty_split_rejected, "outsideRejected":outside_rejected,
+                    "text":text,
+                })).unwrap()));
+            }
             let snapshot = json!({"metadata":resource.metadata(), "length":resource.bytes(), "encoding":resource.encoding(),
                 "first":resource.read(0..resource.bytes().min(8))?, "splitRejected":resource.read(1..2).is_err(),
                 "emptySplitRejected":resource.read(1..1).is_err()});
@@ -167,6 +182,67 @@ impl Fixture {
 }
 fn observation(value: Value) -> Value {
     serde_json::from_str(value.as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn frozen_utf8_whole_read_retains_admitted_bytes_and_original_scope() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let f = Fixture::new(MethodMode::Query).await;
+        let text = format!("{}\nK115 original final marker", "中🦀a".repeat(150_000));
+        let metadata = json!({"owner":"original K115 editor","revision":73,"bytes":text.len()});
+        let (source, mut capture) =
+            f.capture(text.len() as u64, metadata.clone(), ResourceEncoding::Utf8);
+        let identity = serde_json::to_value(&source.identity).unwrap();
+        // Ingress still uses its real bounded contiguous transfer frames. A
+        // complete immutable resource can then service one whole local read.
+        for (index, chunk) in text.as_bytes().chunks(RESOURCE_CHUNK_LIMIT).enumerate() {
+            capture
+                .write("text", (index * RESOURCE_CHUNK_LIMIT) as u64, chunk)
+                .unwrap();
+        }
+        let completion = f
+            .client
+            .start(
+                f.binding.clone(),
+                "echo".into(),
+                json!("whole"),
+                source.clone(),
+                capture.finish().unwrap(),
+            )
+            .await
+            .unwrap()
+            .completion()
+            .await;
+        let settled = source.finish().await;
+        f.app.shutdown().await.unwrap();
+
+        completion.cleanup.unwrap();
+        settled.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        assert!(text.len() > 1024 * 1024);
+        let result = completion
+            .result
+            .unwrap_or_else(|error| panic!("whole admitted UTF-8 read failed: {error}"));
+        let value = observation(result);
+        assert_eq!(value["metadata"], metadata);
+        assert_eq!(value["identity"], identity);
+        assert_eq!(value["length"], text.len());
+        assert_eq!(value["encoding"], "utf8");
+        for flag in [
+            "emptyValid",
+            "splitRejected",
+            "emptySplitRejected",
+            "outsideRejected",
+        ] {
+            assert_eq!(value[flag], true, "original UTF-8 range invariant: {flag}");
+        }
+        assert!(
+            value["text"].as_str() == Some(text.as_str()),
+            "whole local read changed original multibyte bytes"
+        );
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

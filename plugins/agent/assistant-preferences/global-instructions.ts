@@ -195,7 +195,7 @@ export function globalInstructionsEvent(
     } else if (r.kind === 'read') {
       const view =
         result.status === 'succeeded' ? (result.value as AgentGlobalInstructionsView) : null;
-      if (view?.kind !== 'available' || new TextEncoder().encode(view.content).length > 65536) {
+      if (view?.kind !== 'available') {
         state.saved = null;
         state.ready = false;
         state.notice = 'assistant-global-unavailable';
@@ -215,8 +215,7 @@ export function globalInstructionsEvent(
         !state.saved ||
         !sameValue(chunk.metadata, r.observed.snapshot.text) ||
         !sameValue(state.observation?.snapshot.text, r.observed.snapshot.text) ||
-        new TextEncoder().encode(chunk.text).length !== r.observed.snapshot.text.bytes ||
-        r.observed.snapshot.text.bytes > 65536
+        new TextEncoder().encode(chunk.text).length !== r.observed.snapshot.text.bytes
       ) {
         state.notice = 'assistant-invalid';
         return;
@@ -261,10 +260,6 @@ export function globalInstructionsEvent(
       ) {
         const observed = state.observation;
         if (!observed || observed.snapshot.marked) return;
-        if (observed.snapshot.text.bytes > 65536) {
-          state.notice = 'assistant-global-limit';
-          return;
-        }
         request(
           state,
           actions,

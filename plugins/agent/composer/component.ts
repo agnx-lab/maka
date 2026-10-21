@@ -817,8 +817,7 @@ export function composer<N extends Node>(
                 Number.isSafeInteger(metadata.revision) &&
                 metadata.revision >= 0 &&
                 Number.isSafeInteger(metadata.bytes) &&
-                metadata.bytes >= 0 &&
-                metadata.bytes <= 65536
+                metadata.bytes >= 0
               ) {
                 const submission = delivery.submission;
                 submission.draft = { revision: metadata.revision, snapshot: { text: metadata } };

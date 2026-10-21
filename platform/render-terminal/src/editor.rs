@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded, grapheme-aware native editor. Inspired by grok-build's separation of byte
+//! Grapheme-aware native editor. Inspired by grok-build's separation of byte
 //! editing and display geometry; implemented here against Ratatui 0.30.
 //! No Host state or submission authority belongs in this widget.
 pub(crate) mod layout;
@@ -52,7 +52,7 @@ pub(crate) struct PasteTarget {
     selection: Selection,
 }
 
-const MAX_TEXT_BYTES: usize = 256 * 1024;
+// Evict older history first; the latest edit remains undoable even above this target.
 const MAX_HISTORY_BYTES: usize = 1024 * 1024;
 const MAX_HISTORY_EDITS: usize = 128;
 
@@ -88,7 +88,7 @@ struct LayoutCache {
 
 pub struct Editor {
     revision: u64,
-    byte_limit: usize,
+    byte_limit: Option<usize>,
     limit_error: &'static str,
     text: String,
     inline_tokens: Vec<String>,
@@ -114,7 +114,7 @@ impl Default for Editor {
         let layout = Arc::new(Layout::new("", 1));
         Self {
             revision: 0,
-            byte_limit: MAX_TEXT_BYTES,
+            byte_limit: None,
             limit_error: "composer-too-large",
             text: String::new(),
             inline_tokens: Vec::new(),
@@ -142,7 +142,7 @@ impl Default for Editor {
 impl Editor {
     pub fn bounded(byte_limit: usize, limit_error: &'static str) -> Self {
         Self {
-            byte_limit,
+            byte_limit: Some(byte_limit),
             limit_error,
             ..Self::default()
         }
@@ -219,7 +219,7 @@ impl Editor {
         self.single_line && self.masked
     }
     pub(crate) fn accepts_text(&self, text: &str) -> bool {
-        text.len() <= self.byte_limit
+        self.byte_limit.is_none_or(|limit| text.len() <= limit)
             && !text
                 .chars()
                 .any(|c| c.is_control() && (self.single_line || !matches!(c, '\n' | '\t')))
@@ -237,12 +237,16 @@ impl Editor {
         }
     }
     pub(crate) fn paste_at(&mut self, target: PasteTarget, text: &str) -> bool {
-        if self.revision != target.revision || text.len() > self.byte_limit {
+        if self.revision != target.revision
+            || self.byte_limit.is_some_and(|limit| text.len() > limit)
+        {
             return false;
         }
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         if !self.accepts_text(&text)
-            || self.text.len() - target.selection.range().len() + text.len() > self.byte_limit
+            || self.byte_limit.is_some_and(|limit| {
+                self.text.len() - target.selection.range().len() + text.len() > limit
+            })
         {
             return false;
         }
@@ -301,7 +305,7 @@ impl Editor {
 
     /// Rows the text wraps to at `width`, without changing admitted input geometry.
     pub fn rows(&self, width: u16) -> u16 {
-        self.retained_layout(width).rows.len().max(1) as u16
+        u16::try_from(self.retained_layout(width).rows.len().max(1)).unwrap_or(u16::MAX)
     }
 
     pub fn invalidate_geometry(&mut self) {
@@ -375,7 +379,7 @@ impl Editor {
             self.error = Some("input-control");
             return true;
         }
-        if text.len() > self.byte_limit {
+        if self.byte_limit.is_some_and(|limit| text.len() > limit) {
             self.error = Some(self.limit_error);
             return true;
         }
@@ -388,7 +392,10 @@ impl Editor {
         }
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let range = self.atomic_range(self.selection.range());
-        if self.text.len() - range.len() + text.len() > self.byte_limit {
+        if self
+            .byte_limit
+            .is_some_and(|limit| self.text.len() - range.len() + text.len() > limit)
+        {
             self.error = Some(self.limit_error);
             return true;
         }
@@ -445,7 +452,9 @@ impl Editor {
     }
 
     fn trim_history(&mut self) {
-        while self.history_bytes > MAX_HISTORY_BYTES || self.undo.len() > MAX_HISTORY_EDITS {
+        while self.undo.len() > 1
+            && (self.history_bytes > MAX_HISTORY_BYTES || self.undo.len() > MAX_HISTORY_EDITS)
+        {
             if let Some(edit) = self.undo.pop_front() {
                 self.history_bytes -= edit.bytes();
             }
@@ -850,7 +859,8 @@ mod tests {
 
     #[test]
     fn paste_is_atomic_bounded_and_controls_never_reach_the_terminal() {
-        let mut editor = Editor::default();
+        let limit = 256 * 1024;
+        let mut editor = Editor::bounded(limit, "composer-too-large");
         let paste = "中文👩🏽‍💻\tcode\r\n".repeat(4096);
         assert!(paste.len() >= 100 * 1024);
         editor.insert(&paste);
@@ -863,7 +873,7 @@ mod tests {
         editor.insert("\u{1b}[2J");
         assert_eq!(editor.text(), before);
         assert_eq!(editor.error, Some("composer-control"));
-        editor.insert(&"a".repeat(MAX_TEXT_BYTES + 1));
+        editor.insert(&"a".repeat(limit + 1));
         assert_eq!(editor.text(), before);
         assert_eq!(editor.error, Some("composer-too-large"));
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();

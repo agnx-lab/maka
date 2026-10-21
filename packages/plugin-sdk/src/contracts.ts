@@ -3782,7 +3782,6 @@ export const contracts = {
           },
           initialText: {
             type: 'string',
-            maxLength: 65536,
             default: '',
           },
           placeholder: {
@@ -4475,7 +4474,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -4483,7 +4482,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4498,7 +4496,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4513,7 +4510,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -4525,12 +4521,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6056,7 +6051,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -6064,7 +6059,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6079,7 +6073,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6094,7 +6087,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6106,12 +6098,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6938,7 +6929,7 @@ export const contracts = {
             oneOf: [
               {
                 description:
-                  'Replace a bounded UTF-16 range in the current revision, preserving its suffix.',
+                  'Replace a UTF-16 range in the current revision, preserving its suffix.',
                 type: 'object',
                 properties: {
                   range: {
@@ -6946,7 +6937,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6961,7 +6951,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6976,7 +6965,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -6988,12 +6976,11 @@ export const contracts = {
               },
               {
                 description:
-                  'Continue initialization after Reset, without creating undo history.\nEach chunk is bounded; the same native owner retains the full buffer.',
+                  'Continue initialization after Reset, without creating undo history.\nThe same native owner retains the complete buffer.',
                 type: 'object',
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',

@@ -44,7 +44,8 @@ pub enum ResourceEncoding {
 
 /// Trusted immutable payload. Its owner must not retain a native UI entity,
 /// live input, mount lease or a writable buffer. Descriptors remain immutable.
-/// Reads use byte ranges; text implementations check UTF-8 boundaries and chunk limits.
+/// Reads use in-bounds byte ranges; text implementations check UTF-8 boundaries.
+/// Transport adapters apply their own framing limits.
 pub trait ReadResource: Send + Sync + 'static {
     fn encoding(&self) -> ResourceEncoding {
         ResourceEncoding::Bytes

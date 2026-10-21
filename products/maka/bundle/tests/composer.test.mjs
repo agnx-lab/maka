@@ -314,14 +314,23 @@ for (const target of ['tui']) {
     assert.equal(c.state.entries[0].notice, 'draftKept');
     assert.deepEqual(c.out.actions, [], 'recovery and clearing never replay a mutation');
   });
-  test(`${target} sends a 64 KiB Unicode snapshot intact and keeps rejected text editable`, async () => {
-    const text = '🙂'.repeat(16384),
+  test(`${target} send button and native submission preserve a 600 KiB Unicode draft`, async () => {
+    const text = '🙂'.repeat(153600),
       c = await client(target);
     c.ready(text);
-    c.emit('submitted', observed(text));
-    assert.deepEqual(c.out.actions[0].input, { start: 0, end: 65536 });
+    c.raw('send');
+    assert.deepEqual(c.out.actions[0].input, { start: 0, end: 0 });
+    assert.deepEqual(c.out.actions[0].resources.text.input, { kind: 'current' });
+    c.reply({ status: 'succeeded', value: { metadata: observed(text).snapshot.text, text: '' } });
+    assert.equal(c.out.actions.length, 1, 'Send must read the full current draft');
+    assert.deepEqual(c.out.actions[0].input, { start: 0, end: 614400 });
+    assert.deepEqual(c.out.actions[0].resources.text.input, {
+      kind: 'at_revision',
+      owner: 'editor',
+      revision: 1,
+    });
     c.reply({ status: 'succeeded', value: { metadata: observed(text).snapshot.text, text } });
-    assert.equal(c.out.actions[0].input.message, text);
+    assert.ok(c.out.actions[0].input.message === text, 'Send must preserve every Unicode byte');
     c.reply({
       status: 'operation',
       caller,
@@ -333,6 +342,7 @@ for (const target of ['tui']) {
     assert.equal(c.out.events[0].value.status, 'removed');
     c.emit('submitted', observed(text));
     assert.equal(c.out.actions[0].binding, 'reader');
+    assert.deepEqual(c.out.actions[0].input, { start: 0, end: 614400 });
     c.reply({ status: 'failed', reason: 'capture retired' });
     assert.equal(c.state.entries[0].notice, 'draftKept');
     const ime = observed(text);

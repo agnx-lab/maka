@@ -114,15 +114,11 @@ fn admit_clipboard_files(
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 pub(super) fn read_text(budget: &NativeBudget) -> Result<Content, FileError> {
     use clipboard_rs::{Clipboard, ClipboardContext};
-    let mut memory = budget.reserve(Kind::Encoded, maka_ui_runtime::textarea::MAX_BUFFER_BYTES)?;
     let clipboard = ClipboardContext::new().map_err(|_| FileError::ClipboardUnavailable)?;
     let value = clipboard
         .get_text()
         .map_err(|_| FileError::ClipboardUnavailable)?;
-    if value.capacity() > maka_ui_runtime::textarea::MAX_BUFFER_BYTES {
-        return Err(FileError::LimitExceeded);
-    }
-    memory.shrink_to(value.capacity());
+    let memory = budget.reserve(Kind::Encoded, value.capacity())?;
     Ok(Content::Text(Text {
         value,
         _memory: memory,
@@ -166,15 +162,10 @@ pub(super) fn read(allow_files: bool, budget: &NativeBudget) -> Result<Content, 
         return Ok(Content::Image(image));
     }
     if clipboard.has(ContentFormat::Text) {
-        let mut memory =
-            budget.reserve(Kind::Encoded, maka_ui_runtime::textarea::MAX_BUFFER_BYTES)?;
         let value = clipboard
             .get_text()
             .map_err(|_| FileError::ClipboardUnavailable)?;
-        if value.capacity() > maka_ui_runtime::textarea::MAX_BUFFER_BYTES {
-            return Err(FileError::LimitExceeded);
-        }
-        memory.shrink_to(value.capacity());
+        let memory = budget.reserve(Kind::Encoded, value.capacity())?;
         return Ok(Content::Text(Text {
             value,
             _memory: memory,
