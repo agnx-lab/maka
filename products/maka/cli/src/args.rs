@@ -43,7 +43,7 @@ enum Command {
     /// Open the desktop shell connected to a business Host Root.
     Desktop(crate::desktop::Args),
     /// Open the NSH terminal shell (connects to or starts the selected Host).
-    TerminalShell(crate::terminal_shell::Args),
+    TerminalShell(maka_terminal_shell::entry::Args),
     /// Author, inspect and run plugin applications.
     #[command(subcommand)]
     Application(crate::application::Command),
@@ -138,6 +138,10 @@ struct Log {
 }
 
 impl Cli {
+    pub(super) fn is_terminal_shell(&self) -> bool {
+        matches!(self.command, Some(Command::TerminalShell(_)))
+    }
+
     pub(super) fn logs_to_stderr(&self) -> bool {
         // Interactive products own the terminal; only headless roles write logs
         // to stderr. Libraries never install a process-global subscriber.
@@ -205,7 +209,7 @@ impl Cli {
         };
         let result = match command {
             Command::Desktop(args) => return args.run().await,
-            Command::TerminalShell(args) => return args.run(),
+            Command::TerminalShell(args) => args.run().await.map_err(Into::into),
             Command::Application(args) => args.run().await,
             Command::Sandbox(args) => return args.run(self.timeout_ms).await,
             Command::Host(HostCommand::Fetch(args)) => args.run().await,

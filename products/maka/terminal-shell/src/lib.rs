@@ -20,6 +20,7 @@
 //! Maka's first-party terminal application, using NSH and public Host services.
 
 pub mod bindings;
+pub mod entry;
 pub mod markdown;
 pub mod terminal;
 

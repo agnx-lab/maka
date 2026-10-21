@@ -19,74 +19,35 @@
 
 //! Runs the NSH application against one launcher-selected public Host.
 
-use clap::Parser;
+use crate::{APPLICATION, bindings::Bindings, terminal};
 use maka_app_client::{Client, Journal};
 use maka_event_log::root;
 use maka_host_runtime::application::host::startup;
 use maka_plugin_core::operation::receipt_reader_contract;
-use maka_terminal_shell::{APPLICATION, bindings::Bindings, terminal};
 use nsh_core::{
     Points, Size,
     platform::{Environment, Idiom, Renderer},
 };
 use nsh_engine::{Bundle, EngineConfig, Limits, Policy};
 use std::{
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal},
     path::PathBuf,
-    process::ExitCode,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-#[derive(Parser)]
-#[command(
-    name = "maka-terminal-shell",
-    version,
-    about = "Maka terminal application using NSH"
-)]
-struct Args {
+/// Options shared with the `maka terminal-shell` command.
+#[derive(clap::Args)]
+#[command(version, about = "Maka terminal application using NSH")]
+pub struct Args {
     /// Business Host Root (default: ~/.maka/application/host).
     #[arg(long)]
     root: Option<PathBuf>,
     /// Existing Agent session to display initially; otherwise open the session picker.
     #[arg(long)]
     session: Option<String>,
-}
-
-fn main() -> ExitCode {
-    let args = Args::parse();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build();
-    let result = match runtime {
-        Ok(runtime) => runtime.block_on(args.run()),
-        Err(error) => Err(format!("runtime startup: {error}")),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            report(error);
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn report(error: String) {
-    let (sent, received) = std::sync::mpsc::sync_channel(1);
-    if std::thread::Builder::new()
-        .name("maka-terminal-diagnostic".into())
-        .spawn(move || {
-            let result = writeln!(io::stderr().lock(), "maka-terminal-shell: {error}");
-            let _ = sent.send(result);
-        })
-        .is_ok()
-    {
-        // stderr can share the same blocked terminal as stdout. Diagnostic
-        // delivery must not hold the already closed client scope alive.
-        let _ = received.recv_timeout(std::time::Duration::from_millis(100));
-    }
 }
 
 impl Args {
@@ -104,7 +65,9 @@ impl Args {
         Ok(home.join(".maka/application/host"))
     }
 
-    async fn run(self) -> Result<(), String> {
+    /// Runs against the selected public Host using the caller's Tokio runtime.
+    /// Host cleanup completes before an error is returned to the caller.
+    pub async fn run(self) -> Result<(), String> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err("the terminal shell requires a terminal on stdin and stdout".into());
         }
@@ -119,9 +82,7 @@ impl Args {
         // Install before opening any Host session or entering terminal modes.
         let mut signals = Signals::watch(stop.clone()).map_err(|error| error.to_string())?;
         let path = self.root_path()?;
-        let launcher = std::env::current_exe()
-            .map_err(|error| error.to_string())?
-            .with_file_name(if cfg!(windows) { "maka.exe" } else { "maka" });
+        let launcher = std::env::current_exe().map_err(|error| error.to_string())?;
         let mut native = tokio::select! {
             result = startup::connect_root(&launcher, &path) => result?,
             _ = &mut signals.0 => return Ok(()),
@@ -176,10 +137,7 @@ impl Args {
     }
 }
 
-fn configuration(
-    registry: nsh_core::ui::Registry,
-    runtime: tokio::runtime::Handle,
-) -> EngineConfig {
+fn configuration(registry: nsh_core::ui::Registry, runtime: tokio::runtime::Handle) -> EngineConfig {
     let viewport = Size::new(Points(960.0), Points(640.0));
     let mut capabilities = nsh_core::access::Capabilities::default();
     capabilities.clipboard = true;
@@ -201,11 +159,7 @@ fn configuration(
         // APPLICATION is compiled into this trusted executable; only the
         // interpreter stack is bounded, as for other standalone NSH apps.
         limits: Limits::standalone(),
-        ui_sets: vec![
-            nsh_base::registry(),
-            registry,
-            maka_terminal_shell::markdown::registry(),
-        ],
+        ui_sets: vec![nsh_base::registry(), registry, crate::markdown::registry()],
         runtime: Some(runtime),
         ..EngineConfig::new(app)
     }
@@ -239,12 +193,21 @@ impl Drop for Signals {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: Args,
+    }
 
     #[test]
     fn optional_root_selects_the_default_host_and_preserves_explicit_paths() {
         const CHILD: &str = "MAKA_TERMINAL_DEFAULT_ROOT_TEST";
         if std::env::var_os(CHILD).is_some() {
-            let select = |args: &[&str]| Args::try_parse_from(args).unwrap().root_path().unwrap();
+            let select = |args: &[&str]| {
+                Command::try_parse_from(args).unwrap().args.root_path().unwrap()
+            };
             assert_eq!(
                 select(&["maka-terminal-shell"]),
                 PathBuf::from("/isolated-maka-home/.maka/application/host")
@@ -263,7 +226,7 @@ mod tests {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "tests::optional_root_selects_the_default_host_and_preserves_explicit_paths",
+                "entry::tests::optional_root_selects_the_default_host_and_preserves_explicit_paths",
             ])
             .env(CHILD, "1")
             .env("HOME", "/isolated-maka-home")
@@ -271,7 +234,8 @@ mod tests {
             .output()
             .unwrap();
         assert!(
-            output.status.success(),
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)

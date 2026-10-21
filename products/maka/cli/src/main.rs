@@ -36,7 +36,6 @@ mod sandbox;
 mod serve;
 mod signals;
 mod startup;
-mod terminal_shell;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
@@ -157,7 +156,11 @@ fn main() -> std::process::ExitCode {
     {
         Ok(runtime) => runtime.block_on(run(cli)),
         Err(error) => {
-            eprintln!("runtime startup: {error}");
+            if cli.is_terminal_shell() {
+                report_terminal_error(format!("runtime startup: {error}"));
+            } else {
+                eprintln!("runtime startup: {error}");
+            }
             std::process::ExitCode::FAILURE
         }
     }
@@ -202,12 +205,35 @@ fn sandbox_helper(role: &str) -> std::io::Result<()> {
         })
 }
 
+fn report_terminal_error(error: String) {
+    use std::io::Write;
+
+    let (sent, received) = std::sync::mpsc::sync_channel(1);
+    if std::thread::Builder::new()
+        .name("maka-terminal-diagnostic".into())
+        .spawn(move || {
+            let result = writeln!(std::io::stderr().lock(), "maka terminal-shell: {error}");
+            let _ = sent.send(result);
+        })
+        .is_ok()
+    {
+        // stderr can share the same blocked terminal as stdout. Diagnostic
+        // delivery must not hold the already closed client scope alive.
+        let _ = received.recv_timeout(std::time::Duration::from_millis(100));
+    }
+}
+
 async fn run(cli: args::Cli) -> std::process::ExitCode {
     let error_exit = cli.error_exit_code();
+    let terminal = cli.is_terminal_shell();
     let result = cli.run().await;
     match result {
         Err(error) => {
-            eprintln!("{error}");
+            if terminal {
+                report_terminal_error(error.to_string());
+            } else {
+                eprintln!("{error}");
+            }
             // Let Tokio wait for accepted blocking work to finish before the OS
             // releases its leases. A reported timeout does not cancel that work.
             std::process::ExitCode::from(error_exit)
