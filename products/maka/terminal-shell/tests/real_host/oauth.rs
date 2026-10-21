@@ -169,7 +169,7 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         view.set_host_services(Some(clipboard.clone())).unwrap();
         activate(&mut view, "Choose model and effort").await;
         activate(&mut view, "Use fixture-model · NSH fixture").await;
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model · Default")).await;
         tab_to_label(&mut view, "Message composer").await;
         editable(&mut view, "Message composer").await;
         let draft = "OAuth keeps this exact composer draft 你好";
@@ -237,13 +237,14 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         assert_eq!(client.query("settings", "connections", json!({"kind":"start"})).await.unwrap(), catalog);
         assert_eq!(client.query("settings", "credentialStatus", credential_input).await.unwrap(), credential);
         activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Refresh connections") && screen.contains("Close · Esc") && !screen.contains("Connection name")).await;
+        wait_view(&mut view, |screen| screen.contains("Refresh connections") && screen.contains("Close") && !screen.contains("Connection name")).await;
         activate(&mut view, "Back from connection settings").await;
         editable(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(draft));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 0);
+        support::wait_enabled_button(&mut view, "Send message").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         let mut request = fixture.next_request().await;
         assert_eq!(request.body["model"], "fixture-model");
@@ -251,7 +252,7 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         request.delta("OAUTH_CANCEL_SINGLE_SEND_DONE").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        wait_view(&mut view, |screen| screen.contains("OAUTH_CANCEL_SINGLE_SEND_DONE") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("OAUTH_CANCEL_SINGLE_SEND_DONE")).await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 0);
         drop(view);

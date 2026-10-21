@@ -57,8 +57,9 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         fixture.seed_history(1).await;
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        wait_view(&mut view, |screen| screen.contains("Enter sends") && screen.contains("NSH real Agent")).await;
+        wait_view(&mut view, |screen| screen.contains("NSH real Agent")).await;
         tab_to_label(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         view.handle_event(Event::Paste("Original draft stays with its owner".into()));
         support::wait_draft(&client, &fixture.session, "Original draft stays with its owner").await;
 
@@ -103,14 +104,14 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         wait_view(&mut view, |screen| !screen.contains("Conversation actions")).await;
         support::click_label(&mut view, "Show active conversations");
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("This conversation is archived.") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| !screen.contains("This conversation is archived.")).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["session"]["archived"], false);
 
         actions(&mut view, "Renamed original").await;
         support::click_label(&mut view, "Fork conversation");
         fill_title(&mut view, "Independent fork").await;
         activate(&mut view, "Create conversation fork").await;
-        wait_view(&mut view, |screen| screen.contains("Independent fork") && !screen.contains("Fork conversation") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("Independent fork") && !screen.contains("Fork conversation")).await;
         let listed = client.query("agent", "list", json!({"filter":"all","scope":{"kind":"all"},"titleQuery":"Independent fork","position":{"kind":"start"}})).await.unwrap();
         assert_eq!(listed["sessions"].as_array().unwrap().len(), 1);
         let fork = &listed["sessions"][0];
@@ -121,14 +122,16 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         let history = client.query("agent", "history", json!({"sessionId":fork_id,"through":fork_observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         assert!(history.to_string().contains("History question 00"), "the fork must copy the real original history: {history}");
         tab_to_label(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
         view.handle_event(Event::Paste("Independent fork draft".into()));
         support::wait_draft(&client, &fork_id, "Independent fork draft").await;
         shortcut(&mut view, 'o');
         wait_enabled_node(&mut view, "Open conversation Renamed original").await;
         support::click_label(&mut view, "Open conversation Renamed original");
-        wait_view(&mut view, |screen| screen.contains("Original draft stays with its owner") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("Original draft stays with its owner")).await;
         tab_to_label(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Original draft stays with its owner"));
 
         shortcut(&mut view, 'o');

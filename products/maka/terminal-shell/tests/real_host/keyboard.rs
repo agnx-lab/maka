@@ -25,26 +25,20 @@ async fn escape_stops_each_current_execution_after_its_scoped_binding_is_refresh
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
         support::click_button(&mut view, "Choose model and effort").await;
         wait_view(&mut view, |screen| {
             screen.contains("Search models…") && !screen.contains("Loading…")
         })
         .await;
         support::click_button(&mut view, "Use fixture-model · NSH fixture").await;
-        wait_view(&mut view, |screen| {
-            screen.contains("fixture-model · Default · Ctrl+G")
-                && screen.contains("Enter sends")
-                && !screen.contains("Close · Esc")
-                && !screen.contains("Back · Esc")
-        })
-        .await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model · Default")).await;
         let mut previous = None;
         for message in ["FIRST_ESC_RUN", "SECOND_ESC_RUN"] {
             tab_to_label(&mut view, "Message composer").await;
+            wait_editable_composer(&mut view).await;
             view.handle_event(Event::Paste(message.into()));
             support::wait_draft(&client, &fixture.session, message).await;
-            wait_enabled_node(&mut view, "Send message").await;
+            support::wait_enabled_button(&mut view, "Send message").await;
             view.handle_event(Event::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::NONE,

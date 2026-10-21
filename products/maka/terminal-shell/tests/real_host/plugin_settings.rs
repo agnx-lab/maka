@@ -108,7 +108,7 @@ async fn plugin_settings_use_real_host_inventory_cas_configuration_and_enablemen
         let client = fixture.client().await;
         client.save_draft("agent", &fixture.session, EDITOR, None, "PLUGIN_SETTINGS_ORIGINAL_DRAFT".into()).await.unwrap();
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        wait_view(&mut view, |screen| screen.contains("PLUGIN_SETTINGS_ORIGINAL_DRAFT") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("PLUGIN_SETTINGS_ORIGINAL_DRAFT")).await;
         support::click_button(&mut view, "Connections & models").await;
         activate(&mut view, "Settings section Plugins").await;
         wait_enabled_node(&mut view, "Search Host plugins").await;
@@ -155,8 +155,9 @@ async fn plugin_settings_use_real_host_inventory_cas_configuration_and_enablemen
         tab_to_label(&mut view, "Search Host plugins").await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("optional-agent-2"), "returning to the plugin list must retain its search filter");
         activate(&mut view, "Back from plugins settings").await;
-        wait_view(&mut view, |screen| screen.contains("PLUGIN_SETTINGS_ORIGINAL_DRAFT") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("PLUGIN_SETTINGS_ORIGINAL_DRAFT")).await;
         tab_to_label(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("PLUGIN_SETTINGS_ORIGINAL_DRAFT"));
         support::wait_draft(&client, &fixture.session, "PLUGIN_SETTINGS_ORIGINAL_DRAFT").await;
         assert!(client.pending_settings().await.unwrap().is_empty());

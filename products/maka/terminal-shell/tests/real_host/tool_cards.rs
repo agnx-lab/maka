@@ -49,7 +49,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
 
         let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+        wait_enabled_node(&mut view, "Turn activity").await;
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;
@@ -63,11 +63,13 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         // Large originals scroll inside the card while its disclosure and
         // original-details action remain visible in the turn's own viewport.
         support::scroll_snapshot_text(&mut view, &readable, "起点_原始", MouseEventKind::ScrollDown);
-        wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument") && screen.contains("Original details") && !screen.contains("起点_原始")).await;
+        wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && screen.contains("Original details") && !screen.contains("起点_原始")).await;
+        assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Tool details").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
         let tail = wait_view(&mut view, |screen| screen.contains("终点_原始")).await;
-        assert!(tail.contains("v WorkspaceDocument") && tail.contains("Original details"));
+        assert!(tail.contains("WorkspaceDocument") && tail.contains("Original details"));
+        assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-local-scroll-tail", &tail);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Read lines") && screen.contains("起点_原始")).await;
@@ -82,10 +84,12 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.resize(80, 24);
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument")).await;
+        wait_view(&mut view, |screen| screen.contains("WorkspaceDocument")).await;
+        assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Toggle tool WorkspaceDocument").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        let collapsed = wait_view(&mut view, |screen| screen.contains("> WorkspaceDocument") && !screen.contains("Original result")).await;
+        let collapsed = wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && !screen.contains("Original result")).await;
+        assert!(!support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-narrow-collapsed", &collapsed);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Original result")).await;
@@ -100,7 +104,8 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         let wide = wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("Read lines") && screen.contains("起点_原始")).await;
         support::scroll_snapshot_text(&mut view, &wide, "起点_原始", MouseEventKind::ScrollDown);
-        let reading = wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument") && screen.contains("↓ Latest") && !screen.contains("起点_原始")).await;
+        let reading = wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && screen.contains("↓ Latest") && !screen.contains("起点_原始")).await;
+        assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         let numbered_source = original.lines().enumerate()
             .map(|(index, line)| format!("{} │ {line}", index + 1)).collect::<Vec<_>>();
         // Keep exact source glyphs and screen coordinates. The enclosing
@@ -117,14 +122,15 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         continuation.thinking("INNER_STREAM_A").await;
         let anchored = wait_view(&mut view, |screen| screen.contains("Analyzing the request") && screen.contains("INNER_STREAM_A")).await;
         assert_eq!(visible_source(&anchored), anchor, "new same-group reasoning moved the original tool reader:\n{anchored}");
-        assert!(anchored.contains("v WorkspaceDocument") && anchored.contains("Original details"));
+        assert!(anchored.contains("WorkspaceDocument") && anchored.contains("Original details"));
+        assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-stream-keeps-local-position", &anchored);
 
         // Return through the real control, expand the actual new reasoning
         // source, then explicitly resume following before its height grows.
         support::click_button(&mut view, "Return to latest").await;
-        wait_view(&mut view, |screen| screen.contains("◇ Think · INNER_STREAM_A")).await;
-        support::click_text(&mut view, "◇ Think");
+        wait_view(&mut view, |screen| screen.contains("Thinking · INNER_STREAM_A")).await;
+        support::click_button(&mut view, "Thinking · INNER_STREAM_A").await;
         wait_enabled_node(&mut view, "INNER_STREAM_A").await;
         support::click_button(&mut view, "Return to latest").await;
         wait_focused_input(&mut view, "Message composer").await;
@@ -186,7 +192,7 @@ async fn tool_cards_show_recorded_search_changes_and_business_failures_without_i
             std::fs::write(&path, "LATER_WORKSPACE_CONTENT").unwrap();
             let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
             view.resize(120, 40);
-            wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+            wait_enabled_node(&mut view, "Turn activity").await;
             support::focus_activity(&mut view).await;
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
             support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;

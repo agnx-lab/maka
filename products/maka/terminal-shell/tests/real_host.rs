@@ -141,10 +141,11 @@ async fn wait_focused_input(view: &mut AppView, label: &str) {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             support::tick(view);
-            if view
-                .accessibility_snapshot()
-                .iter()
-                .any(|node| node.focused && node.label == label)
+            if view.surface().input_context().is_some_and(|input| {
+                view.accessibility_snapshot().iter().any(|node| {
+                    node.id == input.node && node.focused && node.label == label
+                })
+            })
             {
                 break;
             }
@@ -155,28 +156,35 @@ async fn wait_focused_input(view: &mut AppView, label: &str) {
     .unwrap_or_else(|_| panic!("the native Input {label:?} did not receive focus"));
 }
 
+async fn wait_editable_composer(view: &mut AppView) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            view.poll().unwrap();
+            support::tick(view);
+            if let Some(input) = view.surface().input_context()
+                && input.editable
+                && view.accessibility_snapshot().iter().any(|node| {
+                    node.id == input.node && node.focused && node.label == "Message composer"
+                })
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the original native message composer did not become editable and focused");
+}
+
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
-    let ready_marker = if placeholder == "Search models…" {
-        "Enter selects · Tab moves · Esc back"
-    } else if placeholder == "Search workspaces…" {
-        "Enter opens · Ctrl+Enter uses folder · Alt+↑ parent · Esc closes"
-    } else if placeholder == "Search sessions…" {
-        "Workspaces"
-    } else {
-        "Enter selects · Esc closes"
+    let input_label = match placeholder {
+        "Search models…" => "Search models",
+        "Search workspaces…" => "Search workspace folders",
+        "Search sessions…" => "Search session titles",
+        "Search commands…" => "Search commands",
+        _ => panic!("unknown native search field {placeholder:?}"),
     };
-    if placeholder == "Search sessions…" {
-        wait_focused_input(view, "Search session titles").await;
-    } else if placeholder == "Search models…" {
-        wait_focused_input(view, "Search models").await;
-    } else if placeholder == "Search workspaces…" {
-        wait_focused_input(view, "Search workspace folders").await;
-    } else {
-        wait_view(view, |screen| {
-            screen.contains(placeholder) && screen.contains(ready_marker)
-        })
-        .await;
-    }
+    wait_focused_input(view, input_label).await;
     view.handle_event(Event::Paste(search.into()));
     assert_eq!(
         view.surface().input_context().unwrap().text.as_deref(),
@@ -194,19 +202,43 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         .await
         .expect("the search input change did not commit")
         .expect("the search engine stopped");
-    if placeholder == "Search sessions…" {
-        // The native label keeps the complete highlighted title even when
-        // the docked browser paints it with an ellipsis.
-        wait_enabled_node(view, &format!("› {choice}")).await;
-        wait_enabled_node(view, &format!("Open conversation {choice}")).await;
-    }
     wait_view(view, |screen| {
-        (placeholder == "Search sessions…" || screen.contains(&format!("› {choice}")))
-            && screen.contains(ready_marker)
-            && !screen.contains("Loading…")
-            && !screen.contains("Loading folders…")
+        !screen.contains("Loading…") && !screen.contains("Loading folders…")
     })
     .await;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            view.poll().unwrap();
+            support::tick(view);
+            let nodes = view.accessibility_snapshot();
+            let first = nodes.iter().filter(|node| {
+                node.role == nsh_core::AccessibilityRole::Button && !node.state.disabled
+            });
+            let ready = match placeholder {
+                // The saved model/session is distinct from keyboard selection.
+                // Both search owners reset their keyboard index to the first result.
+                "Search models…" => first.filter(|node| node.label.starts_with("Use "))
+                    .next().is_some_and(|node| node.label.starts_with(&format!("Use {choice} · "))),
+                "Search sessions…" => first.filter(|node| node.label.starts_with("Open conversation "))
+                    .next().is_some_and(|node| node.label == format!("Open conversation {choice}")),
+                "Search workspaces…" => first.into_iter().any(|node| {
+                    node.label == format!("Browse folder {choice}") && node.state.selected
+                }),
+                "Search commands…" => first.into_iter().any(|button| {
+                    button.state.selected && nodes.iter().any(|text| {
+                        text.label.starts_with(&format!("› {choice}"))
+                            && text.frame.origin.x.0 >= button.frame.origin.x.0
+                            && text.frame.origin.y.0 >= button.frame.origin.y.0
+                            && text.frame.origin.x.0 < button.frame.origin.x.0 + button.frame.size.width.0
+                            && text.frame.origin.y.0 < button.frame.origin.y.0 + button.frame.size.height.0
+                    })
+                }),
+                _ => unreachable!(),
+            };
+            if ready { break; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await.unwrap_or_else(|_| panic!("the native search did not select its enabled target {choice:?}"));
     view.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Enter,
         KeyModifiers::NONE,
@@ -407,18 +439,18 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Back from connection settings").await;
         wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
         activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && screen.contains("Close")).await;
         activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close")).await;
         support::click_button(&mut view, "Choose composer workspace").await;
-        wait_view(&mut view, |screen| screen.contains("Workspace locations") && screen.contains("› Workspace /") && !screen.contains("Loading folders…")).await;
+        wait_view(&mut view, |screen| screen.contains("Workspace locations") && screen.contains("Workspace /") && !screen.contains("Loading folders…")).await;
         support::click_button(&mut view, "Browse folder Workspace").await;
         wait_view(&mut view, |screen| screen.contains("Folder · Workspace") && !screen.contains("Loading folders…")).await;
         wait_enabled_node(&mut view, "Use this workspace folder").await;
         support::click_button(&mut view, "Use this workspace folder").await;
         wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
         select_palette(&mut view, "Search models…", "manual-ui-agent", "Manual UI Agent").await;
-        wait_view(&mut view, |screen| screen.contains("Manual UI Agent · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Back · Esc") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Manual UI Agent · Default · high") && !screen.contains("Back") && !screen.contains("Close")).await;
         let sessions = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
         assert_eq!(sessions["sessions"].as_array().unwrap().len(), 1);
         let session = sessions["sessions"][0]["id"].as_str().unwrap().to_owned();
@@ -499,6 +531,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(view.surface().focused(), Some(composer), "settings replaced the resident native composer");
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Use my new connection exactly once"));
         support::wait_draft(&client, &session, "Use my new connection exactly once").await;
+        support::wait_enabled_button(&mut view, "Send message").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         let mut request = fixture.next_request().await;
         assert_eq!(request.body["model"], "manual-ui-agent");
@@ -510,7 +543,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         request.delta("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
         request.finish().await;
         fixture.idle(&client, &session).await;
-        let completed = wait_view(&mut view, |screen| screen.contains("SETTINGS_CONNECTION_SINGLE_SEND_DONE") && screen.contains("Enter sends")).await;
+        let completed = wait_view(&mut view, |screen| screen.contains("SETTINGS_CONNECTION_SINGLE_SEND_DONE")).await;
         evidence("settings-empty-to-real-provider", &completed);
         support::evidence_cells("settings-empty-to-real-provider", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
@@ -522,7 +555,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         {
             let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&session));
             terminal.wait_for("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
-            let restored = terminal.wait_for("Manual UI Agent · Default · high · Ctrl+G").await;
+            let restored = terminal.wait_for("Manual UI Agent · Default · high").await;
             assert!(!restored.contains(support::PROVIDER_KEY));
             assert!(!restored.contains(proxy_secret));
             let restarted = fixture.client().await;
@@ -563,17 +596,18 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         evidence("workbench-home", &home);
         support::evidence_cells("workbench-home", &view);
 
-        support::click_text(&mut view, "MAKA");
-        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("Close · Esc")).await;
-        support::click_text(&mut view, "Close · Esc");
+        support::click_text(&mut view, "Commands");
+        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("Close")).await;
+        support::click_text(&mut view, "Close");
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Search commands…")).await;
-        support::click_text(&mut view, "MAKA");
+        support::click_text(&mut view, "Commands");
         wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("› Sessions")).await;
         support::click_text(&mut view, "› Sessions");
-        wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("› NSH real Agent") && !screen.contains("Loading…")).await;
+        wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("NSH real Agent") && !screen.contains("Loading…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
-        support::click_text(&mut view, "› NSH real Agent");
-        wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Enter sends")).await;
+        support::click_button(&mut view, "Open conversation NSH real Agent").await;
+        wait_view(&mut view, |screen| screen.contains("NSH real Agent")).await;
+        wait_editable_composer(&mut view).await;
         view.handle_event(Event::Paste("Draft A stays in its own conversation".into()));
         support::wait_draft(&client, &fixture.session, "Draft A stays in its own conversation").await;
 
@@ -581,13 +615,13 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // remounts. The center keeps its native Input and exact saved draft.
         let composer = view.surface().focused().unwrap();
         view.resize(80, 24);
-        let narrow = wait_view(&mut view, |screen| screen.contains("Draft A stays in its own conversation") && screen.contains("Enter sends") && !screen.contains("Search sessions…")).await;
+        let narrow = wait_view(&mut view, |screen| screen.contains("Draft A stays in its own conversation") && !screen.contains("Search sessions…")).await;
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Draft A stays in its own conversation"));
         evidence("workbench-narrow-preserves-editor", &narrow);
         support::evidence_cells("workbench-narrow-preserves-editor", &view);
         view.resize(120, 40);
-        let wide = wait_view(&mut view, |screen| screen.contains("Draft A stays in its own conversation") && screen.contains("Search sessions…") && screen.contains("Hide")).await;
+        let wide = wait_view(&mut view, |screen| screen.contains("Draft A stays in its own conversation") && screen.contains("Search sessions…")).await;
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Draft A stays in its own conversation"));
         evidence("workbench-wide-preserves-editor", &wide);
@@ -627,7 +661,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
 
         shortcut(&mut view, 'p');
         select_palette(&mut view, "Search commands…", "New con", "New conversation").await;
-        wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Enter selects")).await;
+        wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Search models…")).await;
         let catalog = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
         let sessions = catalog["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 2);
@@ -637,13 +671,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(created["workspace"], original["workspace"]);
         assert_eq!(created["workspace"]["path"], fixture.directory.path().join("workspace").canonicalize().unwrap().to_str().unwrap());
         wait_view(&mut view, |screen| screen.contains("Search models…")).await;
+        wait_focused_input(&mut view, "Search models").await;
         view.handle_event(Event::Paste("model-alt".into()));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high") && !screen.contains("Close") && !screen.contains("Back")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}));
-        wait_focused_input(&mut view, "Message composer").await;
+        wait_editable_composer(&mut view).await;
         view.handle_event(Event::Paste("Message B uses the selected model".into()));
         support::wait_draft(&client, &created_id, "Message B uses the selected model").await;
 
@@ -651,14 +686,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
         let caret = view.surface().input_context().unwrap().selection;
         shortcut(&mut view, 'g');
-        wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Effort ·") && screen.contains("Close")).await;
         tab_to_label(&mut view, "Choose reasoning effort").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, alternative, None);
         tab_to_label(&mut view, "Use effort high").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high") && !screen.contains("Close") && !screen.contains("Back")).await;
         wait_focused_input(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(created_editor));
         assert_eq!(view.surface().input_context().unwrap().selection, caret);
@@ -669,21 +704,21 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // Dialog returns focus to its actual model trigger, not the editor.
         let model_trigger = view.accessibility_snapshot().into_iter().find(|node| node.label == "Choose model and effort").unwrap().id;
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         support::click_label(&mut view, "Choose model");
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high") && !screen.contains("Close") && !screen.contains("Back")).await;
         assert_eq!(view.surface().focused(), Some(model_trigger));
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["thinkingLevel"], "high");
 
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, alternative, Some("high"));
         support::evidence_cells("workbench-model-effort-explicit-high", &view);
         // Hold an Off press across a keyboard selection of Default.
@@ -699,7 +734,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         }));
         tab_to_label(&mut view, "Use connection default").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high") && !screen.contains("Close") && !screen.contains("Back")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
         view.handle_event(Event::Mouse(MouseEvent {
@@ -719,55 +754,55 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}), "the old Off release changed the newer Default policy");
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off") && !screen.contains("Close") && !screen.contains("Back")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["thinkingLevel"], "off");
 
         // Different routes inherit their own metadata. Inspect both policies
         // before the one existing send, rather than sending once per choice.
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, alternative, Some("off"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close") && !screen.contains("Back")).await;
         support::click_label(&mut view, "Choose model");
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default · low · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model · Default · low") && !screen.contains("Close") && !screen.contains("Back")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["modelId"], "fixture-model");
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, primary, None);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close") && !screen.contains("Back")).await;
         support::click_label(&mut view, "Choose model");
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high") && !screen.contains("Close") && !screen.contains("Back")).await;
         support::click_label(&mut view, "Choose model and effort");
-        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off") && !screen.contains("Close") && !screen.contains("Back")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":"off"}));
         assert_eq!(view.surface().focused(), Some(model_trigger));
@@ -782,13 +817,16 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
 
         shortcut(&mut view, 'o');
         select_palette(&mut view, "Search sessions…", "NSH real", "NSH real Agent").await;
-        let restored = wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Draft A stays in its own conversation") && screen.contains("Enter sends")).await;
+        wait_editable_composer(&mut view).await;
+        let restored = wait_view(&mut view, |screen| screen.contains("NSH real Agent") && screen.contains("Draft A stays in its own conversation")).await;
         assert!(!restored.contains("Message B uses the selected model"));
         evidence("workbench-draft-after-switch", &restored);
         support::evidence_cells("workbench-draft-after-switch", &view);
         shortcut(&mut view, 'o');
         select_palette(&mut view, "Search sessions…", "New conversation", "New conversation").await;
-        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("Message B uses the selected model") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("Message B uses the selected model")).await;
+        wait_editable_composer(&mut view).await;
+        support::wait_enabled_button(&mut view, "Send message").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         let mut request = fixture.next_request().await;
         assert_eq!(request.body["model"], "fixture-model-alt");
@@ -810,43 +848,45 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // handling. Native Tab into a browser Button scopes Escape without a
         // JS focus mirror, and Enter must still activate that exact Button.
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Hide")).await;
+        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Choose workspace scope"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Choose a workspace below")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Workspaces") && !screen.contains("Choose a workspace below")).await;
-        for _ in 0..2 {
+        wait_view(&mut view, |screen| screen.contains("Search sessions…") && !screen.contains("Choose a workspace below")).await;
+        for _ in 0..3 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Close session browser"));
         // The resize decision uses native subtree focus, including Tabbed
         // Buttons that never emitted an application focus callback.
         view.resize(80, 24);
-        let transferred = wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Close · Esc") && !screen.contains("Hide")).await;
+        let transferred = wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Narrower session browser"));
         evidence("workbench-focused-browser-transfers-to-dialog", &transferred);
         support::evidence_cells("workbench-focused-browser-transfers-to-dialog", &view);
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Hide") && !screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Narrower session browser").await;
+        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
-        for _ in 0..2 {
+        for _ in 0..3 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Close session browser"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Workspaces") && screen.contains("Preparing tool · todo_write")).await;
+        wait_view(&mut view, |screen| !screen.contains("Search sessions…") && screen.contains("Preparing tool · todo_write")).await;
 
         view.resize(80, 24);
         shortcut(&mut view, 'o');
-        let narrow_browser = wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Close · Esc")).await;
+        let narrow_browser = wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         evidence("workbench-narrow-session-dialog", &narrow_browser);
         support::evidence_cells("workbench-narrow-session-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Workspaces") && screen.contains("Preparing tool · todo_write")).await;
+        wait_view(&mut view, |screen| !screen.contains("Search sessions…") && screen.contains("Preparing tool · todo_write")).await;
         request.delta("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE").await;
         wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Preparing tool · todo_write")).await;
         let still_running = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
@@ -870,7 +910,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         }).await.expect("the UI did not cancel its original execution");
         drop(request);
         fixture.idle(&client, &created_id).await;
-        let stopped = wait_view(&mut view, |screen| screen.contains("Stopped") && screen.contains("REAL_WORKBENCH_RUN_TO_STOP") && screen.contains("Enter sends") && !screen.contains("Preparing tool") && !screen.contains("Running tool")).await;
+        let stopped = wait_view(&mut view, |screen| screen.contains("Stopped") && screen.contains("REAL_WORKBENCH_RUN_TO_STOP") && !screen.contains("Preparing tool") && !screen.contains("Running tool")).await;
         assert_eq!(stopped.matches("REAL_WORKBENCH_RUN_TO_STOP").count(), 1);
         evidence("workbench-stopped-clears-tool-input", &stopped);
         support::evidence_cells("workbench-stopped-clears-tool-input", &view);
@@ -894,11 +934,11 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let target_id = target["id"].as_str().unwrap();
         assert!(!first_page["sessions"].as_array().unwrap().iter().any(|session| session["id"] == target_id));
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Hide")).await;
+        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Paste("Browser page".into()));
         let first_title = first_page["sessions"][0]["title"].as_str().unwrap();
-        wait_view(&mut view, |screen| screen.contains(&format!("› {first_title}")) && !screen.contains("Loading…")).await;
+        wait_view(&mut view, |screen| screen.contains(first_title) && !screen.contains("Loading…")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 support::tick(&mut view);
@@ -943,7 +983,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::evidence_cells("workbench-browser-revision-preserves-tail", &view);
         let target_title = updated_title.as_str();
         support::click_text(&mut view, &format!("Open conversation {target_title}"));
-        wait_view(&mut view, |screen| screen.lines().any(|line| line.contains("MAKA") && line.contains(target_title)) && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.lines().any(|line| line.contains("Commands") && line.contains(target_title))).await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
         assert_eq!(client.load_draft("agent", &fixture.session, EDITOR).await.unwrap().unwrap().text, "Draft A stays in its own conversation");
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
@@ -978,7 +1018,7 @@ async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority
         let gated = fixture.client_at(&gate.address).await;
         let (mut view, bindings) = fixture.view(gated, Some(fixture.session.clone()));
         view.resize(120, 40);
-        wait_view(&mut view, |screen| screen.contains(DRAFT) && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains(DRAFT)).await;
         wait_focused_input(&mut view, "Message composer").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
         let editor = view.surface().focused().unwrap();
@@ -1123,7 +1163,7 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         );
         support::click_label(&mut view, "Use this workspace folder");
         wait_view(&mut view, |screen| {
-            screen.contains("Search models…") && screen.contains("Enter selects")
+            screen.contains("Search models…")
         })
         .await;
         assert!(
@@ -1157,12 +1197,12 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         )
         .await;
         wait_view(&mut view, |screen| {
-            screen.contains("fixture-model-alt · Default · Ctrl+G")
-                && screen.contains("Enter sends")
-                && !screen.contains("Close · Esc")
-                && !screen.contains("Back · Esc")
+            screen.contains("fixture-model-alt · Default")
+                && !screen.contains("Close")
+                && !screen.contains("Back")
         })
         .await;
+        wait_editable_composer(&mut view).await;
         let editor = view.surface().focused().unwrap();
         assert!(
             view.accessibility_snapshot()
@@ -1178,19 +1218,19 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         let selection = view.surface().input_context().unwrap().selection;
         shortcut(&mut view, 'g');
         wait_view(&mut view, |screen| {
-            screen.contains("Effort ·") && screen.contains("Close · Esc")
+            screen.contains("Effort ·") && screen.contains("Close")
         })
         .await;
         support::click_label(&mut view, "Choose model");
         wait_view(&mut view, |screen| {
-            screen.contains("Search models…") && screen.contains("Enter selects")
+            screen.contains("Search models…")
         })
         .await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| {
             screen.contains("Effort ·")
-                && screen.contains("Close · Esc")
-                && !screen.contains("Back · Esc")
+                && screen.contains("Close")
+                && !screen.contains("Back")
         })
         .await;
         assert!(
@@ -1201,12 +1241,13 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| {
             screen.contains("RESIDENT_FIRST_MESSAGE")
-                && !screen.contains("Close · Esc")
-                && !screen.contains("Back · Esc")
+                && !screen.contains("Close")
+                && !screen.contains("Back")
         })
         .await;
         assert_eq!(view.surface().focused(), Some(editor));
         assert_eq!(view.surface().input_context().unwrap().selection, selection);
+        support::wait_enabled_button(&mut view, "Send message").await;
         view.handle_event(Event::Key(KeyEvent::new(
             KeyCode::Enter,
             KeyModifiers::NONE,
@@ -1230,7 +1271,6 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         fixture.idle(&client, &created_id).await;
         wait_view(&mut view, |screen| {
             screen.contains("RESIDENT_FIRST_ANSWER")
-                && screen.contains("Enter sends")
                 && !screen.contains("Make something remarkable.")
         })
         .await;
@@ -1261,9 +1301,8 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         wait_view(&mut view, |screen| {
             screen
                 .lines()
-                .any(|line| line.contains("MAKA") && line.contains("NSH real Agent"))
-                && screen.contains("Enter sends")
-                && !screen.contains("Close · Esc")
+                .any(|line| line.contains("Commands") && line.contains("NSH real Agent"))
+                && !screen.contains("Close")
         })
         .await;
         wait_focused_input(&mut view, "Message composer").await;
@@ -1342,7 +1381,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                         "REAL_PROVIDER_STREAM_VISIBLE",
                         "NEXT_MESSAGE_AFTER_COMPLETED_PROCESS",
                         "SECOND_TURN_FINAL",
-                        "> todo_write",
+                        "todo_write",
                         "Completed",
                     ]
                     .into_iter()
@@ -1361,7 +1400,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let tail = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         assert!(!tail["before"].is_null(), "the original history must exceed one page");
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        let history = wait_view(&mut view, |screen| screen.contains("History 15 paragraph") && screen.contains("Enter sends")).await;
+        wait_editable_composer(&mut view).await;
+        let history = wait_view(&mut view, |screen| screen.contains("History 15 paragraph")).await;
         assert!(history.contains("original provider text"));
         evidence("history", &history);
         let previous = view.surface().focused();
@@ -1382,7 +1422,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         support::click_button(&mut view, "Return to latest").await;
-        let returned = wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        let returned = wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("Source")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != previous {
                 support::tick(&mut view);
@@ -1393,7 +1433,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // Retain the original shortcut check from older transcript content.
         wheel_history_up_to(&mut view, "History 00 paragraph").await;
         shortcut(&mut view, 'l');
-        wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("Source")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != previous {
                 view.poll().unwrap();
@@ -1402,7 +1442,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         }).await.expect("jump to latest did not restore composer focus");
 
         view.handle_event(Event::Paste("NSH user send, exactly once".into()));
-        wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once") && screen.contains("Send")).await;
+        wait_view(&mut view, |screen| screen.contains("NSH user send, exactly once")).await;
         // Native editor text can paint before its change reaches the app and enables Send.
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
@@ -1413,7 +1453,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.expect("the presented Send button did not become enabled");
-        support::click_text(&mut view, "Send");
+        support::click_button(&mut view, "Send message").await;
         // AppView's engine continues independently while this awaits the real HTTP request.
         let mut request = fixture.next_request().await;
         assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("NSH user send, exactly once")));
@@ -1423,14 +1463,14 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             .collect::<Vec<_>>()
             .join("\n");
         request.thinking(&thinking).await;
-        let grouped = wait_view(&mut view, |screen| screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("◇ Think")).await;
+        let grouped = wait_view(&mut view, |screen| screen.contains("Analyzing the request · NATIVE_ACTIVITY_HEADER_TAIL_INITIAL") && !screen.contains("Thinking")).await;
         evidence("live-group-collapsed", &grouped);
         assert!(!grouped.contains("Details ·"));
         // The one live group's button has a stable semantic label; its text
         // includes a disclosure glyph before the source-backed activity title.
         support::click_text(&mut view, "Process group");
-        wait_view(&mut view, |screen| screen.contains("◇ Think · NATIVE_THINK_SOURCE_FIRST")).await;
-        support::click_text(&mut view, "◇ Think · NATIVE_THINK_SOURCE_FIRST");
+        wait_view(&mut view, |screen| screen.contains("Thinking · NATIVE_THINK_SOURCE_FIRST")).await;
+        support::click_text(&mut view, "Thinking · NATIVE_THINK_SOURCE_FIRST");
         // Either end of the actual expanded source must paint before keyboard scrolling.
         wait_view(&mut view, |screen| screen.contains("NATIVE_THINK_SOURCE_01") || screen.contains("NATIVE_THINK_SOURCE_62")).await;
         support::focus_activity(&mut view).await;
@@ -1566,7 +1606,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // The canonical tool segment now owns a different native activity List.
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.matches("> todo_write").count() == 1).await;
+        support::wait_enabled_button(&mut view, "Toggle tool todo_write").await;
+        assert_eq!(view.accessibility_snapshot().iter().filter(|node| node.label == "Toggle tool todo_write").count(), 1);
         support::click_text(&mut view, "▸ Todo 1/3");
         let checklist_visible = wait_view(&mut view, |screen| screen.contains("▾ Todo 1/3") && screen.contains("NATIVE_TODO_DONE") && screen.contains("NATIVE_TODO_PENDING")).await;
         evidence("real-tool-and-checklist", &checklist_visible);
@@ -1578,18 +1619,18 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         request.delta(" and committed.").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        let committed = wait_view(&mut view, |screen| screen.contains("› Completed") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1 && screen.contains("committed.") && !screen.contains("NATIVE_THINK_SOURCE_FIRST") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED") && screen.contains("Enter sends")).await;
+        let committed = wait_view(&mut view, |screen| screen.contains("Completed") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1 && screen.contains("committed.") && !screen.contains("NATIVE_THINK_SOURCE_FIRST") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED")).await;
         evidence("committed", &committed);
         support::evidence_cells("committed", &view);
 
         // Completion folds the work immediately. Manual reopening retains the
         // original thinking disclosure and starts the independent activity at top.
-        let folded = wheel_history_up_to(&mut view, "› Completed").await;
+        let folded = wheel_history_up_to(&mut view, "Completed").await;
         assert_eq!(folded.matches("REAL_PROVIDER_STREAM_VISIBLE").count(), 1);
         assert!(!folded.contains("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS"));
-        support::click_text(&mut view, "› Completed");
-        wait_view(&mut view, |screen| screen.contains("› 1 thought")).await;
-        support::click_text(&mut view, "› 1 thought");
+        support::click_text(&mut view, "Completed");
+        wait_view(&mut view, |screen| screen.contains("1 thought")).await;
+        support::click_text(&mut view, "1 thought");
         let reopened = wait_view(&mut view, &at_source_start).await;
         evidence("completed-activity-source-reopened-at-top", &reopened);
         support::evidence_cells("completed-activity-source-reopened-at-top", &view);
@@ -1611,16 +1652,16 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.expect("the next presented Send button did not become enabled");
-        support::click_text(&mut view, "Send");
+        support::click_button(&mut view, "Send message").await;
         let mut next = fixture.next_request().await;
         wait_view(&mut view, |screen| screen.contains("NEXT_MESSAGE_AFTER_COMPLETED_PROCESS")).await;
         next.delta("SECOND_TURN_FINAL").await;
         next.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL")).await;
 
         support::load_application(&mut view);
-        let reloaded = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
+        let reloaded = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL")).await;
         assert!(!reloaded.contains("Details ·") && !reloaded.contains("NATIVE_THINK_SOURCE_FIRST"));
         evidence("single-work-presentation-after-reload", &reloaded);
         // Reload starts with a fresh tail window. The first real Turn is not in
@@ -1662,7 +1703,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(!jumped.contains("Load earlier messages"));
         evidence("turn-rail-loads-unloaded-history", &jumped);
         support::click_button(&mut view, "Return to latest").await;
-        let returned = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL") && screen.contains("Enter sends")).await;
+        let returned = wait_view(&mut view, |screen| screen.contains("SECOND_TURN_FINAL")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != Some(composer) || view.surface().input_context().is_none() {
                 support::tick(&mut view);
@@ -1709,7 +1750,7 @@ async fn live_markdown_source_mode_survives_canonical_handoff() {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+        wait_editable_composer(&mut view).await;
         let sent = support::mutate(&client, "send", json!({
             "sessionId":fixture.session,"message":"Keep the live source mode", "model":fixture.selection
         })).await;
@@ -1717,17 +1758,17 @@ async fn live_markdown_source_mode_survives_canonical_handoff() {
         let mut request = fixture.next_request().await;
         let source = "# LIVE_HEADING\n\n**LIVE_BOLD**\n\n```txt\nLIVE_CODE_BLOCK\n```";
         request.delta(source).await;
-        wait_view(&mut view, |screen| screen.contains("LIVE_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt") && !screen.contains("**LIVE_BOLD**")).await;
+        wait_view(&mut view, |screen| screen.contains("LIVE_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt") && !screen.contains("**LIVE_BOLD**")).await;
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "[Source]");
-        let literal = |screen: &str| screen.contains("# LIVE_HEADING") && screen.contains("**LIVE_BOLD**") && screen.contains("```txt") && screen.contains("LIVE_CODE_BLOCK") && screen.contains("[Formatted]");
+        support::click_text(&mut view, "Source");
+        let literal = |screen: &str| screen.contains("# LIVE_HEADING") && screen.contains("**LIVE_BOLD**") && screen.contains("```txt") && screen.contains("LIVE_CODE_BLOCK") && screen.contains("Formatted");
         // Keep the provider physically open until the actual native click
         // has selected source mode; then exercise that same row's handoff.
         let live = wait_view(&mut view, literal).await;
         evidence("live-markdown-source-selected", &live);
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        let settled = wait_view(&mut view, |screen| literal(screen) && screen.contains("› Completed")).await;
+        let settled = wait_view(&mut view, |screen| literal(screen) && screen.contains("Completed")).await;
         evidence("live-markdown-source-settled", &settled);
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
@@ -1750,7 +1791,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         view.surface_mut().set_host_services_enabled(true);
-        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+        wait_editable_composer(&mut view).await;
         let sent = support::mutate(&client, "send", json!({
             "sessionId":fixture.session,"message":"Render the original Markdown", "model":fixture.selection
         })).await;
@@ -1787,22 +1828,22 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let suffix = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n```txt\nRICH_CODE_BLOCK 中文原文\n```";
         request.delta(suffix).await;
         // The stream remains physically open: parsing cannot wait for final.
-        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
+        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt")).await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         // Host idle may precede the completed-turn seat in this native List.
         // Observe that final layout before choosing the source button's coordinates.
-        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && screen.contains("Enter sends") && screen.contains("› Completed")).await;
+        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && screen.contains("Completed")).await;
         evidence("rich-response-complete", &complete);
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "[Source]");
-        let original = wait_view(&mut view, |screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && screen.contains("[Formatted]")).await;
+        support::click_text(&mut view, "Source");
+        let original = wait_view(&mut view, |screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && screen.contains("Formatted")).await;
         evidence("rich-response-original-source", &original);
         // Source has a different native height. Observe the original text
         // first, then let its scroll/layout motion finish before one click.
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "[Formatted]");
-        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt")).await;
+        support::click_text(&mut view, "Formatted");
+        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
@@ -1830,11 +1871,11 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let mut request = fixture.next_request().await;
         let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
         request.delta(&source).await;
-        let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
+        let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source")).await;
         evidence("rich-response-over-formatting-budget", &over_budget);
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "[Source]");
-        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Formatted]") && !screen.contains("Formatting unavailable")).await;
+        support::click_text(&mut view, "Source");
+        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Formatted") && !screen.contains("Formatting unavailable")).await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         drop(view);
@@ -1851,7 +1892,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         assert!(response["offset"].as_u64().unwrap() > 0, "this history must omit the original opening fence");
         let (mut view, bindings) = fixture.view(client, Some(fixture.session.clone()));
         view.surface_mut().set_host_services_enabled(true);
-        let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
+        let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source")).await;
         evidence("rich-response-incomplete-history", &literal);
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
@@ -1991,7 +2032,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let other = support::mutate(&client, "create", json!({"title":"Other preview owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
         shortcut(&mut view, 'o');
         select_palette(&mut view, "Search sessions…", "Other preview owner", "Other preview owner").await;
-        wait_view(&mut view, |screen| screen.contains("Other preview owner") && !screen.contains("UNSENT_PREVIEW_DRAFT") && screen.contains("Enter sends")).await;
+        wait_view(&mut view, |screen| screen.contains("Other preview owner") && !screen.contains("UNSENT_PREVIEW_DRAFT")).await;
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("000-preview.txt") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Preview 000-preview.txt" || node.label == "Preview 001-scene.data"), "resource tabs moved to another session");
@@ -2040,11 +2081,12 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let result = history["chunks"].as_array().unwrap().iter()
             .find(|chunk| chunk["tool"]["result"]["image"] == true).unwrap()["tool"]["result"]["position"].clone();
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
-        terminal.wait_for("Enter sends").await;
-        terminal.wait_for("› Working…").await;
+        terminal.wait_for("fixture-model · Default").await;
+        terminal.wait_for_absent("Loading session history").await;
+        terminal.wait_for("Working…").await;
         terminal.send(b"\x1b[1;3B");
-        terminal.wait_for("> Read").await;
-        terminal.click_text("> Read");
+        terminal.wait_for("Read").await;
+        terminal.click_text("Read");
         let inline = terminal.wait_for("Open image · 192 × 128").await;
         assert!(inline.contains('▀'), "the actual PNG must paint in the production terminal");
         evidence("tool-image-inline", &inline);
@@ -2132,10 +2174,10 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         let mut terminal = support::pty::Pty::spawn_sixel(&fixture.directory.path().join("host"), Some(&fixture.session));
         // The emulator appends this ordinary Ctrl+P to its cell-size reply.
         terminal.wait_for("Search commands…").await;
-        terminal.wait_for("Enter selects · Esc closes").await;
+        terminal.wait_for("Type to filter · ↑↓ to navigate").await;
         terminal.send(b"\x1b");
-        terminal.wait_for_absent("Close · Esc").await;
-        terminal.wait_for("Enter sends").await;
+        terminal.wait_for_absent("Close").await;
+        terminal.wait_for_absent("Loading session history").await;
         // Drafts belong to the client journal, not the Host. Observe the actual
         // binary's journal rather than the fixture client's separate client.db.
         let terminal_client = Client::new(
@@ -2151,9 +2193,9 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         support::wait_draft(&terminal_client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         terminal.send(b"\x1b[1;3B");
-        terminal.wait_for("> Read").await;
+        terminal.wait_for("Read").await;
         let image_start = terminal.wire().len();
-        terminal.click_text("> Read");
+        terminal.click_text("Read");
         terminal.wait_for("Open image · 64 × 48").await;
         terminal.wait_for_wire(SIXEL, image_start).await;
         let native_wire = &terminal.wire()[image_start..];
@@ -2266,7 +2308,8 @@ async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "recovering a receipt must never send A or draft B again");
 
         support::load_application(&mut view);
-        let reloaded = wait_view(&mut view, |screen| screen.contains("Later unsent draft B survives recovery") && screen.contains("REAL_RECOVERED_PROVIDER_ANSWER") && screen.contains("Enter sends")).await;
+        wait_editable_composer(&mut view).await;
+        let reloaded = wait_view(&mut view, |screen| screen.contains("Later unsent draft B survives recovery") && screen.contains("REAL_RECOVERED_PROVIDER_ANSWER")).await;
         evidence("reloaded-draft", &reloaded);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         let history = restarted.query("agent", "history", json!({"sessionId":fixture.session,"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
@@ -2293,7 +2336,8 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             &fixture.directory.path().join("host"),
             Some(&fixture.session),
         );
-        terminal.wait_for("Enter sends").await;
+        terminal.wait_for("fixture-model · Default").await;
+        terminal.wait_for_absent("Loading session history").await;
         terminal.wait_for("Message or run a task…").await;
         terminal.click_text("Message or run a task…");
         terminal.paste("PTY_FOLDER_DRAFT_你好");
@@ -2316,15 +2360,13 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         for choose in [false, true] {
             terminal.send(b"\x10");
             terminal.wait_for("Search commands…").await;
-            terminal.wait_for("Enter selects · Esc closes").await;
+            terminal.wait_for("Type to filter · ↑↓ to navigate").await;
             terminal.paste("Choose workspace");
             terminal.wait_for("› Choose workspace").await;
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
-            terminal
-                .wait_for("Enter opens · Ctrl+Enter uses folder")
-                .await;
-            terminal.wait_for("› Workspace /").await;
+            terminal.wait_for("Workspace locations").await;
+            terminal.wait_for("Workspace /").await;
             terminal.click_text("Workspace /");
             terminal.wait_for("Folder · Workspace").await;
             terminal.wait_for("Use this folder").await;
@@ -2333,7 +2375,7 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             terminal.wait_for("Search workspaces…").await;
             terminal.click_text("Search workspaces…");
             terminal.paste("中文工程");
-            terminal.wait_for("› 中文工程 /").await;
+            terminal.wait_for("中文工程 /").await;
             terminal.send(b"\r");
             terminal.wait_for("Folder · 中文工程").await;
             terminal.wait_for("子目录 /").await;
@@ -2355,7 +2397,7 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
                     terminal.wait_for("Folder · 子目录").await;
                 }
                 terminal.send(b"\x1b");
-                terminal.wait_for_absent("Close · Esc").await;
+                terminal.wait_for_absent("Close").await;
                 terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
                 support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好")
                     .await;
@@ -2395,9 +2437,9 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             child_path.canonicalize().unwrap()
         );
         terminal.send(b"\x1b");
-        terminal.wait_for("Close · Esc").await;
+        terminal.wait_for("Close").await;
         terminal.send(b"\x1b");
-        terminal.wait_for_absent("Close · Esc").await;
+        terminal.wait_for_absent("Close").await;
         terminal.wait_for("Message or run a task…").await;
         terminal.click_text("Message or run a task…");
         terminal.paste("PTY_NEW_FOLDER_DRAFT");
@@ -2442,20 +2484,20 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         input.push(0x10);
         terminal.send(&input);
         terminal.wait_for("Search commands…").await;
-        terminal.wait_for("Enter selects · Esc closes").await;
+        terminal.wait_for("Type to filter · ↑↓ to navigate").await;
         terminal.click_text("Close");
-        terminal.wait_for_absent("Close · Esc").await;
+        terminal.wait_for_absent("Close").await;
         terminal.wait_for("Make something remarkable.").await;
         terminal.send(b"\x10");
         terminal.wait_for("Search commands…").await;
         terminal.paste("Sess");
         terminal.wait_for("╭Sess ").await;
         terminal.send(b"\r");
-        terminal.wait_for_absent("Close · Esc").await;
+        terminal.wait_for_absent("Close").await;
         terminal.wait_for("Search sessions…").await;
         terminal.paste("NSH real");
         terminal.wait_for("╭NSH real ").await;
-        terminal.wait_for("› NSH real Agent").await;
+        terminal.wait_for("NSH real Agent").await;
         terminal.send(b"\r");
         let mut held = Box::pin(gate.held.notified());
         let awaiting = Instant::now();
@@ -2466,18 +2508,18 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         }
         drop(held);
         let loading = terminal.wait_for("Loading session history").await;
-        assert!(!loading.contains("Enter sends"), "the shell advertised submission before history was ready");
+        assert!(loading.contains("Loading session history… Your draft is kept."));
         terminal.paste("Production PTY user message");
         terminal.wait_for("Production PTY user message").await;
         terminal.send(b"\r");
         let blocked = terminal.wait_for("This message was not sent.").await;
         assert!(blocked.contains("Production PTY user message"));
         assert!(blocked.contains("Loading session history"));
-        assert!(!blocked.contains("Enter sends"));
+        assert!(blocked.contains("Loading session history… Your draft is kept."));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         evidence("production-pty-loading-keeps-draft", &blocked);
         gate.release();
-        terminal.wait_for("Enter sends").await;
+        terminal.wait_for_absent("Loading session history").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "history recovery must not replay the early Enter");
         terminal.click_text("Send");
         // A real terminal keeps reading stdout while waiting for the provider.
@@ -2513,8 +2555,8 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         fixture.idle(&control, &fixture.session).await;
         control.close().await.unwrap();
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
-        terminal.wait_for("› Completed").await;
-        assert!(!terminal.snapshot().contains("◇ Think · PRODUCTION_PTY_REASONING"));
+        terminal.wait_for("Completed").await;
+        assert!(!terminal.snapshot().contains("Thinking · PRODUCTION_PTY_REASONING"));
         terminal.send(b"\x11");
         terminal.finish().await;
         drop(terminal);
@@ -2523,11 +2565,11 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         let mut restarted = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
         let folded = restarted.wait_for("REAL_PRODUCTION_PTY_STREAM").await;
         assert!(folded.contains("completed.") && !folded.contains("Details ·"));
-        restarted.wait_for("› Completed").await;
-        restarted.click_text("› Completed");
-        restarted.wait_for("› 1 thought").await;
-        restarted.click_text("› 1 thought");
-        let reopened = restarted.wait_for("◇ Think · PRODUCTION_PTY_REASONING").await;
+        restarted.wait_for("Completed").await;
+        restarted.click_text("Completed");
+        restarted.wait_for("1 thought").await;
+        restarted.click_text("1 thought");
+        let reopened = restarted.wait_for("Thinking · PRODUCTION_PTY_REASONING").await;
         assert!(reopened.contains("REAL_PRODUCTION_PTY_STREAM"));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "reopening recorded work must not send another message");
         evidence("production-pty-work-after-restart", &reopened);
@@ -2569,11 +2611,12 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
         let failed = terminal.wait_for("Retry loading conversation").await;
         assert!(failed.contains("History unavailable."));
-        assert!(!failed.contains("Enter sends"));
+        assert!(failed.contains("History unavailable. Retrying automatically; your draft is kept."));
         terminal.wait_for("RECOVERY_ORIGINAL_A").await;
         support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A").await;
         terminal.click_text("Retry loading conversation");
-        terminal.wait_for("Enter sends").await;
+        terminal.wait_for_absent("History unavailable.").await;
+        terminal.wait_for_absent("Loading session history").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "retry must not send the retained draft");
 
         send.arm();
@@ -2612,7 +2655,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         watch.arm_times(3);
         request.delta("MISSED_WHILE_DISCONNECTED\n\n").await;
         let reconnecting = terminal.wait_for("Reconnecting updates").await;
-        assert!(!reconnecting.contains("Enter sends"));
+        assert!(reconnecting.contains("Reconnecting updates… Your draft is kept."));
         assert!(!reconnecting.contains("Reconnect updates"), "one transient loss must recover without a button");
         request.delta(" ACTIVE_OFFLINE_SUFFIX").await;
         let control = fixture.client().await;
@@ -2644,7 +2687,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         fixture.idle(&control, &fixture.session).await;
 
         send.release();
-        terminal.wait_for("Enter sends").await;
+        terminal.wait_for_absent("Confirming send").await;
         let settled = terminal_client.operation(original.id).await.unwrap();
         assert_eq!(settled.reference, original.reference);
         assert!(matches!(settled.receipt, Some(Receipt::Recorded {outcome:OperationOutcome::Returned {ref value},..}) if value["kind"] == "started"));
