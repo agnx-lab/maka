@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { Canvas, effect, inputAction, signal, Text, View } from 'nsh';
+import { Canvas, computed, effect, inputAction, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -75,24 +75,18 @@ export function TurnNavigation(props: {
   navigate(item: TurnNavigationItem): void;
   cancel(): void;
 }) {
-  const hoveredTurn = signal<string | null>(null);
-  const pointerInside = signal(false);
+  const activeIndex = computed(() => {
+    const active = props.active();
+    return props.items().findIndex((item) => item.turnId === active);
+  });
   let rail: YNode | undefined;
   effect(() => {
-    if (pointerInside()) return;
-    const index = props.items().findIndex((item) => item.turnId === props.active());
-    if (index >= 0) rail?.scrollToIndex({ index, viewPosition: 0.5 });
+    const active = props.active();
+    const index = activeIndex();
+    if (active !== null && index >= 0) rail?.scrollToIndex({ index, viewPosition: 0.5 });
   });
-  const previewItem = () => props.items().find((item) => item.turnId === hoveredTurn());
   return (
-    <View
-      style={{ width: 24, minHeight: 0 }}
-      onHoverIn={() => pointerInside.set(true)}
-      onHoverOut={() => {
-        pointerInside.set(false);
-        hoveredTurn.set(null);
-      }}
-    >
+    <View style={{ width: 24, minHeight: 0 }}>
       <List
         ref={rail}
         testID="turn-navigation"
@@ -103,41 +97,22 @@ export function TurnNavigation(props: {
         style={{ flex: 1, minHeight: 0 }}
       >
         {(item) => (
-          <View onHoverIn={() => hoveredTurn.set(item().turnId)}>
-            <Button
-              accessibilityLabel={`Jump to turn: ${item().label || 'Recorded turn'}`}
-              selected={props.active() === item().turnId}
-              onPress={inputAction(props.navigate, item())}
-              style={{ height: 24, width: 24, alignItems: 'center', justifyContent: 'center' }}
-              hoverStyle={{ backgroundColor: C.surface }}
-              focusStyle={{ backgroundColor: C.raised }}
-            >
-              <TurnMark
-                active={props.active() === item().turnId}
-                busy={props.busy() === item().turnId}
-              />
-            </Button>
-          </View>
+          <Button
+            accessibilityLabel={`Jump to turn: ${item().label || 'Recorded turn'}`}
+            tooltip={item().label || 'Recorded turn'}
+            selected={props.active() === item().turnId}
+            onPress={inputAction(props.navigate, item())}
+            style={{ height: 24, width: 24, alignItems: 'center', justifyContent: 'center' }}
+            hoverStyle={{ backgroundColor: C.surface }}
+            focusStyle={{ backgroundColor: C.raised }}
+          >
+            <TurnMark
+              active={props.active() === item().turnId}
+              busy={props.busy() === item().turnId}
+            />
+          </Button>
         )}
       </List>
-      <If when={previewItem()}>
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: 0,
-            right: 24,
-            width: 240,
-            maxWidth: 240,
-            padding: 8,
-            backgroundColor: C.raised,
-          }}
-        >
-          <Text numberOfLines={3} style={{ color: C.secondary }}>
-            {previewItem()?.label || 'Recorded turn'}
-          </Text>
-        </View>
-      </If>
       <If when={props.busy()}>
         <Button
           accessibilityLabel="Cancel turn navigation"

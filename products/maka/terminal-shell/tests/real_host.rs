@@ -1827,16 +1827,16 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             assert!(scrolling.elapsed() < Duration::from_secs(20), "the native turn rail did not reveal its first mark:\n{}", view.snapshot());
             let column = ((rail.origin.x.0 + rail.size.width.0 / 2.0) / 8.0).floor().max(0.0) as u16;
             let row = ((rail.origin.y.0 + rail.size.height.0 / 2.0) / 16.0).floor().max(0.0) as u16;
-            // Pointer entry stops active-turn centering; the wheel then belongs
-            // to this real nested rail rather than the outer transcript.
+            // The active turn is unchanged, so the nested rail keeps the
+            // position reached by its wheel rather than centering again.
             for kind in [MouseEventKind::Moved, MouseEventKind::ScrollUp] {
                 view.handle_event(Event::Mouse(MouseEvent {kind,column,row,modifiers:KeyModifiers::NONE}));
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         support::click_button(&mut view, "Jump to turn: History question 00").await;
-        // Leave the rail preview so its label cannot stand in for the actual
-        // user message in the transcript visibility assertion.
+        // Leave the native rail tooltip so its label cannot stand in for
+        // the actual user message in the transcript visibility assertion.
         view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::Moved,column:0,row:0,modifiers:KeyModifiers::NONE}));
         let jumped = wait_view(&mut view, |screen| screen.contains("History question 00") && screen.contains("History 00 paragraph 00")).await;
         assert!(!jumped.contains("Load earlier messages"));
