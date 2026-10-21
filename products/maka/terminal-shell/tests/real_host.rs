@@ -149,10 +149,12 @@ async fn wait_focused_input(view: &mut AppView, label: &str) {
 }
 
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
-    let footer = if placeholder == "Search models…" {
+    let ready_marker = if placeholder == "Search models…" {
         "Enter selects · Tab moves · Esc back"
     } else if placeholder == "Search workspaces…" {
         "Enter opens · Ctrl+Enter uses folder · Alt+↑ parent · Esc closes"
+    } else if placeholder == "Search sessions…" {
+        "Workspaces"
     } else {
         "Enter selects · Esc closes"
     };
@@ -164,7 +166,7 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         wait_focused_input(view, "Search workspace folders").await;
     } else {
         wait_view(view, |screen| {
-            screen.contains(placeholder) && screen.contains(footer)
+            screen.contains(placeholder) && screen.contains(ready_marker)
         })
         .await;
     }
@@ -187,7 +189,7 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         .expect("the search engine stopped");
     wait_view(view, |screen| {
         screen.contains(&format!("› {choice}"))
-            && screen.contains(footer)
+            && screen.contains(ready_marker)
             && !screen.contains("Loading…")
             && !screen.contains("Loading folders…")
     })
