@@ -6316,8 +6316,6 @@ dependencies = [
 [[package]]
 name = "gpui-fast-wgpu"
 version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cac7d34083b2611b49b2f415a16aa9e33620b127a25e981f835db8fe72f07423"
 dependencies = [
  "anyhow",
  "bytemuck",
