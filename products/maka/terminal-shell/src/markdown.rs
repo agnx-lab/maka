@@ -17,18 +17,10 @@
  * under the License.
  */
 
-//! A bounded presentation of CommonMark/GFM, independent of Host content.
+//! CommonMark/GFM presentation, independent of Host content.
 
 use ::markdown::{ParseOptions, mdast::Node};
 use nsh_core::ui::prelude::*;
-
-// Formatting work is limited to eight normal 32 KiB history text windows.
-// This is a presentation budget, independent of the larger Host message limits:
-// longer documents stay complete literal source rather than parsing a prefix.
-const MAX_SOURCE_BYTES: usize = 256 * 1024;
-const SOURCE_TOO_LONG: &str = "Long response shown as original source.";
-const MAX_BLOCKS: usize = 48;
-const MAX_RUNS: usize = 2048;
 
 /// Inline content; unsupported constructs retain their complete source spelling.
 #[derive(Clone, Debug, PartialEq, JsObject)]
@@ -88,19 +80,14 @@ pub fn registry() -> Registry {
 }
 
 fn parse_source(source: &str) -> Result<Vec<MarkdownBlock>, String> {
-    if source.len() > MAX_SOURCE_BYTES {
-        return Err(SOURCE_TOO_LONG.into());
-    }
     let root =
         ::markdown::to_mdast(source, &ParseOptions::gfm()).map_err(|error| error.to_string())?;
     let mut output = Presentation {
         source,
         blocks: Vec::new(),
-        runs: 0,
-        finished: false,
     };
     output.visit(&root, Context::default());
-    Ok(output.blocks.into_iter().map(|(_, block)| block).collect())
+    Ok(output.blocks)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -119,16 +106,11 @@ struct Marks {
 
 struct Presentation<'a> {
     source: &'a str,
-    blocks: Vec<(usize, MarkdownBlock)>,
-    runs: usize,
-    finished: bool,
+    blocks: Vec<MarkdownBlock>,
 }
 
 impl Presentation<'_> {
     fn visit(&mut self, node: &Node, context: Context) {
-        if self.finished {
-            return;
-        }
         match node {
             Node::Root(root) => {
                 for child in &root.children {
@@ -163,17 +145,14 @@ impl Presentation<'_> {
                     // has its own marker before its descendants.
                     let first = self.blocks.len();
                     if item.children.is_empty() || begins_with_list(item.children.first()) {
-                        self.push(
-                            self.block(
-                                child,
-                                MarkdownBlockKind::Paragraph,
-                                Context {
-                                    indent: context.indent + 1,
-                                    ..context
-                                },
-                            ),
+                        self.blocks.push(self.block(
                             child,
-                        );
+                            MarkdownBlockKind::Paragraph,
+                            Context {
+                                indent: context.indent + 1,
+                                ..context
+                            },
+                        ));
                     }
                     for child in &item.children {
                         self.visit(
@@ -183,20 +162,9 @@ impl Presentation<'_> {
                                 ..context
                             },
                         );
-                        if self.finished {
-                            break;
-                        }
                     }
-                    // Even if a later child exhausted the budget, this item's
-                    // retained first block still owns its marker. The literal
-                    // tail itself already contains the original source marker.
-                    if (!self.finished || first + 1 < self.blocks.len())
-                        && let Some((_, block)) = self.blocks.get_mut(first)
-                    {
+                    if let Some(block) = self.blocks.get_mut(first) {
                         block.marker = marker;
-                    }
-                    if self.finished {
-                        break;
                     }
                 }
             }
@@ -222,19 +190,19 @@ impl Presentation<'_> {
                 let mut block = self.block(node, MarkdownBlockKind::Code, context);
                 block.text.clone_from(&code.value);
                 block.language = code.lang.clone().unwrap_or_default();
-                self.push(block, node);
+                self.blocks.push(block);
             }
             Node::ThematicBreak(_) => {
                 let mut block = self.block(node, MarkdownBlockKind::Rule, context);
                 block.text = raw(self.source, node).into();
-                self.push(block, node);
+                self.blocks.push(block);
             }
             // Tables, HTML, images, links, footnotes and definitions have no
             // terminal activation or lossy "text content" representation.
             _ => {
                 let mut block = self.block(node, MarkdownBlockKind::Literal, context);
                 block.text = raw(self.source, node).into();
-                self.push(block, node);
+                self.blocks.push(block);
             }
         }
     }
@@ -263,55 +231,10 @@ impl Presentation<'_> {
     ) {
         let mut block = self.block(node, kind, context);
         for child in children {
-            if !inline(
-                self.source,
-                child,
-                Marks::default(),
-                &mut block.runs,
-                MAX_RUNS - self.runs,
-            ) {
-                self.tail(start(node));
-                return;
-            }
+            inline(self.source, child, Marks::default(), &mut block.runs);
         }
         block.level = level;
-        self.push(block, node);
-    }
-
-    fn push(&mut self, block: MarkdownBlock, node: &Node) {
-        if self.blocks.len() == MAX_BLOCKS {
-            self.tail(start(node));
-            return;
-        }
-        self.runs += block.runs.len();
-        self.blocks.push((start(node), block));
-    }
-
-    fn tail(&mut self, mut offset: usize) {
-        // Reserve the final slot for a complete literal suffix, including the
-        // last displayed block if all presentation slots were already used.
-        if self.blocks.len() == MAX_BLOCKS {
-            offset = self.blocks.pop().expect("presentation slots are full").0;
-        }
-        // Container markers before a leaf's AST offset belong to this suffix.
-        let offset = self.source[..offset]
-            .rfind('\n')
-            .map_or(0, |index| index + 1);
-        self.blocks.push((
-            offset,
-            MarkdownBlock {
-                key: format!("literal:{offset}"),
-                kind: MarkdownBlockKind::Literal,
-                indent: 0,
-                quote: 0,
-                marker: String::new(),
-                runs: Vec::new(),
-                text: self.source[offset..].into(),
-                level: 0,
-                language: String::new(),
-            },
-        ));
-        self.finished = true;
+        self.blocks.push(block);
     }
 }
 
@@ -323,13 +246,7 @@ fn begins_with_list(node: Option<&Node>) -> bool {
     }
 }
 
-fn inline(
-    source: &str,
-    node: &Node,
-    marks: Marks,
-    runs: &mut Vec<MarkdownRun>,
-    limit: usize,
-) -> bool {
+fn inline(source: &str, node: &Node, marks: Marks, runs: &mut Vec<MarkdownRun>) {
     let children = match node {
         Node::Strong(strong) => Some((
             &strong.children,
@@ -355,9 +272,10 @@ fn inline(
         _ => None,
     };
     if let Some((children, marks)) = children {
-        return children
-            .iter()
-            .all(|child| inline(source, child, marks, runs, limit));
+        for child in children {
+            inline(source, child, marks, runs);
+        }
+        return;
     }
     let (text, marks) = match node {
         Node::Text(text) => (&*text.value, marks),
@@ -372,7 +290,7 @@ fn inline(
         _ => (raw(source, node), marks),
     };
     if text.is_empty() {
-        return true;
+        return;
     }
     if let Some(previous) = runs.last_mut()
         && previous.strong == marks.strong
@@ -381,10 +299,7 @@ fn inline(
         && previous.code == marks.code
     {
         previous.text.push_str(text);
-        return true;
-    }
-    if runs.len() == limit {
-        return false;
+        return;
     }
     runs.push(MarkdownRun {
         key: format!("inline:{}", start(node)),
@@ -394,7 +309,6 @@ fn inline(
         strike: marks.strike,
         code: marks.code,
     });
-    true
 }
 
 fn start(node: &Node) -> usize {
@@ -488,44 +402,31 @@ mod tests {
     }
 
     #[test]
-    fn block_budget_keeps_the_entire_remaining_source_literal() {
-        let source = (1..=60)
-            .map(|number| format!("段落 {number} 👩🏽‍💻"))
+    fn long_rich_response_keeps_every_formatted_block_and_inline_run() {
+        let paragraph = "完整内容".repeat(400);
+        let mut source = (1..=60)
+            .map(|number| format!("段落 {number} **{paragraph}**"))
             .collect::<Vec<_>>()
             .join("\n\n");
+        source.push_str("\n\n");
+        source.push_str(&"**bold** plain ".repeat(1100));
+        source.push_str("**last**");
         let blocks = parse_source(&source).unwrap();
-        assert_eq!(blocks.len(), 48);
-        let tail = blocks.last().unwrap();
-        assert_eq!(tail.kind, MarkdownBlockKind::Literal);
-        assert_eq!(tail.text, source[source.find("段落 48 ").unwrap()..]);
-        assert!(tail.text.ends_with("段落 60 👩🏽‍💻"));
-    }
-
-    #[test]
-    fn inline_budget_keeps_the_complete_block_and_tail_literal() {
-        let rich = "**bold** plain ".repeat(1100);
-        let source = format!("Earlier\n\n{rich}\n\nLast ![image](retained.png)");
-        let blocks = parse_source(&source).unwrap();
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].runs[0].text, "Earlier");
-        assert_eq!(blocks[1].kind, MarkdownBlockKind::Literal);
-        assert_eq!(blocks[1].text, source["Earlier\n\n".len()..]);
-        assert!(blocks[1].text.ends_with("![image](retained.png)"));
-    }
-
-    #[test]
-    fn source_work_budget_accepts_the_boundary_and_rejects_the_whole_larger_document() {
-        let original = format!("**{}**", "a".repeat(262_140));
-        let blocks = parse_source(&original).unwrap();
-        assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].runs[0].strong);
-        assert_eq!(blocks[0].runs[0].text, "a".repeat(262_140));
-        // The UI owns this entire original, not a misleading parsed prefix or
-        // another full-document copy transported back through native DTOs.
-        assert_eq!(
-            parse_source(&format!("{original}\n末尾")),
-            Err("Long response shown as original source.".into())
-        );
+        assert_eq!(blocks.len(), 61);
+        for (index, block) in blocks[..60].iter().enumerate() {
+            assert_eq!(block.kind, MarkdownBlockKind::Paragraph);
+            assert_eq!(block.runs[0].text, format!("段落 {} ", index + 1));
+            assert_eq!(block.runs[1].text, paragraph);
+            assert!(block.runs[1].strong);
+        }
+        let rich = &blocks[60];
+        assert_eq!(rich.kind, MarkdownBlockKind::Paragraph);
+        assert_eq!(rich.runs.len(), 2201);
+        assert!(rich.runs[..2200].chunks_exact(2).all(|pair| {
+            pair[0].strong && pair[0].text == "bold" && !pair[1].strong && pair[1].text == " plain "
+        }));
+        assert_eq!(rich.runs[2200].text, "last");
+        assert!(rich.runs[2200].strong);
     }
 
     #[test]
@@ -547,23 +448,5 @@ mod tests {
         assert_eq!(blocks[1].marker, "3.");
         assert_eq!(blocks[1].quote, 1);
         assert_eq!(blocks[1].runs[0].text, "nested");
-    }
-
-    #[test]
-    fn budget_in_a_later_item_paragraph_keeps_its_first_marker() {
-        let source = format!(
-            "- first\n\n{}",
-            (2..=50)
-                .map(|number| format!("  paragraph {number}"))
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        );
-        let blocks = parse_source(&source).unwrap();
-        assert_eq!(blocks[0].marker, "•");
-        assert_eq!(blocks[0].runs[0].text, "first");
-        assert_eq!(
-            blocks.last().unwrap().text,
-            source[source.find("  paragraph 48").unwrap()..]
-        );
     }
 }

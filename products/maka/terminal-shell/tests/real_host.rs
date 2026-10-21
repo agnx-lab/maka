@@ -1890,18 +1890,18 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), format!("{prefix}{suffix}").as_bytes());
         evidence("rich-response-copies-exact-original-source", &sent_to_clipboard);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
-        // Exceed the formatter's document budget during a real open stream.
-        // The complete current source stays selectable instead of retaining
-        // a stale rich prefix or returning a second native copy of the document.
+        // A long response stays formatted while its real stream remains open.
+        // Its original source remains selectable and copyable without reducing
+        // the supported document to a literal presentation after a size threshold.
         let sent = support::mutate(&client, "send", json!({
-            "sessionId":fixture.session,"message":"Keep a partial code source literal", "model":fixture.selection
+            "sessionId":fixture.session,"message":"Render a complete long code source", "model":fixture.selection
         })).await;
         assert_eq!(sent["kind"], "started");
         let mut request = fixture.next_request().await;
         let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
         request.delta(&source).await;
-        let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source")).await;
-        evidence("rich-response-over-formatting-budget", &over_budget);
+        let long_formatted = wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source") && !screen.contains("```txt") && !screen.contains("Formatting unavailable")).await;
+        evidence("rich-response-long-formatted", &long_formatted);
         wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "Source");
         wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Formatted") && !screen.contains("Formatting unavailable")).await;
