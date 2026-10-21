@@ -317,7 +317,7 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
         let encoded = serde_json::to_value(&canonical).unwrap();
         assert_eq!(encoded["outcome"]["action"], "accept");
         assert_eq!(encoded["outcome"]["values"], json!({
-            "private_note":PRIVATE_NOTE,"ratio":1.25,"optional_note":"","copies":0,
+            "private_note":PRIVATE_NOTE,"ratio":1.25,"optional_note":"","copies":0.0,
             "confirm":false,"plan":"full","extras":["metrics"]
         }));
         gate.release();
