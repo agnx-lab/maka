@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#[path = "real_host/attachment_intake.rs"]
+mod attachment_intake;
 #[path = "real_host/interactions.rs"]
 mod interactions;
 mod support;

@@ -260,6 +260,8 @@ impl Fixture {
                             "respond",
                             "source",
                             "toolImage",
+                            "attachmentImage",
+                            "uploadAttachment",
                             "listFiles",
                             "watchFiles",
                             "readFile",

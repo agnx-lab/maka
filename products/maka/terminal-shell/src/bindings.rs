@@ -22,6 +22,7 @@
 mod assets;
 mod files;
 mod settings;
+mod uploads;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
 use nsh_core::{JsonValue, ui::prelude::*};
@@ -44,6 +45,7 @@ struct Owner {
     client: Client,
     runtime: Handle,
     tasks: StdMutex<Option<TaskTracker>>,
+    budget: maka_ui_runtime::budget::NativeBudget,
 }
 struct Scope {
     owner: Arc<Owner>,
@@ -70,6 +72,7 @@ impl Bindings {
                 client,
                 runtime,
                 tasks: StdMutex::new(Some(TaskTracker::new())),
+                budget: Default::default(),
             }),
         }
     }
@@ -83,6 +86,7 @@ impl Bindings {
     pub fn registry(&self, initial_session: Option<String>) -> Registry {
         let owner = self.owner.clone();
         let mut registry = Registry::ui_set("maka/host");
+        registry.register::<uploads::AttachmentPicker>();
         registry.value("host", move || {
             Instance::new(ApplicationHost {
                 owner: owner.clone(),
@@ -349,7 +353,7 @@ impl ScopedHost {
                 .await?
             {
                 Some(draft) => serde_json::to_value(draft).map_err(|error| error.to_string()),
-                None => Ok(serde_json::json!({"revision": 0, "text": ""})),
+                None => Ok(serde_json::json!({"revision": 0, "text": "", "attachments": []})),
             }
         })
         .await
@@ -359,9 +363,11 @@ impl ScopedHost {
     pub async fn save_draft(
         this: Instance<Self>,
         expected_revision: u64,
-        text: String,
+        edit: JsonValue,
     ) -> Result<JsonValue, String> {
         let scope = this.with(|host| host.scope.clone());
+        let edit: maka_app_client::DraftEdit =
+            serde_json::from_value(edit).map_err(|_| "Invalid complete draft edit")?;
         execute(scope.owner.clone(), async move {
             let draft = scope
                 .owner
@@ -371,10 +377,58 @@ impl ScopedHost {
                     &scope.session,
                     EDITOR,
                     (expected_revision != 0).then_some(expected_revision),
-                    text.into(),
+                    edit,
                 )
                 .await?;
             serde_json::to_value(draft).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Observe original upload receipts, including work admitted by an older view.
+    pub fn watch_uploads(&self) -> Instance<uploads::UploadSubscription> {
+        Instance::new(uploads::UploadSubscription::new(self.scope.clone()))
+    }
+
+    /// Read an original upload's receipt without selecting or uploading bytes again.
+    pub async fn recover_upload(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(scope.owner.clone(), async move {
+            scope
+                .owner
+                .client
+                .operation_for_upload(&scope.session, EDITOR, id)
+                .await?;
+            scope.owner.client.recover(id).await?;
+            let operation = scope
+                .owner
+                .client
+                .operation_for_upload(&scope.session, EDITOR, id)
+                .await?;
+            serde_json::to_value(operation).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
+    /// Fence an upload only before its original preparation has committed.
+    pub async fn abandon_upload(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(scope.owner.clone(), async move {
+            scope
+                .owner
+                .client
+                .operation_for_upload(&scope.session, EDITOR, id)
+                .await?;
+            let operation = scope.owner.client.abandon_unprepared(id).await?;
+            serde_json::to_value(operation).map_err(|error| error.to_string())
         })
         .await
     }

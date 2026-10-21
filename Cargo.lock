@@ -10207,6 +10207,7 @@ dependencies = [
  "maka-plugin-core",
  "maka-process",
  "maka-settings-native",
+ "maka-ui-runtime",
  "maka-workspace-api",
  "markdown",
  "nsh-base",
