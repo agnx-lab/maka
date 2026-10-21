@@ -45,20 +45,23 @@ Choose **Choose workspace** or press Ctrl+N to open **Workspaces**, then choose 
 | --- | --- |
 | Ctrl+P | Open **Commands** |
 | Ctrl+O | Open **Sessions** |
-| Ctrl+G | Open **Models** for the current conversation |
+| Ctrl+G | Open model and effort choices in **Models** |
 | Ctrl+N | Create a conversation |
 | Ctrl+L | Jump to the latest messages |
 | Alt+↑ | Focus the conversation for scrolling |
 | Alt+↓ | Open and focus the latest process group (or its flat rows) |
-| Enter | Send from the composer, or activate a selected palette entry |
+| Tab | Move between controls |
+| Enter | Send from the composer, select a search result, or activate the focused control |
 | Shift+Enter | Insert a newline in the composer |
-| Esc | Close the current overlay or focused browser; from the conversation, request Stop |
+| Esc | Go back within **Models**, then close it; otherwise close the overlay or focused browser, or request Stop from the conversation |
 | Ctrl+C | Copy selected text through the terminal's OSC 52 support |
 | Ctrl+Q | Quit |
 
 Model selection uses **Ctrl+G** because classic terminals encode Ctrl+M as the same carriage return as Enter. Paste through your terminal's paste command.
 
-In a palette or the Sessions search field, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches titles within the chosen scope, using a case-sensitive literal substring of at most 128 Unicode characters. The Host applies this search before paging; it does not search conversation contents, paths or IDs. Models searches the Host's model catalog. Results load automatically as you scroll or move down. Escape closes navigation without choosing.
+In a search field, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches titles within the chosen scope, using a case-sensitive literal substring of at most 128 Unicode characters. The Host applies this search before paging; it does not search conversation contents, paths or IDs. Model search uses the Host's catalog. Results load automatically as you scroll or move down.
+
+Click the composer's model label or press Ctrl+G to open **Models**, then choose **Model** or **Effort**. Effort choices come from the selected model's published policy; **Off** appears only when supported. **Default · Use connection default** clears an explicit effort override and follows the connection's default. Re-selecting the same model on the same connection preserves an explicit effort choice. Escape or **Back** returns from either list to the menu; another Escape or **Close** closes it and restores focus to the opener, preserving the draft and caret.
 
 ## Conversation and requests
 
