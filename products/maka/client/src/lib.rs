@@ -812,14 +812,14 @@ impl Client {
         for request in &requests {
             request.stop.cancel();
         }
-        let (closed, ()) = tokio::join!(host.close(), async {
-            for request in requests {
-                let mut state = request.state.lock().await;
-                let _ = self.drain_request(&request, &mut state).await;
-                self.release_if_clean(&request, &state).await;
-            }
-        });
-        closed?;
+        // Closing the anchor revokes transport reply delivery. Drain original
+        // Calls first so their business receipts survive session shutdown.
+        for request in requests {
+            let mut state = request.state.lock().await;
+            let _ = self.drain_request(&request, &mut state).await;
+            self.release_if_clean(&request, &state).await;
+        }
+        host.close().await?;
         self.0.requests.lock().await.clear();
         Ok(())
     }
