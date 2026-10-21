@@ -444,4 +444,12 @@ test('vendored provenance is finite and does not exempt Maka additions', () => {
   assert.equal(classifyPath('third-party/sqlx-sqlite/src/new.rs').status, 'covered');
   assert.equal(classifyPath('third-party/image-webp/src/vp8.rs').status, 'excluded');
   assert.equal(classifyPath('third-party/image-webp/src/new.rs').status, 'covered');
+  for (const path of ['src/parse.rs', 'LICENSE-MIT', 'LICENSE-MPL']) {
+    assert.deepEqual(classifyPath(`third-party/termina/${path}`), {
+      rule: 'third-party-source',
+      status: 'excluded',
+    });
+  }
+  assert.equal(classifyPath('third-party/termina/SOURCE.md').status, 'covered');
+  assert.equal(classifyPath('third-party/termina/src/new.rs').status, 'covered');
 });
