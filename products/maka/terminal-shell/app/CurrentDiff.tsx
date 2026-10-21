@@ -23,7 +23,16 @@ import { List } from 'nsh/list';
 import { host } from './host';
 import type { GitArea, GitDiff, WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
 import { parsePatch } from '../../desktop-shell/app/patch.js';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  codeTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+} from './ui';
 
 export const gitAreaLabel: Record<GitArea, string> = {
   staged: 'Staged',
@@ -183,27 +192,34 @@ export function CurrentDiff(props: { model: CurrentDiffModel }) {
     }
   };
   return (
-    <View style={{ flex: 1, minHeight: 0, gap: 16 }}>
+    <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontWeight: '700' }}>
+        <Icon name="code" color={C.muted} />
+        <Text
+          numberOfLines={1}
+          style={{ ...captionTextStyle, flex: 1, color: C.text, fontWeight: '500' }}
+        >
           {model.target.title}
         </Text>
         <Button
           accessibilityLabel="Refresh current diff"
           onPress={inputAction(model.refresh, null)}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip={model.state().kind === 'error' ? 'Retry current diff' : 'Refresh current diff'}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: C.accent }}>
-            {model.state().kind === 'error' ? 'Retry' : 'Refresh'}
-          </Text>
+          <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
-      <Text style={{ color: C.muted }}>
+      <Text style={{ ...captionTextStyle, color: C.muted }}>
         Current {gitAreaLabel[model.target.area].toLowerCase()} diff
       </Text>
       <If when={notice()}>
-        <Text selectable style={{ color: model.state().kind === 'error' ? C.danger : C.muted }}>
+        <Text
+          selectable
+          style={{ ...bodyTextStyle, color: model.state().kind === 'error' ? C.danger : C.muted }}
+        >
           {notice()}
         </Text>
       </If>
@@ -230,18 +246,23 @@ function DiffRows(props: { model: CurrentDiffModel }) {
       accessibilityLabel="Current file diff"
       each={rows()}
       keyExtractor={(row: DiffRow) => row.key}
-      estimatedItemSize={16}
+      estimatedItemSize={codeTextStyle.lineHeight}
       contentOffset={initialOffset}
       onScroll={(event) => {
         if (mounted) model.position = { x: event.offset.x, y: event.offset.y };
       }}
-      style={{ flex: 1, minHeight: 0 }}
-      empty={<Text style={{ color: C.muted }}>The current patch has no displayable rows.</Text>}
+      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface }}
+      empty={
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>
+          The current patch has no displayable rows.
+        </Text>
+      }
     >
       {(row) => (
         <Text
           selectable
           style={{
+            ...codeTextStyle,
             color:
               row().kind === 'added'
                 ? '#9bd5a5'
@@ -252,9 +273,6 @@ function DiffRows(props: { model: CurrentDiffModel }) {
                     : C.muted,
             backgroundColor:
               row().kind === 'added' ? '#203527' : row().kind === 'removed' ? '#382528' : undefined,
-            fontSize: 16,
-            lineHeight: 16,
-            fontFamily: 'monospace',
           }}
         >
           {row().continuation

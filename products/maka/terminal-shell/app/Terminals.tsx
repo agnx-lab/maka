@@ -21,7 +21,16 @@ import { inputAction, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import type { TerminalsModel } from './terminalState';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
   const model = props.model;
@@ -32,36 +41,45 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
           onPress={inputAction(model.start, null)}
           disabled={model.starting() || !model.known() || !!model.pending().length}
           accessibilityLabel="Start interactive terminal"
-          style={{ paddingHorizontal: 8 }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          style={{
+            ...controlStyle,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: C.surface,
+          }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>
-            {model.starting() ? 'Starting shell…' : '+ New terminal'}
+          <Icon name="plus" color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.text }}>
+            {model.starting() ? 'Starting shell…' : 'New terminal'}
           </Text>
         </Button>
         <Button
           onPress={inputAction(model.refresh, null)}
           accessibilityLabel="Refresh terminals"
-          style={{ paddingHorizontal: 8 }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip="Refresh terminals"
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: C.accent }}>↻</Text>
+          <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
       <If when={model.error()}>
-        <Text selectable style={{ color: C.danger }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
           {model.error()}
         </Text>
       </If>
       <Each of={model.pending()} key={(operation) => operation.id}>
         {(operation) => (
-          <View style={{ gap: 8, padding: 8, backgroundColor: C.raised }}>
-            <Text style={{ color: C.warning }}>
+          <View style={{ gap: 8, padding: 12, borderRadius: 8, backgroundColor: C.surface }}>
+            <Text style={{ ...bodyTextStyle, color: C.warning }}>
               Unresolved {operation().method} · input has not been repeated.
             </Text>
-            <View style={{ flexDirection: 'row', gap: 16 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Button
                 disabled={model.recovering()}
                 onPress={inputAction(model.recover, {
@@ -69,8 +87,12 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
                   id: operation().id,
                   abandon: false,
                 })}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+                disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ color: C.accent }}>Recover original</Text>
+                <Text style={{ ...captionTextStyle, color: C.text }}>Recover original</Text>
               </Button>
               <If when={!operation().reference}>
                 <Button
@@ -80,8 +102,14 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
                     id: operation().id,
                     abandon: true,
                   })}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>Cancel undispatched action</Text>
+                  <Text style={{ ...captionTextStyle, color: C.secondary }}>
+                    Cancel undispatched action
+                  </Text>
                 </Button>
               </If>
             </View>
@@ -89,10 +117,10 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
         )}
       </Each>
       <If when={model.loading() && !model.entries().length}>
-        <Text style={{ color: C.muted }}>Reading terminals…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading terminals…</Text>
       </If>
       <If when={!model.loading() && !model.error() && !model.entries().length}>
-        <Text style={{ color: C.muted }}>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>
           Start a shell in this conversation’s workspace. Agent terminals also appear here.
         </Text>
       </If>
@@ -107,17 +135,30 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
           <Button
             onPress={inputAction(model.open, entry())}
             accessibilityLabel={`Open terminal: ${entry().result.cmd}`}
-            style={{ padding: 8, minHeight: 64 }}
-            hoverStyle={{ backgroundColor: C.raised }}
-            focusStyle={{ backgroundColor: C.line }}
+            style={{
+              ...controlStyle,
+              paddingHorizontal: 12,
+              minHeight: 64,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+            }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
           >
-            <Text numberOfLines={1} style={{ color: C.text }}>
-              ⌁ {entry().result.cmd || 'Interactive shell'}
-            </Text>
-            <Text numberOfLines={1} style={{ color: C.muted }}>
-              {entry().result.status} · {entry().result.mode} ·{' '}
-              {entry().ownership.kind === 'local' ? entry().result.cwd : 'shared · view only'}
-            </Text>
+            <Icon name="terminal" color={C.muted} />
+            <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+              <Text
+                numberOfLines={1}
+                style={{ ...captionTextStyle, color: C.text, fontWeight: '500' }}
+              >
+                {entry().result.cmd || 'Interactive shell'}
+              </Text>
+              <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
+                {entry().result.status} · {entry().result.mode} ·{' '}
+                {entry().ownership.kind === 'local' ? entry().result.cwd : 'shared · view only'}
+              </Text>
+            </View>
           </Button>
         )}
       </List>

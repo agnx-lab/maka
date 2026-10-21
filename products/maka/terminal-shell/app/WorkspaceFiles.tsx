@@ -22,7 +22,16 @@ import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { host } from './host';
 import type { WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 import type { WorkspaceFilesModel } from './workspaceFileState';
 
 export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
@@ -42,10 +51,10 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
     return text.split('/').at(-1) ?? text;
   };
   return (
-    <View style={{ flex: 1, minHeight: 0, gap: 8, backgroundColor: C.surface }}>
+    <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Scroll horizontal style={{ flex: 1, minWidth: 0 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Each of={model.breadcrumbs()} key={(directory) => directory.path?.bytesBase64 ?? ''}>
               {(directory, index) => (
                 <Button
@@ -55,17 +64,25 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                     sessionId: model.sessionId()!,
                     path: directory().path,
                   })}
-                  style={{ paddingHorizontal: 8 }}
-                  hoverStyle={{ backgroundColor: C.raised }}
-                  focusStyle={{ backgroundColor: C.line }}
+                  style={{
+                    ...controlStyle,
+                    paddingHorizontal: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
+                  <Icon name={index() ? 'right' : 'folder'} color={C.muted} />
                   <Text
                     numberOfLines={1}
                     style={{
+                      ...captionTextStyle,
                       color: index() === model.breadcrumbs().length - 1 ? C.text : C.accent,
                     }}
                   >
-                    {index() ? '› ' : ''}
                     {directory().path ? label(directory().path!) : directory().title}
                   </Text>
                 </Button>
@@ -77,11 +94,13 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
           disabled={!model.active() || model.busy()}
           accessibilityLabel="Refresh workspace files"
           onPress={inputAction(model.refresh, null)}
-          style={{ paddingHorizontal: 8 }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip="Refresh workspace files"
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>↻</Text>
+          <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
       <Each
@@ -141,17 +160,24 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                     parent: directory,
                     entry: entry(),
                   })}
-                  style={{ height: 32, paddingHorizontal: 8, flexDirection: 'row', gap: 8 }}
-                  hoverStyle={{ backgroundColor: C.raised }}
-                  focusStyle={{ backgroundColor: C.line }}
+                  style={{
+                    ...controlStyle,
+                    height: 32,
+                    paddingHorizontal: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                   activeStyle={{ backgroundColor: C.line }}
                 >
-                  <Text style={{ color: entry().kind === 'directory' ? C.accent : C.muted }}>
-                    {entry().kind === 'directory' ? '▸' : entry().kind === 'symlink' ? '↗' : '·'}
-                  </Text>
+                  <Icon name={entry().kind === 'directory' ? 'folder' : 'file'} color={C.muted} />
                   <Text
                     numberOfLines={1}
                     style={{
+                      ...captionTextStyle,
                       flex: 1,
                       color:
                         entry().kind === 'file' || entry().kind === 'directory' ? C.text : C.muted,
@@ -160,7 +186,7 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                     {label(entry().path)}
                   </Text>
                   <If when={entry().kind === 'symlink' || entry().kind === 'other'}>
-                    <Text style={{ color: C.muted }}>
+                    <Text style={{ ...captionTextStyle, color: C.muted }}>
                       {entry().kind === 'symlink' ? 'Link' : 'Unsupported'}
                     </Text>
                   </If>
@@ -171,23 +197,31 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
         }}
       </Each>
       <If when={model.loading() || (model.busy() && model.entries().length === 0)}>
-        <Text style={{ color: C.muted, paddingHorizontal: 8 }}>Loading files…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
+          Loading files…
+        </Text>
       </If>
       <If when={model.busy() && !model.loading() && model.entries().length > 0}>
-        <Text style={{ color: C.muted, paddingHorizontal: 8 }}>Updating files…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
+          Updating files…
+        </Text>
       </If>
       <If when={!model.sessionId()}>
-        <Text style={{ color: C.muted, paddingHorizontal: 8 }}>
+        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
           Select a conversation to browse its workspace.
         </Text>
       </If>
       <If
         when={model.sessionId() && !model.busy() && !model.error() && model.entries().length === 0}
       >
-        <Text style={{ color: C.muted, paddingHorizontal: 8 }}>This directory is empty.</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
+          This directory is empty.
+        </Text>
       </If>
       <If when={model.error()}>
-        <Text style={{ color: C.danger, paddingHorizontal: 8 }}>{model.error()}</Text>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger, paddingHorizontal: 8 }}>
+          {model.error()}
+        </Text>
       </If>
     </View>
   );

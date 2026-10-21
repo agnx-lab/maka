@@ -39,7 +39,17 @@ import type {
   TerminalSize,
 } from '../../../../packages/plugin-sdk/src/index.js';
 import type { TerminalModel } from './terminalState';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  codeTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 type Color = { named: number } | { indexed: number } | { rgb: number[] };
 type Run = {
@@ -321,7 +331,7 @@ export function Terminal(props: { model: TerminalModel }) {
   };
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
         <Button
           ref={(node) => {
             fallback = node;
@@ -332,56 +342,94 @@ export function Terminal(props: { model: TerminalModel }) {
             input?.focus();
           }}
           accessibilityLabel="Focus terminal input"
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip={model.control() === 'held' ? 'Terminal input is active' : 'Focus terminal input'}
+          selected={model.control() === 'held'}
+          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          selectedStyle={{ backgroundColor: C.raised }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>
-            {model.control() === 'held' ? 'Terminal focused' : 'Take input'}
-          </Text>
+          <Icon name="terminal" color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>Input</Text>
         </Button>
         <If when={model.control() === 'held'}>
-          <Button onPress={inputAction(model.release, null)}>
-            <Text style={{ color: C.accent }}>Release input</Text>
+          <Button
+            onPress={inputAction(model.release, null)}
+            tooltip="Release terminal input · Ctrl+Shift+Space"
+            style={controlStyle}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+          >
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>Release input</Text>
           </Button>
         </If>
-        <Button onPress={() => void copy()} accessibilityLabel="Copy visible terminal">
-          <Text style={{ color: C.accent }}>Copy</Text>
+        <View style={{ flex: 1 }} />
+        <Button
+          onPress={() => void copy()}
+          accessibilityLabel="Copy visible terminal"
+          tooltip="Copy visible terminal · Ctrl+Shift+C"
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+        >
+          <Icon name="copy" color={C.secondary} />
         </Button>
         <If when={model.local() && model.running()}>
           <Button
             disabled={model.stopping()}
             onPress={() => confirmation.set(true)}
             accessibilityLabel="Stop terminal process"
+            tooltip={model.stopping() ? 'Stopping process…' : 'Stop terminal process'}
+            style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.warning }}>
-              {model.stopping() ? 'Stopping…' : 'Stop process'}
-            </Text>
+            <Icon name="stop" color={C.warning} />
           </Button>
         </If>
-        <Text style={{ color: C.muted }}>
-          {model.entry().result.status} ·{' '}
-          {model.control() === 'held'
-            ? 'input held'
-            : model.local()
-              ? 'viewing'
-              : 'shared · view only'}
-        </Text>
       </View>
+      <Text
+        tooltip="Terminal history · Shift+PageUp / Shift+PageDown"
+        style={{ ...captionTextStyle, color: C.muted }}
+      >
+        {model.entry().result.status} ·{' '}
+        {model.control() === 'held'
+          ? 'input held'
+          : model.local()
+            ? 'viewing'
+            : 'shared · view only'}
+      </Text>
       <If when={model.error()}>
-        <Text selectable style={{ color: C.danger }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
           {model.error()}
         </Text>
       </If>
       <If when={model.state() === 'failed' || model.control() === 'refused'}>
-        <Button onPress={inputAction(model.retry, null)}>
-          <Text style={{ color: C.accent }}>Retry terminal observation</Text>
+        <Button
+          onPress={inputAction(model.retry, null)}
+          style={{
+            ...controlStyle,
+            alignSelf: 'flex-start',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+        >
+          <Icon name="refresh" color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>
+            Retry terminal observation
+          </Text>
         </Button>
       </If>
       <If when={copyStatus()}>
-        <Text style={{ color: C.muted }}>{copyStatus()}</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>{copyStatus()}</Text>
       </If>
       <If when={model.state() === 'unavailable'}>
-        <Text style={{ color: C.warning }}>
+        <Text style={{ ...bodyTextStyle, color: C.warning }}>
           Live output is no longer retained. Input is released; the final display will appear after
           the process settles.
         </Text>
@@ -514,10 +562,7 @@ export function Terminal(props: { model: TerminalModel }) {
         </If>
         <If when={model.entry().result.mode === 'pipes'}>
           <Scroll style={{ flex: 1 }}>
-            <Text
-              selectable
-              style={{ color: C.text, fontFamily: 'monospace', fontSize: 16, lineHeight: LINE }}
-            >
+            <Text selectable style={{ ...codeTextStyle, color: C.text }}>
               {pipes()}
             </Text>
           </Scroll>
@@ -549,9 +594,6 @@ export function Terminal(props: { model: TerminalModel }) {
           />
         </If>
       </View>
-      <Text style={{ color: C.muted }}>
-        Ctrl+Shift+Space · leave terminal · Shift+PageUp/Down · history
-      </Text>
       <If when={confirmation()}>
         <Dialog
           animation="none"
@@ -563,15 +605,31 @@ export function Terminal(props: { model: TerminalModel }) {
             backgroundColor: '#000000cc',
           }}
         >
-          <View style={{ padding: 16, maxWidth: 480, gap: 16, backgroundColor: C.surface }}>
-            <Text style={{ color: C.text }}>
+          <View
+            style={{
+              padding: 24,
+              width: '90%',
+              maxWidth: 480,
+              gap: 24,
+              borderRadius: 16,
+              backgroundColor: C.surface,
+            }}
+          >
+            <Text style={{ ...bodyTextStyle, color: C.text }}>
               {model.agentOwned()
                 ? 'Stop the agent’s running terminal? This interrupts its command.'
                 : 'Stop this terminal and its running process?'}
             </Text>
-            <View style={{ flexDirection: 'row', gap: 24 }}>
-              <Button onPress={() => confirmation.set(false)}>
-                <Text style={{ color: C.text }}>Keep running</Text>
+            <View
+              style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}
+            >
+              <Button
+                onPress={() => confirmation.set(false)}
+                style={{ ...controlStyle, backgroundColor: C.raised }}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
+              >
+                <Text style={{ ...captionTextStyle, color: C.secondary }}>Keep running</Text>
               </Button>
               <Button
                 accessibilityLabel="Confirm stop terminal process"
@@ -579,8 +637,11 @@ export function Terminal(props: { model: TerminalModel }) {
                   confirmation.set(false);
                   void model.stop();
                 }}
+                style={controlStyle}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
               >
-                <Text style={{ color: C.danger }}>Stop process</Text>
+                <Text style={{ ...captionTextStyle, color: C.danger }}>Stop process</Text>
               </Button>
             </View>
           </View>

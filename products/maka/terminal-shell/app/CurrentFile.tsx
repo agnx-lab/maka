@@ -24,7 +24,17 @@ import { List } from 'nsh/list';
 import { host, type FileView } from './host';
 import type { AgentFileChange } from '../../../../packages/plugin-sdk/src/index.js';
 import type { WorkspaceFileTarget } from './workspaceFileState';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  codeTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 type FileState =
   | FileView
@@ -228,44 +238,57 @@ export function CurrentFile(props: { model: CurrentFileModel }) {
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontWeight: '700' }}>
+        <Icon name="file" color={C.muted} />
+        <Text
+          numberOfLines={1}
+          style={{ ...captionTextStyle, flex: 1, color: C.text, fontWeight: '500' }}
+        >
           {model.target.title}
         </Text>
         <Button
           disabled={model.state().kind === 'loading'}
           accessibilityLabel="Refresh current file"
           onPress={inputAction(model.refresh, null)}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip={model.state().kind === 'error' ? 'Retry current file' : 'Refresh current file'}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>
-            {model.state().kind === 'error' ? 'Retry' : 'Refresh'}
-          </Text>
+          <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
-      <Text style={{ color: C.muted }}>Current file · Captured contents</Text>
-      <If when={version()}>
-        <Text selectable numberOfLines={1} style={{ color: C.muted }}>
-          Captured version {version()}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
+          Current file · Captured contents
         </Text>
-      </If>
+        <If when={version()}>
+          <Text
+            selectable
+            numberOfLines={1}
+            style={{ ...captionTextStyle, maxWidth: '100%', color: C.muted }}
+          >
+            Captured version {version()}
+          </Text>
+        </If>
+      </View>
       <If when={model.stale()}>
-        <Text style={{ color: C.warning }}>
+        <Text style={{ ...bodyTextStyle, color: C.warning }}>
           The workspace may have changed. Refresh for current contents.
         </Text>
       </If>
       <If when={model.state().kind === 'idle' || model.state().kind === 'loading'}>
-        <Text style={{ color: C.muted }}>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>
           {model.state().kind === 'loading' ? 'Reading current file…' : 'File preview is inactive.'}
         </Text>
       </If>
       <If when={error()}>
-        <Text selectable style={{ color: C.danger }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
           {error()}
         </Text>
       </If>
       <If when={notice()}>
-        <Text style={{ color: C.muted }}>{notice()}</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>{notice()}</Text>
       </If>
       <Each of={view() ? [view()!] : []} key={(value) => value}>
         {(value) => {
@@ -289,22 +312,28 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
     <List
       each={props.view.rows}
       keyExtractor={(row) => String(row.offset)}
-      estimatedItemSize={16}
+      estimatedItemSize={codeTextStyle.lineHeight}
       contentOffset={initialOffset}
       onScroll={(event) => {
         if (mounted) props.model.position = { x: event.offset.x, y: event.offset.y };
       }}
       accessibilityLabel="Captured file text"
-      style={{ flex: 1, minHeight: 0 }}
+      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface }}
     >
       {(row) => (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', minHeight: 16, gap: 8 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            minHeight: codeTextStyle.lineHeight,
+            gap: 8,
+          }}
+        >
           <Text
             style={{
+              ...codeTextStyle,
               width: Math.max(24, String(props.view.rows.at(-1)?.line ?? 1).length * 8),
               color: C.muted,
-              fontFamily: 'monospace',
-              lineHeight: 16,
             }}
           >
             {row().line}
@@ -312,11 +341,10 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
           <Text
             selectable
             style={{
+              ...codeTextStyle,
               flex: 1,
+              minWidth: 0,
               color: C.text,
-              fontFamily: 'monospace',
-              fontSize: 16,
-              lineHeight: 16,
             }}
           >
             {/* Each native block starts at this source line; internal newlines remain intact. */}
@@ -350,19 +378,30 @@ function FileImage(props: { model: CurrentFileModel; view: Extract<FileView, { k
         style={{ flex: 1, minHeight: 0, width: '100%' }}
       />
       <If when={dimensions()}>
-        <Text style={{ color: C.muted }}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
           {dimensions()!.width} × {dimensions()!.height} · Captured image
         </Text>
       </If>
       <If when={error()}>
-        <Text selectable style={{ color: C.danger }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
           {error()}
         </Text>
         <Button
           disabled={props.model.state().kind === 'loading'}
           onPress={inputAction(props.model.refresh, null)}
+          style={{
+            ...controlStyle,
+            alignSelf: 'flex-start',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
+          disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Retry image</Text>
+          <Icon name="refresh" color={C.secondary} />
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry image</Text>
         </Button>
       </If>
     </View>

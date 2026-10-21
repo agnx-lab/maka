@@ -30,7 +30,15 @@ import { CurrentDiff } from './CurrentDiff';
 import { CurrentFile } from './CurrentFile';
 import type { Resources } from './resources';
 import type { ImagePreview } from './ImageThumbnail';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+} from './ui';
 
 export function ResourcePane(props: { resources: Resources; docked: boolean }) {
   const resources = props.resources;
@@ -59,9 +67,9 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           within: node,
         });
       }}
-      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 8, gap: 8 }}
+      style={{ flex: 1, minHeight: 0, backgroundColor: C.background, padding: 8, gap: 8 }}
     >
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <Button
           accessibilityLabel="Browse files"
           selected={resources.active() === 'files'}
@@ -76,8 +84,19 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
             sessionId: resources.sessionId()!,
             kind: 'files',
           })}
+          style={{ ...controlStyle, paddingHorizontal: 8 }}
+          selectedStyle={{ backgroundColor: C.raised }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: resources.active() === 'files' ? C.accent : C.muted }}>Files</Text>
+          <Text
+            style={{
+              ...captionTextStyle,
+              color: resources.active() === 'files' ? C.text : C.muted,
+            }}
+          >
+            Files
+          </Text>
         </Button>
         <Button
           accessibilityLabel="Browse current changes"
@@ -86,25 +105,41 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
             sessionId: resources.sessionId()!,
             kind: 'changes',
           })}
+          style={{ ...controlStyle, paddingHorizontal: 8 }}
+          selectedStyle={{ backgroundColor: C.raised }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: resources.active() === 'changes' ? C.accent : C.muted }}>
+          <Text
+            style={{
+              ...captionTextStyle,
+              color: resources.active() === 'changes' ? C.text : C.muted,
+            }}
+          >
             Changes
           </Text>
         </Button>
         <Button
           accessibilityLabel="Show conversation terminals"
+          selected={resources.active() === 'terminals'}
           onPress={inputAction(resources.inventory, {
             sessionId: resources.sessionId()!,
             kind: 'terminals',
           })}
           style={{
+            ...controlStyle,
             paddingHorizontal: 8,
-            backgroundColor: resources.active() === 'terminals' ? C.raised : 'transparent',
           }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          selectedStyle={{ backgroundColor: C.raised }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: resources.active() === 'terminals' ? C.text : C.accent }}>
+          <Text
+            style={{
+              ...captionTextStyle,
+              color: resources.active() === 'terminals' ? C.text : C.muted,
+            }}
+          >
             Terminal
           </Text>
         </Button>
@@ -112,19 +147,24 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
         <Button
           accessibilityLabel="Close workspace preview"
           onPress={inputAction(resources.close, closeTarget)}
+          tooltip="Close workspace preview · Esc"
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: C.muted }}>Close · Esc</Text>
+          <Icon name="close" color={C.muted} />
         </Button>
       </View>
       <If when={resources.tabs().length}>
         <Scroll horizontal style={{ flexGrow: 0, flexShrink: 0 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
             <Each of={resources.tabs()} key={(tab) => tab.instance}>
               {(tab) => (
                 <View
                   style={{
                     flexDirection: 'row',
-                    gap: 8,
+                    alignItems: 'center',
+                    borderRadius: 8,
                     backgroundColor: resources.active() === tab().instance ? C.raised : C.surface,
                   }}
                 >
@@ -135,11 +175,28 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                       instance: tab().instance,
                     })}
                     accessibilityLabel={`Preview ${tab().title}`}
+                    tooltip={tab().title}
+                    style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
                   >
+                    <Icon
+                      name={
+                        tab().kind === 'terminal'
+                          ? 'terminal'
+                          : tab().kind === 'diff'
+                            ? 'code'
+                            : tab().kind === 'image'
+                              ? 'image'
+                              : 'file'
+                      }
+                      color={C.muted}
+                    />
                     <Text
                       numberOfLines={1}
                       style={{
-                        color: resources.active() === tab().instance ? C.accent : C.muted,
+                        ...captionTextStyle,
+                        color: resources.active() === tab().instance ? C.text : C.muted,
                         maxWidth: 200,
                       }}
                     >
@@ -152,8 +209,17 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
                       instance: tab().instance,
                     })}
                     accessibilityLabel={`Close ${tab().title}`}
+                    tooltip={`Close ${tab().title}`}
+                    style={{
+                      ...controlStyle,
+                      width: 32,
+                      paddingHorizontal: 8,
+                      alignItems: 'center',
+                    }}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
                   >
-                    <Text style={{ color: C.muted }}>×</Text>
+                    <Icon name="close" color={C.muted} />
                   </Button>
                 </View>
               )}
@@ -191,7 +257,9 @@ function OriginalImage(props: { image: ImagePreview }) {
   });
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
-      <Text style={{ color: C.text }}>Image preview</Text>
+      <Text style={{ ...captionTextStyle, color: C.secondary, fontWeight: '500' }}>
+        Image preview
+      </Text>
       <Image
         src={props.image.uri}
         resizeMode="contain"
@@ -200,11 +268,11 @@ function OriginalImage(props: { image: ImagePreview }) {
         }}
         style={{ flex: 1, minHeight: 0, width: '100%' }}
       />
-      <Text style={{ color: C.muted }}>
+      <Text style={{ ...captionTextStyle, color: C.muted }}>
         {props.image.width} × {props.image.height} · Original image
       </Text>
       <If when={error()}>
-        <Text style={{ color: C.danger }}>{error()}</Text>
+        <Text style={{ ...bodyTextStyle, color: C.danger }}>{error()}</Text>
       </If>
     </View>
   );

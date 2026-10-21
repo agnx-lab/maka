@@ -23,7 +23,15 @@ import { List } from 'nsh/list';
 import { host } from './host';
 import type { GitStatus, GitStatusEntry } from '../../../../packages/plugin-sdk/src/index.js';
 import { gitAreaLabel, type CurrentDiffTarget } from './CurrentDiff';
-import { C } from './ui';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+} from './ui';
 
 type ChangesState =
   | { kind: 'loading' }
@@ -74,41 +82,45 @@ export function WorkspaceChanges(props: {
       props.openDiff(target);
   };
   return (
-    <View style={{ flex: 1, minHeight: 0, gap: 16 }}>
+    <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text style={{ flex: 1, color: C.text, fontWeight: '700' }}>Current changes</Text>
+        <Text style={{ ...captionTextStyle, flex: 1, color: C.secondary, fontWeight: '500' }}>
+          Current changes
+        </Text>
         <Button
           accessibilityLabel="Refresh current changes"
           onPress={inputAction(refresh, props.sessionId)}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          tooltip={state().kind === 'error' ? 'Retry current changes' : 'Refresh current changes'}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
-          <Text style={{ color: C.accent }}>{state().kind === 'error' ? 'Retry' : 'Refresh'}</Text>
+          <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
       <If when={state().kind === 'loading'}>
-        <Text style={{ color: C.muted }}>Reading current changes…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading current changes…</Text>
       </If>
       <If when={state().kind === 'error'}>
-        <Text selectable style={{ color: C.danger }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
           {(state() as Extract<ChangesState, { kind: 'error' }>).message}
         </Text>
       </If>
       <If when={state().kind === 'ready'}>
         <If
           when={status() !== null}
-          else={<Text style={{ color: C.muted }}>Not a Git workspace.</Text>}
+          else={<Text style={{ ...bodyTextStyle, color: C.muted }}>Not a Git workspace.</Text>}
         >
-          <Text numberOfLines={1} style={{ color: C.muted }}>
+          <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
             {status()?.head ?? 'No commits yet'} · {entries().length} changes
           </Text>
           <List
             accessibilityLabel="Current workspace changes"
             each={entries()}
             keyExtractor={(entry: GitStatusEntry) => `${entry.area}/${entry.path.bytesBase64}`}
-            estimatedItemSize={32}
+            estimatedItemSize={48}
             style={{ flex: 1, minHeight: 0 }}
-            empty={<Text style={{ color: C.muted }}>No current changes.</Text>}
+            empty={<Text style={{ ...bodyTextStyle, color: C.muted }}>No current changes.</Text>}
           >
             {(entry) => (
               <Button
@@ -119,16 +131,26 @@ export function WorkspaceChanges(props: {
                   path: entry().path,
                   title: host.pathLabel(entry().path),
                 })}
-                style={{ paddingHorizontal: 8, minHeight: 32 }}
-                hoverStyle={{ backgroundColor: C.raised }}
-                focusStyle={{ backgroundColor: C.line }}
+                style={{
+                  ...controlStyle,
+                  paddingHorizontal: 8,
+                  minHeight: 48,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+                hoverStyle={controlHoverStyle}
+                focusStyle={controlFocusStyle}
               >
-                <Text numberOfLines={1} style={{ color: C.text }}>
-                  {host.pathLabel(entry().path)}
-                </Text>
-                <Text numberOfLines={1} style={{ color: C.muted }}>
-                  {gitAreaLabel[entry().area]} · {entry().kind.replace('_', ' ')}
-                </Text>
+                <Icon name="file" color={entry().kind === 'deleted' ? C.danger : C.muted} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text }}>
+                    {host.pathLabel(entry().path)}
+                  </Text>
+                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
+                    {gitAreaLabel[entry().area]} · {entry().kind.replace('_', ' ')}
+                  </Text>
+                </View>
               </Button>
             )}
           </List>
