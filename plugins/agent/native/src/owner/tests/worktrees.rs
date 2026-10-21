@@ -315,11 +315,23 @@ async fn large_completed_isolated_patch_is_complete_and_immutable_after_successo
         {
             return Err("restart must preserve the original patch descriptor".into());
         }
+        // Real clients retain a binding for the activation. Rebinding every
+        // page would repeatedly hash the entire contract instead of its data.
+        let client = f.app.client();
+        let binding = f.binding(2).await;
         let mut output = std::fs::File::create(&patch_file).map_err(|error| error.to_string())?;
         let mut offset = 0;
         loop {
-            let page = f
-                .query("readPatch", json!({"execution":execution,"offset":offset}))
+            let page = client
+                .start(
+                    binding.clone(),
+                    "readPatch".into(),
+                    json!({"execution":execution,"offset":offset}),
+                    scope(&f.issuer, true),
+                    Attachments::new().into(),
+                )
+                .await?
+                .result()
                 .await?;
             if page["kind"] != "ready"
                 || page["patch"] != original["patch"]
