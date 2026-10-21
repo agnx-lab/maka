@@ -39,8 +39,6 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
   const failure = signal<{ input: Input; message: string } | null>(null);
   let wanted: Input | null = null;
   let preparing = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let nextStart = 0;
   let alive = true;
   const input = (): Input | null => {
     const row = props.row();
@@ -53,26 +51,15 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
     current.messageId === parsed.messageId &&
     current.field === parsed.field &&
     current.source.startsWith(parsed.source);
-  function schedule() {
-    if (!alive || preparing || timer !== undefined || wanted === null) return;
+  async function prepare() {
+    if (!alive || preparing || wanted === null) return;
     if (
       sameInput(projection()?.input ?? null, wanted) ||
       sameInput(failure()?.input ?? null, wanted)
     )
       return;
-    timer = setTimeout(
-      () => {
-        timer = undefined;
-        void prepare();
-      },
-      Math.max(0, nextStart - Date.now()),
-    );
-  }
-  async function prepare() {
-    if (!alive || wanted === null) return;
     const captured = wanted;
     preparing = true;
-    nextStart = Date.now() + 50;
     try {
       const blocks = await markdown.parse(captured.source);
       const current = input();
@@ -92,7 +79,7 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
       }
     } finally {
       preparing = false;
-      schedule();
+      void prepare();
     }
   }
   effect(() => {
@@ -103,11 +90,10 @@ export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
     }
     wanted = current;
     failure.set(null);
-    schedule();
+    void prepare();
   });
   cleanup(() => {
     alive = false;
-    if (timer !== undefined) clearTimeout(timer);
   });
   const blocks = computed(() => {
     const parsed = projection();
