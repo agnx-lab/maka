@@ -25,7 +25,7 @@ use maka_event_log::{
 };
 use maka_host_runtime::{
     application::{
-        NativeRegistry,
+        Handler, NativeActivation, NativeRegistry,
         host::{Client as HostClient, Host, discovery::Registration},
         transport::{Grant, HostEndpoint, NativeGrant, wire},
     },
@@ -35,6 +35,7 @@ use maka_packages::Package;
 use maka_plugin_core::{
     composition::InstanceId,
     operation::{OperationOutcome, Receipt, receipt_reader_contract},
+    runtime::Published,
 };
 use nsh_engine::Bundle;
 use nsh_platform_tui::{AppOptions, AppView};
@@ -104,6 +105,16 @@ enum InitialCatalog {
 }
 
 impl Fixture {
+    pub async fn oauth(authentication: Arc<dyn Handler>) -> Self {
+        Self::open_with_services(
+            false,
+            false,
+            InitialCatalog::Configured { reasoning: false },
+            false,
+            Some(authentication),
+        )
+        .await
+    }
     pub async fn open() -> Self {
         Self::open_with_options(
             false,
@@ -135,22 +146,24 @@ impl Fixture {
         Self::open_with_options(true, true, InitialCatalog::Configured { reasoning: false }).await
     }
     pub async fn plugin_settings() -> Self {
-        Self::open_with_plugins(
+        Self::open_with_services(
             false,
             false,
             InitialCatalog::Configured { reasoning: false },
             true,
+            None,
         )
         .await
     }
     async fn open_with_options(registered: bool, images: bool, catalog: InitialCatalog) -> Self {
-        Self::open_with_plugins(registered, images, catalog, false).await
+        Self::open_with_services(registered, images, catalog, false, None).await
     }
-    async fn open_with_plugins(
+    async fn open_with_services(
         registered: bool,
         images: bool,
         catalog: InitialCatalog,
         plugins: bool,
+        login_handler: Option<Arc<dyn Handler>>,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
@@ -228,7 +241,11 @@ impl Fixture {
         );
         let authentication = package(
             "test.nsh.authentication",
-            "maka.settings.authentication",
+            if login_handler.is_some() {
+                "test.nsh.oauth"
+            } else {
+                "maka.settings.authentication"
+            },
             empty.clone(),
             json!({}),
             json!({"Authentication":{"contract":authentication_contract,"availability":"required"}}),
@@ -324,6 +341,30 @@ impl Fixture {
         let mut native = NativeRegistry::default();
         maka_agent_native::provide(&mut native).unwrap();
         maka_settings_native::provide(&mut native).unwrap();
+        if let Some(handler) = login_handler.clone() {
+            let contract = authentication_contract.clone();
+            native
+                .insert(
+                    "test.nsh.oauth".into(),
+                    Arc::new(move |_, _| {
+                        let contract = contract.clone();
+                        let handler = handler.clone();
+                        Box::pin(async move {
+                            NativeActivation {
+                                exports: Ok(BTreeMap::from([(
+                                    "Authentication".into(),
+                                    Published {
+                                        contract,
+                                        value: handler,
+                                    },
+                                )])),
+                                owner: Arc::new(()),
+                            }
+                        })
+                    }),
+                )
+                .unwrap();
+        }
         if images {
             maka_files_native::provide(&mut native).unwrap();
         }
@@ -407,7 +448,15 @@ impl Fixture {
                 ),
                 (
                     "authentication".into(),
-                    endpoint("authentication", &["provider"], false),
+                    endpoint(
+                        "authentication",
+                        if login_handler.is_some() {
+                            &["provider", "loginCredential"]
+                        } else {
+                            &["provider"]
+                        },
+                        false,
+                    ),
                 ),
                 (
                     "setup".into(),

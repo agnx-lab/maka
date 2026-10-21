@@ -70,3 +70,4 @@ maka-workspace-api.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 maka-config.workspace = true
 maka-packages.workspace = true
+maka-providers.workspace = true
