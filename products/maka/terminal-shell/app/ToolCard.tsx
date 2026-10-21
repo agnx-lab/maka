@@ -176,7 +176,6 @@ function Field(props: {
   sessionId: string;
   through: number;
   original(): boolean;
-  bodyMaxHeight?(): number;
 }) {
   const source = createToolSource(props.reference, props.sessionId, props.through);
   const family = cardFamily(source.original.presentation);
@@ -207,6 +206,7 @@ export function ToolCard(props: {
   through(): number;
   expanded(): boolean;
   original(): boolean;
+  bodyMaxHeight?(): number;
   expand(action: { sessionId: string; key: string; value: boolean }): void;
   showOriginal(action: { sessionId: string; key: string; value: boolean }): void;
   previewImage(image: ImagePreview): void;
