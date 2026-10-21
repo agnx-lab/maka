@@ -25,6 +25,7 @@ import { host, type FileView } from './host';
 import type { AgentFileChange } from '../../../../packages/plugin-sdk/src/index.js';
 import type { WorkspaceFileTarget } from './workspaceFileState';
 import { Icon } from './Icon';
+import { ImageViewerButton, type OpenImageViewer } from './ImageViewer';
 import {
   C,
   bodyTextStyle,
@@ -223,7 +224,7 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
   return model;
 }
 
-export function CurrentFile(props: { model: CurrentFileModel }) {
+export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: OpenImageViewer }) {
   const model = props.model;
   const view = () => captured(model.state());
   const version = () => {
@@ -310,7 +311,10 @@ export function CurrentFile(props: { model: CurrentFileModel }) {
         {(value) => {
           const snapshot = value();
           if (snapshot.kind === 'text') return <FileRows model={model} view={snapshot} />;
-          if (snapshot.kind === 'image') return <FileImage model={model} view={snapshot} />;
+          if (snapshot.kind === 'image')
+            return (
+              <FileImage model={model} view={snapshot} openImageViewer={props.openImageViewer} />
+            );
           return <View />;
         }}
       </Each>
@@ -372,7 +376,11 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
   );
 }
 
-function FileImage(props: { model: CurrentFileModel; view: Extract<FileView, { kind: 'image' }> }) {
+function FileImage(props: {
+  model: CurrentFileModel;
+  view: Extract<FileView, { kind: 'image' }>;
+  openImageViewer: OpenImageViewer;
+}) {
   const error = signal('');
   const dimensions = signal<{ width: number; height: number } | null>(null);
   let mounted = true;
@@ -394,9 +402,15 @@ function FileImage(props: { model: CurrentFileModel; view: Extract<FileView, { k
         style={{ flex: 1, minHeight: 0, width: '100%' }}
       />
       <If when={dimensions()}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>
-          {dimensions()!.width} × {dimensions()!.height} · Captured image
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
+            {dimensions()!.width} × {dimensions()!.height} · Captured image
+          </Text>
+          <ImageViewerButton
+            open={props.openImageViewer}
+            image={{ uri: props.view.uri, ...dimensions()!, title: props.model.target.title }}
+          />
+        </View>
       </If>
       <If when={error()}>
         <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>

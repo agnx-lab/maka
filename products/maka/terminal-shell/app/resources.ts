@@ -23,6 +23,7 @@ import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFileS
 import { createCurrentFile, type CurrentFileModel } from './CurrentFile';
 import { createCurrentDiff, type CurrentDiffTarget, type CurrentDiffModel } from './CurrentDiff';
 import type { ImagePreview } from './ImageThumbnail';
+import type { ViewerImage } from './ImageViewer';
 import { createTerminals, type TerminalModel } from './terminalState';
 import type { ResourceUpdate } from '../../../../packages/plugin-sdk/src/index.js';
 
@@ -38,6 +39,8 @@ export type ResourceTab = {
   | { kind: 'terminal'; model: TerminalModel }
 );
 
+type ImageViewerState = { tab: ResourceTab; image: ViewerImage; close(): void };
+
 // Window presentation state only. All resource authority remains in the
 // original Host selector; no session, draft or backend data is duplicated here.
 export function createResources(options: { selected(): string | null; blocked(): boolean }) {
@@ -46,6 +49,7 @@ export function createResources(options: { selected(): string | null; blocked():
   const active = signal<number | 'files' | 'changes' | 'terminals'>('files');
   const focusRequest = signal(false);
   const instance = signal(0);
+  const imageViewer = signal<ImageViewerState | null>(null);
   let nextInstance = 0;
   let session: string | null = null;
   let alive = true;
@@ -58,6 +62,7 @@ export function createResources(options: { selected(): string | null; blocked():
   const adopt = () => {
     const selected = options.selected();
     if (selected !== session) {
+      imageViewer.set(null);
       tabs().forEach(dispose);
       tabs.set([]);
       shown.set(false);
@@ -87,12 +92,14 @@ export function createResources(options: { selected(): string | null; blocked():
       !tabs().some((tab) => tab.instance === target.instance && tab.sessionId === target.sessionId)
     )
       return;
+    imageViewer.set(null);
     active.set(target.instance);
     reveal();
   };
   const open = (sessionId: string, identity: string, build: (instance: number) => ResourceTab) => {
     if (!admits(sessionId)) return;
     adopt();
+    imageViewer.set(null);
     let tab = tabs().find((candidate) => candidate.identity === identity);
     if (!tab) {
       tab = build(++nextInstance);
@@ -153,6 +160,7 @@ export function createResources(options: { selected(): string | null; blocked():
   const inventory = (target: { sessionId: string; kind: 'files' | 'changes' | 'terminals' }) => {
     if (!admits(target.sessionId)) return;
     adopt();
+    imageViewer.set(null);
     active.set(target.kind);
     reveal();
   };
@@ -160,12 +168,14 @@ export function createResources(options: { selected(): string | null; blocked():
     if (!admits(target.sessionId)) return;
     const tab = tabs().find((tab) => tab.instance === target.instance);
     if (!tab) return;
+    if (imageViewer()?.tab === tab) imageViewer.set(null);
     dispose(tab);
     tabs.set(tabs().filter((candidate) => candidate !== tab));
     if (active() === tab.instance) active.set('files');
     focusRequest.set(true);
   };
   const hide = () => {
+    imageViewer.set(null);
     shown.set(false);
     focusRequest.set(false);
   };
@@ -180,6 +190,27 @@ export function createResources(options: { selected(): string | null; blocked():
       opener = headerOpener(target.sessionId);
       focusRequest.set(true);
     }
+  };
+  const openImageViewer = (
+    target: { sessionId: string; instance: number; image: ViewerImage },
+    restoreFocus: () => boolean,
+  ) => {
+    if (!admits(target.sessionId) || active() !== target.instance) return;
+    const tab = tabs().find(
+      (tab) => tab.instance === target.instance && tab.sessionId === target.sessionId,
+    );
+    if (!tab || (tab.kind !== 'image' && tab.kind !== 'file')) return;
+    if (tab.kind === 'image' && tab.image.uri !== target.image.uri) return;
+    const state: ImageViewerState = {
+      tab,
+      image: target.image,
+      close() {
+        if (!alive || imageViewer() !== state || options.selected() !== tab.sessionId) return;
+        imageViewer.set(null);
+        if (!restoreFocus()) focusRequest.set(true);
+      },
+    };
+    imageViewer.set(state);
   };
   const terminals = createTerminals({
     sessionId: options.selected,
@@ -218,6 +249,7 @@ export function createResources(options: { selected(): string | null; blocked():
   });
   cleanup(() => {
     alive = false;
+    imageViewer.set(null);
     tabs().forEach(dispose);
   });
   return {
@@ -229,6 +261,8 @@ export function createResources(options: { selected(): string | null; blocked():
     inventory,
     openFiles,
     openImage,
+    openImageViewer,
+    imageViewer,
     openDiff,
     select,
     closeTab,

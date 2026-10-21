@@ -24,6 +24,7 @@ import { Dialog } from 'nsh/base';
 import { C } from './ui';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 import { ResourcePane } from './ResourcePane';
+import { ImageViewer } from './ImageViewer';
 import type { Resources } from './resources';
 
 const CELL = 8;
@@ -103,7 +104,8 @@ export function Workbench(props: {
   effect(() => {
     const docked = canDockPreview();
     const root = props.resources.root();
-    if (!props.resources.shown() || docked) previewDialog.set(false);
+    if (!props.resources.shown() || docked || props.resources.imageViewer())
+      previewDialog.set(false);
     else if (!wasPreviewDocked || (root && keymap.focusedWithin(root))) previewDialog.set(true);
     else {
       props.resources.hide();
@@ -206,6 +208,24 @@ export function Workbench(props: {
           <ResourcePane resources={props.resources} docked={false} />
         </Dialog>
       </If>
+      <Each
+        of={props.resources.imageViewer() ? [props.resources.imageViewer()!] : []}
+        key={(viewer) => viewer}
+      >
+        {(viewer) => {
+          const current = viewer();
+          return (
+            <ImageViewer
+              image={current.image}
+              close={inputAction(current.close, {
+                sessionId: current.tab.sessionId,
+                instance: current.tab.instance,
+                uri: current.image.uri,
+              })}
+            />
+          );
+        }}
+      </Each>
     </View>
   );
 }

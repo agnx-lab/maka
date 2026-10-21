@@ -42,6 +42,7 @@ const glyphs = {
   latest: '↓',
   paperclip: '📎',
   image: '▧',
+  expand: '⛶',
   fork: '⑂',
   shield: '◇',
   lock: '▣',
@@ -107,6 +108,20 @@ export function Icon(props: { name: keyof typeof glyphs; color: string }) {
             cx.lineTo(12, 12);
             cx.moveTo(12, 4);
             cx.lineTo(4, 12);
+            break;
+          case 'expand':
+            cx.moveTo(6, 2);
+            cx.lineTo(2, 2);
+            cx.lineTo(2, 6);
+            cx.moveTo(10, 2);
+            cx.lineTo(14, 2);
+            cx.lineTo(14, 6);
+            cx.moveTo(2, 10);
+            cx.lineTo(2, 14);
+            cx.lineTo(6, 14);
+            cx.moveTo(10, 14);
+            cx.lineTo(14, 14);
+            cx.lineTo(14, 10);
             break;
           case 'down':
             cx.moveTo(4, 6);

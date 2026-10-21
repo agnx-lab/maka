@@ -2211,6 +2211,18 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let image = wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains('▀')).await;
         evidence("workspace-current-image-dialog", &image);
         support::evidence_cells("workspace-current-image-dialog", &view);
+        let captured_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
+        support::click_button(&mut view, "Open image full screen").await;
+        wait_view_state(&mut view, |view, screen| screen.contains('▀') && view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
+        let viewer = view.accessibility_snapshot().into_iter().find(|node| node.label == "Full screen image viewer").unwrap().id;
+        for (columns, rows) in [(120, 40), (80, 24)] {
+            view.resize(columns, rows);
+            wait_view_state(&mut view, |view, screen| screen.contains('▀') && view.accessibility_snapshot().iter().any(|node| node.id == viewer && node.label == "Full screen image viewer" && node.frame.size.width.0 == f32::from(columns) * 8.0 && node.frame.size.height.0 == f32::from(rows) * 16.0)).await;
+        }
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view_state(&mut view, |view, screen| screen.contains("64 × 48 · Captured image") && !view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == captured_version));
+        assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse files"));
         view.resize(120, 40);
         wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
         support::click_button(&mut view, "Close workspace preview").await;
@@ -2303,6 +2315,73 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let result = history["chunks"].as_array().unwrap().iter()
             .find(|chunk| chunk["tool"]["result"]["image"] == true).unwrap()["tool"]["result"]["position"].clone();
+
+        // The full-window reader uses this same immutable selector even though
+        // the workspace path no longer contains an image. Inspect painted image
+        // columns so zoom controls cannot pass by changing only their captions.
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        view.resize(120, 40);
+        wait_editable_composer(&mut view).await;
+        let composer = view.surface().focused().unwrap();
+        view.handle_event(Event::Paste("IMAGE_VIEWER_UNSENT_DRAFT".into()));
+        support::wait_draft(&client, &fixture.session, "IMAGE_VIEWER_UNSENT_DRAFT").await;
+        support::focus_activity(&mut view).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        support::click_button(&mut view, "Toggle tool Read").await;
+        support::click_button(&mut view, "Open image preview").await;
+        let opener = support::wait_enabled_button(&mut view, "Open image full screen").await.id;
+        support::click_button(&mut view, "Open image full screen").await;
+        let image_columns = |view: &AppView| {
+            use ratatui::{buffer::Buffer, layout::Rect, style::Color};
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+            view.render(buffer.area, &mut buffer);
+            (0..120_u16).filter(|column| (0..40_u16).any(|row| {
+                let cell = &buffer[(*column, row)];
+                [cell.fg, cell.bg].iter().any(|color| matches!(color,
+                    Color::Rgb(255, 64, 32) | Color::Rgb(32, 220, 96) | Color::Rgb(64, 128, 255)))
+            })).count()
+        };
+        wait_view_state(&mut view, |view, _| image_columns(view) == 24 && view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
+        let original_image = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Image && node.label == "Original image").unwrap().id;
+        support::click_button(&mut view, "Fit image to window").await;
+        let full = wait_view_state(&mut view, |view, _| image_columns(view) == 120 && view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 960.0)).await;
+        evidence("tool-image-full-window-fit", &full);
+        support::click_button(&mut view, "Show image at actual size").await;
+        wait_view_state(&mut view, |view, _| image_columns(view) == 24 && view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 192.0)).await;
+        support::click_button(&mut view, "Zoom image out").await;
+        wait_view_state(&mut view, |view, _| image_columns(view) < 24 && view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 < 192.0)).await;
+        support::click_button(&mut view, "Show image at actual size").await;
+        wait_view_state(&mut view, |view, _| image_columns(view) == 24 && view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 192.0)).await;
+        support::click_button(&mut view, "Zoom image in").await;
+        let zoomed = wait_view_state(&mut view, |view, _| image_columns(view) == 30 && view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 240.0)).await;
+        evidence("tool-image-full-window-zoom", &zoomed);
+        support::click_label(&mut view, "Zoom image in");
+        support::click_label(&mut view, "Zoom image in");
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 375.0)).await;
+        view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::ScrollUp,column:60,row:20,modifiers:KeyModifiers::CONTROL}));
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.size.width.0 == 412.5)).await;
+        let before_pan = view.accessibility_snapshot().into_iter().find(|node| node.id == original_image).unwrap().frame;
+        for (kind, column, row) in [
+            (MouseEventKind::Down(MouseButton::Left), 60, 20),
+            (MouseEventKind::Drag(MouseButton::Left), 64, 22),
+            (MouseEventKind::Up(MouseButton::Left), 64, 22),
+        ] {
+            view.handle_event(Event::Mouse(MouseEvent {kind,column,row,modifiers:KeyModifiers::NONE}));
+        }
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.id == original_image && node.frame.origin.x.0 == before_pan.origin.x.0 + 32.0 && node.frame.origin.y.0 == before_pan.origin.y.0 + 32.0 && node.frame.size == before_pan.size)).await;
+        let continuing = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(continuing["run"]["invocationId"], observed["run"]["invocationId"]);
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view_state(&mut view, |view, screen| screen.contains("Image preview") && !view.accessibility_snapshot().iter().any(|node| node.label == "Full screen image viewer")).await;
+        assert_eq!(view.surface().focused(), Some(opener));
+        support::click_button(&mut view, "Close workspace preview").await;
+        tab_to_label(&mut view, "Message composer").await;
+        assert_eq!(view.surface().focused(), Some(composer));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("IMAGE_VIEWER_UNSENT_DRAFT"));
+        support::wait_draft(&client, &fixture.session, "IMAGE_VIEWER_UNSENT_DRAFT").await;
+        drop(view);
+        bindings.close().await.unwrap();
+
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
         terminal.wait_for("fixture-model · Default").await;
         terminal.wait_for_absent("Loading session history").await;
