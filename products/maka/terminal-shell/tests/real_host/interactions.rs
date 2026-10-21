@@ -1,0 +1,381 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{shortcut, support, tab_to_label, wait_enabled_node, wait_focused_input};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use maka_agent_api::session::SessionConfiguration;
+use maka_agent_facts::interaction::{Decision, InteractionOutcome, InteractionRecord};
+use maka_app_client::{Client, Operation};
+use maka_plugin_core::operation::{OperationOutcome, Receipt};
+use nsh_platform_tui::AppView;
+use serde_json::{Value, json};
+use std::{sync::atomic::Ordering, time::Duration};
+use support::{Fixture, ReplyGate, wait_view};
+
+const PRIVATE_NOTE: &str = "PRIVATE_FORM_VALUE_门口";
+
+async fn publish(fixture: &Fixture, id: &str, mut request: Value) -> InteractionRecord {
+    let projection = fixture
+        .store
+        .session_projection::<SessionConfiguration>(&fixture.session)
+        .await
+        .unwrap()
+        .unwrap();
+    if request["kind"] == "client_capability" {
+        request["baseRevision"] = json!(projection.session.configuration.boundary_revision);
+    }
+    // Use the live physical Run, including its invocation identity, rather than
+    // the stable logical Turn identity used to present continuations.
+    let invocation = projection.root_turn.unwrap().invocation;
+    let record: InteractionRecord = serde_json::from_value(json!({
+        "sessionId":invocation.session_id,
+        "turnId":invocation.turn_id,
+        "runId":invocation.run_id,
+        "requestId":id,
+        "createdAt":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64,
+        "request":request,
+        "outcome":null
+    }))
+    .unwrap();
+    let established = fixture
+        .store
+        .establish_run_interaction(&invocation, &record)
+        .await
+        .unwrap();
+    assert!(established.matches);
+    established.record
+}
+
+fn computer_request() -> Value {
+    json!({
+        "kind":"client_capability",
+        "toolUseId":"original_computer_call",
+        "target":maka_workspace_api::computer::target()
+    })
+}
+
+fn form_request() -> Value {
+    json!({
+        "kind":"form", "toolUseId":"original_form_call",
+        "message":"Review the original delivery form", "requester":{"name":"Trusted fixture"},
+        "fields":[
+            {"kind":"string","name":"private_note","label":"Private note","required":true,"default":"Existing delivery note","maxLength":64},
+            {"kind":"number","name":"ratio","label":"Ratio","required":true,"default":1.25,"minimum":0,"maximum":2},
+            {"kind":"string","name":"optional_note","label":"Optional note","required":false,"maxLength":64},
+            {"kind":"integer","name":"copies","label":"Copies","required":true,"default":0,"minimum":0,"maximum":5},
+            {"kind":"boolean","name":"confirm","label":"Confirm","required":true,"default":false},
+            {"kind":"single_select","name":"plan","label":"Plan","required":true,"default":"basic","options":[{"value":"basic","label":"Basic"},{"value":"full","label":"Full"}]},
+            {"kind":"multi_select","name":"extras","label":"Extras","required":true,"default":["logs"],"options":[{"value":"logs","label":"Logs"},{"value":"metrics","label":"Metrics"}]},
+            {"kind":"boolean","name":"optional_confirm","label":"Optional confirm","required":false},
+            {"kind":"multi_select","name":"optional_extras","label":"Optional extras","required":false,"options":[{"value":"email","label":"Email copy"}]}
+        ]
+    })
+}
+
+async fn open_request(view: &mut AppView, title: &str) {
+    wait_view(view, |screen| screen.contains("Your input is needed")).await;
+    support::click_text(view, "! Your input is needed");
+    wait_view(view, |screen| {
+        screen.contains(title) && screen.contains("Esc closes without answering")
+    })
+    .await;
+}
+
+fn escape(view: &mut AppView) {
+    view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+}
+
+async fn commit_input(view: &mut AppView) {
+    // Native text edits precede their JS change callbacks. Commit those events
+    // before testing validation or admitting an answer from a painted button.
+    let (done, committed) = tokio::sync::oneshot::channel();
+    view.control()
+        .unwrap()
+        .advance_clock(Duration::ZERO, move || {
+            let _ = done.send(());
+        });
+    tokio::time::timeout(Duration::from_secs(20), committed)
+        .await
+        .unwrap()
+        .unwrap();
+    support::tick(view);
+}
+
+async fn activate(view: &mut AppView, label: &str) {
+    tab_to_label(view, label).await;
+    view.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    commit_input(view).await;
+}
+
+async fn await_response_gate(view: &mut AppView, gate: &ReplyGate) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let held = gate.held.notified();
+        tokio::pin!(held);
+        loop {
+            support::tick(view);
+            tokio::select! {
+                () = &mut held => break,
+                () = tokio::time::sleep(Duration::from_millis(5)) => {}
+            }
+        }
+    })
+    .await
+    .expect("the single native click did not reach the real respond receipt");
+}
+
+async fn original_response(client: &Client, request_id: &str) -> Operation {
+    let mut originals = client.pending_controls().await.unwrap();
+    assert_eq!(
+        originals.len(),
+        1,
+        "one physical click must reserve one attempt"
+    );
+    let original = originals.remove(0);
+    assert_eq!(original.method, "respond");
+    assert_eq!(
+        original.correlation,
+        json!({"kind":"agent-control","requestId":request_id})
+    );
+    assert!(original.reference.is_some());
+    assert!(original.receipt.is_none());
+    original
+}
+
+async fn assert_response_receipt(
+    client: &Client,
+    original: &Operation,
+    record: &InteractionRecord,
+) {
+    let settled = client.operation_for_control(original.id).await.unwrap();
+    assert_eq!(settled.reference, original.reference);
+    assert_eq!(
+        settled.session_id.as_deref(),
+        Some(record.session_id.as_str())
+    );
+    let Some(Receipt::Recorded {
+        outcome: OperationOutcome::Returned { value },
+        ..
+    }) = settled.receipt
+    else {
+        panic!("the original response did not retain its real recorded receipt");
+    };
+    assert_eq!(value, json!({"kind":"recorded","record":record}));
+    assert!(client.pending_controls().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn computer_consent_keeps_the_original_target_boundary_and_single_click_receipt() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::open().await;
+        let gate = ReplyGate::respond(fixture.directory.path(), fixture.address.clone());
+        let client = fixture.client_at(&gate.address).await;
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Keep the original consent Run active","model":fixture.selection})).await;
+        let request = fixture.next_request().await;
+        let denied = publish(&fixture, "native_computer_deny", computer_request()).await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        open_request(&mut view, "Capability request").await;
+        wait_view(&mut view, |screen| screen.contains("Computer access for this session") && screen.contains("cua_repl") && screen.contains("Permission boundary: 0")).await;
+        escape(&mut view);
+        wait_view(&mut view, |screen| !screen.contains("Capability request") && screen.contains("Your input is needed")).await;
+        assert!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome.is_none());
+        assert!(client.pending_controls().await.unwrap().is_empty());
+
+        open_request(&mut view, "Capability request").await;
+        wait_enabled_node(&mut view, "[D] Deny").await;
+        support::click_label(&mut view, "[D] Deny");
+        wait_view(&mut view, |screen| screen.contains("Recorded outcome") && screen.contains("deny")).await;
+        assert!(matches!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome, Some(InteractionOutcome::ClientCapabilityDecision { decision: Decision::Deny, .. })));
+        let target = maka_workspace_api::computer::target();
+        assert!(fixture.store.client_capability_grant(&fixture.session, &target).await.unwrap().is_none());
+        escape(&mut view);
+        wait_view(&mut view, |screen| !screen.contains("Capability request")).await;
+
+        let allowed = publish(&fixture, "native_computer_allow", computer_request()).await;
+        open_request(&mut view, "Capability request").await;
+        wait_enabled_node(&mut view, "[Ctrl+Enter] Allow").await;
+        gate.arm();
+        support::click_label(&mut view, "[Ctrl+Enter] Allow");
+        await_response_gate(&mut view, &gate).await;
+        let original = original_response(&client, &allowed.request_id).await;
+        let canonical = fixture.store.interaction(&allowed.request_id).await.unwrap().unwrap();
+        assert!(matches!(canonical.outcome, Some(InteractionOutcome::ClientCapabilityDecision { decision: Decision::Allow, .. })));
+        let grant = fixture.store.client_capability_grant(&fixture.session, &target).await.unwrap().unwrap();
+        assert_eq!(grant.session_id, fixture.session);
+        assert_eq!(grant.target, target);
+        assert_eq!(grant.base_revision, Some(0));
+        gate.release();
+        wait_view(&mut view, |screen| screen.contains("Recorded outcome") && screen.contains("allow")).await;
+        assert_response_receipt(&client, &original, &canonical).await;
+
+        let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
+        let other = support::mutate(&client, "create", json!({"title":"Other consent owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
+        assert!(fixture.store.client_capability_grant(other["session"]["id"].as_str().unwrap(), &target).await.unwrap().is_none());
+        let mut other_provider = target.clone();
+        other_provider.provider_id = "other_computer_provider".into();
+        assert!(fixture.store.client_capability_grant(&fixture.session, &other_provider).await.unwrap().is_none());
+        let before = fixture.store.get_session::<SessionConfiguration>(&fixture.session).await.unwrap().unwrap();
+        let changed = support::mutate(&client, "metadata", json!({
+            "sessionId":fixture.session,"expectedRevision":before.revision,
+            "title":before.configuration.title,"labels":before.configuration.labels,
+            "permissions":{"settings":before.configuration.permissions,"revokeGrants":true}
+        })).await;
+        assert_eq!(changed["kind"], "committed");
+        assert!(fixture.store.client_capability_grant(&fixture.session, &target).await.unwrap().is_none());
+        assert_eq!(fixture.store.interaction(&allowed.request_id).await.unwrap().unwrap(), canonical);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "consent must not send another model request");
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host computer consent workflow timed out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn structured_form_defaults_omission_validation_masking_and_receipt_are_real() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::open().await;
+        let gate = ReplyGate::respond(fixture.directory.path(), fixture.address.clone());
+        let client = fixture.client_at(&gate.address).await;
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Keep the original form Run active","model":fixture.selection})).await;
+        let request = fixture.next_request().await;
+        let record = publish(&fixture, "native_structured_form", form_request()).await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        open_request(&mut view, "Form request").await;
+        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
+        for label in ["(*) No · Confirm", "(*) Basic", "(*) Logs", "Include Optional confirm", "Include Optional extras"] {
+            assert!(view.accessibility_snapshot().iter().any(|node| node.label == label), "the original defaults or omission state were not presented: {label}");
+        }
+        tab_to_label(&mut view, "Ratio").await;
+        wait_focused_input(&mut view, "Ratio").await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("1.25"));
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste("invalid-number".into()));
+        commit_input(&mut view).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "[Ctrl+Enter] Submit form" && node.state.disabled));
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
+        commit_input(&mut view).await;
+        assert!(fixture.store.interaction(&record.request_id).await.unwrap().unwrap().outcome.is_none());
+        assert!(client.pending_controls().await.unwrap().is_empty());
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste("1.25".into()));
+        commit_input(&mut view).await;
+        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
+
+        activate(&mut view, "Include Optional note").await;
+        wait_enabled_node(&mut view, "Omit Optional note").await;
+        tab_to_label(&mut view, "Optional note").await;
+        wait_focused_input(&mut view, "Optional note").await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
+        tab_to_label(&mut view, "Copies").await;
+        wait_focused_input(&mut view, "Copies").await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("0"));
+        activate(&mut view, "( ) Full").await;
+        wait_enabled_node(&mut view, "(*) Full").await;
+        activate(&mut view, "( ) Metrics").await;
+        wait_enabled_node(&mut view, "(*) Metrics").await;
+        activate(&mut view, "(*) Logs").await;
+        wait_enabled_node(&mut view, "( ) Logs").await;
+        activate(&mut view, "Hide Private note").await;
+        wait_enabled_node(&mut view, "Reveal Private note").await;
+        tab_to_label(&mut view, "Private note").await;
+        wait_focused_input(&mut view, "Private note").await;
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(PRIVATE_NOTE.into()));
+        commit_input(&mut view).await;
+        let context = view.surface().input_context().unwrap();
+        assert!(context.secure);
+        assert_eq!(context.text, None);
+        let masked = wait_view(&mut view, |screen| screen.contains("Reveal Private note") && !screen.contains(PRIVATE_NOTE)).await;
+        assert!(!format!("{:?}", view.accessibility_snapshot()).contains(PRIVATE_NOTE));
+        support::evidence("structured-form-masked", &masked);
+
+        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
+        gate.arm();
+        support::click_label(&mut view, "[Ctrl+Enter] Submit form");
+        await_response_gate(&mut view, &gate).await;
+        let original = original_response(&client, &record.request_id).await;
+        let canonical = fixture.store.interaction(&record.request_id).await.unwrap().unwrap();
+        let encoded = serde_json::to_value(&canonical).unwrap();
+        assert_eq!(encoded["outcome"]["action"], "accept");
+        assert_eq!(encoded["outcome"]["values"], json!({
+            "private_note":PRIVATE_NOTE,"ratio":1.25,"optional_note":"","copies":0,
+            "confirm":false,"plan":"full","extras":["metrics"]
+        }));
+        gate.release();
+        let submitted = wait_view(&mut view, |screen| screen.contains("Form submitted · 7 fields")).await;
+        assert!(!submitted.contains(PRIVATE_NOTE));
+        assert!(!format!("{:?}", view.accessibility_snapshot()).contains(PRIVATE_NOTE));
+        assert_response_receipt(&client, &original, &canonical).await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        support::evidence("structured-form-submitted", &submitted);
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host structured form workflow timed out");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_production_pty_closes_without_answering_then_records_cancel_and_decline() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::registered().await;
+        let client = fixture.client().await;
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Keep physical form decisions active","model":fixture.selection})).await;
+        let request = fixture.next_request().await;
+        let prompt = json!({"kind":"form","toolUseId":"physical_form_call","message":"Physical form decision","requester":{"name":"Trusted fixture"},"fields":[]});
+        let cancelled = publish(&fixture, "physical_form_cancel", prompt.clone()).await;
+        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        terminal.wait_for("Open request (1)").await;
+        terminal.click_text("Open request");
+        terminal.wait_for("Physical form decision").await;
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Form request").await;
+        terminal.wait_for("Open request (1)").await;
+        assert!(fixture.store.interaction(&cancelled.request_id).await.unwrap().unwrap().outcome.is_none());
+        terminal.click_text("Open request");
+        terminal.wait_for("Cancel request").await;
+        terminal.click_text("Cancel request");
+        terminal.wait_for("Form cancelled").await;
+        assert_eq!(serde_json::to_value(fixture.store.interaction(&cancelled.request_id).await.unwrap().unwrap()).unwrap()["outcome"]["action"], "cancel");
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Form request").await;
+
+        let declined = publish(&fixture, "physical_form_decline", prompt).await;
+        terminal.wait_for("Open request (1)").await;
+        terminal.click_text("Open request");
+        terminal.wait_for("[D] Decline").await;
+        terminal.click_text("[D] Decline");
+        let screen = terminal.wait_for("Form declined").await;
+        assert_eq!(serde_json::to_value(fixture.store.interaction(&declined.request_id).await.unwrap().unwrap()).unwrap()["outcome"]["action"], "decline");
+        support::evidence("production-pty-form-declined", &screen);
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Form request").await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        terminal.send(b"\x11");
+        terminal.finish().await;
+        client.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("production PTY form decisions timed out");
+}

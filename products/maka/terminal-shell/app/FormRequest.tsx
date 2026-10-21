@@ -134,7 +134,7 @@ export function FormRequest(props: {
                   </If>
                 </If>
                 <If when={field().kind === 'boolean'}>
-                  <View style={{ flexDirection: 'row', gap: 16 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
                     <Each of={[true, false]}>
                       {(value) => (
                         <Choice
