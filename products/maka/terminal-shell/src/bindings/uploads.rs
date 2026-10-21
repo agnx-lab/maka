@@ -234,6 +234,7 @@ pub(super) fn AttachmentPicker(
                     .value(path)
                     .placeholder("Absolute file path…")
                     .label("Attachment path")
+                    .auto_focus(true)
                     .readonly(move || busy.get() || props.disabled.get())
                     .on_change(move |value: &str| path.set(value.to_owned()))
                     .on_submit(move |value: &str| {
