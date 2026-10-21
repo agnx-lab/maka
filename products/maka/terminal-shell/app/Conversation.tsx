@@ -235,29 +235,32 @@ export function Conversation(props: ConversationProps) {
   const processActivity = computed<readonly ProcessActivity[]>(() => toolActivity(), {
     equals: sameProcessActivity,
   });
-  const activity = computed<LiveActivity>(() => {
-    if (run() === 'waiting_for_user') return { kind: 'waiting', detail: '' };
-    let latest: { part: LivePart; row: Row; sequence: number } | undefined;
-    for (const part of parts()) {
-      if (part.invocationId !== invocation()) continue;
-      const message = `${part.messageId}/${part.field}`;
-      const row = liveRows().byMessage.get(message) ?? canonicalRows().byMessage.get(message);
-      if (!row || row.closedAt != null) continue;
-      const sequence = Math.max(part.startSequence, row.sequence ?? 0);
-      if (!latest || sequence > latest.sequence) latest = { part, row, sequence };
-    }
-    if (!latest) return { kind: 'working', detail: '' };
-    if (latest.part.field === 'body')
-      return { kind: 'response', detail: '', rowId: stableRowId(latest.row) };
-    return {
-      kind: 'thinking',
-      rowId: stableRowId(latest.row),
-      detail: thinkingSummary(latest.row.text),
-    };
-  }, {
-    equals: (left, right) =>
-      left.kind === right.kind && left.detail === right.detail && left.rowId === right.rowId,
-  });
+  const activity = computed<LiveActivity>(
+    () => {
+      if (run() === 'waiting_for_user') return { kind: 'waiting', detail: '' };
+      let latest: { part: LivePart; row: Row; sequence: number } | undefined;
+      for (const part of parts()) {
+        if (part.invocationId !== invocation()) continue;
+        const message = `${part.messageId}/${part.field}`;
+        const row = liveRows().byMessage.get(message) ?? canonicalRows().byMessage.get(message);
+        if (!row || row.closedAt != null) continue;
+        const sequence = Math.max(part.startSequence, row.sequence ?? 0);
+        if (!latest || sequence > latest.sequence) latest = { part, row, sequence };
+      }
+      if (!latest) return { kind: 'working', detail: '' };
+      if (latest.part.field === 'body')
+        return { kind: 'response', detail: '', rowId: stableRowId(latest.row) };
+      return {
+        kind: 'thinking',
+        rowId: stableRowId(latest.row),
+        detail: thinkingSummary(latest.row.text),
+      };
+    },
+    {
+      equals: (left, right) =>
+        left.kind === right.kind && left.detail === right.detail && left.rowId === right.rowId,
+    },
+  );
   let previousGroups: ProcessEntry[] = [];
   const projection = computed(() => {
     // Canonical position and live PartStarted sequence are source order. A send
@@ -607,7 +610,9 @@ export function Conversation(props: ConversationProps) {
           position = { kind: 'after', cursor: page.after };
         }
         const currentLive = live();
-        const nextLive = currentLive.filter((row) => row.closedAt === null || row.closedAt! > fence);
+        const nextLive = currentLive.filter(
+          (row) => row.closedAt === null || row.closedAt! > fence,
+        );
         if (nextLive.length !== currentLive.length) live.set(nextLive);
         const refresh = refreshFrom;
         refreshFrom = null;
