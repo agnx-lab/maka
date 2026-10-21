@@ -19,6 +19,7 @@
 
 /** Application authoring types. Runtime admission remains in Rust. */
 export type * from './generated/runtime.js';
+export type { ServiceMethods } from './generated/methods.js';
 export { contracts } from './contracts.js';
 export { configurations } from './configurations.js';
 export { ui } from './ui.js';

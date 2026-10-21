@@ -24,6 +24,7 @@ use maka_plugin_core::{
     deployment::DeploymentRef,
     operation::{OperationCleanup, OperationOutcome, Receipt, RecoveryRef},
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{
@@ -43,8 +44,9 @@ macro_rules! settings_owner_sql {
 }
 
 /// One user attempt. Neither this observation nor its original reference grants access.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientOperation")]
 pub struct Operation {
     pub id: Uuid,
     pub host: DeploymentRef,
@@ -73,8 +75,9 @@ pub struct Journal(
 );
 
 /// Stable product owner, independent of endpoint aliases, VM instances and UI nodes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientDraftKey")]
 pub struct DraftKey {
     pub state_domain: String,
     pub deployment: Uuid,
@@ -113,8 +116,9 @@ impl DraftKey {
             && self.export == original.export
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientDraft")]
 pub struct Draft {
     pub revision: u64,
     pub text: String,
@@ -123,8 +127,9 @@ pub struct Draft {
 }
 
 /// Display metadata for an immutable Host upload in this exact draft owner.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientDraftAttachment")]
 pub struct DraftAttachment {
     pub id: String,
     pub name: String,
@@ -133,8 +138,9 @@ pub struct DraftAttachment {
 }
 
 /// One complete editor revision, including the upload receipts it has handled.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientDraftEdit")]
 pub struct DraftEdit {
     pub text: String,
     #[serde(default)]
@@ -156,16 +162,18 @@ impl From<&str> for DraftEdit {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientUploadReference")]
 pub struct UploadReference {
     pub key: DraftKey,
     pub name: String,
     pub bytes: usize,
     pub digest: String,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ClientDraftReference")]
 pub struct DraftReference {
     pub key: DraftKey,
     pub revision: u64,

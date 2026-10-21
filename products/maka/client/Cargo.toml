@@ -26,6 +26,7 @@ publish.workspace = true
 maka-capabilities.workspace = true
 maka-host-runtime.workspace = true
 maka-plugin-core.workspace = true
+schemars = { workspace = true, features = ["uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

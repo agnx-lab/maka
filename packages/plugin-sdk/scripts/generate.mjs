@@ -70,14 +70,113 @@ function declarationSchema(value) {
   return result;
 }
 const outputs = new Map();
+const typeOptions = {
+  bannerComment: banner.trimEnd(),
+  unknownAny: true,
+  strictIndexSignatures: true,
+  format: false,
+};
+const runtimeTypes = await compile(
+  declarationSchema(catalog.schema),
+  catalog.schema.title,
+  typeOptions,
+);
+outputs.set(new URL('../src/generated/runtime.ts', import.meta.url), runtimeTypes);
+
+// Types for the services used by the first-party client. These describe the
+// original contracts, not endpoint aliases, live availability or authorization.
+const runtimeNames = new Set(
+  [...runtimeTypes.matchAll(/^export (?:type|interface|enum) (\w+)/gm)].map((match) => match[1]),
+);
+const ordered = (value) =>
+  Array.isArray(value)
+    ? value.map(ordered)
+    : value !== null && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, ordered(value[key])]),
+        )
+      : value;
+const shape = (value) => {
+  if (typeof value === 'boolean') return JSON.stringify(value);
+  const { $schema, title, ...schema } = value;
+  return JSON.stringify(ordered(schema));
+};
+const methodDefinitions = {};
+function methodSchema(document, prefix) {
+  if (typeof document === 'boolean') return document;
+  const { $defs = {}, $schema, title, ...schema } = document;
+  const canonical = (name, value) =>
+    runtimeNames.has(name) &&
+    catalog.schema.$defs[name] !== undefined &&
+    shape(value) === shape(catalog.schema.$defs[name]);
+  // A matching root alone is insufficient: its references must mean the same
+  // types in both documents, including recursive definitions.
+  const shared = Object.entries($defs).every(([name, value]) => canonical(name, value));
+  if (shared && canonical(title, schema)) return { tsType: `Runtime.${title}` };
+  const relocate = (value) => {
+    if (Array.isArray(value)) return value.map(relocate);
+    if (value === null || typeof value !== 'object') return value;
+    if (
+      shared &&
+      Object.keys(value).length === 1 &&
+      typeof value.$ref === 'string' &&
+      value.$ref.startsWith('#/$defs/')
+    ) {
+      const name = value.$ref.slice('#/$defs/'.length);
+      if (Object.hasOwn($defs, name)) return { tsType: `Runtime.${name}` };
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        key === '$ref' && typeof child === 'string'
+          ? child.replace(/^#\/\$defs\//, `#/$defs/${prefix}`)
+          : ['default', 'const', 'enum', 'examples'].includes(key)
+            ? child
+            : relocate(child),
+      ]),
+    );
+  };
+  for (const [name, value] of Object.entries($defs)) {
+    methodDefinitions[`${prefix}${name}`] = shared
+      ? { tsType: `Runtime.${name}` }
+      : relocate(value);
+  }
+  return relocate(schema);
+}
+const object = (properties) => ({
+  type: 'object',
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
+});
+const services = Object.fromEntries(
+  ['agent', 'settings', 'settingsAuthentication', 'settingsSetup'].map((service) => [
+    service,
+    object(
+      Object.fromEntries(
+        Object.entries(catalog.contracts[service].interface.methods).map(([name, method]) => [
+          name,
+          object({
+            mode: { const: method.mode },
+            input: methodSchema(method.input, `${service}_${name}_input_`),
+            output: methodSchema(method.output, `${service}_${name}_output_`),
+          }),
+        ]),
+      ),
+    ),
+  ]),
+);
 outputs.set(
-  new URL('../src/generated/runtime.ts', import.meta.url),
-  await compile(declarationSchema(catalog.schema), catalog.schema.title, {
-    bannerComment: banner.trimEnd(),
-    unknownAny: true,
-    strictIndexSignatures: true,
-    format: false,
-  }),
+  new URL('../src/generated/methods.ts', import.meta.url),
+  banner +
+    "import type * as Runtime from './runtime.js';\n\n" +
+    (await compile(
+      declarationSchema({ ...object(services), $defs: methodDefinitions }),
+      'ServiceMethods',
+      { ...typeOptions, bannerComment: '' },
+    )),
 );
 outputs.set(
   new URL('../src/contracts.ts', import.meta.url),

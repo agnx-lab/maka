@@ -33,6 +33,13 @@ pub fn catalog() -> Value {
     use composition::PresentationTarget;
     let mut g = SchemaGenerator::default();
     let roots = vec![
+        root::<maka_app_client::Draft>(&mut g),
+        root::<maka_app_client::DraftEdit>(&mut g),
+        root::<maka_app_client::DraftAttachment>(&mut g),
+        root::<maka_app_client::DraftKey>(&mut g),
+        root::<maka_app_client::DraftReference>(&mut g),
+        root::<maka_app_client::UploadReference>(&mut g),
+        root::<maka_app_client::Operation>(&mut g),
         root::<maka_host_runtime::logs::HostLogRequest>(&mut g),
         root::<maka_host_runtime::logs::HostLogPage>(&mut g),
         root::<maka_ui_authoring::contract::Command>(&mut g),
