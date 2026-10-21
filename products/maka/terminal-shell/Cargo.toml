@@ -60,7 +60,7 @@ nsh-core.workspace = true
 nsh-base.workspace = true
 
 [dev-dependencies]
-nsh-bundler = { workspace = true, features = ["bundle"] }
+nsh-bundler.workspace = true
 libc.workspace = true
 maka-process.workspace = true
 tempfile.workspace = true
