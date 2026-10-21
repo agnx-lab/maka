@@ -247,6 +247,7 @@ fn run(
         return Err("cannot open the terminal GPUI surface".into());
     }
     let mut mapping = Mapping::default();
+    let mut inputs_before_draw = 0;
     let result = (|| {
         while !presentation.stop.load(Ordering::Acquire) {
             let (resize, cancel, ready, caps, generation, quit, error) = {
@@ -359,6 +360,16 @@ fn run(
                 let inbox = state.pixels.as_mut().unwrap();
                 let queue_len = inbox.queue_len();
                 let input = inbox.pop();
+                if input.is_some() {
+                    if inputs_before_draw == 0 {
+                        // Yield drawing for the current queue length only;
+                        // arrivals during this turn cannot extend it.
+                        inputs_before_draw = queue_len;
+                    }
+                    inputs_before_draw -= 1;
+                } else {
+                    inputs_before_draw = 0;
+                }
                 let late_cancel = std::mem::take(&mut inbox.cancel_pointer);
                 if let Some(mut sample) = input_pump
                     && let Some(trace) = &mut state.trace
@@ -564,7 +575,8 @@ fn run(
             let allow_draw = {
                 let state = presentation.state.lock().unwrap();
                 let inbox = state.pixels.as_ref().unwrap();
-                inbox.pending.is_none()
+                inputs_before_draw == 0
+                    && inbox.pending.is_none()
                     && inbox.encoded.is_none()
                     && inbox.resize.is_none()
                     && geometry.get() == inbox.geometry
@@ -577,7 +589,9 @@ fn run(
             if let Some(started) = &pump_started {
                 started.set(None);
             }
-            worked |= encode_pending(presentation);
+            if inputs_before_draw == 0 {
+                worked |= encode_pending(presentation);
+            }
             let retained = presentation
                 .state
                 .lock()
