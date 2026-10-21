@@ -27,7 +27,14 @@ import { host } from './host';
 import type { ConversationHandle } from './Conversation';
 import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
-import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  C,
+  compact,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 type Pane = 'root' | 'models' | 'effort';
 type SelectionAction = {
@@ -251,7 +258,9 @@ export function ModelSelect(props: {
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Models</Text>
+          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
+            Models
+          </Text>
           <Button
             disabled={pending()}
             accessibilityLabel={
@@ -267,9 +276,7 @@ export function ModelSelect(props: {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>
-              {pane() === 'root' ? 'Close' : 'Back'}
-            </Text>
+            <Text style={{ color: C.muted }}>{pane() === 'root' ? 'Close' : 'Back'}</Text>
           </Button>
         </View>
         <If when={pane() === 'root'}>
@@ -341,7 +348,7 @@ export function ModelSelect(props: {
             }}
             placeholder="Search models…"
             maxLength={256}
-                        style={{
+            style={{
               placeholderColor: C.muted,
               color: C.text,
               height: compact() ? 32 : 40,

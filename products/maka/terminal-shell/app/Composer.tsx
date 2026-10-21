@@ -136,11 +136,26 @@ export function Composer(props: {
             <If when={windowSize().height >= 336}>
               <Image src={logo} resizeMode="contain" style={{ width: 32, height: 32 }} />
             </If>
-            <Text style={{ color: C.text, fontSize: compact() ? 20 : 26, lineHeight: 32, fontWeight: '500' }}>
+            <Text
+              style={{
+                color: C.text,
+                fontSize: compact() ? 20 : 26,
+                lineHeight: 32,
+                fontWeight: '500',
+              }}
+            >
               Make something remarkable.
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
             <If when={props.session() === null}>
               <Button
                 accessibilityLabel="Choose composer workspace"
@@ -177,7 +192,9 @@ export function Composer(props: {
         </Text>
       </If>
       <If when={props.session()?.notice()}>
-        <Text style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>{props.session()?.notice()}</Text>
+        <Text style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>
+          {props.session()?.notice()}
+        </Text>
       </If>
       <Each of={props.session() ? [props.session()!] : []} key={(session) => session.sessionId}>
         {(session) => {
@@ -270,26 +287,46 @@ export function Composer(props: {
           <Button
             onPress={inputAction(props.commands, { sessionId: props.session()?.sessionId ?? null })}
             accessibilityLabel="Open commands"
-            style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16 }}
+            style={{
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 16,
+            }}
             hoverStyle={{ backgroundColor: C.line }}
             focusStyle={{ backgroundColor: C.line }}
             activeStyle={{ backgroundColor: C.surface }}
           >
             <Icon name="plus" color={C.secondary} />
           </Button>
-          <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>{props.session()?.permissions()}</Text>
+          <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>
+            {props.session()?.permissions()}
+          </Text>
           <If when={props.session() !== null}>
             <Button
               accessibilityLabel="Choose model and effort"
               onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
-              style={{ ...controlStyle, flex: 1, minWidth: 0, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}
+              style={{
+                ...controlStyle,
+                flex: 1,
+                minWidth: 0,
+                flexDirection: 'row',
+                justifyContent: 'flex-end',
+                alignItems: 'center',
+                gap: 8,
+              }}
               hoverStyle={{ backgroundColor: C.line }}
               focusStyle={{ backgroundColor: C.line }}
               activeStyle={{ backgroundColor: C.surface }}
             >
               <Text
                 numberOfLines={1}
-                style={{ color: props.session()?.backend() ? C.secondary : C.warning, fontSize: 13, flexShrink: 1 }}
+                style={{
+                  color: props.session()?.backend() ? C.secondary : C.warning,
+                  fontSize: 13,
+                  flexShrink: 1,
+                }}
               >
                 {modelLabel()}
               </Text>
@@ -304,7 +341,14 @@ export function Composer(props: {
               disabled={props.session()!.stopping()}
               accessibilityLabel="Stop response"
               onPress={inputAction(props.session()!.stop, props.session()!.invocation())}
-              style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accent, borderRadius: 16 }}
+              style={{
+                width: 32,
+                height: 32,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: C.accent,
+                borderRadius: 16,
+              }}
               hoverStyle={{ backgroundColor: C.accentHover }}
               focusStyle={{ backgroundColor: C.accentHover }}
               activeStyle={{ backgroundColor: C.accent }}
@@ -326,7 +370,14 @@ export function Composer(props: {
                   })
                 : undefined
             }
-            style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.accent, borderRadius: 16 }}
+            style={{
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: C.accent,
+              borderRadius: 16,
+            }}
             hoverStyle={{ backgroundColor: C.accentHover }}
             focusStyle={{ backgroundColor: C.accentHover }}
             activeStyle={{ backgroundColor: C.accent }}

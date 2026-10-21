@@ -23,7 +23,14 @@ import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
-import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  C,
+  compact,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export type PaletteEntry = {
   id: string;
@@ -90,8 +97,11 @@ export function Palette(props: {
         }}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Commands</Text>
-          <Button onPress={inputAction(props.close, props.instance)}
+          <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
+            Commands
+          </Text>
+          <Button
+            onPress={inputAction(props.close, props.instance)}
             style={controlStyle}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}

@@ -89,8 +89,7 @@ export function MessageRow({
           row().tool != null || row().role === 'tool_call' || row().role === 'tool_result';
         const compact = () => thinking() || isTool();
         const user = () => row().role === 'user';
-        const summary = () =>
-          `Thinking${preview() ? ` · ${preview()}` : ''}`;
+        const summary = () => `Thinking${preview() ? ` · ${preview()}` : ''}`;
         const timestamp = () => {
           const value = (row() as Row & { timestamp?: number }).timestamp;
           if (typeof value !== 'number') return '';
@@ -114,10 +113,7 @@ export function MessageRow({
                           <If
                             when={row().role === 'assistant' && row().field === 'body'}
                             else={
-                              <Text
-                                selectable
-                                style={{ color: C.text, ...bodyTextStyle }}
-                              >
+                              <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
                                 {text()}
                               </Text>
                             }
@@ -191,7 +187,12 @@ export function MessageRow({
                             key: rowKey(row()),
                             value: !expanded(),
                           })}
-                          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                          style={{
+                            ...controlStyle,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
                           hoverStyle={{ backgroundColor: C.raised }}
                           focusStyle={{ backgroundColor: C.line }}
                         >
@@ -205,10 +206,7 @@ export function MessageRow({
                         </Button>
                         <If when={expanded()}>
                           <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
-                            <Text
-                              selectable
-                              style={{ color: C.muted, ...bodyTextStyle }}
-                            >
+                            <Text selectable style={{ color: C.muted, ...bodyTextStyle }}>
                               {text()}
                             </Text>
                           </View>
@@ -260,7 +258,13 @@ export function MessageRow({
               </View>
               <If when={timestamp()}>
                 <Text
-                  style={{ alignSelf: 'flex-end', color: C.muted, fontSize: 12, lineHeight: 16, paddingTop: 4 }}
+                  style={{
+                    alignSelf: 'flex-end',
+                    color: C.muted,
+                    fontSize: 12,
+                    lineHeight: 16,
+                    paddingTop: 4,
+                  }}
                 >
                   {timestamp()}
                 </Text>

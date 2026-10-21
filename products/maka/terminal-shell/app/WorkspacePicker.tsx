@@ -30,7 +30,14 @@ import type {
   AgentDirectorySelection,
   AgentWorkspaceSelection,
 } from '../../../../packages/plugin-sdk/src/index.js';
-import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  C,
+  compact,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 type Location = {
   id: number;
@@ -220,12 +227,14 @@ export function WorkspacePicker(props: {
                 padding: 16,
                 gap: 8,
                 borderWidth: 1,
-          borderRadius: 16,
+                borderRadius: 16,
                 borderColor: C.line,
               }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>Choose workspace</Text>
+                <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
+                  Choose workspace
+                </Text>
                 <Button
                   accessibilityLabel="Close workspace picker"
                   onPress={inputAction(props.close, props.instance)}

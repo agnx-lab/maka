@@ -20,7 +20,18 @@
 import { Canvas } from 'nsh';
 
 export function Icon(props: {
-  name: 'back' | 'sidebar' | 'plus' | 'send' | 'stop' | 'close' | 'down' | 'right' | 'search' | 'settings' | 'folder';
+  name:
+    | 'back'
+    | 'sidebar'
+    | 'plus'
+    | 'send'
+    | 'stop'
+    | 'close'
+    | 'down'
+    | 'right'
+    | 'search'
+    | 'settings'
+    | 'folder';
   color: string;
 }) {
   return (
@@ -38,70 +49,70 @@ export function Icon(props: {
           case 'sidebar':
             cx.roundRect(1.5, 2.5, 13, 11, 2);
             cx.moveTo(6, 2.5);
-              cx.lineTo(6, 13.5);
+            cx.lineTo(6, 13.5);
             break;
           case 'plus':
             cx.moveTo(8, 3);
-              cx.lineTo(8, 13);
+            cx.lineTo(8, 13);
             cx.moveTo(3, 8);
-              cx.lineTo(13, 8);
+            cx.lineTo(13, 8);
             break;
           case 'send':
             cx.moveTo(8, 13);
-              cx.lineTo(8, 3);
+            cx.lineTo(8, 3);
             cx.moveTo(3.5, 7.5);
-              cx.lineTo(8, 3);
-              cx.lineTo(12.5, 7.5);
+            cx.lineTo(8, 3);
+            cx.lineTo(12.5, 7.5);
             break;
           case 'stop':
             cx.roundRect(4, 4, 8, 8, 1);
             cx.fill();
-              return;
+            return;
           case 'close':
             cx.moveTo(4, 4);
-              cx.lineTo(12, 12);
+            cx.lineTo(12, 12);
             cx.moveTo(12, 4);
-              cx.lineTo(4, 12);
+            cx.lineTo(4, 12);
             break;
           case 'down':
             cx.moveTo(4, 6);
-              cx.lineTo(8, 10);
-              cx.lineTo(12, 6);
+            cx.lineTo(8, 10);
+            cx.lineTo(12, 6);
             break;
           case 'back':
             cx.moveTo(10, 4);
-              cx.lineTo(6, 8);
-              cx.lineTo(10, 12);
+            cx.lineTo(6, 8);
+            cx.lineTo(10, 12);
             break;
           case 'right':
             cx.moveTo(6, 4);
-              cx.lineTo(10, 8);
-              cx.lineTo(6, 12);
+            cx.lineTo(10, 8);
+            cx.lineTo(6, 12);
             break;
           case 'search':
             cx.arc(7, 7, 4.5, 0, Math.PI * 2);
             cx.moveTo(10.5, 10.5);
-              cx.lineTo(14, 14);
+            cx.lineTo(14, 14);
             break;
           case 'settings':
             cx.arc(8, 8, 5, 0, Math.PI * 2);
             cx.moveTo(10, 8);
-              cx.arc(8, 8, 2, 0, Math.PI * 2);
+            cx.arc(8, 8, 2, 0, Math.PI * 2);
             for (let i = 0; i < 8; i++) {
-              const angle = i * Math.PI / 4;
+              const angle = (i * Math.PI) / 4;
               cx.moveTo(8 + Math.cos(angle) * 5, 8 + Math.sin(angle) * 5);
               cx.lineTo(8 + Math.cos(angle) * 7, 8 + Math.sin(angle) * 7);
             }
             break;
           case 'folder':
             cx.moveTo(1.5, 5);
-              cx.lineTo(1.5, 3);
-              cx.lineTo(6, 3);
+            cx.lineTo(1.5, 3);
+            cx.lineTo(6, 3);
             cx.lineTo(8, 5);
-              cx.lineTo(14.5, 5);
-              cx.lineTo(14.5, 13);
+            cx.lineTo(14.5, 5);
+            cx.lineTo(14.5, 13);
             cx.lineTo(1.5, 13);
-              cx.closePath();
+            cx.closePath();
         }
         cx.stroke();
       }}

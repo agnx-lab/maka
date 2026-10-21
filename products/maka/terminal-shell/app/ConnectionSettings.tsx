@@ -108,7 +108,15 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 disabled={disabled() || !item().editable}
                 accessibilityLabel={`Edit connection ${item().name}`}
                 onPress={inputAction(owner.openConnection, item().basis)}
-                style={{ height: 64, padding: 12, justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: C.line, backgroundColor: C.background }}
+                style={{
+                  height: 64,
+                  padding: 12,
+                  justifyContent: 'center',
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: C.line,
+                  backgroundColor: C.background,
+                }}
                 focusStyle={{ backgroundColor: C.raised }}
                 hoverStyle={{ backgroundColor: C.raised }}
                 disabledStyle={controlDisabledStyle}
@@ -139,7 +147,13 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 disabled={disabled()}
                 accessibilityLabel={`Connect ${item().label}`}
                 onPress={inputAction(owner.chooseProvider, item().identity)}
-                style={{ height: 48, padding: 12, justifyContent: 'center', borderRadius: 8, backgroundColor: C.background }}
+                style={{
+                  height: 48,
+                  padding: 12,
+                  justifyContent: 'center',
+                  borderRadius: 8,
+                  backgroundColor: C.background,
+                }}
                 focusStyle={{ backgroundColor: C.raised }}
                 hoverStyle={{ backgroundColor: C.raised }}
                 disabledStyle={controlDisabledStyle}

@@ -35,7 +35,14 @@ import { Image } from 'nsh/image';
 import logo from './assets/maka.png';
 import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
-import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  C,
+  compact,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 import { Icon } from './Icon';
 import type { Browsing, BrowserScope, BrowserWorkspace, BrowserSession } from './browsing';
 import { SessionActions } from './SessionActions';
@@ -244,10 +251,25 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       }}
       style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 12, gap: 8 }}
     >
-      <View style={{ height: compact() ? 32 : 40, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <View
+        style={{ height: compact() ? 32 : 40, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+      >
         <Image src={logo} resizeMode="contain" style={{ width: 24, height: 24 }} />
-        <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600', flex: 1 }}>Maka</Text>
-        <Button onPress={inputAction(props.close, null)} accessibilityLabel="Close session browser" style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 8 }} hoverStyle={controlHoverStyle} focusStyle={controlFocusStyle}
+        <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600', flex: 1 }}>
+          Maka
+        </Text>
+        <Button
+          onPress={inputAction(props.close, null)}
+          accessibilityLabel="Close session browser"
+          style={{
+            width: 32,
+            height: 32,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 8,
+          }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
           <Icon name="sidebar" color={C.secondary} />
         </Button>
@@ -286,48 +308,67 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         </Text>
         <Icon name="down" color={C.secondary} />
       </Button>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, gap: 8, height: 32, backgroundColor: C.background, borderRadius: 8 }}>
-      <Icon name="search" color={C.secondary} />
-      <Input
-        ref={(node) => {
-          search = node;
-          removeSearchKeys();
-          const unbind = [
-            keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
-            keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
-            keymap.bind('enter', activate, { when: 'always', within: node }),
-            keymap.bind('mod+enter', currentActions, { when: 'always', within: node }),
-          ];
-          removeSearchKeys = () => {
-            for (const remove of unbind) remove();
-          };
-          focusSearch();
-        }}
-        testID="session-search"
-        accessibilityLabel="Search session titles"
-        autoFocus={!props.docked}
-        maxLength={256}
-        value={choosingWorkspace() ? '' : browser.titleQuery()}
-        readonly={choosingWorkspace()}
-        onChange={(text) => {
-          batch(() => {
-            selectedRow.set(null);
-            browser.setTitleQuery(text);
-          });
-          list?.scrollToIndex({ index: 0, animated: false });
-        }}
-        placeholder={choosingWorkspace() ? 'Choose a workspace below' : 'Search sessions…'}
+      <View
         style={{
-          color: C.text,
-          placeholderColor: C.muted,
-          flex: 1,
-          minWidth: 0,
-          fontSize: 13,
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 8,
+          gap: 8,
           height: 32,
+          backgroundColor: C.background,
+          borderRadius: 8,
         }}
-      />
+      >
+        <Icon name="search" color={C.secondary} />
+        <Input
+          ref={(node) => {
+            search = node;
+            removeSearchKeys();
+            const unbind = [
+              keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
+              keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
+              keymap.bind('enter', activate, { when: 'always', within: node }),
+              keymap.bind('mod+enter', currentActions, { when: 'always', within: node }),
+            ];
+            removeSearchKeys = () => {
+              for (const remove of unbind) remove();
+            };
+            focusSearch();
+          }}
+          testID="session-search"
+          accessibilityLabel="Search session titles"
+          autoFocus={!props.docked}
+          maxLength={256}
+          value={choosingWorkspace() ? '' : browser.titleQuery()}
+          readonly={choosingWorkspace()}
+          onChange={(text) => {
+            batch(() => {
+              selectedRow.set(null);
+              browser.setTitleQuery(text);
+            });
+            list?.scrollToIndex({ index: 0, animated: false });
+          }}
+          placeholder={choosingWorkspace() ? 'Choose a workspace below' : 'Search sessions…'}
+          style={{
+            color: C.text,
+            placeholderColor: C.muted,
+            flex: 1,
+            minWidth: 0,
+            fontSize: 13,
+            height: 32,
+          }}
+        />
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: compact() ? 0 : 4, backgroundColor: C.background, borderRadius: 8 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          padding: compact() ? 0 : 4,
+          backgroundColor: C.background,
+          borderRadius: 8,
+        }}
+      >
         <Button
           selected={browser.filter() === 'all'}
           accessibilityLabel="Show active conversations"
@@ -387,7 +428,13 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                 const project = () =>
                   browser.projects().find((project) => project.reference.id === key());
                 return (
-                  <View style={{ flexDirection: 'row', height: compact() ? 32 : 48, paddingVertical: compact() ? 0 : 2 }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      height: compact() ? 32 : 48,
+                      paddingVertical: compact() ? 0 : 2,
+                    }}
+                  >
                     <Button
                       disabled={!scopesById().has(key())}
                       onPress={inputAction(chooseScope, scope().scope)}
@@ -433,7 +480,13 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
               }
               const session = () => sessionsById().get(key());
               return (
-                <View style={{ flexDirection: 'row', height: compact() ? 32 : 48, paddingVertical: compact() ? 0 : 2 }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    height: compact() ? 32 : 48,
+                    paddingVertical: compact() ? 0 : 2,
+                  }}
+                >
                   <Button
                     accessibilityLabel={`Open conversation ${session()?.title || 'Untitled conversation'}`}
                     disabled={props.switching() || !session()}
@@ -460,13 +513,17 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                       {session()?.hasUnread ? '● ' : ''}
                       {session()?.title || 'Untitled conversation'}
                     </Text>
-                    <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}
+                    >
                       {session()?.activity === 'working'
                         ? '● Working · '
                         : session()?.activity === 'waiting'
                           ? '◇ Waiting · '
                           : ''}
-                      {session()?.workspace.path.split('/').filter(Boolean).at(-1) || session()?.workspace.path}
+                      {session()?.workspace.path.split('/').filter(Boolean).at(-1) ||
+                        session()?.workspace.path}
                     </Text>
                   </Button>
                   <Button
@@ -480,7 +537,12 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                           })
                         : undefined
                     }
-                    style={{ width: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 8 }}
+                    style={{
+                      width: 32,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 8,
+                    }}
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
                   >
@@ -497,8 +559,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       </If>
       <If when={navigationNotice()}>
         <Text style={{ color: C.warning }}>{navigationNotice()}</Text>
-        <Button onPress={inputAction(props.close, null)}
-        >
+        <Button onPress={inputAction(props.close, null)}>
           <Text style={{ color: C.accent }}>Return to draft</Text>
         </Button>
       </If>
@@ -506,27 +567,41 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         <Text selectable style={{ color: C.danger }}>
           {browser.error() || browser.projectError()}
         </Text>
-        <Button onPress={inputAction(refresh, null)}
-        >
+        <Button onPress={inputAction(refresh, null)}>
           <Text style={{ color: C.accent }}>Refresh browser</Text>
         </Button>
       </If>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: C.line }}>
-      <Button
-        accessibilityLabel="Open settings"
-        onPress={inputAction(props.settings, props.selected())}
-        style={{ ...controlStyle, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-        hoverStyle={{ backgroundColor: C.raised }}
-        focusStyle={{ backgroundColor: C.line }}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingTop: 8,
+          borderTopWidth: 1,
+          borderTopColor: C.line,
+        }}
       >
-        <Icon name="settings" color={C.secondary} />
-        <Text style={{ color: C.secondary }}>Settings</Text>
-      </Button>
+        <Button
+          accessibilityLabel="Open settings"
+          onPress={inputAction(props.settings, props.selected())}
+          style={{ ...controlStyle, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
+          <Icon name="settings" color={C.secondary} />
+          <Text style={{ color: C.secondary }}>Settings</Text>
+        </Button>
         <If when={props.docked}>
           <Button
             onPress={props.resize ? inputAction(props.resize, -2) : undefined}
             accessibilityLabel="Narrower session browser"
-            style={{ width: 24, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 8 }}
+            style={{
+              width: 24,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 8,
+            }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
           >
@@ -535,7 +610,13 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           <Button
             onPress={props.resize ? inputAction(props.resize, 2) : undefined}
             accessibilityLabel="Wider session browser"
-            style={{ width: 24, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 8 }}
+            style={{
+              width: 24,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 8,
+            }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
           >

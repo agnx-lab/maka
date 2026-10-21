@@ -128,7 +128,9 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           focusStyle={{ backgroundColor: C.accentHover }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.background, fontWeight: '500' }}>{owner.busy() ? 'Saving…' : 'Save model'}</Text>
+          <Text style={{ color: C.background, fontWeight: '500' }}>
+            {owner.busy() ? 'Saving…' : 'Save model'}
+          </Text>
         </Button>
         <If when={model().originalId !== null}>
           <Button

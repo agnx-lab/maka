@@ -29,7 +29,14 @@ import { GeneralSettings } from './GeneralSettings';
 import { NetworkSettings } from './NetworkSettings';
 import { PluginSettings } from './PluginSettings';
 import { createPluginSettings } from './pluginSettings';
-import { C, compact, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  C,
+  compact,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 import { Icon } from './Icon';
 
 type Section = 'general' | 'connections' | 'network' | 'plugins';
@@ -144,8 +151,20 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
           borderColor: C.line,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: compact() ? 48 : 64, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: C.line }}>
-          <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18, lineHeight: 24 }}>{title()}</Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            minHeight: compact() ? 48 : 64,
+            paddingHorizontal: 16,
+            borderBottomWidth: 1,
+            borderBottomColor: C.line,
+          }}
+        >
+          <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18, lineHeight: 24 }}>
+            {title()}
+          </Text>
           <Button
             disabled={operations.busy()}
             accessibilityLabel={
@@ -164,7 +183,18 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
           </Button>
         </View>
         <View style={{ flex: 1, minHeight: 0, flexDirection: rail() ? 'row' : 'column' }}>
-          <View style={{ flexDirection: rail() ? 'column' : 'row', flexWrap: rail() ? 'nowrap' : 'wrap', width: rail() ? 184 : '100%', flexShrink: 0, padding: rail() ? 16 : 8, gap: 4, borderRightWidth: rail() ? 1 : 0, borderRightColor: C.line }}>
+          <View
+            style={{
+              flexDirection: rail() ? 'column' : 'row',
+              flexWrap: rail() ? 'nowrap' : 'wrap',
+              width: rail() ? 184 : '100%',
+              flexShrink: 0,
+              padding: rail() ? 16 : 8,
+              gap: 4,
+              borderRightWidth: rail() ? 1 : 0,
+              borderRightColor: C.line,
+            }}
+          >
             <Each of={sections} key={(item) => item.id}>
               {(item) => (
                 <Button
@@ -185,56 +215,58 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
               )}
             </Each>
           </View>
-          <View style={{ flex: 1, minWidth: 0, minHeight: 0, padding: compact() ? 8 : 16, gap: 16 }}>
-          <If when={operations.error()}>
-            <Text selectable style={{ color: C.danger }}>
-              {operations.error()}
-            </Text>
-          </If>
-          <If when={operations.notice()}>
-            <Text style={{ color: C.muted }}>{operations.notice()}</Text>
-          </If>
-          <If when={!operations.pendingKnown() || operations.pending().length > 0}>
-            <View style={{ gap: 4 }}>
-              <Text style={{ color: C.warning }}>
-                Earlier settings actions must be resolved before another change.
+          <View
+            style={{ flex: 1, minWidth: 0, minHeight: 0, padding: compact() ? 8 : 16, gap: 16 }}
+          >
+            <If when={operations.error()}>
+              <Text selectable style={{ color: C.danger }}>
+                {operations.error()}
               </Text>
-              <Button
-                disabled={operations.busy()}
-                accessibilityLabel="Recover settings actions"
-                onPress={inputAction(recover, null)}
-              >
-                <Text style={{ color: C.accent }}>
-                  {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
+            </If>
+            <If when={operations.notice()}>
+              <Text style={{ color: C.muted }}>{operations.notice()}</Text>
+            </If>
+            <If when={!operations.pendingKnown() || operations.pending().length > 0}>
+              <View style={{ gap: 4 }}>
+                <Text style={{ color: C.warning }}>
+                  Earlier settings actions must be resolved before another change.
                 </Text>
-              </Button>
-              <Each
-                of={operations.pending().filter((item) => !item.reference)}
-                key={(item) => item.id}
-              >
-                {(item) => (
-                  <Button
-                    disabled={operations.busy()}
-                    onPress={inputAction(operations.abandon, item().id)}
-                  >
-                    <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
-                  </Button>
-                )}
-              </Each>
-            </View>
-          </If>
-          <If when={section() === 'connections'}>
-            <ConnectionSettings owner={connections} />
-          </If>
-          <If when={section() === 'general'}>
-            <GeneralSettings owner={general} />
-          </If>
-          <If when={section() === 'network'}>
-            <NetworkSettings owner={network} />
-          </If>
-          <If when={section() === 'plugins'}>
-            <PluginSettings owner={plugins} />
-          </If>
+                <Button
+                  disabled={operations.busy()}
+                  accessibilityLabel="Recover settings actions"
+                  onPress={inputAction(recover, null)}
+                >
+                  <Text style={{ color: C.accent }}>
+                    {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
+                  </Text>
+                </Button>
+                <Each
+                  of={operations.pending().filter((item) => !item.reference)}
+                  key={(item) => item.id}
+                >
+                  {(item) => (
+                    <Button
+                      disabled={operations.busy()}
+                      onPress={inputAction(operations.abandon, item().id)}
+                    >
+                      <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
+                    </Button>
+                  )}
+                </Each>
+              </View>
+            </If>
+            <If when={section() === 'connections'}>
+              <ConnectionSettings owner={connections} />
+            </If>
+            <If when={section() === 'general'}>
+              <GeneralSettings owner={general} />
+            </If>
+            <If when={section() === 'network'}>
+              <NetworkSettings owner={network} />
+            </If>
+            <If when={section() === 'plugins'}>
+              <PluginSettings owner={plugins} />
+            </If>
           </View>
         </View>
       </View>

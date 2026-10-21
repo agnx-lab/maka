@@ -132,7 +132,9 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           focusStyle={{ backgroundColor: C.accentHover }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.background, fontWeight: '500' }}>{owner.busy() ? 'Saving…' : 'Save connection'}</Text>
+          <Text style={{ color: C.background, fontWeight: '500' }}>
+            {owner.busy() ? 'Saving…' : 'Save connection'}
+          </Text>
         </Button>
         <If when={form().baseline}>
           <View style={{ height: 1, backgroundColor: C.line }} />

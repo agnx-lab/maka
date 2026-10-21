@@ -230,9 +230,7 @@ export function Conversation(props: ConversationProps) {
     return next;
   });
   const canFoldTurn = (turn: TurnPresentation) =>
-    turnOutcome(turn) === 'completed' &&
-    !turn.active &&
-    !turn.interleavedInput;
+    turnOutcome(turn) === 'completed' && !turn.active && !turn.interleavedInput;
   const turnExpanded = (turn: TurnPresentation) => {
     if (!canFoldTurn(turn)) return true;
     const stored = turnState(turn.turnId).expanded();
@@ -1492,8 +1490,7 @@ export function Conversation(props: ConversationProps) {
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
       <If when={attachmentMetadataFailed()}>
-        <Button onPress={retryAttachmentMetadata}
-        >
+        <Button onPress={retryAttachmentMetadata}>
           <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
         </Button>
       </If>
@@ -1655,9 +1652,7 @@ export function Conversation(props: ConversationProps) {
                   if (initial.kind === 'process') {
                     const group = () => {
                       const latest = entry();
-                      return latest.kind === 'process'
-                        ? latest.group
-                        : initial.group;
+                      return latest.kind === 'process' ? latest.group : initial.group;
                     };
                     const first = projection().turns.get(initial.group.turnId);
                     if (!first) return <View />;
@@ -1718,10 +1713,12 @@ export function Conversation(props: ConversationProps) {
                         onExpand={reveal}
                         onToolReading={(key) => {
                           if (
-                            !alive || key !== initial.rowId ||
+                            !alive ||
+                            key !== initial.rowId ||
                             displayByKey().get(key)?.kind !== 'row' ||
                             !rowStates.get(key)?.expanded()
-                          ) return;
+                          )
+                            return;
                           innerReader.set(key);
                         }}
                         finalActions={(row, ownerKey) => (

@@ -114,10 +114,18 @@ export function Workbench(props: {
           onResponderTerminate={() => {
             drag = null;
           }}
-          style={{ width: CELL, flexShrink: 0, alignItems: 'center', backgroundColor: C.background }}
+          style={{
+            width: CELL,
+            flexShrink: 0,
+            alignItems: 'center',
+            backgroundColor: C.background,
+          }}
           hoverStyle={{ backgroundColor: C.line }}
         >
-          <View pointerEvents="none" style={{ width: 1, height: '100%', backgroundColor: C.line }} />
+          <View
+            pointerEvents="none"
+            style={{ width: 1, height: '100%', backgroundColor: C.line }}
+          />
         </View>
       </If>
       <View ref={(node) => content.set(node)} style={{ flex: 1, minWidth: 0, minHeight: 0 }}>

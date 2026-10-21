@@ -97,7 +97,9 @@ export function TurnSummary(props: {
       focusStyle={{ backgroundColor: C.raised }}
       activeStyle={{ backgroundColor: C.line }}
     >
-      <If when={props.canFold()}><Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} /></If>
+      <If when={props.canFold()}>
+        <Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} />
+      </If>
       <Text
         numberOfLines={1}
         style={{ flex: 1, color: turnOutcome(props.turn()) === 'failed' ? C.danger : C.muted }}
@@ -240,7 +242,8 @@ function ActivityLog(props: {
                   props.rowState(id).expanded() === true
                 );
               })
-            ) return;
+            )
+              return;
             state.following.set(!away);
             props.reading(away);
           }}
@@ -298,9 +301,13 @@ function ActivityLog(props: {
                       toolBodyMaxHeight={() => Math.max(24, bodyMaxHeight() - 64)}
                       onToolReading={(key) => {
                         if (
-                          !alive || lease !== state.lease || key !== ownedId() ||
-                          !props.group().rowIds.includes(key) || !props.rowState(key).expanded()
-                        ) return;
+                          !alive ||
+                          lease !== state.lease ||
+                          key !== ownedId() ||
+                          !props.group().rowIds.includes(key) ||
+                          !props.rowState(key).expanded()
+                        )
+                          return;
                         state.following.set(false);
                         props.reading(true);
                       }}
@@ -405,7 +412,17 @@ export function TurnPanel(props: {
     if (action.open) props.reveal();
   };
   return (
-    <View style={{ marginVertical: 8, gap: 8, padding: 8, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 12 }}>
+    <View
+      style={{
+        marginVertical: 8,
+        gap: 8,
+        padding: 8,
+        backgroundColor: C.surface,
+        borderWidth: 1,
+        borderColor: C.line,
+        borderRadius: 12,
+      }}
+    >
       <Button
         accessibilityLabel="Process group"
         disabled={props.group().rowIds.length === 0}
