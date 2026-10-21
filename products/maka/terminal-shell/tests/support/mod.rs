@@ -112,6 +112,7 @@ impl Fixture {
             InitialCatalog::Configured { reasoning: false },
             false,
             Some(authentication),
+            None,
         )
         .await
     }
@@ -152,11 +153,27 @@ impl Fixture {
             InitialCatalog::Configured { reasoning: false },
             true,
             None,
+            None,
+        )
+        .await
+    }
+    pub async fn files(method: &str) -> Self {
+        Self::open_with_services(
+            false,
+            false,
+            InitialCatalog::Configured { reasoning: false },
+            false,
+            None,
+            Some(json!({
+                "name":"WorkspaceDocument", "description":"Use the actual workspace Files service.",
+                "import":"files", "method":method, "result":"json", "confirmation":"preapproved",
+                "presentation":format!("maka.workspace.Files@1/{method}")
+            })),
         )
         .await
     }
     async fn open_with_options(registered: bool, images: bool, catalog: InitialCatalog) -> Self {
-        Self::open_with_services(registered, images, catalog, false, None).await
+        Self::open_with_services(registered, images, catalog, false, None, None).await
     }
     async fn open_with_services(
         registered: bool,
@@ -164,7 +181,9 @@ impl Fixture {
         catalog: InitialCatalog,
         plugins: bool,
         login_handler: Option<Arc<dyn Handler>>,
+        file_tool: Option<Value>,
     ) -> Self {
+        let has_files = images || file_tool.is_some();
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
         let workspace = directory.path().join("workspace");
@@ -218,7 +237,7 @@ impl Fixture {
             "test.nsh.agent",
             maka_agent_api::IMPLEMENTATION,
             maka_agent_api::configuration_schema(),
-            if images {
+            if has_files {
                 json!({"files":{"contract":files_contract,"cardinality":{"kind":"one"}}})
             } else {
                 json!({})
@@ -296,8 +315,15 @@ impl Fixture {
             })
         };
         let deployment = Uuid::new_v4();
+        let tools = if let Some(tool) = &file_tool {
+            json!([tool])
+        } else if images {
+            json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}])
+        } else {
+            json!([])
+        };
         let mut plan = json!({"environment":{"location":"host"},"instances":{
-            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":if images { json!([{"name":"Read","description":"Read an image in the selected workspace.","import":"files","method":"readImage","result":"image","confirmation":"preapproved"}]) } else { json!([]) },"todo":true,"permissions":{"access":"read_only","requestPermissions":true}}), if images { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
+            "agent":node(&agent, 1, json!({"locale":"en","workspaceRoots":[{"label":"Workspace","path":workspace}],"tools":tools,"todo":true,"permissions":{"access":if file_tool.is_some() { "workspace_write" } else { "read_only" },"requestPermissions":true}}), if has_files { json!({"files":[{"kind":"instance","path":["files"],"export":"files"}]}) } else { json!({}) }),
             "settings":node(&settings, 2, json!({}), json!({})),
             "authentication":node(&authentication, 6, json!({}), json!({})),
             "setup":node(&setup, 7, json!({}), json!({})),
@@ -329,7 +355,7 @@ impl Fixture {
         if plugins {
             packages.push(manager);
         }
-        if images {
+        if has_files {
             plan["instances"]["files"] = node(&files, 5, json!({}), json!({}));
             packages.push(files);
         }
@@ -365,7 +391,7 @@ impl Fixture {
                 )
                 .unwrap();
         }
-        if images {
+        if has_files {
             maka_files_native::provide(&mut native).unwrap();
         }
         let endpoint = |import: &str, methods: &[&str], recovery| HostEndpoint {

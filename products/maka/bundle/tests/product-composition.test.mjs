@@ -244,6 +244,42 @@ test('WorkHub product authors two independent Agent graphs with explicit native 
   }
 });
 
+test('native Web tools freeze their display contract while retaining explicit custom presentations', async () => {
+  const { composition, instanceNames, packageNames } = await import(
+    '../dist/authoring/composition.mjs'
+  );
+  const { host } = composition({
+    presentation: 'tui',
+    locale: 'en',
+    scheme: 'dark',
+    hostRoot: '/fixture',
+    hostDeployment: 'host',
+    managementDeployment: 'management',
+    keys: Object.fromEntries(instanceNames.map((name, index) => [name, `key-${index}`])),
+    packages: Object.fromEntries(
+      packageNames.map((name) => [name, { id: name, revision: 'a'.repeat(64) }]),
+    ),
+    web: { network: 'denied' },
+    agent: {
+      workspaceRoots: [],
+      tools: [
+        { name: 'WorkspacePage', description: 'Fetch a page', import: 'web', method: 'fetch', result: 'json', confirmation: 'preapproved' },
+        { name: 'WorkspaceQuery', description: 'Search the web', import: 'web', method: 'search', result: 'json', confirmation: 'preapproved' },
+        { name: 'CustomPage', description: 'Use a custom card', import: 'web', method: 'fetch', result: 'json', confirmation: 'preapproved', presentation: 'product.customPage@2' },
+      ],
+    },
+  });
+  const tools = host.instances.agent.configuration.values.tools;
+  assert.deepEqual(tools.map(({ name, input, presentation }) => ({ name, input, presentation })), [
+    { name: 'WorkspacePage', input: 'web', presentation: 'maka.workspace.Web@1/fetch' },
+    { name: 'WorkspaceQuery', input: 'web', presentation: 'maka.workspace.Web@1/search' },
+    { name: 'CustomPage', input: 'web', presentation: 'product.customPage@2' },
+  ]);
+  assert.deepEqual(host.instances.agent.bindings.web, [
+    { kind: 'instance', path: ['workspace-web'], export: 'web' },
+  ]);
+});
+
 test('workspace and navigation mount only declared child capabilities with valid props', async () => {
   const appearance = await import('../dist/packages/appearance/tui.js');
   const theme = appearance.activate({ scheme: 'dark' }).Appearance.value;

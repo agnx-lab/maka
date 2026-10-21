@@ -33,6 +33,8 @@ mod oauth;
 mod plugin_settings;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
+#[path = "real_host/tool_cards.rs"]
+mod tool_cards;
 mod support;
 
 use crossterm::event::{

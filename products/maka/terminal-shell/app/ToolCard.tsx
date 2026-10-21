@@ -141,7 +141,7 @@ export function ToolCard(props: {
           <If when={tool()?.result?.image}>
             <ToolImage sessionId={props.sessionId} through={() => props.row().metadataThrough ?? props.through()} position={tool()!.result!.position} preview={props.previewImage} />
           </If>
-          <Button accessibilityLabel="Show original tool details" selected={props.original()} onPress={inputAction(props.showOriginal, !props.original())} style={{ alignSelf: 'flex-start' }}>
+          <Button accessibilityLabel="Toggle original tool details" selected={props.original()} onPress={inputAction(props.showOriginal, !props.original())} style={{ alignSelf: 'flex-start' }}>
             <Text style={{ color: C.accent }}>{props.original() ? 'Readable card' : 'Original details'}</Text>
           </Button>
           <Each of={references()} key={(value) => value.key}>
