@@ -29,10 +29,10 @@ mod interactions;
 mod keyboard;
 #[path = "real_host/oauth.rs"]
 mod oauth;
-#[path = "real_host/session_lifecycle.rs"]
-mod session_lifecycle;
 #[path = "real_host/plugin_settings.rs"]
 mod plugin_settings;
+#[path = "real_host/session_lifecycle.rs"]
+mod session_lifecycle;
 mod support;
 
 use crossterm::event::{
