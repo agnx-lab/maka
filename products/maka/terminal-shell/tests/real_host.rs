@@ -38,7 +38,28 @@ fn shortcut(view: &mut AppView, key: char) {
     )));
 }
 
-fn tab_to_label(view: &mut AppView, label: &str) {
+async fn wait_enabled_node(view: &mut AppView, label: &str) {
+    // Model policy loads asynchronously. A visible disabled button accepts
+    // neither keyboard nor pointer activation until its metadata arrives.
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            support::tick(view);
+            if view
+                .accessibility_snapshot()
+                .iter()
+                .any(|node| node.label == label && !node.state.disabled)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the native target {label:?} did not become enabled"));
+}
+
+async fn tab_to_label(view: &mut AppView, label: &str) {
+    wait_enabled_node(view, label).await;
     for _ in 0..=view.accessibility_snapshot().len() {
         if view
             .accessibility_snapshot()
@@ -255,7 +276,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Paste("model-alt".into()));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}));
         wait_focused_input(&mut view, "Message composer").await;
@@ -267,13 +288,13 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let caret = view.surface().input_context().unwrap().selection;
         shortcut(&mut view, 'g');
         wait_view(&mut view, |screen| screen.contains("Models") && screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
-        tab_to_label(&mut view, "Choose reasoning effort");
+        tab_to_label(&mut view, "Choose reasoning effort").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, alternative, None);
-        tab_to_label(&mut view, "Use effort high");
+        tab_to_label(&mut view, "Use effort high").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         wait_focused_input(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(created_editor));
         assert_eq!(view.surface().input_context().unwrap().selection, caret);
@@ -289,13 +310,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         assert_eq!(view.surface().focused(), Some(model_trigger));
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["thinkingLevel"], "high");
 
         support::click_label(&mut view, "Choose model and effort");
         wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, alternative, Some("high"));
@@ -311,9 +333,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
             row,
             modifiers: KeyModifiers::NONE,
         }));
-        tab_to_label(&mut view, "Use connection default");
+        tab_to_label(&mut view, "Use connection default").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
         view.handle_event(Event::Mouse(MouseEvent {
@@ -334,11 +356,12 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::click_label(&mut view, "Choose model and effort");
         wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["thinkingLevel"], "off");
 
@@ -346,6 +369,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // before the one existing send, rather than sending once per choice.
         support::click_label(&mut view, "Choose model and effort");
         wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, alternative, Some("off"));
@@ -355,12 +379,13 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default · low · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model · Default · low · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["modelId"], "fixture-model");
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
         support::click_label(&mut view, "Choose model and effort");
         wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, primary, None);
@@ -370,20 +395,23 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · Default · high · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         support::click_label(&mut view, "Choose model and effort");
         wait_view(&mut view, |screen| screen.contains("Effort ·") && screen.contains("Close · Esc")).await;
+        wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
         wait_view(&mut view, |screen| screen.contains("Default · Use connection default") && screen.contains("Back · Esc")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
-        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc")).await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt · off · Ctrl+G") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":"off"}));
         assert_eq!(view.surface().focused(), Some(model_trigger));
-        tab_to_label(&mut view, "Message composer");
+        tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(created_editor));
-        assert_eq!(view.surface().input_context().unwrap().selection, caret);
+        // Native Tab entry selects the Input's contents; Dialog restoration
+        // above preserves the original caret without a new Tab entry.
+        assert_eq!(view.surface().input_context().unwrap().selection, 0..33);
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Message B uses the selected model"));
         support::wait_draft(&client, &created_id, "Message B uses the selected model").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);

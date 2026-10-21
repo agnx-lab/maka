@@ -62,7 +62,7 @@ export function ModelSelect(props: {
   let generation = 0;
   let removeSearchKeys = () => {};
   let list: YNode | undefined;
-  let focusIntent: 'model' | 'effort' | null = 'model';
+  let focusIntent: 'model' | 'effort' | null = null;
   cleanup(() => {
     alive = false;
     generation += 1;
