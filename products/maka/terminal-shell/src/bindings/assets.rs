@@ -22,7 +22,7 @@ use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
-use maka_agent_api::contract::ToolImageRead;
+use maka_agent_api::contract::{AttachmentImageRead, AttachmentImageSource, ToolImageRead};
 use maka_agent_facts::artifact::content_digest;
 use nsh_engine::Assets;
 use serde_json::json;
@@ -70,28 +70,57 @@ impl Assets for HostAssets {
                 }
             }));
         }
-        let Some(encoded) = uri.strip_prefix("asset:/tool-image/") else {
+        let source = if let Some(encoded) = uri.strip_prefix("asset:/tool-image/") {
+            if uri.len() > 2048 {
+                return Err("Tool image source is too long".into());
+            }
+            let source: ToolImageRead = serde_json::from_slice(
+                &URL_SAFE_NO_PAD
+                    .decode(encoded)
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            source.position.validate().map_err(str::to_owned)?;
+            if source.offset != 0
+                || source.through > 9_007_199_254_740_991
+                || source.position.source_sequence > source.through
+            {
+                return Err("Invalid tool image source".into());
+            }
+            ImageSource::Tool(source)
+        } else if let Some(encoded) = uri.strip_prefix("asset:/attachment-image/") {
+            if uri.len() > 4096 {
+                return Err("Attachment image source is too long".into());
+            }
+            let source: AttachmentImageRead = serde_json::from_slice(
+                &URL_SAFE_NO_PAD
+                    .decode(encoded)
+                    .map_err(|_| "Invalid attachment image source")?,
+            )
+            .map_err(|_| "Invalid attachment image source")?;
+            match &source.source {
+                AttachmentImageSource::Uploaded { id } if id.is_empty() || id.len() > 256 => {
+                    return Err("Invalid uploaded image source".into());
+                }
+                AttachmentImageSource::History {
+                    through, position, ..
+                } => {
+                    position.validate().map_err(str::to_owned)?;
+                    if *through > 9_007_199_254_740_991 || position.source_sequence > *through {
+                        return Err("Invalid attachment history source".into());
+                    }
+                }
+                _ => {}
+            }
+            if source.offset != 0 {
+                return Err("Invalid attachment image offset".into());
+            }
+            ImageSource::Attachment(source)
+        } else {
             return crate::ApplicationAssets.read(uri);
         };
-        // This URI selects a canonical row, not a file or bearer capability.
-        // The original Host authorizes every page with its original grant.
-        if uri.len() > 2048 {
-            return Err("Tool image source is too long".into());
-        }
-        let source: ToolImageRead = serde_json::from_slice(
-            &URL_SAFE_NO_PAD
-                .decode(encoded)
-                .map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-        source.position.validate().map_err(str::to_owned)?;
-        if source.session_id.is_empty()
-            || source.session_id.len() > 128
-            || source.offset != 0
-            || source.through > 9_007_199_254_740_991
-            || source.position.source_sequence > source.through
-        {
-            return Err("Invalid tool image source".into());
+        if source.session().is_empty() || source.session().len() > 128 {
+            return Err("Invalid image session".into());
         }
         let owner = self.0.clone();
         // Image assets are read on NSH's image workers; bundled/font reads above
@@ -101,44 +130,36 @@ impl Assets for HostAssets {
         }))?;
         // Hash a large image on its reader, without occupying a Host IO worker.
         if content_digest(&bytes) != digest {
-            return Err("The original tool image digest does not match".into());
+            return Err("The original image digest does not match".into());
         }
         Ok(bytes)
     }
 }
 
-async fn read_image(owner: &Owner, source: ToolImageRead) -> Result<(Vec<u8>, String), String> {
+async fn read_image(owner: &Owner, source: ImageSource) -> Result<(Vec<u8>, String), String> {
     // Match the existing NSH decoder's encoded-byte ceiling, including valid
     // 50 MiB Host images. Image bytes never enter the JavaScript heap.
     const MAX_BYTES: u64 = 64 << 20;
+    let (method, mut input, expected) = source.request();
     let mut bytes = Vec::new();
     let mut metadata: Option<(u64, String, String)> = None;
     loop {
         let offset = bytes.len() as u64;
-        let page = owner
-            .client
-            .query(
-                "agent",
-                "toolImage",
-                json!({
-                    "sessionId":source.session_id, "through":source.through,
-                    "position":source.position, "offset":offset,
-                }),
-            )
-            .await?;
+        input["offset"] = offset.into();
+        let page = owner.client.query("agent", method, input.clone()).await?;
         let total = page["totalBytes"]
             .as_u64()
             .filter(|total| *total > 0 && *total <= MAX_BYTES)
-            .ok_or("Tool image exceeds the terminal decoder's 64 MiB limit")?;
-        let mime = page["mimeType"]
-            .as_str()
-            .ok_or("Missing tool image MIME type")?;
-        let digest = page["digest"].as_str().ok_or("Missing tool image digest")?;
-        let data = page["data"].as_str().ok_or("Missing tool image bytes")?;
+            .ok_or("Image exceeds the terminal decoder's 64 MiB limit")?;
+        let mime = page["mimeType"].as_str().ok_or("Missing image MIME type")?;
+        let digest = page["digest"].as_str().ok_or("Missing image digest")?;
+        let data = page["data"].as_str().ok_or("Missing image bytes")?;
         if page["kind"] != "ready"
-            || page["through"].as_u64() != Some(source.through)
-            || page["position"]["sourceSequence"].as_u64() != Some(source.position.source_sequence)
-            || page["position"]["itemIndex"].as_u64() != Some(source.position.item_index)
+            || expected
+                .as_object()
+                .unwrap()
+                .iter()
+                .any(|(key, value)| page.get(key) != Some(value))
             || page["offset"].as_u64() != Some(offset)
             || offset >= total
             || data.len() > 43692
@@ -156,7 +177,7 @@ async fn read_image(owner: &Owner, source: ToolImageRead) -> Result<(Vec<u8>, St
                 *length != total || kind != mime || hash != digest
             })
         {
-            return Err("The original tool image could not be verified".into());
+            return Err("The original image could not be verified".into());
         }
         if mime == "image/avif" {
             return Err("AVIF previews are not supported by this terminal renderer".into());
@@ -171,11 +192,40 @@ async fn read_image(owner: &Owner, source: ToolImageRead) -> Result<(Vec<u8>, St
         // every image that crosses the Host's 32 KiB page boundary.
         let chunk = STANDARD.decode(data).map_err(|error| error.to_string())?;
         if chunk.len() as u64 != (total - offset).min(32 * 1024) {
-            return Err("The original tool image page has an invalid length".into());
+            return Err("The original image page has an invalid length".into());
         }
         bytes.extend_from_slice(&chunk);
         if bytes.len() as u64 == total {
             return Ok((bytes, digest.to_owned()));
+        }
+    }
+}
+
+// Both selectors remain authorized by the same original Host; only their
+// canonical page identity differs. Encoded bytes never enter the JS heap.
+enum ImageSource {
+    Tool(ToolImageRead),
+    Attachment(AttachmentImageRead),
+}
+impl ImageSource {
+    fn session(&self) -> &str {
+        match self {
+            Self::Tool(source) => &source.session_id,
+            Self::Attachment(source) => &source.session_id,
+        }
+    }
+    fn request(self) -> (&'static str, serde_json::Value, serde_json::Value) {
+        match self {
+            Self::Tool(source) => (
+                "toolImage",
+                json!({"sessionId":source.session_id,"through":source.through,"position":source.position,"offset":0}),
+                json!({"through":source.through,"position":source.position}),
+            ),
+            Self::Attachment(source) => (
+                "attachmentImage",
+                json!({"sessionId":source.session_id,"source":source.source,"offset":0}),
+                json!({"source":source.source}),
+            ),
         }
     }
 }

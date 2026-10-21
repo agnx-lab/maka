@@ -33,7 +33,7 @@ import { ModelSelect } from './ModelSelect';
 import { ModelSettings } from './ModelSettings';
 import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
-import type { ImagePreview } from './ToolImage';
+import type { ImagePreview } from './ImageThumbnail';
 import { createResources } from './resources';
 import { createPresentationSettings } from './presentation';
 import { createBrowsing } from './browsing';
@@ -393,7 +393,7 @@ function App() {
     overlay.set({ kind: 'interaction', sessionId, requestId, instance: ++overlayInstance });
   };
   const previewImage = (image: ImagePreview) => {
-    if (!alive || selected() !== image.source.sessionId || overlay()) return;
+    if (!alive || selected() !== image.source.read.sessionId || overlay()) return;
     browserFocus.set(false);
     resources.openImage(image);
   };

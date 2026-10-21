@@ -27,7 +27,7 @@ import { WorkspaceChanges } from './WorkspaceChanges';
 import { CurrentDiff } from './CurrentDiff';
 import { CurrentFile } from './CurrentFile';
 import type { Resources } from './resources';
-import type { ImagePreview } from './ToolImage';
+import type { ImagePreview } from './ImageThumbnail';
 import { C } from './ui';
 
 export function ResourcePane(props: { resources: Resources; docked: boolean }) {

@@ -22,7 +22,7 @@ import type { YNode } from 'nsh';
 import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFiles';
 import { createCurrentFile, type CurrentFileModel } from './CurrentFile';
 import { createCurrentDiff, type CurrentDiffTarget, type CurrentDiffModel } from './CurrentDiff';
-import type { ImagePreview } from './ToolImage';
+import type { ImagePreview } from './ImageThumbnail';
 
 export type ResourceTab = {
   instance: number;
@@ -32,7 +32,7 @@ export type ResourceTab = {
 } & (
   | { kind: 'file'; model: CurrentFileModel }
   | { kind: 'diff'; model: CurrentDiffModel }
-  | { kind: 'tool-image'; image: ImagePreview }
+  | { kind: 'image'; image: ImagePreview }
 );
 
 // Window presentation state only. All resource authority remains in the
@@ -50,7 +50,7 @@ export function createResources(options: { selected(): string | null; blocked():
   let header: { sessionId: string; node: YNode } | undefined;
   let opener: (() => boolean) | undefined;
   const dispose = (tab: ResourceTab) => {
-    if (tab.kind !== 'tool-image') tab.model.dispose();
+    if (tab.kind !== 'image') tab.model.dispose();
   };
   const adopt = () => {
     const selected = options.selected();
@@ -133,11 +133,11 @@ export function createResources(options: { selected(): string | null; blocked():
     };
   };
   const openImage = (image: ImagePreview) => {
-    const { sessionId, through, position } = image.source;
-    const identity = `image:${through}:${position.sourceSequence}:${position.itemIndex}`;
+    const { sessionId } = image.source.read;
+    const identity = image.uri;
     if (!admits(sessionId)) return;
     open(sessionId, identity, (instance) => ({
-      kind: 'tool-image',
+      kind: 'image',
       instance,
       identity,
       sessionId,
