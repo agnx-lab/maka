@@ -19,8 +19,11 @@
 
 //! View-independent Maka calls. The launcher retains this scope until `close` succeeds.
 mod journal;
-pub use journal::{Draft, DraftKey, DraftReference, Journal, Operation};
-use maka_capabilities::call::{Attachments, ResourceEncoding};
+pub use journal::{
+    Draft, DraftAttachment, DraftEdit, DraftKey, DraftReference, Journal, Operation,
+    UploadReference,
+};
+use maka_capabilities::call::{Attachments, ReadResource, ResourceEncoding};
 use maka_host_runtime::application::{
     host::{Client as HostClient, LocalCall},
     transport::{Description, wire::Reply},
@@ -220,10 +223,19 @@ impl Client {
             session_id,
             correlation,
             draft: None,
+            upload: None,
             abandoned: false,
             reference: None,
             receipt: None,
         };
+        self.begin_mutation(operation, input, resources).await
+    }
+    async fn begin_mutation(
+        &self,
+        operation: Operation,
+        input: Value,
+        resources: Attachments,
+    ) -> Result<Mutation> {
         self.0.journal.reserve(&operation).await?;
         self.open_mutation(operation, input, resources).await
     }
@@ -282,12 +294,84 @@ impl Client {
             session_id: None,
             correlation: serde_json::json!({"kind": SETTINGS_KIND}),
             draft: None,
+            upload: None,
             abandoned: false,
             reference: None,
             receipt: None,
         };
         self.0.journal.reserve_settings(&operation).await?;
         self.open_mutation(operation, input, resources).await
+    }
+    /// Upload bytes selected by native input, with the original editor/provider owner.
+    pub async fn upload_attachment(
+        &self,
+        id: Uuid,
+        session: &str,
+        editor: &str,
+        resource: Arc<dyn ReadResource>,
+    ) -> Result<Mutation> {
+        let key = self.draft_key("agent", session, editor).await?;
+        let metadata = resource.metadata();
+        let name = metadata["name"]
+            .as_str()
+            .filter(|name| !name.is_empty() && name.len() <= 512)
+            .ok_or("invalid selected filename")?
+            .to_owned();
+        let bytes = metadata["bytes"]
+            .as_u64()
+            .filter(|bytes| *bytes <= 50 * 1024 * 1024 && *bytes as usize == resource.bytes())
+            .ok_or("invalid selected file size")? as usize;
+        let digest = metadata["digest"]
+            .as_str()
+            .filter(|digest| {
+                digest.strip_prefix("sha256:").is_some_and(|hash| {
+                    hash.len() == 64
+                        && hash
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                })
+            })
+            .ok_or("invalid selected file digest")?
+            .to_owned();
+        let input = serde_json::json!({"sessionId": session, "name": name, "bytes": bytes, "digest": digest});
+        self.begin_mutation(
+            Operation {
+                id,
+                host: self.0.source.clone(),
+                endpoint: "agent".into(),
+                method: "uploadAttachment".into(),
+                session_id: Some(session.into()),
+                correlation: Value::Null,
+                draft: None,
+                upload: Some(UploadReference {
+                    key,
+                    name,
+                    bytes,
+                    digest,
+                }),
+                abandoned: false,
+                reference: None,
+                receipt: None,
+            },
+            input,
+            Attachments::from([("file".into(), resource)]),
+        )
+        .await
+    }
+    pub async fn pending_uploads(&self, session: &str, editor: &str) -> Result<Vec<Operation>> {
+        let key = self.draft_key("agent", session, editor).await?;
+        self.0.journal.pending_uploads(&self.0.source, &key).await
+    }
+    pub async fn operation_for_upload(
+        &self,
+        session: &str,
+        editor: &str,
+        id: Uuid,
+    ) -> Result<Operation> {
+        let key = self.draft_key("agent", session, editor).await?;
+        let operation = self.operation(id).await?;
+        journal::validate_upload(&operation, &key)?;
+        Ok(operation)
     }
     /// Reserve a shell control attempt separately from composer draft sends.
     pub async fn control(&self, id: Uuid, method: &str, input: Value) -> Result<Mutation> {
@@ -343,12 +427,12 @@ impl Client {
         session: &str,
         editor: &str,
         expected_revision: Option<u64>,
-        text: String,
+        edit: DraftEdit,
     ) -> Result<Draft> {
         let key = self.draft_key(endpoint, session, editor).await?;
         self.0
             .journal
-            .save_draft(&key, expected_revision, text)
+            .save_draft(&key, expected_revision, edit)
             .await
     }
     /// Read the exact saved text in Rust. UI callers provide only its revision
@@ -373,7 +457,7 @@ impl Client {
         if draft.revision != revision {
             return Err("saved draft revision changed before sending".into());
         }
-        if draft.text.trim().is_empty() {
+        if draft.text.trim().is_empty() && draft.attachments.is_empty() {
             return Err("saved draft is empty or already consumed".into());
         }
         let mut input = selection
@@ -382,6 +466,17 @@ impl Client {
             .ok_or("send selection must be an object")?;
         input.insert("sessionId".into(), Value::String(session.into()));
         input.insert("message".into(), Value::String(draft.text));
+        input.insert(
+            "attachments".into(),
+            serde_json::to_value(
+                draft
+                    .attachments
+                    .iter()
+                    .map(|attachment| &attachment.id)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(error)?,
+        );
         let operation = Operation {
             id,
             host: self.0.source.clone(),
@@ -390,6 +485,7 @@ impl Client {
             session_id: Some(session.into()),
             correlation: Value::Null,
             draft: Some(DraftReference { key, revision }),
+            upload: None,
             abandoned: false,
             reference: None,
             receipt: None,
@@ -604,7 +700,8 @@ impl Mutation {
                     || reference.export != self.description.export || reference.method != self.operation.method || reference.contract != contract {
                     return Err("Host preparation differs from the original client target".into());
                 }
-                if self.operation.draft.as_ref().is_some_and(|draft| !draft.key.matches(&reference)) {
+                if self.operation.draft.as_ref().is_some_and(|draft| !draft.key.matches(&reference))
+                    || self.operation.upload.as_ref().is_some_and(|upload| !upload.key.matches(&reference)) {
                     return Err("Host preparation belongs to another draft owner".into());
                 }
                 self.client.0.journal.prepared(self.operation.id, &reference).await?;

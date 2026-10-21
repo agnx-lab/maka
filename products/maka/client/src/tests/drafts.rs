@@ -18,6 +18,231 @@
  */
 use super::*;
 
+struct SelectedFile;
+impl maka_capabilities::call::ReadResource for SelectedFile {
+    fn resource_type(&self) -> maka_plugin_core::contract::ResourceType {
+        maka_plugin_core::contract::binary_resource_type()
+    }
+    fn bytes(&self) -> usize {
+        b"actual selected bytes".len()
+    }
+    fn metadata(&self) -> Value {
+        json!({"name":"notes.txt","bytes":21,"digest":"sha256:9989a315c7fb6c07f91bd91de902109f14ed480e4ea7b04534e872abc81f1007"})
+    }
+    fn read(&self, range: std::ops::Range<usize>) -> Result<Vec<u8>> {
+        b"actual selected bytes"
+            .get(range)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| "invalid range".into())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn original_upload_receipts_and_complete_attachment_drafts_survive_restart_and_old_send_clear()
+ {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let fixture = Fixture::new().await;
+        let client = fixture.client().await;
+        let upload = client
+            .upload_attachment(
+                Uuid::new_v4(),
+                "session-one",
+                "composer",
+                Arc::new(SelectedFile),
+            )
+            .await
+            .unwrap();
+        upload.prepare().await.unwrap();
+        upload.confirm().await.unwrap();
+        assert!(
+            client
+                .pending_operations("agent", "session-one", "composer")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            client
+                .pending_uploads("session-two", "composer")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            client
+                .operation_for_upload("session-one", "other-editor", upload.id())
+                .await
+                .unwrap_err(),
+            "original attachment upload belongs to another draft owner"
+        );
+        client.close().await.unwrap();
+
+        let client = fixture.client().await;
+        let originals = client
+            .pending_uploads("session-one", "composer")
+            .await
+            .unwrap();
+        assert_eq!(
+            originals
+                .iter()
+                .map(|operation| operation.id)
+                .collect::<Vec<_>>(),
+            [upload.id()]
+        );
+        let attachment = DraftAttachment {
+            id: "original-upload".into(),
+            name: "notes.txt".into(),
+            mime_type: "text/plain".into(),
+            bytes: 21,
+        };
+        let edit = DraftEdit {
+            text: String::new(),
+            attachments: vec![attachment.clone()],
+            settled_uploads: vec![upload.id()],
+        };
+        assert!(
+            client
+                .save_draft("agent", "session-one", "other-editor", None, edit.clone())
+                .await
+                .is_err()
+        );
+        // A failed CAS cannot adopt the upload ahead of its saved draft.
+        assert!(
+            client
+                .save_draft("agent", "session-one", "composer", Some(8), edit.clone())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            client
+                .pending_uploads("session-one", "composer")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let saved = client
+            .save_draft("agent", "session-one", "composer", None, edit)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                saved.revision,
+                saved.text.as_str(),
+                saved.attachments.as_slice()
+            ),
+            (1, "", std::slice::from_ref(&attachment))
+        );
+        assert!(
+            client
+                .pending_uploads("session-one", "composer")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        client.close().await.unwrap();
+
+        let client = fixture.client().await;
+        assert_eq!(
+            client
+                .load_draft("agent", "session-one", "composer")
+                .await
+                .unwrap()
+                .unwrap()
+                .attachments,
+            [attachment]
+        );
+        fixture.counter.blocked.store(true, Ordering::SeqCst);
+        let send = client
+            .send_draft(
+                Uuid::new_v4(),
+                "agent",
+                "session-one",
+                "composer",
+                1,
+                json!({"attachments":["unselected-forged-id"]}),
+            )
+            .await
+            .unwrap();
+        send.prepare().await.unwrap();
+        let mut confirming = Box::pin(send.confirm());
+        tokio::select! {
+            result = &mut confirming => panic!("send bypassed the actual handler gate: {result:?}"),
+            () = fixture.counter.started.notified() => {},
+        }
+        client
+            .save_draft(
+                "agent",
+                "session-one",
+                "composer",
+                Some(1),
+                "new unsent draft".into(),
+            )
+            .await
+            .unwrap();
+        fixture.counter.release.notify_one();
+        confirming.await.unwrap();
+        let messages = fixture.counter.messages.lock().unwrap().clone();
+        assert_eq!(messages[0]["message"], "");
+        assert_eq!(messages[0]["attachments"], json!(["original-upload"]));
+        let kept = client
+            .load_draft("agent", "session-one", "composer")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (kept.revision, kept.text.as_str(), kept.attachments.len()),
+            (2, "new unsent draft", 0)
+        );
+
+        let unknown = client
+            .upload_attachment(
+                Uuid::new_v4(),
+                "session-one",
+                "composer",
+                Arc::new(SelectedFile),
+            )
+            .await
+            .unwrap();
+        unknown.prepare().await.unwrap();
+        unknown.disconnect().await;
+        assert!(matches!(
+            client.recover(unknown.id()).await.unwrap().receipt,
+            Receipt::NotRecorded
+        ));
+        assert!(
+            client
+                .save_draft(
+                    "agent",
+                    "session-one",
+                    "composer",
+                    Some(2),
+                    DraftEdit {
+                        text: "new unsent draft".into(),
+                        settled_uploads: vec![unknown.id()],
+                        ..Default::default()
+                    }
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            client
+                .pending_uploads("session-one", "composer")
+                .await
+                .unwrap()
+                .iter()
+                .map(|operation| operation.id)
+                .collect::<Vec<_>>(),
+            [unknown.id()]
+        );
+        client.close().await.unwrap();
+        fixture.finish().await;
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn saved_drafts_and_receipts_preserve_new_edits_across_clear_ordering_and_restart() {
     tokio::time::timeout(Duration::from_secs(20), async {

@@ -72,6 +72,21 @@ impl Handler for CounterHandler {
         Box::pin(async move {
             match method.as_str() {
                 "read" => Ok(json!({"sent":owner.effects.load(Ordering::SeqCst)})),
+                "uploadAttachment" => {
+                    let file = context
+                        .attachments()
+                        .get("file")
+                        .ok_or("missing actual file")?;
+                    let bytes = file.read(0..file.bytes())?;
+                    if bytes != b"actual selected bytes" {
+                        return Err("the original selected bytes did not arrive".into());
+                    }
+                    owner.effects.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({"kind":"uploaded","attachment":{
+                        "sessionId":input["sessionId"],"id":"original-upload",
+                        "name":input["name"],"bytes":input["bytes"],"mimeType":"text/plain"
+                    }}))
+                }
                 "send" | "selectBackend" | "create" | "discoverModels" | "saveCredential" => {
                     owner.messages.lock().unwrap().push(input.clone());
                     if method == "saveCredential" {
@@ -135,7 +150,7 @@ impl Fixture {
             .unwrap(),
         );
         let store = Arc::new(EventLog::for_root(root).await.unwrap());
-        let contract: Contract = serde_json::from_value(json!({
+        let mut contract: Contract = serde_json::from_value(json!({
             "name":"test.Counter","version":1,"transport":"remote","interface":{"kind":"service","methods":{
                 "read":{"mode":"query","input":{},"output":{},"resources":{}},
                 "send":{"mode":"mutation","input":{},"output":{},"resources":{}},
@@ -148,6 +163,19 @@ impl Fixture {
                 "watch":{"mode":"subscription","input":{},"output":{},"resources":{}}
             }}
         })).unwrap();
+        if let maka_plugin_core::contract::Interface::Service { methods } = &mut contract.interface
+        {
+            methods.insert(
+                "uploadAttachment".into(),
+                maka_plugin_core::contract::Method {
+                    resources: BTreeMap::from([(
+                        "file".into(),
+                        maka_plugin_core::contract::binary_resource_type().required(),
+                    )]),
+                    ..methods["send"].clone()
+                },
+            );
+        }
         let package = |id: &str, implementation: &str, imports: Value, exports: Value| {
             Package::new(BTreeMap::from([(
                 "maka.extension.json".into(),
@@ -252,6 +280,7 @@ impl Fixture {
                             methods: [
                                 "read".into(),
                                 "send".into(),
+                                "uploadAttachment".into(),
                                 "selectBackend".into(),
                                 "stop".into(),
                                 "respond".into(),

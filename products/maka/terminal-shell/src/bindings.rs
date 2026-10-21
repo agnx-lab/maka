@@ -371,7 +371,7 @@ impl ScopedHost {
                     &scope.session,
                     EDITOR,
                     (expected_revision != 0).then_some(expected_revision),
-                    text,
+                    text.into(),
                 )
                 .await?;
             serde_json::to_value(draft).map_err(|error| error.to_string())

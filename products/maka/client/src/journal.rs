@@ -50,6 +50,8 @@ pub struct Operation {
     pub correlation: Value,
     #[serde(default)]
     pub draft: Option<DraftReference>,
+    #[serde(default)]
+    pub upload: Option<UploadReference>,
     /// Durable fence for an attempt abandoned before preparation committed.
     #[serde(default)]
     pub abandoned: bool,
@@ -112,6 +114,46 @@ impl DraftKey {
 pub struct Draft {
     pub revision: u64,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<DraftAttachment>,
+}
+
+/// Display metadata for an immutable Host upload in this exact draft owner.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftAttachment {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub bytes: u64,
+}
+
+/// One complete editor revision, including the upload receipts it has handled.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftEdit {
+    pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<DraftAttachment>,
+    #[serde(default)]
+    pub settled_uploads: Vec<Uuid>,
+}
+impl From<String> for DraftEdit {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UploadReference {
+    pub key: DraftKey,
+    pub name: String,
+    pub bytes: usize,
+    pub digest: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -132,12 +174,45 @@ impl Journal {
             .connect_with(options)
             .await
             .map_err(error)?;
+        let mut connection = pool.acquire().await.map_err(error)?;
+        // Serialize schema inspection and ALTER across independent client scopes.
+        let mut transaction = sqlx::Connection::begin_with(&mut *connection, "BEGIN IMMEDIATE")
+            .await
+            .map_err(error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, domain TEXT NOT NULL, deployment TEXT NOT NULL, context TEXT NOT NULL, draft_owner TEXT, reference TEXT, receipt TEXT, abandoned INTEGER NOT NULL DEFAULT 0)")
-            .execute(&pool).await.map_err(error)?;
+            .execute(&mut *transaction).await.map_err(error)?;
         sqlx::query("CREATE INDEX IF NOT EXISTS operations_pending ON operations(domain,deployment,draft_owner) WHERE receipt IS NULL AND abandoned=0")
-            .execute(&pool).await.map_err(error)?;
+            .execute(&mut *transaction).await.map_err(error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS drafts (owner TEXT PRIMARY KEY, revision INTEGER NOT NULL, text TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0)")
-            .execute(&pool).await.map_err(error)?;
+            .execute(&mut *transaction).await.map_err(error)?;
+        for (table, column, alter) in [
+            (
+                "drafts",
+                "attachments",
+                "ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+            ),
+            (
+                "operations",
+                "upload_adopted",
+                "ALTER TABLE operations ADD COLUMN upload_adopted INTEGER NOT NULL DEFAULT 0",
+            ),
+        ] {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(error)?;
+            if !columns
+                .iter()
+                .any(|row| row.get::<&str, _>("name") == column)
+            {
+                sqlx::query(alter)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(error)?;
+            }
+        }
+        transaction.commit().await.map_err(error)?;
+        drop(connection);
         Ok(Self(
             pool,
             #[cfg(test)]
@@ -145,7 +220,7 @@ impl Journal {
         ))
     }
     pub(crate) async fn load_draft(&self, key: &DraftKey) -> Result<Option<Draft>> {
-        let row = sqlx::query("SELECT revision,CASE WHEN consumed=1 THEN '' ELSE text END AS text FROM drafts WHERE owner=?")
+        let row = sqlx::query("SELECT revision,CASE WHEN consumed=1 THEN '' ELSE text END AS text,CASE WHEN consumed=1 THEN '[]' ELSE attachments END AS attachments FROM drafts WHERE owner=?")
             .bind(serde_json::to_string(key).map_err(error)?)
             .fetch_optional(&self.0)
             .await
@@ -154,6 +229,8 @@ impl Journal {
             Ok(Draft {
                 revision: row.try_get::<i64, _>("revision").map_err(error)? as u64,
                 text: row.try_get("text").map_err(error)?,
+                attachments: serde_json::from_str(row.try_get("attachments").map_err(error)?)
+                    .map_err(error)?,
             })
         })
         .transpose()
@@ -162,25 +239,96 @@ impl Journal {
         &self,
         key: &DraftKey,
         expected: Option<u64>,
-        text: String,
+        edit: DraftEdit,
     ) -> Result<Draft> {
-        if text.len() > 1024 * 1024
+        if edit.text.len() > 1024 * 1024
             || expected.is_some_and(|revision| revision == 0 || revision >= 9_007_199_254_740_991)
+            || edit.settled_uploads.len() > 128
         {
             return Err("draft text or revision exceeds its limit".into());
         }
-        let key = serde_json::to_string(key).map_err(error)?;
+        let attachments = serde_json::to_string(&edit.attachments).map_err(error)?;
+        if attachments.len() > 64 * 1024
+            || edit.attachments.iter().any(|attachment| {
+                attachment.id.is_empty()
+                    || attachment.id.len() > 128
+                    || attachment.name.is_empty()
+                    || attachment.name.len() > 512
+                    || attachment.mime_type.len() > 128
+                    || attachment.bytes > 50 * 1024 * 1024
+            })
+            || edit
+                .attachments
+                .iter()
+                .enumerate()
+                .any(|(index, attachment)| {
+                    edit.attachments[..index]
+                        .iter()
+                        .any(|other| other.id == attachment.id)
+                })
+        {
+            return Err("invalid draft attachments".into());
+        }
+        let encoded_key = serde_json::to_string(key).map_err(error)?;
+        let mut connection = self.0.acquire().await.map_err(error)?;
+        let mut transaction = sqlx::Connection::begin_with(&mut *connection, "BEGIN IMMEDIATE")
+            .await
+            .map_err(error)?;
+        // A save queued before a send receipt may still follow its consumption
+        // at this same revision, as text edits already can. Keep its verified
+        // metadata available for that CAS; consumed load still returns [].
+        let previous: Option<String> = sqlx::query_scalar("SELECT attachments FROM drafts WHERE owner=?")
+        .bind(&encoded_key)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(error)?;
+        let mut admitted: Vec<DraftAttachment> = previous
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(error)?
+            .unwrap_or_default();
+        for id in &edit.settled_uploads {
+            let row = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE id=? AND domain=? AND deployment=? AND draft_owner=?")
+                .bind(id.to_string()).bind(&key.state_domain).bind(key.deployment.to_string())
+                .bind(&encoded_key).fetch_optional(&mut *transaction).await.map_err(error)?
+                .ok_or("original attachment upload not found for this draft")?;
+            let original = decode_operation(row)?;
+            validate_upload(&original, key)?;
+            let attachment = uploaded_attachment(&original)?;
+            if let Some(attachment) = attachment {
+                admitted.push(attachment);
+            }
+            sqlx::query("UPDATE operations SET upload_adopted=1 WHERE id=?")
+                .bind(id.to_string())
+                .execute(&mut *transaction)
+                .await
+                .map_err(error)?;
+        }
+        if edit
+            .attachments
+            .iter()
+            .any(|attachment| !admitted.contains(attachment))
+        {
+            return Err("draft attachment differs from its original upload receipt".into());
+        }
         let row = if let Some(revision) = expected {
-            sqlx::query("UPDATE drafts SET revision=revision+1,text=?,consumed=0 WHERE owner=? AND revision=? RETURNING revision,text")
-                .bind(text).bind(key).bind(revision as i64).fetch_optional(&self.0).await.map_err(error)?
+            sqlx::query("UPDATE drafts SET revision=revision+1,text=?,attachments=?,consumed=0 WHERE owner=? AND revision=? RETURNING revision,text,attachments")
+                .bind(edit.text).bind(attachments).bind(encoded_key).bind(revision as i64)
+                .fetch_optional(&mut *transaction).await.map_err(error)?
         } else {
-            sqlx::query("INSERT INTO drafts (owner,revision,text) VALUES (?,1,?) ON CONFLICT DO NOTHING RETURNING revision,text")
-                .bind(key).bind(text).fetch_optional(&self.0).await.map_err(error)?
+            sqlx::query("INSERT INTO drafts (owner,revision,text,attachments) VALUES (?,1,?,?) ON CONFLICT DO NOTHING RETURNING revision,text,attachments")
+                .bind(encoded_key).bind(edit.text).bind(attachments)
+                .fetch_optional(&mut *transaction).await.map_err(error)?
         }.ok_or("draft revision conflicts with a newer saved value")?;
-        Ok(Draft {
+        let draft = Draft {
             revision: row.try_get::<i64, _>("revision").map_err(error)? as u64,
             text: row.try_get("text").map_err(error)?,
-        })
+            attachments: serde_json::from_str(row.try_get("attachments").map_err(error)?)
+                .map_err(error)?,
+        };
+        transaction.commit().await.map_err(error)?;
+        Ok(draft)
     }
     pub(crate) async fn reserve(&self, operation: &Operation) -> Result<()> {
         let context = encode_operation(operation)?;
@@ -191,7 +339,7 @@ impl Journal {
         .bind(&operation.host.state_domain)
         .bind(operation.host.deployment.to_string())
         .bind(context)
-        .bind(operation.draft.as_ref().map(|draft| serde_json::to_string(&draft.key)).transpose().map_err(error)?)
+        .bind(operation.draft.as_ref().map(|draft| &draft.key).or_else(|| operation.upload.as_ref().map(|upload| &upload.key)).map(serde_json::to_string).transpose().map_err(error)?)
         .execute(&self.0)
         .await
         .map_err(error)?;
@@ -258,10 +406,27 @@ impl Journal {
         host: &DeploymentRef,
         key: &DraftKey,
     ) -> Result<Vec<Operation>> {
-        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.draft')='object' AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(serde_json::to_string(key).map_err(error)?).fetch_all(&self.0).await.map_err(error)?;
         rows.into_iter().map(decode_operation).collect()
+    }
+    pub(crate) async fn pending_uploads(
+        &self,
+        host: &DeploymentRef,
+        key: &DraftKey,
+    ) -> Result<Vec<Operation>> {
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.upload')='object' AND upload_adopted=0 AND abandoned=0 ORDER BY rowid LIMIT 128")
+            .bind(&host.state_domain).bind(host.deployment.to_string())
+            .bind(serde_json::to_string(key).map_err(error)?).fetch_all(&self.0).await.map_err(error)?;
+        let operations = rows
+            .into_iter()
+            .map(decode_operation)
+            .collect::<Result<Vec<_>>>()?;
+        for operation in &operations {
+            validate_upload(operation, key)?;
+        }
+        Ok(operations)
     }
     pub(crate) async fn pending_controls(&self, host: &DeploymentRef) -> Result<Vec<Operation>> {
         let correlation = serde_json::json!({"kind": CONTROL_KIND}).to_string();
@@ -404,4 +569,114 @@ fn accepted_send(receipt: &Receipt, session: &str) -> bool {
 }
 fn error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+pub(crate) fn validate_upload(operation: &Operation, key: &DraftKey) -> Result<()> {
+    if operation.draft.is_some()
+        || operation.endpoint != "agent"
+        || operation.method != "uploadAttachment"
+        || operation.session_id.as_deref() != Some(&key.session_id)
+        || operation.upload.as_ref().map(|upload| &upload.key) != Some(key)
+        || operation.host.state_domain != key.state_domain
+        || operation.host.deployment != key.deployment
+        || operation
+            .reference
+            .as_ref()
+            .is_some_and(|reference| !key.matches(reference))
+    {
+        return Err("original attachment upload belongs to another draft owner".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn uploaded_attachment(operation: &Operation) -> Result<Option<DraftAttachment>> {
+    if operation.abandoned {
+        return Ok(None);
+    }
+    let Some(Receipt::Recorded {
+        outcome: OperationOutcome::Returned { value },
+        ..
+    }) = &operation.receipt
+    else {
+        return Err("original attachment upload is unresolved; recover its receipt".into());
+    };
+    if value["kind"] == "rejected" {
+        return Ok(None);
+    }
+    let upload = operation.upload.as_ref().ok_or("missing upload owner")?;
+    let value = value
+        .get("attachment")
+        .filter(|_| value["kind"] == "uploaded")
+        .ok_or("unexpected attachment upload result")?;
+    if value["sessionId"] != upload.key.session_id {
+        return Err("attachment upload returned another session".into());
+    }
+    let attachment: DraftAttachment = serde_json::from_value(serde_json::json!({
+        "id":value["id"],"name":value["name"],"mimeType":value["mimeType"],"bytes":value["bytes"]
+    }))
+    .map_err(error)?;
+    if attachment.id.is_empty() || attachment.bytes != upload.bytes as u64 {
+        return Err("attachment upload receipt differs from the original file".into());
+    }
+    Ok(Some(attachment))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_open_migrates_the_original_text_row_without_losing_its_revision() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("old-client.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE drafts (owner TEXT PRIMARY KEY, revision INTEGER NOT NULL, text TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0)").execute(&pool).await.unwrap();
+        let key = DraftKey {
+            state_domain: "original-host".into(),
+            deployment: Uuid::from_u128(1),
+            namespace: InstanceId(vec![Uuid::from_u128(2)]),
+            export: "Agent".into(),
+            session_id: "original-session".into(),
+            editor_id: "composer".into(),
+        };
+        sqlx::query("INSERT INTO drafts(owner,revision,text) VALUES (?,7,'original unsent text')")
+            .bind(serde_json::to_string(&key).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let (first, second) = tokio::join!(Journal::open(&path), Journal::open(&path));
+        let (first, second) = (first.unwrap(), second.unwrap());
+        let loaded = first.load_draft(&key).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                loaded.revision,
+                loaded.text.as_str(),
+                loaded.attachments.len()
+            ),
+            (7, "original unsent text", 0)
+        );
+        first
+            .save_draft(&key, Some(7), "edited after migration".to_owned().into())
+            .await
+            .unwrap();
+        assert_eq!(
+            second.load_draft(&key).await.unwrap().unwrap().text,
+            "edited after migration"
+        );
+        assert!(
+            second
+                .save_draft(&key, Some(7), "stale old scope".to_owned().into())
+                .await
+                .is_err()
+        );
+    }
 }
