@@ -21,7 +21,7 @@ import { cleanup, computed, effect, signal, Text, View } from 'nsh';
 import { markdown } from 'maka/markdown';
 import type { MarkdownBlock } from 'maka/markdown';
 import { hasCompletePrefix, type Row } from './history';
-import { C, bodyTextStyle } from './ui';
+import { C, bodyTextStyle, secondaryTextStyle } from './ui';
 import { MarkdownBlockView } from './MarkdownBlock';
 
 type Input = { messageId: string; field: string; source: string };
@@ -34,7 +34,7 @@ const sameInput = (left: Input | null, right: Input | null) =>
     left.field === right.field &&
     left.source === right.source);
 
-export function MarkdownBody(props: { row: () => Row }) {
+export function MarkdownBody(props: { row: () => Row; compact?: boolean }) {
   const projection = signal<Projection | null>(null);
   const failure = signal<{ input: Input; message: string } | null>(null);
   let wanted: Input | null = null;
@@ -120,18 +120,26 @@ export function MarkdownBody(props: { row: () => Row }) {
       when={blocks()}
       else={
         <View style={{ gap: 0 }}>
-          <Text selectable style={{ color: C.text, ...bodyTextStyle }}>
+          <Text
+            selectable
+            style={{
+              ...(props.compact ? secondaryTextStyle : bodyTextStyle),
+              color: props.compact ? C.muted : C.text,
+            }}
+          >
             {props.row().text}
           </Text>
           <If when={failure()}>
-            <Text style={{ color: C.danger }}>Formatting unavailable: {failure()!.message}</Text>
+            <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.danger }}>
+              Formatting unavailable: {failure()!.message}
+            </Text>
           </If>
         </View>
       }
     >
-      <View style={{ gap: 16 }}>
+      <View style={{ gap: props.compact ? 6 : 16 }}>
         <Each of={blocks() ?? []} key={(block: MarkdownBlock) => block.key}>
-          {(block) => <MarkdownBlockView block={block} />}
+          {(block) => <MarkdownBlockView block={block} compact={props.compact} />}
         </Each>
       </View>
     </If>

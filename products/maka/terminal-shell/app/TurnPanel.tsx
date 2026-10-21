@@ -34,12 +34,21 @@ import { toolActivitySummary, type ToolActivity } from './toolActivity';
 const panelStyle = {
   marginVertical: 8,
   gap: 8,
-  padding: 8,
-  backgroundColor: C.surface,
-  borderWidth: 1,
-  borderColor: C.line,
-  borderRadius: 12,
+  padding: 0,
+  borderWidth: 0,
 };
+const groupHeaderStyle = {
+  ...controlStyle,
+  paddingHorizontal: 0,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+} as const;
+const groupHeaderHeight = Math.max(
+  groupHeaderStyle.minHeight,
+  captionTextStyle.lineHeight + 2 * groupHeaderStyle.paddingVertical,
+);
+const memberGap = 6;
 
 export type LiveActivity = {
   kind: 'working' | 'thinking' | 'response' | 'waiting';
@@ -196,7 +205,7 @@ function ActivityLog(props: {
   // one-line row minimum; text length never acts as a layout authority.
   const bodyMaxHeight = () => {
     const chrome =
-      controlStyle.minHeight +
+      groupHeaderHeight +
       panelStyle.gap +
       2 * (panelStyle.marginVertical + panelStyle.padding + panelStyle.borderWidth);
     const available = Math.max(16, props.viewport().height - chrome);
@@ -207,7 +216,12 @@ function ActivityLog(props: {
     const viewport = props.viewport();
     const measured = props.group().rowIds.reduce((height, id) => {
       const row = state.measured.get(id);
-      return height + (row?.width === viewport.width ? row.height : 32);
+      return (
+        height +
+        (row?.width === viewport.width
+          ? row.height
+          : controlStyle.minHeight + (id === props.group().rowIds.at(-1) ? 0 : memberGap))
+      );
     }, 0);
     return Math.min(bodyMaxHeight(), Math.max(16, measured));
   };
@@ -236,7 +250,7 @@ function ActivityLog(props: {
         <List
           accessibilityLabel="Turn activity"
           each={props.group().rowIds}
-          estimatedItemSize={32}
+          estimatedItemSize={controlStyle.minHeight + memberGap}
           scrollValue={state.offset}
           contentOffset={initial()!}
           maintainVisibleContentPosition={
@@ -284,6 +298,9 @@ function ActivityLog(props: {
                 if (!first) return <View />;
                 return (
                   <View
+                    style={{
+                      paddingBottom: props.group().rowIds.at(-1) === ownedId() ? 0 : memberGap,
+                    }}
                     onLayout={(frame) => {
                       if (
                         !alive ||
@@ -440,7 +457,7 @@ export function TurnPanel(props: {
           key: props.group().key,
           open: !props.state.open(),
         })}
-        style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+        style={groupHeaderStyle}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
         activeStyle={{ backgroundColor: C.line }}

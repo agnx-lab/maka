@@ -20,9 +20,10 @@
 import { computed, inputAction, signal, Text, View } from 'nsh';
 import type { JSX } from 'nsh';
 import { Button } from 'nsh/base';
+import { platform } from 'nsh/device';
 import { messageKey, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
-import { C, bodyTextStyle, controlStyle } from './ui';
+import { C, bodyTextStyle, secondaryTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 import { HistoryAttachments } from './Attachments';
 import { ToolCard } from './ToolCard';
@@ -189,36 +190,74 @@ export function MessageRow({
                     when={isTool()}
                     else={
                       <View>
-                        <Button
-                          accessibilityLabel={summary()}
-                          selected={expanded()}
-                          onPress={inputAction(setExpanded, {
-                            sessionId,
-                            key: rowKey(row()),
-                            value: !expanded(),
-                          })}
-                          style={{
-                            ...controlStyle,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 8,
-                          }}
-                          hoverStyle={{ backgroundColor: C.raised }}
-                          focusStyle={{ backgroundColor: C.line }}
-                        >
-                          <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
-                          <Text
-                            numberOfLines={1}
-                            style={{ flex: 1, color: C.muted, fontSize: 13, lineHeight: 16 }}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0 }}>
+                          <Button
+                            accessibilityLabel={summary()}
+                            selected={expanded()}
+                            onPress={inputAction(setExpanded, {
+                              sessionId,
+                              key: rowKey(row()),
+                              value: !expanded(),
+                            })}
+                            style={{
+                              ...controlStyle,
+                              flex: 1,
+                              minWidth: 0,
+                              paddingHorizontal: 0,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                            hoverStyle={{ backgroundColor: C.raised }}
+                            focusStyle={{ backgroundColor: C.line }}
                           >
-                            {summary()}
-                          </Text>
-                        </Button>
-                        <If when={expanded()}>
-                          <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
-                            <Text selectable style={{ color: C.muted, ...bodyTextStyle }}>
-                              {text()}
+                            <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
+                            <Text
+                              numberOfLines={1}
+                              style={{ flex: 1, color: C.muted, fontSize: 13, lineHeight: 16 }}
+                            >
+                              {summary()}
                             </Text>
+                          </Button>
+                          <If when={expanded()}>
+                            <Button
+                              accessibilityLabel={
+                                sourceMode() ? 'Show formatted thinking' : 'Show thinking source'
+                              }
+                              tooltip={
+                                sourceMode() ? 'Show formatted thinking' : 'Show thinking source'
+                              }
+                              selected={sourceMode()}
+                              onPress={inputAction(setSourceMode, {
+                                sessionId,
+                                key: rowKey(row()),
+                                value: !sourceMode(),
+                              })}
+                              style={{
+                                ...controlStyle,
+                                width: 32,
+                                paddingHorizontal: 8,
+                                alignItems: 'center',
+                              }}
+                              hoverStyle={{ backgroundColor: C.raised }}
+                              focusStyle={{ backgroundColor: C.line }}
+                            >
+                              <Icon name={sourceMode() ? 'file' : 'code'} color={C.muted} />
+                            </Button>
+                          </If>
+                        </View>
+                        <If when={expanded()}>
+                          <View
+                            style={{
+                              paddingLeft: platform.isTerminal ? 24 : 22,
+                              paddingVertical: 4,
+                            }}
+                          >
+                            <If when={sourceMode()} else={<MarkdownBody row={row} compact />}>
+                              <Text selectable style={{ ...secondaryTextStyle, color: C.muted }}>
+                                {text()}
+                              </Text>
+                            </If>
                           </View>
                         </If>
                       </View>

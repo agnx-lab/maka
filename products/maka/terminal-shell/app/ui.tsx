@@ -40,6 +40,7 @@ export const C = {
 
 // Cells have a fixed 16-point row; native pixels retain the prose leading.
 export const bodyTextStyle = { fontSize: 14, lineHeight: platform.isTerminal ? 16 : 24 };
+export const secondaryTextStyle = { fontSize: 13, lineHeight: platform.isTerminal ? 16 : 20 };
 export const inputTextStyle = { fontSize: 14, lineHeight: platform.isTerminal ? 16 : 20 };
 export const captionTextStyle = { fontSize: 13, lineHeight: 16 };
 export const codeTextStyle = {

@@ -22,17 +22,24 @@ import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { platform, windowSize } from 'nsh/device';
 import type { MarkdownBlock, MarkdownRun, MarkdownTable } from 'maka/markdown';
-import { C, bodyTextStyle, captionTextStyle, codeTextStyle, controlStyle } from './ui';
+import {
+  C,
+  bodyTextStyle,
+  secondaryTextStyle,
+  captionTextStyle,
+  codeTextStyle,
+  controlStyle,
+} from './ui';
 import { Icon } from './Icon';
 
-export function MarkdownBlockView(props: { block: () => MarkdownBlock }) {
+export function MarkdownBlockView(props: { block: () => MarkdownBlock; compact?: boolean }) {
   const block = props.block;
   const container = () =>
     block().kind === 'code' || block().marker !== '' || block().quote > 0 || block().indent > 0;
   const inset = () =>
     Math.min((block().indent + Math.max(0, block().quote - 1)) * 16, windowSize().width / 4);
   return (
-    <If when={container()} else={<MarkdownBlockContent block={block} />}>
+    <If when={container()} else={<MarkdownBlockContent block={block} compact={props.compact} />}>
       <View
         style={{
           flexDirection: 'row',
@@ -43,17 +50,21 @@ export function MarkdownBlockView(props: { block: () => MarkdownBlock }) {
         }}
       >
         <If when={block().marker}>
-          <Text style={{ color: C.muted, flexShrink: 0 }}>{block().marker}</Text>
+          <Text
+            style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.muted, flexShrink: 0 }}
+          >
+            {block().marker}
+          </Text>
         </If>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <MarkdownBlockContent block={block} />
+          <MarkdownBlockContent block={block} compact={props.compact} />
         </View>
       </View>
     </If>
   );
 }
 
-function InlineRuns(props: { runs(): MarkdownRun[] }) {
+function InlineRuns(props: { runs(): MarkdownRun[]; compact?: boolean }) {
   return (
     <Each of={props.runs()} key={(run) => run.key}>
       {(run) => (
@@ -62,7 +73,8 @@ function InlineRuns(props: { runs(): MarkdownRun[] }) {
             fontWeight: run().strong ? '700' : undefined,
             fontStyle: run().emphasis ? 'italic' : undefined,
             textDecorationLine: run().strike ? 'line-through' : undefined,
-            color: run().code ? C.accentHover : undefined,
+            fontFamily: props.compact && run().code ? 'monospace' : undefined,
+            color: run().code ? (props.compact ? C.muted : C.accentHover) : undefined,
             backgroundColor: run().code ? C.surface : undefined,
           }}
         >
@@ -73,7 +85,7 @@ function InlineRuns(props: { runs(): MarkdownRun[] }) {
   );
 }
 
-function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
+function MarkdownBlockContent(props: { block: () => MarkdownBlock; compact?: boolean }) {
   const block = props.block;
   return (
     <If
@@ -88,7 +100,13 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
                 <If
                   when={block().kind === 'rule'}
                   else={
-                    <Text selectable style={{ color: C.text }}>
+                    <Text
+                      selectable
+                      style={{
+                        ...(props.compact ? secondaryTextStyle : {}),
+                        color: props.compact ? C.muted : C.text,
+                      }}
+                    >
                       {block().text}
                     </Text>
                   }
@@ -97,7 +115,9 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
                     when={platform.isTerminal}
                     else={<View style={{ height: 1, backgroundColor: C.line }} />}
                   >
-                    <Text style={{ color: C.muted }}>───</Text>
+                    <Text style={{ ...(props.compact ? secondaryTextStyle : {}), color: C.muted }}>
+                      ───
+                    </Text>
                   </If>
                 </If>
               }
@@ -105,27 +125,31 @@ function MarkdownBlockContent(props: { block: () => MarkdownBlock }) {
               <Text
                 selectable
                 style={{
-                  color: block().quote > 0 ? C.secondary : C.text,
-                  fontSize: block().kind === 'heading' ? 18 : 14,
-                  lineHeight: bodyTextStyle.lineHeight,
-                  fontWeight: block().kind === 'heading' ? '700' : '400',
+                  ...(props.compact ? secondaryTextStyle : bodyTextStyle),
+                  color: props.compact ? C.muted : block().quote > 0 ? C.secondary : C.text,
+                  fontSize: props.compact
+                    ? secondaryTextStyle.fontSize
+                    : block().kind === 'heading'
+                      ? 18
+                      : 14,
+                  fontWeight: block().kind === 'heading' ? (props.compact ? '600' : '700') : '400',
                 }}
               >
-                <InlineRuns runs={() => block().runs} />
+                <InlineRuns runs={() => block().runs} compact={props.compact} />
               </Text>
             </If>
           }
         >
-          <CodeBlock block={block} />
+          <CodeBlock block={block} compact={props.compact} />
         </If>
       }
     >
-      <TableBlock table={() => block().table!} />
+      <TableBlock table={() => block().table!} compact={props.compact} />
     </If>
   );
 }
 
-function TableBlock(props: { table(): MarkdownTable }) {
+function TableBlock(props: { table(): MarkdownTable; compact?: boolean }) {
   const cells = computed(() => {
     const table = props.table();
     return table.rows.flatMap((row, rowIndex) =>
@@ -155,9 +179,11 @@ function TableBlock(props: { table(): MarkdownTable }) {
           {(cell) => (
             <View
               style={{
-                paddingHorizontal: platform.isTerminal ? 8 : 12,
-                paddingVertical: 8,
-                minHeight: bodyTextStyle.lineHeight + 16,
+                paddingHorizontal: props.compact || platform.isTerminal ? 8 : 12,
+                paddingVertical: props.compact ? 4 : 8,
+                minHeight:
+                  (props.compact ? secondaryTextStyle.lineHeight : bodyTextStyle.lineHeight) +
+                  (props.compact ? 8 : 16),
                 borderBottomWidth: platform.isTerminal || cell().last ? 0 : 1,
                 borderBottomColor: C.line,
                 backgroundColor:
@@ -167,13 +193,13 @@ function TableBlock(props: { table(): MarkdownTable }) {
               <Text
                 selectable
                 style={{
-                  ...bodyTextStyle,
-                  color: C.text,
+                  ...(props.compact ? secondaryTextStyle : bodyTextStyle),
+                  color: props.compact ? C.muted : C.text,
                   fontWeight: cell().row === 0 ? '600' : '400',
                   textAlign: cell().align,
                 }}
               >
-                <InlineRuns runs={() => cell().runs} />
+                <InlineRuns runs={() => cell().runs} compact={props.compact} />
               </Text>
             </View>
           )}
@@ -188,7 +214,7 @@ type CopyState =
   | { kind: 'copying' | 'copied'; text: string }
   | { kind: 'failed'; text: string; message: string };
 
-function CodeBlock(props: { block: () => MarkdownBlock }) {
+function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
   const block = props.block;
   const key = computed(() => block().key);
   const text = computed(() => block().text);
@@ -232,7 +258,14 @@ function CodeBlock(props: { block: () => MarkdownBlock }) {
     return current.kind === 'failed' && current.text === text() ? current.message : '';
   };
   return (
-    <View style={{ backgroundColor: C.surface, borderRadius: 12, padding: 16, gap: 8 }}>
+    <View
+      style={{
+        backgroundColor: C.surface,
+        borderRadius: props.compact ? 8 : 12,
+        padding: props.compact ? 8 : 16,
+        gap: props.compact ? 4 : 8,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 32, gap: 8 }}>
         <Text style={{ ...captionTextStyle, color: C.muted, flex: 1 }}>
           {block().language || 'code'}
@@ -250,7 +283,7 @@ function CodeBlock(props: { block: () => MarkdownBlock }) {
         </Button>
       </View>
       <Scroll horizontal>
-        <Text selectable style={{ color: C.text, ...codeTextStyle }}>
+        <Text selectable style={{ ...codeTextStyle, color: props.compact ? C.muted : C.text }}>
           {block().text}
         </Text>
       </Scroll>
