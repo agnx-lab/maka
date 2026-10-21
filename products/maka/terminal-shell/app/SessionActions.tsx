@@ -44,8 +44,8 @@ export function SessionActions(props: {
   const active = () => alive && props.current();
   const sameSession = (original: BrowserSession) =>
     original.id === session().id && original.revision === session().revision;
-  const back = () => {
-    if (!active() || pending()) return;
+  const back = (from: Page) => {
+    if (!active() || pending() || page() !== from) return;
     if (page() === 'actions') props.close();
     else {
       page.set('actions');
@@ -104,7 +104,7 @@ export function SessionActions(props: {
       closeOnEscape={false}
       closeOnBackdropPress={false}
       closeOnSwipe={false}
-      onCancel={back}
+      onCancel={() => back(page())}
       style={{
         flex: 1,
         justifyContent: 'center',
@@ -136,7 +136,7 @@ export function SessionActions(props: {
           <Button
             disabled={pending()}
             accessibilityLabel="Back from conversation actions"
-            onPress={inputAction(back, null)}
+            onPress={inputAction(back, page())}
           >
             <Text style={{ color: C.muted }}>
               {page() === 'actions' ? 'Close · Esc' : 'Back · Esc'}
@@ -254,7 +254,7 @@ export function SessionActions(props: {
               >
                 <Text style={{ color: C.danger }}>Delete permanently</Text>
               </Button>
-              <Button disabled={pending()} onPress={inputAction(back, null)}>
+              <Button disabled={pending()} onPress={inputAction(back, 'remove')}>
                 <Text style={{ color: C.text }}>Keep conversation</Text>
               </Button>
             </If>
