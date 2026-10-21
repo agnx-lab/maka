@@ -218,11 +218,16 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
   const block = props.block;
   const key = computed(() => block().key);
   const text = computed(() => block().text);
+  const wrapped = signal(true);
   const state = signal<CopyState>({ kind: 'idle' });
   let alive = true;
   cleanup(() => {
     alive = false;
   });
+  const toggleWrapped = (request: { key: string; wrapped: boolean }) => {
+    if (alive && key() === request.key && wrapped() === request.wrapped)
+      wrapped.set(!request.wrapped);
+  };
   const action = computed(() => {
     const originalKey = key();
     const originalText = text();
@@ -272,6 +277,17 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
         </Text>
         <Text style={{ ...captionTextStyle, color: C.muted }}>{copied() ? 'Copied' : ''}</Text>
         <Button
+          accessibilityLabel="Wrap code"
+          selected={wrapped()}
+          tooltip={wrapped() ? 'Show original columns' : 'Wrap long lines'}
+          onPress={inputAction(toggleWrapped, { key: key(), wrapped: wrapped() })}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+          hoverStyle={{ backgroundColor: C.line }}
+          focusStyle={{ backgroundColor: C.raised }}
+        >
+          <Icon name={wrapped() ? 'nowrap' : 'wrap'} color={C.secondary} />
+        </Button>
+        <Button
           accessibilityLabel="Copy code"
           tooltip={copied() ? 'Code copied' : 'Copy code'}
           onPress={action()}
@@ -282,8 +298,16 @@ function CodeBlock(props: { block: () => MarkdownBlock; compact?: boolean }) {
           <Icon name={copied() ? 'check' : 'copy'} color={C.secondary} />
         </Button>
       </View>
-      <Scroll horizontal>
-        <Text selectable style={{ ...codeTextStyle, color: props.compact ? C.muted : C.text }}>
+      <Scroll horizontal={!wrapped()} scrollable={!wrapped()}>
+        <Text
+          selectable
+          style={{
+            ...codeTextStyle,
+            width: wrapped() ? '100%' : undefined,
+            minWidth: 0,
+            color: props.compact ? C.muted : C.text,
+          }}
+        >
           {block().text}
         </Text>
       </Scroll>

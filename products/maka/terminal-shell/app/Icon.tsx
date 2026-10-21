@@ -36,6 +36,8 @@ const glyphs = {
   file: '📄',
   terminal: '⌁',
   copy: '⧉',
+  wrap: '↵',
+  nowrap: '→',
   code: '⌘',
   check: '✓',
   more: '⋯',
@@ -191,6 +193,30 @@ export function Icon(props: { name: keyof typeof glyphs; color: string }) {
           case 'copy':
             cx.roundRect(2, 1.5, 9, 10, 1.5);
             cx.roundRect(5, 4.5, 9, 10, 1.5);
+            break;
+          case 'wrap':
+            cx.moveTo(2, 3.5);
+            cx.lineTo(14, 3.5);
+            cx.moveTo(2, 7.5);
+            cx.lineTo(11.5, 7.5);
+            cx.arc(11.5, 10, 2.5, -Math.PI / 2, Math.PI / 2);
+            cx.lineTo(7, 12.5);
+            cx.moveTo(9, 10.5);
+            cx.lineTo(7, 12.5);
+            cx.lineTo(9, 14.5);
+            cx.moveTo(2, 11.5);
+            cx.lineTo(4, 11.5);
+            break;
+          case 'nowrap':
+            cx.moveTo(2, 3.5);
+            cx.lineTo(14, 3.5);
+            cx.moveTo(2, 7.5);
+            cx.lineTo(14, 7.5);
+            cx.moveTo(12, 5.5);
+            cx.lineTo(14, 7.5);
+            cx.lineTo(12, 9.5);
+            cx.moveTo(2, 11.5);
+            cx.lineTo(9, 11.5);
             break;
           case 'code':
             cx.moveTo(6, 4);

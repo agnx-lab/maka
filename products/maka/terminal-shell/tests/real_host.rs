@@ -2090,7 +2090,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         evidence("rich-response-live-table", &rendered_table);
         let code = "\n\n```txt\nRICH_CODE_BLOCK 中文原文\n\tkeep trailing  \n\n```";
         let suffix = format!("{table}{code}");
-        request.delta(code).await;
+        request.delta("\n\n```txt\nRICH_CODE_BLOCK 中文原文\n").await;
         // The stream remains physically open: parsing cannot wait for final.
         // Copying the long user message can leave its reader anchored above
         // this new block. Reveal it through the actual native Latest action.
@@ -2113,6 +2113,15 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
             support::click_button(&mut view, "Return to latest").await;
         }
         wait_view_state(&mut view, code_readable).await;
+        let wrap = support::wait_enabled_button(&mut view, "Wrap code").await;
+        assert!(wrap.state.selected, "new code blocks must wrap long lines by default");
+        support::click_button(&mut view, "Wrap code").await;
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.id == wrap.id && node.label == "Wrap code" && !node.state.selected)).await;
+        // The same live fence grows after a real wrap action. Keep the native
+        // control and the reader's choice while the Rust projection updates.
+        request.delta("\tkeep trailing  \n\n```").await;
+        wait_view_state(&mut view, |view, screen| code_readable(view, screen) && screen.contains("keep trailing")
+            && view.accessibility_snapshot().iter().any(|node| node.id == wrap.id && node.label == "Wrap code" && !node.state.selected)).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy code").await;
         let copied_code = wait_view(&mut view, |screen| screen.contains("Copied") && screen.contains("RICH_CODE_BLOCK")).await;
