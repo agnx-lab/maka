@@ -78,7 +78,18 @@ async fn wait_enabled_node(view: &mut AppView, label: &str) {
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("the native target {label:?} did not become enabled"));
+    .unwrap_or_else(|_| {
+        let matching: Vec<_> = view
+            .accessibility_snapshot()
+            .into_iter()
+            .filter(|node| node.label.contains(label))
+            .collect();
+        panic!(
+            "the native target {label:?} did not become enabled; app error: {:?}; containing AX nodes: {matching:#?}\n{}",
+            view.last_error(),
+            view.snapshot()
+        )
+    });
 }
 
 async fn tab_to_label(view: &mut AppView, label: &str) {
@@ -1534,7 +1545,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }
-        assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}");
+        assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}; paragraphs={paragraph}; elapsed={:?}", cadence.elapsed());
         let latest = format!("TITLE_{paragraph:02} 规划 e\u{301}");
         wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(cadence_header_row).is_some_and(|line| line.contains(&latest))).await;
         let last = support::painted_text(&view, "Analyzing the request", cadence_header_row);
