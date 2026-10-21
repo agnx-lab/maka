@@ -60,17 +60,16 @@ impl Handler for Authentication {
                         input.clone(),
                     )
                     .is_ok()
+                    && let Some(reference) = context.operation()
                 {
-                    if let Some(reference) = context.operation() {
-                        self.calls.lock().unwrap().push((input, reference.clone()));
-                        return Box::pin(async move {
-                            context.emit(json!({"url":URL,"userCode":CODE})).await?;
-                            context.scope().cancellation.cancelled().await;
-                            Ok(
-                                json!({"kind":"failed","reason":"cancelled","message":"Sign-in cancelled."}),
-                            )
-                        });
-                    }
+                    self.calls.lock().unwrap().push((input, reference.clone()));
+                    return Box::pin(async move {
+                        context.emit(json!({"url":URL,"userCode":CODE})).await?;
+                        context.scope().cancellation.cancelled().await;
+                        Ok(
+                            json!({"kind":"failed","reason":"cancelled","message":"Sign-in cancelled."}),
+                        )
+                    });
                 }
                 Err("login requires the original operation and no secret resource".into())
             }
