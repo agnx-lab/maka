@@ -128,13 +128,17 @@ pub(crate) fn run(
         let mut setup = setup;
         let mut state = presentation.state.lock().unwrap();
         state.trace = frame_trace::Trace::from_env();
-        state.pixels = Some(pixels::Inbox::new(pixels::Capabilities {
-            size,
-            mouse: pixels::MouseCoordinates::Cells,
-            protocol: None,
-            synchronized: false,
-            sixel_geometry: Default::default(),
-        }));
+        let tracing = state.trace.is_some();
+        state.pixels = Some(pixels::Inbox::new(
+            pixels::Capabilities {
+                size,
+                mouse: pixels::MouseCoordinates::Cells,
+                protocol: None,
+                synchronized: false,
+                sixel_geometry: Default::default(),
+            },
+            tracing,
+        ));
         setup.extend(state.pixel_probe.query()?);
         setup
     };

@@ -17,7 +17,13 @@
  * under the License.
  */
 
-use super::{super::Presentation, mapping::Mapping};
+use super::{
+    super::{
+        Presentation,
+        frame_trace::{InputPumpSample, InputSample},
+    },
+    mapping::Mapping,
+};
 use gpui::{
     AppContext, Application, Bounds, PlatformInput, WindowBounds, WindowOptions, point, px, size,
 };
@@ -128,6 +134,14 @@ fn run(
             }
             if has_snapshot || timing.is_some() {
                 let mut state = delivered.state.lock().unwrap();
+                let pending_frame = timing.as_ref().and_then(|_| {
+                    state
+                        .pixels
+                        .as_ref()?
+                        .pending
+                        .as_ref()
+                        .map(|candidate| candidate.frame.token().sequence())
+                });
                 let mut admitted = false;
                 if has_snapshot
                     && let Some(inbox) = &mut state.pixels
@@ -154,6 +168,7 @@ fn run(
                     sample.bytes = Some(bytes);
                     sample.pixel_size = Some((size.width.0, size.height.0));
                     sample.outcome = if admitted { "admitted" } else { "discarded" };
+                    sample.pending_frame = pending_frame;
                 }
             }
         }),
@@ -316,8 +331,24 @@ fn run(
             // Apply mount/focus work before admitting input. Deferred drawing
             // stays visible to has_pending(), so an opaque callback cannot
             // pass the exact-presentation barrier ahead of that work.
+            let mut input_pump = tracing.then(|| {
+                let state = presentation.state.lock().unwrap();
+                let inbox = state.pixels.as_ref().unwrap();
+                let start = Instant::now();
+                InputPumpSample {
+                    frame: inbox.published.as_ref().map(FrameToken::sequence),
+                    geometry: inbox.geometry,
+                    start,
+                    end: start,
+                    queue_before: inbox.queue_len(),
+                    queue_after: 0,
+                }
+            });
             let mut worked = platform.pump_with_draw(false);
-            let (input, late_cancel) = {
+            if let Some(sample) = &mut input_pump {
+                sample.end = Instant::now();
+            }
+            let (input, late_cancel, queue_len) = {
                 let mut state = presentation.state.lock().unwrap();
                 if presentation.stop.load(Ordering::Acquire) || state.quit {
                     return Ok(());
@@ -326,7 +357,16 @@ fn run(
                     return Err(error.clone());
                 }
                 let inbox = state.pixels.as_mut().unwrap();
-                (inbox.pop(), std::mem::take(&mut inbox.cancel_pointer))
+                let queue_len = inbox.queue_len();
+                let input = inbox.pop();
+                let late_cancel = std::mem::take(&mut inbox.cancel_pointer);
+                if let Some(mut sample) = input_pump
+                    && let Some(trace) = &mut state.trace
+                {
+                    sample.queue_after = queue_len;
+                    trace.record_input_pump(sample);
+                }
+                (input, late_cancel, queue_len)
             };
             if late_cancel {
                 source.borrow().cancel_pointer();
@@ -351,17 +391,43 @@ fn run(
                     .resize
                     .is_none();
             if let Some(input) = input {
+                let dispatch_start = input.queued_at.map(|_| Instant::now());
                 let mut refresh = false;
                 let mut release_pending = super::input::released(&input.event);
                 let token = input
                     .token
                     .or_else(|| input.startup.then(|| platform.presented()).flatten());
+                let measurement = if let (Some(queued), Some(start)) = (input.queued_at, dispatch_start)
+                {
+                    let mut state = presentation.state.lock().unwrap();
+                    state.trace.as_mut().map(|trace| {
+                        trace.record_input(InputSample {
+                            frame: token.as_ref().map(FrameToken::sequence),
+                            viewport_generation: token.as_ref().map(FrameToken::viewport_generation),
+                            geometry: input.geometry,
+                            kind: super::input::trace_kind(&input.event),
+                            queued,
+                            dispatch_start: start,
+                            dispatch_end: None,
+                            queue_len,
+                            outcome: "incomplete",
+                        })
+                    })
+                } else {
+                    None
+                };
+                let mut outcome = if token.is_some() {
+                    "missing_snapshot"
+                } else {
+                    "missing_token"
+                };
                 match &input.event {
                     Event::FocusIn => {
                         refresh = true;
                         platform
                             .set_active(true)
                             .map_err(|error| error.to_string())?;
+                        outcome = "focus_in";
                     }
                     Event::FocusOut => {
                         refresh = true;
@@ -369,14 +435,17 @@ fn run(
                         platform
                             .set_active(false)
                             .map_err(|error| error.to_string())?;
+                        outcome = "focus_out";
                     }
                     event => {
                         if let Some(token) = token
                             && let Some(snapshot) = snapshots.borrow().get(&token).cloned()
                         {
                             if let Event::Paste(text) = event {
+                                outcome = "paste_rejected";
                                 if source.borrow().editor_matches(&snapshot) {
                                     platform.paste(text).map_err(|error| error.to_string())?;
+                                    outcome = "paste_handled";
                                     let mut state = presentation.state.lock().unwrap();
                                     let inbox = state.pixels.as_mut().unwrap();
                                     inbox.reject_through =
@@ -391,24 +460,46 @@ fn run(
                                 let stale = super::input::pointer(&input.event)
                                     && (token.sequence() <= floor
                                         || input.geometry != current_geometry);
+                                outcome = "stale_pointer";
                                 if !stale {
                                     let disposition = source.borrow().dispatch(&snapshot, &event);
                                     let admitted = match disposition {
-                                        InputDisposition::Handled => true,
-                                        InputDisposition::Rejected => false,
+                                        InputDisposition::Handled => {
+                                            outcome = "native_handled";
+                                            true
+                                        }
+                                        InputDisposition::Rejected => {
+                                            outcome = "native_rejected";
+                                            false
+                                        }
                                         InputDisposition::ExactFallback => {
-                                            (exact_ready
+                                            if exact_ready
                                                 && input.geometry == current_geometry
                                                 && platform.dispatch_input_exact(
                                                     token.clone(),
                                                     event.clone(),
-                                                ))
-                                                || commit_text(
+                                                )
+                                            {
+                                                outcome = "exact_handled";
+                                                true
+                                            } else {
+                                                let committed = commit_text(
                                                     &platform,
                                                     &source.borrow(),
                                                     &snapshot,
                                                     &event,
-                                                )?
+                                                )?;
+                                                outcome = if committed {
+                                                    "text_committed"
+                                                } else if !exact_ready {
+                                                    "exact_not_ready"
+                                                } else if input.geometry != current_geometry {
+                                                    "exact_geometry_changed"
+                                                } else {
+                                                    "exact_rejected"
+                                                };
+                                                committed
+                                            }
                                         }
                                     };
                                     if admitted {
@@ -440,6 +531,8 @@ fn run(
                                             inbox.reject_through.max(token.sequence());
                                     }
                                 }
+                            } else {
+                                outcome = "unmapped";
                             }
                         }
                     }
@@ -457,6 +550,13 @@ fn run(
                             });
                         }
                     });
+                }
+                if let Some(index) = measurement {
+                    let end = Instant::now();
+                    let mut state = presentation.state.lock().unwrap();
+                    if let Some(trace) = &mut state.trace {
+                        trace.finish_input(index, end, outcome);
+                    }
                 }
             }
             let allow_draw = {

@@ -29,6 +29,8 @@ pub(super) struct Trace {
     started: Instant,
     environment: Value,
     samples: Vec<Sample>,
+    inputs: Vec<InputSample>,
+    input_pumps: Vec<InputPumpSample>,
     pub gpu: Option<Value>,
     pub protocol: Option<&'static str>,
 }
@@ -44,6 +46,30 @@ pub(super) struct Sample {
     pub pixel_size: Option<(i32, i32)>,
     pub image: Option<u32>,
     pub outcome: &'static str,
+    /// Candidate present at the sink before admitting this frame. The outcome
+    /// distinguishes a discarded new frame from replacing that old candidate.
+    pub pending_frame: Option<u64>,
+}
+
+pub(super) struct InputSample {
+    pub frame: Option<u64>,
+    pub viewport_generation: Option<u64>,
+    pub geometry: u64,
+    pub kind: &'static str,
+    pub queued: Instant,
+    pub dispatch_start: Instant,
+    pub dispatch_end: Option<Instant>,
+    pub queue_len: usize,
+    pub outcome: &'static str,
+}
+
+pub(super) struct InputPumpSample {
+    pub frame: Option<u64>,
+    pub geometry: u64,
+    pub start: Instant,
+    pub end: Instant,
+    pub queue_before: usize,
+    pub queue_after: usize,
 }
 
 impl Trace {
@@ -61,6 +87,8 @@ impl Trace {
             // Preallocate a minute at the target 120 Hz and eight Kitty
             // stages. This avoids growth during short measurements, not a cap.
             samples: Vec::with_capacity(60 * 120 * 8),
+            inputs: Vec::with_capacity(60 * 120),
+            input_pumps: Vec::with_capacity(60 * 120),
             gpu: None,
             protocol: None,
         })
@@ -85,8 +113,25 @@ impl Trace {
             pixel_size: None,
             image: None,
             outcome: "ok",
+            pending_frame: None,
         });
         self.samples.last_mut().unwrap()
+    }
+
+    pub fn record_input(&mut self, sample: InputSample) -> usize {
+        let index = self.inputs.len();
+        self.inputs.push(sample);
+        index
+    }
+
+    pub fn finish_input(&mut self, index: usize, end: Instant, outcome: &'static str) {
+        let sample = &mut self.inputs[index];
+        sample.dispatch_end = Some(end);
+        sample.outcome = outcome;
+    }
+
+    pub fn record_input_pump(&mut self, sample: InputPumpSample) {
+        self.input_pumps.push(sample);
     }
 
     pub fn write(self, result: &Result<(), String>) -> Result<(), String> {
@@ -106,6 +151,38 @@ impl Trace {
                     "pixel_size": sample.pixel_size,
                     "image": sample.image,
                     "outcome": sample.outcome,
+                    "pending_frame": sample.pending_frame,
+                })
+            })
+            .collect();
+        let inputs: Vec<_> = self
+            .inputs
+            .into_iter()
+            .map(|sample| {
+                json!({
+                    "frame": sample.frame,
+                    "viewport_generation": sample.viewport_generation,
+                    "geometry": sample.geometry,
+                    "kind": sample.kind,
+                    "queued_us": sample.queued.saturating_duration_since(self.started).as_micros(),
+                    "dispatch_start_us": sample.dispatch_start.saturating_duration_since(self.started).as_micros(),
+                    "dispatch_end_us": sample.dispatch_end.map(|end| end.saturating_duration_since(self.started).as_micros()),
+                    "queue_len_before_pop": sample.queue_len,
+                    "outcome": sample.outcome,
+                })
+            })
+            .collect();
+        let input_pumps: Vec<_> = self
+            .input_pumps
+            .into_iter()
+            .map(|sample| {
+                json!({
+                    "frame": sample.frame,
+                    "geometry": sample.geometry,
+                    "start_us": sample.start.saturating_duration_since(self.started).as_micros(),
+                    "end_us": sample.end.saturating_duration_since(self.started).as_micros(),
+                    "queue_before": sample.queue_before,
+                    "queue_after": sample.queue_after,
                 })
             })
             .collect();
@@ -120,6 +197,8 @@ impl Trace {
             "stopped_us": stopped.saturating_duration_since(self.started).as_micros(),
             "terminal_result": result.as_ref().err(),
             "samples": samples,
+            "inputs": inputs,
+            "input_pumps": input_pumps,
         });
         let write = || -> Result<(), Box<dyn std::error::Error>> {
             let mut output = std::io::BufWriter::new(std::fs::File::create(&self.path)?);

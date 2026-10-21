@@ -19,7 +19,10 @@
 
 use super::probe::{Capabilities, SixelGeometry};
 use nsh_gpui_terminal::{CandidateFrame, FrameToken};
-use std::collections::{HashSet, VecDeque};
+use std::{
+    collections::{HashSet, VecDeque},
+    time::Instant,
+};
 use termina::{
     Event, WindowSize,
     event::{KeyCode, KeyEventKind, Modifiers, MouseEventKind},
@@ -30,6 +33,8 @@ pub(super) struct Input {
     pub token: Option<FrameToken>,
     pub geometry: u64,
     pub startup: bool,
+    /// Coalesced motion keeps the oldest arrival in its existing queue slot.
+    pub queued_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -66,6 +71,7 @@ pub(super) struct Encoded {
 pub(crate) struct Inbox {
     pub capabilities: Capabilities,
     events: VecDeque<Input>,
+    tracing: bool,
     pub published: Option<FrameToken>,
     pub keyboard: Option<FrameToken>,
     capture: Option<FrameToken>,
@@ -86,10 +92,11 @@ pub(crate) struct Inbox {
 }
 
 impl Inbox {
-    pub fn new(capabilities: Capabilities) -> Self {
+    pub fn new(capabilities: Capabilities, tracing: bool) -> Self {
         Self {
             capabilities,
             events: VecDeque::new(),
+            tracing,
             published: None,
             keyboard: None,
             capture: None,
@@ -224,6 +231,7 @@ impl Inbox {
             token,
             geometry: self.geometry,
             startup: self.keyboard.is_none(),
+            queued_at: self.tracing.then(Instant::now),
         });
         Ok(false)
     }
@@ -271,6 +279,10 @@ impl Inbox {
         self.events.pop_front()
     }
 
+    pub(super) fn queue_len(&self) -> usize {
+        self.events.len()
+    }
+
     pub fn retained(&self) -> HashSet<FrameToken> {
         self.events
             .iter()
@@ -289,6 +301,38 @@ impl Inbox {
             self.events.into_iter().map(|input| input.event).collect(),
             self.resize,
         )
+    }
+}
+
+/// Classification only: diagnostics retain no typed characters or pasted text.
+pub(super) fn trace_kind(event: &Event) -> &'static str {
+    let mouse = match event {
+        Event::SgrMouse(mouse) => Some(mouse.kind),
+        Event::Mouse(mouse) => Some(mouse.kind),
+        _ => None,
+    };
+    if let Some(kind) = mouse {
+        return match kind {
+            MouseEventKind::Down(_) => "mouse_down",
+            MouseEventKind::Up(_) => "mouse_up",
+            MouseEventKind::Drag(_) => "mouse_drag",
+            MouseEventKind::Moved => "mouse_move",
+            MouseEventKind::ScrollUp => "wheel_up",
+            MouseEventKind::ScrollDown => "wheel_down",
+            MouseEventKind::ScrollLeft => "wheel_left",
+            MouseEventKind::ScrollRight => "wheel_right",
+        };
+    }
+    match event {
+        Event::Key(key) => match key.kind {
+            KeyEventKind::Press => "key_press",
+            KeyEventKind::Repeat => "key_repeat",
+            KeyEventKind::Release => "key_release",
+        },
+        Event::Paste(_) => "paste",
+        Event::FocusIn => "focus_in",
+        Event::FocusOut => "focus_out",
+        _ => "other",
     }
 }
 
@@ -337,7 +381,7 @@ mod tests {
 
     #[test]
     fn late_sixel_maxima_resize_the_same_canvas_without_changing_terminal_units() {
-        let mut inbox = Inbox::new(capabilities());
+        let mut inbox = Inbox::new(capabilities(), false);
         let token = FrameToken::default();
         inbox.published = Some(token.clone());
         inbox.keyboard = Some(token.clone());
@@ -405,7 +449,7 @@ mod tests {
     fn letterbox_presses_and_wheels_do_not_capture_and_hover_leaves_without_a_frame() {
         let mut caps = capabilities();
         caps.sixel_geometry = maximum(1000, 600);
-        let mut inbox = Inbox::new(caps);
+        let mut inbox = Inbox::new(caps, false);
         let token = FrameToken::default();
         let pointer = |kind, x, y| {
             Event::SgrMouse(termina::event::SgrMouseEvent {
@@ -451,18 +495,21 @@ mod tests {
 
     #[test]
     fn keyboard_bursts_and_large_paste_survive_startup_and_resize_in_order() {
-        let mut inbox = Inbox::new(Capabilities {
-            size: WindowSize {
-                cols: 120,
-                rows: 40,
-                pixel_width: Some(1200),
-                pixel_height: Some(800),
+        let mut inbox = Inbox::new(
+            Capabilities {
+                size: WindowSize {
+                    cols: 120,
+                    rows: 40,
+                    pixel_width: Some(1200),
+                    pixel_height: Some(800),
+                },
+                mouse: super::super::probe::MouseCoordinates::Cells,
+                protocol: None,
+                synchronized: false,
+                sixel_geometry: Default::default(),
             },
-            mouse: super::super::probe::MouseCoordinates::Cells,
-            protocol: None,
-            synchronized: false,
-            sixel_geometry: Default::default(),
-        });
+            false,
+        );
         let mut expected = Vec::new();
         for character in "a你b界".repeat(1024).chars() {
             let event = Event::Key(KeyEvent::new(KeyCode::Char(character), Modifiers::NONE));
