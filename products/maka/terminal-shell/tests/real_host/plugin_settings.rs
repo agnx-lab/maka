@@ -152,7 +152,8 @@ async fn plugin_settings_use_real_host_inventory_cas_configuration_and_enablemen
         assert_eq!(final_source["revision"].as_u64().unwrap(), source["revision"].as_u64().unwrap() + 2);
         assert_eq!(disabled["package"], original["package"], "enablement must not manufacture another package identity");
         activate(&mut view, "Back from plugins settings").await;
-        wait_view(&mut view, |screen| screen.contains("Search plugins…")).await;
+        tab_to_label(&mut view, "Search Host plugins").await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("optional-agent-2"), "returning to the plugin list must retain its search filter");
         activate(&mut view, "Back from plugins settings").await;
         wait_view(&mut view, |screen| screen.contains("PLUGIN_SETTINGS_ORIGINAL_DRAFT") && screen.contains("Enter sends")).await;
         tab_to_label(&mut view, "Message composer").await;
