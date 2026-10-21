@@ -47,6 +47,7 @@ export function MessageRow({
   onExpand,
   ownerKey,
   reasoningPreview,
+  toolBodyMaxHeight,
   finalActions,
 }: {
   item: () => Row;
@@ -57,6 +58,7 @@ export function MessageRow({
   onExpand?(key: string): void;
   ownerKey?: () => string;
   reasoningPreview?: () => boolean;
+  toolBodyMaxHeight?: () => number;
   finalActions?(row: () => Row, ownerKey: () => string): JSX.Element;
 }) {
   const rowKey = (row: Row) => ownerKey?.() ?? messageKey(row);
@@ -215,6 +217,7 @@ export function MessageRow({
                       ownerKey={() => rowKey(row())}
                       expanded={() => expanded() ?? false}
                       original={() => sourceMode() ?? false}
+                      bodyMaxHeight={toolBodyMaxHeight}
                       previewImage={previewImage}
                       expand={setExpanded}
                       showOriginal={setSourceMode}

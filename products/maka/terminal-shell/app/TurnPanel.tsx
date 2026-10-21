@@ -182,15 +182,16 @@ function ActivityLog(props: {
   });
   // Native cell measurements fit short groups. Unmeasured cells start at the
   // one-line row minimum; text length never acts as a layout authority.
+  const bodyMaxHeight = () =>
+    Math.max(16, Math.min(400, Math.floor(props.viewport().height / 32) * 16));
   const bodyHeight = () => {
     measurements();
     const viewport = props.viewport();
-    const cap = Math.max(16, Math.min(400, Math.floor(viewport.height / 32) * 16));
     const measured = props.group().rowIds.reduce((height, id) => {
       const row = state.measured.get(id);
       return height + (row?.width === viewport.width ? row.height : 16);
     }, 0);
-    return Math.min(cap, Math.max(16, measured));
+    return Math.min(bodyMaxHeight(), Math.max(16, measured));
   };
   // Read before binding: the new List's first layout writes its scroll gauge.
   if (opening) initial.set({ y: 0 });
@@ -282,6 +283,7 @@ function ActivityLog(props: {
                       ownerKey={ownedId}
                       viewState={props.rowState(ownedId())}
                       reasoningPreview={() => props.reasoningPreview(ownedId())}
+                      toolBodyMaxHeight={() => Math.max(16, bodyMaxHeight() - 32)}
                       sessionId={props.sessionId}
                       through={props.through}
                       previewImage={props.previewImage}

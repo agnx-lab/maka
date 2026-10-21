@@ -17,8 +17,9 @@
  * under the License.
  */
 
-import { computed, inputAction, Text, View } from 'nsh';
+import { computed, inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
+import { windowSize } from 'nsh/device';
 import type { HistoryTool } from '../../../../packages/plugin-sdk/src/index.js';
 import type { Row } from './history';
 import type { ImagePreview } from './ImageThumbnail';
@@ -175,6 +176,7 @@ function Field(props: {
   sessionId: string;
   through: number;
   original(): boolean;
+  bodyMaxHeight?(): number;
 }) {
   const source = createToolSource(props.reference, props.sessionId, props.through);
   const family = cardFamily(source.original.presentation);
@@ -211,9 +213,10 @@ export function ToolCard(props: {
 }) {
   const tool = (): HistoryTool | null => props.row().tool ?? null;
   const family = () => cardFamily(tool()?.call?.presentation);
+  // Open at the recorded output; the complete original arguments remain below.
   const references = () =>
     tool()
-      ? (['arguments', 'result'] as const).flatMap((field) => {
+      ? (['result', 'arguments'] as const).flatMap((field) => {
           const value = reference(tool()!, field);
           return value ? [value] : [];
         })
@@ -280,15 +283,7 @@ export function ToolCard(props: {
         </If>
       </Button>
       <If when={props.expanded()}>
-        <View style={{ paddingLeft: 16, paddingVertical: 16, gap: 16 }}>
-          <If when={tool()?.result?.image}>
-            <ToolImage
-              sessionId={props.sessionId}
-              through={() => props.row().metadataThrough ?? props.through()}
-              position={tool()!.result!.position}
-              preview={props.previewImage}
-            />
-          </If>
+        <View style={{ paddingLeft: 16 }}>
           <Button
             accessibilityLabel="Toggle original tool details"
             selected={props.original()}
@@ -297,27 +292,47 @@ export function ToolCard(props: {
               key: props.ownerKey(),
               value: !props.original(),
             })}
-            style={{ alignSelf: 'flex-start' }}
+            style={{ alignSelf: 'flex-start', height: 16, paddingVertical: 0 }}
           >
             <Text style={{ color: C.accent }}>
               {props.original() ? 'Readable card' : 'Original details'}
             </Text>
           </Button>
-          <Each of={references()} key={(value) => value.key}>
-            {(value) => (
-              <Field
-                reference={value()}
+          <Scroll
+            accessibilityLabel="Tool details"
+            style={{
+              minHeight: 16,
+              minWidth: 0,
+              maxHeight:
+                props.bodyMaxHeight?.() ??
+                Math.max(16, Math.min(192, Math.floor(windowSize().height / 64) * 16 - 32)),
+            }}
+            contentStyle={{ gap: 16 }}
+          >
+            <If when={tool()?.result?.image}>
+              <ToolImage
                 sessionId={props.sessionId}
-                through={props.row().metadataThrough ?? props.through()}
-                original={props.original}
+                through={() => props.row().metadataThrough ?? props.through()}
+                position={tool()!.result!.position}
+                preview={props.previewImage}
               />
-            )}
-          </Each>
-          <If when={!references().length}>
-            <Text selectable style={{ color: C.muted }}>
-              {props.row().text || 'Original tool source is unavailable in this history row.'}
-            </Text>
-          </If>
+            </If>
+            <Each of={references()} key={(value) => value.key}>
+              {(value) => (
+                <Field
+                  reference={value()}
+                  sessionId={props.sessionId}
+                  through={props.row().metadataThrough ?? props.through()}
+                  original={props.original}
+                />
+              )}
+            </Each>
+            <If when={!references().length}>
+              <Text selectable style={{ color: C.muted }}>
+                {props.row().text || 'Original tool source is unavailable in this history row.'}
+              </Text>
+            </If>
+          </Scroll>
         </View>
       </If>
     </View>

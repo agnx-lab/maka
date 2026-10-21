@@ -60,6 +60,18 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         assert!(!text.label.contains("CHANGED_CURRENT_WORKSPACE"));
         evidence("tool-read-paged-original", &readable);
 
+        // Large originals scroll inside the card while its disclosure and
+        // original-details action remain visible in the turn's own viewport.
+        support::scroll_snapshot_text(&mut view, &readable, "起点_原始", MouseEventKind::ScrollDown);
+        wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument") && screen.contains("Original details") && !screen.contains("起点_原始")).await;
+        tab_to_label(&mut view, "Tool details").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+        let tail = wait_view(&mut view, |screen| screen.contains("终点_原始")).await;
+        assert!(tail.contains("v WorkspaceDocument") && tail.contains("Original details"));
+        evidence("tool-read-local-scroll-tail", &tail);
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("Read lines") && screen.contains("起点_原始")).await;
+
         // This switch shares the mounted reader; the literal JSON is still the exact result.
         support::click_button(&mut view, "Toggle original tool details").await;
         wait_view(&mut view, |screen| screen.contains("Original result")).await;
