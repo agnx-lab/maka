@@ -187,8 +187,14 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
         .await
         .expect("the search input change did not commit")
         .expect("the search engine stopped");
+    if placeholder == "Search sessions…" {
+        // The native label keeps the complete highlighted title even when
+        // the docked browser paints it with an ellipsis.
+        wait_enabled_node(view, &format!("› {choice}")).await;
+        wait_enabled_node(view, &format!("Open conversation {choice}")).await;
+    }
     wait_view(view, |screen| {
-        screen.contains(&format!("› {choice}"))
+        (placeholder == "Search sessions…" || screen.contains(&format!("› {choice}")))
             && screen.contains(ready_marker)
             && !screen.contains("Loading…")
             && !screen.contains("Loading folders…")
@@ -2053,9 +2059,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
         let other = support::mutate(&client, "create", json!({"title":"Other preview owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
         shortcut(&mut view, 'o');
-        // The docked browser ellipsizes titles; select the actual full-title
-        // native button rather than waiting for its truncated painted text.
-        support::click_button(&mut view, "Open conversation Other preview owner").await;
+        select_palette(&mut view, "Search sessions…", "Other preview owner", "Other preview owner").await;
         wait_view(&mut view, |screen| screen.contains("Other preview owner") && !screen.contains("UNSENT_PREVIEW_DRAFT") && screen.contains("Enter sends")).await;
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("000-preview.txt") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
