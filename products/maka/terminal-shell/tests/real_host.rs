@@ -142,11 +142,10 @@ async fn wait_focused_input(view: &mut AppView, label: &str) {
         loop {
             support::tick(view);
             if view.surface().input_context().is_some_and(|input| {
-                view.accessibility_snapshot().iter().any(|node| {
-                    node.id == input.node && node.focused && node.label == label
-                })
-            })
-            {
+                view.accessibility_snapshot()
+                    .iter()
+                    .any(|node| node.id == input.node && node.focused && node.label == label)
+            }) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -211,34 +210,43 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
             view.poll().unwrap();
             support::tick(view);
             let nodes = view.accessibility_snapshot();
-            let first = nodes.iter().filter(|node| {
+            let mut first = nodes.iter().filter(|node| {
                 node.role == nsh_core::AccessibilityRole::Button && !node.state.disabled
             });
             let ready = match placeholder {
                 // The saved model/session is distinct from keyboard selection.
                 // Both search owners reset their keyboard index to the first result.
-                "Search models…" => first.filter(|node| node.label.starts_with("Use "))
-                    .next().is_some_and(|node| node.label.starts_with(&format!("Use {choice} · "))),
-                "Search sessions…" => first.filter(|node| node.label.starts_with("Open conversation "))
-                    .next().is_some_and(|node| node.label == format!("Open conversation {choice}")),
-                "Search workspaces…" => first.into_iter().any(|node| {
+                "Search models…" => first
+                    .find(|node| node.label.starts_with("Use "))
+                    .is_some_and(|node| node.label.starts_with(&format!("Use {choice} · "))),
+                "Search sessions…" => first
+                    .find(|node| node.label.starts_with("Open conversation "))
+                    .is_some_and(|node| node.label == format!("Open conversation {choice}")),
+                "Search workspaces…" => first.any(|node| {
                     node.label == format!("Browse folder {choice}") && node.state.selected
                 }),
-                "Search commands…" => first.into_iter().any(|button| {
-                    button.state.selected && nodes.iter().any(|text| {
-                        text.label.starts_with(&format!("› {choice}"))
-                            && text.frame.origin.x.0 >= button.frame.origin.x.0
-                            && text.frame.origin.y.0 >= button.frame.origin.y.0
-                            && text.frame.origin.x.0 < button.frame.origin.x.0 + button.frame.size.width.0
-                            && text.frame.origin.y.0 < button.frame.origin.y.0 + button.frame.size.height.0
-                    })
+                "Search commands…" => first.any(|button| {
+                    button.state.selected
+                        && nodes.iter().any(|text| {
+                            text.label.starts_with(&format!("› {choice}"))
+                                && text.frame.origin.x.0 >= button.frame.origin.x.0
+                                && text.frame.origin.y.0 >= button.frame.origin.y.0
+                                && text.frame.origin.x.0
+                                    < button.frame.origin.x.0 + button.frame.size.width.0
+                                && text.frame.origin.y.0
+                                    < button.frame.origin.y.0 + button.frame.size.height.0
+                        })
                 }),
                 _ => unreachable!(),
             };
-            if ready { break; }
+            if ready {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    }).await.unwrap_or_else(|_| panic!("the native search did not select its enabled target {choice:?}"));
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the native search did not select its enabled target {choice:?}"));
     view.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Enter,
         KeyModifiers::NONE,
@@ -848,14 +856,14 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // handling. Native Tab into a browser Button scopes Escape without a
         // JS focus mirror, and Enter must still activate that exact Button.
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
+        wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Choose workspace scope"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("Choose a workspace below")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("Search sessions…") && !screen.contains("Choose a workspace below")).await;
+        wait_view(&mut view, |screen| screen.contains("All workspaces") && !screen.contains("Choose a workspace below")).await;
         for _ in 0..3 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
@@ -863,30 +871,30 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         // The resize decision uses native subtree focus, including Tabbed
         // Buttons that never emitted an application focus callback.
         view.resize(80, 24);
-        let transferred = wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
+        let transferred = wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Narrower session browser"));
         evidence("workbench-focused-browser-transfers-to-dialog", &transferred);
         support::evidence_cells("workbench-focused-browser-transfers-to-dialog", &view);
         view.resize(120, 40);
         wait_enabled_node(&mut view, "Narrower session browser").await;
-        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
+        wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         for _ in 0..3 {
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
         }
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Close session browser"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Search sessions…") && screen.contains("Preparing tool · todo_write")).await;
+        wait_view(&mut view, |screen| !screen.contains("All workspaces") && screen.contains("Preparing tool · todo_write")).await;
 
         view.resize(80, 24);
         shortcut(&mut view, 'o');
-        let narrow_browser = wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
+        let narrow_browser = wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         evidence("workbench-narrow-session-dialog", &narrow_browser);
         support::evidence_cells("workbench-narrow-session-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| !screen.contains("Search sessions…") && screen.contains("Preparing tool · todo_write")).await;
+        wait_view(&mut view, |screen| !screen.contains("All workspaces") && screen.contains("Preparing tool · todo_write")).await;
         request.delta("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE").await;
         wait_view(&mut view, |screen| screen.contains("BROWSER_ESCAPE_LEFT_THE_RUN_ALIVE") && screen.contains("Preparing tool · todo_write")).await;
         let still_running = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
@@ -934,7 +942,6 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let target_id = target["id"].as_str().unwrap();
         assert!(!first_page["sessions"].as_array().unwrap().iter().any(|session| session["id"] == target_id));
         shortcut(&mut view, 'o');
-        wait_view(&mut view, |screen| screen.contains("Search sessions…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Paste("Browser page".into()));
         let first_title = first_page["sessions"][0]["title"].as_str().unwrap();
@@ -1162,10 +1169,7 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
             "opening a folder must not create a conversation"
         );
         support::click_label(&mut view, "Use this workspace folder");
-        wait_view(&mut view, |screen| {
-            screen.contains("Search models…")
-        })
-        .await;
+        wait_view(&mut view, |screen| screen.contains("Search models…")).await;
         assert!(
             !view
                 .accessibility_snapshot()
@@ -1222,15 +1226,10 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         })
         .await;
         support::click_label(&mut view, "Choose model");
-        wait_view(&mut view, |screen| {
-            screen.contains("Search models…")
-        })
-        .await;
+        wait_view(&mut view, |screen| screen.contains("Search models…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| {
-            screen.contains("Effort ·")
-                && screen.contains("Close")
-                && !screen.contains("Back")
+            screen.contains("Effort ·") && screen.contains("Close") && !screen.contains("Back")
         })
         .await;
         assert!(
@@ -2491,12 +2490,17 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         terminal.send(b"\x10");
         terminal.wait_for("Search commands…").await;
         terminal.paste("Sess");
-        terminal.wait_for("╭Sess ").await;
+        terminal.wait_for_absent("Search commands…").await;
+        // Removing another command proves the actual query handler committed,
+        // rather than treating a native Input border as an app-ready marker.
+        terminal.wait_for_absent("A fresh start in your workspace").await;
+        terminal.wait_for("› Sessions").await;
         terminal.send(b"\r");
         terminal.wait_for_absent("Close").await;
         terminal.wait_for("Search sessions…").await;
         terminal.paste("NSH real");
-        terminal.wait_for("╭NSH real ").await;
+        terminal.wait_for_absent("Search sessions…").await;
+        terminal.wait_for("NSH real").await;
         terminal.wait_for("NSH real Agent").await;
         terminal.send(b"\r");
         let mut held = Box::pin(gate.held.notified());
@@ -2521,7 +2525,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         gate.release();
         terminal.wait_for_absent("Loading session history").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "history recovery must not replay the early Enter");
-        terminal.click_text("Send");
+        terminal.click_send("fixture-model · Default").await;
         // A real terminal keeps reading stdout while waiting for the provider.
         // This also exercises the production LocalEngine presentation acknowledgements.
         let awaiting = Instant::now();
@@ -2620,7 +2624,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "retry must not send the retained draft");
 
         send.arm();
-        terminal.click_text("Send");
+        terminal.click_send("fixture-model · Default").await;
         let started = Instant::now();
         let mut request = loop {
             terminal.read();
@@ -2700,7 +2704,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
         // A new deliberate send proves the new live subscription receives
         // subsequent facts, rather than merely displaying its recovery snapshot.
-        terminal.click_text("Send");
+        terminal.click_send("fixture-model · Default").await;
         let started = Instant::now();
         let mut next = loop {
             terminal.read();

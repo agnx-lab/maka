@@ -167,6 +167,61 @@ impl Pty {
         // buffer can deliver a quick click. Production admission must keep it.
         self.send(format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").as_bytes());
     }
+    pub async fn click_send(&mut self, model_caption: &str) {
+        use maka_agent_facts::terminal::display::Color;
+        let started = Instant::now();
+        loop {
+            self.read();
+            if completed_presentation(&self.output) {
+                let snapshot = self.snapshot();
+                if let Some((row, _)) = snapshot
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, line)| line.contains(model_caption))
+                    .last()
+                {
+                    let viewport = self
+                        .screen
+                        .viewport(0, usize::from(self.screen.size().rows()))
+                        .unwrap();
+                    let mut column = 0;
+                    let mut primary = None;
+                    // Locate the rightmost primary control in this actual
+                    // toolbar's presented cells. A disabled Send stays gray,
+                    // so an enabled Stop to its left must never admit a click.
+                    for run in &viewport.rows[row] {
+                        let width = run.columns();
+                        let enabled = matches!(
+                            run.style.background,
+                            Color::Rgb([138, 184, 248] | [182, 211, 255])
+                        );
+                        if enabled || run.style.background == Color::Rgb([55, 57, 62]) {
+                            primary = Some((column + width / 2, enabled));
+                        }
+                        column += width;
+                    }
+                    if let Some((column, true)) = primary {
+                        let column = column + 1;
+                        let row = row + 1;
+                        self.send(
+                            format!("\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m").as_bytes(),
+                        );
+                        return;
+                    }
+                }
+            }
+            assert!(
+                self.child.try_wait().unwrap().is_none(),
+                "production terminal exited before its Send control was enabled"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "the presented Send control did not become enabled:\n{}",
+                self.snapshot()
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
     pub fn snapshot(&self) -> String {
         self.screen.text_preview(128 * 1024).screen
     }
