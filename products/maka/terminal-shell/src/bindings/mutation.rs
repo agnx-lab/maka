@@ -65,6 +65,7 @@ impl OriginalMutation {
                 Some(MutationEvent::Progress(value)) => {
                     Ok(json!({"kind":"progress","value":value}))
                 }
+                Some(MutationEvent::NotDispatched) => Ok(json!({"kind":"not_dispatched"})),
                 Some(MutationEvent::Finished { reply, cleanup }) => Ok(json!({
                     "kind":"finished", "reply":reply, "cleanupError":cleanup.err()
                 })),

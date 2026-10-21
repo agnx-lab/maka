@@ -53,6 +53,7 @@ async fn progress_cancellation_and_scope_drain_preserve_saved_business_receipts(
                 _ => unreachable!(),
             }
             let original = client.operation_for_settings(id).await.unwrap();
+            assert!(!original.abandoned, "finish={finish}, cleanup_failure={cleanup_failure}");
             assert_eq!(original.reference, prepared.reference);
             assert!(matches!(&original.receipt, Some(Receipt::Recorded { outcome: OperationOutcome::Returned { value }, .. }) if value == &json!({"kind":"saved"})), "finish={finish}, cleanup_failure={cleanup_failure}, original={original:?}");
             assert_eq!(fixture.counter.effects.load(Ordering::SeqCst), 1);
@@ -70,4 +71,97 @@ async fn progress_cancellation_and_scope_drain_preserve_saved_business_receipts(
             }
         }
     }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_original_clean_undispatched_abort_retires_prepared_settings() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for finish in ["next", "mutation", "client", "disconnect"] {
+            let fixture = Fixture::new().await;
+            let client = fixture.client().await;
+            let observer = fixture.client().await;
+            let id = Uuid::new_v4();
+            let mutation = client
+                .settings_mutation(
+                    id,
+                    "authentication",
+                    "loginCredential",
+                    Value::Null,
+                    Attachments::new(),
+                )
+                .await
+                .unwrap();
+            let prepared = mutation.prepare().await.unwrap();
+            assert!(!observer.abandon_unprepared(id).await.unwrap().abandoned);
+            match finish {
+                "next" => {
+                    mutation.request_cancel();
+                    assert!(matches!(
+                        mutation.next().await.unwrap(),
+                        Some(MutationEvent::NotDispatched)
+                    ));
+                    assert!(mutation.next().await.unwrap().is_none());
+                }
+                "mutation" => mutation.close().await.unwrap(),
+                "client" => client.close().await.unwrap(),
+                "disconnect" => {
+                    mutation.disconnect().await;
+                    assert!(mutation.close().await.is_err());
+                    client.close().await.unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let original = observer.operation_for_settings(id).await.unwrap();
+            assert_eq!(original.reference, prepared.reference);
+            assert!(
+                original.receipt.is_none(),
+                "no business receipt is fabricated: {original:?}"
+            );
+            assert_eq!(
+                original.abandoned,
+                finish != "disconnect",
+                "finish={finish}, original={original:?}"
+            );
+            assert_eq!(fixture.counter.effects.load(Ordering::SeqCst), 0);
+            let pending = observer.pending_settings().await.unwrap();
+            let replacement = observer
+                .settings_mutation(
+                    Uuid::new_v4(),
+                    "setup",
+                    "discoverModels",
+                    Value::Null,
+                    Attachments::new(),
+                )
+                .await;
+            if finish == "disconnect" {
+                assert_eq!(
+                    pending
+                        .iter()
+                        .map(|operation| operation.id)
+                        .collect::<Vec<_>>(),
+                    [id]
+                );
+                assert_eq!(
+                    replacement.err().unwrap(),
+                    "settings operation already exists or has an unresolved original"
+                );
+            } else {
+                assert!(pending.is_empty());
+                let replacement = replacement.unwrap();
+                assert!(
+                    observer
+                        .abandon_unprepared(replacement.id())
+                        .await
+                        .unwrap()
+                        .abandoned
+                );
+                replacement.close().await.unwrap();
+            }
+            client.close().await.unwrap();
+            observer.close().await.unwrap();
+            fixture.finish().await;
+        }
+    })
+    .await
+    .unwrap();
 }

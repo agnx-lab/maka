@@ -107,6 +107,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Call<R, W> {
     pub fn holds_caller_intent(&self) -> bool {
         self.recorded.is_some()
     }
+    /// The original physical call has not begun a confirmation or transferred caller custody.
+    pub fn awaiting_confirmation(&self) -> bool {
+        self.phase == Phase::Prepared && self.recorded.is_none() && self.settlement_phase.is_none()
+    }
     /// Disconnects only the physical channel, retaining this invocation's
     /// unconfirmed token and immutable inputs. Remote EOF requests cancellation;
     /// it is not an acknowledgement of remote execution cleanup.
@@ -482,7 +486,7 @@ mod tests {
     }
     #[tokio::test]
     async fn dropping_a_partial_control_write_cannot_append_a_second_frame() {
-        for streaming in [true, false] {
+        for control in ["pull", "cancel", "confirm"] {
             let written = Arc::new(Mutex::new(Vec::new()));
             let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut call = Call::new(
@@ -505,13 +509,18 @@ mod tests {
                 Value::Null,
                 Attachments::new(),
             );
-            call.phase = if streaming {
+            call.phase = if control == "pull" {
                 Phase::Streaming
             } else {
                 Phase::Prepared
             };
-            if streaming {
+            assert_eq!(call.awaiting_confirmation(), control != "pull");
+            if control == "pull" {
                 let mut future = Box::pin(call.pull());
+                assert!(futures_util::poll!(&mut future).is_pending());
+                drop(future);
+            } else if control == "confirm" {
+                let mut future = Box::pin(call.confirm());
                 assert!(futures_util::poll!(&mut future).is_pending());
                 drop(future);
             } else {
@@ -520,6 +529,7 @@ mod tests {
                 drop(future);
             }
             assert_eq!(written.lock().unwrap().len(), 2);
+            assert!(!call.awaiting_confirmation());
             released.store(true, std::sync::atomic::Ordering::SeqCst);
             assert!(call.cancel().await.is_err());
             assert!(call.receive().await.is_err());

@@ -150,9 +150,15 @@ struct State {
     call: LocalCall,
     phase: Phase,
 }
-struct Drained {
-    reply: Option<OperationReply>,
-    cleanup: Result<()>,
+enum Drained {
+    Finished {
+        reply: OperationReply,
+        cleanup: Result<()>,
+    },
+    NotDispatched,
+    Closed {
+        cleanup: Result<()>,
+    },
 }
 #[derive(PartialEq)]
 enum Phase {
@@ -253,26 +259,40 @@ impl Client {
         Ok(())
     }
     async fn drain_request(&self, request: &Request, state: &mut State) -> Result<Drained> {
+        let unconfirmed = state.call.awaiting_confirmation();
         state.phase = Phase::Interrupted;
         let drained = match state.call.drain().await? {
             Some(Reply::Mutation { reply, cleanup }) => {
                 self.observe_mutation(request, &reply).await?;
-                Drained {
-                    reply: Some(*reply),
+                Drained::Finished {
+                    reply: *reply,
                     cleanup,
                 }
             }
-            Some(reply) => Drained {
-                reply: None,
+            Some(Reply::Aborted { cleanup, .. })
+                if unconfirmed && cleanup.is_ok() && request.operation.is_some() =>
+            {
+                let operation = self.operation(request.operation.unwrap()).await?;
+                let reference = state
+                    .call
+                    .reference()
+                    .ok_or("original undispatched preparation has no reference")?;
+                self.0
+                    .journal
+                    .abandon_undispatched(&self.0.source, operation.id, reference)
+                    .await?;
+                if operation.upload.is_some() {
+                    self.notify_uploads();
+                }
+                Drained::NotDispatched
+            }
+            Some(reply) => Drained::Closed {
                 cleanup: reply
                     .cleanup()
                     .expect("drain returns a terminal reply")
                     .clone(),
             },
-            None => Drained {
-                reply: None,
-                cleanup: Ok(()),
-            },
+            None => Drained::Closed { cleanup: Ok(()) },
         };
         state.phase = Phase::Complete;
         Ok(drained)
@@ -838,6 +858,8 @@ pub struct Mutation {
 #[derive(Debug)]
 pub enum MutationEvent {
     Progress(Value),
+    /// The original preparation was cleanly aborted before confirmation began.
+    NotDispatched,
     Finished {
         reply: OperationReply,
         cleanup: Result<()>,
@@ -895,6 +917,9 @@ impl Mutation {
                 Some(MutationEvent::Finished { reply, cleanup }) => {
                     cleanup?;
                     return Ok(reply);
+                }
+                Some(MutationEvent::NotDispatched) => {
+                    return Err("client mutation was cancelled before dispatch".into());
                 }
                 None => return Err("client mutation ended without a business receipt".into()),
             }
@@ -960,14 +985,11 @@ impl Mutation {
                         None => None,
                     };
                     match self.client.drain_request(&self.request, &mut state).await {
-                        Ok(Drained {
-                            reply: Some(reply),
-                            cleanup,
-                        }) => Ok(Some(MutationEvent::Finished { reply, cleanup })),
-                        Ok(Drained {
-                            reply: None,
-                            cleanup,
-                        }) => {
+                        Ok(Drained::Finished { reply, cleanup }) => {
+                            Ok(Some(MutationEvent::Finished { reply, cleanup }))
+                        }
+                        Ok(Drained::NotDispatched) => Ok(Some(MutationEvent::NotDispatched)),
+                        Ok(Drained::Closed { cleanup }) => {
                             cleanup?;
                             failure.map_or(Ok(None), Err)
                         }
@@ -993,7 +1015,10 @@ impl Mutation {
             .client
             .drain_request(&self.request, &mut state)
             .await
-            .and_then(|drained| drained.cleanup);
+            .and_then(|drained| match drained {
+                Drained::Finished { cleanup, .. } | Drained::Closed { cleanup } => cleanup,
+                Drained::NotDispatched => Ok(()),
+            });
         self.client.release_if_clean(&self.request, &state).await;
         result
     }

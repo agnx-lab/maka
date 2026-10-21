@@ -58,7 +58,7 @@ pub struct Operation {
     pub draft: Option<DraftReference>,
     #[serde(default)]
     pub upload: Option<UploadReference>,
-    /// Durable fence for an attempt abandoned before preparation committed.
+    /// Durable fence proving that this attempt did not dispatch.
     #[serde(default)]
     pub abandoned: bool,
     /// Present only after original preparation has been durably recorded.
@@ -424,6 +424,24 @@ impl Journal {
             .bind(id.to_string()).bind(&host.state_domain).bind(host.deployment.to_string())
             .execute(&self.0).await.map_err(error)?;
         self.load(host, id).await
+    }
+    // Only the original Call's undispatched, clean Aborted reply authorizes this path.
+    pub(crate) async fn abandon_undispatched(
+        &self,
+        host: &DeploymentRef,
+        id: Uuid,
+        reference: &RecoveryRef,
+    ) -> Result<()> {
+        // The prepare observer may have disappeared before its reference write.
+        // This same fence also rejects that write if it arrives after the abort.
+        let updated = sqlx::query("UPDATE operations SET abandoned=1 WHERE id=? AND domain=? AND deployment=? AND (reference IS NULL OR reference=?) AND receipt IS NULL")
+            .bind(id.to_string()).bind(&host.state_domain).bind(host.deployment.to_string())
+            .bind(serde_json::to_string(reference).map_err(error)?)
+            .execute(&self.0).await.map_err(error)?;
+        if updated.rows_affected() != 1 {
+            return Err("original undispatched preparation is unavailable".into());
+        }
+        Ok(())
     }
     pub(crate) async fn pending(
         &self,

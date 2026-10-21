@@ -607,6 +607,7 @@ async fn cancelling_a_sql_blocked_preparation_fences_confirmation_even_after_the
         assert!(mutation.prepare().await.is_err());
         mutation.close().await.unwrap();
         assert_eq!(client.pending_requests().await, 0);
+        assert!(client.operation(id).await.unwrap().abandoned);
         assert_eq!(
             client.query("agent", "read", Value::Null).await.unwrap(),
             json!({"sent":0})

@@ -115,6 +115,7 @@ function fileView(value: unknown): FileView {
 type Attempt = { operationId: string; reply: unknown };
 export type OriginalMutationEvent =
   | { kind: 'progress'; value: unknown }
+  | { kind: 'not_dispatched' }
   | { kind: 'finished'; reply: OperationReply; cleanupError: string | null };
 export type OriginalMutation = {
   readonly operationId: string;
