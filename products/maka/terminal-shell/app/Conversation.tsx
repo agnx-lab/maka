@@ -371,7 +371,7 @@ export function Conversation(props: ConversationProps) {
   const report = (reason: unknown) => {
     if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
   };
-  const covered = () => new Set(rows().map((row) => `${row.messageId}/${row.field}`));
+  const covered = computed(() => new Set(rows().map((row) => `${row.messageId}/${row.field}`)));
   const publishHistory = (chunks: any[], through: number, older = false) => {
     batch(() => {
       rows.set(mergeChunks(rows(), chunks, older, through));
