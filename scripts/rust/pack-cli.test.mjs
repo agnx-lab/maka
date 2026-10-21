@@ -47,6 +47,8 @@ test('native archives carry the shell and exact authored app rather than a stale
       'maka.exe',
       'maka-desktop-shell',
       'maka-desktop-shell.exe',
+      'maka-terminal-shell',
+      'maka-terminal-shell.exe',
       'maka-service.exe',
     ])
       await writeFile(join(root, 'build', name), name + ' bytes');
@@ -64,6 +66,8 @@ test('native archives carry the shell and exact authored app rather than a stale
       const files = execFileSync('tar', ['-tzf', archive], {encoding:'utf8'}).trim().split('\n');
       const windows = value('--target') === 'win32-x64';
       assert.ok(files.includes('package/bin/' + (windows ? 'maka-desktop-shell.exe' : 'maka-desktop-shell')));
+      const terminal = 'package/bin/' + (windows ? 'maka-terminal-shell.exe' : 'maka-terminal-shell');
+      assert.equal(execFileSync('tar', ['-xOf', archive, terminal], {encoding:'utf8'}), (windows ? 'maka-terminal-shell.exe' : 'maka-terminal-shell') + ' bytes');
       assert.equal(files.includes('package/bin/maka-service.exe'), windows);
       assert.ok(!files.includes('package/bin/maka-desktop'));
       assert.ok(!files.includes('package/bin/app/stale.js'));

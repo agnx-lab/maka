@@ -57,6 +57,8 @@ export async function buildCli({
     'maka-cli',
     '-p',
     'maka-desktop-shell',
+    '-p',
+    'maka-terminal-shell',
     '--target-dir',
     targetDirectory,
   ];

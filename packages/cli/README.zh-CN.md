@@ -27,13 +27,15 @@
 npm install --global @maka-agent/cli@rust-preview
 ```
 
-启动器选择匹配的原生可执行文件，转发参数、标准 I/O 和退出状态。精确版本的可选依赖携带 CLI、`maka-desktop-shell` 及其相邻的 `app/` 应用目录。预览版支持 macOS arm64、使用 glibc 的 Linux x64 和 Windows x64。WSL 使用 Linux 可执行文件，通过匹配的 Windows helper 提供 Computer Use。
+启动器选择匹配的原生可执行文件，转发参数、标准 I/O 和退出状态。精确版本的可选依赖携带 CLI、`maka-terminal-shell`、`maka-desktop-shell` 及其相邻的 `app/` 应用目录。预览版支持 macOS arm64、使用 glibc 的 Linux x64 和 Windows x64。WSL 使用 Linux 可执行文件，通过匹配的 Windows helper 提供 Computer Use。
 
 `latest` 标签仍为空占位包，包括独立的 `maka-agent` 包；它们没有 CLI、运行时、依赖或安装脚本。占位源码见 [placeholder](placeholder/README.md)，预览产物必须使用 `rust-preview`。
 
 运行 `maka` 启动终端产品。首次启动确认工作区，之后重新打开保存的安装。配置和显式组合命令见[产品指南](../../products/maka/bundle/README.zh-CN.md)。
 
 通过 `maka desktop --root HOST_ROOT` 启动桌面。这个必填路径选择业务 Host：缺失的 Root 初始化为标准只读 Host，已有 Root 使用已保存的部署。启动器在 shell 退出前保留经过校验的 Host 客户端；其他已连接客户端会继续保留 Host。打包的 shell 从可执行文件旁加载 app，不依赖工作目录。直接开发命令见 [desktop-shell](../../products/maka/desktop-shell/README.zh-CN.md)。
+
+通过 `maka terminal-shell` 启动 NSH 终端工作台，自动发现或启动 `~/.maka/application/host` 的 Host。`--root HOST_ROOT` 可指定其他 Root，`--session SESSION_ID` 可打开已有会话。`maka terminal-shell --help` 可查看参数。源码构建见 [terminal-shell](../../products/maka/terminal-shell/README.zh-CN.md)。
 
 ## 构建与发布
 

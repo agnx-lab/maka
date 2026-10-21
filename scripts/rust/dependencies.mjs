@@ -29,11 +29,11 @@ if (!['check', 'generate'].includes(mode) || process.argv.length !== 3) {
 }
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const cargo = ['deny', '--locked', '--config', 'deny.toml'];
-// Check test/build dependencies too; inventory the two shipped native roots.
+// Check test/build dependencies too; inventory the shipped native roots.
 execFileSync('cargo', [...cargo, 'check', 'licenses'], { cwd: root, stdio: 'inherit' });
 const crates = new Map();
 const licenses = new Set();
-for (const crate of ['cli', 'desktop-shell']) {
+for (const crate of ['cli', 'desktop-shell', 'terminal-shell']) {
   const listing = execFileSync(
     'cargo',
     [

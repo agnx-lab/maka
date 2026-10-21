@@ -199,6 +199,12 @@ export async function releaseNativeCli({ source, keys, target, validator, output
       );
       if (stdout.trim() !== 'maka-desktop-shell ' + candidate.version)
         throw new Error('Built desktop shell reports another source version');
+      const terminal = await run(binary, ['terminal-shell', '--version'], {
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      if (terminal.stdout.trim() !== 'maka-terminal-shell ' + candidate.version)
+        throw new Error('Built terminal shell reports another source version');
       const executables = [
         binary,
         ...(platform.os === 'win32' ? [join(dirname(binary), 'maka-service.exe')] : []),

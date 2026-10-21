@@ -36,6 +36,7 @@ mod sandbox;
 mod serve;
 mod signals;
 mod startup;
+mod terminal_shell;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]

@@ -42,6 +42,8 @@ pub(super) struct Cli {
 enum Command {
     /// Open the desktop shell connected to a business Host Root.
     Desktop(crate::desktop::Args),
+    /// Open the NSH terminal shell (connects to or starts the selected Host).
+    TerminalShell(crate::terminal_shell::Args),
     /// Author, inspect and run plugin applications.
     #[command(subcommand)]
     Application(crate::application::Command),
@@ -203,6 +205,7 @@ impl Cli {
         };
         let result = match command {
             Command::Desktop(args) => return args.run().await,
+            Command::TerminalShell(args) => return args.run(),
             Command::Application(args) => args.run().await,
             Command::Sandbox(args) => return args.run(self.timeout_ms).await,
             Command::Host(HostCommand::Fetch(args)) => args.run().await,

@@ -27,11 +27,13 @@
 
 ```sh
 npm run build --workspace @maka-agent/product
-cargo build -p maka-cli --bin maka
-cargo run -p maka-terminal-shell
+cargo build -p maka-cli -p maka-terminal-shell --bins
+target/debug/maka terminal-shell
 ```
 
 终端先发现并验证指定 Root 的在线 Host；没有在线 Host 时，使用同目录的 `maka` 原生启动器按既有部署配置启动。无需另开终端运行 `host serve`。启动器不会从 `PATH` 查找。默认业务 Host Root 为 `~/.maka/application/host`，可用 `--root /path/to/root` 指定其他路径。
+
+原生预览包包含两个可执行文件，安装后可直接运行 `maka terminal-shell`。`--root`、`--session`、`--help`、`--version` 等参数直接交给 shell；相对 Root 路径按调用时的工作目录解析。
 
 启动时会协商图片协议和显示尺寸。在 Linux（含 WSL）上，终端提供所需能力时，整个界面通过 Kitty、Sixel 或 iTerm2 显示 GPU 渲染的像素帧；否则，同一个应用自动使用 Unicode 呈现。两种呈现方式都支持鼠标和键盘操作。
 

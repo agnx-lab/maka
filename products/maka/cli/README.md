@@ -27,6 +27,8 @@ From the repository root, run `just run` or `just run --help`. Development build
 
 [Source](src/main.rs) · [Cargo manifest](Cargo.toml)
 
+Run `maka terminal-shell` for the [NSH terminal workbench](../terminal-shell/README.md). It uses `~/.maka/application/host` by default and accepts `--root DIRECTORY` and `--session SESSION_ID`. The sibling `maka-terminal-shell` executable owns Host discovery, startup and terminal cleanup; native preview packages include it. `maka terminal-shell --help` shows its options.
+
 The first installation asks for workspace trust inside the TUI, before starting the Host or enabling project skills and tools. Tab or the arrow keys select an action; Enter confirms and Esc exits. The initial selection is Exit. Confirmation keeps the same terminal screen while the product initializes. Reopening uses the saved installation without asking again.
 
 Startup discovers the local Host and connects to it, or starts one automatically. TUI and Desktop can share that Host. By default, quitting a UI also stops the Host when no other client remains. Use Ctrl+Alt+Q in the TUI to close only the UI and keep accepted background tasks running; reconnect to observe their results.

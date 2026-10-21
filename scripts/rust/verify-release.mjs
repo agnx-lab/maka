@@ -74,6 +74,9 @@ export async function verifyRelease(directory) {
     );
     if (desktop.stdout.trim() !== 'maka-desktop-shell ' + native.source.version)
       throw new Error('Installed desktop shell reports another source version');
+    const terminal = await run(process.execPath, [command, 'terminal-shell', '--version'], options);
+    if (terminal.stdout.trim() !== 'maka-terminal-shell ' + native.source.version)
+      throw new Error('Installed terminal shell reports another source version');
     const result = await new Promise((resolveResult, reject) => {
       const child = execFile(
         process.execPath,
