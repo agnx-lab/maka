@@ -131,21 +131,31 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       );
   };
   const openActions = (target: { session: BrowserSession; origin: string | null }) => {
-    if (alive && !props.switching() && props.selected() === target.origin &&
-        sessionsById().get(target.session.id)?.revision === target.session.revision)
+    if (
+      alive &&
+      !props.switching() &&
+      props.selected() === target.origin &&
+      sessionsById().get(target.session.id)?.revision === target.session.revision
+    )
       actions.set(target);
   };
   const currentActions = () => {
     const session = sessionsById().get(currentRow() ?? '');
     if (session && !choosingWorkspace()) openActions({ session, origin: props.selected() });
   };
-  const closeActions = () => { actions.set(null); search?.focus(); };
+  const closeActions = () => {
+    actions.set(null);
+    search?.focus();
+  };
   effect(() => {
     const target = actions();
     if (target && props.selected() !== target.origin) actions.set(null);
   });
   const chooseFilter = (filter: 'all' | 'archived') => {
-    batch(() => { browser.setFilter(filter); selectedRow.set(null); });
+    batch(() => {
+      browser.setFilter(filter);
+      selectedRow.set(null);
+    });
     list?.scrollToIndex({ index: 0, animated: false });
     search?.focus();
   };
@@ -322,11 +332,21 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         }}
       />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Button selected={browser.filter() === 'all'} accessibilityLabel="Show active conversations" onPress={inputAction(chooseFilter, 'all')}>
+        <Button
+          selected={browser.filter() === 'all'}
+          accessibilityLabel="Show active conversations"
+          onPress={inputAction(chooseFilter, 'all')}
+        >
           <Text style={{ color: browser.filter() === 'all' ? C.text : C.muted }}>Active</Text>
         </Button>
-        <Button selected={browser.filter() === 'archived'} accessibilityLabel="Show archived conversations" onPress={inputAction(chooseFilter, 'archived')}>
-          <Text style={{ color: browser.filter() === 'archived' ? C.text : C.muted }}>Archived</Text>
+        <Button
+          selected={browser.filter() === 'archived'}
+          accessibilityLabel="Show archived conversations"
+          onPress={inputAction(chooseFilter, 'archived')}
+        >
+          <Text style={{ color: browser.filter() === 'archived' ? C.text : C.muted }}>
+            Archived
+          </Text>
         </Button>
       </View>
       <List
@@ -336,7 +356,9 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         each={rowIds()}
         estimatedItemSize={32}
         empty={() => (
-          <View style={{ height: viewportHeight(), alignItems: 'center', justifyContent: 'center' }}>
+          <View
+            style={{ height: viewportHeight(), alignItems: 'center', justifyContent: 'center' }}
+          >
             <If when={!browser.loading() && !browser.error() && !browser.projectError()}>
               <Text style={{ color: C.muted }}>
                 {browser.titleQuery() ? 'No matching conversations.' : 'No conversations yet.'}
@@ -423,7 +445,8 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                     <Text
                       numberOfLines={1}
                       style={{
-                        color: props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
+                        color:
+                          props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
                       }}
                     >
                       {currentRow() === key() ? '› ' : session()?.hasUnread ? '● ' : '  '}
@@ -441,7 +464,14 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                   <Button
                     accessibilityLabel={`Actions for ${session()?.title || 'Untitled conversation'}`}
                     disabled={props.switching() || !session()}
-                    onPress={session() ? inputAction(openActions, { session: session()!, origin: props.selected() }) : undefined}
+                    onPress={
+                      session()
+                        ? inputAction(openActions, {
+                            session: session()!,
+                            origin: props.selected(),
+                          })
+                        : undefined
+                    }
                     style={{ width: 32, alignItems: 'center' }}
                   >
                     <Text style={{ color: C.muted }}>…</Text>

@@ -109,7 +109,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   const nested = () =>
     section() === 'connections'
       ? connections.page() !== 'connections' || !!connections.confirmation()
-      : section() === 'general' ? general.title() !== 'General settings'
+      : section() === 'general'
+        ? general.title() !== 'General settings'
         : section() === 'plugins' && plugins.selected() !== null;
   return (
     <Dialog
