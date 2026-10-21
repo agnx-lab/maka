@@ -99,6 +99,7 @@ export function Conversation(props: ConversationProps) {
   const parts = signal<LivePart[]>([]);
   const pendingMessages = signal<(Row & { placement: 'queued' | 'transcript' })[]>([]);
   const title = signal(sessionId);
+  const archived = signal(false);
   const run = signal('Loading session…');
   const invocation = signal<string | null>(null);
   const stoppingRun = signal<string | null>(null);
@@ -467,6 +468,7 @@ export function Conversation(props: ConversationProps) {
     if (observed.session.id !== sessionId) throw new Error('Host observed a different session.');
     latestKnown = Math.max(latestKnown, observed.through);
     title.set(observed.session.title || 'Untitled conversation');
+    archived.set(observed.session.archived);
     workspace.set(observed.session.workspace.path);
     permissions.set(
       (
@@ -1057,6 +1059,7 @@ export function Conversation(props: ConversationProps) {
     if (ready() && transcriptStatus() !== 'live')
       return 'Reconnecting updates… Your draft is kept.';
     if (!ready()) return 'Loading session history… Your draft is kept.';
+    if (archived()) return 'This conversation is archived. Restore it in Sessions to send; your draft is kept.';
     if (!draftReady()) return 'Loading the saved draft…';
     if (savingFailed()) return 'The draft could not be saved. Sending is unavailable.';
     if (attachments.blocked()) return attachments.blocked();

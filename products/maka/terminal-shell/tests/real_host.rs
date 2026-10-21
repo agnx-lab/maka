@@ -25,6 +25,8 @@ mod attachment_intake;
 mod attachments;
 #[path = "real_host/interactions.rs"]
 mod interactions;
+#[path = "real_host/session_lifecycle.rs"]
+mod session_lifecycle;
 mod support;
 
 use crossterm::event::{

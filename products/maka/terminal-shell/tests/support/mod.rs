@@ -304,6 +304,8 @@ impl Fixture {
                             "create",
                             "selectBackend",
                             "metadata",
+                            "changeSession",
+                            "fork",
                             "send",
                             "stop",
                             "execution",

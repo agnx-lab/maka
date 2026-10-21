@@ -21,6 +21,7 @@ import { batch, cleanup, signal } from 'nsh';
 import { host } from 'maka/host';
 import type {
   AgentSessionListScope,
+  AgentSessionFilter,
   AgentSession,
   AgentSessionPage,
   AgentProject,
@@ -37,6 +38,7 @@ export type BrowserWorkspace = AgentWorkspaceSelection;
 
 export type Browsing = {
   scope(): BrowserScope;
+  filter(): AgentSessionFilter;
   titleQuery(): string;
   sessions(): BrowserSession[];
   projects(): BrowserProject[];
@@ -44,6 +46,7 @@ export type Browsing = {
   error(): string;
   projectError(): string;
   setScope(scope: BrowserScope): void;
+  setFilter(filter: AgentSessionFilter): void;
   setTitleQuery(text: string): void;
   loadMore(): Promise<void>;
   refresh(): Promise<void>;
@@ -58,6 +61,7 @@ type Subscription = {
 };
 type CatalogRead = {
   scope: BrowserScope;
+  filter: AgentSessionFilter;
   titleQuery: string;
   stream: Subscription | null;
   // Local read intent: the last published row and one requested next page.
@@ -75,6 +79,7 @@ const uniqueSessions = (items: BrowserSession[]) => [
 // Host revisions own paging; these snapshots grant no mutation authority.
 export function createBrowsing(): Browsing {
   const scope = signal<BrowserScope>({ kind: 'all' });
+  const filter = signal<AgentSessionFilter>('all');
   const titleQuery = signal('');
   const sessions = signal<BrowserSession[]>([]);
   const projects = signal<BrowserProject[]>([]);
@@ -89,7 +94,7 @@ export function createBrowsing(): Browsing {
   const owns = (read: CatalogRead) => alive && current === read;
   const list = async (read: CatalogRead, position: AgentSessionPosition): Promise<SessionPage> =>
     host.query('agent', 'list', {
-      filter: 'all',
+      filter: read.filter,
       scope: read.scope,
       titleQuery: read.titleQuery,
       position,
@@ -132,6 +137,7 @@ export function createBrowsing(): Browsing {
     });
     const read: CatalogRead = {
       scope: scope(),
+      filter: filter(),
       titleQuery: titleQuery(),
       stream: null,
       extent,
@@ -157,7 +163,7 @@ export function createBrowsing(): Browsing {
     }
     void (async () => {
       const opened: Subscription = await host.subscribe('agent', 'catalog', {
-        filter: 'all',
+        filter: read.filter,
         scope: read.scope,
         titleQuery: read.titleQuery,
         position: { kind: 'start' },
@@ -329,6 +335,13 @@ export function createBrowsing(): Browsing {
       void restart(true);
     });
   };
+  const setFilter = (next: AgentSessionFilter) => {
+    if (!alive || next === filter()) return;
+    batch(() => {
+      filter.set(next);
+      void restart(true);
+    });
+  };
   const setTitleQuery = (text: string) => {
     if (!alive || text === titleQuery()) return;
     batch(() => {
@@ -339,6 +352,7 @@ export function createBrowsing(): Browsing {
   void refresh();
   return {
     scope,
+    filter,
     titleQuery,
     sessions,
     projects,
@@ -346,6 +360,7 @@ export function createBrowsing(): Browsing {
     error,
     projectError,
     setScope,
+    setFilter,
     setTitleQuery,
     loadMore,
     refresh,

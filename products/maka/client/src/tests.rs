@@ -157,6 +157,9 @@ impl Fixture {
                 "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "stop":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "respond":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "metadata":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "changeSession":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "fork":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "create":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "discoverModels":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "saveCredential":{"mode":"mutation","input":{},"output":{},"resources":{"secret":{"type":{"name":"maka.text.utf8","version":1},"optional":false}}},
@@ -409,6 +412,29 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
             assert!(client.abandon_unprepared(control.id()).await.unwrap().abandoned);
             assert_eq!(client.operation_for_control(control.id()).await.unwrap().correlation,expected);
             assert!(client.pending_controls().await.unwrap().is_empty());
+            control.close().await.unwrap();
+        }
+        // Lifecycle originals retain their captured CAS and action identity in
+        // the same journal; recovering them cannot become a new user action.
+        for (method, input, expected) in [
+            ("metadata", json!({"sessionId":"session-one","expectedRevision":7,"title":"Private title","labels":[]}), json!({"kind":"agent-control","expectedRevision":7})),
+            ("changeSession", json!({"sessionId":"session-one","expectedRevision":8,"action":"archive"}), json!({"kind":"agent-control","expectedRevision":8,"action":"archive"})),
+            ("fork", json!({"sessionId":"session-one","expectedRevision":9,"turnId":null,"title":"Private fork title","labels":[]}), json!({"kind":"agent-control","expectedRevision":9,"turnId":null})),
+        ] {
+            let control = client.control(Uuid::new_v4(),method,input).await.unwrap();
+            let original = client.operation_for_control(control.id()).await.unwrap();
+            assert_eq!(original.session_id.as_deref(),Some("session-one"));
+            assert_eq!(original.correlation,expected);
+            let pending = client.pending_controls().await.unwrap();
+            assert_eq!(pending.iter().map(|operation| operation.id).collect::<Vec<_>>(),[control.id()]);
+            assert_eq!(pending[0].correlation,expected);
+            let mut extra = expected.clone();
+            extra["extra"] = json!(true);
+            let unrelated = client.mutation(Uuid::new_v4(),"agent",method,Value::Null,Attachments::new(),Some("session-one".into()),extra).await.unwrap();
+            assert_eq!(client.operation_for_control(unrelated.id()).await.unwrap_err(),"original client operation belongs to another control owner");
+            assert_eq!(client.pending_controls().await.unwrap().iter().map(|operation| operation.id).collect::<Vec<_>>(),[control.id()]);
+            unrelated.close().await.unwrap();
+            assert!(client.abandon_unprepared(control.id()).await.unwrap().abandoned);
             control.close().await.unwrap();
         }
         let id = Uuid::new_v4();

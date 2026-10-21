@@ -34,7 +34,9 @@ import { Button } from 'nsh/base';
 import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
 import { C } from './ui';
-import type { Browsing, BrowserScope, BrowserWorkspace } from './browsing';
+import type { Browsing, BrowserScope, BrowserWorkspace, BrowserSession } from './browsing';
+import { SessionActions } from './SessionActions';
+import type { SessionAction } from './sessionLifecycle';
 
 export type WorkspaceBrowserProps = {
   browsing: Browsing;
@@ -47,6 +49,7 @@ export type WorkspaceBrowserProps = {
   selectSession(id: string, expectedSessionId: string | null): Promise<void>;
   create(workspace: BrowserWorkspace, expectedSessionId: string | null): Promise<void>;
   newConversation(expectedSessionId: string | null): void;
+  changeSession(action: SessionAction, expectedSessionId: string | null): Promise<void>;
   docked?: boolean;
   resize?(columns: number): void;
 };
@@ -55,6 +58,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
   const browser = props.browsing;
   const choosingWorkspace = signal(false);
   const selectedRow = signal<string | null>(null);
+  const actions = signal<{ session: BrowserSession; origin: string | null } | null>(null);
   const navigationNotice = signal('');
   const viewportHeight = signal(160);
   let search: YNode | undefined;
@@ -109,8 +113,8 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       : browser.sessions().map((session) => session.id),
   );
   effect(() => {
-    if (selectedRow() === null && rowIds().length && !browser.loading())
-      selectedRow.set(rowIds()[0]);
+    if (!rowIds().includes(selectedRow() ?? '') && !browser.loading())
+      selectedRow.set(rowIds()[0] ?? null);
   });
   const index = () => rowIds().indexOf(selectedRow() ?? '');
   const currentRow = () => (index() < 0 ? undefined : selectedRow());
@@ -122,6 +126,25 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       navigationNotice.set(
         'The draft is not ready to save. Return to the conversation to check its status.',
       );
+  };
+  const openActions = (target: { session: BrowserSession; origin: string | null }) => {
+    if (alive && !props.switching() && props.selected() === target.origin &&
+        sessionsById().get(target.session.id)?.revision === target.session.revision)
+      actions.set(target);
+  };
+  const currentActions = () => {
+    const session = sessionsById().get(currentRow() ?? '');
+    if (session && !choosingWorkspace()) openActions({ session, origin: props.selected() });
+  };
+  const closeActions = () => { actions.set(null); search?.focus(); };
+  effect(() => {
+    const target = actions();
+    if (target && props.selected() !== target.origin) actions.set(null);
+  });
+  const chooseFilter = (filter: 'all' | 'archived') => {
+    batch(() => { browser.setFilter(filter); selectedRow.set(null); });
+    list?.scrollToIndex({ index: 0, animated: false });
+    search?.focus();
   };
   const chooseScope = (scope: BrowserScope) => {
     if (!alive) return;
@@ -153,6 +176,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
     if (!choosingWorkspace() && next >= rowIds().length - 3) void browser.loadMore();
   };
   const escape = () => {
+    if (actions()) return;
     if (choosingWorkspace()) {
       choosingWorkspace.set(false);
       search?.focus();
@@ -229,6 +253,7 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
             keymap.bind('up', () => move(-1), { when: 'always', repeat: true, within: node }),
             keymap.bind('down', () => move(1), { when: 'always', repeat: true, within: node }),
             keymap.bind('enter', activate, { when: 'always', within: node }),
+            keymap.bind('mod+enter', currentActions, { when: 'always', within: node }),
           ];
           removeSearchKeys = () => {
             for (const remove of unbind) remove();
@@ -257,6 +282,14 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           height: 32,
         }}
       />
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Button selected={browser.filter() === 'all'} accessibilityLabel="Show active conversations" onPress={inputAction(chooseFilter, 'all')}>
+          <Text style={{ color: browser.filter() === 'all' ? C.accent : C.muted }}>Active</Text>
+        </Button>
+        <Button selected={browser.filter() === 'archived'} accessibilityLabel="Show archived conversations" onPress={inputAction(chooseFilter, 'archived')}>
+          <Text style={{ color: browser.filter() === 'archived' ? C.accent : C.muted }}>Archived</Text>
+        </Button>
+      </View>
       <List
         ref={(node) => {
           list = node;
@@ -324,37 +357,48 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
               }
               const session = () => sessionsById().get(key());
               return (
-                <Button
-                  accessibilityLabel={`Open conversation ${session()?.title || 'Untitled conversation'}`}
-                  disabled={props.switching() || !session()}
-                  selected={props.selected() === key()}
-                  onPress={inputAction(select, { id: key(), origin: props.selected() })}
-                  style={{
-                    height: 32,
-                    paddingHorizontal: 8,
-                    backgroundColor: currentRow() === key() ? C.line : C.surface,
-                  }}
-                  hoverStyle={{ backgroundColor: C.line }}
-                  focusStyle={{ backgroundColor: C.raised }}
-                >
-                  <Text
-                    numberOfLines={1}
+                <View style={{ flexDirection: 'row', height: 32 }}>
+                  <Button
+                    accessibilityLabel={`Open conversation ${session()?.title || 'Untitled conversation'}`}
+                    disabled={props.switching() || !session()}
+                    selected={props.selected() === key()}
+                    onPress={inputAction(select, { id: key(), origin: props.selected() })}
                     style={{
-                      color: props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
+                      flex: 1,
+                      minWidth: 0,
+                      paddingHorizontal: 8,
+                      backgroundColor: currentRow() === key() ? C.line : C.surface,
                     }}
+                    hoverStyle={{ backgroundColor: C.line }}
+                    focusStyle={{ backgroundColor: C.raised }}
                   >
-                    {currentRow() === key() ? '› ' : session()?.hasUnread ? '● ' : '  '}
-                    {session()?.title || 'Untitled conversation'}
-                  </Text>
-                  <Text numberOfLines={1} style={{ color: C.muted }}>
-                    {session()?.activity === 'working'
-                      ? '● Working · '
-                      : session()?.activity === 'waiting'
-                        ? '◇ Waiting · '
-                        : ''}
-                    {session()?.workspace.path}
-                  </Text>
-                </Button>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        color: props.selected() === key() || session()?.hasUnread ? C.accent : C.text,
+                      }}
+                    >
+                      {currentRow() === key() ? '› ' : session()?.hasUnread ? '● ' : '  '}
+                      {session()?.title || 'Untitled conversation'}
+                    </Text>
+                    <Text numberOfLines={1} style={{ color: C.muted }}>
+                      {session()?.activity === 'working'
+                        ? '● Working · '
+                        : session()?.activity === 'waiting'
+                          ? '◇ Waiting · '
+                          : ''}
+                      {session()?.workspace.path}
+                    </Text>
+                  </Button>
+                  <Button
+                    accessibilityLabel={`Actions for ${session()?.title || 'Untitled conversation'}`}
+                    disabled={props.switching() || !session()}
+                    onPress={session() ? inputAction(openActions, { session: session()!, origin: props.selected() }) : undefined}
+                    style={{ width: 32, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: C.muted }}>…</Text>
+                  </Button>
+                </View>
               );
             }}
           </Each>
@@ -410,6 +454,22 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       <Text numberOfLines={1} style={{ color: C.muted }}>
         Enter selects · Esc closes
       </Text>
+      <Text numberOfLines={1} style={{ color: C.muted }}>
+        Ctrl+Enter actions · Tab moves
+      </Text>
+      <Each of={actions() ? [actions()!] : []} key={(target) => target}>
+        {(item) => {
+          const target = item();
+          return (
+            <SessionActions
+              session={target.session}
+              current={() => alive && actions() === target && props.selected() === target.origin}
+              close={closeActions}
+              change={(action) => props.changeSession(action, target.origin)}
+            />
+          );
+        }}
+      </Each>
     </View>
   );
 }

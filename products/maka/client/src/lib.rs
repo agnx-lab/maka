@@ -47,7 +47,15 @@ use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, String>;
 
-const CONTROL_METHODS: [&str; 4] = ["create", "selectBackend", "stop", "respond"];
+const CONTROL_METHODS: [&str; 7] = [
+    "create",
+    "selectBackend",
+    "stop",
+    "respond",
+    "metadata",
+    "changeSession",
+    "fork",
+];
 const CONTROL_KIND: &str = "agent-control";
 const SETTINGS_KIND: &str = "settings";
 const SETTINGS_METHODS: [&str; 7] = [
@@ -83,6 +91,34 @@ fn control_correlation(method: &str, input: &Value) -> Result<Value> {
             .filter(|target| !target.is_empty() && target.len() <= 128)
             .ok_or("agent control requires a valid invocationId or requestId")?;
         correlation[key] = Value::String(target.to_owned());
+    }
+    if matches!(method, "metadata" | "changeSession" | "fork") {
+        let revision = input
+            .get("expectedRevision")
+            .and_then(Value::as_u64)
+            .filter(|revision| (1..=9_007_199_254_740_991).contains(revision))
+            .ok_or("agent lifecycle control requires a valid expectedRevision")?;
+        correlation["expectedRevision"] = revision.into();
+        if method == "changeSession" {
+            let action = input
+                .get("action")
+                .and_then(Value::as_str)
+                .filter(|action| matches!(*action, "archive" | "restore" | "remove"))
+                .ok_or("agent lifecycle control requires a valid action")?;
+            correlation["action"] = action.into();
+        }
+        if method == "fork" {
+            let turn = input
+                .get("turnId")
+                .filter(|turn| {
+                    turn.is_null()
+                        || turn
+                            .as_str()
+                            .is_some_and(|turn| !turn.is_empty() && turn.len() <= 128)
+                })
+                .ok_or("agent fork control requires an original turnId")?;
+            correlation["turnId"] = turn.clone();
+        }
     }
     Ok(correlation)
 }

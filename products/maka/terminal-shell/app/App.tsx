@@ -40,6 +40,7 @@ import { createBrowsing } from './browsing';
 import type { BrowserWorkspace } from './browsing';
 import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
+import { performSessionAction, type SessionAction } from './sessionLifecycle';
 
 type Overlay = { instance: number } & (
   | { kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings'; sessionId: string | null }
@@ -61,6 +62,7 @@ function App() {
   const controls = signal<any[]>([]);
   const controlsKnown = signal(false);
   const recovering = signal(false);
+  const recoveredFork = signal<{ id: string; title: string } | null>(null);
   const handle = signal<ConversationHandle | null>(null);
   let editor: YNode | undefined;
   const focusComposer = () => editor?.focus();
@@ -110,7 +112,9 @@ function App() {
     const originals: any[] = method === 'stop' ? await host.pendingControls() : controls();
     const pending = originals.find(
       (original) =>
-        original.method === method &&
+        (original.method === method ||
+          (['metadata', 'changeSession', 'fork'].includes(method) &&
+            ['metadata', 'changeSession', 'fork'].includes(original.method))) &&
         original.sessionId === (input.sessionId ?? null) &&
         (method !== 'stop' || original.correlation.invocationId === input.invocationId) &&
         (method !== 'respond' || original.correlation.requestId === input.requestId),
@@ -205,6 +209,32 @@ function App() {
     if (!alive || selected() !== sessionId) return;
     if (sessionId) void create({ kind: 'session', sessionId }, sessionId);
     else open({ kind: 'workspaces', sessionId });
+  };
+  const removeSelected = async (sessionId: string) => {
+    const owner = handle();
+    if (!alive || selected() !== sessionId || owner?.sessionId !== sessionId) return;
+    if (!(await owner.flushDraft()))
+      throw new Error('The conversation was deleted, but its latest draft is not saved. Return to the draft to check its status.');
+    if (alive && selected() === sessionId && handle() === owner) {
+      overlay.set(null);
+      selected.set(null);
+    }
+  };
+  const changeBrowsedSession = async (action: SessionAction, origin: string | null) => {
+    if (!alive || selected() !== origin || switching() || busy())
+      throw new Error('This conversation action is no longer current.');
+    const owner = handle();
+    if (action.kind === 'remove' && owner?.sessionId === action.session.id &&
+        !(await owner.flushDraft()))
+      throw new Error('The draft is not ready to save. Return to the conversation before deleting it.');
+    if (!alive || selected() !== origin || handle() !== owner)
+      throw new Error('This conversation action is no longer current.');
+    const result = await performSessionAction(control, action);
+    if (!alive) return;
+    if (result.kind === 'removed') await removeSelected(result.sessionId);
+    else if (result.kind === 'forked') await switchSession(result.session.id, origin);
+    else if (handle()?.sessionId === result.session.id) await handle()!.refresh();
+    await browsing.refresh();
   };
   const stop = () => {
     if (!overlay() && handle()) void handle()!.stop(handle()!.invocation()).catch(report);
@@ -360,6 +390,11 @@ function App() {
           const reply = await host.recoverControl(original.id);
           if (!alive) return;
           const result = returned(reply);
+          if (original.method === 'changeSession' && result.kind === 'removed' &&
+              result.sessionId === original.sessionId)
+            await removeSelected(result.sessionId);
+          if (original.method === 'fork' && result.kind === 'forked')
+            recoveredFork.set({ id: result.session.id, title: result.session.title });
           if (original.method === 'create' && result.kind === 'created') {
             await switchSession(result.session.id);
             if (selected() === result.session.id && !result.session.backend)
@@ -379,6 +414,8 @@ function App() {
       if (alive) recovering.set(false);
     }
   };
+  const openRecoveredFork = ({ id, origin }: { id: string; origin: string | null }) =>
+    selectBrowsed(id, origin);
   const abandonControl = async (id: string) => {
     try {
       await host.abandonControl(id);
@@ -425,6 +462,7 @@ function App() {
     },
     close: closeSidebar,
     selectSession: selectBrowsed,
+    changeSession: changeBrowsedSession,
     create,
     newConversation,
   };
@@ -498,6 +536,11 @@ function App() {
           settings={inputAction(open, { kind: 'settings', sessionId: selected() })}
         />
       </Workbench>
+      <If when={recoveredFork()}>
+        <Button onPress={inputAction(openRecoveredFork, { id: recoveredFork()!.id, origin: selected() })}>
+          <Text style={{ color: C.accent }}>Open recovered fork · {recoveredFork()!.title}</Text>
+        </Button>
+      </If>
       <If
         when={error() || status() || switching() || busy() || !controlsKnown() || controls().length}
       >
