@@ -226,7 +226,34 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         .unwrap_or_else(|_| panic!("the native Input {label:?} did not become editable"));
     }
     async fn activate(view: &mut AppView, label: &str) {
+        // A keyboard target may be below the scroll viewport. Wait for the
+        // actual Button owner, then let native Tab reveal it before Enter.
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                view.poll().unwrap();
+                support::tick(view);
+                let mut buttons = view.accessibility_snapshot().into_iter().filter(|node| {
+                    node.role == nsh_core::AccessibilityRole::Button && node.label == label
+                });
+                let button = buttons.next();
+                assert!(
+                    buttons.next().is_none(),
+                    "ambiguous native button {label:?}"
+                );
+                if button.is_some_and(|button| !button.state.disabled) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("native keyboard button {label:?} did not become enabled"));
         tab_to_label(view, label).await;
+        let button = support::wait_enabled_button(view, label).await;
+        assert!(
+            button.focused,
+            "native Tab did not focus the actual button {label:?}"
+        );
         view.handle_event(Event::Key(KeyEvent::new(
             KeyCode::Enter,
             KeyModifiers::NONE,
@@ -263,7 +290,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(sessions["sessions"], json!([]));
         let (mut view, bindings) = fixture.view(client.clone(), None);
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.")).await;
-        support::click_label(&mut view, "Connections & models");
+        support::click_button(&mut view, "Connections & models").await;
         wait_view(&mut view, |screen| screen.contains("Add your first connection, then fetch or add a model.")).await;
         activate(&mut view, "Add connection").await;
         wait_view(&mut view, |screen| screen.contains("Choose the API provider for this connection.") && !screen.contains("Loading settings…")).await;
@@ -286,7 +313,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.expect("the real provider inventory did not reveal Chat Completions");
-        support::click_label(&mut view, "Connect Chat Completions");
+        support::click_button(&mut view, "Connect Chat Completions").await;
         wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
         fill(&mut view, "Connection name", "UI 连接").await;
         fill(&mut view, "Connection ID", "ui-connection").await;
@@ -340,12 +367,12 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_view(&mut view, |screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && screen.contains("Close · Esc")).await;
         activate(&mut view, "Back from connection settings").await;
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close · Esc")).await;
-        support::click_label(&mut view, "Choose composer workspace");
+        support::click_button(&mut view, "Choose composer workspace").await;
         wait_view(&mut view, |screen| screen.contains("Workspace locations") && screen.contains("› Workspace /") && !screen.contains("Loading folders…")).await;
-        support::click_label(&mut view, "Browse folder Workspace");
+        support::click_button(&mut view, "Browse folder Workspace").await;
         wait_view(&mut view, |screen| screen.contains("Folder · Workspace") && !screen.contains("Loading folders…")).await;
         wait_enabled_node(&mut view, "Use this workspace folder").await;
-        support::click_label(&mut view, "Use this workspace folder");
+        support::click_button(&mut view, "Use this workspace folder").await;
         wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
         select_palette(&mut view, "Search models…", "manual-ui-agent", "Manual UI Agent").await;
         wait_view(&mut view, |screen| screen.contains("Manual UI Agent · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Back · Esc") && !screen.contains("Close · Esc")).await;
