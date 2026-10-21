@@ -25890,7 +25890,6 @@ export const contracts = {
               },
               content: {
                 type: 'string',
-                maxLength: 65536,
               },
             },
             additionalProperties: false,
@@ -25934,17 +25933,6 @@ export const contracts = {
                   kind: {
                     type: 'string',
                     const: 'unavailable',
-                  },
-                },
-                required: ['kind'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  kind: {
-                    type: 'string',
-                    const: 'rejected',
                   },
                 },
                 required: ['kind'],

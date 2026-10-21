@@ -125,9 +125,7 @@ function settle(state: GlobalInstructionsState, reply: OperationReply, actions: 
       ? 'assistant-global-saved'
       : result.kind === 'changed'
         ? 'assistant-global-conflict'
-        : result.kind === 'rejected'
-          ? 'assistant-global-limit'
-          : 'assistant-unavailable';
+        : 'assistant-unavailable';
   if (result.kind === 'changed') state.conflict = true;
   if (result.kind === 'saved' || result.kind === 'changed')
     read(state, actions, result.kind === 'saved');

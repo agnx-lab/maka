@@ -1493,9 +1493,6 @@ export type AgentGlobalInstructionsUpdated =
     }
   | {
       kind: 'unavailable';
-    }
-  | {
-      kind: 'rejected';
     };
 export type Language = 'en' | 'zh-CN' | 'zh-TW';
 export type ExecutorSetupAction =

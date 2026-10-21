@@ -22,7 +22,6 @@ use cap_std::fs::{Dir, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-const EDIT_LIMIT: usize = 64 * 1024;
 const FILE: &str = "AGENTS.md";
 
 fn directory(source: GlobalInstructionSource) -> &'static str {
@@ -44,7 +43,6 @@ pub(super) fn selected(home: &Dir) -> io::Result<GlobalInstructionSource> {
 pub(super) fn read_selected(
     home: &Dir,
     source: GlobalInstructionSource,
-    limit: usize,
 ) -> io::Result<Option<Vec<u8>>> {
     let dir = match home.open_dir(directory(source)) {
         Ok(dir) => dir,
@@ -58,7 +56,7 @@ pub(super) fn read_selected(
         use cap_std::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let file = match dir.open_with(FILE, &options) {
+    let mut file = match dir.open_with(FILE, &options) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             // A dangling symlink is an existing, unavailable file, not an absent one.
@@ -70,19 +68,16 @@ pub(super) fn read_selected(
         Err(error) => return Err(error),
     };
     let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > limit as u64 {
-        return Err(io::Error::other("instruction size or type invalid"));
+    if !metadata.is_file() {
+        return Err(io::Error::other("instruction type invalid"));
     }
     let mut bytes = Vec::new();
-    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(io::Error::other("instruction too large"));
-    }
+    file.read_to_end(&mut bytes)?;
     Ok(Some(bytes))
 }
 fn view(home: &Dir, home_path: &str) -> io::Result<GlobalInstructionsView> {
     let source = selected(home)?;
-    let content = read_selected(home, source, EDIT_LIMIT)?
+    let content = read_selected(home, source)?
         .map(String::from_utf8)
         .transpose()
         .map_err(|_| io::Error::other("instruction encoding invalid"))?;
@@ -107,9 +102,6 @@ fn update(
     input: GlobalInstructionsUpdate,
 ) -> Result<GlobalInstructionsUpdated, String> {
     use GlobalInstructionsUpdated::*;
-    if input.content.len() > EDIT_LIMIT {
-        return Ok(Rejected);
-    }
     let matches = |view: &GlobalInstructionsView| matches!(view, GlobalInstructionsView::Available { source, revision, .. } if *source == input.source && revision == &input.revision);
     let Ok(current) = view(home, home_path) else {
         return Ok(Unavailable);
@@ -255,7 +247,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creation_conflicts_and_limits_preserve_actual_files() {
+    fn creation_and_conflicts_preserve_actual_files() {
         let temp = tempfile::tempdir().unwrap();
         let home = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
         let path = temp.path().to_str().unwrap();
@@ -302,26 +294,13 @@ mod tests {
             .unwrap(),
             GlobalInstructionsUpdated::Changed
         ));
-        assert!(matches!(
-            update(
-                &home,
-                path,
-                GlobalInstructionsUpdate {
-                    source,
-                    revision,
-                    content: "🦀".repeat(EDIT_LIMIT / 4 + 1)
-                }
-            )
-            .unwrap(),
-            GlobalInstructionsUpdated::Rejected
-        ));
         home.create_dir_all(".maka/AGENTS.md").unwrap();
         assert_eq!(selected(&home).unwrap(), GlobalInstructionSource::Maka);
         assert!(
             view(&home, path).is_err(),
             "invalid preferred file cannot fall back"
         );
-        assert!(read_selected(&home, GlobalInstructionSource::Maka, 1024 * 1024).is_err());
+        assert!(read_selected(&home, GlobalInstructionSource::Maka).is_err());
     }
 
     #[cfg(unix)]
