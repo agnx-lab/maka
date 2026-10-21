@@ -2488,7 +2488,11 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), None);
         let home = terminal.wait_for("Make something remarkable.").await;
         evidence("production-pty-home", &home);
-        terminal.send(b"\x10");
+        // A held navigation key can arrive as a burst in one reader turn.
+        // Crossing its fairness slice must not terminate the application.
+        let mut input = b"\x1b[D".repeat(256);
+        input.push(0x10);
+        terminal.send(&input);
         terminal.wait_for("Search commands…").await;
         terminal.wait_for("Enter selects · Esc closes").await;
         terminal.click_text("Close");

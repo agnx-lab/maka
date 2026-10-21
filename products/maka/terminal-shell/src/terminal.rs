@@ -101,11 +101,6 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
         .enter_raw_mode()
         .map_err(|error| error.to_string())?;
     let reader = terminal.event_reader();
-    // The Inbox accepts a full 64 KiB paste. The only unfinished wire framing
-    // beyond that payload is the two six-byte bracketed-paste delimiters.
-    reader
-        .set_max_pending_bytes(input::MAX_BYTES + 12)
-        .map_err(|error| error.to_string())?;
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;
     let presentation = Presentation {
         stop: stop.clone(),
@@ -285,8 +280,7 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                     // poll itself can consume and cache terminal bytes. Keep
                     // polling, decoding and stamping under the presentation
                     // fence, without waiting for stdin while holding it.
-                    let mut read = 0;
-                    for _ in 0..input::MAX_EVENTS {
+                    for _ in 0..input::READ_BATCH {
                         let event = reader
                             .poll(Some(Duration::ZERO), |_| true)
                             .and_then(|ready| {
@@ -304,7 +298,6 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                                 return;
                             }
                         };
-                        read += 1;
                         inbox.graphics.observe(&event, Instant::now());
                         #[cfg(target_os = "linux")]
                         {
@@ -334,20 +327,6 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         inbox.push(event, presented.load(Ordering::Acquire));
                         if inbox.quit || inbox.error.is_some() || stop.load(Ordering::Acquire) {
                             break;
-                        }
-                    }
-                    if read == input::MAX_EVENTS
-                        && !inbox.quit
-                        && inbox.error.is_none()
-                        && !stop.load(Ordering::Acquire)
-                    {
-                        match reader.poll(Some(Duration::ZERO), |_| true) {
-                            Ok(true) => inbox.error = Some(
-                                "terminal input exceeded its pending budget; input was rejected"
-                                    .into(),
-                            ),
-                            Ok(false) => {}
-                            Err(error) => inbox.error = Some(error.to_string()),
                         }
                     }
                 }

@@ -66,7 +66,6 @@ pub(super) struct Encoded {
 pub(crate) struct Inbox {
     pub capabilities: Capabilities,
     events: VecDeque<Input>,
-    bytes: usize,
     pub published: Option<FrameToken>,
     pub keyboard: Option<FrameToken>,
     capture: Option<FrameToken>,
@@ -91,7 +90,6 @@ impl Inbox {
         Self {
             capabilities,
             events: VecDeque::new(),
-            bytes: 0,
             published: None,
             keyboard: None,
             capture: None,
@@ -178,13 +176,32 @@ impl Inbox {
             }
             return Ok(false);
         }
-        let length = bytes(&event);
-        if self.events.len() == super::super::input::MAX_EVENTS
-            || length > super::super::input::MAX_BYTES.saturating_sub(self.bytes)
+        if let Some(previous) = self.events.back_mut()
+            && previous.token == token
+            && previous.geometry == self.geometry
         {
-            return Err("terminal input exceeded its pending budget; input was rejected".into());
+            match (&mut previous.event, &event) {
+                (Event::SgrMouse(previous), Event::SgrMouse(next))
+                    if previous.kind == MouseEventKind::Moved
+                        && next.kind == MouseEventKind::Moved
+                        && previous.modifiers == next.modifiers =>
+                {
+                    previous.x = next.x;
+                    previous.y = next.y;
+                    return Ok(false);
+                }
+                (Event::Mouse(previous), Event::Mouse(next))
+                    if previous.kind == MouseEventKind::Moved
+                        && next.kind == MouseEventKind::Moved
+                        && previous.modifiers == next.modifiers =>
+                {
+                    previous.column = next.column;
+                    previous.row = next.row;
+                    return Ok(false);
+                }
+                _ => {}
+            }
         }
-        self.bytes += length;
         self.events.push_back(Input {
             event,
             token,
@@ -198,7 +215,6 @@ impl Inbox {
         self.capture = None;
         self.cancel_pointer = true;
         self.events.retain(|input| !pointer(&input.event));
-        self.bytes = self.events.iter().map(|input| bytes(&input.event)).sum();
     }
 
     pub(super) fn pop(&mut self) -> Option<Input> {
@@ -210,9 +226,7 @@ impl Inbox {
         {
             return None;
         }
-        let input = self.events.pop_front()?;
-        self.bytes -= bytes(&input.event);
-        Some(input)
+        self.events.pop_front()
     }
 
     pub fn retained(&self) -> HashSet<FrameToken> {
@@ -243,17 +257,50 @@ pub(super) fn pointer(event: &Event) -> bool {
     )
 }
 
-fn bytes(event: &Event) -> usize {
-    match event {
-        Event::Paste(text) => text.len(),
-        _ => std::mem::size_of::<Event>(),
-    }
-}
-
 pub(super) fn released(event: &Event) -> bool {
     match event {
         Event::SgrMouse(mouse) => matches!(mouse.kind, MouseEventKind::Up(_)),
         Event::Mouse(mouse) => matches!(mouse.kind, MouseEventKind::Up(_)),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use termina::event::KeyEvent;
+
+    #[test]
+    fn keyboard_bursts_and_large_paste_survive_startup_and_resize_in_order() {
+        let mut inbox = Inbox::new(Capabilities {
+            size: WindowSize {
+                cols: 120,
+                rows: 40,
+                pixel_width: Some(1200),
+                pixel_height: Some(800),
+            },
+            mouse: super::super::probe::MouseCoordinates::Cells,
+            protocol: None,
+            synchronized: false,
+        });
+        let mut expected = Vec::new();
+        for character in "a你b界".repeat(1024).chars() {
+            let event = Event::Key(KeyEvent::new(KeyCode::Char(character), Modifiers::NONE));
+            assert!(!inbox.push(event.clone()).unwrap());
+            expected.push(event);
+        }
+        let paste = Event::Paste("你好\nworld".repeat(16384));
+        assert!(!inbox.push(paste.clone()).unwrap());
+        expected.push(paste);
+        let size = WindowSize {
+            cols: 80,
+            rows: 24,
+            pixel_width: Some(800),
+            pixel_height: Some(480),
+        };
+        assert!(!inbox.push(Event::WindowResized(size)).unwrap());
+        let (events, resize) = inbox.into_startup();
+        assert_eq!(events, expected);
+        assert_eq!(resize, Some(size));
     }
 }

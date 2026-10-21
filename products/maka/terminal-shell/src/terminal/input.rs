@@ -21,8 +21,8 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, 
 use nsh_platform_tui::{InputSnapshot, PressLease, WheelLease};
 use std::{collections::VecDeque, sync::Arc};
 
-pub(super) const MAX_EVENTS: usize = 128;
-pub(super) const MAX_BYTES: usize = 64 * 1024;
+// Yield the presentation lock between read slices; this is not a queue limit.
+pub(super) const READ_BATCH: usize = 128;
 
 #[derive(Debug)]
 pub(super) struct Input {
@@ -56,7 +56,6 @@ enum Capture {
 #[derive(Default)]
 pub(super) struct Inbox {
     events: VecDeque<Input>,
-    bytes: usize,
     pub resize: Option<(u16, u16)>,
     pub graphics: super::graphics::Probe,
     pub cancel_pointer: bool,
@@ -180,21 +179,25 @@ impl Inbox {
         } else {
             None
         };
-        let bytes = event_bytes(&event);
-        if self.events.len() == MAX_EVENTS || bytes > MAX_BYTES.saturating_sub(self.bytes) {
-            // Explicitly fail the input stream. Continuing with a silently
-            // truncated paste or missing keystroke could submit another command.
-            self.error =
-                Some("terminal input exceeded its pending budget; input was rejected".into());
+        if let Event::Mouse(next) = &event
+            && next.kind == MouseEventKind::Moved
+            && let Some(Input {
+                event: Event::Mouse(previous),
+                pointer: Some(Pointer::Exact(previous_epoch)),
+            }) = self.events.back_mut()
+            && previous.kind == MouseEventKind::Moved
+            && previous.modifiers == next.modifiers
+            && matches!(&pointer, Some(Pointer::Exact(epoch)) if *epoch == *previous_epoch)
+        {
+            previous.column = next.column;
+            previous.row = next.row;
             return;
         }
-        self.bytes += bytes;
         self.events.push_back(Input { event, pointer });
     }
 
     pub fn pop(&mut self, epoch: u64) -> Option<Input> {
         while let Some(input) = self.events.pop_front() {
-            self.bytes -= event_bytes(&input.event);
             let stale = match &input.pointer {
                 Some(Pointer::Exact(offered)) => *offered != epoch,
                 Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. }) => {
@@ -216,12 +219,14 @@ impl Inbox {
             return Vec::new();
         };
         let mut inputs = vec![first];
-        while let Some(next) = self.events.front() {
+        // The native wheel API accepts u16 steps. Keep any remainder queued.
+        while inputs.len() < usize::from(u16::MAX)
+            && let Some(next) = self.events.front()
+        {
             if !continues_pointer(&inputs[0], inputs.last().unwrap(), next) {
                 break;
             }
             let next = self.events.pop_front().unwrap();
-            self.bytes -= event_bytes(&next.event);
             inputs.push(next);
         }
         inputs
@@ -253,13 +258,6 @@ fn continues_pointer(first: &Input, last: &Input, next: &Input) -> bool {
     }
 }
 
-fn event_bytes(event: &Event) -> usize {
-    match event {
-        Event::Paste(text) => text.len(),
-        _ => std::mem::size_of::<Event>(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,13 +279,12 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_is_bounded_without_blocking_resize_or_cancel() {
+    fn keyboard_bursts_keep_their_order_without_blocking_resize_or_cancel() {
         let mut inbox = Inbox::default();
-        for _ in 0..MAX_EVENTS {
-            inbox.push(key('a'), 0);
+        let text = "a你b界".repeat(1024);
+        for character in text.chars() {
+            inbox.push(key(character), 0);
         }
-        inbox.push(key('b'), 0);
-        assert!(inbox.error.as_ref().unwrap().contains("rejected"));
         inbox.push(Event::Resize(20, 4), 0);
         inbox.push(Event::Resize(80, 20), 0);
         inbox.push(
@@ -296,11 +293,15 @@ mod tests {
         );
         assert_eq!(inbox.resize, Some((80, 20)));
         assert!(inbox.quit);
-        assert_eq!(inbox.events.len(), MAX_EVENTS);
+        assert!(inbox.error.is_none());
+        for character in text.chars() {
+            assert_eq!(inbox.pop(0).unwrap().event, key(character));
+        }
+        assert!(inbox.pop(0).is_none());
     }
 
     #[test]
-    fn paste_has_a_byte_limit_and_keeps_literal_unicode_in_one_event() {
+    fn large_paste_keeps_literal_unicode_in_one_event() {
         let mut inbox = Inbox::default();
         inbox.push(
             Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
@@ -313,9 +314,52 @@ mod tests {
         assert!(matches!(inbox.pop(0).unwrap().event, Event::Key(_)));
         inbox.push(Event::Paste("你好\nworld".into()), 0);
         assert!(matches!(inbox.pop(0).unwrap().event, Event::Paste(text) if text == "你好\nworld"));
-        inbox.push(Event::Paste("x".repeat(MAX_BYTES + 1)), 0);
-        assert!(inbox.error.is_some());
-        assert!(inbox.events.is_empty());
+        let text = "你好\nworld".repeat(16384);
+        inbox.push(Event::Paste(text.clone()), 0);
+        assert_eq!(inbox.pop(0).unwrap().event, Event::Paste(text));
+        assert!(inbox.error.is_none());
+        assert!(inbox.pop(0).is_none());
+    }
+
+    #[test]
+    fn hover_bursts_coalesce_without_crossing_input_or_frame_boundaries() {
+        let mut inbox = Inbox::default();
+        let moved = |column, modifiers| {
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Moved,
+                column,
+                row: 1,
+                modifiers,
+            })
+        };
+        for column in 1..=4096 {
+            inbox.push(moved(column, KeyModifiers::NONE), 7);
+        }
+        let barriers = [
+            mouse(),
+            pointer(MouseEventKind::Drag(MouseButton::Left)),
+            pointer(MouseEventKind::Up(MouseButton::Left)),
+            pointer(MouseEventKind::ScrollDown),
+            key('你'),
+            Event::Paste("中文".into()),
+        ];
+        let mut expected = vec![moved(4096, KeyModifiers::NONE)];
+        for barrier in barriers {
+            inbox.push(barrier.clone(), 7);
+            inbox.push(moved(5, KeyModifiers::NONE), 7);
+            inbox.push(moved(6, KeyModifiers::NONE), 7);
+            expected.extend([barrier, moved(6, KeyModifiers::NONE)]);
+        }
+        inbox.push(moved(7, KeyModifiers::SHIFT), 7);
+        expected.push(moved(7, KeyModifiers::SHIFT));
+        for event in expected {
+            assert_eq!(inbox.pop(7).unwrap().event, event);
+        }
+        assert!(inbox.pop(7).is_none());
+        inbox.push(moved(1, KeyModifiers::NONE), 7);
+        inbox.push(moved(2, KeyModifiers::NONE), 8);
+        assert_eq!(inbox.pop(7).unwrap().event, moved(1, KeyModifiers::NONE));
+        assert_eq!(inbox.pop(8).unwrap().event, moved(2, KeyModifiers::NONE));
     }
 
     #[test]
@@ -397,25 +441,29 @@ mod tests {
     }
 
     #[test]
-    fn wheel_group_reuses_the_existing_budget_and_releases_its_bytes() {
+    fn wheel_bursts_split_at_the_native_steps_width_without_losing_input() {
         let mut inbox = Inbox::default();
-        for _ in 0..MAX_EVENTS {
+        for _ in 0..65536 {
             inbox.push(pointer(MouseEventKind::ScrollDown), 7);
         }
-        assert_eq!(inbox.pop_batch(7).len(), 128);
-        inbox.push(Event::Paste("z".repeat(MAX_BYTES)), 8);
+        inbox.push(mouse(), 7);
+        assert_eq!(inbox.pop_batch(7).len(), 65535);
+        assert_eq!(inbox.pop_batch(7).len(), 1);
+        assert_eq!(inbox.pop(7).unwrap().event, mouse());
+        let text = "z".repeat(256 * 1024);
+        inbox.push(Event::Paste(text.clone()), 8);
         assert_eq!(
             inbox
                 .pop_batch(8)
                 .into_iter()
                 .map(|input| input.event)
                 .collect::<Vec<_>>(),
-            vec![Event::Paste("z".repeat(MAX_BYTES))]
+            vec![Event::Paste(text)]
         );
     }
 
     #[test]
-    fn native_wheels_keep_the_queue_bound_and_actions_and_resize_revoke_them() {
+    fn native_wheels_keep_their_owner_and_actions_and_resize_revoke_them() {
         use nsh_core::{
             Bounds, MountBatch, MountItem, Point, ROOT_ID, Size, ViewKind, geometry::px,
         };
@@ -450,7 +498,7 @@ mod tests {
             last_frame: Some((7, surface.input_snapshot())),
             ..Default::default()
         };
-        for _ in 0..MAX_EVENTS {
+        for _ in 0..128 {
             inbox.push(pointer(MouseEventKind::ScrollDown), 0);
         }
         let inputs = inbox.pop_batch(8);
@@ -473,9 +521,9 @@ mod tests {
             })
             .collect();
         assert_eq!(offsets, [(2, px(6144.0))]);
-        inbox.push(Event::Paste("z".repeat(MAX_BYTES)), 8);
+        inbox.push(Event::Paste("z".repeat(256 * 1024)), 8);
         assert!(
-            matches!(inbox.pop(8).unwrap().event, Event::Paste(text) if text.len() == MAX_BYTES)
+            matches!(inbox.pop(8).unwrap().event, Event::Paste(text) if text.len() == 256 * 1024)
         );
         inbox.push(pointer(MouseEventKind::ScrollUp), 0);
         inbox.reject_through = 7;
