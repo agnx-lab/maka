@@ -201,7 +201,7 @@ async fn computer_consent_keeps_the_original_target_boundary_and_single_click_re
 
         open_request(&mut view, "Capability request").await;
         wait_enabled_node(&mut view, "[D] Deny").await;
-        support::click_label(&mut view, "[D] Deny");
+        support::click_button(&mut view, "[D] Deny").await;
         wait_view(&mut view, |screen| screen.contains("Recorded outcome") && screen.contains("deny")).await;
         assert!(matches!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome, Some(InteractionOutcome::ClientCapabilityDecision { decision: Decision::Deny, .. })));
         let target = maka_workspace_api::computer::target();
@@ -213,7 +213,7 @@ async fn computer_consent_keeps_the_original_target_boundary_and_single_click_re
         open_request(&mut view, "Capability request").await;
         wait_enabled_node(&mut view, "[Ctrl+Enter] Allow").await;
         gate.arm();
-        support::click_label(&mut view, "[Ctrl+Enter] Allow");
+        support::click_button(&mut view, "[Ctrl+Enter] Allow").await;
         await_response_gate(&mut view, &gate).await;
         let original = original_response(&client, &allowed.request_id).await;
         let canonical = fixture.store.interaction(&allowed.request_id).await.unwrap().unwrap();
@@ -310,7 +310,7 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
 
         wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
         gate.arm();
-        support::click_label(&mut view, "[Ctrl+Enter] Submit form");
+        support::click_button(&mut view, "[Ctrl+Enter] Submit form").await;
         await_response_gate(&mut view, &gate).await;
         let original = original_response(&client, &record.request_id).await;
         let canonical = fixture.store.interaction(&record.request_id).await.unwrap().unwrap();
