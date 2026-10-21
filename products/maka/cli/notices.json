@@ -1,11 +1,11 @@
 {
   "inputs": {
-    "Cargo.lock": "4fc8da2fa5859c12f85168708ff89d697dc62cbd9c60f2f6366ed01d1558f514",
-    "Cargo.toml": "1fc8ed5d123aa0bb23c8541cc5929200f8afd71449bc5186678847bb7470be24",
+    "Cargo.lock": "b979defcaf98ea30e298f1d1853cda9255f86b057f70afa956f22b43a6ac894d",
+    "Cargo.toml": "916fe691bd74f84c3dce9739e925382ae0266810027ec883dca0b074e6b07df9",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
     "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
-    "packages/plugin-sdk/src/contracts.ts": "53457028d8362de32b3983d01e16958fedc143d33ef6654fc706a842307a5e32",
+    "packages/plugin-sdk/src/contracts.ts": "619c359067913bcab009e066c0a1ee229fcdd0cd73b750c965d1db9e4475c19f",
     "packages/plugin-sdk/src/generated/runtime.ts": "5eb51ec0afff4988bc68e5a65ea9a39656cc3cbccc996e7ec6c121bba8a5d1f6",
     "packages/plugin-sdk/src/index.ts": "e33226c48bc54fbf377a604ead3b28ea448f50c287582804dab1e6e1059a6f71",
     "packages/plugin-sdk/src/native.ts": "6a826e012f5b7887c88ea295d5826b29939ae2ff0ff722db7b4124e37fc49749",
@@ -456,6 +456,7 @@
     "products/maka/desktop-shell/app/locale.js": "b1bb5c17c658a271a512b4a5b8be991e4fb18865ae6795c4a54fa8eefe3d0fcc",
     "products/maka/desktop-shell/app/main.js": "fa0c9f22c8399aca940b63d34f8402fcc31aa6d57172f813ebc0c31493c82086",
     "products/maka/desktop-shell/app/messages.js": "9875bb6ec902b42abf5ec2f89e08e3f05718f3e835074ea5a1826a4d891bd597",
+    "products/maka/desktop-shell/app/patch.d.ts": "5ed938fe54e8e41150fcda57b032885749fa35c900e7bc4592420e42a587646e",
     "products/maka/desktop-shell/app/patch.js": "590c7b57894888439dc5c196b50c7971e9c05ce8089784fd5af61c61aa60e6f8",
     "products/maka/desktop-shell/app/search.js": "8f959ffc154d28ad425e7a6e5d76a1d175b909937e056c914337066e56219863",
     "products/maka/desktop-shell/app/sessions.js": "e9143f98d5203a1583962d101690e1b1ce64389c3d2727a948dd522e0b3b1113",
