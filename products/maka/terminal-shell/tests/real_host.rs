@@ -2128,10 +2128,10 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         terminal.wait_for_absent("Image preview").await;
         terminal.wait_for("Open image · 192 × 128").await;
         request.delta("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
+        // Closing the preview preserves its opener's reading position. The
+        // response is outside that reader; Ctrl+L explicitly returns to latest.
+        terminal.send(b"\x0c");
         terminal.wait_for("Writing response").await;
-        // Closing the preview preserves its opener's reading position. Use
-        // native activity scrolling to reveal the new response below the image.
-        terminal.send(b"\x1b[F");
         terminal.wait_for("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
@@ -2259,7 +2259,9 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         evidence("production-sixel-resize-wire", std::str::from_utf8(&terminal.wire()[after_resize..]).unwrap());
         evidence("production-sixel-resize-unicode", &wide);
         request.delta("GRAPHICS_RUN_CONTINUES_AFTER_RESIZE").await;
-        terminal.send(b"\x1b[F");
+        // End belongs to the inner reader. Ctrl+L returns to the outer response
+        // and resumes following even if the provider delta has not arrived yet.
+        terminal.send(b"\x0c");
         terminal.wait_for("GRAPHICS_RUN_CONTINUES_AFTER_RESIZE").await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
