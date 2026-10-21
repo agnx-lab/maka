@@ -117,7 +117,7 @@ impl Pty {
             sixel: None,
         }
     }
-    /// Simulate a Sixel terminal, answering only queries the binary actually emits.
+    /// Answer the initial Sixel measurement; later replies are controlled by the case.
     /// Its cell-size reply includes Ctrl+P to exercise mixed keyboard input.
     /// This selects emulator behavior; it does not configure the application.
     pub fn spawn_sixel(root: &Path, session: Option<&str>) -> Self {
@@ -207,6 +207,10 @@ impl Pty {
                 assert_eq!(reply.matches("\x1b[?6c").count(), 1);
                 reply = reply.replace("\x1b[?6c", "\x1b[?62;1;4;22c");
                 sixel.attributes = true;
+            } else if sixel.attributes {
+                // Manual resize measurements must remain unanswered until the
+                // case supplies their original replies, including DA1.
+                reply = reply.replace("\x1b[?6c", "");
             }
             if !sixel.cells && self.output.windows(5).any(|bytes| bytes == b"\x1b[16t") {
                 reply.push_str("\x1b[6;17;9t");
