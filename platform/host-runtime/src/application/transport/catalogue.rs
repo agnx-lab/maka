@@ -105,26 +105,16 @@ impl Catalogue {
         Ok((catalogue, reader.inner))
     }
     pub fn validate(&self) -> Result<()> {
-        if self.endpoints.is_empty()
-            || self.endpoints.len() > 128
-            || self
-                .startup_error
-                .as_ref()
-                .is_some_and(|error| error.len() > 64 * 1024)
-        {
+        if self.endpoints.is_empty() {
             return Err("invalid Host endpoint catalogue".into());
         }
         for (name, description) in &self.endpoints {
             if name.is_empty()
-                || name.len() > 256
                 || description
                     .registration_epoch
                     .is_some_and(|epoch| epoch.is_nil())
-                || description.provider.0.is_empty()
-                || description.provider.0.len() > 64
-                || description.provider.0.iter().any(Uuid::is_nil)
+                || description.provider.validate().is_err()
                 || description.export.is_empty()
-                || description.export.len() > 256
                 || description.contract.transport != Transport::Remote
                 || !matches!(description.contract.interface, Interface::Service { .. })
             {

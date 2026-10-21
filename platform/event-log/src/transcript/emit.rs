@@ -18,10 +18,10 @@
  */
 
 //! Exact own-source rows from the existing presentation reducer.
-use super::{MAX_TEXT_BYTES, evidence, read};
+use super::{evidence, read};
 use crate::StoreError;
 use maka_agent_facts::event::{Fact, ToolOutcome};
-use maka_presentation::{InvocationView, MAX_TOOL_ROW_BYTES, ProjectionError, Row};
+use maka_presentation::{InvocationView, Row};
 use rusqlite::{Connection as RawConnection, OptionalExtension, params};
 use sqlx::SqliteConnection;
 
@@ -92,20 +92,15 @@ pub(super) fn source_on_handle(
         return Ok(vec![super::compaction::project(db, source)?]);
     }
     let ids = evidence::selected_on_handle(db, &invocation, step.as_deref(), source, true)?;
-    let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
+    let mut view = InvocationView::new();
     let mut own = Vec::new();
     for sequence in ids {
         let fact = evidence::fact_on_handle(db, sequence)?;
         let resolved = if let Fact::ToolSettled {
-            outcome: ToolOutcome::Succeeded { raw, .. },
+            outcome: ToolOutcome::Succeeded { .. },
             ..
         } = &fact.event.fact
         {
-            // Raw wrapper overhead is smaller than the required Message envelope,
-            // so this bound rejects before hydration; presentation checks exact size.
-            if raw.bytes > MAX_TOOL_ROW_BYTES as u64 {
-                return Err(ProjectionError::TooLarge.into());
-            }
             Some(crate::tool_payloads::resolve_in_transaction(
                 db,
                 &fact.event,

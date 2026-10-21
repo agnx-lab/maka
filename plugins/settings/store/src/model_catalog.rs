@@ -58,13 +58,3 @@ pub fn resolve(
         .map(|model| entry::resolve(row, model, default))
         .collect())
 }
-
-pub(crate) fn wire_limit(text: &str, max: usize) -> String {
-    let mut units = 0;
-    text.chars()
-        .take_while(|character| {
-            units += character.len_utf16();
-            units <= max
-        })
-        .collect()
-}

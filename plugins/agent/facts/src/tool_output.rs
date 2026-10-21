@@ -30,8 +30,8 @@ mod mcp;
 mod media;
 pub(crate) use durable::encode_raw_tool_result;
 pub use durable::{
-    DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE, DurableToolProjection, MAX_RAW_TOOL_RESULT_BYTES,
-    MAX_RAW_TOOL_RESULT_JSON_DEPTH, ProjectionPart, RawToolResultRef, decode_raw_tool_result,
+    DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE, DurableToolProjection, ProjectionPart,
+    RawToolResultRef, decode_raw_tool_result,
 };
 pub use media::{ToolContent, ToolSuccess};
 

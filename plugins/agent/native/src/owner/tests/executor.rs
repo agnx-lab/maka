@@ -534,15 +534,17 @@ async fn executor_service_selects_the_exact_authorized_import_member() {
             .unwrap()
             .manifest()
             .clone();
+        let executor_name = format!("external-{}", "x".repeat(160));
+        let import_name = format!("executor-{}", "r".repeat(300));
         let mut manifest_application = manifest.application.as_ref().unwrap().declaration().clone();
-        manifest_application
+        let imports = &mut manifest_application
             .entries
             .get_mut(&EntryTarget::Host)
             .unwrap()
-            .imports
-            .get_mut("executor")
-            .unwrap()
-            .cardinality = Cardinality::Many { min: 0, max: 8 };
+            .imports;
+        let mut selected_import = imports.remove("executor").unwrap();
+        selected_import.cardinality = Cardinality::Many { min: 0, max: 8 };
+        imports.insert(import_name.clone(), selected_import);
         let package = Package::new(BTreeMap::from([(MANIFEST_FILE.into(), {
             manifest.application = Some(
                 maka_plugin_core::package::CheckedDeclaration::new(manifest_application).unwrap(),
@@ -555,14 +557,26 @@ async fn executor_service_selects_the_exact_authorized_import_member() {
         input.instances.insert("decoy".into(), decoy);
         let agent = input.instances.get_mut("provider").unwrap();
         agent.package = package.application_ref().into();
-        agent.configuration.values.get_mut("executors").unwrap()[0]["member"] = json!(1);
-        agent.bindings.get_mut("executor").unwrap().insert(
+        let configured = &mut agent.configuration.values.get_mut("executors").unwrap()[0];
+        configured["member"] = json!(1);
+        configured["name"] = json!(executor_name);
+        configured["import"] = json!(import_name);
+        let validator = jsonschema::validator_for(&maka_agent_api::configuration_schema()).unwrap();
+        let configuration = serde_json::to_value(&agent.configuration.values).unwrap();
+        for (field, invalid) in [("name", "bad name"), ("name", ""), ("import", "")] {
+            let mut malformed = configuration.clone();
+            malformed["executors"][0][field] = json!(invalid);
+            assert!(!validator.is_valid(&malformed));
+        }
+        let mut targets = agent.bindings.remove("executor").unwrap();
+        targets.insert(
             0,
             Target::Instance {
                 path: vec!["decoy".into()],
                 export: "executor".into(),
             },
         );
+        agent.bindings.insert(import_name.clone(), targets);
         packages.push(package);
         let source = f
             .store
@@ -579,13 +593,10 @@ async fn executor_service_selects_the_exact_authorized_import_member() {
         f.app.ready().await.unwrap();
         let session = f.create("Selected member").await;
         let mut changes = f.store.subscribe_commits();
+        let mut execution = input_for(&session, "second binding");
+        execution["executor"]["executor"] = json!(executor_name);
         let accepted = f
-            .mutation(
-                2,
-                "execute",
-                input_for(&session, "second binding"),
-                Uuid::new_v4(),
-            )
+            .mutation(2, "execute", execution, Uuid::new_v4())
             .await
             .unwrap();
         assert_eq!(accepted["kind"], "started", "{accepted}");
@@ -1077,7 +1088,7 @@ async fn executor_attachments_use_only_owned_immutable_uploads_and_original_rece
                 .parse()
                 .expect("MAKA_ARTIFACT_PROBE_BYTES must be an integer");
             assert!(
-                bytes as u64 <= maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES,
+                bytes as u64 <= (50 * 1024 * 1024),
                 "artifact probe must fit the actual attachment byte limit"
             );
             bytes

@@ -17,7 +17,6 @@
  * under the License.
  */
 
-use super::wire_limit;
 use maka_agent_facts::configuration::ConnectionCatalogEntry;
 use maka_agent_facts::configuration::ModelCatalogEntry;
 use maka_agent_facts::configuration::ModelInfo;
@@ -66,8 +65,8 @@ pub(super) fn resolve(
         thinking_levels,
         input_limit: model.input_limit,
         compaction_threshold: profile.and_then(|p| p.compaction_threshold),
-        display_name: model.display_name.as_deref().map(|s| wire_limit(s, 512)),
-        description: model.description.as_deref().map(|s| wire_limit(s, 2048)),
+        display_name: model.display_name.clone(),
+        description: model.description.clone(),
         context_window: model.context_window,
         knowledge_cutoff: model.knowledge_cutoff.clone(),
     }

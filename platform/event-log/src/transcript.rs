@@ -38,5 +38,3 @@ mod timing;
 mod tool_metadata;
 mod tools;
 pub use read::*;
-
-const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;

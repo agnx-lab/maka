@@ -286,7 +286,9 @@ async fn final_coalesced_snapshot_flushes_before_cleanup_and_restores_after_root
 async fn checkpoint_load_admits_actual_content_and_preserves_records_when_budget_is_exhausted() {
     let (_dir, store) = store().await;
     let source = source(&store, Uuid::new_v4(), 0).await;
-    let policy = policy();
+    let mut policy = policy();
+    policy.metadata = json!({"complete": "保留 metadata ".repeat(3000)});
+    policy.data_source = json!({"original": "source".repeat(1000)});
     let checkpoints = store.ui_checkpoints(&source, &instance()).await.unwrap();
     let large = format!("甲👩‍💻z{}COMPLETE END", "保留中文😀。\n".repeat(70_000));
     assert!(large.len() > 1024 * 1024);
@@ -346,7 +348,10 @@ async fn checkpoint_load_admits_actual_content_and_preserves_records_when_budget
                 "a small checkpoint must not reserve the former whole-content ceiling"
             );
             assert_eq!(failed, None);
-            assert!(retained_bytes > 0 && retained_bytes < 128 * 1024);
+            assert_eq!(
+                retained_bytes,
+                body.len() + maka_plugin_core::json::encoded_size(&saved, usize::MAX).unwrap()
+            );
         } else {
             assert_eq!(loaded, None);
             assert!(
@@ -567,14 +572,21 @@ async fn preference_busy_keeps_the_original_write_result_and_retirement_drains_i
     })
     .await
     .unwrap();
+    let original_payload = json!({"original": "完整 preference ".repeat(3000)});
+    let original_bytes = maka_plugin_core::json::value_size(&original_payload, usize::MAX).unwrap();
     let blocker = rusqlite::Connection::open(dir.path().join("root").join(ROOT_DATABASE)).unwrap();
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
     props.command = Some(ValueCheckpointCommand::Write {
         sequence: 1,
         expected_revision: None,
-        value: json!({"original": true}),
+        value: original_payload.clone(),
     });
     preferences.update(&props);
+    assert_eq!(
+        budget.usage().0,
+        original_bytes,
+        "accepted queued value retains its reservation"
+    );
     let saving = preferences.observe().unwrap();
     assert_eq!(saving.sequence, 1);
     assert!(matches!(saving.state, ValueCheckpointState::Saving));
@@ -608,7 +620,12 @@ async fn preference_busy_keeps_the_original_write_result_and_retirement_drains_i
     else {
         panic!("the original accepted write must finish");
     };
-    assert_eq!(value, Some(json!({"original": true})));
+    assert_eq!(value, Some(original_payload.clone()));
+    assert_eq!(
+        budget.usage().0,
+        original_bytes,
+        "ready observation retains its original reservation"
+    );
     let checkpoints = scope.open(&store).unwrap();
     let (saved, ()) = checkpoints
         .read(&props.key, |_| Ok(()))
@@ -618,7 +635,7 @@ async fn preference_busy_keeps_the_original_write_result_and_retirement_drains_i
     assert_eq!(saved.revision, revision);
     assert_eq!(
         serde_json::from_slice::<Value>(&saved.content).unwrap(),
-        json!({"original": true})
+        original_payload
     );
 
     blocker.execute_batch("BEGIN IMMEDIATE").unwrap();

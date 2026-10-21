@@ -424,7 +424,7 @@ fn settlement(
         id: fire.id.clone(),
         at: (now() as i64).max(fire.scheduled_at),
         outcome,
-        message: message.chars().take(1024).collect(),
+        message: message.to_owned(),
         session_id,
         run_id,
     }

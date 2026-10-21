@@ -52,7 +52,7 @@ impl ToolExecutor for Fixture {
     }
 }
 fn context() -> CellContext {
-    CellContext::new(CellStore::default(), 1024 * 1024, vec![])
+    CellContext::new(CellStore::default(), vec![])
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

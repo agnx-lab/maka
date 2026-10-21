@@ -146,11 +146,10 @@ impl Host {
         options: Options,
     ) -> Result<Arc<Self>> {
         if options.handshake_timeout.is_zero()
-            || options.handshake_timeout > Duration::from_secs(300)
             || options
                 .generation
                 .as_ref()
-                .is_some_and(|value| value.is_empty() || value.len() > 512)
+                .is_some_and(|value| value.is_empty())
         {
             return Err("invalid Host options".into());
         }
@@ -394,7 +393,7 @@ impl Host {
         let opening: Opening = tokio::select! {
             biased;
             () = self.stop.cancelled() => return Err("Host is closing".into()),
-            value = tokio::time::timeout(self.options.handshake_timeout, input.read_bounded(512 * 1024)) => value.map_err(|_| "Host handshake timed out")??,
+            value = tokio::time::timeout(self.options.handshake_timeout, input.read()) => value.map_err(|_| "Host handshake timed out")??,
         };
         if opening.version != VERSION || opening.epoch.is_some_and(|epoch| epoch != self.epoch) {
             return Err("Host protocol or incarnation changed".into());
@@ -701,7 +700,7 @@ impl Host {
         }
     }
     fn check_peer_selections(&self, selections: &BTreeMap<String, HostEndpoint>) -> Result<()> {
-        if selections.is_empty() || selections.len() > 128 {
+        if selections.is_empty() {
             return Err("invalid peer endpoint selections".into());
         }
         let published = self.selections.lock().unwrap();

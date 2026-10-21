@@ -57,9 +57,6 @@ fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Optio
 
 /// Decode account facts once for discovery and provider request preparation.
 pub fn decode_model_inventory(bytes: &[u8]) -> Result<Vec<ModelInfo>, Error> {
-    if bytes.len() > 4 * 1024 * 1024 {
-        return Err(invalid());
-    }
     let text = String::from_utf8_lossy(bytes);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let mut inventory: Inventory = serde_json::from_str(text).map_err(|_| invalid())?;
@@ -75,7 +72,6 @@ pub fn decode_model_inventory(bytes: &[u8]) -> Result<Vec<ModelInfo>, Error> {
             continue;
         };
         if id.is_empty()
-            || id.encode_utf16().count() > 512
             || id.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             || row.visibility.as_deref().is_some_and(|value| {
                 matches!(
@@ -139,9 +135,6 @@ pub fn decode_model_inventory(bytes: &[u8]) -> Result<Vec<ModelInfo>, Error> {
         }
         info.validate().map_err(|_| invalid())?;
         models.push(info);
-        if models.len() > 2048 {
-            return Err(invalid());
-        }
     }
     Ok(models)
 }

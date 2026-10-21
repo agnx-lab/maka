@@ -572,8 +572,15 @@ unsafe fn in_application_menu(pid: i32, element: AXUIElementRef) -> bool {
         };
         let mut current = RetainedElement::retain(element as usize);
         let mut matched = false;
-        for _ in 0..64 {
+        let mut ancestors = Vec::<RetainedElement>::new();
+        loop {
             let pointer = current.as_ptr() as AXUIElementRef;
+            if ancestors.iter().any(|ancestor| {
+                CFEqual((ancestor.as_ptr() as AXUIElementRef).cast(), pointer.cast()) != 0
+            }) {
+                break;
+            }
+            ancestors.push(RetainedElement::retain(pointer as usize));
             if CFEqual(pointer.cast(), menu.cast()) != 0 {
                 matched = true;
                 break;

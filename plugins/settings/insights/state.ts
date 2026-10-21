@@ -74,7 +74,6 @@ export function savedView(value: unknown): SavedView | null {
       v.selection.status ?? null,
     ) ||
     typeof v.selection.search !== 'string' ||
-    new TextEncoder().encode(v.selection.search).length > 1024 ||
     /[\u0000-\u001f\u007f]/.test(v.selection.search)
   )
     return null;

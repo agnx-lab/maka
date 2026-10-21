@@ -47,9 +47,6 @@ impl Intent {
             return Err(Error::Invalid("Unsupported publication intent".into()));
         }
         for manifest in [&self.expected, &self.next].into_iter().flatten() {
-            if manifest.len() > 256 {
-                return Err(Error::Invalid("Oversized Skill manifest".into()));
-            }
             for (path, fact) in manifest {
                 super::tree::validate(path)?;
                 if let Fact::File { hash, mode } = fact
@@ -85,7 +82,7 @@ pub(super) async fn replay(
             ));
         }
     }
-    match transaction.read("committed", 80).await {
+    match transaction.read("committed").await {
         Ok((bytes, _)) if bytes == hash.as_bytes() => return Ok(()),
         Ok(_) => return Err(Error::Invalid("Invalid Skill commit marker".into())),
         Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}

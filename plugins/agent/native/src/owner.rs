@@ -1107,22 +1107,18 @@ impl Owner {
     }
 }
 fn metadata_rejection(title: &str, labels: &[String]) -> Option<Rejection> {
-    if title.trim().is_empty()
-        || title.chars().count() > 128
-        || title.len() > 512
-        || title.chars().any(char::is_control)
-    {
+    if title.trim().is_empty() || title.chars().any(char::is_control) {
         Some(Rejection::TitleInvalid)
-    } else if labels.len() > 32
-        || labels.iter().any(|label| {
-            label.trim().is_empty() || label.len() > 128 || label.chars().any(char::is_control)
-        })
+    } else if labels
+        .iter()
+        .any(|label| label.trim().is_empty() || label.chars().any(char::is_control))
     {
         Some(Rejection::LabelsInvalid)
     } else {
         None
     }
 }
+
 impl Owner {
     pub(crate) fn prepare_retirement(
         &self,
@@ -1205,10 +1201,9 @@ impl maka_host_runtime::application::NativeRetirement for Idle {
 }
 use maka_agent_authority::now;
 fn jsonschema_valid(input: &Value) -> bool {
-    serde_json::to_vec(input).is_ok_and(|bytes| bytes.len() <= 64 * 1024)
-        && jsonschema::validator_for(&configuration_schema())
-            .expect("configuration schema")
-            .is_valid(input)
+    jsonschema::validator_for(&configuration_schema())
+        .expect("configuration schema")
+        .is_valid(input)
 }
 
 fn public_error(error: RunError) -> String {

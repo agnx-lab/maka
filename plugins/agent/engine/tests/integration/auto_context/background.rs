@@ -248,7 +248,7 @@ async fn background_summary_drains_before_terminal_handoff_and_retirement() {
                 assert!(prefix.events.iter().any(|e| matches!(&e.event.fact,
                     Fact::InvocationEnded { outcome: InvocationOutcome::Failed { class, .. } } if class == "reconciliation_required")));
             }
-            let mut view = maka_presentation::InvocationView::new(512 * 1024).unwrap();
+            let mut view = maka_presentation::InvocationView::new();
             let mut rows = Vec::new();
             for event in prefix.events.iter().filter(|e| e.event.invocation.invocation_id == "invocation-next") {
                 let payload = if matches!(event.event.fact, Fact::ToolSettled { outcome: maka_agent_facts::event::ToolOutcome::Succeeded { .. }, .. }) {

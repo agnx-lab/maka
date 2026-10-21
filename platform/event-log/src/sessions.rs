@@ -48,7 +48,6 @@ use sqlx::{Connection, Row, SqliteConnection};
 
 use crate::{EventLog, StoreError};
 
-pub const MAX_CONFIGURATION_BYTES: usize = 64 * 1024;
 pub const MAX_SESSION_PAGE: usize = 32;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -199,9 +198,6 @@ impl EventLog {
         validate_id(id)?;
         validate_time(now)?;
         let configuration = serde_json::to_string(configuration)?;
-        if configuration.len() > MAX_CONFIGURATION_BYTES {
-            return Err(invalid("session configuration exceeds 64 KiB"));
-        }
         let (id, fingerprint) = (id.to_owned(), fingerprint.to_owned());
         self.connection
             .run(move |connection| {
@@ -291,9 +287,6 @@ pub(crate) async fn insert(
 ) -> Result<(), StoreError> {
     validate_id(id)?;
     validate_time(now)?;
-    if configuration.len() > MAX_CONFIGURATION_BYTES {
-        return Err(invalid("session configuration exceeds 64 KiB"));
-    }
     let reserved: Option<String> =
         sqlx::query_scalar("SELECT fingerprint FROM plugin_sessions WHERE session_id = ?")
             .bind(id)
@@ -343,9 +336,6 @@ pub(crate) async fn read<T: DeserializeOwned>(
     .await?;
     if let Some(row) = raw {
         let configuration: String = row.try_get(5)?;
-        if configuration.len() > MAX_CONFIGURATION_BYTES {
-            return Err(invalid("oversized stored session configuration"));
-        }
         let configuration_digest =
             maka_agent_facts::artifact::content_digest(configuration.as_bytes());
         let configuration = serde_json::from_str(&configuration)?;
@@ -403,7 +393,6 @@ pub(crate) async fn advance_catalog(connection: &mut SqliteConnection) -> Result
 
 pub(crate) fn validate_id(id: &str) -> Result<(), StoreError> {
     if id.is_empty()
-        || id.len() > 128
         || !id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
@@ -438,8 +427,8 @@ async fn probe<T: DeserializeOwned>(
     fingerprint: &str,
 ) -> Result<Option<SessionRecord<T>>, StoreError> {
     removal::require_accepting(connection, id).await?;
-    if fingerprint.is_empty() || fingerprint.len() > 512 {
-        return Err(invalid("invalid session fingerprint length"));
+    if fingerprint.is_empty() {
+        return Err(invalid("invalid session fingerprint"));
     }
     let previous: Option<String> =
         sqlx::query_scalar("SELECT fingerprint FROM session_control WHERE id = ?")

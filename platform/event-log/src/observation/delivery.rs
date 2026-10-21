@@ -145,7 +145,7 @@ pub struct StreamEventPage {
 impl EventLog {
     /// Read only stream delivery fields in (after, through]. Unrelated facts and
     /// provider payloads consume no page budget. The byte budget counts projected
-    /// JSON, including identities and escaping; an oversized first item is an error.
+    /// JSON, including identities and escaping; the first complete item always advances.
     pub async fn session_stream_events(
         &self,
         session_id: &str,
@@ -184,10 +184,10 @@ impl EventLog {
                             // No complete RuntimeEvent is deserialized.
                             let json: &str = row.try_get(0)?;
                             if events.len() == max_events
-                                || json.len() > max_bytes.saturating_sub(bytes)
+                                || (!events.is_empty()
+                                    && json.len() > max_bytes.saturating_sub(bytes))
                             {
-                                let last = events.last().ok_or(StoreError::PrefixTooLarge)?;
-                                next_after = Some(last.sequence);
+                                next_after = events.last().map(|event| event.sequence);
                                 break;
                             }
                             let event: StoreStreamEvent = serde_json::from_str(json)?;
@@ -229,10 +229,10 @@ impl EventLog {
                             }
                         }
                         let size = serde_json::to_vec(&event)?.len();
-                        if size > max_bytes.saturating_sub(bytes) {
-                            let last: &StoreStreamEvent =
-                                enriched.last().ok_or(StoreError::PrefixTooLarge)?;
-                            next_after = Some(last.sequence);
+                        if !enriched.is_empty() && size > max_bytes.saturating_sub(bytes) {
+                            next_after = enriched
+                                .last()
+                                .map(|event: &StoreStreamEvent| event.sequence);
                             break;
                         }
                         bytes += size;

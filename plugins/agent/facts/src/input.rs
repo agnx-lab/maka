@@ -212,19 +212,10 @@ pub fn validate_receipts(receipts: &[InputReceipt]) -> Result<(), &'static str> 
                 &source.revision,
             ]
             .into_iter()
-            .any(|value| {
-                value.is_empty() || value.len() > 512 || value.chars().any(char::is_control)
-            })
+            .any(|value| value.is_empty() || value.chars().any(char::is_control))
         {
             return Err("invalid input preparation source");
         }
-    }
-    if serde_json::to_vec(receipts)
-        .map_err(|_| "invalid input preparation encoding")?
-        .len()
-        > 1024 * 1024
-    {
-        return Err("input preparation receipts exceed durable capacity");
     }
     Ok(())
 }
@@ -241,7 +232,7 @@ mod tests {
     use crate::composition::{SourceKind, SourceRevision};
 
     #[test]
-    fn input_receipts_are_bounded_by_bytes_and_sources_not_provider_inventory() {
+    fn input_receipts_accept_complete_payloads_and_validate_source_kind() {
         let mut receipts: Vec<_> = (0..4096)
             .map(|index| InputReceipt {
                 source: SourceRevision {
@@ -255,7 +246,6 @@ mod tests {
                 receipt: serde_json::json!({"message": index / 64}),
             })
             .collect();
-        assert!(serde_json::to_vec(&receipts).unwrap().len() < 1024 * 1024);
         validate_receipts(&receipts).unwrap();
         receipts[0].source.kind = SourceKind::Tool;
         assert_eq!(
@@ -264,9 +254,6 @@ mod tests {
         );
         receipts[0].source.kind = SourceKind::Input;
         receipts[0].receipt = serde_json::json!("x".repeat(1024 * 1024));
-        assert_eq!(
-            validate_receipts(&receipts),
-            Err("input preparation receipts exceed durable capacity")
-        );
+        validate_receipts(&receipts).unwrap();
     }
 }

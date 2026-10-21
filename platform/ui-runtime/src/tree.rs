@@ -70,7 +70,6 @@ struct Call {
     mount: Mount,
     request: backend::Call,
     subscription: Option<Subscription>,
-    depth: usize,
     basis: Option<(u64, Option<Surface>)>,
     root: bool,
 }
@@ -128,14 +127,6 @@ impl<V: ?Sized> Update<V> {
             native_prepared: false,
             publication: None,
         }
-    }
-    pub fn step(&mut self, depth: usize) -> Result<()> {
-        if depth > 32 {
-            return Err(Error::Invalid(
-                "component mount depth limit exceeded".into(),
-            ));
-        }
-        Ok(())
     }
     fn emit(
         &mut self,
@@ -289,7 +280,6 @@ impl<V: ?Sized + 'static> Application<V> {
                 props: Arc::new(props),
             },
             subscription: None,
-            depth: 0,
             basis: None,
             root: true,
         });
@@ -417,13 +407,11 @@ impl<V: ?Sized + 'static> Application<V> {
         };
         let revision = current.frame.revision;
         let surface = current.frame.surface.clone();
-        let depth = self.mount_depth(mount)?;
         let subscription = self.subscription(mount, &update)?;
         update.calls.push_back(Call {
             mount: mount.clone(),
             request,
             subscription,
-            depth,
             basis: Some((revision, surface)),
             root: false,
         });
@@ -503,13 +491,11 @@ impl<V: ?Sized + 'static> Application<V> {
                         call.request.props().clone(),
                         invocation,
                         call.subscription,
-                        call.depth,
                         &mut update,
                     )?;
                     continue;
                 }
                 if let Some(call) = update.calls.pop_front() {
-                    update.step(call.depth)?;
                     let previous = match &call.basis {
                         Some((revision, _)) => {
                             let current = self.current(&call.mount, &update)?;
@@ -755,9 +741,6 @@ impl<V: ?Sized + 'static> Application<V> {
     pub(super) fn provider(&self, mount: &Mount) -> Result<Activation> {
         Ok(self.runtime.mount_provider(mount)?.clone())
     }
-    pub(super) fn mount_depth(&self, mount: &Mount) -> Result<usize> {
-        Ok(self.mount_chain(mount)?.len() - 1)
-    }
     /// The owning root comes from the mount parent chain, not display reachability.
     /// Detached mounts remain attributed to their original native surface.
     pub fn mount_root(&self, mount: &Mount) -> Result<Mount> {
@@ -877,7 +860,6 @@ impl<V: ?Sized + 'static> Application<V> {
         props: Arc<Value>,
         invocation: Invocation<V>,
         subscription: Option<Subscription>,
-        depth: usize,
         update: &mut Update<V>,
     ) -> Result<()> {
         let Invocation { output } = invocation;
@@ -887,7 +869,7 @@ impl<V: ?Sized + 'static> Application<V> {
             .unwrap_or_default();
         let declarations = output.subscriptions;
         for key in output.cancel {
-            if key.is_empty() || key.len() > 128 || output.actions.iter().any(|a| a.key == key) {
+            if key.is_empty() || output.actions.iter().any(|a| a.key == key) {
                 return Err(Error::Invalid("invalid mutation cancellation key".into()));
             }
             update.cancellations.push((mount.clone(), key));
@@ -949,12 +931,10 @@ impl<V: ?Sized + 'static> Application<V> {
                         props: Arc::new(reference.props.clone()),
                     };
                     self.check_props(&old.mount, reference.props)?;
-                    update.step(depth + 1)?;
                     update.calls.push_back(Call {
                         mount: old.mount.clone(),
                         request,
                         subscription,
-                        depth: depth + 1,
                         basis: Some((revision, surface)),
                         root: false,
                     });
@@ -973,14 +953,12 @@ impl<V: ?Sized + 'static> Application<V> {
                 update.created.push(child.clone());
                 self.check_subscription(&child, reference.on)?;
                 self.check_props(&child, reference.props)?;
-                update.step(depth + 1)?;
                 update.calls.push_back(Call {
                     mount: child.clone(),
                     request: backend::Call::Mount {
                         props: Arc::new(reference.props.clone()),
                     },
                     subscription,
-                    depth: depth + 1,
                     basis: None,
                     root: false,
                 });
@@ -1132,14 +1110,11 @@ impl<V: ?Sized + 'static> Application<V> {
             };
             let revision = current.frame.revision;
             let surface = current.frame.surface.clone();
-            let depth = self.mount_depth(&route.parent)?;
             let subscription = self.subscription(&route.parent, update)?;
-            update.step(depth)?;
             update.calls.push_back(Call {
                 mount: route.parent,
                 request,
                 subscription,
-                depth,
                 basis: Some((revision, surface)),
                 root: false,
             });

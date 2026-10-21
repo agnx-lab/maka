@@ -35,8 +35,6 @@ pub use policy::{Endpoint, NativeGrant, Peer, PeerApproval, PeerPolicy, Peers};
 pub use server::Server;
 pub use wire::{Reply, Source};
 
-const MAX_GRANTED_METHODS: usize = 128;
-
 /// Explicit trusted exposure of methods on one captured service binding.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

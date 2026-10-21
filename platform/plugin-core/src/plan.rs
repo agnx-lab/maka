@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -110,6 +111,7 @@ impl Plan {
             nodes: &builder.nodes,
             aliases: &builder.aliases,
             remote: &remote,
+            resolved: RefCell::new(BTreeMap::new()),
         };
         let mut instances = BTreeMap::new();
         for (id, pending) in &builder.nodes {
@@ -127,13 +129,15 @@ impl Plan {
                 for name in pending.imports.keys() {
                     bindings.insert(
                         name.clone(),
-                        resolver.binding(id, name, &mut BTreeSet::new())?,
+                        resolver.resolve(Resolving::Import(id.clone(), name.clone()))?,
                     );
                 }
                 for name in pending.exports.keys() {
                     exports.insert(
                         name.clone(),
-                        resolver.export(id, name, &mut BTreeSet::new())?,
+                        resolver
+                            .resolve(Resolving::Export(id.clone(), name.clone()))?
+                            .remove(0),
                     );
                 }
             }
@@ -143,7 +147,7 @@ impl Plan {
             instances.insert(id.clone(), instance);
         }
         let resolve_root = |target: &composition::Target| {
-            let bindings = resolver.target(target, &[], None, &mut BTreeSet::new())?;
+            let bindings = resolver.target(target, &[], None)?;
             let [binding] = bindings.as_slice() else {
                 return Err(Error::Composition("root must select one component".into()));
             };
@@ -217,27 +221,87 @@ impl<'a> Builder<'a> {
         overrides: &[Override],
         ancestor_disabled: bool,
     ) -> Result<(), Error> {
-        composition::validate_nodes(nodes)?;
-        for patch in overrides {
-            if !nodes.contains_key(&patch.path[0]) {
-                return Err(Error::Composition(format!(
-                    "override target disappeared: {:?}",
-                    patch.path
-                )));
-            }
+        #[derive(PartialEq)]
+        struct ExpansionState {
+            package: PackageRef,
+            overrides: Vec<Override>,
         }
-        for (alias, original) in nodes {
-            if self.nodes.len() >= 4096 || namespace.len() >= 32 {
-                return Err(Error::Composition(
-                    "composition exceeds expansion limits".into(),
-                ));
+        enum Task {
+            Enter {
+                alias: String,
+                node: Box<Node>,
+                namespace: Vec<String>,
+                parent: Option<InstanceId>,
+                parameters: Arc<BTreeMap<String, Value>>,
+                overrides: Arc<[Override]>,
+                ancestor_disabled: bool,
+            },
+            Exit,
+        }
+        fn schedule(
+            tasks: &mut Vec<Task>,
+            nodes: &BTreeMap<String, Node>,
+            namespace: &[String],
+            parent: Option<&InstanceId>,
+            parameters: &BTreeMap<String, Value>,
+            overrides: &[Override],
+            ancestor_disabled: bool,
+        ) -> Result<(), Error> {
+            composition::validate_nodes(nodes)?;
+            for patch in overrides {
+                if !nodes.contains_key(&patch.path[0]) {
+                    return Err(Error::Composition(format!(
+                        "override target disappeared: {:?}",
+                        patch.path
+                    )));
+                }
             }
-            let mut node = original.clone();
+            let parameters = Arc::new(parameters.clone());
+            let overrides: Arc<[Override]> = overrides.into();
+            for (alias, node) in nodes.iter().rev() {
+                tasks.push(Task::Enter {
+                    alias: alias.clone(),
+                    node: Box::new(node.clone()),
+                    namespace: namespace.to_vec(),
+                    parent: parent.cloned(),
+                    parameters: parameters.clone(),
+                    overrides: overrides.clone(),
+                    ancestor_disabled,
+                });
+            }
+            Ok(())
+        }
+        let mut tasks = Vec::new();
+        let mut active = Vec::new();
+        schedule(
+            &mut tasks,
+            nodes,
+            namespace,
+            parent,
+            parameters,
+            overrides,
+            ancestor_disabled,
+        )?;
+        while let Some(task) = tasks.pop() {
+            let Task::Enter {
+                alias,
+                node,
+                namespace,
+                parent,
+                parameters,
+                overrides,
+                ancestor_disabled,
+            } = task
+            else {
+                active.pop();
+                continue;
+            };
+            let mut node = *node;
             let mut child_overrides = BTreeMap::new();
             for patch in &node.overrides {
                 child_overrides.insert(patch.path.clone(), patch.clone());
             }
-            for patch in overrides.iter().filter(|patch| patch.path[0] == *alias) {
+            for patch in overrides.iter().filter(|patch| patch.path[0] == alias) {
                 if patch.path.len() == 1 {
                     if let Some(package) = &patch.package {
                         node.package = package.clone().into();
@@ -288,7 +352,9 @@ impl<'a> Builder<'a> {
             }
             let child_overrides: Vec<_> = child_overrides.into_values().collect();
             node.validate()?;
-            let mut identity = parent.map_or_else(Vec::new, |parent| parent.0.clone());
+            let mut identity = parent
+                .as_ref()
+                .map_or_else(Vec::new, |parent| parent.0.clone());
             identity.push(node.key);
             let identity = InstanceId(identity);
             identity.validate()?;
@@ -297,6 +363,7 @@ impl<'a> Builder<'a> {
             let package = match &node.package {
                 PackageSelection::Pinned { package } => package.clone(),
                 PackageSelection::Current => parent
+                    .as_ref()
                     .map(|parent| self.nodes[parent].instance.package.clone())
                     .ok_or_else(|| {
                         Error::Composition(
@@ -312,7 +379,7 @@ impl<'a> Builder<'a> {
             })?;
             let configuration = Value::Object(
                 node.configuration
-                    .resolve(parameters)?
+                    .resolve(&parameters)?
                     .into_iter()
                     .collect(),
             );
@@ -371,7 +438,7 @@ impl<'a> Builder<'a> {
                     instance: Instance {
                         identity: identity.clone(),
                         path: path.clone(),
-                        parent: parent.cloned(),
+                        parent: parent.clone(),
                         package: package.clone(),
                         disabled,
                         configuration,
@@ -386,7 +453,7 @@ impl<'a> Builder<'a> {
             );
             if node.use_package == PackageUse::Composition {
                 let template = declaration.composition.as_ref().unwrap();
-                let mut supplied = node.parameters.resolve(parameters)?;
+                let mut supplied = node.parameters.resolve(&parameters)?;
                 for name in supplied.keys() {
                     if !template.parameters.contains_key(name) {
                         return Err(Error::Composition(format!(
@@ -405,7 +472,19 @@ impl<'a> Builder<'a> {
                     }
                     crate::validate_value(&parameter.schema, &supplied[name])?;
                 }
-                self.expand(
+                // Only package selection and effective child overrides determine topology.
+                // Repeated packages with shrinking override paths can still terminate.
+                let state = ExpansionState {
+                    package,
+                    overrides: child_overrides.clone(),
+                };
+                if active.contains(&state) {
+                    return Err(Error::Composition("cyclic composition expansion".into()));
+                }
+                active.push(state);
+                tasks.push(Task::Exit);
+                schedule(
+                    &mut tasks,
                     &template.children,
                     &path,
                     Some(&identity),
@@ -429,117 +508,137 @@ struct Resolver<'a> {
     nodes: &'a BTreeMap<InstanceId, Pending<'a>>,
     aliases: &'a BTreeMap<Vec<String>, InstanceId>,
     remote: &'a BTreeMap<RemoteCapability, Arc<Export>>,
+    resolved: RefCell<BTreeMap<Resolving, Vec<Binding>>>,
 }
 
 impl Resolver<'_> {
-    fn binding(
-        &self,
-        instance: &InstanceId,
-        name: &str,
-        stack: &mut BTreeSet<Resolving>,
-    ) -> Result<Vec<Binding>, Error> {
-        let key = Resolving::Import(instance.clone(), name.into());
-        if stack.len() >= 128 || !stack.insert(key.clone()) {
-            return Err(Error::Composition("cyclic import forwarding".into()));
-        }
-        let pending = &self.nodes[instance];
-        if pending.instance.disabled {
-            return Err(Error::Composition(
-                "binding to a disabled structural instance".into(),
-            ));
-        }
-        let import = pending
-            .imports
-            .get(name)
-            .ok_or_else(|| Error::Composition(format!("undeclared imported binding: {name}")))?;
-        let namespace = &pending.instance.path[..pending.instance.path.len() - 1];
-        let mut bindings = Vec::new();
-        for target in pending.bindings.get(name).into_iter().flatten() {
-            bindings.extend(self.target(
-                target,
-                namespace,
-                pending.instance.parent.as_ref(),
-                stack,
-            )?);
-            if bindings.len() > 4096 {
-                return Err(Error::Composition("expanded binding exceeds limits".into()));
+    fn resolve(&self, root: Resolving) -> Result<Vec<Binding>, Error> {
+        let mut resolved = self.resolved.borrow_mut();
+        let mut active = BTreeSet::new();
+        let mut tasks = vec![(root.clone(), false)];
+        while let Some((key, finishing)) = tasks.pop() {
+            if resolved.contains_key(&key) {
+                continue;
             }
-        }
-        let unique: BTreeSet<_> = bindings.iter().map(|binding| &binding.provider).collect();
-        if unique.len() != bindings.len() {
-            return Err(Error::Composition(format!(
-                "duplicate provider in binding: {name}"
-            )));
-        }
-        for binding in &bindings {
-            if !import.contract.accepts(&binding.declaration.contract) {
-                return Err(Error::Contract(format!(
-                    "import {name} does not accept its bound export"
-                )));
+            let (instance, name) = match &key {
+                Resolving::Import(instance, name) | Resolving::Export(instance, name) => {
+                    (instance, name)
+                }
+            };
+            let pending = &self.nodes[instance];
+            let (namespace, owner, targets) = match &key {
+                Resolving::Import(_, _) => {
+                    if pending.instance.disabled {
+                        return Err(Error::Composition(
+                            "binding to a disabled structural instance".into(),
+                        ));
+                    }
+                    if !pending.imports.contains_key(name) {
+                        return Err(Error::Composition(format!(
+                            "undeclared imported binding: {name}"
+                        )));
+                    }
+                    (
+                        &pending.instance.path[..pending.instance.path.len() - 1],
+                        pending.instance.parent.as_ref(),
+                        pending.bindings.get(name).map_or(&[][..], Vec::as_slice),
+                    )
+                }
+                Resolving::Export(_, _) => {
+                    if pending.instance.disabled {
+                        return Err(Error::Composition(
+                            "binding selects a disabled provider".into(),
+                        ));
+                    }
+                    let export = pending
+                        .exports
+                        .get(name)
+                        .ok_or_else(|| Error::Composition(format!("missing export: {name}")))?;
+                    let targets = match export {
+                        PendingExport::Actual(_) => &[][..],
+                        PendingExport::Forward(target) => std::slice::from_ref(target),
+                    };
+                    (pending.instance.path.as_slice(), Some(instance), targets)
+                }
+            };
+            if !finishing {
+                if !active.insert(key.clone()) {
+                    let message = match key {
+                        Resolving::Import(_, _) => "cyclic import forwarding",
+                        Resolving::Export(_, _) => "cyclic export forwarding",
+                    };
+                    return Err(Error::Composition(message.into()));
+                }
+                tasks.push((key.clone(), true));
+                for target in targets.iter().rev() {
+                    if let Some(dependency) = self.target_key(target, namespace, owner)? {
+                        tasks.push((dependency, false));
+                    }
+                }
+                continue;
             }
-        }
-        let guaranteed = bindings
-            .iter()
-            .filter(|binding| binding.declaration.availability == Availability::Required)
-            .count();
-        if !import.cardinality.accepts(bindings.len(), guaranteed) {
-            return Err(Error::Contract(format!(
-                "import cardinality is not satisfied: {name}"
-            )));
-        }
-        stack.remove(&key);
-        Ok(bindings)
-    }
-
-    fn export(
-        &self,
-        instance: &InstanceId,
-        name: &str,
-        stack: &mut BTreeSet<Resolving>,
-    ) -> Result<Binding, Error> {
-        let key = Resolving::Export(instance.clone(), name.into());
-        if stack.len() >= 128 || !stack.insert(key.clone()) {
-            return Err(Error::Composition("cyclic export forwarding".into()));
-        }
-        let pending = &self.nodes[instance];
-        if pending.instance.disabled {
-            return Err(Error::Composition(
-                "binding selects a disabled provider".into(),
-            ));
-        }
-        let binding = match pending
-            .exports
-            .get(name)
-            .ok_or_else(|| Error::Composition(format!("missing export: {name}")))?
-        {
-            PendingExport::Actual(declaration) => Binding {
-                provider: Provider::Local {
-                    instance: instance.clone(),
-                    export: name.into(),
+            let mut bindings = Vec::new();
+            for target in targets {
+                bindings.extend(self.target_result(target, namespace, owner, &resolved)?);
+            }
+            match &key {
+                Resolving::Import(_, _) => {
+                    let unique: BTreeSet<_> =
+                        bindings.iter().map(|binding| &binding.provider).collect();
+                    if unique.len() != bindings.len() {
+                        return Err(Error::Composition(format!(
+                            "duplicate provider in binding: {name}"
+                        )));
+                    }
+                    let import = &pending.imports[name];
+                    for binding in &bindings {
+                        if !import.contract.accepts(&binding.declaration.contract) {
+                            return Err(Error::Contract(format!(
+                                "import {name} does not accept its bound export"
+                            )));
+                        }
+                    }
+                    let guaranteed = bindings
+                        .iter()
+                        .filter(|binding| {
+                            binding.declaration.availability == Availability::Required
+                        })
+                        .count();
+                    if !import.cardinality.accepts(bindings.len(), guaranteed) {
+                        return Err(Error::Contract(format!(
+                            "import cardinality is not satisfied: {name}"
+                        )));
+                    }
+                }
+                Resolving::Export(_, _) => match &pending.exports[name] {
+                    PendingExport::Actual(declaration) => bindings.push(Binding {
+                        provider: Provider::Local {
+                            instance: instance.clone(),
+                            export: name.clone(),
+                        },
+                        declaration: declaration.clone(),
+                    }),
+                    PendingExport::Forward(_) => {
+                        if bindings.len() != 1 {
+                            return Err(Error::Composition(
+                                "structural export must forward exactly one capability".into(),
+                            ));
+                        }
+                    }
                 },
-                declaration: declaration.clone(),
-            },
-            PendingExport::Forward(target) => {
-                let targets = self.target(target, &pending.instance.path, Some(instance), stack)?;
-                let [binding] = targets.as_slice() else {
-                    return Err(Error::Composition(
-                        "structural export must forward exactly one capability".into(),
-                    ));
-                };
-                binding.clone()
             }
-        };
-        stack.remove(&key);
-        Ok(binding)
+            active.remove(&key);
+            resolved.insert(key, bindings);
+        }
+        Ok(resolved[&root].clone())
     }
 
-    fn target(
+    fn target_key(
         &self,
         target: &Target,
         namespace: &[String],
         import_owner: Option<&InstanceId>,
-        stack: &mut BTreeSet<Resolving>,
-    ) -> Result<Vec<Binding>, Error> {
+    ) -> Result<Option<Resolving>, Error> {
         match target {
             Target::Instance { path, export } => {
                 let mut absolute = namespace.to_vec();
@@ -547,67 +646,94 @@ impl Resolver<'_> {
                 let instance = self.aliases.get(&absolute).ok_or_else(|| {
                     Error::Composition(format!("missing provider instance: {absolute:?}"))
                 })?;
-                Ok(vec![self.export(instance, export, stack)?])
+                Ok(Some(Resolving::Export(instance.clone(), export.clone())))
             }
             Target::Import { name } => {
                 let owner = import_owner.ok_or_else(|| {
                     Error::Composition("root input cannot refer to an enclosing import".into())
                 })?;
-                self.binding(owner, name, stack)
+                Ok(Some(Resolving::Import(owner.clone(), name.clone())))
             }
-            Target::Remote {
-                deployment,
-                instance,
-                export,
-            } => {
-                let capability = RemoteCapability {
-                    deployment: deployment.clone(),
-                    instance: instance.clone(),
-                    export: export.clone(),
-                };
-                let declaration = self.remote.get(&capability).ok_or_else(|| {
-                    Error::Composition("remote capability has no observed declaration".into())
-                })?;
-                declaration.contract.validate()?;
-                if declaration.contract.transport != Transport::Remote {
-                    return Err(Error::Contract(
-                        "local capability cannot cross deployments".into(),
-                    ));
-                }
-                Ok(vec![Binding {
-                    provider: Provider::Remote { capability },
-                    declaration: declaration.clone(),
-                }])
-            }
+            Target::Remote { .. } => Ok(None),
+        }
+    }
+
+    fn target_result(
+        &self,
+        target: &Target,
+        namespace: &[String],
+        import_owner: Option<&InstanceId>,
+        resolved: &BTreeMap<Resolving, Vec<Binding>>,
+    ) -> Result<Vec<Binding>, Error> {
+        if let Some(key) = self.target_key(target, namespace, import_owner)? {
+            return Ok(resolved[&key].clone());
+        }
+        let Target::Remote {
+            deployment,
+            instance,
+            export,
+        } = target
+        else {
+            unreachable!()
+        };
+        let capability = RemoteCapability {
+            deployment: deployment.clone(),
+            instance: instance.clone(),
+            export: export.clone(),
+        };
+        let declaration = self.remote.get(&capability).ok_or_else(|| {
+            Error::Composition("remote capability has no observed declaration".into())
+        })?;
+        declaration.contract.validate()?;
+        if declaration.contract.transport != Transport::Remote {
+            return Err(Error::Contract(
+                "local capability cannot cross deployments".into(),
+            ));
+        }
+        Ok(vec![Binding {
+            provider: Provider::Remote { capability },
+            declaration: declaration.clone(),
+        }])
+    }
+
+    fn target(
+        &self,
+        target: &Target,
+        namespace: &[String],
+        import_owner: Option<&InstanceId>,
+    ) -> Result<Vec<Binding>, Error> {
+        if let Some(key) = self.target_key(target, namespace, import_owner)? {
+            self.resolve(key)
+        } else {
+            self.target_result(target, namespace, import_owner, &BTreeMap::new())
         }
     }
 }
 
 fn validate_dependencies(instances: &BTreeMap<InstanceId, Instance>) -> Result<(), Error> {
-    fn visit<'a>(
-        id: &'a InstanceId,
-        instances: &'a BTreeMap<InstanceId, Instance>,
-        path: &mut BTreeSet<&'a InstanceId>,
-        done: &mut BTreeSet<&'a InstanceId>,
-    ) -> Result<(), Error> {
-        if done.contains(id) {
-            return Ok(());
-        }
-        if path.len() >= 4096 || !path.insert(id) {
-            return Err(Error::Composition("cyclic capability dependency".into()));
-        }
-        for binding in instances[id].bindings.values().flatten() {
-            if let Provider::Local { instance, .. } = &binding.provider {
-                visit(instance, instances, path, done)?;
+    let mut done = BTreeSet::new();
+    for root in instances.keys() {
+        let mut active = BTreeSet::new();
+        let mut tasks = vec![(root, false)];
+        while let Some((id, finishing)) = tasks.pop() {
+            if done.contains(id) {
+                continue;
+            }
+            if finishing {
+                active.remove(id);
+                done.insert(id);
+                continue;
+            }
+            if !active.insert(id) {
+                return Err(Error::Composition("cyclic capability dependency".into()));
+            }
+            tasks.push((id, true));
+            for binding in instances[id].bindings.values().flatten() {
+                if let Provider::Local { instance, .. } = &binding.provider {
+                    tasks.push((instance, false));
+                }
             }
         }
-        path.remove(id);
-        done.insert(id);
-        Ok(())
-    }
-    let mut done = BTreeSet::new();
-    for id in instances.keys() {
-        visit(id, instances, &mut BTreeSet::new(), &mut done)?;
     }
     Ok(())
 }

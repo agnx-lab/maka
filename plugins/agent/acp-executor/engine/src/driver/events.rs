@@ -24,7 +24,7 @@ impl Driver<'_> {
         &mut self,
         connection: &mut Connection,
         event: Event,
-        deadline: tokio::time::Instant,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<(), Error> {
         if !event.is_callback() {
             return self.observe(event).await;
@@ -46,7 +46,7 @@ impl Driver<'_> {
             tokio::select! {
                 biased;
                 result = &mut handling => return result,
-                _ = tokio::time::sleep_until(deadline) => {
+                _ = super::wait_deadline(deadline) => {
                     context.cancellation.cancel();
                     handling.await?;
                     return Err(Error::Timeout);

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditorCommand {
     /// Correlation with the original native editor, never a resource grant.
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub owner: String,
     #[schemars(range(min = 1, max = 9007199254740991u64))]
     pub sequence: u64,
@@ -164,7 +164,7 @@ pub fn observation_schema() -> serde_json::Value {
 pub enum EditorCapture {
     Current,
     AtRevision {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         owner: String,
         revision: u64,
     },

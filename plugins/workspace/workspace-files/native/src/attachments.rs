@@ -48,7 +48,7 @@ pub async fn read(
             "Use readImage for images and readText for UTF-8 text attachments",
         ));
     }
-    let window = maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES as usize;
+    let window = usize::try_from(record.size_bytes).map_err(failed)?.max(1);
     let chunk = store
         .read_artifact_chunk(session, id, 0, window)
         .await

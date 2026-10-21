@@ -26,7 +26,6 @@ use serde_json::{Value, json};
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -34,7 +33,7 @@ mod filter;
 mod matches;
 
 pub const GREP_NAME: &str = "Grep";
-pub const GREP_DESCRIPTION: &str = "Search file contents with a ripgrep-compatible regular expression. Optional path selects a file or directory; glob filters files. Returns matches and complete. At most 200 matching lines, 50 per file; complete=false means limits left matches or paths unscanned, so narrow the pattern or path before treating results as exhaustive. Hidden, binary and ignored files are excluded during directory traversal. No fuzzy fallback.";
+pub const GREP_DESCRIPTION: &str = "Search file contents with a ripgrep-compatible regular expression. Optional path selects a file or directory; glob filters files. Returns matches and complete. Results cover all matching lines in the admitted search scope. Hidden, binary and ignored files are excluded during directory traversal. No fuzzy fallback.";
 
 pub fn grep_schema() -> Value {
     schemars::schema_for!(Input).into()
@@ -43,7 +42,6 @@ pub fn grep_schema() -> Value {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
-    #[schemars(length(max = 8192))]
     pattern: String,
     #[serde(default = "default_path")]
     path: String,
@@ -52,7 +50,7 @@ struct Input {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    #[schemars(with = "String", length(max = 4096))]
+    #[schemars(with = "String")]
     glob: Option<String>,
 }
 fn default_path() -> String {
@@ -69,11 +67,8 @@ impl ReadExecutor {
         cancellation: CancellationToken,
     ) -> Result<Value, ToolError> {
         let input: Input = serde_json::from_value(input).map_err(|e| failed(e.to_string()))?;
-        if input.pattern.len() > 8192
-            || input.path.contains("://")
-            || input.glob.as_ref().is_some_and(|g| g.len() > 4096)
-        {
-            return Err(failed("Grep requires bounded filesystem search arguments"));
+        if input.path.contains("://") {
+            return Err(failed("Grep requires a filesystem path"));
         }
         let matcher = matches::Regex::new(&input.pattern)?;
         let authority = self.authority.clone();
@@ -81,12 +76,7 @@ impl ReadExecutor {
             let mut search = Search {
                 matcher,
                 cancellation,
-                deadline: Instant::now() + Duration::from_secs(120),
-                visited: 0,
-                source_bytes: 0,
-                output_bytes: 0,
                 output: Vec::new(),
-                complete: true,
             };
             search.check()?;
             let requested = if input.path.is_empty() {
@@ -121,6 +111,7 @@ impl ReadExecutor {
                 let mut filters = filter::Filters::new(
                     input.glob.as_deref(),
                     dunce::simplified(authority.cwd()),
+                    search.cancellation.clone(),
                 )?;
                 // Read ancestor rules only through the already admitted root.
                 for ancestor in target
@@ -132,12 +123,12 @@ impl ReadExecutor {
                 {
                     filters.push(&root, ancestor)?;
                 }
-                search.walk(&root, &target, &target, display, &mut filters, 0)?;
+                search.walk(&root, &target, &target, display, &mut filters)?;
             } else {
                 return Err(failed("Grep supports only regular files and directories"));
             }
             search.check()?;
-            Ok(json!({"matches":search.output,"complete":search.complete}))
+            Ok(json!({"matches":search.output,"complete":true}))
         })
         .await
         .map_err(|e| failed(format!("Grep worker failed: {e}")))?
@@ -147,20 +138,12 @@ impl ReadExecutor {
 struct Search {
     matcher: matches::Regex,
     cancellation: CancellationToken,
-    deadline: Instant,
-    visited: usize,
-    source_bytes: usize,
-    output_bytes: usize,
     output: Vec<String>,
-    complete: bool,
 }
 impl Search {
     fn check(&self) -> Result<(), ToolError> {
         if self.cancellation.is_cancelled() {
             return Err(failed("Grep cancelled"));
-        }
-        if Instant::now() >= self.deadline {
-            return Err(failed("Grep timed out"));
         }
         Ok(())
     }
@@ -170,46 +153,27 @@ impl Search {
         if !metadata.is_file() {
             return Err(failed("Grep target changed to a nonregular file"));
         }
-        if metadata.len() > 10 * 1024 * 1024 {
-            return Err(failed("Grep source exceeds 10 MiB per-file limit"));
-        }
         let mut bytes = Vec::new();
-        let mut file = file.take(10 * 1024 * 1024 + 1);
+        let mut file = file.take(metadata.len());
         let mut chunk = [0; 8192];
-        loop {
+        while file.limit() != 0 {
             self.check()?;
             let count = file.read(&mut chunk).map_err(io_error)?;
             if count == 0 {
-                break;
-            }
-            self.source_bytes += count;
-            if self.source_bytes > 256 * 1024 * 1024 {
-                return Err(failed("Grep search exceeds total byte limit"));
+                return Err(failed("Grep source changed within its captured extent"));
             }
             bytes.extend_from_slice(&chunk[..count]);
-            if bytes.len() > 10 * 1024 * 1024 {
-                return Err(failed("Grep source grew beyond byte limit"));
-            }
         }
         let decoded = encoding_rs::Encoding::for_bom(&bytes)
             .map(|(encoding, _)| encoding.decode_with_bom_removal(&bytes).0);
         let bytes = decoded
             .as_ref()
             .map_or(bytes.as_slice(), |text| text.as_bytes());
-        if bytes.len() > 10 * 1024 * 1024 {
-            return Err(failed("Grep decoded source exceeds 10 MiB per-file limit"));
-        }
         if bytes.contains(&0) {
             return Ok(());
         }
-        self.complete &= self.matcher.search(
-            bytes,
-            label,
-            &self.cancellation,
-            self.deadline,
-            &mut self.output,
-            &mut self.output_bytes,
-        )?;
+        self.matcher
+            .search(bytes, label, &self.cancellation, &mut self.output)?;
         self.check()
     }
     fn walk(
@@ -219,74 +183,78 @@ impl Search {
         target: &Path,
         display: &Path,
         filters: &mut filter::Filters,
-        depth: usize,
     ) -> Result<(), ToolError> {
-        self.check()?;
-        if depth > 128 {
-            return Err(failed("Grep directory depth limit exceeded"));
+        enum Work {
+            Enter(PathBuf),
+            Child(PathBuf, bool, bool),
+            Leave(String),
         }
-        filters.push(root, path)?;
-        let directory = if path.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            path
-        };
-        let mut children = Vec::new();
-        for entry in root.read_dir(directory).map_err(io_error)? {
+        let mut pending = vec![Work::Enter(path.to_owned())];
+        let mut active = std::collections::BTreeSet::new();
+        while let Some(work) = pending.pop() {
             self.check()?;
-            self.visited += 1;
-            if self.visited > 100_000 {
-                return Err(failed("Grep directory entry limit exceeded"));
-            }
-            let entry = entry.map_err(io_error)?;
-            #[cfg(unix)]
-            let hidden = false;
-            #[cfg(windows)]
-            let hidden = {
-                use cap_std::fs::MetadataExt;
-                entry.metadata().map_err(io_error)?.file_attributes()
-                    & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN
-                    != 0
-            };
-            children.push((
-                entry.file_name(),
-                entry.file_type().map_err(io_error)?,
-                hidden,
-            ));
-        }
-        children.sort_by(|a, b| a.0.cmp(&b.0));
-        for (name, kind, hidden) in children {
-            self.check()?;
-            if !kind.is_dir() && !kind.is_file() {
-                continue;
-            }
-            let child = path.join(&name);
-            if let Err(error) = root.check_read(&child) {
-                if error.kind() == std::io::ErrorKind::PermissionDenied {
-                    continue;
+            match work {
+                Work::Leave(identity) => {
+                    filters.pop();
+                    active.remove(&identity);
                 }
-                return Err(io_error(error));
-            }
-            let label = display.join(
-                child
-                    .strip_prefix(target)
-                    .map_err(|e| failed(e.to_string()))?,
-            );
-            if filters.excludes(&child, &label, kind.is_dir(), hidden) {
-                continue;
-            }
-            if self.output.len() >= 200 {
-                // We did not search this eligible path; do not claim exhaustive matches.
-                self.complete = false;
-                break;
-            }
-            if kind.is_dir() {
-                self.walk(root, &child, target, display, filters, depth + 1)?;
-            } else {
-                self.file(open(root, &child).map_err(io_error)?, Some(&label))?;
+                Work::Enter(path) => {
+                    let identity = root
+                        .open_dir(&path)
+                        .and_then(|directory| directory.identity())
+                        .map_err(io_error)?;
+                    if !active.insert(identity.clone()) {
+                        continue;
+                    }
+                    filters.push(root, &path)?;
+                    pending.push(Work::Leave(identity));
+                    let mut children = Vec::new();
+                    for entry in root.read_dir(&path).map_err(io_error)? {
+                        self.check()?;
+                        let entry = entry.map_err(io_error)?;
+                        let kind = entry.file_type().map_err(io_error)?;
+                        if !kind.is_dir() && !kind.is_file() {
+                            continue;
+                        }
+                        #[cfg(unix)]
+                        let hidden = false;
+                        #[cfg(windows)]
+                        let hidden = {
+                            use cap_std::fs::MetadataExt;
+                            entry.metadata().map_err(io_error)?.file_attributes()
+                                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN
+                                != 0
+                        };
+                        children.push((entry.file_name(), kind.is_dir(), hidden));
+                    }
+                    children.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (name, directory, hidden) in children.into_iter().rev() {
+                        pending.push(Work::Child(path.join(name), directory, hidden));
+                    }
+                }
+                Work::Child(child, directory, hidden) => {
+                    if let Err(error) = root.check_read(&child) {
+                        if error.kind() == std::io::ErrorKind::PermissionDenied {
+                            continue;
+                        }
+                        return Err(io_error(error));
+                    }
+                    let label = display.join(
+                        child
+                            .strip_prefix(target)
+                            .map_err(|e| failed(e.to_string()))?,
+                    );
+                    if filters.excludes(&child, &label, directory, hidden) {
+                        continue;
+                    }
+                    if directory {
+                        pending.push(Work::Enter(child));
+                    } else {
+                        self.file(open(root, &child).map_err(io_error)?, Some(&label))?;
+                    }
+                }
             }
         }
-        filters.pop();
         Ok(())
     }
 }

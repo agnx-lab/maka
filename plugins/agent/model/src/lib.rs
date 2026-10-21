@@ -47,7 +47,6 @@ use tokio_util::sync::CancellationToken;
 
 mod auth;
 pub use auth::{AuthResolver, ProviderAuth};
-use maka_agent_facts::model::budget;
 
 /// Trusted configuration, never exposed to a Code Mode isolate or event log.
 #[derive(Clone, Serialize)]
@@ -429,11 +428,8 @@ impl ModelExecutor {
             let adapter_cancel = worker_cancel.child_token();
             let _settlement = adapter_cancel.clone().drop_guard();
             let (activity, mut progress) = tokio::sync::watch::channel(tokio::time::Instant::now());
-            let events: Arc<dyn maka_agent_ports::model::Events> = Arc::new(ChannelEvents {
-                sender,
-                activity,
-                total: std::sync::atomic::AtomicU32::new(0),
-            });
+            let events: Arc<dyn maka_agent_ports::model::Events> =
+                Arc::new(ChannelEvents { sender, activity });
             let network = Arc::new(network::Call {
                 transport: network,
                 events: events.clone(),
@@ -507,7 +503,6 @@ impl ModelExecutor {
 }
 
 struct ChannelEvents {
-    total: std::sync::atomic::AtomicU32,
     sender: mpsc::Sender<Result<Emission, ModelError>>,
     activity: tokio::sync::watch::Sender<tokio::time::Instant>,
 }
@@ -517,18 +512,6 @@ impl maka_agent_ports::model::Events for ChannelEvents {
     }
     fn emit(&self, event: Emission) -> futures_util::future::BoxFuture<'_, Result<(), ModelError>> {
         Box::pin(async move {
-            let bytes = budget::bytes(&event.event, 8 * 1024 * 1024)?;
-            self.total
-                .try_update(
-                    std::sync::atomic::Ordering::Relaxed,
-                    std::sync::atomic::Ordering::Relaxed,
-                    |total| {
-                        total
-                            .checked_add(bytes)
-                            .filter(|total| *total <= 64 * 1024 * 1024)
-                    },
-                )
-                .map_err(|_| ModelError::Adapter("model output exceeds 64 MiB".into()))?;
             self.progress();
             self.sender
                 .send(Ok(event))

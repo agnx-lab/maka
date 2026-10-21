@@ -117,7 +117,7 @@ impl Baseline {
     pub fn complete(mut self, response: &mut Value, budget: &Arc<Semaphore>) -> Option<Self> {
         let id = response["id"]
             .as_str()
-            .filter(|id| !id.is_empty() && id.len() <= 1024)?
+            .filter(|id| !id.is_empty())?
             .to_owned();
         let output = response["output"].as_array_mut()?;
         let input = self.body["input"].as_array_mut()?;

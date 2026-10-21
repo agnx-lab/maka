@@ -23,4 +23,6 @@
 
 Registers the Jev service and connects its public contract to the evaluation engine and settings repository. `provide` adds the factory to the Host. Product bindings and call admission determine who may invoke the configured endpoint.
 
+Credential resources are read in full under their original endpoint/revision intent. Complete evaluation results keep the same confirmed-result versus uncertain-POST receipt distinction, and owner shutdown still awaits original scope and HTTP cleanup.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

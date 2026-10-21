@@ -41,24 +41,12 @@ pub struct LoadedSkill {
 #[serde(untagged)]
 pub enum SkillInvocationFailure {
     Request(SkillRequestFailure),
-    Overflow(SkillOverflowFailure),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SkillRequestFailure {
     pub request: String,
     pub reason: SkillFailureReason,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SkillOverflowFailure {
-    pub reason: TooManyRequests,
-    pub request_limit: u64,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TooManyRequests {
-    TooManyRequests,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -98,60 +86,37 @@ impl SkillInvocationResult {
     }
 
     pub fn validate(&self) -> Result<()> {
-        ensure(
-            self.loaded.len() <= 50 && self.failed.len() <= 50 && self.receipts.len() <= 50,
-            "Too many skill invocation entries",
-        )?;
         for loaded in &self.loaded {
             identity(&loaded.id, &loaded.name)?;
         }
         for failed in &self.failed {
             match failed {
-                SkillInvocationFailure::Request(failure) => bytes(&failure.request, 512, false)?,
-                SkillInvocationFailure::Overflow(failure) => limit(failure.request_limit)?,
+                SkillInvocationFailure::Request(failure) => text(&failure.request)?,
             }
         }
         for receipt in &self.receipts {
             match receipt {
                 SkillInvocationReceipt::Loaded(r) => {
-                    bytes(&r.request, 512, false)?;
-                    bytes(&r.skill_ref, 512, false)?;
+                    text(&r.request)?;
+                    text(&r.skill_ref)?;
                     identity(&r.id, &r.name)?;
                 }
                 SkillInvocationReceipt::Failed(r) => {
-                    bytes(&r.request, 512, false)?;
-                }
-                SkillInvocationReceipt::Overflow { request_limit } => {
-                    limit(*request_limit)?;
+                    text(&r.request)?;
                 }
             }
         }
-        encoded(self, 72 * 1024)
+        Ok(())
     }
 }
 fn identity(id: &str, name: &str) -> Result<()> {
-    bytes(id, 128, false)?;
-    bytes(name, 256, false)
+    text(id)?;
+    text(name)
 }
-fn limit(limit: u64) -> Result<()> {
-    ensure((1..=50).contains(&limit), "Invalid skill request limit")
-}
-
-fn ensure(valid: bool, message: &'static str) -> Result<()> {
-    if valid { Ok(()) } else { Err(message) }
-}
-fn bytes(value: &str, max: usize, empty: bool) -> Result<()> {
-    ensure(
-        (empty || !value.is_empty()) && value.len() <= max,
-        "Invalid UTF-8 string",
-    )
-}
-fn encoded(value: &impl Serialize, max: usize) -> Result<()> {
-    ensure(
-        serde_json::to_vec(value)
-            .map_err(|_| "Invalid skill result")?
-            .len()
-            <= max,
-        "Encoded skill result exceeds byte limit",
-    )
+fn text(value: &str) -> Result<()> {
+    if value.is_empty() {
+        Err("Invalid empty string")
+    } else {
+        Ok(())
+    }
 }

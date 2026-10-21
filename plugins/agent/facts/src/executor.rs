@@ -36,10 +36,12 @@ impl Settings {
         self.model.is_none() && self.thinking_level.is_none()
     }
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.model.as_ref().is_some_and(|model| {
-            model.trim().is_empty() || model.len() > 512 || model.chars().any(char::is_control)
-        }) {
-            return Err("executor model must contain 1–512 UTF-8 bytes without control characters");
+        if self
+            .model
+            .as_ref()
+            .is_some_and(|model| model.trim().is_empty() || model.chars().any(char::is_control))
+        {
+            return Err("executor model must be nonempty without control characters");
         }
         Ok(())
     }
@@ -79,11 +81,10 @@ impl TryFrom<String> for ExecutorId {
     type Error = &'static str;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() > 128
-            || !value
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphabetic)
+        if !value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
             || !value
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))

@@ -55,7 +55,7 @@ impl ToolExecutor for Bridge {
     }
 }
 async fn evaluate(repl: &Repl, bridge: Arc<Bridge>, source: String) -> (bool, Vec<CellOutput>) {
-    let context = CellContext::new(CellStore::default(), 16 * 1024 * 1024, vec![]);
+    let context = CellContext::new(CellStore::default(), vec![]);
     let result = repl
         .evaluate(
             source,
@@ -126,7 +126,6 @@ async fn native_form_retains_exact_ax_elements_and_verifies_submission() {
     let repl = Repl::new(
         facade(),
         CellLimits {
-            max_value_bytes: 16 * 1024 * 1024,
             heap_bytes: 128 * 1024 * 1024,
             ..Default::default()
         },
@@ -396,7 +395,6 @@ async fn native_observation_recovers_after_busy_and_preserves_external_edits() {
     let repl = Repl::new(
         facade(),
         CellLimits {
-            max_value_bytes: 16 * 1024 * 1024,
             heap_bytes: 128 * 1024 * 1024,
             ..Default::default()
         },
@@ -858,7 +856,6 @@ async fn browser_form_uses_independent_repl_and_rejects_stale_document_and_tab()
     let repl = Repl::new(
         facade(),
         CellLimits {
-            max_value_bytes: 16 * 1024 * 1024,
             heap_bytes: 128 * 1024 * 1024,
             ..Default::default()
         },

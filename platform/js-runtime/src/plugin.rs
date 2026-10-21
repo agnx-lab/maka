@@ -44,6 +44,11 @@ use tokio_util::sync::CancellationToken;
 pub struct Error(pub String);
 type Result<T> = std::result::Result<T, Error>;
 
+const INPUT_WINDOW: usize = 32 * 1024 * 1024;
+fn input_charge(bytes: usize) -> Result<u32> {
+    u32::try_from(bytes.clamp(1, INPUT_WINDOW)).map_err(|_| failed("VM input budget exhausted"))
+}
+
 #[derive(Clone)]
 pub struct Limits {
     pub heap_bytes: usize,
@@ -244,7 +249,7 @@ impl Vm {
             realm,
             commands,
             health,
-            bytes: Arc::new(Semaphore::new(32 * 1024 * 1024)),
+            bytes: Arc::new(Semaphore::new(INPUT_WINDOW)),
             sequence: AtomicU64::new(1),
         })))
     }
@@ -252,17 +257,19 @@ impl Vm {
     /// Reserve module custody before awaiting readiness.
     /// Entrypoints are prebuilt ESM bundles: no imports or top-level await.
     pub fn load(&self, name: String, source: String) -> Result<Module> {
-        if name.len() > 1024
-            || source.len() > 8 * 1024 * 1024
-            || self.0.health.stopped.is_cancelled()
-        {
-            return Err(failed("module is too large or VM is stopped"));
+        if self.0.health.stopped.is_cancelled() {
+            return Err(failed("VM is stopped"));
         }
         let bytes = self
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(source.len().max(1) as u32)
+            .try_acquire_many_owned(input_charge(
+                source
+                    .len()
+                    .checked_add(name.len())
+                    .ok_or_else(|| failed("module input length is not representable"))?,
+            )?)
             .map_err(|_| failed("VM input budget exhausted"))?;
         let id = self
             .0
@@ -352,23 +359,17 @@ impl Module {
 
     async fn call_inner(&self, path: Vec<String>, args: Vec<Value>) -> Result<Value> {
         self.ready().await?;
-        if path.is_empty()
-            || path.len() > 8
-            || path.iter().any(|name| name.is_empty() || name.len() > 128)
-        {
+        if path.is_empty() || path.iter().any(|name| name.is_empty()) {
             return Err(failed("invalid export path"));
         }
-        let size = serde_json::to_vec(&args).map_err(failed)?.len();
-        if size > 32 * 1024 * 1024 {
-            return Err(failed("call arguments exceed 32 MiB"));
-        }
+        let size = json::encoded_size(&(&path, &args), usize::MAX).map_err(failed)?;
         let bytes = self
             .0
             .vm
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(size.max(1) as u32)
+            .try_acquire_many_owned(input_charge(size)?)
             .map_err(|_| failed("VM input budget exhausted"))?;
         let (reply, result) = oneshot::channel();
         self.0

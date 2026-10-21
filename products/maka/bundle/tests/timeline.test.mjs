@@ -1061,3 +1061,118 @@ for (const target of ['tui']) {
     assert.equal(preview.input.through, 8);
   });
 }
+
+test('full message copy follows original source pages beyond the former clipboard ceiling', () => {
+  const position = { sourceSequence: 8, itemIndex: 0 };
+  const original = `COPY START\n${'保留😀z'.repeat(12_000)}\nCOPY END`;
+  const bytes = Buffer.from(original);
+  assert.ok(bytes.length > 65536);
+  const props = {
+    theme,
+    locale: 'en',
+    copyRequest: 1,
+    browse: null,
+    timings: [],
+    markReadEnabled: true,
+    toolContext: { sessionId: 'copy-session', through: 8 },
+    waitingTools: [],
+    liveTools: [],
+    source: null,
+    search: null,
+    loading: false,
+    older: false,
+    newer: false,
+    latest: false,
+    landing: { sequence: 0, edge: 'end' },
+    live: false,
+    messages: [
+      {
+        id: 'complete',
+        contentKey: 'complete',
+        role: 'user',
+        text: 'preview',
+        timestamp: null,
+        source: position,
+        image: false,
+        continued: true,
+        tool: null,
+      },
+    ],
+  };
+  let out = component.mount(props, {});
+  const event = (input) => (out = component.event(out.frame.state, input, props, {}));
+  event({
+    kind: 'component',
+    child: 'reading',
+    name: 'observed',
+    event: {
+      readingRevision: 1,
+      selectedChildKey: 'message-complete',
+      viewport: null,
+      pendingCommand: null,
+      receipt: null,
+    },
+  });
+  let offset = 0;
+  while (offset < bytes.length) {
+    const action = out.actions[0];
+    assert.equal(action.method, 'source');
+    assert.deepEqual(action.input, {
+      sessionId: 'copy-session',
+      through: 8,
+      source: { kind: 'row', position },
+      field: 'body',
+      position: offset === 0 ? { kind: 'start' } : { kind: 'after', offset },
+    });
+    let end = Math.min(offset + 32768, bytes.length);
+    while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+    const value = {
+      through: 8,
+      source: {
+        position,
+        field: 'body',
+        fields: ['body'],
+        path: null,
+        tool: null,
+        format: 'text',
+        offset,
+        totalBytes: bytes.length,
+        text: bytes.subarray(offset, end).toString('utf8'),
+      },
+    };
+    event({ kind: 'action', key: action.key, event: { status: 'succeeded', value } });
+    offset = end;
+  }
+  const copied = out.events.find((item) => item.name === 'messageCopy')?.value;
+  assert.equal(copied?.status, 'ready');
+  assert.ok(copied.source === original, 'complete raw source copy changed');
+  assert.ok(copied.message === original, 'complete message copy changed');
+  assert.equal(copied.through, 8);
+  assert.equal(copied.sessionId, 'copy-session');
+  // A fresh request cannot accept evidence from a different frozen history cut.
+  props.copyRequest = 2;
+  out = component.update(out.frame.state, props, {});
+  const action = out.actions[0];
+  event({
+    kind: 'action',
+    key: action.key,
+    event: {
+      status: 'succeeded',
+      value: {
+        through: 9,
+        source: {
+          position,
+          field: 'body',
+          fields: ['body'],
+          path: null,
+          tool: null,
+          format: 'text',
+          offset: 0,
+          totalBytes: 1,
+          text: 'x',
+        },
+      },
+    },
+  });
+  assert.equal(out.events.find((item) => item.name === 'messageCopy')?.value.status, 'unavailable');
+});

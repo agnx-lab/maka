@@ -81,7 +81,6 @@ async fn rejects_invalid_arguments_and_pre_spawn_cancellation() {
         json!({"command":""}),
         json!({"command":"true","timeout_ms":null}),
         json!({"command":"true","timeout_ms":0}),
-        json!({"command":"true","timeout_ms":600001}),
         json!({"command":"true","timeout_ms":1.5}),
         json!({"command":"true","run_in_background":true}),
     ] {
@@ -90,6 +89,15 @@ async fn rejects_invalid_arguments_and_pre_spawn_cancellation() {
             Err(ToolError::Failed(_))
         ));
     }
+    let complete_deadline = invoke(
+        dir.path(),
+        json!({"command":"true","timeout_ms":600001}),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(complete_deadline["status"], "completed");
+    assert_eq!(complete_deadline["exitCode"], 0);
     let token = CancellationToken::new();
     token.cancel();
     assert!(matches!(

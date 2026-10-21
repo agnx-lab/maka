@@ -139,7 +139,7 @@ async fn seed(
     (cuts, later, log.prefix(32, 65536).await.unwrap().events)
 }
 fn expected(events: &[StoredEvent], through: u64) -> Vec<fixtures::Row> {
-    let mut view = maka_presentation::InvocationView::new(8 * 1024 * 1024).unwrap();
+    let mut view = maka_presentation::InvocationView::new();
     events
         .iter()
         .filter(|fact| fact.sequence <= through)

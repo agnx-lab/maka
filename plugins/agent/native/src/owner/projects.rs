@@ -223,19 +223,13 @@ impl Owner {
                         projects: projects.clone(),
                         next,
                     };
-                    if workspace::fits(&page) {
+                    if workspace::fits(&page) || projects.len() <= 1 {
                         return Ok(page);
-                    }
-                    if projects.len() <= 1 {
-                        return Err("agent_projects_unavailable".into());
                     }
                     projects.pop();
                 }
             }
         };
-        if !workspace::fits(&result) {
-            return Err("agent_projects_unavailable".into());
-        }
         Ok(result)
     }
 
@@ -378,10 +372,7 @@ impl Owner {
                     .await
             }
             ProjectChange::Rename { project, name } => {
-                if name.trim().is_empty()
-                    || name.chars().count() > 256
-                    || name.chars().any(char::is_control)
-                {
+                if name.trim().is_empty() || name.chars().any(char::is_control) {
                     return Ok(ProjectResult::Invalid);
                 }
                 let Some(current) = self.project_record(project.id).await? else {

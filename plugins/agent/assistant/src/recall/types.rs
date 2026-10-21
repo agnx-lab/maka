@@ -25,13 +25,13 @@ use unicode_normalization::UnicodeNormalization;
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "RecallQuery")]
 pub struct Query {
-    #[schemars(length(min = 1, max = 8), inner(length(min = 1, max = 500)))]
+    #[schemars(length(min = 1), inner(length(min = 1)))]
     pub terms: Vec<String>,
-    #[schemars(length(min = 1, max = 500))]
+    #[schemars(length(min = 1))]
     pub question: Option<String>,
-    #[schemars(range(min = 1, max = 25))]
+    #[schemars(range(min = 1))]
     pub limit: Option<usize>,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub session_id: Option<String>,
     pub since: Option<u64>,
     pub until: Option<u64>,
@@ -39,25 +39,19 @@ pub struct Query {
 impl Query {
     pub fn validate(&mut self) -> Result<(), String> {
         if self.terms.is_empty()
-            || self.terms.len() > 8
-            || self.limit.is_some_and(|n| !(1..=25).contains(&n))
+            || self.limit.is_some_and(|n| n == 0)
             || self.since.zip(self.until).is_some_and(|(a, b)| a > b)
-            || self
-                .question
-                .as_ref()
-                .is_some_and(|text| !bounded(text, 500))
-            || self
-                .session_id
-                .as_ref()
-                .is_some_and(|text| !bounded(text, 256))
+            || self.question.as_ref().is_some_and(|text| !nonempty(text))
+            || self.session_id.as_ref().is_some_and(|text| !nonempty(text))
         {
             return Err(
-                "Recall requires 1–8 terms, a limit of 1–25 and valid Session/time bounds".into(),
+                "Recall requires nonempty terms, a positive limit and valid Session/time bounds"
+                    .into(),
             );
         }
         for term in &mut self.terms {
-            if !bounded(term, 500) {
-                return Err("Recall terms must contain 1–500 characters".into());
+            if !nonempty(term) {
+                return Err("Recall terms must be nonempty".into());
             }
             *term = term.trim().nfc().collect();
         }
@@ -69,37 +63,26 @@ impl Query {
 #[derive(Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct More {
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub anchor_message_id: String,
-    #[schemars(range(max = 8))]
     pub before: Option<usize>,
-    #[schemars(range(max = 8))]
     pub after: Option<usize>,
     /// Byte offset in the anchor's NFC text, useful for a long individual message.
-    #[schemars(range(max = 67108864))]
     pub offset: Option<usize>,
 }
 impl More {
     pub fn validate(&self) -> Result<(), String> {
-        if !bounded(&self.session_id, 256)
-            || !bounded(&self.anchor_message_id, 256)
-            || self.before.is_some_and(|v| v > 8)
-            || self.after.is_some_and(|v| v > 8)
-            || self.offset.is_some_and(|v| v > 64 * 1024 * 1024)
-        {
-            Err(
-                "RecallMore requires an existing Session/message and 0–8 neighbors on each side"
-                    .into(),
-            )
+        if !nonempty(&self.session_id) || !nonempty(&self.anchor_message_id) {
+            Err("RecallMore requires an existing Session/message".into())
         } else {
             Ok(())
         }
     }
 }
-fn bounded(text: &str, limit: usize) -> bool {
-    !text.trim().is_empty() && text.chars().count() <= limit
+fn nonempty(text: &str) -> bool {
+    !text.trim().is_empty() && !text.contains('\0')
 }
 pub(super) fn fold(text: &str) -> String {
     text.nfc().collect::<String>().to_lowercase()

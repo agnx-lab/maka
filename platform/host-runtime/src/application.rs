@@ -215,9 +215,6 @@ impl Service {
         let compiled = methods
             .iter()
             .map(|(name, method)| {
-                if method.resources.len() > 16 {
-                    return Err("maximum 16 resource slots".into());
-                }
                 Ok((
                     name.clone(),
                     Method {
@@ -338,6 +335,7 @@ struct PreparedInvocation {
     scope: Scope,
     attachments: Attachments,
     capture: Option<Uuid>,
+    admitted: resource_ingress::AttachmentSize,
     bytes: OwnedSemaphorePermit,
     resources: OwnedSemaphorePermit,
     // Last: inert drop releases physical custody before acknowledging its Scope.
@@ -491,6 +489,7 @@ pub(super) struct Call {
     scope: Scope,
     attachments: Attachments,
     capture: Option<Uuid>,
+    admitted: resource_ingress::AttachmentSize,
     bytes: OwnedSemaphorePermit,
     resources: OwnedSemaphorePermit,
     parent: Option<Ticket>,
@@ -791,8 +790,8 @@ impl Application {
         let stop = CancellationToken::new();
         let dispatch = Arc::new(Dispatch {
             commands,
-            bytes: Arc::new(Semaphore::new(32 * 1024 * 1024)),
-            resources: Arc::new(Semaphore::new(64 * 1024 * 1024)),
+            bytes: Arc::new(Semaphore::new(resource_ingress::INPUT_WINDOW)),
+            resources: Arc::new(Semaphore::new(resource_ingress::RESOURCE_WINDOW)),
         });
         let client = Client {
             dispatch: dispatch.clone(),
@@ -1104,6 +1103,7 @@ impl Client {
             scope,
             attachments,
             capture,
+            admitted,
             bytes,
             resources,
             parent,
@@ -1124,6 +1124,7 @@ impl Client {
                 scope,
                 attachments,
                 capture,
+                admitted,
                 bytes,
                 resources,
             })))
@@ -1172,21 +1173,21 @@ fn check_reference(reference: &RecoveryRef) -> Result<usize> {
     .map_err(|e| e.to_string())
 }
 
-fn check_json_limit<T: serde::Serialize + ?Sized>(value: &T, limit: usize) -> Result<usize> {
-    struct Count(usize, usize);
+fn json_size<T: serde::Serialize + ?Sized>(value: &T) -> Result<usize> {
+    struct Count(usize);
     impl Write for Count {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len());
-            if self.0 > self.1 {
-                return Err(std::io::Error::other("service JSON exceeds byte budget"));
-            }
+            self.0 = self
+                .0
+                .checked_add(bytes.len())
+                .ok_or_else(|| std::io::Error::other("service JSON length overflow"))?;
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    let mut count = Count(0, limit);
+    let mut count = Count(0);
     serde_json::to_writer(&mut count, value).map_err(|e| e.to_string())?;
     Ok(count.0)
 }
@@ -1207,13 +1208,14 @@ impl Dispatch {
         // Early validation also drops physical input before its inert ticket.
         let custody = (attachments, parent);
         let size = maka_plugin_core::json::value_size(&input, usize::MAX)?;
-        if method.is_empty() || method.len() > 128 {
+        if method.is_empty() {
             return Err("invalid service method".into());
         }
         let resource_ingress::Reserved {
             attachments,
             bytes,
             resources,
+            admitted,
             parent,
             ..
         } = self.resources(custody.0, &scope, size, custody.1)?;
@@ -1228,6 +1230,7 @@ impl Dispatch {
                 scope,
                 attachments,
                 capture,
+                admitted,
                 bytes,
                 resources,
             })))
@@ -1245,9 +1248,10 @@ impl Dispatch {
         let bytes = self
             .bytes
             .clone()
-            .try_acquire_many_owned(
-                u32::try_from(size.max(1)).map_err(|_| "Host recovery budget exhausted")?,
-            )
+            .try_acquire_many_owned(resource_ingress::charge(
+                size.max(1),
+                resource_ingress::INPUT_WINDOW,
+            ))
             .map_err(|_| "Host recovery budget exhausted")?;
         let (reply, result) = oneshot::channel();
         self.commands
@@ -1315,11 +1319,9 @@ fn prepare_plan(
                 };
                 if methods
                     .values()
-                    .any(|m| m.mode == MethodMode::Mutation && !durable || m.resources.len() > 16)
+                    .any(|m| m.mode == MethodMode::Mutation && !durable)
                 {
-                    return Err(
-                        "durable mutation requires a State Root; maximum 16 resource slots".into(),
-                    );
+                    return Err("durable mutation requires a State Root".into());
                 }
             }
             if let Implementation::Native { implementation } = &entry.implementation

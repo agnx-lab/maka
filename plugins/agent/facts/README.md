@@ -27,4 +27,6 @@ Malformed tool arguments are preserved and returned to the model for correction 
 
 Histories and bundles written with the earlier tool-input format cannot be replayed. Initialize a separate empty Root with `maka host init --root NEW_EMPTY_DIRECTORY`; existing data is not automatically migrated or deleted.
 
+Successful tool results retain complete raw evidence and ordered frozen projection parts. Exact size/digest, confirmed operation receipt and Session media ownership remain required. Raw typed JSON must round-trip through the dependency's supported decoder representation; archive canonical encoding walks JSON iteratively and preserves its established key/number encoding. Model token budgets select a request view separately from retained evidence.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

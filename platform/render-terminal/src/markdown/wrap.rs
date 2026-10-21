@@ -34,9 +34,6 @@ impl Writer {
         semantic: bool,
         budget: usize,
     ) -> Result<Step, &'static str> {
-        if self.bytes > MAX_BYTES {
-            return Err("Transcript layout exceeds local capacity");
-        }
         let grapheme = text[offset..].graphemes(true).next().expect("nonempty run");
         let mut inspected = grapheme.len();
         let position = if exact {

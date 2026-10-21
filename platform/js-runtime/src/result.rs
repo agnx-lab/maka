@@ -97,23 +97,8 @@ impl Serialize for CellResult {
     }
 }
 
-pub(crate) fn diagnostic_fits(calls: &[ToolCall], cap: usize) -> bool {
-    // execution_error is the longest diagnostic kind. Reserve its empty envelope.
-    serde_json::to_vec(&CellResult::Failure {
-        error: CellDiagnostic::new(CellDiagnosticKind::ExecutionError, ""),
-        tool_calls: calls.to_vec(),
-    })
-    .unwrap()
-    .len()
-        <= cap
-}
-
-pub(crate) fn bounded(
-    result: Result<Value, CellDiagnostic>,
-    calls: Vec<ToolCall>,
-    cap: usize,
-) -> CellResult {
-    let mut envelope = match result {
+pub(crate) fn complete(result: Result<Value, CellDiagnostic>, calls: Vec<ToolCall>) -> CellResult {
+    match result {
         Ok(value) => CellResult::Success {
             value,
             tool_calls: calls,
@@ -122,40 +107,5 @@ pub(crate) fn bounded(
             error,
             tool_calls: calls,
         },
-    };
-    if serde_json::to_vec(&envelope).unwrap().len() <= cap {
-        return envelope;
     }
-    if let CellResult::Success { tool_calls, .. } = envelope {
-        envelope = CellResult::Failure {
-            error: CellDiagnostic::limit("result bytes"),
-            tool_calls,
-        };
-    }
-    let CellResult::Failure { error, .. } = &mut envelope else {
-        unreachable!()
-    };
-    let message = std::mem::take(&mut error.message);
-    // Admission reserves the empty diagnostic; count JSON escaping once so a
-    // very large thrown string cannot trigger quadratic reserialization.
-    let available = cap - serde_json::to_vec(&envelope).unwrap().len();
-    let mut used = 0;
-    let mut end = 0;
-    for (index, character) in message.char_indices() {
-        let bytes = match character {
-            '"' | '\\' | '\u{8}' | '\t' | '\n' | '\u{c}' | '\r' => 2,
-            '\u{0}'..='\u{1f}' => 6,
-            _ => character.len_utf8(),
-        };
-        if used + bytes > available {
-            break;
-        }
-        used += bytes;
-        end = index + character.len_utf8();
-    }
-    let CellResult::Failure { error, .. } = &mut envelope else {
-        unreachable!()
-    };
-    error.message = message[..end].to_owned();
-    envelope
 }

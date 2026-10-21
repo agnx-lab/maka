@@ -23,7 +23,7 @@ import {
   assistantLanguages,
   type GeneralAction,
   type GeneralSettingsOwner,
-} from './generalSettings';
+} from './generalSettings.ts';
 import { SettingsField } from './SettingsField';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
@@ -252,7 +252,6 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
           value={name()}
           change={(text) => owner.editName(request, 'displayName', text)}
           disabled={owner.disabled()}
-          hint="Up to 256 characters."
         />
         <SettingsField
           label="Assistant tone"
@@ -260,7 +259,7 @@ function PreferenceEditor(props: { owner: GeneralSettingsOwner; request: General
           change={(text) => owner.editName(request, 'assistantTone', text)}
           disabled={owner.disabled()}
           multiline
-          hint="How the assistant should respond. Up to 4096 characters."
+          hint="How the assistant should respond."
         />
       </If>
       <If when={request.kind === 'compaction'}>

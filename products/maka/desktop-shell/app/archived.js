@@ -34,7 +34,6 @@ import { palette, typeset, text, controlButton, compactAge } from './theme.js';
 import { t } from './locale.js';
 
 /** Pages read after the first; the Host pages at most 32 sessions in id order. */
-const MAX_PAGES = 32;
 
 export class Archived {
   /**
@@ -148,7 +147,11 @@ async function readArchived() {
     const sessions = [...first.sessions];
     let after = first.after;
     try {
-      for (let count = 0; after !== null && count < MAX_PAGES; count += 1) {
+      const seen = new Set();
+      while (after !== null) {
+        const cursor = JSON.stringify(after);
+        if (seen.has(cursor)) throw new Error('session catalog cursor did not advance');
+        seen.add(cursor);
         const page = await query('agent', 'list', {
           filter: 'archived',
           position: { kind: 'after', revision: first.revision, cursor: after },

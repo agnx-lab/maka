@@ -171,9 +171,6 @@ impl FormInput {
 impl FormResult {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.validate_values()?;
-        if let Self::Accept { values } = self {
-            super::form_validation::answer_budget(values)?;
-        }
         Ok(())
     }
     pub(crate) fn validate_values(&self) -> Result<(), &'static str> {
@@ -184,7 +181,7 @@ impl FormResult {
         {
             return Err("Non-finite form value");
         }
-        super::form_result_decode::decode_outcome_result(
+        super::form_result_decode::decode_form_result(
             &serde_json::to_value(self).map_err(|_| "Invalid form")?,
         )?;
         Ok(())

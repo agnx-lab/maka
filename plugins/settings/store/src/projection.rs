@@ -71,10 +71,6 @@ pub fn project(
             items.push(item);
         }
         for (item_index, model) in row.models.iter().enumerate() {
-            let mut model = model.clone();
-            if let Some(name) = &mut model.display_name {
-                *name = crate::model_catalog::wire_limit(name, 512);
-            }
             model.validate().map_err(ConfigError::Invalid)?;
             items.push(json!({"kind":"model","connectionIndex":connection_index,
                 "itemIndex":item_index,"model":model}));
@@ -114,16 +110,12 @@ pub fn project(
     while end < items.len().min(offset + 128) {
         let next_item_bytes = serde_json::to_vec(&items[end])?.len() + usize::from(end > offset);
         let cursor_bytes = serde_json::to_vec(&items.get(end + 1).map(cursor_for))?.len();
-        if envelope_bytes + item_bytes + next_item_bytes + cursor_bytes > 128 * 1024 {
+        if end > offset && envelope_bytes + item_bytes + next_item_bytes + cursor_bytes > 128 * 1024
+        {
             break;
         }
         item_bytes += next_item_bytes;
         end += 1;
-    }
-    if end == offset && end < items.len() {
-        return Err(ConfigError::Invalid(
-            "catalog item exceeds page byte limit".into(),
-        ));
     }
     Ok(page(end))
 }

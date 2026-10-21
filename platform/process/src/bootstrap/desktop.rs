@@ -29,7 +29,6 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const DESKTOP_BOOTSTRAP: &str = "__maka-sandbox-desktop";
-const LIMIT: usize = 16 * 1024;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,9 +45,6 @@ pub unsafe fn serve_desktop() -> io::Result<()> {
     let mut header = [0; 4];
     io::stdin().read_exact(&mut header)?;
     let size = u32::from_le_bytes(header) as usize;
-    if size > LIMIT {
-        return Err(io::Error::other("desktop request exceeds limit"));
-    }
     let mut bytes = vec![0; size];
     io::stdin().read_exact(&mut bytes)?;
     let request: Request = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
@@ -93,7 +89,7 @@ pub async fn desktop(
         participants: participants.to_vec(),
     };
     let bytes = serde_json::to_vec(&request).map_err(io::Error::other)?;
-    if bytes.len() > LIMIT {
+    if u32::try_from(bytes.len()).is_err() {
         return Err(io::Error::other("desktop request exceeds limit"));
     }
     let mut child = tokio::process::Command::new(executable)
@@ -116,9 +112,6 @@ pub async fn desktop(
         input.write_all(&bytes).await?;
         input.flush().await?;
         let size = output.read_u32_le().await? as usize;
-        if size > LIMIT {
-            return Err(io::Error::other("desktop response exceeds limit"));
-        }
         let mut bytes = vec![0; size];
         output.read_exact(&mut bytes).await?;
         let reply: Result<DesktopTransfer, String> =

@@ -20,7 +20,6 @@
 use crate::{ConfigError, ConfigurationStore, Result, TransactionMode};
 use maka_agent_facts::configuration::policy::ChatDefaults;
 use maka_agent_facts::configuration::policy::EnabledPolicy;
-use maka_agent_facts::configuration::policy::MAX_POLICY_SNAPSHOT_BYTES;
 use maka_agent_facts::configuration::policy::Personalization;
 use maka_agent_facts::configuration::policy::PrivacyPolicy;
 use maka_agent_facts::configuration::policy::RuntimePolicy;
@@ -171,37 +170,22 @@ pub(crate) async fn write(
 ) -> Result<()> {
     snapshot.validate().map_err(ConfigError::Invalid)?;
     let document = serde_json::to_string(snapshot)?;
-    if document.len() > MAX_POLICY_SNAPSHOT_BYTES {
-        return Err(ConfigError::Invalid(
-            "runtime policy snapshot exceeds byte limit".into(),
-        ));
-    }
     sqlx::query("INSERT INTO runtime_policy(singleton, document) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET document = excluded.document")
         .bind(document).execute(connection).await?;
     Ok(())
 }
 
 pub(crate) async fn read(connection: &mut SqliteConnection) -> Result<RuntimePolicySnapshot> {
-    // Bound bytes before loading the document, including databases altered outside
-    // the checked writer. A corrupt row is persistence failure, never defaults.
-    let size: Option<i64> = sqlx::query_scalar(
-        "SELECT length(CAST(document AS BLOB)) FROM runtime_policy WHERE singleton = 1",
-    )
-    .fetch_optional(&mut *connection)
-    .await?;
-    let Some(size) = size else {
+    let document: Option<String> =
+        sqlx::query_scalar("SELECT document FROM runtime_policy WHERE singleton = 1")
+            .fetch_optional(connection)
+            .await?;
+    let Some(document) = document else {
         return Ok(RuntimePolicySnapshot {
             revision: 0,
             policy: RuntimePolicy::default(),
         });
     };
-    if size < 0 || size > MAX_POLICY_SNAPSHOT_BYTES as i64 {
-        return Err(ConfigError::UnsupportedDatabase);
-    }
-    let document: String =
-        sqlx::query_scalar("SELECT document FROM runtime_policy WHERE singleton = 1")
-            .fetch_one(connection)
-            .await?;
     let value = serde_json::from_str(&document)?;
     decode_canonical_snapshot(value).map_err(|_| ConfigError::UnsupportedDatabase)
 }

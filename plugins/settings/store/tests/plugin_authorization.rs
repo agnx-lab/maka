@@ -48,9 +48,13 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
     );
     let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
     let namespace = Namespace::new("example.background", Scope::Profile).unwrap();
+    let title = format!(
+        "Review complete authorization: {}final purpose",
+        "完整说明 ".repeat(8_000)
+    );
     let request = Request {
         operation_id: Uuid::new_v4(),
-        title: "Review changes".into(),
+        title: title.clone(),
         target: Target::Session {
             session_id: "session".into(),
         },
@@ -95,6 +99,7 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
         panic!("identical approval conflicted")
     };
     assert_eq!(left.grant, right.grant);
+    assert_eq!(left.grant.request.title, title);
     let id = left.grant.id;
     // Lost reply retries cannot recapture a newer/wider Session configuration.
     let Approval::Granted(retry) = approve(
@@ -109,6 +114,7 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
         panic!("retry conflicted")
     };
     assert_eq!(retry.boundary, first);
+    assert_eq!(retry.grant.request.title, title);
     let mut changed = request.clone();
     changed.capabilities.insert(Capability::Notifications);
     assert!(matches!(
@@ -181,6 +187,7 @@ async fn consent_retries_preserve_original_boundary_and_revocation_across_restar
     assert_eq!(retry.grant.id, id);
     assert!(retry.grant.revoked);
     assert_eq!(retry.boundary, first);
+    assert_eq!(retry.grant.request.title, title);
     assert!(
         store
             .plugin_authorization(namespace, id)

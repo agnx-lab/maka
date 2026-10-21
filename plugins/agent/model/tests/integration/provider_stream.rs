@@ -471,7 +471,7 @@ async fn chat_tool_deltas_keep_arguments_separate_when_gateways_omit_or_reuse_id
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
+async fn complete_provider_tool_identities_preserve_original_values_over_http() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let executor = ModelExecutor::new(Duration::from_secs(15)).unwrap();
         for (id, name) in [("x".repeat(4092), "echo".into()), ("tool-1".into(), "é".repeat(129))] {
@@ -490,21 +490,72 @@ async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
                 request(ProviderKind::OpenaiChat, base), CancellationToken::new(),
             ).await.unwrap();
             let mut builder = StepBuilder::for_step("step").unwrap();
-            let mut rejected_call = false;
+            let mut starts = Vec::new();
             while let Some(event) = stream.next().await {
-                let event = event.expect("SDK must pass the malformed identity to model acceptance").event;
-                let is_identity_start = matches!(&event, ModelEvent::ToolInputStarted { .. });
-                if builder.push(event).is_err() {
-                    assert!(is_identity_start, "reject the malformed identity before admitting its argument preview");
-                    rejected_call = true;
-                    break;
+                let event = event.expect("complete provider identities must survive the SDK").event;
+                if let ModelEvent::ToolInputStarted { id, name, .. } = &event {
+                    starts.push((id.clone(), name.clone()));
                 }
+                builder.push(event).unwrap();
             }
             stream.cancel_and_wait().await.expect("actual stream cleanup");
-            assert!(rejected_call);
-            assert!(builder.finish().is_err());
             server.await.unwrap();
+            assert_eq!(starts, [(id.clone(), name.clone())]);
+            let step = builder.finish().unwrap();
+            let calls: Vec<_> = step.tool_calls().collect();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].id, id);
+            assert_eq!(calls[0].name, name);
+            assert_eq!(calls[0].input.as_json().unwrap(), &json!({}));
+            assert_eq!(step.finish_reason, maka_agent_facts::model::ModelFinishReason::ToolCalls);
         }
+    }).await.expect("complete provider identities must make bounded progress");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let executor = ModelExecutor::new(Duration::from_secs(15)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (first, _) = fixtures(ProviderKind::OpenaiChat, "hello");
+        // A missing function name violates the provider grammar independently of size.
+        let body = first + &sse(&[
+            json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"tool-1","type":"function","function":{"arguments":"{}"}}]},"finish_reason":null}]}),
+            json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}),
+        ]) + "data: [DONE]\n\n";
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            let header = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            socket.write_all(header.as_bytes()).await.unwrap();
+            socket.write_all(body.as_bytes()).await.unwrap();
+        });
+        let mut stream = executor.stream(
+            request(ProviderKind::OpenaiChat, base), CancellationToken::new(),
+        ).await.unwrap();
+        let mut builder = StepBuilder::for_step("step").unwrap();
+        let mut rejected = false;
+        let mut admitted_calls = 0;
+        while let Some(event) = stream.next().await {
+            match event {
+                Err(_) => {
+                    rejected = true;
+                    break;
+                }
+                Ok(event) => {
+                    if matches!(&event.event, ModelEvent::ToolInputStarted { .. } | ModelEvent::ToolCall(_)) {
+                        admitted_calls += 1;
+                    }
+                    builder.push(event.event).unwrap();
+                }
+            }
+        }
+        stream.cancel_and_wait().await.expect("actual stream cleanup");
+        server.await.unwrap();
+        assert!(rejected, "the SDK must reject a missing function name");
+        assert_eq!(admitted_calls, 0);
+        assert!(builder.finish().is_err());
     }).await.expect("malformed provider stream must terminate promptly");
 }
 

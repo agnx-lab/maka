@@ -85,7 +85,7 @@ impl Library {
         if let Some(outcome) = publisher.reserve(operation).await.map_err(store_error)? {
             return recorded(outcome);
         }
-        // The original Call retains the bounded immutable-resource copy until the
+        // The original Call retains the complete immutable-resource copy until the
         // worker physically ends, including if the caller stops observing it.
         let mut ticket = scope
             .resources
@@ -153,8 +153,7 @@ fn material(
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> Result<(String, Tree), &'static str> {
     let id = resources.get("id").ok_or("invalid_source_id")?;
-    let id =
-        read(&**id, ResourceEncoding::Utf8, 128, cancellation).map_err(|_| "invalid_source_id")?;
+    let id = read(&**id, ResourceEncoding::Utf8, cancellation).map_err(|_| "invalid_source_id")?;
     let id = std::str::from_utf8(&id)
         .map_err(|_| "invalid_source_id")?
         .trim();
@@ -165,7 +164,7 @@ fn material(
     if input.bytes != file.bytes() {
         return Err("invalid_source");
     }
-    let bytes = read(&**file, ResourceEncoding::Bytes, 1024 * 1024, cancellation)?;
+    let bytes = read(&**file, ResourceEncoding::Bytes, cancellation)?;
     if maka_agent_facts::artifact::content_digest(&bytes) != input.digest {
         return Err("invalid_source");
     }
@@ -179,7 +178,6 @@ fn material(
 fn read(
     resource: &dyn ReadResource,
     encoding: ResourceEncoding,
-    limit: usize,
     cancellation: &tokio_util::sync::CancellationToken,
 ) -> Result<Vec<u8>, &'static str> {
     let expected = match encoding {
@@ -187,11 +185,7 @@ fn read(
         ResourceEncoding::Utf8 => maka_plugin_core::contract::text_resource_type(),
     };
     let length = resource.bytes();
-    if resource.resource_type() != expected
-        || resource.encoding() != encoding
-        || length == 0
-        || length > limit
-    {
+    if resource.resource_type() != expected || resource.encoding() != encoding || length == 0 {
         return Err("invalid_source");
     }
     let mut bytes = Vec::with_capacity(length);

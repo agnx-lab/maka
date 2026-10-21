@@ -58,7 +58,6 @@ pub(super) async fn run(owner: Arc<Web>, input: Value, context: Context) -> Resu
         Ok(_) => settings::CheckOutcome::Valid,
         Err(search::Error::InvalidCredentials) => settings::CheckOutcome::InvalidCredentials,
         Err(search::Error::RateLimited) => settings::CheckOutcome::RateLimited,
-        Err(search::Error::Timeout) => settings::CheckOutcome::Timeout,
         Err(search::Error::Network | search::Error::Status(_) | search::Error::Response) => {
             settings::CheckOutcome::NetworkError
         }

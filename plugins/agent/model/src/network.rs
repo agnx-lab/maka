@@ -147,7 +147,9 @@ fn headers(values: Vec<(String, String)>) -> Result<reqwest::header::HeaderMap, 
             .map_err(|_| Error::Adapter("invalid model HTTP header".into()))?;
         let value = reqwest::header::HeaderValue::from_bytes(&bytes)
             .map_err(|_| Error::Adapter("invalid model HTTP header".into()))?;
-        headers.append(name, value);
+        headers
+            .try_append(name, value)
+            .map_err(|_| Error::Adapter("model HTTP headers cannot be represented".into()))?;
     }
     Ok(headers)
 }
@@ -166,10 +168,16 @@ impl Transport for Network {
                 http::Method::Delete => reqwest::Method::DELETE,
                 http::Method::Options => reqwest::Method::OPTIONS,
             };
+            let request_headers = headers(request.headers)?;
+            let url = reqwest::Url::parse(&request.url)
+                .map_err(|_| Error::Adapter("invalid model HTTP URL".into()))?;
+            self.policy
+                .check_request_headers(&url, &request_headers, !request.body.is_empty(), true)
+                .map_err(|_| Error::Adapter("model HTTP headers cannot be represented".into()))?;
             let response = self
                 .client
                 .request(method, request.url)
-                .headers(headers(request.headers)?)
+                .headers(request_headers)
                 .body(request.body)
                 .send()
                 .await
@@ -203,11 +211,13 @@ impl Transport for Network {
             };
             url.set_scheme(scheme)
                 .map_err(|_| Error::Adapter("invalid model WebSocket scheme".into()))?;
+            let request_headers = headers(request.headers)?;
             let socket = maka_network::connect_websocket(
+                &self.policy,
                 self.policy.client_builder(),
                 url.as_str(),
-                headers(request.headers)?,
-                8 * 1024 * 1024,
+                request_headers,
+                usize::MAX,
             )
             .await
             .map_err(|_| Error::Adapter("model WebSocket connection failed".into()))?;
@@ -237,13 +247,7 @@ impl http::Body for Body {
                 result = body.chunk() => result,
             };
             match result {
-                Ok(Some(bytes)) if bytes.len() <= 8 * 1024 * 1024 => Ok(Some(bytes.to_vec())),
-                Ok(Some(_)) => {
-                    response.take();
-                    Err(http::Error::Invalid(
-                        "model HTTP chunk exceeds 8 MiB".into(),
-                    ))
-                }
+                Ok(Some(bytes)) => Ok(Some(bytes.to_vec())),
                 Ok(None) => {
                     response.take();
                     Ok(None)
@@ -428,6 +432,29 @@ pub(super) fn failure(error: reqwest::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unrepresentable_model_headers_fail_without_panicking() {
+        let values = (0..32_768)
+            .map(|index| (format!("x-field-{index}"), "value".into()))
+            .collect();
+        let result = headers(values).and_then(|headers| {
+            maka_network::Policy::default()
+                .check_request_headers(
+                    &reqwest::Url::parse("https://example.com/").unwrap(),
+                    &headers,
+                    true,
+                    true,
+                )
+                .map_err(|_| Error::Adapter("model HTTP headers cannot be represented".into()))?;
+            Ok(headers)
+        });
+        assert!(
+            matches!(result, Err(Error::Adapter(message)) if message == "model HTTP headers cannot be represented")
+        );
+        let values = headers(vec![("x-safe".into(), "kept".into())]).unwrap();
+        assert_eq!(values["x-safe"], "kept");
+    }
+
     #[test]
     fn socket_write_failures_preserve_transient_network_evidence() {
         use tokio_tungstenite::tungstenite::{Error as WsError, error::ProtocolError};

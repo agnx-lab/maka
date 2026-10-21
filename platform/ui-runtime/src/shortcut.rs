@@ -33,7 +33,7 @@ pub struct Shortcut {
     pub key: String,
     #[schemars(length(max = 4))]
     pub modifiers: Vec<Modifier>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub input: String,
     pub enabled: bool,
 }
@@ -149,7 +149,6 @@ fn validate_chords<'a>(
             .all(|(i, m)| !modifiers[..i].contains(m));
         if (!printable && !named)
             || target.is_empty()
-            || target.len() > 128
             || modifiers.len() > 4
             || !unique_modifiers
             || (printable && !physical.control && !physical.alt && !physical.super_key)

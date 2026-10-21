@@ -29,7 +29,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const LIMIT: usize = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Tokens {
@@ -50,8 +49,6 @@ impl Tokens {
         let tokens = self;
         if tokens.access_token.is_empty()
             || tokens.refresh_token.is_empty()
-            || tokens.access_token.len() > 32 * 1024
-            || tokens.refresh_token.len() > 32 * 1024
             || tokens.access_token.chars().any(char::is_control)
             || tokens.refresh_token.chars().any(char::is_control)
             || tokens.expires_at > 9_007_199_254_740_991
@@ -86,7 +83,7 @@ impl Grant {
             .checked_add(self.expires_in.checked_mul(1000).ok_or_else(invalid)?)
             .filter(|v| *v <= 9_007_199_254_740_991)
             .ok_or_else(invalid)?;
-        if self.expires_in == 0 || self.expires_in > 366 * 86400 || self.access_token.is_empty() {
+        if self.expires_in == 0 || self.access_token.is_empty() {
             return Err(invalid());
         }
         let refresh_token = self
@@ -161,11 +158,7 @@ pub(super) async fn authenticate(
             other => other,
         })?.decode()?,
     };
-    if device.device_auth_id.is_empty()
-        || device.device_auth_id.len() > 1024
-        || device.user_code.is_empty()
-        || device.user_code.len() > 1024
-    {
+    if device.device_auth_id.is_empty() || device.user_code.is_empty() {
         return Err(invalid());
     }
     let expires_at = device
@@ -200,11 +193,7 @@ pub(super) async fn authenticate(
         .await?;
         if (200..300).contains(&response.status) {
             let exchange: Exchange = response.decode()?;
-            if exchange.authorization_code.is_empty()
-                || exchange.code_verifier.is_empty()
-                || exchange.authorization_code.len() > 32 * 1024
-                || exchange.code_verifier.len() > 32 * 1024
-            {
+            if exchange.authorization_code.is_empty() || exchange.code_verifier.is_empty() {
                 return Err(invalid());
             }
             return post_form(
@@ -332,41 +321,34 @@ async fn post_form(context: &Context, form: &[(&str, &str)]) -> Result<Response,
     .await
 }
 async fn send(context: &Context, request: Request) -> Result<Response, Error> {
-    tokio::time::timeout(Duration::from_secs(15), async {
-        let response = context
-            .transport
-            .request(request)
-            .await
-            .map_err(|_| Error::OutcomeUnknown)?;
-        let result = async {
-            let mut bytes = Vec::new();
-            while let Some(chunk) = response
-                .body
-                .next()
-                .await
-                .map_err(|_| Error::OutcomeUnknown)?
-            {
-                if chunk.len() > LIMIT - bytes.len() {
-                    return Err(invalid());
-                }
-                bytes.extend_from_slice(&chunk);
-            }
-            Ok(Response {
-                status: response.head.status,
-                bytes,
-            })
-        }
-        .await;
-        response.body.cancel();
-        response
+    let response = context
+        .transport
+        .request(request)
+        .await
+        .map_err(|_| Error::OutcomeUnknown)?;
+    let result = async {
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
             .body
-            .close()
+            .next()
             .await
-            .map_err(|_| Error::OutcomeUnknown)?;
-        result
-    })
-    .await
-    .map_err(|_| Error::OutcomeUnknown)?
+            .map_err(|_| Error::OutcomeUnknown)?
+        {
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(Response {
+            status: response.head.status,
+            bytes,
+        })
+    }
+    .await;
+    response.body.cancel();
+    response
+        .body
+        .close()
+        .await
+        .map_err(|_| Error::OutcomeUnknown)?;
+    result
 }
 fn now() -> Result<u64, Error> {
     SystemTime::now()

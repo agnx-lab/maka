@@ -88,10 +88,6 @@ pub enum FileReadPart {
     Binary {
         bytes: u64,
     },
-    TooLarge {
-        bytes: u64,
-        limit: u64,
-    },
     Unsupported {
         file_kind: FileKind,
     },

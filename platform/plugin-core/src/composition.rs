@@ -69,8 +69,8 @@ impl Environment {
 pub struct InstanceId(pub Vec<Uuid>);
 
 impl InstanceId {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
-        if self.0.is_empty() || self.0.len() > 32 || self.0.iter().any(Uuid::is_nil) {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.0.is_empty() || self.0.iter().any(Uuid::is_nil) {
             return Err(Error::Composition("invalid instance identity".into()));
         }
         Ok(())
@@ -250,7 +250,7 @@ impl Target {
 }
 
 pub(crate) fn validate_path(path: &[String]) -> Result<(), Error> {
-    if path.is_empty() || path.len() > 32 {
+    if path.is_empty() {
         return Err(Error::Composition("invalid relative instance path".into()));
     }
     for part in path {
@@ -271,9 +271,6 @@ impl Node {
         }
         for (name, targets) in &self.bindings {
             crate::name(name)?;
-            if targets.len() > 4096 {
-                return Err(Error::Composition("too many binding targets".into()));
-            }
             for target in targets {
                 target.validate()?;
             }
@@ -289,11 +286,6 @@ impl Node {
             }
             for (name, targets) in &patch.bindings {
                 crate::name(name)?;
-                if targets.len() > 4096 {
-                    return Err(Error::Composition(
-                        "too many override binding targets".into(),
-                    ));
-                }
                 for target in targets {
                     target.validate()?;
                 }

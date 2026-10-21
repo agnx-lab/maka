@@ -45,10 +45,8 @@ pub enum State {
 
 impl Assignments {
     pub async fn feedback(&self, ids: Vec<String>) -> Result<Vec<Feedback>, Error> {
-        if ids.len() > 32 || ids.iter().any(|id| id.is_empty() || id.len() > 256) {
-            return Err(invalid(
-                "Feedback accepts at most 32 bounded assignment IDs",
-            ));
+        if ids.iter().any(|id| id.is_empty()) {
+            return Err(invalid("Feedback requires nonempty assignment IDs"));
         }
         let mut result = Vec::with_capacity(ids.len());
         for id in ids {

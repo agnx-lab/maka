@@ -88,8 +88,8 @@ async fn op_model_emit(
             models.budget.clone(),
         )
     };
-    let bytes = super::budget::bytes(&value, 8 * 1024 * 1024)
-        .map_err(|_| JsErrorBox::generic("provider event exceeds 8 MiB"))?;
+    let bytes = maka_agent_facts::model::budget::reservation(&value, 32 * 1024 * 1024)
+        .map_err(|_| JsErrorBox::generic("invalid provider event"))?;
     let budget = tokio::select! {
         biased;
         _ = cancellation.cancelled() => return Err(JsErrorBox::generic("model cancelled")),

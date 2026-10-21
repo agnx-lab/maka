@@ -65,7 +65,7 @@ impl RequestComposition {
         }
         let mut names = BTreeSet::new();
         for tool in &self.tools {
-            if tool.name.is_empty() || tool.name.len() > 256 || !names.insert(&tool.name) {
+            if tool.name.is_empty() || !names.insert(&tool.name) {
                 return Err("invalid request composition tools");
             }
         }
@@ -77,7 +77,7 @@ impl RequestComposition {
                 &source.activation,
                 &source.revision,
             ] {
-                if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+                if value.is_empty() || value.chars().any(char::is_control) {
                     return Err("invalid request composition source");
                 }
             }

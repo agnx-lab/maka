@@ -29,7 +29,7 @@ Retiring either party of a subscription requests cancellation of its original in
 
 Service inputs, outputs, configuration and original receipts have no separate JSON envelope quota in the Host or JavaScript request bridge. Accepted inputs still reserve shared capacity until their work settles; this does not bound output memory. Schema validation, JavaScript numeric precision and IPC framing requirements apply at their respective boundaries. A receipt that JavaScript cannot represent exactly remains available in its original journal.
 
-Complete source documents, including frozen remote contracts and package references, have a shared 2 MiB budget for admission, persistence and management. Read them in pages under one source revision; replace large documents through immutable resources.
+Complete source documents, including frozen remote contracts and package references, retain all original bytes through admission, persistence and management. Read them in pages under one source revision; replace large documents through immutable resources. Concurrent Host input and resource custody uses packing windows: a larger call owns the whole window until actual settlement, rather than being rejected solely for its extent.
 
 Persistence comes from the owned EventLog. Stable plugin data belongs to the Root, deployment and instance; an activation epoch identifies execution, not a new data owner.
 

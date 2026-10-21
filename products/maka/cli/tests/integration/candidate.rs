@@ -396,9 +396,11 @@ fn host_serve_rejects_overlong_system_temp_and_releases_root_and_socket_director
             .join("host.stderr.log"),
     )
     .unwrap_or_default();
+    let path_error = std::os::unix::net::SocketAddr::from_pathname(selected.join("h.sock"))
+        .expect_err("fixture path must exceed the actual platform Unix socket representation");
     assert!(
-        log.contains("100-byte limit"),
-        "failure must come from the actual portable socket path bound"
+        log.contains(&path_error.to_string()),
+        "failure must come from actual platform socket path validation: {log}"
     );
     assert!(
         output.is_empty(),

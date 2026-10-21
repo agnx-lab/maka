@@ -75,10 +75,8 @@ impl Executors {
                     Receipt::Recorded {
                         outcome: OperationOutcome::Unknown { diagnostic },
                         cleanup: OperationCleanup::Confirmed,
-                    } => serde_json::to_value(Outcome::Unresolved {
-                        diagnostic: diagnostic.chars().take(2048).collect(),
-                    })
-                    .map_err(|e| e.to_string()),
+                    } => serde_json::to_value(Outcome::Unresolved { diagnostic })
+                        .map_err(|e| e.to_string()),
                     _ => serde_json::to_value(Outcome::Unresolved {
                         diagnostic:
                             "Original setup outcome is unconfirmed; do not repeat authentication"

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Inventory, format::MAX_EVENT_BYTES, format::MAX_EVENTS};
+use super::Inventory;
 use crate::{StoreError, context::selection::Selection, sequence_number};
 use maka_agent_facts::context::CheckpointMode;
 use maka_agent_facts::event::Fact;
@@ -37,7 +37,6 @@ pub(super) struct Closure {
     queue: VecDeque<u64>,
     scopes: HashMap<String, u64>,
     runs: HashMap<String, u64>,
-    bytes: u64,
 }
 
 impl Closure {
@@ -54,7 +53,6 @@ impl Closure {
             queue: VecDeque::new(),
             scopes: HashMap::new(),
             runs: HashMap::new(),
-            bytes: 0,
         };
         for session in &inventory.sessions {
             selected
@@ -67,8 +65,8 @@ impl Closure {
                 )
                 .await?;
             let revisions: Vec<i64> = sqlx::query_scalar(
-                "SELECT sequence FROM session_revision_sources WHERE session_id=? ORDER BY sequence LIMIT ?"
-            ).bind(&session.id).bind((MAX_EVENTS+1) as i64).fetch_all(&mut *db).await?;
+                "SELECT sequence FROM session_revision_sources WHERE session_id=? ORDER BY sequence"
+            ).bind(&session.id).fetch_all(&mut *db).await?;
             for sequence in revisions {
                 let sequence = sequence_number(sequence)?;
                 selected.add(sequence)?;
@@ -80,28 +78,19 @@ impl Closure {
                 .fetch_one(&mut *db)
                 .await?;
                 selected.member(db, &source, sequence).await?;
-                if selected.revisions.len() > MAX_EVENTS {
-                    return Err(StoreError::PrefixTooLarge);
-                }
             }
         }
         while let Some(sequence) = selected.queue.pop_front() {
             let row: Option<(Option<String>, Option<i64>)> = sqlx::query_as(
-                "SELECT CASE WHEN length(CAST(event_json AS BLOB))<=?2 THEN event_json END,
+                "SELECT event_json,
                     (SELECT length(payload) FROM tool_result_payloads WHERE event_id=e.event_id)
                  FROM runtime_events e WHERE sequence=?1",
             )
             .bind(sequence as i64)
-            .bind(MAX_EVENT_BYTES as i64)
             .fetch_optional(&mut *db)
             .await?;
             let (json, payload_bytes) = row.ok_or(StoreError::MaterialCollected)?;
             let json = json.ok_or(StoreError::PrefixTooLarge)?;
-            selected.bytes +=
-                json.len() as u64 + payload_bytes.map(sequence_number).transpose()?.unwrap_or(0);
-            if selected.bytes > super::format::MAX_BYTES {
-                return Err(StoreError::PrefixTooLarge);
-            }
             let event: RuntimeEvent = serde_json::from_str(&json)?;
             crate::tool_payloads::verify_binding(&event, payload_bytes)?;
             if !matches!(event.fact, Fact::MessageImported { .. }) {
@@ -171,9 +160,6 @@ impl Closure {
 
     fn add(&mut self, sequence: u64) -> Result<(), StoreError> {
         if self.events.insert(sequence) {
-            if self.events.len() > MAX_EVENTS {
-                return Err(StoreError::PrefixTooLarge);
-            }
             self.queue.push_back(sequence);
         }
         Ok(())
@@ -190,8 +176,8 @@ impl Closure {
             return Ok(());
         }
         let rows: Vec<i64> = sqlx::query_scalar(
-            "SELECT sequence FROM runtime_events WHERE invocation_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?"
-        ).bind(invocation).bind(prior as i64).bind(through as i64).bind((MAX_EVENTS+1) as i64).fetch_all(db).await?;
+            "SELECT sequence FROM runtime_events WHERE invocation_id=? AND sequence>? AND sequence<=? ORDER BY sequence"
+        ).bind(invocation).bind(prior as i64).bind(through as i64).fetch_all(db).await?;
         for row in rows {
             self.add(sequence_number(row)?)?;
         }
@@ -228,9 +214,6 @@ impl Closure {
         .await?;
         if copy {
             self.copies.insert(session.clone());
-            if self.copies.len() > super::MAX_SESSIONS {
-                return Err(StoreError::PrefixTooLarge);
-            }
         }
         let filter = Selection::predicate("e", "?3");
         let collected: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
@@ -246,13 +229,12 @@ impl Closure {
         let rows: Vec<(i64, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT e.sequence,e.inherited FROM session_history_events e
              WHERE e.owner_session_id=?1 AND e.sequence>?2 AND e.sequence<=?3 AND {filter}
-             ORDER BY e.sequence LIMIT ?5"
+             ORDER BY e.sequence"
         )))
         .bind(session)
         .bind(prior.unwrap_or(0) as i64)
         .bind(through as i64)
         .bind(&selection.lineage)
-        .bind((MAX_EVENTS + 1) as i64)
         .fetch_all(&mut *db)
         .await?;
         for (sequence, inherited) in rows {
@@ -280,9 +262,9 @@ impl Closure {
             "SELECT a.sequence FROM session_history_events t JOIN runtime_events a
              ON a.kind='tool_result_archived' AND json_extract(a.event_json,'$.fact.placeholder.identity.runtime_event_id')=t.event_id
              WHERE t.owner_session_id=?1 AND t.sequence<=?2 AND {filter} AND {target}
-             ORDER BY a.sequence LIMIT ?5"
+             ORDER BY a.sequence"
         ))).bind(&selection.session).bind(through as i64).bind(before as i64).bind(&selection.lineage)
-            .bind((MAX_EVENTS+1) as i64).fetch_all(db).await?;
+            .fetch_all(db).await?;
         for row in rows {
             self.add(sequence_number(row)?)?;
         }

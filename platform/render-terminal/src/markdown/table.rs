@@ -32,29 +32,17 @@ pub(super) fn render<'a>(
     events: &mut impl Iterator<Item = (Event<'a>, Range<usize>)>,
     ascii: bool,
 ) -> Result<(), &'static str> {
-    const MAX_CELLS: usize = 32_768;
-    const MAX_EVENTS: usize = 262_144;
     let columns = alignments.len();
-    if columns == 0 || columns > 128 {
+    if columns == 0 {
         return Err("Table column capacity exceeded");
     }
     let mut rows: Vec<Vec<Cell<'a>>> = vec![];
-    let mut cells = 0;
-    let mut count = 0;
     for (event, range) in events.by_ref() {
-        count += 1;
-        if count > MAX_EVENTS {
-            return Err("Table event capacity exceeded");
-        }
         match event {
             Event::End(TagEnd::Table) => break,
             Event::Start(Tag::TableHead | Tag::TableRow) => rows.push(vec![]),
             Event::End(TagEnd::TableHead | TagEnd::TableRow | TagEnd::TableCell) => {}
             Event::Start(Tag::TableCell) => {
-                cells += 1;
-                if cells > MAX_CELLS {
-                    return Err("Table cell capacity exceeded");
-                }
                 rows.last_mut().ok_or("Table cell without row")?.push(Cell {
                     events: vec![],
                     source: range.start,
@@ -90,9 +78,6 @@ fn semantic(writer: &mut Writer, layout: &mut Layout, separator: &str) -> Result
     writer.logical(separator);
     let start = writer.text.len();
     writer.logical(&layout.text);
-    if writer.bytes > MAX_BYTES {
-        return Err("Transcript layout exceeds local capacity");
-    }
     for span in layout.lines.iter_mut().flat_map(|line| &mut line.mapping) {
         span.logical.start += start;
         span.logical.end += start;
@@ -136,9 +121,6 @@ fn append(writer: &mut Writer, mut line: VisualLine, indent: usize) -> Result<()
             .iter()
             .map(|span| std::mem::size_of::<Span<'static>>() + span.content.len())
             .sum::<usize>();
-    if writer.lines.len() >= MAX_LINES || writer.bytes + bytes > MAX_BYTES {
-        return Err("Transcript layout exceeds local capacity");
-    }
     writer.bytes += bytes;
     writer.rows += 1;
     writer.last_source = line.source;
@@ -197,7 +179,6 @@ fn grid(
     }
     for (row_index, row) in rows.iter().enumerate() {
         let mut layouts = Vec::with_capacity(columns);
-        let mut bytes = 0;
         for (column, (item, width)) in row.iter().zip(&widths).enumerate() {
             let mut layout = cell(item, source, *width, ascii, writer.colors)?;
             semantic(
@@ -211,10 +192,6 @@ fn grid(
                     ""
                 },
             )?;
-            bytes += layout.bytes;
-            if bytes > MAX_BYTES {
-                return Err("Table row capacity exceeded");
-            }
             layouts.push(layout);
         }
         let height = layouts
@@ -330,14 +307,9 @@ fn stacked(
 ) -> Result<(), &'static str> {
     // A narrow terminal gets labeled fields, not squeezed columns or silently hidden cells.
     let mut headers = Vec::with_capacity(rows[0].len());
-    let mut bytes = 0;
     for (column, item) in rows[0].iter().enumerate() {
         let mut header = cell(item, source, width, ascii, writer.colors)?;
         semantic(writer, &mut header, if column > 0 { "\t" } else { "" })?;
-        bytes += header.bytes;
-        if bytes > MAX_BYTES {
-            return Err("Table header capacity exceeded");
-        }
         headers.push(header);
     }
     if rows.len() == 1 {
@@ -451,11 +423,49 @@ mod tests {
             visible.contains("数量7") && !visible.contains('│'),
             "narrow CJK tables use labeled fields, not unreadable one-glyph columns"
         );
+        let headers: Vec<_> = (0..129).map(|index| format!("column{index}")).collect();
+        let values: Vec<_> = (0..129).map(|index| format!("值{index}😀")).collect();
         let many = format!(
-            "|{}|\n|{}|\n",
-            vec!["x"; 129].join("|"),
-            vec!["---"; 129].join("|")
+            "|{}|\n|{}|\n|{}|\n",
+            headers.join("|"),
+            vec!["---"; 129].join("|"),
+            values.join("|")
         );
-        assert!(markdown(&many, 80, false).is_err());
+        let complete = markdown(&many, 80, false).unwrap();
+        assert_eq!(
+            complete.text,
+            format!("{}\n{}", headers.join("\t"), values.join("\t"))
+        );
+        assert!(complete.lines.iter().all(|line| line.line.width() <= 80));
+        let visible: String = complete
+            .lines
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect();
+        for (header, value) in headers.iter().zip(&values) {
+            assert!(visible.contains(header), "missing header {header}");
+            assert!(visible.contains(value), "missing value {value}");
+        }
+        let tail = values.last().unwrap();
+        let source_start = many.find(tail).unwrap();
+        let logical_start = complete.text.find(tail).unwrap();
+        let mapped_tail: String = complete
+            .lines
+            .iter()
+            .flat_map(|line| &line.mapping)
+            .filter(|span| span.source.start >= source_start)
+            .map(|span| {
+                assert_eq!(
+                    span.logical.start - logical_start,
+                    span.source.start - source_start
+                );
+                assert_eq!(
+                    &complete.text[span.logical.clone()],
+                    &many[span.source.clone()]
+                );
+                &complete.text[span.logical.clone()]
+            })
+            .collect();
+        assert_eq!(mapped_tail, *tail);
     }
 }

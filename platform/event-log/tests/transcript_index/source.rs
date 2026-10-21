@@ -139,16 +139,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 let mut text = String::new();
                 loop {
                     let source = log
-                        .history_source(
-                            "source",
-                            through,
-                            sequence,
-                            field,
-                            None,
-                            position,
-                            budget,
-                            64 * 1024,
-                        )
+                        .history_source("source", through, sequence, field, None, position, budget)
                         .await
                         .unwrap();
                     assert!(source.origin.is_none());
@@ -207,8 +198,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 field,
                 None,
                 SourcePosition::Start,
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -221,8 +211,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 field,
                 None,
                 SourcePosition::Start,
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -240,8 +229,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 wrong,
                 None,
                 SourcePosition::Start,
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -260,8 +248,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 field,
                 None,
                 SourcePosition::After { offset: middle },
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -276,8 +263,7 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 SourcePosition::After {
                     offset: expected.len() as u64 + 1
                 },
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -296,7 +282,6 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                 None,
                 SourcePosition::Start,
                 8192,
-                64 * 1024,
             )
             .await
             .unwrap();
@@ -320,27 +305,12 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
                     offset: expected.len() as u64,
                 },
                 8192,
-                64 * 1024,
             )
             .await
             .unwrap();
         assert_eq!(eof.offset, expected.len() as u64);
         assert!(eof.text.is_empty());
     }
-    assert!(
-        log.history_source(
-            "source",
-            through,
-            sequences[4],
-            SourceField::Arguments,
-            None,
-            SourcePosition::Start,
-            8192,
-            1024
-        )
-        .await
-        .is_err()
-    );
     let full = log
         .history_source(
             "source",
@@ -350,7 +320,6 @@ async fn literal_tool_fields_reach_every_byte_without_summarizing_json_or_crossi
             None,
             SourcePosition::Start,
             8192,
-            64 * 1024,
         )
         .await
         .unwrap();
@@ -451,16 +420,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
         let mut position = SourcePosition::Start;
         for _ in 0..16 {
             let page = log
-                .history_source(
-                    "failed",
-                    through,
-                    hit.position,
-                    field,
-                    None,
-                    position,
-                    31,
-                    64 * 1024,
-                )
+                .history_source("failed", through, hit.position, field, None, position, 31)
                 .await
                 .unwrap();
             assert_eq!(page.position, hit.position);
@@ -493,7 +453,6 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
                 None,
                 SourcePosition::Start,
                 8192,
-                64 * 1024,
             )
             .await
             .unwrap();
@@ -507,8 +466,7 @@ async fn failure_search_reads_original_diagnostic_fields_and_visible_body() {
                 field,
                 None,
                 SourcePosition::Start,
-                8192,
-                64 * 1024
+                8192
             )
             .await
             .is_err()
@@ -601,7 +559,6 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                             Some(vec![Key("content".into())]),
                             position,
                             budget,
-                            65536,
                         )
                         .await
                         .unwrap();
@@ -673,7 +630,6 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                     Some(path.clone()),
                     SourcePosition::Start,
                     8192,
-                    65536,
                 )
                 .await
                 .unwrap();
@@ -697,8 +653,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                     field,
                     Some(path),
                     SourcePosition::Start,
-                    8192,
-                    65536
+                    8192
                 )
                 .await
                 .is_err()
@@ -712,8 +667,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                 SourceField::Body,
                 Some(vec![]),
                 SourcePosition::Start,
-                8192,
-                65536
+                8192
             )
             .await
             .is_err()
@@ -726,8 +680,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                 field,
                 Some(vec![Key("content".into())]),
                 SourcePosition::After { offset: 1 },
-                8192,
-                65536
+                8192
             )
             .await
             .is_err()
@@ -740,8 +693,7 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                 field,
                 Some(vec![Key("content".into())]),
                 SourcePosition::Start,
-                8192,
-                65536
+                8192
             )
             .await
             .is_err()
@@ -755,7 +707,6 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                 Some(vec![]),
                 SourcePosition::Tail,
                 8192,
-                65536,
             )
             .await
             .unwrap();
@@ -768,7 +719,6 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
                 None,
                 SourcePosition::Tail,
                 8192,
-                65536,
             )
             .await
             .unwrap();
@@ -788,9 +738,190 @@ async fn structured_values_page_literal_text_and_exact_json_without_aliasing_key
             Some(vec![Key("content".into())]),
             SourcePosition::Tail,
             8192,
-            65536,
         )
         .await
         .unwrap();
     assert!(text.ends_with(&source.text));
+}
+
+#[tokio::test]
+async fn soft_first_history_and_source_keep_complete_title_with_bounded_text() {
+    use maka_agent_ports::session::history::HistoryField;
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("metadata.sqlite"))
+        .await
+        .unwrap();
+    let session = "complete-metadata";
+    log.create_session(session, "create", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
+    log.create_session("other", "other", &serde_json::json!({}), 1)
+        .await
+        .unwrap();
+    log.append(&event(session, opening())).await.unwrap();
+    log.append(&event(session, request(session))).await.unwrap();
+    let arguments =
+        serde_json::json!({"literal":"完整😀\"\\ original content beyond one body chunk"});
+    let call = maka_agent_facts::model::ModelToolCall {
+        id: "call".into(),
+        name: "Count".into(),
+        input: arguments.clone().into(),
+        provider_options: None,
+        provider_executed: false,
+    };
+    log.append(&event(
+        session,
+        observe(session, ModelEvent::ToolCall(call.clone())),
+    ))
+    .await
+    .unwrap();
+    log.append(&event(
+        session,
+        Fact::ModelCompleted {
+            step_id: format!("step-{session}"),
+            output: ModelStep {
+                parts: vec![ModelPart::ToolCall { call }],
+                finish_reason: maka_agent_facts::model::ModelFinishReason::ToolCalls,
+                usage: Default::default(),
+                provider_options: None,
+                response_id: None,
+                model: None,
+                timestamp: None,
+            },
+        },
+    ))
+    .await
+    .unwrap();
+    let operation = format!("step-{session}:call");
+    let title = maka_agent_facts::display::Text::plain("原始 title 😀 ".repeat(6000));
+    let through = log
+        .append(&event(
+            session,
+            Fact::ToolDispatched {
+                presentation: None,
+                title: Some(title.clone()),
+                operation_id: operation.clone(),
+                call: maka_agent_facts::tool_call::ToolCallIdentity::provider(
+                    format!("step-{session}"),
+                    "call".into(),
+                ),
+                name: "Count".into(),
+                input: arguments.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let visible_tool =
+        maka_agent_facts::tool_call::tool_use_id(&format!("inv-{session}"), &operation);
+    let locator = log
+        .tool_source_position(session, through, &visible_tool)
+        .await
+        .unwrap();
+    let history = log
+        .history_text(
+            session,
+            through,
+            Position::Row {
+                position: locator,
+                field: HistoryField::Body,
+            },
+            false,
+            8,
+            1,
+            64 * 1024,
+        )
+        .await;
+    let mut source_pages = Vec::new();
+    let mut position = SourcePosition::Start;
+    for _ in 0..32 {
+        let result = log
+            .history_source(
+                session,
+                through,
+                locator,
+                SourceField::Arguments,
+                None,
+                position,
+                8,
+            )
+            .await;
+        let next = result.as_ref().ok().and_then(|source| {
+            let end = source.offset + source.text.len() as u64;
+            (end < source.total_bytes).then_some(SourcePosition::After { offset: end })
+        });
+        source_pages.push(result);
+        match next {
+            Some(next) => position = next,
+            None => break,
+        }
+    }
+    let foreign = log
+        .history_source(
+            "other",
+            through,
+            locator,
+            SourceField::Arguments,
+            None,
+            SourcePosition::Start,
+            8,
+        )
+        .await;
+    let old = log
+        .history_source(
+            session,
+            locator.source_sequence - 1,
+            locator,
+            SourceField::Arguments,
+            None,
+            SourcePosition::Start,
+            8,
+        )
+        .await;
+    log.close().await.unwrap();
+    let Page::Ready {
+        through: actual_fence,
+        chunks,
+        after,
+        ..
+    } = history.expect("first history metadata must remain complete");
+    assert_eq!(actual_fence, through);
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].position, locator);
+    assert!(chunks[0].text.len() <= 8);
+    assert!(
+        chunks[0]
+            .tool
+            .as_ref()
+            .unwrap()
+            .call
+            .as_ref()
+            .unwrap()
+            .title
+            .as_deref()
+            == Some(&title)
+    );
+    assert!(after.is_some(), "bounded body keeps an exact continuation");
+    let mut actual = String::new();
+    for result in source_pages {
+        let source = result.expect("first source metadata must remain complete");
+        assert_eq!(source.position, locator);
+        assert_eq!(source.offset, actual.len() as u64);
+        assert!(!source.text.is_empty() && source.text.len() <= 8);
+        assert!(
+            source
+                .tool
+                .as_ref()
+                .unwrap()
+                .call
+                .as_ref()
+                .unwrap()
+                .title
+                .as_deref()
+                == Some(&title)
+        );
+        actual.push_str(&source.text);
+    }
+    assert_eq!(actual, serde_json::to_string(&arguments).unwrap());
+    assert!(foreign.is_err());
+    assert!(old.is_err());
 }

@@ -101,6 +101,74 @@ fn text_events(text: &str) -> Vec<Value> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_http_preserves_complete_ordered_output_items() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let mut events =
+        vec![json!({"type":"response.created","response":{"id":"complete-items","model":"gpt-5"}})];
+    for index in 0..129 {
+        let id = format!("message-{index:03}");
+        let text = format!("complete-part-{index:03}");
+        events.extend([
+            json!({"type":"response.output_item.added","output_index":index,"item":{"type":"message","id":id,"role":"assistant","content":[]}}),
+            json!({"type":"response.output_text.delta","item_id":id,"output_index":index,"content_index":0,"delta":text}),
+            json!({"type":"response.output_item.done","output_index":index,"item":{"type":"message","id":id,"role":"assistant","content":[{"type":"output_text","text":text,"annotations":[]}]}}),
+        ]);
+    }
+    events.push(completed());
+    let body = frames(&events);
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = read_request(&mut socket).await;
+        let write = socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+        (request, write)
+    });
+    let executor = ModelExecutor::new(Duration::from_secs(15)).unwrap();
+    let mut input = super::provider_stream::request(ProviderKind::OpenaiResponses, base_url);
+    input.provider.model = "gpt-5".into();
+    input.provider.auth = maka_model::ProviderAuth::ApiKey("local-test-key".into());
+    input
+        .provider
+        .headers
+        .insert("x-test-provider".into(), "responses".into());
+    let mut stream = executor
+        .stream(input, CancellationToken::new())
+        .await
+        .unwrap();
+    let mut builder = StepBuilder::for_step("complete-items").unwrap();
+    let completed = async {
+        while let Some(event) = stream.next().await {
+            builder
+                .push(event.map_err(|error| error.to_string())?.event)
+                .map_err(|error| error.to_string())?;
+        }
+        builder.finish().map_err(|error| error.to_string())
+    }
+    .await;
+    let cleanup = stream.cancel_and_wait().await;
+    let (request, write) = server.await.unwrap();
+    cleanup.unwrap();
+    write.unwrap();
+    let step = completed.expect("valid provider output must preserve every ordered item");
+    assert_eq!(request["model"], "gpt-5");
+    assert_eq!(step.response_id.as_deref(), Some("complete-items"));
+    let parts: Vec<_> = step
+        .parts
+        .iter()
+        .map(|part| match part {
+            ModelPart::Text { text, .. } => text.clone(),
+            other => panic!("unexpected provider part {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        parts,
+        (0..129)
+            .map(|index| format!("complete-part-{index:03}"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

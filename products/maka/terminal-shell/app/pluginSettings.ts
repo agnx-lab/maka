@@ -293,8 +293,7 @@ export function createPluginSettings(operations: SettingsOperations, active: () 
         disabled() ||
         editor() ||
         !field?.editable ||
-        !['object', 'array'].includes(field.kind) ||
-        request.path.length >= 16
+        !['object', 'array'].includes(field.kind)
       )
         return;
       cancelRead();

@@ -61,7 +61,7 @@ pub struct Call<T> {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "WebFetch")]
 pub struct Fetch {
-    #[schemars(length(min = 1, max = 8192))]
+    #[schemars(length(min = 1))]
     pub url: String,
 }
 #[derive(Deserialize, JsonSchema)]

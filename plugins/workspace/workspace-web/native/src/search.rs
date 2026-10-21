@@ -20,16 +20,14 @@
 use maka_capabilities::call;
 use maka_capabilities::http;
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use url::Url;
 
 use maka_web_api::search::{Query, Results, Row};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(
-        "WebSearch requires a nonempty query of at most 200 characters and a limit from 1 to 10"
-    )]
+    #[error("WebSearch requires a nonempty query and a result limit from 1 to 20")]
     Input,
     #[error("WebSearch credentials are not configured")]
     NotConfigured,
@@ -37,13 +35,11 @@ pub enum Error {
     InvalidCredentials,
     #[error("WebSearch rate limit exceeded")]
     RateLimited,
-    #[error("WebSearch request timed out")]
-    Timeout,
     #[error("WebSearch request was cancelled")]
     Cancelled,
     #[error("WebSearch returned HTTP {0}")]
     Status(u16),
-    #[error("WebSearch returned an invalid or oversized response")]
+    #[error("WebSearch returned an invalid response")]
     Response,
     #[error("WebSearch network request failed")]
     Network,
@@ -79,8 +75,7 @@ impl Search {
         let result = tokio::select! {
             biased;
             _ = scope.cancellation.cancelled() => Err(Error::Cancelled),
-            result = tokio::time::timeout(Duration::from_secs(10), self.request(&scope, key, input)) =>
-                result.unwrap_or(Err(Error::Timeout)),
+            result = self.request(&scope, key, input) => result,
         };
         owned.finish().await?;
         result
@@ -127,9 +122,6 @@ impl Search {
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.body.next().await.map_err(network_error)? {
-                if chunk.len() > 1024 * 1024 - bytes.len() {
-                    return Err(Error::Response);
-                }
                 bytes.extend_from_slice(&chunk);
             }
             decode(&bytes, input)
@@ -172,20 +164,19 @@ fn decode(bytes: &[u8], input: &Query) -> Result<Results, Error> {
         .filter_map(|entry| {
             let entry: Entry = serde_json::from_value(entry).ok()?;
             let url = Url::parse(&entry.url).ok()?;
-            if entry.url.len() > 2048
-                || !matches!(url.scheme(), "http" | "https")
+            if !matches!(url.scheme(), "http" | "https")
                 || !url.username().is_empty()
                 || url.password().is_some()
             {
                 return None;
             }
-            let (title, title_truncated) = clip(entry.title, 240);
-            let (snippet, snippet_truncated) = clip(entry.content, 400);
+            let title = entry.title;
+            let snippet = entry.content;
             Some(Row {
                 title,
                 snippet,
                 url: url.to_string(),
-                truncated: title_truncated || snippet_truncated,
+                truncated: false,
             })
         })
         .take(input.limit)
@@ -197,13 +188,6 @@ fn decode(bytes: &[u8], input: &Query) -> Result<Results, Error> {
         omitted_results,
         rows,
     })
-}
-
-fn clip(value: String, chars: usize) -> (String, bool) {
-    let Some((end, _)) = value.char_indices().nth(chars) else {
-        return (value, false);
-    };
-    (value[..end].to_owned(), true)
 }
 
 pub fn native(
@@ -251,8 +235,8 @@ mod tests {
         assert_eq!(result.rows.len(), 2);
         assert_eq!(result.omitted_results, 3);
         assert!(result.truncated);
-        assert!(result.rows[0].truncated);
-        assert_eq!(result.rows[0].snippet.chars().count(), 400);
+        assert!(!result.rows[0].truncated);
+        assert_eq!(result.rows[0].snippet, "字".repeat(401));
         assert!(
             decode(
                 br#"{"error":"provider rejected request"}"#,

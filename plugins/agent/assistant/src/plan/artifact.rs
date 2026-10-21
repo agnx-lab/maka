@@ -37,7 +37,7 @@ pub struct Artifact {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "PlanStep")]
 pub struct Step {
-    #[schemars(length(min = 1, max = 128), regex(pattern = "^[A-Za-z0-9_-]+$"))]
+    #[schemars(length(min = 1), regex(pattern = "^[A-Za-z0-9_-]+$"))]
     pub id: String,
     #[schemars(length(min = 1))]
     pub title: String,

@@ -82,7 +82,7 @@ impl Host {
             Authority::Remote { hash } => {
                 let credential = self.credential(hash).await?;
                 let client = client
-                    .filter(|value| !value.is_empty() && value.encode_utf16().count() <= 128)
+                    .filter(|value| !value.is_empty())
                     .ok_or("remote client identity required")?;
                 if !matches!(credential.state, CredentialState::Active { .. })
                     || credential.client_instance_id() != Some(client)

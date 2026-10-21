@@ -58,9 +58,6 @@ pub fn normalize_headers(secret: &str) -> ValidationResult<String> {
 pub fn parse_headers(secret: &str) -> ValidationResult<std::collections::BTreeMap<String, String>> {
     let entries: std::collections::BTreeMap<String, String> =
         serde_json::from_str(secret).map_err(|_| "request headers must map names to strings")?;
-    if entries.len() > 32 {
-        return Err("too many request headers".into());
-    }
     let mut result = std::collections::BTreeMap::new();
     let mut seen = std::collections::BTreeSet::new();
     for (raw, v) in entries {
@@ -70,10 +67,6 @@ pub fn parse_headers(secret: &str) -> ValidationResult<std::collections::BTreeMa
         }
         super::headers::validate_value(&v)?;
         result.insert(name.to_owned(), v);
-    }
-    let normalized = serde_json::to_string(&result).map_err(|_| "invalid headers")?;
-    if normalized.len() > 65536 {
-        return Err("request headers exceed byte limit".into());
     }
     Ok(result)
 }
@@ -109,8 +102,6 @@ pub fn validate_set_credential(value: &SetCredentialInput) -> ValidationResult {
         }
     ) {
         normalize_headers(&value.secret)?;
-    } else if value.secret.len() > 10240 {
-        return Err("credential exceeds byte limit".into());
     }
     Ok(())
 }

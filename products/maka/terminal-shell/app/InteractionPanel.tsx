@@ -237,11 +237,7 @@ export function InteractionPanel({
     request()?.kind === 'question' &&
     answers().length === request().questions.length &&
     answers().every(
-      (part) =>
-        part.value === null ||
-        (typeof part.value === 'string' &&
-          !!part.value.trim() &&
-          interactionBytes(part.value) <= 2048),
+      (part) => part.value === null || (typeof part.value === 'string' && !!part.value.trim()),
     );
   const choose = (index: number, value: string | null | undefined, other = false) => {
     if (!blocked())
@@ -452,13 +448,11 @@ export function InteractionPanel({
   const submit = () => {
     if (blocked()) return;
     if (request()?.kind === 'question' && !questionReady()) {
-      error.set(
-        'Answer every question or explicitly choose Skip. Other answers must fit in 2048 UTF-8 bytes.',
-      );
+      error.set('Answer every question or explicitly choose Skip.');
       return;
     }
     if (request()?.kind === 'form' && !form().answer) {
-      error.set(form().error ?? 'Complete the included fields before submitting.');
+      error.set('Complete the included fields before submitting.');
       return;
     }
     const answer = submissionAnswer();
@@ -829,9 +823,6 @@ export function InteractionPanel({
                     action={formAction}
                     edit={editForm}
                   />
-                  <If when={form().error}>
-                    <Text style={{ ...bodyTextStyle, color: C.warning }}>{form().error}</Text>
-                  </If>
                 </If>
                 <If when={request()?.kind === 'client_capability'}>
                   <CapabilityRequest request={request()} sessionId={sessionId} />
@@ -879,8 +870,7 @@ export function InteractionPanel({
           </If>
           <If when={request()?.kind === 'question' && !record()?.outcome && !questionReady()}>
             <Text style={{ ...captionTextStyle, color: C.muted }}>
-              Choose an option, write another answer, or skip each question. Written answers allow
-              up to 2048 UTF-8 bytes.
+              Choose an option, write another answer, or skip each question.
             </Text>
           </If>
           <If when={record() && !record().outcome && !pending() && !loading()}>

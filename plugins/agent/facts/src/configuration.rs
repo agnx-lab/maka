@@ -104,11 +104,11 @@ pub struct ConnectionVersionBasis {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelSelection {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub connection_id: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
     pub revision: u64,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub model_id: String,
 }
 

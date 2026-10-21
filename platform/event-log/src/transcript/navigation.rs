@@ -99,7 +99,7 @@ impl EventLog {
                         "sessionId": session, "throughSequence": through, "contributions": [],
                         "nextPosition": { "sourceSequence": MAX_SAFE_INTEGER, "itemIndex": MAX_SAFE_INTEGER }
                     });
-                    let budget = 192 * 1024 - serde_json::to_vec(&envelope)?.len();
+                    let budget = (192_usize * 1024).saturating_sub(serde_json::to_vec(&envelope)?.len());
                     let mut bytes = 0usize;
                     for (index, row) in rows.into_iter().enumerate() {
                         let position = row_position(row.try_get(0)?, row.try_get(1)?)?;
@@ -150,10 +150,7 @@ impl EventLog {
                         }
                         let updated_bytes =
                             bytes - old_bytes + serde_json::to_vec(&contribution)?.len() + 1;
-                        if updated_bytes > budget {
-                            if contributions.is_empty() {
-                                return Err(StoreError::PrefixTooLarge);
-                            }
+                        if !contributions.is_empty() && updated_bytes > budget {
                             next_position = Some(position);
                             break;
                         }

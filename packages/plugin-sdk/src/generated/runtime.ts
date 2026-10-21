@@ -937,9 +937,6 @@ export type TerminalScene =
        * Render a single line, eliding overflow at a complete grapheme.
        */
       truncate?: boolean;
-      /**
-       * @maxItems 64
-       */
       animation?: TerminalAnimationFrame[];
       align?: TerminalAlign & string;
       bold?: boolean;
@@ -1101,14 +1098,11 @@ export type FileError =
   | 'clipboard_unavailable'
   | 'paste_rejected';
 /**
- * Complete bounded comparisons and structured patches reuse native parsers.
+ * Complete comparisons and structured patches reuse native parsers.
  */
 export type DiffContent =
   | {
       source: string;
-      /**
-       * @maxItems 8192
-       */
       rows: DiffRow[];
       kind: 'annotated';
     }
@@ -1207,7 +1201,6 @@ export type ReadingTarget =
   | {
       /**
        * @minItems 1
-       * @maxItems 32
        */
       path: [string, ...string[]];
       offset: number;
@@ -1274,7 +1267,6 @@ export type TextFileError =
   | 'read_failed'
   | 'write_failed'
   | 'invalid_file'
-  | 'too_large'
   | 'invalid_utf8'
   | 'conflict'
   | 'worker_failed';
@@ -1349,9 +1341,6 @@ export type Network =
   | ('denied' | 'allowed')
   | {
       restricted: {
-        /**
-         * @maxItems 128
-         */
         destinations: Destination[];
       };
     };
@@ -1519,9 +1508,6 @@ export type ExecutorSetupAction =
 export type ExecutorSetupResult =
   | {
       info?: ExecutorSetupInfo | null;
-      /**
-       * @maxItems 32
-       */
       methods: ExecutorAuthenticationMethod[];
       kind: 'checked';
     }
@@ -1756,102 +1742,7 @@ export type AgentRejection =
   | 'closed';
 export type WorkHubTaskStatus =
   | {
-      /**
-       * @maxItems 16
-       */
-      dependencies:
-        | []
-        | [string]
-        | [string, string]
-        | [string, string, string]
-        | [string, string, string, string]
-        | [string, string, string, string, string]
-        | [string, string, string, string, string, string]
-        | [string, string, string, string, string, string, string]
-        | [string, string, string, string, string, string, string, string]
-        | [string, string, string, string, string, string, string, string, string]
-        | [string, string, string, string, string, string, string, string, string, string]
-        | [string, string, string, string, string, string, string, string, string, string, string]
-        | [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-          ]
-        | [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-          ]
-        | [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-          ]
-        | [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-          ]
-        | [
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-            string,
-          ];
+      dependencies: string[];
       kind: 'blocked';
     }
   | {
@@ -2709,7 +2600,6 @@ export type SettingsCredentialRejection =
   | 'attempt_conflict'
   | 'connection_changed'
   | 'credential_changed'
-  | 'capacity'
   | 'slug_taken'
   | 'authentication';
 export type SettingsLoginFailure = 'cancelled' | 'expired' | 'transport' | 'authentication';
@@ -2934,12 +2824,6 @@ export type SkillInvocationReceipt =
       request: string;
       success: false;
       reason: SkillFailureReason;
-    }
-  | {
-      invocation: 'explicit';
-      success: false;
-      reason: TooManyRequests;
-      requestLimit: number;
     };
 export type SkillInvocationMode = 'explicit' | 'model_tool';
 export type SkillFailureReason =
@@ -2948,7 +2832,6 @@ export type SkillFailureReason =
   | 'disabled'
   | 'host_incompatible'
   | 'resolution_failed';
-export type TooManyRequests = 'too_many_requests';
 export type SkillPreparation =
   | {
       /**
@@ -2963,7 +2846,7 @@ export type SkillPreparation =
       invocation: SkillInvocationResult;
       kind: 'blocked';
     };
-export type SkillInvocationFailure = SkillRequestFailure | SkillOverflowFailure;
+export type SkillInvocationFailure = SkillRequestFailure;
 export type AgentSessionFilter = 'all' | 'archived' | 'needs_you';
 export type AgentSessionPosition =
   | {
@@ -5116,14 +4999,10 @@ export type Identity2 =
  * an unrevoked Host record and the issuing principal's current authorization.
  */
 export type Id = string;
-export type MarkdownTextResult =
-  | {
-      text: string;
-      kind: 'ready';
-    }
-  | {
-      kind: 'too_large';
-    };
+export type MarkdownTextResult = {
+  text: string;
+  kind: 'ready';
+};
 
 export interface ClientDraft {
   revision: number;
@@ -5261,13 +5140,7 @@ export interface DeploymentSourceReplace {
  */
 export interface DeploymentDocument {
   input: CompositionInput;
-  /**
-   * @maxItems 128
-   */
   remoteExports: RemoteObservation[];
-  /**
-   * @maxItems 128
-   */
   packages: PackageRef[];
 }
 /**
@@ -5395,100 +5268,8 @@ export interface CompositionEdit {
 export interface SettingChange {
   /**
    * @minItems 1
-   * @maxItems 16
    */
-  path:
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ];
+  path: [string, ...string[]];
   /**
    * None removes the field; all other fields retain their original source.
    */
@@ -5499,7 +5280,6 @@ export interface InstanceConfigure {
   instance: InstanceId;
   /**
    * @minItems 1
-   * @maxItems 32
    */
   changes: [SettingChange, ...SettingChange[]];
 }
@@ -5619,102 +5399,7 @@ export interface InstanceSetEnabled {
 export interface InstanceSettingsRead {
   source: DeploymentRef;
   instance: InstanceId;
-  /**
-   * @maxItems 16
-   */
-  path:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ];
+  path: string[];
   after?: string | null;
 }
 export interface InstanceSettingsPage {
@@ -5763,152 +5448,7 @@ export interface SettingField {
   nullable: boolean;
   editable: boolean;
   value?: SettingValue | null;
-  /**
-   * @maxItems 16
-   */
-  options:
-    | []
-    | [SettingValue]
-    | [SettingValue, SettingValue]
-    | [SettingValue, SettingValue, SettingValue]
-    | [SettingValue, SettingValue, SettingValue, SettingValue]
-    | [SettingValue, SettingValue, SettingValue, SettingValue, SettingValue]
-    | [SettingValue, SettingValue, SettingValue, SettingValue, SettingValue, SettingValue]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ]
-    | [
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-        SettingValue,
-      ];
+  options: SettingValue[];
 }
 export interface BindingCandidatesPage {
   source: DeploymentRef;
@@ -6214,28 +5754,7 @@ export interface TextAppearance {
 }
 export interface FontAppearance {
   family: FontFamily;
-  /**
-   * @maxItems 8
-   */
-  fallbacks:
-    | []
-    | [FontFamily]
-    | [FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily, FontFamily]
-    | [
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-        FontFamily,
-      ];
+  fallbacks: FontFamily[];
   size: number;
   /**
    * Line height relative to this font size.
@@ -6251,8 +5770,6 @@ export interface TextareaProps {
   appearance: TextareaAppearance;
   /**
    * Exact whitespace-delimited literals rendered and edited as atomic inline tokens.
-   *
-   * @maxItems 4096
    */
   inlineTokens?: string[];
   menu?: TextareaMenu | null;
@@ -6716,9 +6233,6 @@ export interface ReadingViewport {
   readingRevision: number;
   atStart?: boolean;
   atEnd: boolean;
-  /**
-   * @maxItems 4096
-   */
   visibleChildKeys: string[];
 }
 /**
@@ -6746,7 +6260,6 @@ export interface ReadingFind {
 export interface ReadingMatch {
   /**
    * @minItems 1
-   * @maxItems 32
    */
   path: [string, ...string[]];
   offset: number;
@@ -6759,13 +6272,7 @@ export interface RowsProps {
    * or selects the first row when there is no current selection.
    */
   entry?: string | null;
-  /**
-   * @maxItems 64
-   */
   rows: Row[];
-  /**
-   * @maxItems 32
-   */
   shortcuts: Shortcut[];
   maxRows: number;
   /**
@@ -6783,19 +6290,7 @@ export interface RowsProps {
 export interface Row {
   key: string;
   text: string;
-  /**
-   * @maxItems 8
-   */
-  actions:
-    | []
-    | [RowAction]
-    | [RowAction, RowAction]
-    | [RowAction, RowAction, RowAction]
-    | [RowAction, RowAction, RowAction, RowAction]
-    | [RowAction, RowAction, RowAction, RowAction, RowAction]
-    | [RowAction, RowAction, RowAction, RowAction, RowAction, RowAction]
-    | [RowAction, RowAction, RowAction, RowAction, RowAction, RowAction, RowAction]
-    | [RowAction, RowAction, RowAction, RowAction, RowAction, RowAction, RowAction, RowAction];
+  actions: RowAction[];
 }
 export interface RowAction {
   key: string;
@@ -6849,13 +6344,9 @@ export interface MorphMarkConfiguration {
 export interface MorphShape {
   /**
    * @minItems 1
-   * @maxItems 32
    */
   paths: [[number, number][], ...[number, number][][]];
   radius: number;
-  /**
-   * @maxItems 32
-   */
   miters: number[];
   columns: number;
 }
@@ -7276,9 +6767,6 @@ export interface ComputerEvaluate {
 }
 export interface ProtocolProcessLaunch {
   executable: string;
-  /**
-   * @maxItems 256
-   */
   args?: string[];
   env?: {
     [k: string]: string | undefined;
@@ -7304,9 +6792,6 @@ export interface AcpAgent {
   };
 }
 export interface Permissions {
-  /**
-   * @maxItems 32
-   */
   filesystem: Rule[];
   network: Network;
 }
@@ -7321,9 +6806,6 @@ export interface Rule {
 }
 export interface ProtocolProcessRun {
   executable: string;
-  /**
-   * @maxItems 256
-   */
   args?: string[];
   env?: {
     [k: string]: string | undefined;
@@ -7351,9 +6833,6 @@ export interface AgentToolNames {
 }
 export interface WorkHubPresets {
   revision: number | null;
-  /**
-   * @maxItems 64
-   */
   entries: WorkHubPreset[];
 }
 export interface WorkHubPreset {
@@ -7701,19 +7180,8 @@ export interface WorkHubConfiguration {
   agent: AgentConfiguration;
   /**
    * Exactly selected imports of Agent services. Native grants are independent.
-   *
-   * @maxItems 8
    */
-  workers:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string];
+  workers: string[];
 }
 export interface WorkHubTaskRead {
   taskId: string;
@@ -7724,102 +7192,7 @@ export interface AgentAnswerCursor {
   offset: number;
 }
 export interface WorkHubTask {
-  /**
-   * @maxItems 16
-   */
-  dependencies?:
-    | []
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string, string, string, string]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ]
-    | [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-      ];
+  dependencies?: string[];
   taskId: string;
   worker: string;
   title: string;
@@ -8555,9 +7928,6 @@ export interface ConnectionCredentialTarget {
   };
 }
 export interface SettingsConnectionEditingFacts {
-  /**
-   * @maxItems 512
-   */
   enabledModelIds: string[];
   modelOverrides: {
     [k: string]: ModelOverride | undefined;
@@ -8921,10 +8291,6 @@ export interface SkillRequestFailure {
   request: string;
   reason: SkillFailureReason;
 }
-export interface SkillOverflowFailure {
-  reason: TooManyRequests;
-  requestLimit: number;
-}
 export interface AgentList {
   filter: AgentSessionFilter;
   position: AgentSessionPosition;
@@ -8945,9 +8311,6 @@ export interface AgentCreate {
    */
   tools?: string[] | null;
   title: string;
-  /**
-   * @maxItems 32
-   */
   labels: string[];
   workspace: AgentWorkspaceSelection;
 }
@@ -9407,17 +8770,8 @@ export interface AgentScheduledReminder {
 export interface RecallQuery {
   /**
    * @minItems 1
-   * @maxItems 8
    */
-  terms:
-    | [string]
-    | [string, string]
-    | [string, string, string]
-    | [string, string, string, string]
-    | [string, string, string, string, string]
-    | [string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string]
-    | [string, string, string, string, string, string, string, string];
+  terms: [string, ...string[]];
   question?: string | null;
   limit?: number | null;
   session_id?: string | null;
@@ -9566,9 +8920,6 @@ export interface AgentFork {
    */
   turnId: string | null;
   title: string;
-  /**
-   * @maxItems 32
-   */
   labels: string[];
 }
 export interface AgentForkReceipt {
@@ -9601,9 +8952,6 @@ export interface AgentMetadata {
   sessionId: string;
   expectedRevision: number;
   title: string;
-  /**
-   * @maxItems 32
-   */
   labels: string[];
 }
 export interface AgentPermissionChange {
@@ -9679,170 +9027,7 @@ export interface AgentWatch {
 }
 export interface AgentPendingInteractions {
   revision: number;
-  /**
-   * @maxItems 16
-   */
-  entries:
-    | []
-    | [AgentInteractionSummary]
-    | [AgentInteractionSummary, AgentInteractionSummary]
-    | [AgentInteractionSummary, AgentInteractionSummary, AgentInteractionSummary]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ]
-    | [
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-        AgentInteractionSummary,
-      ];
+  entries: AgentInteractionSummary[];
 }
 export interface AgentInteractionSummary {
   requestId: string;
@@ -9921,9 +9106,6 @@ export interface QuestionAsk {
 }
 export interface FormAsk {
   message: string;
-  /**
-   * @maxItems 32
-   */
   fields: FormField[];
 }
 /**
@@ -9966,13 +9148,7 @@ export interface WorkspaceProcessConfiguration {
  */
 export interface Policy {
   default: Access;
-  /**
-   * @maxItems 512
-   */
   rules: Rule[];
-  /**
-   * @maxItems 128
-   */
   denyGlobs: string[];
 }
 export interface WorkspacePath {
@@ -10122,9 +9298,6 @@ export interface TerminalController {
 export interface TerminalControl {
   controller: TerminalController;
   sequence: number;
-  /**
-   * @maxItems 64
-   */
   actions?: RawAction[];
   size?: TerminalSize | null;
 }
@@ -10400,8 +9573,6 @@ export interface HistoryTool {
 export interface HistoryToolCall {
   /**
    * Recorded ancestors in this Turn, nearest first; display references only.
-   *
-   * @maxItems 32
    */
   ancestorToolUseIds: string[];
   /**
@@ -10443,7 +9614,7 @@ export interface AgentHistorySearch {
    */
   after?: HistoryRowPosition | null;
   /**
-   * Literal query, additionally limited to 512 UTF-8 bytes; no normalization.
+   * Literal query; no normalization.
    */
   query: string;
   /**
@@ -10476,166 +9647,8 @@ export interface AgentHistorySourceRead {
   field: SourceField;
   /**
    * Optional JSON keys/array indices within arguments, result or receipt.
-   *
-   * @maxItems 16
    */
-  path?:
-    | []
-    | [HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment, HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment, HistorySourceSegment, HistorySourceSegment]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | null;
+  path?: HistorySourceSegment[] | null;
   position: SourcePosition;
 }
 /**
@@ -10668,166 +9681,8 @@ export interface HistorySource {
   field: SourceField;
   /**
    * Omission reads the encoded field. A selected JSON string is literal text.
-   *
-   * @maxItems 16
    */
-  path?:
-    | []
-    | [HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment, HistorySourceSegment]
-    | [HistorySourceSegment, HistorySourceSegment, HistorySourceSegment, HistorySourceSegment]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | [
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-        HistorySourceSegment,
-      ]
-    | null;
+  path?: HistorySourceSegment[] | null;
   format: SourceFormat;
   offset: number;
   totalBytes: number;
@@ -10876,7 +9731,7 @@ export interface ResourceMetadata {
   metadata: unknown;
 }
 /**
- * Bounded source-to-readable-text conversion using the presenter's Markdown semantics.
+ * Complete source-to-readable-text conversion using the presenter's Markdown semantics.
  */
 export interface MarkdownTextInput {
   source: string;

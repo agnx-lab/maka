@@ -283,7 +283,7 @@ impl Handler for Agent {
                 "gitStatus" => encode(owner.git_status(decode(input)?, context.scope()).await?),
                 "listFiles" => {
                     let result = encode(owner.list_files(decode(input)?, context.scope()).await?)?;
-                    maka_plugin_core::json::check_delivery(&result, 512 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_files_output_unavailable")?;
                     Ok(result)
                 }
@@ -406,7 +406,7 @@ impl Handler for Agent {
                             })
                             .collect(),
                     })?;
-                    maka_plugin_core::json::check_delivery(&result, 48 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_observation_unavailable")?;
                     owner.session(&input.session_id).await?;
                     if context.scope().cancellation.is_cancelled() {
@@ -495,7 +495,7 @@ impl Handler for Agent {
                         return Err("agent_observation_cancelled".into());
                     }
                     let result = encode(result)?;
-                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_history_unavailable")?;
                     Ok(result)
                 }
@@ -527,7 +527,7 @@ impl Handler for Agent {
                         return Err("agent_observation_cancelled".into());
                     }
                     let result = encode(result)?;
-                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_history_unavailable")?;
                     Ok(result)
                 }
@@ -557,7 +557,6 @@ impl Handler for Agent {
                             after.validate().is_err() || after.source_sequence > input.through
                         })
                         || input.query.is_empty()
-                        || input.query.len() > 512
                     {
                         return Err("agent_search_invalid".into());
                     }
@@ -597,7 +596,7 @@ impl Handler for Agent {
                         return Err("agent_observation_cancelled".into());
                     }
                     let result = encode(page)?;
-                    maka_plugin_core::json::check_delivery(&result, 16 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_history_unavailable")?;
                     Ok(result)
                 }
@@ -630,7 +629,6 @@ impl Handler for Agent {
                                 input.path,
                                 input.position,
                                 8192,
-                                64 * 1024,
                             )
                             .await
                             .map_err(|_| "agent_history_unavailable")?;
@@ -649,7 +647,7 @@ impl Handler for Agent {
                         return Err("agent_observation_cancelled".into());
                     }
                     let result = encode(page)?;
-                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_history_unavailable")?;
                     Ok(result)
                 }
@@ -686,7 +684,7 @@ impl Handler for Agent {
                         return Err("agent_observation_cancelled".into());
                     }
                     let result = encode(page)?;
-                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_image_unavailable")?;
                     Ok(result)
                 }
@@ -737,7 +735,7 @@ impl Handler for Agent {
                         digest: image.digest,
                         data: STANDARD.encode(image.bytes),
                     })?;
-                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                    maka_plugin_core::json::exact_numbers(&result)
                         .map_err(|_| "agent_image_unavailable")?;
                     Ok(result)
                 }
@@ -888,9 +886,6 @@ impl Handler for Agent {
     }
 }
 async fn catalog_scope(owner: &Owner, input: &List) -> Result<CatalogScope, String> {
-    if input.title_query.chars().take(129).count() > 128 {
-        return Err("agent_catalog_query_invalid".into());
-    }
     let selection = match &input.scope {
         SessionListScope::All => CatalogSelection::All,
         SessionListScope::Project { project_id } => CatalogSelection::Project(*project_id),
@@ -961,7 +956,7 @@ async fn catalog_page(owner: &Owner, input: &List) -> Result<SessionPage, String
     };
     while !maka_workspace_support::fits(&result) {
         if result.sessions.len() <= 1 {
-            return Err("agent_catalog_unavailable".into());
+            break;
         }
         if reverse {
             result.sessions.remove(0);

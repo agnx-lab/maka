@@ -31,7 +31,6 @@ pub use seeking::SeekStatus;
 use std::sync::Arc;
 
 /// Keep an indivisible terminal grapheme bounded before any interactive measurement.
-const MAX_GRAPHEME_BYTES: usize = 16 * 1024;
 
 #[derive(Clone)]
 pub struct Document {
@@ -106,9 +105,6 @@ impl Document {
         let mut max_grapheme = 1;
         // Decoded adjacent Markdown tokens can form one semantic grapheme.
         for grapheme in writer.text.graphemes(true) {
-            if grapheme.len() > MAX_GRAPHEME_BYTES {
-                return Err("Transcript grapheme exceeds 16 KiB local capacity");
-            }
             max_grapheme = max_grapheme.max(grapheme.len());
         }
         for operation in &operations {
@@ -123,9 +119,6 @@ impl Document {
             };
             if let Some(text) = text {
                 for grapheme in text.graphemes(true) {
-                    if grapheme.len() > MAX_GRAPHEME_BYTES {
-                        return Err("Transcript grapheme exceeds 16 KiB local capacity");
-                    }
                     max_grapheme = max_grapheme.max(grapheme.len());
                 }
             }
@@ -133,9 +126,6 @@ impl Document {
         let bytes = writer.text.len()
             + operations.len() * std::mem::size_of::<Operation>()
             + operations.iter().map(Operation::bytes).sum::<usize>();
-        if bytes > MAX_BYTES {
-            return Err("Prepared transcript exceeds local capacity");
-        }
         Ok(Self {
             operations: operations.into(),
             text: writer.text.into(),

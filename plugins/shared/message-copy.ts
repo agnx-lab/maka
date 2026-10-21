@@ -41,11 +41,6 @@ function utf8Bytes(text: string) {
   return bytes;
 }
 
-// Native copy accepts 64 KiB of UTF-8. Escaped control characters also need
-// a bounded JSON delivery through Timeline, Root and the physical copy widget.
-function fits(text: string) {
-  return utf8Bytes(text) <= 65536 && utf8Bytes(JSON.stringify(text)) <= 131074;
-}
 export interface MessageCopy {
   basis: {
     request: number;
@@ -192,9 +187,7 @@ export function messageCopyEvent(state: State, input: ComponentInput, actions: A
   }
   if (pending.kind === 'format') {
     const value = result.value as MarkdownTextResult;
-    if (value.kind === 'too_large' || (value.kind === 'ready' && !fits(value.text)))
-      copy.status = 'too_large';
-    else if (value.kind === 'ready') {
+    if (value.kind === 'ready') {
       copy.rendered = value.text || null;
       copy.status = value.text ? 'ready' : 'empty';
     } else copy.status = 'unavailable';
@@ -225,21 +218,11 @@ export function messageCopyEvent(state: State, input: ComponentInput, actions: A
     copy.status = 'unavailable';
     return true;
   }
-  if (source.totalBytes > 65536) {
-    copy.status = 'too_large';
-    copy.text = '';
-    return true;
-  }
   copy.total = source.totalBytes;
   copy.format = source.format;
   copy.text += source.text;
   if (end < source.totalBytes) {
     action(copy, actions, 'source');
-    return true;
-  }
-  if (!fits(copy.text)) {
-    copy.status = 'too_large';
-    copy.text = '';
     return true;
   }
   const body = copy.text;
@@ -277,11 +260,8 @@ function readable(source: string, format: SourceFormat | null): string {
     /"(?:\\.|[^"\\])*"|true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],:]/g,
   )!;
   let result = '',
-    depth = 0,
-    budget = 0;
+    depth = 0;
   function append(text: string) {
-    budget += utf8Bytes(text);
-    if (budget > 65536) throw new Error('copy budget');
     result += text;
   }
   const newline = () => append('\n' + '  '.repeat(depth));
@@ -313,11 +293,10 @@ function finishTool(copy: MessageCopy, args: string | null) {
     if (copy.basis.field === 'result')
       sections.push(text.toolResult + '\n' + readable(copy.raw ?? '', copy.rawFormat));
     const rendered = sections.join('\n\n');
-    if (!fits(rendered)) throw new Error('copy budget');
     copy.rendered = rendered;
     copy.status = 'ready';
   } catch {
-    copy.status = 'too_large';
+    copy.status = 'unavailable';
   }
 }
 export function messageCopyObservation(state: State): MessageCopyObservation | null {

@@ -37,7 +37,7 @@ fn namespace() -> Namespace {
         .expect("built-in skill library namespace")
 }
 fn valid(reference: &str) -> bool {
-    !reference.is_empty() && reference.len() <= 512 && !reference.chars().any(char::is_control)
+    !reference.is_empty() && !reference.chars().any(char::is_control)
 }
 impl Store {
     pub fn new(log: Arc<EventLog>, owner: String) -> Self {
@@ -135,15 +135,6 @@ impl Store {
                 }
                 let value =
                     serde_json::to_value(&current.entries).map_err(|_| "skills_encoding_failed")?;
-                if serde_json::to_vec(&value)
-                    .map_err(|_| "skills_encoding_failed")?
-                    .len()
-                    > maka_capabilities::storage::MAX_VALUE_BYTES
-                {
-                    return Ok(PreferenceResult::Rejected {
-                        reason: "preferences_full".into(),
-                    });
-                }
                 if scope.cancellation.is_cancelled() {
                     return Err("skills_call_cancelled".into());
                 }

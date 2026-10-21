@@ -79,7 +79,6 @@ export type FileView =
   | { kind: 'absent' }
   | { kind: 'changed' }
   | { kind: 'binary'; bytes: number }
-  | { kind: 'too_large'; bytes: number; limit: number }
   | { kind: 'unsupported'; fileKind: AgentFileKind };
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -94,7 +93,6 @@ function fileView(value: unknown): FileView {
     value.kind === 'absent' ||
     value.kind === 'changed' ||
     (value.kind === 'binary' && count(value.bytes)) ||
-    (value.kind === 'too_large' && count(value.bytes) && count(value.limit)) ||
     (value.kind === 'unsupported' &&
       typeof value.fileKind === 'string' &&
       ['file', 'directory', 'symlink', 'other'].includes(value.fileKind)) ||

@@ -53,19 +53,11 @@ pub struct Descriptor {
 impl Descriptor {
     pub fn validate(&self) -> Result<(), Error> {
         if self.label.trim().is_empty()
-            || self.label.len() > 256
             || self.label.chars().any(char::is_control)
             || !self.configuration_schema.is_object()
             || !self.configuration_defaults.is_object()
-            || self.authentication.len() > 16
         {
-            return Err(Error::Invalid(
-                "provider descriptor exceeds its bounds".into(),
-            ));
-        }
-        let bytes = serde_json::to_vec(self).map_err(|e| Error::Invalid(e.to_string()))?;
-        if bytes.len() > 64 * 1024 {
-            return Err(Error::Invalid("provider descriptor exceeds 64 KiB".into()));
+            return Err(Error::Invalid("invalid provider descriptor".into()));
         }
         let mut methods = std::collections::HashSet::new();
         for method in &self.authentication {

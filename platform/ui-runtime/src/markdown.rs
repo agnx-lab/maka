@@ -51,7 +51,6 @@ pub struct MarkdownProps {
     pub ascii: bool,
     #[serde(default)]
     pub animate: bool,
-    #[schemars(length(max = 65536))]
     pub source: String,
     pub appearance: MarkdownAppearance,
     pub selectable: bool,
@@ -71,7 +70,6 @@ fn pointer_focus_default() -> bool {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MarkdownLink {
-    #[schemars(length(max = 65536))]
     pub url: String,
 }
 pub fn link_schema() -> serde_json::Value {
@@ -91,21 +89,16 @@ pub fn markdown_contract() -> Contract {
     }
 }
 
-/// Bounded source-to-readable-text conversion using the presenter's Markdown semantics.
+/// Complete source-to-readable-text conversion using the presenter's Markdown semantics.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MarkdownTextInput {
-    #[schemars(length(max = 65536))]
     pub source: String,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MarkdownTextResult {
-    Ready {
-        #[schemars(length(max = 65536))]
-        text: String,
-    },
-    TooLarge,
+    Ready { text: String },
 }
 pub fn text_contract() -> Contract {
     use maka_plugin_core::contract::{Method, MethodMode};

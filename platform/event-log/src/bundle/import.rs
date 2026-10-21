@@ -74,15 +74,6 @@ impl EventLog {
         {
             return Err(invalid("bundle destination bindings differ from its inventory").into());
         }
-        for configuration in configurations.values() {
-            if serde_json::to_vec(configuration)
-                .map_err(StoreError::from)?
-                .len()
-                > crate::sessions::MAX_CONFIGURATION_BYTES
-            {
-                return Err(StoreError::PrefixTooLarge.into());
-            }
-        }
         // Never repair hashes of unvalidated source history.
         staged.validate_history().await?;
         let commits = self.commits.clone();

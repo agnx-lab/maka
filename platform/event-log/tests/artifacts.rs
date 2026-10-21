@@ -44,59 +44,83 @@ fn artifact(id: &str, bytes: &[u8]) -> Artifact {
 }
 
 #[tokio::test]
-async fn oversized_artifact_rejection_preserves_catalog_and_writer() {
+async fn large_upload_copy_reopens_with_complete_immutable_bytes() {
     let temp = tempfile::tempdir().unwrap();
-    let log = EventLog::open(&temp.path().join("runtime.sqlite"))
-        .await
-        .unwrap();
-    log.create_session("session", "create", &json!({}), 1)
-        .await
-        .unwrap();
-    let before = log.list_artifacts("session", 0, 128).await.unwrap();
+    let path = temp.path().join("runtime.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    for session in ["session", "copied"] {
+        log.create_session(session, session, &json!({}), 1)
+            .await
+            .unwrap();
+    }
     let bytes = vec![0x5a; 50 * 1024 * 1024 + 1];
-    let record = artifact("oversized", &bytes);
-    assert!(matches!(
-        log.commit_artifact(record, bytes).await,
-        Err(StoreError::InvalidTransition(message))
-            if message == "Artifact payload size mismatch or limit exceeded"
-    ));
-    let after = log.list_artifacts("session", 0, 128).await.unwrap();
-    assert_eq!(after.revision, before.revision);
-    assert_eq!(after.records, before.records);
-    assert_eq!(after.total, 0);
-    assert!(
-        log.get_artifact("session", "oversized")
-            .await
-            .unwrap()
-            .record
-            .is_none()
-    );
-    assert!(
-        log.read_artifact_chunk("session", "oversized", 0, 1)
-            .await
-            .unwrap()
-            .is_none()
-    );
-
-    let accepted = artifact("accepted", b"writer remains usable");
-    assert_eq!(
-        log.commit_artifact(accepted.clone(), b"writer remains usable".to_vec())
-            .await
-            .unwrap(),
-        accepted
-    );
-    let committed = log.list_artifacts("session", 0, 128).await.unwrap();
-    assert_ne!(committed.revision, before.revision);
-    assert_eq!(committed.records, [accepted]);
-    assert_eq!(
-        log.read_artifact_chunk("session", "accepted", 0, 64)
-            .await
-            .unwrap()
-            .unwrap()
-            .bytes,
-        b"writer remains usable"
-    );
+    let record = artifact("large", &bytes);
+    let completed = async {
+        let committed = log.commit_artifact(record.clone(), bytes.clone()).await?;
+        let copied = log
+            .copy_plugin_attachment(
+                &maka_capabilities::storage::Namespace::new(
+                    "upload.fixture",
+                    maka_plugin_core::scope::Scope::Profile,
+                )
+                .unwrap(),
+                maka_agent_ports::execution::CopyAttachment {
+                    target_session_id: "copied".into(),
+                    attachment: maka_agent_facts::attachment::AttachmentRef {
+                        kind: maka_agent_facts::attachment::AttachmentKind::Other,
+                        name: "file.bin".into(),
+                        mime_type: "application/octet-stream".into(),
+                        bytes: bytes.len() as u64,
+                        storage_ref: maka_agent_facts::attachment::StorageRef::SessionFile {
+                            session_id: "session".into(),
+                            relative_path: "large".into(),
+                        },
+                    },
+                },
+            )
+            .await?;
+        Ok::<_, StoreError>((committed, copied))
+    }
+    .await;
     log.close().await.unwrap();
+    let (committed, copied) =
+        completed.expect("complete upload and immutable copy must be admitted");
+    assert_eq!(committed, record);
+    let maka_agent_facts::attachment::StorageRef::SessionFile {
+        session_id,
+        relative_path,
+    } = copied.storage_ref
+    else {
+        panic!("copy lost Session ownership")
+    };
+    let reopened = EventLog::open(&path).await.unwrap();
+    for (session, id) in [
+        ("session", "large"),
+        (session_id.as_str(), relative_path.as_str()),
+    ] {
+        let mut restored = Vec::new();
+        while restored.len() < bytes.len() {
+            let chunk = reopened
+                .read_artifact_chunk(session, id, restored.len() as u64, 64 * 1024)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(chunk.total_bytes, 50 * 1024 * 1024 + 1);
+            restored.extend(chunk.bytes);
+        }
+        assert_eq!(restored, bytes);
+        assert_eq!(
+            reopened
+                .get_artifact(session, id)
+                .await
+                .unwrap()
+                .record
+                .unwrap()
+                .summary,
+            record.summary
+        );
+    }
+    reopened.close().await.unwrap();
 }
 
 #[tokio::test]

@@ -94,7 +94,7 @@ pub(crate) async fn save(
         return rejected(CredentialRejection::InvalidSecret);
     };
     let bytes = resource.bytes();
-    if bytes == 0 || bytes > 65536 {
+    if bytes == 0 {
         return rejected(CredentialRejection::InvalidSecret);
     }
     let Ok(secret) = resource.read(0..bytes) else {
@@ -128,7 +128,7 @@ impl provider::authentication::Interaction for LoginInteraction {
     ) -> BoxFuture<'_, Result<(), provider::Error>> {
         Box::pin(async move {
             let user_code = user_code.unwrap_or_default();
-            if url != "https://auth.openai.com/codex/device" || user_code.len() > 1024 {
+            if url != "https://auth.openai.com/codex/device" {
                 return Err(provider::Error::Invalid("invalid login prompt".into()));
             }
             self.0
@@ -227,9 +227,6 @@ async fn enroll(
                     CredentialRejection::ConnectionChanged
                 }
                 LoginRejection::CredentialChanged => CredentialRejection::CredentialChanged,
-                LoginRejection::CatalogFull | LoginRejection::AttemptsFull => {
-                    CredentialRejection::Capacity
-                }
                 LoginRejection::SlugTaken => CredentialRejection::SlugTaken,
             });
         }
@@ -314,10 +311,7 @@ async fn authenticate(
                     provider::Error::Transport(_) | provider::Error::Http(_) => {
                         (LoginFailure::Transport, String::new())
                     }
-                    provider::Error::Rejected(message) => (
-                        LoginFailure::Authentication,
-                        message.chars().take(512).collect(),
-                    ),
+                    provider::Error::Rejected(message) => (LoginFailure::Authentication, message),
                     _ => (LoginFailure::Authentication, String::new()),
                 };
                 return connections::encode(CredentialLoginResult::Failed { reason, message });

@@ -22,7 +22,6 @@ use maka_agent_facts::event::EventWrite;
 use maka_agent_facts::event::Fact;
 use maka_agent_facts::event::RuntimeEvent;
 use maka_agent_facts::event::ToolOutcome;
-use maka_agent_facts::tool_output::MAX_RAW_TOOL_RESULT_BYTES;
 use maka_agent_facts::tool_output::ToolOutput;
 use maka_agent_facts::tool_output::decode_raw_tool_result;
 use rusqlite::{Connection as RawConnection, OptionalExtension, params};
@@ -47,7 +46,6 @@ pub(crate) fn verify_binding(event: &RuntimeEvent, bytes: Option<i64>) -> Result
             ..
         } => {
             if raw.bytes == 0
-                || raw.bytes > MAX_RAW_TOOL_RESULT_BYTES as u64
                 || bytes.and_then(|n| u64::try_from(n).ok()) != Some(raw.bytes)
                 || raw.digest.len() != 71
                 || !raw.digest.starts_with("sha256:")
@@ -61,7 +59,7 @@ pub(crate) fn verify_binding(event: &RuntimeEvent, bytes: Option<i64>) -> Result
             let mut ids = std::collections::HashSet::new();
             let references = crate::artifacts::references::from_event(event);
             for artifact in artifacts {
-                if artifacts.len() > 64 || !ids.insert(&artifact.id)
+                if !ids.insert(&artifact.id)
                     || maka_agent_facts::interaction::entity_id(&artifact.id).is_err()
                     || artifact.bytes > 9_007_199_254_740_991
                     || !maka_agent_facts::archive::valid_projection_digest(&artifact.digest)
@@ -89,8 +87,8 @@ pub(crate) async fn verify_invocation_bindings(
          WHERE e.invocation_id = ? AND e.kind = 'tool_settled'
          AND json_extract(e.event_json, '$.fact.outcome.kind') = 'succeeded'
          AND (p.event_id IS NULL OR COALESCE(json_extract(e.event_json, '$.fact.outcome.raw.bytes'), 0) != length(p.payload)
-              OR length(p.payload) = 0 OR length(p.payload) > ?))",
-    ).bind(invocation_id).bind(MAX_RAW_TOOL_RESULT_BYTES as i64).fetch_one(connection).await?;
+              OR length(p.payload) = 0))",
+    ).bind(invocation_id).fetch_one(connection).await?;
     if broken {
         return Err(invalid());
     }

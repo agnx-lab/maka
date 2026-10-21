@@ -124,7 +124,6 @@ impl Catalog<'_> {
     pub fn load(&self, request: &str) -> Result<LoadedInstructions<'_>, SkillFailureReason> {
         let request = request.trim_matches(fields::whitespace);
         if request.is_empty()
-            || request.encode_utf16().count() > 512
             || request
                 .chars()
                 .any(|c| matches!(c, '\u{0000}'..='\u{001f}' | '\u{007f}'))

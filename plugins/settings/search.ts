@@ -33,7 +33,7 @@ export interface Search {
   observation: EditorObservation | null;
   pending: { key: string; basis: EditorTextRef } | null;
   serial: number;
-  error: 'searchTooLong' | 'searchUnavailable' | null;
+  error: 'searchUnavailable' | null;
 }
 export function searchState(): Search {
   return { query: '', observation: null, pending: null, serial: 0, error: null };
@@ -61,7 +61,6 @@ export function searchEvent(
       const result = input.event as ActionOutcome;
       const chunk = result.status === 'succeeded' ? (result.value as TextChunk) : null;
       if (!chunk || !sameValue(chunk.metadata, pending.basis)) state.error = 'searchUnavailable';
-      else if ([...chunk.text].length > 256) state.error = 'searchTooLong';
       else state.query = chunk.text.trim().toLocaleLowerCase();
       return true;
     }
@@ -69,8 +68,7 @@ export function searchEvent(
   const observation = state.observation;
   if (!state.pending && observation && !observation.snapshot.marked) {
     const basis = observation.snapshot.text;
-    if (basis.bytes > 1024) state.error = 'searchTooLong';
-    else if (basis.bytes) {
+    if (basis.bytes) {
       const key = child + '-' + ++state.serial;
       state.pending = { key, basis };
       actions.push({

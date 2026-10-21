@@ -259,9 +259,6 @@ impl Session {
 
 pub(crate) fn validate_connections(connections: &[BrowserConnection]) -> Result<(), ToolError> {
     let mut ids = std::collections::HashSet::new();
-    if connections.len() > 8 {
-        return Err(failed("at most 8 browser providers may be configured"));
-    }
     for connection in connections {
         let url = reqwest::Url::parse(&connection.endpoint).map_err(failed)?;
         let loopback = url.host_str().is_some_and(|host| {

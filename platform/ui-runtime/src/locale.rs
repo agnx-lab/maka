@@ -27,7 +27,7 @@ pub fn contract() -> Contract {
         version: 1,
         transport: Transport::Local,
         interface: Interface::Value {
-            schema: json!({"type": "string", "minLength": 1, "maxLength": 128}),
+            schema: json!({"type": "string", "minLength": 1}),
         },
     }
 }
@@ -58,7 +58,6 @@ fn normalize(value: &str) -> Option<String> {
         return Some("en".into());
     }
     if tag.is_empty()
-        || tag.len() > 128
         || tag
             .split('-')
             .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_alphanumeric()))
@@ -118,19 +117,12 @@ mod tests {
     }
 
     #[test]
-    fn posix_and_malformed_locales_have_a_bounded_fallback() {
-        for value in [
-            "C",
-            "C.UTF-8",
-            "POSIX",
-            "",
-            "zh--TW",
-            "bad/locale",
-            "\n",
-            &"a".repeat(129),
-        ] {
+    fn posix_and_malformed_locales_fall_back_while_complete_valid_tags_survive() {
+        for value in ["C", "C.UTF-8", "POSIX", "", "zh--TW", "bad/locale", "\n"] {
             assert_eq!(resolve(|_| Some(value.into()), || None), "en");
         }
+        let complete = "a".repeat(129);
+        assert_eq!(resolve(|_| Some(complete.clone()), || None), complete);
         assert_eq!(
             normalize("en_US.UTF-8@calendar=gregorian").as_deref(),
             Some("en-US")

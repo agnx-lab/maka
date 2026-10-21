@@ -117,11 +117,13 @@ async fn full_artifact_snapshot_preserves_maximum_payload_empty_and_business_err
             .await
             .is_err()
     );
-    assert!(
-        log.read_artifact_chunk("session", "maximum", 0, 50 * 1024 * 1024 + 1)
-            .await
-            .is_err()
-    );
+    let full = log
+        .read_artifact_chunk("session", "maximum", 0, 50 * 1024 * 1024 + 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(full.bytes, vec![0x5a; 50 * 1024 * 1024]);
+    assert_eq!(full.total_bytes, 50 * 1024 * 1024);
     assert!(
         log.read_artifact_chunk("session", "maximum", 1 << 53, 1)
             .await

@@ -150,6 +150,7 @@ pub(super) fn network(stage: &'static str, error: &maka_network::Error, connecti
         maka_network::Error::InvalidProxy => "proxy_invalid",
         maka_network::Error::MissingCredentials => "proxy_credentials_missing",
         maka_network::Error::InvalidUpgrade => "network_invalid_upgrade",
+        maka_network::Error::InvalidHeaders => "network_invalid_headers",
         maka_network::Error::Transport(_) => "network_transport",
     };
     tracing::warn!(stage, cause, connection_id, "Model preparation failed");

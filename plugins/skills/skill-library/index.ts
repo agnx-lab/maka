@@ -112,7 +112,7 @@ function dirty(state: State) {
   return !!state.observation && !same(state.basis, state.observation.snapshot.text);
 }
 function readable(state: State) {
-  return state.notice !== 'skillsChanged' && state.notice !== 'searchTooLong' && !dirty(state);
+  return state.notice !== 'skillsChanged' && !dirty(state);
 }
 function list(
   state: State,
@@ -136,10 +136,6 @@ function list(
 function search(state: State): Action[] {
   const basis = state.observation?.snapshot.text;
   if (!basis) return list(state);
-  if (basis.bytes > 1024) {
-    state.notice = 'searchTooLong';
-    return [];
-  }
   const key = `skills-${++state.serial}`;
   state.pending = { kind: 'query', key, basis };
   state.notice = null;
@@ -735,12 +731,9 @@ export function skillLibrary<N extends Node>(
             state.notice = 'skillsFailed';
           else {
             const query = (result.value as TextChunk).text.trim();
-            if ([...query].length > 256) state.notice = 'searchTooLong';
-            else {
-              state.query = query;
-              state.basis = request.basis;
-              actions = list(state);
-            }
+            state.query = query;
+            state.basis = request.basis;
+            actions = list(state);
           }
         } else if (request.kind === 'list') {
           const page = result.value as SkillLibraryPage;

@@ -227,12 +227,13 @@ pub(super) async fn verify_original_proofs(
         });
         rejected(&tampered, expected).await;
     }
-    // Reject attacker-declared allocation before waiting for the absent body.
-    let mut oversized = b"MAKA-SESSION\0\x02".to_vec();
-    oversized.extend(u32::MAX.to_be_bytes());
+    // An untrusted declared length reports absent payload without allocating that length.
+    let mut truncated = b"MAKA-SESSION\0\x02".to_vec();
+    truncated.extend(u32::MAX.to_be_bytes());
     assert!(matches!(
-        bundle::inspect(oversized.as_slice()).await,
-        Err(BundleError::Store(StoreError::PrefixTooLarge))
+        bundle::inspect(truncated.as_slice()).await,
+        Err(BundleError::Store(StoreError::Io(error)))
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
     ));
 }
 

@@ -54,19 +54,10 @@ pub fn validate_selection_sources(
                 &source.session_id,
             ]
             .into_iter()
-            .any(|value| {
-                value.is_empty() || value.len() > 512 || value.chars().any(char::is_control)
-            })
+            .any(|value| value.is_empty() || value.chars().any(char::is_control))
         {
             return Err("invalid input selection source");
         }
-    }
-    if serde_json::to_vec(&(selections, sources))
-        .map_err(|_| "invalid input selection encoding")?
-        .len()
-        > 64 * 1024
-    {
-        return Err("input selections exceed their byte budget");
     }
     Ok(())
 }

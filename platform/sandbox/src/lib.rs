@@ -38,8 +38,6 @@ pub mod windows;
 pub enum Error {
     #[error("invalid sandbox policy: {0}")]
     Invalid(String),
-    #[error("sandbox policy exceeds the supported complexity limit")]
-    TooComplex,
     #[error("sandbox cannot enforce this policy: {0}")]
     Unsupported(String),
     #[error("sandbox preparation failed: {0}")]

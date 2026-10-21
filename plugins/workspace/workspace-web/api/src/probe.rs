@@ -25,14 +25,13 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "WebProbe")]
 pub struct Input {
-    #[schemars(length(min = 1, max = 8192))]
+    #[schemars(length(min = 1))]
     pub url: String,
 }
 impl Input {
     pub fn target(&self) -> Result<String, String> {
         let url = url::Url::parse(&self.url).map_err(|_| "Invalid health endpoint URL")?;
-        if self.url.len() > 8192
-            || !matches!(url.scheme(), "http" | "https")
+        if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
             || url.password().is_some()

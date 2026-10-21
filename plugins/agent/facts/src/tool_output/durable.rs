@@ -24,15 +24,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    io::{self, Write},
-    time::SystemTime,
-};
+use std::time::SystemTime;
 
-pub const MAX_RAW_TOOL_RESULT_BYTES: usize = 64 * 1024 * 1024;
-/// Embedded JSON root is depth zero. Typed raw envelopes add at most seven
-/// containers, below serde_json's 128-level decoder guard.
-pub const MAX_RAW_TOOL_RESULT_JSON_DEPTH: usize = 64;
 pub const DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE: &str =
     "The tool completed, but its model-visible result could not be projected safely.";
 
@@ -81,95 +74,37 @@ pub fn decode_raw_tool_result(
     bytes: &[u8],
     evidence: &RawToolResultRef,
 ) -> Result<ToolOutput, &'static str> {
-    if bytes.len() > MAX_RAW_TOOL_RESULT_BYTES
-        || evidence.bytes != bytes.len() as u64
-        || evidence.digest != content_digest(bytes)
-    {
+    if evidence.bytes != bytes.len() as u64 || evidence.digest != content_digest(bytes) {
         return Err("raw tool result integrity mismatch");
     }
     let output = serde_json::from_slice(bytes).map_err(|_| "invalid raw tool result encoding")?;
-    validate_raw_depth(&output)?;
+    validate_raw(&output)?;
     Ok(output)
 }
 
 pub(crate) fn encode_raw_tool_result(output: &ToolOutput) -> Result<Vec<u8>, &'static str> {
-    validate_raw_depth(output)?;
-    bounded_encode(output, MAX_RAW_TOOL_RESULT_BYTES)
+    validate_raw(output)?;
+    let bytes = serde_json::to_vec(output).map_err(|_| "invalid tool result encoding")?;
+    // Keep the dependency's supported typed decoder representation coherent on
+    // write and read, without imposing a smaller independent depth policy.
+    let _: ToolOutput =
+        serde_json::from_slice(&bytes).map_err(|_| "unsupported tool result encoding")?;
+    Ok(bytes)
 }
 
-fn validate_raw_depth(output: &ToolOutput) -> Result<(), &'static str> {
-    fn within_limit(value: &Value, depth: usize) -> bool {
-        if depth > MAX_RAW_TOOL_RESULT_JSON_DEPTH {
-            return false;
-        }
-        match value {
-            Value::Array(values) => values.iter().all(|value| within_limit(value, depth + 1)),
-            Value::Object(values) => values.values().all(|value| within_limit(value, depth + 1)),
-            _ => true,
-        }
-    }
-    let valid = match output {
-        ToolOutput::Json(value) => within_limit(value, 0),
-        ToolOutput::Operation(reply) => {
-            let maka_plugin_core::operation::Receipt::Recorded {
-                outcome: maka_plugin_core::operation::OperationOutcome::Returned { value },
-                cleanup: maka_plugin_core::operation::OperationCleanup::Confirmed,
-            } = &reply.receipt
-            else {
-                return Err("successful operation output requires a confirmed returned receipt");
-            };
-            within_limit(value, 0)
-        }
-        ToolOutput::Mcp(result) => {
-            result
-                .structured_content
-                .as_ref()
-                .is_none_or(|value| within_limit(value, 0))
-                && result.content.iter().all(|block| match block {
-                    crate::capability::ContentBlock::Unknown { value } => within_limit(value, 0),
-                    crate::capability::ContentBlock::Text { .. }
-                    | crate::capability::ContentBlock::Image { .. }
-                    | crate::capability::ContentBlock::Audio { .. }
-                    | crate::capability::ContentBlock::Resource { .. }
-                    | crate::capability::ContentBlock::ResourceLink { .. } => true,
-                })
-        }
-        ToolOutput::Image(_) | ToolOutput::Text(_) | ToolOutput::Model(_) => true,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err("raw tool result JSON exceeds depth limit")
-    }
-}
-
-pub(crate) fn bounded_encode(
-    value: &impl Serialize,
-    limit: usize,
-) -> Result<Vec<u8>, &'static str> {
-    struct Bounded {
-        bytes: Vec<u8>,
-        limit: usize,
-    }
-    impl Write for Bounded {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
-                return Err(io::Error::other("encoded tool result exceeds byte limit"));
+fn validate_raw(output: &ToolOutput) -> Result<(), &'static str> {
+    if let ToolOutput::Operation(reply) = output
+        && !matches!(
+            &reply.receipt,
+            maka_plugin_core::operation::Receipt::Recorded {
+                outcome: maka_plugin_core::operation::OperationOutcome::Returned { .. },
+                cleanup: maka_plugin_core::operation::OperationCleanup::Confirmed
             }
-            self.bytes.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
+        )
+    {
+        return Err("successful operation output requires a confirmed returned receipt");
     }
-    let mut writer = Bounded {
-        bytes: Vec::new(),
-        limit,
-    };
-    serde_json::to_writer(&mut writer, value)
-        .map_err(|_| "tool result encoding exceeds limit or is invalid")?;
-    Ok(writer.bytes)
+    Ok(())
 }
 
 pub(crate) fn freeze(
@@ -193,21 +128,15 @@ pub(crate) fn freeze(
                 Vec::new(),
             )
         }),
-        ToolOutput::Json(value) => {
-            if !json_shape(value, &mut 0, 0) {
-                None
-            } else {
-                Some((
-                    match value {
-                        Value::String(text) => DurableToolProjection::Text { text: text.clone() },
-                        _ => DurableToolProjection::Json {
-                            value: value.clone(),
-                        },
-                    },
-                    Vec::new(),
-                ))
-            }
-        }
+        ToolOutput::Json(value) => Some((
+            match value {
+                Value::String(text) => DurableToolProjection::Text { text: text.clone() },
+                _ => DurableToolProjection::Json {
+                    value: value.clone(),
+                },
+            },
+            Vec::new(),
+        )),
         ToolOutput::Operation(reply) => match &reply.receipt {
             maka_plugin_core::operation::Receipt::Recorded {
                 outcome: maka_plugin_core::operation::OperationOutcome::Returned { value },
@@ -245,10 +174,9 @@ pub(crate) fn freeze(
 impl DurableToolProjection {
     pub fn validate(&self, session: &str) -> Result<(), &'static str> {
         let valid = match self {
-            Self::Json { value } => json_shape(value, &mut 0, 0),
+            Self::Json { .. } => true,
             Self::Content { parts } => {
                 !parts.is_empty()
-                    && parts.len() <= 64
                     && parts.iter().all(|part| match part {
                         ProjectionPart::Text { .. } => true,
                         ProjectionPart::Artifact { image } => {
@@ -270,18 +198,6 @@ impl DurableToolProjection {
     }
 }
 
-fn json_shape(value: &Value, nodes: &mut usize, depth: usize) -> bool {
-    *nodes += 1;
-    if *nodes > 20_000 || depth > 32 {
-        return false;
-    }
-    match value {
-        Value::Array(values) => values.iter().all(|v| json_shape(v, nodes, depth + 1)),
-        Value::Object(values) => values.values().all(|v| json_shape(v, nodes, depth + 1)),
-        _ => true,
-    }
-}
-
 pub(super) fn checked_image(image: &ImageOutput, session: &str) -> Option<ImageOutput> {
     let StorageRef::SessionFile {
         session_id,
@@ -299,4 +215,34 @@ pub(super) fn checked_image(image: &ImageOutput, session: &str) -> Option<ImageO
         mime_type: mime,
         reference: image.reference.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_results_round_trip_beyond_old_depth_and_reject_unsupported_decoder_shape() {
+        let nested = |depth| {
+            let mut value = serde_json::json!("exact tail");
+            for _ in 0..depth {
+                value = Value::Array(vec![value]);
+            }
+            value
+        };
+        let value = nested(80);
+        let bytes = encode_raw_tool_result(&ToolOutput::Json(value.clone())).unwrap();
+        let evidence = RawToolResultRef {
+            bytes: bytes.len() as u64,
+            digest: content_digest(&bytes),
+        };
+        let ToolOutput::Json(restored) = decode_raw_tool_result(&bytes, &evidence).unwrap() else {
+            panic!("raw result changed kind")
+        };
+        assert_eq!(restored, value);
+        assert_eq!(
+            encode_raw_tool_result(&ToolOutput::Json(nested(160))),
+            Err("unsupported tool result encoding")
+        );
+    }
 }

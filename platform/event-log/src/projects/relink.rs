@@ -18,7 +18,7 @@
  */
 
 use super::*;
-use crate::sessions::{MAX_CONFIGURATION_BYTES, advance_catalog};
+use crate::sessions::advance_catalog;
 use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Debug)]
@@ -74,7 +74,7 @@ impl EventLog {
         T: Serialize + DeserializeOwned + Send + 'static,
         F: FnMut(&mut T, &ProjectRelinkContext) -> Result<()> + Send + 'static,
     {
-        if guard.session_prefix.is_empty() || guard.session_prefix.len() > 128 {
+        if guard.session_prefix.is_empty() {
             return Err(invalid("invalid project Session namespace"));
         }
         let id = guard.source.id.clone();
@@ -241,9 +241,6 @@ where
             reassign(&mut configuration, context)?;
             let after = serde_json::to_string(&configuration)?;
             if after != before {
-                if after.len() > MAX_CONFIGURATION_BYTES {
-                    return Err(invalid("relinked Session configuration exceeds capacity"));
-                }
                 if sqlx::query(
                     "UPDATE session_control SET configuration = ?, revision = revision + 1
                     WHERE id = ? AND revision < ?",

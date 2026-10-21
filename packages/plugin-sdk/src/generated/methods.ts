@@ -68,11 +68,6 @@ export type AgentReadFileOutput_AgentFileReadPart =
       kind: 'binary';
     }
   | {
-      bytes: number;
-      limit: number;
-      kind: 'too_large';
-    }
-  | {
       fileKind: AgentReadFileOutput_AgentFileKind;
       kind: 'unsupported';
     };
@@ -755,7 +750,7 @@ export interface ServiceMethods {
         connectionId: string;
         revision: number;
         /**
-         * Opt in to the bounded editing projection; credential reads stay narrow.
+         * Opt in to the complete editing projection; credential reads stay narrow.
          */
         includeEditingFacts?: boolean;
       };

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::{Error, MAX_DELAY_MS, invalid, schedule::Schedule};
+use crate::{Error, invalid, schedule::Schedule};
 use maka_agent_facts::execution::BehaviorId;
 use maka_agent_facts::execution::CollaborationMode;
 use maka_agent_facts::execution::SandboxMode;
@@ -116,24 +116,23 @@ impl Effect {
     pub fn validate(&self) -> Result<(), Error> {
         match self {
             Self::Notify(Notification::Local) => Ok(()),
-            Self::Notify(Notification::Bot { chat_id, .. }) => text(chat_id, 160),
-            Self::SessionResume { session_id } => text(session_id, 160),
+            Self::Notify(Notification::Bot { chat_id, .. }) => text(chat_id),
+            Self::SessionResume { session_id } => text(session_id),
             Self::AgentRun { execution } => {
-                text(&execution.cwd, 4096)?;
+                text(&execution.cwd)?;
                 for value in [
                     &execution.llm_connection_id,
                     &execution.llm_connection_slug,
                     &execution.model,
                 ] {
-                    text(value, 256)?;
+                    text(value)?;
                 }
                 if let Some(project) = &execution.project_id {
-                    text(project, 256)?;
+                    text(project)?;
                 }
                 if let Some(tools) = &execution.bound_tools {
                     for tool in tools {
                         if tool.is_empty()
-                            || tool.len() > 256
                             || tool.chars().any(|ch| ch.is_control() || ch.is_whitespace())
                         {
                             return Err(invalid("invalid bound tool name"));
@@ -203,20 +202,6 @@ pub struct Task<E = Effect> {
     pub runs: Vec<Run>,
     pub last_error: Option<String>,
 }
-impl<E: TaskEffect> Task<E> {
-    pub(crate) fn bound_history(&mut self) -> Result<(), Error> {
-        while serde_json::to_vec(self)
-            .map_err(|error| invalid(error.to_string()))?
-            .len()
-            > 87 * 1024
-        {
-            if self.runs.pop().is_none() {
-                return Err(invalid("task exceeds response budget"));
-            }
-        }
-        Ok(())
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Create<E = Effect> {
@@ -236,37 +221,22 @@ impl<E: TaskEffect> Create<E> {
             return Err(invalid("expiry must be a future timestamp"));
         }
         if let Schedule::Once { run_at } = self.schedule
-            && (run_at <= now || run_at.saturating_sub(now) > MAX_DELAY_MS)
+            && run_at <= now
         {
-            return Err(invalid(
-                "one-shot trigger must be within the following year",
-            ));
+            return Err(invalid("one-shot trigger must be in the future"));
         }
         Ok(())
     }
 
     pub(crate) fn validate_fields(&self) -> Result<(), Error> {
-        // Leave room for metadata, lastError and at least one complete run.
-        if serde_json::to_vec(self)
-            .map_err(|error| invalid(error.to_string()))?
-            .len()
-            > 64 * 1024
-        {
-            return Err(invalid("task input exceeds 64 KiB encoded"));
-        }
-        text(&self.title, 120)?;
+        text(&self.title)?;
         if !self.effect.is_notification() {
-            text(&self.intent_body, 8000)?;
-        } else if self.intent_body.chars().count() > 8000 {
-            return Err(invalid("intent exceeds 8000 characters"));
+            text(&self.intent_body)?;
         }
         self.schedule.validate()?;
         self.effect.validate()?;
-        if self
-            .max_fires
-            .is_some_and(|max| !(1..=10_000).contains(&max))
-        {
-            return Err(invalid("maxFires must be between 1 and 10000"));
+        if self.max_fires.is_some_and(|max| max == 0) {
+            return Err(invalid("maxFires must be positive"));
         }
         if self
             .expires_at
@@ -277,9 +247,9 @@ impl<E: TaskEffect> Create<E> {
         Ok(())
     }
 }
-pub(crate) fn text(value: &str, maximum: usize) -> Result<(), Error> {
-    if value.trim().is_empty() || value.chars().count() > maximum || value.contains('\0') {
-        return Err(invalid("empty or oversized task field"));
+pub(crate) fn text(value: &str) -> Result<(), Error> {
+    if value.trim().is_empty() || value.contains('\0') {
+        return Err(invalid("empty or invalid task field"));
     }
     Ok(())
 }

@@ -40,7 +40,7 @@ async fn cold_windows_use_complete_directory_and_preserve_all_anchor_kinds_after
     .await;
     let prefix = log.prefix(32, 65536).await.unwrap();
     let canonical = serde_json::to_vec(&prefix).unwrap();
-    let mut view = maka_presentation::InvocationView::new(8 * 1024 * 1024).unwrap();
+    let mut view = maka_presentation::InvocationView::new();
     let expected: Vec<_> = prefix
         .events
         .iter()

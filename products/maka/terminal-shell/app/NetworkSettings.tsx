@@ -22,7 +22,7 @@ import { Button } from 'nsh/base';
 import type { ProxyProtocol } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { SettingsField } from './SettingsField';
 import { ChoiceIndicator } from './ChoiceIndicator';
-import type { NetworkSettingsOwner } from './networkSettings';
+import type { NetworkSettingsOwner } from './networkSettings.ts';
 import {
   bodyTextStyle,
   captionTextStyle,

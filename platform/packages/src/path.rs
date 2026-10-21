@@ -23,7 +23,6 @@ use crate::Error;
 pub fn validate_path(path: &str) -> Result<(), Error> {
     let invalid = || Error::Invalid(format!("invalid package path: {path:?}"));
     if path.is_empty()
-        || path.len() > 512
         || path
             .chars()
             .any(|c| c.is_control() || "\\:<>\"|?*".contains(c))

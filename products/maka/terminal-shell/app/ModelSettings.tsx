@@ -22,13 +22,13 @@ import { Button, Dialog } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 import { createSettingsOperations } from './settingsOperations';
 import { createModelSettings } from './settings';
-import { createGeneralSettings } from './generalSettings';
-import { createNetworkSettings } from './networkSettings';
+import { createGeneralSettings } from './generalSettings.ts';
+import { createNetworkSettings } from './networkSettings.ts';
 import { ConnectionSettings } from './ConnectionSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { NetworkSettings } from './NetworkSettings';
 import { PluginSettings } from './PluginSettings';
-import { createPluginSettings } from './pluginSettings';
+import { createPluginSettings } from './pluginSettings.ts';
 import {
   C,
   compact,

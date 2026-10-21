@@ -23,7 +23,7 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InteractionQuestion {
-    #[schemars(length(min = 1, max = 1024))]
+    #[schemars(length(min = 1))]
     pub question: String,
     #[schemars(length(min = 2, max = 3))]
     pub options: Vec<QuestionOption>,
@@ -32,14 +32,14 @@ pub struct InteractionQuestion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionOption {
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub label: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "description"
     )]
-    #[schemars(with = "String", length(min = 1, max = 512))]
+    #[schemars(with = "String", length(min = 1))]
     pub description: Option<String>,
 }
 
@@ -48,8 +48,8 @@ fn description<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     String::deserialize(d).map(Some)
 }
 
-fn bounded(value: &str, limit: usize) -> Result<(), &'static str> {
-    if value.is_empty() || value.len() > limit {
+fn required_text(value: &str) -> Result<(), &'static str> {
+    if value.is_empty() {
         return Err("Invalid question text length");
     }
     Ok(())
@@ -60,15 +60,15 @@ pub(super) fn validate_questions(questions: &[InteractionQuestion]) -> Result<()
         return Err("Invalid question count");
     }
     for question in questions {
-        bounded(&question.question, 1024)?;
+        required_text(&question.question)?;
         if !(2..=3).contains(&question.options.len()) {
             return Err("Invalid question option count");
         }
         let mut labels = HashSet::new();
         for option in &question.options {
-            bounded(&option.label, 256)?;
+            required_text(&option.label)?;
             if let Some(description) = &option.description {
-                bounded(description, 512)?;
+                required_text(description)?;
             }
             if !labels.insert(&option.label) {
                 return Err("Duplicate question option label");
@@ -83,7 +83,7 @@ pub(super) fn validate_answers(answers: &[Option<String>]) -> Result<(), &'stati
         return Err("Invalid question answer count");
     }
     for answer in answers.iter().flatten() {
-        bounded(answer, 2048)?;
+        required_text(answer)?;
     }
     Ok(())
 }

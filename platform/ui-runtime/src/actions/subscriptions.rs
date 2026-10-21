@@ -148,7 +148,7 @@ impl<V: ?Sized + 'static> Application<V> {
                 let consumer = running.consumer.clone();
                 let key = running.key.clone();
                 if let Err(error) = valid {
-                    self.fail_update(id, bounded_reason(error.to_string()));
+                    self.fail_update(id, error.to_string());
                 }
                 let flow = self
                     .actions

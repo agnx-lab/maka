@@ -171,7 +171,6 @@ impl Host {
                                 return Err("product package export ended without cleanup".into());
                             };
                             if offset != bytes.len()
-                                || total_bytes > maka_packages::MAX_PACKAGE_BYTES * 2
                                 || total.is_some_and(|total| total != total_bytes)
                                 || text.is_empty()
                                 || text.len() > total_bytes.saturating_sub(bytes.len())

@@ -250,13 +250,7 @@ export function formInput(
     title = values.title!.trim(),
     body = values.body!.trim(),
     at = instant(values.at!.trim());
-  if (
-    !title ||
-    [...title].length > 120 ||
-    [...body].length > 8000 ||
-    (!body && form.effect !== 'reminder')
-  )
-    throw Error('text');
+  if (!title || (!body && form.effect !== 'reminder')) throw Error('text');
   const schedule: Schedule =
     form.timing === 'once'
       ? { kind: 'once', runAt: at }
@@ -264,7 +258,7 @@ export function formInput(
         ? {
             kind: 'interval',
             startAt: at,
-            everySeconds: integer(values.seconds!.trim(), 10, 31622400),
+            everySeconds: integer(values.seconds!.trim(), 1, 4294967295),
           }
         : form.timing === 'cron'
           ? { kind: 'cron', startAt: at, expression: values.cron!.trim() }
@@ -284,7 +278,7 @@ export function formInput(
       intentBody: body,
       schedule,
       effect,
-      maxFires: values.max!.trim() ? integer(values.max!.trim(), 1, 10000) : null,
+      maxFires: values.max!.trim() ? integer(values.max!.trim(), 1, 4294967295) : null,
       expiresAt: values.expiry!.trim() ? instant(values.expiry!.trim()) : null,
     },
     timezone: values.timezone!.trim(),

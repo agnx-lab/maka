@@ -63,7 +63,7 @@ impl<'a> Driver<'a> {
         mut connection: Connection,
         journal: &mut Journal,
     ) -> Result<Live, Error> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let deadline = Some(tokio::time::Instant::now() + Duration::from_secs(30));
         loop {
             match self.next_event(&mut connection, deadline).await? {
                 Event::Initialized(peer) => {
@@ -99,7 +99,7 @@ impl<'a> Driver<'a> {
                     .rpc(
                         &mut connection,
                         acp::NewSessionRequest::new(&self.request.cwd),
-                        Duration::from_secs(30),
+                        Some(Duration::from_secs(30)),
                     )
                     .await?;
                 let options = result.config_options.unwrap_or_default();
@@ -122,7 +122,7 @@ impl<'a> Driver<'a> {
                     .rpc(
                         &mut connection,
                         acp::LoadSessionRequest::new(session_id.clone(), &self.request.cwd),
-                        Duration::from_secs(30),
+                        Some(Duration::from_secs(30)),
                     )
                     .await;
                 self.replay = false;
@@ -181,7 +181,7 @@ impl<'a> Driver<'a> {
             .rpc(
                 &mut live.connection,
                 acp::PromptRequest::new(live.session_id.clone(), content),
-                Duration::from_secs(15 * 60),
+                None,
             )
             .await;
         let projection = self.projection.as_mut().expect("prompt projection");
@@ -219,16 +219,16 @@ impl<'a> Driver<'a> {
         &mut self,
         connection: &mut Connection,
         request: R,
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> Result<R::Response, Error> {
         let response = connection.request(request).block_task();
         tokio::pin!(response);
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
         loop {
             tokio::select! {
                 biased;
                 _ = self.context.cancellation.cancelled() => return Err(Error::Cancelled),
-                _ = tokio::time::sleep_until(deadline) => return Err(Error::Timeout),
+                _ = wait_deadline(deadline) => return Err(Error::Timeout),
                 event = connection.events.recv() => self.event(connection, event.ok_or(Error::Invalid("ACP event stream ended"))?, deadline).await?,
                 result = &mut response => return result.map_err(Error::from),
                 result = &mut connection.run => { result?; return Err(Error::Invalid("ACP connection ended")); },
@@ -239,12 +239,12 @@ impl<'a> Driver<'a> {
     async fn next_event(
         &self,
         connection: &mut Connection,
-        deadline: tokio::time::Instant,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<Event, Error> {
         tokio::select! {
             biased;
             _ = self.context.cancellation.cancelled() => Err(Error::Cancelled),
-            _ = tokio::time::sleep_until(deadline) => Err(Error::Timeout),
+            _ = wait_deadline(deadline) => Err(Error::Timeout),
             event = connection.events.recv() => event.ok_or(Error::Invalid("ACP event stream ended")),
             result = &mut connection.run => { result?; Err(Error::Invalid("ACP connection ended")) },
         }
@@ -257,6 +257,13 @@ impl<'a> Driver<'a> {
         self.projection
             .as_ref()
             .map(|projection| projection.session_id())
+    }
+}
+
+async fn wait_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
     }
 }
 

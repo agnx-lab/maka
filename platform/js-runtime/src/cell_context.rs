@@ -74,7 +74,7 @@ pub struct ToolMetadata {
     pub description: String,
 }
 
-/// A cell's bounded scratch data and emitted output, separate from its V8 heap.
+/// A cell's JSON scratch data and emitted output, separate from its V8 heap.
 /// Host observers own delivery; the VM only appends and requests an observation.
 #[derive(Clone)]
 pub struct CellContext(Arc<Inner>);
@@ -84,7 +84,6 @@ struct Inner {
     state: Mutex<State>,
     changed: Notify,
     notification_ready: Notify,
-    max_bytes: usize,
     metadata: Vec<ToolMetadata>,
     notification_gate: NotificationGate,
 }
@@ -94,21 +93,18 @@ struct State {
     writes: BTreeMap<String, Value>,
     output: Vec<CellOutput>,
     notifications: VecDeque<String>,
-    output_bytes: usize,
-    output_count: usize,
     deduplicate_images: bool,
     yielded: bool,
     failure: Option<ToolError>,
 }
 
 impl CellContext {
-    pub fn new(store: CellStore, max_bytes: usize, metadata: Vec<ToolMetadata>) -> Self {
-        Self::with_notification_gate(store, max_bytes, metadata, NotificationGate::default())
+    pub fn new(store: CellStore, metadata: Vec<ToolMetadata>) -> Self {
+        Self::with_notification_gate(store, metadata, NotificationGate::default())
     }
 
     pub fn with_notification_gate(
         store: CellStore,
-        max_bytes: usize,
         metadata: Vec<ToolMetadata>,
         notification_gate: NotificationGate,
     ) -> Self {
@@ -120,15 +116,12 @@ impl CellContext {
                 writes: BTreeMap::new(),
                 output: Vec::new(),
                 notifications: VecDeque::new(),
-                output_bytes: 0,
-                output_count: 0,
                 deduplicate_images: false,
                 yielded: false,
                 failure: None,
             }),
             changed: Notify::new(),
             notification_ready: Notify::new(),
-            max_bytes,
             metadata,
             notification_gate,
         }))
@@ -162,18 +155,7 @@ impl CellContext {
 
     pub(crate) fn store(&self, key: String, value: Value) -> Result<(), CellDiagnostic> {
         let mut state = self.0.state.lock().unwrap();
-        let previous = state.values.insert(key.clone(), value.clone());
-        if serde_json::to_vec(&state.values).unwrap().len() > self.0.max_bytes {
-            match previous {
-                Some(previous) => {
-                    state.values.insert(key, previous);
-                }
-                None => {
-                    state.values.remove(&key);
-                }
-            }
-            return Err(CellDiagnostic::limit("cell store byte limit exceeded"));
-        }
+        state.values.insert(key.clone(), value.clone());
         state.writes.insert(key, value);
         Ok(())
     }
@@ -184,11 +166,6 @@ impl CellContext {
         let mut store = self.0.store.0.lock().unwrap();
         let mut next = store.clone();
         next.extend(state.writes.clone());
-        if serde_json::to_vec(&next).unwrap().len() > self.0.max_bytes {
-            return Err(CellDiagnostic::limit(
-                "shared cell store byte limit exceeded",
-            ));
-        }
         *store = next;
         Ok(())
     }
@@ -219,14 +196,6 @@ impl CellContext {
         {
             return Ok(());
         }
-        let bytes = serde_json::to_vec(&output).unwrap().len();
-        // A lifetime bound, not a per-observation bound: slow observers cannot
-        // cause unbounded memory, and fast observers cannot defeat the budget.
-        if state.output_count >= 63 || bytes > self.0.max_bytes.saturating_sub(state.output_bytes) {
-            return Err(CellDiagnostic::limit("cell output limit exceeded"));
-        }
-        state.output_bytes += bytes;
-        state.output_count += 1;
         state.output.push(output);
         Ok(())
     }
@@ -260,20 +229,13 @@ impl CellContext {
                 "notification Run is closed",
             ));
         }
-        if text.trim().is_empty() || text.len() > 128 * 1024 {
+        if text.trim().is_empty() {
             return Err(CellDiagnostic::new(
                 crate::CellDiagnosticKind::ExecutionError,
-                "notify expects non-empty text of at most 128 KiB",
+                "notify expects non-empty text",
             ));
         }
         let mut state = self.0.state.lock().unwrap();
-        if state.output_count >= 63
-            || text.len() > self.0.max_bytes.saturating_sub(state.output_bytes)
-        {
-            return Err(CellDiagnostic::limit("cell output limit exceeded"));
-        }
-        state.output_count += 1;
-        state.output_bytes += text.len();
         state.notifications.push_back(text);
         self.0.notification_ready.notify_one();
         Ok(())
@@ -310,18 +272,17 @@ mod tests {
             },
             detail: None,
         };
-        let bytes = serde_json::to_vec(&image).unwrap().len();
-        let context =
-            CellContext::new(CellStore::default(), bytes, vec![]).with_image_deduplication();
+        let context = CellContext::new(CellStore::default(), vec![]).with_image_deduplication();
         context.emit(image.clone()).unwrap();
         context.emit(image.clone()).unwrap();
         assert_eq!(context.take_output().len(), 1);
-        // Deduplication cannot reset the lifetime quota after a drain.
-        assert!(context.emit(image.clone()).is_err());
-        let next = CellContext::new(CellStore::default(), bytes, vec![]).with_image_deduplication();
+        // A drained batch does not suppress a new observation.
+        context.emit(image.clone()).unwrap();
+        assert_eq!(context.take_output().len(), 1);
+        let next = CellContext::new(CellStore::default(), vec![]).with_image_deduplication();
         next.emit(image.clone()).unwrap();
         assert_eq!(next.take_output().len(), 1);
-        let ordinary = CellContext::new(CellStore::default(), bytes * 2, vec![]);
+        let ordinary = CellContext::new(CellStore::default(), vec![]);
         ordinary.emit(image.clone()).unwrap();
         ordinary.emit(image).unwrap();
         assert_eq!(ordinary.take_output().len(), 2);
@@ -331,7 +292,7 @@ mod tests {
     fn notification_acceptance_and_empty_queue_closure_are_atomic() {
         let gate = NotificationGate::default();
         let context =
-            CellContext::with_notification_gate(CellStore::default(), 4096, vec![], gate.clone());
+            CellContext::with_notification_gate(CellStore::default(), vec![], gate.clone());
         context.notify("accepted".into()).unwrap();
         assert!(!gate.close_if_empty(std::iter::once(&context)));
         assert_eq!(context.take_notifications(), ["accepted".to_string()]);

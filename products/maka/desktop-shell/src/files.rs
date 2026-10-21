@@ -55,20 +55,13 @@ use std::{
 use uuid::Uuid;
 
 pub const NAME: &str = "maka-files";
-/// Read limit when the script does not give one.
-const DEFAULT_MAX_BYTES: u64 = 1 << 20;
-/// Largest limit a script may ask for.
-const MAX_BYTES: u64 = 16 << 20;
-/// Largest file `chooseFiles` registers: the Host's limit for an attachment
-/// (`agent.uploadAttachment`, 52428800 bytes).
-const MAX_ATTACHMENT_BYTES: u64 = 50 << 20;
 /// How much of a file is read at a time while its digest is computed.
 const DIGEST_CHUNK: usize = 64 * 1024;
 
 const DECLARATIONS: &str = r#"/**
  * Shows the open panel for one file and reads it as UTF-8 text. Resolves with
  * null when the user cancels. Rejects when the file is larger than `maxBytes`
- * (default 1 MiB, at most 16 MiB) or is not UTF-8.
+ * (when explicitly requested) or is not UTF-8.
  */
 export function openText(options?: {
   prompt?: string;
@@ -84,16 +77,13 @@ export function chooseFolder(options?: { prompt?: string }): Promise<string | nu
 /**
  * One file chosen with `chooseFiles`. A registered file has a `handle`, its
  * size and its `digest` (`sha256:` and the lowercase hex SHA-256 of its
- * content). A file over 50 MiB (52428800 bytes, the Host's limit for an
- * attachment) is not registered and has `tooLarge`; one that cannot be read
- * is not registered and has `error`.
+ * content). A file that cannot be read is not registered and has `error`.
  */
 export interface ChosenFile {
   name: string;
   bytes?: number;
   handle?: string;
   digest?: string;
-  tooLarge?: boolean;
   error?: string;
 }
 
@@ -559,14 +549,13 @@ pub(crate) fn chosen(handle: &str) -> Option<Chosen> {
 /// What `chooseFiles` found out about one file.
 enum Described {
     Ready(Chosen),
-    TooLarge(u64),
     Unreadable(String),
 }
 
 /// Registers the files at `paths` as `chooseFiles` does, and resolves with
 /// what it answers (see `ChosenFile` in the declarations). Only paths the
 /// user chose in the panel may be handed here. The files are read on a
-/// thread of their own: the digest of 50 MiB takes a while, and the executor
+/// thread of their own: hashing selected files may take a while, and the executor
 /// driving the call is not held meanwhile.
 pub(crate) fn register(paths: Vec<PathBuf>) -> impl Future<Output = HostResult> + Send + 'static {
     let (answer, answered) = tokio::sync::oneshot::channel();
@@ -598,9 +587,6 @@ pub(crate) fn register(paths: Vec<PathBuf>) -> impl Future<Output = HostResult> 
                     chosen_files().insert(handle, chosen);
                     file.into()
                 }
-                Described::TooLarge(bytes) => {
-                    file.field("bytes", bytes).field("tooLarge", true).into()
-                }
                 Described::Unreadable(error) => file.field("error", error).into(),
             });
         }
@@ -616,8 +602,7 @@ fn name_of(path: &Path) -> String {
         .into_owned()
 }
 
-/// The size and digest of one file as it is now, unless it is over the
-/// Host's limit or cannot be read.
+/// The complete size and digest of one user-selected regular file.
 fn describe(path: &Path) -> Described {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
@@ -625,9 +610,6 @@ fn describe(path: &Path) -> Described {
     };
     if !metadata.is_file() {
         return Described::Unreadable("not a regular file".into());
-    }
-    if metadata.len() > MAX_ATTACHMENT_BYTES {
-        return Described::TooLarge(metadata.len());
     }
     match digest(path, metadata.len()) {
         Ok(digest) => Described::Ready(Chosen {
@@ -675,21 +657,19 @@ fn folder_options(arguments: &HostArguments) -> Result<Option<SharedString>, Hos
 
 fn options(arguments: &HostArguments) -> Result<(Option<SharedString>, u64), HostError> {
     let Some(options) = arguments.get(0).filter(|value| !value.is_null()) else {
-        return Ok((None, DEFAULT_MAX_BYTES));
+        return Ok((None, u64::MAX));
     };
     if options.as_object().is_none() {
         return Err(HostError::new("openText options must be an object"));
     }
     let prompt = prompt(options)?;
     let limit = match options.get("maxBytes") {
-        None => DEFAULT_MAX_BYTES,
-        Some(value) if value.is_null() => DEFAULT_MAX_BYTES,
+        None => u64::MAX,
+        Some(value) if value.is_null() => u64::MAX,
         Some(value) => match value.as_number() {
-            Some(n) if n.fract() == 0.0 && n >= 1.0 && n <= MAX_BYTES as f64 => n as u64,
+            Some(n) if n.fract() == 0.0 && (1.0..=9_007_199_254_740_991.0).contains(&n) => n as u64,
             _ => {
-                return Err(HostError::new(format!(
-                    "`maxBytes` must be a whole number from 1 to {MAX_BYTES}"
-                )));
+                return Err(HostError::new("`maxBytes` must be a positive safe integer"));
             }
         },
     };
@@ -717,7 +697,7 @@ fn read_text(path: &Path, limit: u64) -> Result<String, HostError> {
     let file =
         std::fs::File::open(path).map_err(|error| HostError::new(format!("{name}: {error}")))?;
     let mut bytes = Vec::new();
-    file.take(limit + 1)
+    file.take(limit.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| HostError::new(format!("{name}: {error}")))?;
     if bytes.len() as u64 > limit {
@@ -738,10 +718,7 @@ mod tests {
 
     #[test]
     fn options_default_and_bounds() {
-        assert_eq!(
-            options(&arguments(vec![])).unwrap(),
-            (None, DEFAULT_MAX_BYTES)
-        );
+        assert_eq!(options(&arguments(vec![])).unwrap(), (None, u64::MAX));
         let given = HostObject::new()
             .field("prompt", "Import")
             .field("maxBytes", 4096.0)
@@ -749,7 +726,7 @@ mod tests {
         let (prompt, limit) = options(&arguments(vec![given])).unwrap();
         assert_eq!(prompt.as_deref(), Some("Import"));
         assert_eq!(limit, 4096);
-        for bad in [0.0, 1.5, (MAX_BYTES + 1) as f64] {
+        for bad in [0.0, 1.5, f64::INFINITY] {
             let value = HostObject::new().field("maxBytes", bad).into();
             assert!(options(&arguments(vec![value])).is_err(), "{bad}");
         }
@@ -948,16 +925,16 @@ mod tests {
     }
 
     #[test]
-    fn chosen_files_are_registered_unless_too_large_or_unreadable() {
+    fn chosen_files_preserve_large_uploads_and_reject_unreadable_paths() {
         let directory = std::env::temp_dir().join(format!("maka-files-chosen-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let small = directory.join("abc.txt");
         std::fs::write(&small, "abc").unwrap();
-        // Sparse: one byte over the limit without writing 50 MiB.
+        // Sparse source exercises complete registration without allocating the payload.
         let large = directory.join("large.bin");
         std::fs::File::create(&large)
             .unwrap()
-            .set_len(MAX_ATTACHMENT_BYTES + 1)
+            .set_len(50 * 1024 * 1024 + 1)
             .unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -985,12 +962,18 @@ mod tests {
         );
 
         assert_eq!(files[1].get("name"), Some(&HostValue::from("large.bin")));
-        assert_eq!(files[1].get("tooLarge"), Some(&HostValue::Bool(true)));
+        assert!(files[1].get("tooLarge").is_none());
         assert_eq!(
             files[1].get("bytes"),
-            Some(&HostValue::Number((MAX_ATTACHMENT_BYTES + 1) as f64))
+            Some(&HostValue::Number((50 * 1024 * 1024 + 1) as f64))
         );
-        assert!(files[1].get("handle").is_none());
+        let large_handle = files[1].get("handle").and_then(HostValue::as_str).unwrap();
+        let registered_large = chosen(large_handle).unwrap();
+        assert_eq!(registered_large.bytes, 50 * 1024 * 1024 + 1);
+        assert_eq!(
+            files[1].get("digest").and_then(HostValue::as_str),
+            Some(registered_large.digest.as_str())
+        );
         assert_eq!(
             files[2].get("error"),
             Some(&HostValue::from("not a regular file"))
@@ -1001,8 +984,14 @@ mod tests {
         let release = |handles: Vec<HostValue>| {
             module().call("release", &HostArguments::new([HostValue::Array(handles)]))
         };
-        release(vec![HostValue::from(handle), HostValue::from("unknown")]).unwrap();
+        release(vec![
+            HostValue::from(handle),
+            HostValue::from(large_handle),
+            HostValue::from("unknown"),
+        ])
+        .unwrap();
         assert!(chosen(handle).is_none());
+        assert!(chosen(large_handle).is_none());
         assert!(release(vec![HostValue::Number(1.0)]).is_err());
         assert!(module().call("release", &arguments(vec![])).is_err());
         std::fs::remove_dir_all(&directory).unwrap();

@@ -84,14 +84,7 @@ pub struct SearchResult<'a> {
 
 impl Catalog<'_> {
     pub fn search(&self, query: &str, limit: usize) -> SearchResult<'_> {
-        let normalized = normalize(query);
-        let query: String = normalized
-            .chars()
-            .scan(0, |units, c| {
-                *units += c.len_utf16();
-                (*units <= 512).then_some(c)
-            })
-            .collect();
+        let query = normalize(query);
         let mut total_eligible = 0;
         let mut ranked = Vec::new();
         for skill in self.available() {
@@ -112,7 +105,7 @@ impl Catalog<'_> {
             })
             .collect::<Vec<_>>();
         SearchResult {
-            query_truncated: query.len() < normalized.len(),
+            query_truncated: false,
             query,
             truncated: matches.len() < matched_count,
             matches,
@@ -242,7 +235,7 @@ fn score(skill: &DiscoveredSkill, query: &str) -> u32 {
     let name = normalize(&skill.document.manifest.name);
     let id = normalize(&skill.location.id);
     let description = normalize(&skill.document.manifest.description);
-    let mut score = 0;
+    let mut score: u32 = 0;
     if name == query || id == query || skill.location.reference.to_lowercase() == query {
         score += 1000;
     }
@@ -258,13 +251,12 @@ fn score(skill: &DiscoveredSkill, query: &str) -> u32 {
     for term in query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.encode_utf16().count() > 1)
-        .take(24)
     {
         if name.contains(term) || id.contains(term) {
-            score += 40;
+            score = score.saturating_add(40);
         }
         if description.contains(term) {
-            score += 12;
+            score = score.saturating_add(12);
         }
     }
     score

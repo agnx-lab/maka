@@ -269,20 +269,10 @@ export const MESSAGES = {
   noticeDismiss: ['{value} (click to dismiss)', '{value}（点击关闭）', '{value}（按一下關閉）'],
   attachFiles: ['Attach files', '添加附件', '新增附件'],
   attachFailed: ['Attach files: {value}', '添加附件失败：{value}', '新增附件失敗：{value}'],
-  attachmentTooLarge: [
-    '{name} is over 50 MB and was not attached.',
-    '{name} 超过 50 MB，未添加。',
-    '{name} 超過 50 MB，未新增。',
-  ],
   attachmentUnreadable: [
     'Couldn’t attach {name}: {value}',
     '无法添加 {name}：{value}',
     '無法新增 {name}：{value}',
-  ],
-  attachmentLimit: [
-    'A message takes at most {limit} files; the rest were not attached.',
-    '每条消息最多 {limit} 个附件，其余未添加。',
-    '每則訊息最多 {limit} 個附件，其餘未新增。',
   ],
   attachmentRejected: [
     'The Host did not take {name}: {reason}',
@@ -1235,16 +1225,6 @@ export const MESSAGES = {
     '移除此設定？已有任務和工作階段會保留。',
   ],
   subagentNameMissing: ['Name the subagent', '请为 Subagent 命名', '請為 Subagent 命名'],
-  subagentNameTooLong: [
-    'The name is longer than 128 characters',
-    '名称超过 128 个字符',
-    '名稱超過 128 個字元',
-  ],
-  subagentDescriptionTooLong: [
-    'The description is longer than 4000 characters',
-    '说明超过 4000 个字符',
-    '說明超過 4000 個字元',
-  ],
   subagentsConflict: [
     'Subagents were changed elsewhere and have been read again. Check, then save again.',
     'Subagent 配置已被其他操作修改，已重新读取。请检查后再保存。',

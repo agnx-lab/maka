@@ -124,7 +124,7 @@ impl View {
                     return Err(invalid("unknown task page cursor"));
                 }
                 // Reserve envelope headroom; a page is constrained by bytes as well as count.
-                let mut remaining = 87 * 1024;
+                let mut remaining: usize = 87 * 1024;
                 let mut tasks = Vec::new();
                 let mut next_cursor = None;
                 for task in self.tasks.values().skip(offset) {
@@ -132,14 +132,11 @@ impl View {
                         .map_err(|error| invalid(error.to_string()))?
                         .len()
                         + 1;
-                    if tasks.len() == 64 || bytes > remaining {
-                        if tasks.is_empty() {
-                            return Err(invalid("task exceeds response budget"));
-                        }
+                    if tasks.len() == 64 || (!tasks.is_empty() && bytes > remaining) {
                         next_cursor = Some((offset + tasks.len()).to_string());
                         break;
                     }
-                    remaining -= bytes;
+                    remaining = remaining.saturating_sub(bytes);
                     tasks.push((**task).clone());
                 }
                 Ok(QueryResult::Page {
@@ -149,5 +146,71 @@ impl View {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        plan::Plan,
+        schedule::Schedule,
+        task::{Create, Creator, Effect, Notification},
+    };
+
+    #[test]
+    fn oversized_first_task_is_complete_and_continues_to_the_next_task() {
+        let body = "evidence\n".repeat(20000);
+        let mut view = View {
+            ready: true,
+            revision: 7,
+            ..View::default()
+        };
+        for (id, intent) in [("a", body.clone()), ("b", "Next task".into())] {
+            let plan = Plan::create(
+                id.into(),
+                Create {
+                    title: id.into(),
+                    intent_body: intent,
+                    schedule: Schedule::Once { run_at: 1000 },
+                    effect: Effect::Notify(Notification::Local),
+                    max_fires: None,
+                    expires_at: None,
+                },
+                Creator::User,
+                "UTC".into(),
+                0,
+            )
+            .unwrap();
+            view.tasks.insert(id.into(), Arc::new(plan.task));
+        }
+        let QueryResult::Page {
+            tasks, next_cursor, ..
+        } = view
+            .query(Query::List {
+                cursor: None,
+                expected_revision: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected first page")
+        };
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].intent.body(), body.trim());
+        assert_eq!(next_cursor.as_deref(), Some("1"));
+        let QueryResult::Page {
+            tasks, next_cursor, ..
+        } = view
+            .query(Query::List {
+                cursor: next_cursor,
+                expected_revision: Some(7),
+            })
+            .unwrap()
+        else {
+            panic!("expected continuation")
+        };
+        assert_eq!(tasks[0].id, "b");
+        assert_eq!(tasks[0].intent.body(), "Next task");
+        assert_eq!(next_cursor, None);
     }
 }

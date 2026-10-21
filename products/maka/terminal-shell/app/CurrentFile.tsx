@@ -51,9 +51,19 @@ export type CurrentFileModel = {
   refresh(): void;
   dispose(): void;
 };
-type FileSubscription = { readFile(): Promise<FileView>; close(): Promise<void> };
-type WatchSubscription = { next(): Promise<AgentFileChange | null>; close(): Promise<void> };
-type Watching = { stream: WatchSubscription | null; ready: boolean; changes: number };
+type FileSubscription = {
+  readFile(): Promise<FileView>;
+  close(): Promise<void>;
+};
+type WatchSubscription = {
+  next(): Promise<AgentFileChange | null>;
+  close(): Promise<void>;
+};
+type Watching = {
+  stream: WatchSubscription | null;
+  ready: boolean;
+  changes: number;
+};
 type Reading = { stream: FileSubscription | null };
 
 const captured = (state: FileState): FileView | null =>
@@ -93,7 +103,11 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
     if (!ownsWatch(watch)) return;
     stop();
     stale.set(true);
-    state.set({ kind: 'error', message: message(reason), previous: captured(state()) });
+    state.set({
+      kind: 'error',
+      message: message(reason),
+      previous: captured(state()),
+    });
   };
   const read = (watch: Watching) => {
     if (!ownsWatch(watch) || !watch.ready) return;
@@ -136,7 +150,11 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
     })()
       .catch((reason) => {
         if (ownsRead(request, watch))
-          state.set({ kind: 'error', message: message(reason), previous: captured(state()) });
+          state.set({
+            kind: 'error',
+            message: message(reason),
+            previous: captured(state()),
+          });
       })
       .finally(() => {
         if (reading === request) reading = null;
@@ -227,8 +245,6 @@ export function CurrentFile(props: { model: CurrentFileModel }) {
         return 'This file changed while it was being read. Refresh to capture it again.';
       case 'binary':
         return `Binary file · ${value.bytes} bytes. A text preview is unavailable.`;
-      case 'too_large':
-        return `This file exceeds the preview limit of ${value.limit} bytes (${value.bytes} bytes).`;
       case 'unsupported':
         return `This ${value.fileKind === 'symlink' ? 'symbolic link' : value.fileKind} cannot be previewed.`;
       default:

@@ -40,8 +40,6 @@ use windows_sys::Win32::{
     System::{Pipes::GetNamedPipeClientProcessId, Threading::GetProcessId},
 };
 
-const LIMIT: usize = 1024 * 1024;
-
 pub struct Endpoint {
     id: Uuid,
     server: NamedPipeServer,
@@ -152,7 +150,7 @@ pub(super) async fn send(
     value: &impl Serialize,
 ) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
-    if bytes.len() > LIMIT {
+    if u32::try_from(bytes.len()).is_err() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "sandbox frame exceeds limit",
@@ -166,12 +164,6 @@ pub(super) async fn receive<T: DeserializeOwned>(
     input: &mut (impl AsyncRead + Unpin),
 ) -> io::Result<T> {
     let size = input.read_u32_le().await? as usize;
-    if size > LIMIT {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "sandbox frame exceeds limit",
-        ));
-    }
     let mut bytes = vec![0; size];
     input.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(io::Error::other)

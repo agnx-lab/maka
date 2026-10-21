@@ -33,7 +33,7 @@ use sqlx::{Row, SqliteConnection};
 
 const MAX_REVISION: u64 = 9_007_199_254_740_991;
 const PAGE_ITEMS: usize = 128;
-// Reserve envelope space; each admitted record is bounded independently.
+// A packing target; one complete larger entry still advances the cursor.
 const PAGE_ENTRY_BYTES: usize = 47 * 1024;
 
 impl ConfigurationStore {
@@ -103,7 +103,7 @@ impl ConfigurationStore {
                     } else { ResetEffect::BecomeUnpriced } }
                 } else { Entry::Builtin { pricing } };
                 let size = serde_json::to_vec(&entry)?.len() + 1;
-                if entries.len() == PAGE_ITEMS || bytes + size > PAGE_ENTRY_BYTES {
+                if entries.len() == PAGE_ITEMS || (!entries.is_empty() && bytes + size > PAGE_ENTRY_BYTES) {
                     more = true;
                     break;
                 }
@@ -141,7 +141,6 @@ impl ConfigurationStore {
                         false
                     } else {
                         let record = serde_json::to_string(&pricing)?;
-                        if record.len() > 4096 { return Err(invalid("model price exceeds record limit")); }
                         sqlx::query(
                             "INSERT INTO pricing_overrides(model_key, sort_key, record_json) VALUES(?, ?, ?)
                              ON CONFLICT(model_key) DO UPDATE SET record_json = excluded.record_json"

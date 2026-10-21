@@ -16,22 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-use crate::ProjectionError;
-use std::io::{self, Write};
-
-pub(super) fn check(value: &impl serde::Serialize, limit: usize) -> Result<(), ProjectionError> {
-    struct Budget(usize);
-    impl Write for Budget {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.0 = self.0.checked_sub(bytes.len()).ok_or_else(|| {
-                io::Error::other("serialized tool presentation exceeds its byte limit")
-            })?;
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
-    serde_json::to_writer(Budget(limit), value).map_err(|_| ProjectionError::TooLarge)
 }

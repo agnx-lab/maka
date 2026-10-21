@@ -31,7 +31,7 @@ pub struct InputProps {
     pub appearance: crate::appearance::InputAppearance,
     #[serde(default)]
     pub menu: Option<crate::textarea::TextareaMenu>,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub accessibility_label: String,
     pub read_only: bool,
     pub disabled: bool,
@@ -43,13 +43,12 @@ pub struct InputProps {
     pub auto_focus: bool,
     /// UTF-8 byte capacity, fixed for this original native editor mount.
     #[serde(default = "default_max_bytes")]
-    #[schemars(range(min = 1, max = 65536))]
+    #[schemars(range(min = 1))]
     pub max_bytes: u32,
     /// Terminal bracketed-paste policy. Other native insertion remains literal.
     #[serde(default)]
     pub terminal_paste: TerminalPaste,
     #[serde(default)]
-    #[schemars(length(max = 512))]
     pub placeholder: String,
     #[serde(default)]
     pub command: Option<EditorCommand>,
@@ -62,7 +61,7 @@ pub struct InputProps {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SubmitCopy {
     pub basis: EditorTextRef,
-    #[schemars(length(min = 1, max = 65536))]
+    #[schemars(length(min = 1))]
     pub text: String,
 }
 fn default_max_bytes() -> u32 {
@@ -84,7 +83,7 @@ impl crate::editor::Props for InputProps {
     }
 }
 pub fn representable(text: &str) -> bool {
-    text.len() <= 65536 && !text.chars().any(char::is_control)
+    !text.chars().any(char::is_control)
 }
 pub fn submitted_schema() -> serde_json::Value {
     json!({"type":"object","additionalProperties":false,"properties":{}})
@@ -102,13 +101,13 @@ pub fn reduce(call: ComponentCall<'_>) -> crate::Result<ComponentOutput<InputPro
     if typed
         .submit_copy
         .as_ref()
-        .is_some_and(|copy| copy.text.is_empty() || copy.text.len() > 65536)
+        .is_some_and(|copy| copy.text.is_empty())
     {
         return Err(crate::Error::Invalid(
-            "input submit copy exceeds clipboard byte budget".into(),
+            "input submit copy must be nonempty".into(),
         ));
     }
-    if !(1..=65536).contains(&limit)
+    if limit == 0
         || previous.is_some_and(|state| state["maxBytes"].as_u64() != Some(u64::from(limit)))
     {
         return Err(crate::Error::Invalid(
@@ -204,12 +203,13 @@ mod tests {
         })
         .unwrap();
         assert_eq!(next.frame.state["maxBytes"], 512);
-        for text in [String::new(), "界".repeat(21846)] {
+        {
+            let text = String::new();
             props["submitCopy"] =
                 json!({"basis":{"owner":"original","revision":0,"bytes":0},"text":text});
             assert!(reduce(ComponentCall::Mount { props: &props }).is_err());
         }
-        props["submitCopy"]["text"] = json!("x".repeat(65536));
+        props["submitCopy"]["text"] = json!("界".repeat(21846));
         assert!(reduce(ComponentCall::Mount { props: &props }).is_ok());
     }
 }

@@ -117,7 +117,6 @@ pub enum Direction {
 #[serde(default, deny_unknown_fields)]
 #[schemars(rename = "TerminalLayout")]
 pub struct Layout {
-    #[schemars(range(max = 1024))]
     pub grow: u16,
     pub basis: Option<u16>,
     pub basis_fraction: Option<FractionalBasis>,
@@ -140,13 +139,12 @@ pub struct FractionalBasis {
 }
 impl Layout {
     fn valid(&self) -> bool {
-        self.grow <= 1024
-            && self.basis_fraction.is_none_or(|fraction| {
-                self.basis.is_none()
-                    && fraction.denominator > 0
-                    && fraction.numerator <= fraction.denominator
-                    && fraction.max.is_none_or(|max| max >= fraction.min)
-            })
+        self.basis_fraction.is_none_or(|fraction| {
+            self.basis.is_none()
+                && fraction.denominator > 0
+                && fraction.numerator <= fraction.denominator
+                && fraction.max.is_none_or(|max| max >= fraction.min)
+        })
     }
 }
 /// Rearrange the same direct children at an allocated inner-width breakpoint.
@@ -169,9 +167,9 @@ pub struct ResponsiveStack {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "TerminalWheelCommands")]
 pub struct WheelCommands {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub up: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub down: String,
 }
 /// Native scroll policy; offsets and accepted viewport geometry remain native.
@@ -219,9 +217,8 @@ pub enum Align {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "TerminalAnimationFrame")]
 pub struct AnimationFrame {
-    #[schemars(length(max = 256))]
     pub text: String,
-    #[schemars(range(min = 1, max = 60000))]
+    #[schemars(range(min = 1))]
     pub millis: u16,
 }
 
@@ -254,22 +251,19 @@ pub struct ChoiceOption {
 impl Choice {
     fn validate(&self) -> Result<(), String> {
         let mut keys = BTreeSet::new();
-        if self.label.len() > 4096
-            || [
-                self.foreground,
-                self.background,
-                self.border,
-                self.selected,
-                self.accent,
-            ]
-            .iter()
-            .any(|color| !color.valid())
-            || self.options.iter().any(|option| {
-                option.key.is_empty()
-                    || option.key.len() > 128
-                    || option.label.len() > 4096
-                    || !keys.insert(&option.key)
-            })
+        if [
+            self.foreground,
+            self.background,
+            self.border,
+            self.selected,
+            self.accent,
+        ]
+        .iter()
+        .any(|color| !color.valid())
+            || self
+                .options
+                .iter()
+                .any(|option| option.key.is_empty() || !keys.insert(&option.key))
             || self.current.as_ref().is_some_and(|key| !keys.contains(key))
         {
             return Err("invalid terminal choice".into());
@@ -302,13 +296,11 @@ pub struct DialogAppearance {
 impl DialogAppearance {
     fn validate(&self) -> Result<(), String> {
         if self.label.is_empty()
-            || self.label.len() > 512
             || self.width == 0
             || self.height == 0
             || !self.background_color.valid()
             || !self.border_color.valid()
             || self.title_color.is_some_and(|color| !color.valid())
-            || self.padding > 1024
         {
             return Err("invalid terminal dialog presentation".into());
         }
@@ -371,7 +363,6 @@ pub enum Node {
         key: String,
         /// Native Copy selection entry; absent omits selection capture.
         #[serde(default)]
-        #[schemars(length(max = 512))]
         copy_selection_label: Option<String>,
         background: Box<Node>,
         content: Box<Node>,
@@ -443,14 +434,12 @@ pub enum Node {
         text: String,
         /// Passive hover description; never participates in focus or activation.
         #[serde(default)]
-        #[schemars(length(max = 512))]
         hint: String,
         color: Color,
         /// Render a single line, eliding overflow at a complete grapheme.
         #[serde(default)]
         truncate: bool,
         #[serde(default)]
-        #[schemars(length(max = 64))]
         animation: Vec<AnimationFrame>,
         #[serde(default)]
         align: Align,
@@ -464,7 +453,6 @@ pub enum Node {
         #[serde(default)]
         align: Option<Align>,
         #[serde(default)]
-        #[schemars(length(max = 512))]
         hint: String,
         /// Enter a declared child's native focus target instead of emitting a click.
         #[serde(default)]
@@ -522,9 +510,15 @@ impl Node {
         !matches!(self, Self::Stack { visible: false, .. })
     }
     pub fn validate_root(&self) -> Result<(), String> {
-        self.validate(0, &mut BTreeSet::new())
+        let mut keys = BTreeSet::new();
+        let mut pending = vec![self];
+        while let Some(node) = pending.pop() {
+            node.validate(0, &mut keys)?;
+            node.children_into(&mut pending);
+        }
+        Ok(())
     }
-    fn validate(&self, depth: usize, keys: &mut BTreeSet<String>) -> Result<(), String> {
+    fn validate(&self, _depth: usize, keys: &mut BTreeSet<String>) -> Result<(), String> {
         let key = match self {
             Self::Stack { key, .. }
             | Self::Rule { key, .. }
@@ -537,22 +531,11 @@ impl Node {
             Self::Component(slot) => &slot.key,
             Self::Choice(choice) => &choice.key,
         };
-        if depth > 32 {
-            return Err("UI node nesting exceeds limit".into());
-        }
-        if key.is_empty() || key.len() > 128 {
+        if key.is_empty() {
             return Err("invalid UI node identity".into());
         }
         if !keys.insert(key.clone()) {
             return Err(format!("duplicate UI node identity: {key:?}"));
-        }
-        if let Self::ContextMenu {
-            copy_selection_label: Some(label),
-            ..
-        } = self
-            && label.len() > 512
-        {
-            return Err("context menu selection label exceeds limit".into());
         }
         if let Self::Stack {
             shortcuts,
@@ -570,7 +553,6 @@ impl Node {
             }
             Self::Choice(choice) => choice.validate()?,
             Self::Item {
-                content,
                 selected_color,
                 selected_foreground,
                 ..
@@ -580,27 +562,11 @@ impl Node {
                 {
                     return Err("invalid item selection color".into());
                 }
-                content.validate(depth + 1, keys)?;
             }
-            Self::ContextMenu {
-                appearance,
-                background,
-                content,
-                ..
-            }
-            | Self::Dialog {
-                appearance,
-                background,
-                content,
-                ..
-            } => {
+            Self::ContextMenu { appearance, .. } | Self::Dialog { appearance, .. } => {
                 appearance.validate()?;
-                background.validate(depth + 1, keys)?;
-                content.validate(depth + 1, keys)?;
             }
             Self::AdaptivePane {
-                background,
-                content,
                 pane_width,
                 inline_min_width,
                 auto_inline_min_width,
@@ -618,12 +584,8 @@ impl Node {
                 {
                     return Err("invalid terminal adaptive pane".into());
                 }
-                background.validate(depth + 1, keys)?;
-                content.validate(depth + 1, keys)?;
             }
             Self::Stack {
-                gap,
-                padding,
                 background,
                 border,
                 children,
@@ -642,7 +604,7 @@ impl Node {
                             .is_none_or(|policy| policy == ScrollPolicy::None))
                         || [wheel.up.as_str(), wheel.down.as_str()]
                             .iter()
-                            .any(|key| key.is_empty() || key.len() > 128)
+                            .any(|key| key.is_empty())
                 }) {
                     return Err(
                         "wheel commands require a scrolling viewport and valid input keys".into(),
@@ -665,38 +627,22 @@ impl Node {
                 {
                     return Err("invalid terminal layout".into());
                 }
-                if *gap > 1024
-                    || *padding > 1024
-                    || background.is_some_and(|color| !color.valid())
+                if background.is_some_and(|color| !color.valid())
                     || border.is_some_and(|border| {
                         !border.color.valid() || !border.focused_color.valid()
                     })
                 {
                     return Err("invalid UI style".into());
                 }
-                for child in children {
-                    child.validate(depth + 1, keys)?;
-                }
             }
             Self::Text {
-                text,
-                color,
-                animation,
-                ..
+                color, animation, ..
             } => {
-                if text.len() > 64 * 1024
-                    || !color.valid()
-                    || animation.len() > 64
-                    || animation
-                        .iter()
-                        .any(|frame| frame.millis == 0 || frame.text.len() > 256)
-                {
+                if !color.valid() || animation.iter().any(|frame| frame.millis == 0) {
                     return Err("invalid text".into());
                 }
             }
             Self::Button {
-                label,
-                hint,
                 color,
                 background,
                 hover_background,
@@ -704,51 +650,27 @@ impl Node {
                 focus_child,
                 ..
             } => {
-                if label.len() > 4096
-                    || hint.len() > 512
-                    || color.is_some_and(|color| !color.valid())
+                if color.is_some_and(|color| !color.valid())
                     || background.is_some_and(|color| !color.valid())
                     || hover_background.is_some_and(|color| !color.valid())
-                    || copy_text
-                        .as_ref()
-                        .is_some_and(|text| text.is_empty() || text.len() > 64 * 1024)
+                    || copy_text.as_ref().is_some_and(|text| text.is_empty())
                     || (copy_text.is_some() && focus_child.is_some())
                 {
                     return Err("invalid button".into());
                 }
             }
             Self::Component(slot) => {
-                if slot.binding.is_empty() || slot.binding.len() > 128 {
+                if slot.binding.is_empty() {
                     return Err("invalid slot binding".into());
                 }
             }
         }
         Ok(())
     }
-    pub fn validate_focus_targets(&self, slots: &[ComponentSlot]) -> Result<(), String> {
+    fn children_into<'a>(&'a self, pending: &mut Vec<&'a Self>) {
         match self {
-            Self::Item { content, .. } => content.validate_focus_targets(slots)?,
-            Self::Button {
-                focus_child: Some(child),
-                ..
-            } if !slots.iter().any(|slot| slot.key == *child) => {
-                return Err("focus button names an undeclared child".into());
-            }
-            Self::Stack {
-                focus_shortcuts,
-                children,
-                ..
-            } => {
-                if focus_shortcuts
-                    .iter()
-                    .any(|binding| !slots.iter().any(|slot| slot.key == binding.child))
-                {
-                    return Err("focus shortcut names an undeclared child".into());
-                }
-                for child in children {
-                    child.validate_focus_targets(slots)?;
-                }
-            }
+            Self::Stack { children, .. } => pending.extend(children.iter().rev()),
+            Self::Item { content, .. } => pending.push(content),
             Self::Dialog {
                 background,
                 content,
@@ -764,10 +686,33 @@ impl Node {
                 content,
                 ..
             } => {
-                background.validate_focus_targets(slots)?;
-                content.validate_focus_targets(slots)?;
+                pending.push(content);
+                pending.push(background);
             }
             _ => {}
+        }
+    }
+    pub fn validate_focus_targets(&self, slots: &[ComponentSlot]) -> Result<(), String> {
+        let mut pending = vec![self];
+        while let Some(node) = pending.pop() {
+            match node {
+                Self::Button {
+                    focus_child: Some(child),
+                    ..
+                } if !slots.iter().any(|slot| slot.key == *child) => {
+                    return Err("focus button names an undeclared child".into());
+                }
+                Self::Stack {
+                    focus_shortcuts, ..
+                } if focus_shortcuts
+                    .iter()
+                    .any(|binding| !slots.iter().any(|slot| slot.key == binding.child)) =>
+                {
+                    return Err("focus shortcut names an undeclared child".into());
+                }
+                _ => {}
+            }
+            node.children_into(&mut pending);
         }
         Ok(())
     }

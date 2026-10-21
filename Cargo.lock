@@ -5374,8 +5374,6 @@ dependencies = [
 [[package]]
 name = "gix-index"
 version = "0.55.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "632e16cb48b0e88a747e106924cb2765194105d8070a7a961b0d080ed806c632"
 dependencies = [
  "bitflags 2.13.2",
  "bstr",

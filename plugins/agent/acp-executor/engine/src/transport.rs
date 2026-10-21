@@ -34,7 +34,6 @@ use tokio::sync::{mpsc, watch};
 
 mod client;
 pub(crate) use client::{Event, Peer};
-pub(crate) const MAX_LINE: usize = 1024 * 1024;
 
 pub struct Connection {
     pub(crate) owner: Arc<Owner>,
@@ -161,9 +160,6 @@ impl ConnectTo<sdk::Client> for HostTransport {
         let outgoing = sink::unfold(
             self.owner.binding.subscribe(),
             |binding, mut line: String| async move {
-                if line.len() > MAX_LINE {
-                    return Err(io::Error::other("ACP output frame exceeds 1 MiB"));
-                }
                 line.push('\n');
                 let process = binding.borrow().clone();
                 for chunk in line.as_bytes().chunks(64 * 1024) {
@@ -193,9 +189,6 @@ impl Reader {
                 let remaining = &self.chunk[self.offset..];
                 let newline = remaining.iter().position(|byte| *byte == b'\n');
                 let len = newline.unwrap_or(remaining.len());
-                if self.line.len().saturating_add(len) > MAX_LINE {
-                    return Err(io::Error::other("ACP input frame exceeds 1 MiB"));
-                }
                 self.line.extend_from_slice(&remaining[..len]);
                 self.offset += len + usize::from(newline.is_some());
                 if newline.is_some() {
@@ -218,9 +211,6 @@ impl Reader {
                 }
                 return Ok(None);
             };
-            if chunk.bytes.len() > MAX_LINE {
-                return Err(io::Error::other("ACP process chunk exceeds 1 MiB"));
-            }
             match chunk.stream {
                 Stream::Stdout => self.chunk = chunk.bytes,
                 Stream::Stderr => self

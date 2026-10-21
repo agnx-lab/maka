@@ -26,19 +26,18 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentFork")]
 pub struct Fork {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
     pub expected_revision: u64,
     /// Include history through a complete logical Turn, or all current history when null.
     #[schemars(
         with = "maka_plugin_core::wire_schema::RequiredNullable<String>",
-        length(min = 1, max = 128)
+        length(min = 1)
     )]
     pub turn_id: Option<String>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub title: String,
-    #[schemars(length(max = 32))]
     pub labels: Vec<String>,
 }
 
@@ -74,11 +73,11 @@ pub struct ForkReceiptResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentSessionBranch")]
 pub struct SessionBranch {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(
         with = "maka_plugin_core::wire_schema::RequiredNullable<String>",
-        length(min = 1, max = 128)
+        length(min = 1)
     )]
     pub turn_id: Option<String>,
 }

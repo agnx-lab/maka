@@ -204,13 +204,17 @@ fn markdown_append_preserves_selection_but_reference_resolution_revokes_old_sema
     close(&mut presenter);
 }
 #[test]
-fn markdown_preparation_limits_are_explicit_and_never_publish_partial_text() {
+fn markdown_preparation_publishes_complete_text_and_replaces_the_original_selection() {
     let (runtime, mut presenter, props) = native(vec![markdown("md", "original")]);
     settle(&mut presenter, 20, 4);
     all(&mut presenter);
-    let value = markdown("md", &"x".repeat(65537));
-    assert!(super::super::super::source::compile_markdown(&value["props"]).is_err());
     assert_eq!(copied(&mut presenter).unwrap(), b"original");
+    let complete = "x".repeat(65537) + "中😀tail";
+    props.borrow_mut()["content"]["children"][0]["props"]["source"] = json!(complete);
+    refresh(&mut presenter);
+    settle(&mut presenter, 20, 4);
+    all(&mut presenter);
+    assert_eq!(copied(&mut presenter).unwrap(), complete.as_bytes());
     props.borrow_mut()["content"]["children"][0]["props"]["source"] = json!("new");
     refresh(&mut presenter);
     settle(&mut presenter, 20, 4);
@@ -380,21 +384,44 @@ fn native_diff_rejects_invalid_untrusted_byte_ranges_before_layout() {
         json!([{"start":0,"end":9,"kind":"added"}]),
         json!([{"start":3,"end":0,"kind":"added"}]),
         json!([{"start":0,"end":3,"kind":"removed"},{"start":0,"end":7,"kind":"added"}]),
-        json!([{"start":0,"end":3,"kind":"added","language":"x".repeat(129)}]),
     ] {
         let declaration = diff(text, rows);
         assert!(crate::application::source::compile_diff(&declaration["props"]).is_err());
     }
-    for source in ["x".repeat(65537), "界".repeat(21846)] {
-        assert!(
-            crate::application::source::compile_diff(&diff(&source, json!([]))["props"]).is_err()
+}
+
+#[test]
+fn native_diff_preserves_complete_sources_and_language_hints() {
+    for (text, language) in [
+        ("中😀\n".to_owned(), "x".repeat(129)),
+        ("中😀\n".to_owned(), "unrecognized-language".to_owned()),
+        ("x".repeat(65537) + "tail", "rust".to_owned()),
+        ("界".repeat(21846) + "😀tail", "rust".to_owned()),
+    ] {
+        let rows = json!([{"start":0,"end":text.len(),"kind":"added","language":language}]);
+        let (_runtime, mut presenter, props) = native(vec![diff(&text, rows)]);
+        settle(&mut presenter, 20, 4);
+        all(&mut presenter);
+        assert_eq!(copied(&mut presenter).unwrap(), text.trim_end().as_bytes());
+        let query = if text.ends_with("tail") {
+            "tail"
+        } else {
+            "😀"
+        };
+        command(
+            &mut presenter,
+            &props,
+            1,
+            json!({"kind":"find","query":query,"step":"first"}),
         );
+        settle(&mut presenter, 20, 4);
+        assert_eq!(
+            observation(&presenter)["find"],
+            json!({"sequence":1,"count":1,"limited":false,"index":1,"active":{"path":["diff"],"offset":text.find(query).unwrap()}})
+        );
+        assert_eq!(copied(&mut presenter).unwrap(), text.trim_end().as_bytes());
+        close(&mut presenter);
     }
-    let declaration = diff(
-        text,
-        json!([{"start":0,"end":3,"kind":"added","language":"unrecognized-language"}]),
-    );
-    assert!(crate::application::source::compile_diff(&declaration["props"]).is_ok());
 }
 
 #[test]

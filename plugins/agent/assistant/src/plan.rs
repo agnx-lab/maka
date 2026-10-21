@@ -245,13 +245,12 @@ fn invalid(message: impl ToString) -> Error {
 
 fn identifier(value: &str) -> Result<(), Error> {
     if value.is_empty()
-        || value.len() > 128
         || !value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
         return Err(invalid(
-            "identity must contain 1–128 ASCII letters, digits, '_' or '-'",
+            "identity must contain ASCII letters, digits, '_' or '-'",
         ));
     }
     Ok(())

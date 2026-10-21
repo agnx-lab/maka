@@ -31,9 +31,8 @@ pub const EXPORT: &str = "forms";
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "FormAsk")]
 pub struct Ask {
-    #[schemars(length(min = 1, max = 2048))]
+    #[schemars(length(min = 1))]
     pub message: String,
-    #[schemars(length(max = 32))]
     pub fields: Vec<FormField>,
 }
 #[derive(Serialize, JsonSchema)]

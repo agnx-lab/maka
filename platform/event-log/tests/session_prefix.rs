@@ -165,7 +165,22 @@ async fn empty_scopes_remain_distinct_and_invalid_session_ids_are_rejected() {
             .unwrap()
             .digest
     );
-    for id in ["", "bad/id", &"a".repeat(129)] {
+    let long_id = "a".repeat(129);
+    let long = log
+        .scoped_prefix(scope(&long_id), 10, 16_384)
+        .await
+        .unwrap();
+    assert_eq!(long.high_water, 0);
+    assert!(long.events.is_empty());
+    assert_ne!(long.digest, first.digest);
+    assert_eq!(
+        long.digest,
+        log.scoped_prefix(scope(&long_id), 10, 16_384)
+            .await
+            .unwrap()
+            .digest
+    );
+    for id in ["", "bad/id"] {
         assert!(matches!(
             log.scoped_prefix(scope(id), 10, 16_384).await,
             Err(StoreError::InvalidTransition(_))

@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn large_paste_keeps_literal_unicode_in_one_event() {
+    fn complete_large_paste_keeps_literal_unicode_in_one_ordered_event() {
         let mut inbox = Inbox::default();
         inbox.push(
             Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
@@ -316,10 +316,25 @@ mod tests {
         assert!(matches!(inbox.pop(0).unwrap().event, Event::Key(_)));
         inbox.push(Event::Paste("你好\nworld".into()), 0);
         assert!(matches!(inbox.pop(0).unwrap().event, Event::Paste(text) if text == "你好\nworld"));
-        let text = "你好\nworld".repeat(16384);
+        let text = format!("PASTE START\n{}PASTE END", "保留😀z\n".repeat(100_000));
+        assert!(text.len() > 1024 * 1024);
+        inbox.push(key('a'), 0);
         inbox.push(Event::Paste(text.clone()), 0);
-        assert_eq!(inbox.pop(0).unwrap().event, Event::Paste(text));
-        assert!(inbox.error.is_none());
+        inbox.push(key('b'), 0);
+        assert!(
+            inbox.error.is_none(),
+            "complete paste must not fail input admission"
+        );
+        assert!(
+            matches!(inbox.pop(0).unwrap().event,Event::Key(value) if value.code == KeyCode::Char('a'))
+        );
+        assert!(
+            matches!(inbox.pop(0).unwrap().event,Event::Paste(value) if value == text),
+            "one original paste must retain all bytes"
+        );
+        assert!(
+            matches!(inbox.pop(0).unwrap().event,Event::Key(value) if value.code == KeyCode::Char('b'))
+        );
         assert!(inbox.pop(0).is_none());
     }
 

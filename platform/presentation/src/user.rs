@@ -26,11 +26,7 @@ pub(super) fn project(
     ts: u64,
     content: &MessageInput,
     origin: Option<&maka_agent_facts::message::MessageOrigin>,
-    max_text_bytes: usize,
 ) -> Result<Message, ProjectionError> {
-    if content.text_bytes() > max_text_bytes {
-        return Err(ProjectionError::TooLarge);
-    }
     Ok(Message {
         id: id.into(),
         turn_id: turn.into(),

@@ -184,9 +184,10 @@ impl Target {
         &mut self,
         mutation: crate::mutation::Mutation,
         path: &str,
+        cancellation: &CancellationToken,
     ) -> Result<(String, serde_json::Value), ToolError> {
         self.validate()?;
-        mutation.prepare(self.existing.as_mut(), path)
+        mutation.prepare(self.existing.as_mut(), path, cancellation)
     }
 
     pub(crate) fn apply(

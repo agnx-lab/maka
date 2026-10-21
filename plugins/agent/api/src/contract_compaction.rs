@@ -32,7 +32,7 @@ pub struct CompactionPrompt {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentCompact")]
 pub struct Compact {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub model: ModelSelection,
     pub thinking_level: Option<maka_agent_facts::execution::ThinkingLevel>,

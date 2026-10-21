@@ -274,7 +274,7 @@ impl EventLog {
     pub async fn touch_project(&self, id: &str, path: &str, now: u64) -> Result<ProjectRecord> {
         self.validate_root()?;
         validate_id(id)?;
-        validate_text(path, 4096)?;
+        validate_text(path)?;
         let now = timestamp(now)?;
         let (id, path) = (id.to_owned(), path.to_owned());
         self.connection

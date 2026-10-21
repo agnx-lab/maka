@@ -36,19 +36,11 @@ pub enum Configuration {
 impl Configuration {
     pub fn validate(&self) -> Result<()> {
         let Self::PublicHost { endpoints, native } = self;
-        if endpoints.is_empty()
-            || endpoints.len() > 128
-            || endpoints
-                .keys()
-                .any(|name| name.is_empty() || name.len() > 256)
-        {
+        if endpoints.is_empty() || endpoints.keys().any(|name| name.is_empty()) {
             return Err("invalid public Host endpoint configuration".into());
         }
         for endpoint in endpoints.values() {
             endpoint.validate()?;
-        }
-        if native.len() > 128 {
-            return Err("maximum 128 native service grants".into());
         }
         for grant in native {
             grant.validate()?;

@@ -27,7 +27,7 @@ use maka_agent_facts::model::ModelEvent;
 use maka_agent_facts::model::ModelPart;
 use maka_agent_facts::model::ModelStep;
 use maka_agent_facts::model::TextKind;
-use maka_event_log::{EventLog, StoreError, observation::StreamFact};
+use maka_event_log::{EventLog, observation::StreamFact};
 use serde_json::json;
 
 fn event(session: &str, fact: Fact) -> RuntimeEvent {
@@ -294,11 +294,12 @@ async fn giant_bodies_and_metadata_do_not_block_stream_delivery() {
         if interrupted.is_empty()));
     // The derived interruption identities belong to the delivery byte budget.
     let bytes = serde_json::to_vec(&page.events[6]).unwrap().len();
-    assert!(matches!(
-        log.session_stream_events("session", finished, interrupted, 1, bytes - 1)
-            .await,
-        Err(StoreError::PrefixTooLarge)
-    ));
+    let soft = log
+        .session_stream_events("session", finished, interrupted, 1, bytes - 1)
+        .await
+        .unwrap();
+    assert_eq!(soft.events, page.events[6..7]);
+    assert_eq!(soft.next_after, None);
     let exact = log
         .session_stream_events("session", finished, interrupted, 1, bytes)
         .await
@@ -382,11 +383,13 @@ async fn pages_obey_global_fences_and_never_skip_oversized_deltas() {
         .unwrap();
     assert_eq!(limited.events.len(), 1);
     assert_eq!(limited.next_after, Some(first));
-    assert!(matches!(
-        log.session_stream_events("session", first, last, 512, 1024)
-            .await,
-        Err(StoreError::PrefixTooLarge)
-    ));
+    let soft = log
+        .session_stream_events("session", first, last, 512, 1024)
+        .await
+        .unwrap();
+    assert_eq!(soft.events.len(), 1);
+    assert_eq!(soft.events[0].sequence, large);
+    assert_eq!(soft.next_after, Some(large));
     let next = log
         .session_stream_events("session", first, last, 1, 32 * 1024)
         .await
@@ -412,4 +415,110 @@ async fn pages_obey_global_fences_and_never_skip_oversized_deltas() {
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn soft_first_stream_and_raw_events_preserve_complete_fenced_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("singleton.sqlite"))
+        .await
+        .unwrap();
+    let append = async |fact| {
+        log.append(&EventWrite::plain(event("session", fact)).unwrap())
+            .await
+            .unwrap()
+    };
+    append(Fact::InvocationOpened {
+        configuration: None,
+        input: maka_agent_facts::input::InvocationInput::Message {
+            source_messages: Vec::new(),
+            content: "".into(),
+            request_fingerprint: None,
+        },
+    })
+    .await;
+    append(request("second")).await;
+    let mut start = event(
+        "session",
+        observed(
+            "second",
+            ModelEvent::PartStarted {
+                id: "part".into(),
+                text_kind: TextKind::Text,
+                provider_options: None,
+            },
+        ),
+    );
+    start.id = "original-start-".repeat(5000);
+    let started = log
+        .append(&EventWrite::plain(start.clone()).unwrap())
+        .await
+        .unwrap();
+    let text = "完整😀\"".repeat(8000);
+    let delta = event("session", delta(&text));
+    let delta_sequence = log
+        .append(&EventWrite::plain(delta.clone()).unwrap())
+        .await
+        .unwrap();
+    let finished = append(observed(
+        "second",
+        ModelEvent::PartFinished {
+            id: "part".into(),
+            provider_options: None,
+        },
+    ))
+    .await;
+    let interrupted = append(Fact::ModelInterrupted {
+        model_failure: None,
+        diagnostic: None,
+        step_id: "second".into(),
+        status: maka_agent_facts::event::ModelInterruption::Failed,
+    })
+    .await;
+    append(Fact::InvocationEnded {
+        outcome: InvocationOutcome::Failed {
+            model_failure: None,
+            class: "provider".into(),
+            message: None,
+        },
+    })
+    .await;
+    let projected = log
+        .session_stream_events("session", started, interrupted, 32, 48 * 1024)
+        .await;
+    let enriched = log
+        .session_stream_events("session", finished, interrupted, 32, 48 * 1024)
+        .await;
+    let raw = log
+        .session_events("session", started, interrupted, 32, 48 * 1024)
+        .await;
+    let foreign = log
+        .session_stream_events("other", started, interrupted, 32, 48 * 1024)
+        .await;
+    let beyond = log
+        .session_stream_events("session", 0, interrupted + 100, 32, 48 * 1024)
+        .await;
+    log.close().await.unwrap();
+    let projected = projected.expect("first complete projected delta must progress");
+    assert_eq!(projected.events.len(), 1);
+    assert_eq!(projected.events[0].sequence, delta_sequence);
+    assert!(
+        matches!(&projected.events[0].fact, StreamFact::PartDelta { text: actual, .. } if actual==&text)
+    );
+    assert_eq!(projected.next_after, Some(delta_sequence));
+    assert_eq!(projected.through_sequence, interrupted);
+    let enriched = enriched.expect("first enriched boundary must keep every interruption ID");
+    assert_eq!(enriched.events.len(), 1);
+    assert!(
+        matches!(&enriched.events[0].fact, StreamFact::StepEnded { interrupted: ids, .. } if ids==std::slice::from_ref(&start.id))
+    );
+    assert_eq!(enriched.events[0].sequence, interrupted);
+    assert_eq!(enriched.next_after, None);
+    let raw = raw.expect("first complete original event must progress");
+    assert_eq!(raw.events.len(), 1);
+    assert_eq!(raw.events[0].event, delta);
+    assert_eq!(raw.next_after, Some(delta_sequence));
+    assert_eq!(raw.through_sequence, interrupted);
+    assert!(foreign.unwrap().events.is_empty());
+    assert!(beyond.is_err());
 }

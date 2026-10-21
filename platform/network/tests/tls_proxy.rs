@@ -178,6 +178,7 @@ async fn exchange(protocol: ProxyProtocol, websocket: bool, trust: Trust) {
     let url = format!("https://{destination}/responses");
     if websocket {
         let result = connect_websocket(
+            &policy,
             builder,
             &url,
             HeaderMap::from_iter([(AUTHORIZATION, HeaderValue::from_static("Bearer model-key"))]),

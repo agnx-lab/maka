@@ -96,17 +96,11 @@ impl Owner {
                 let _cancel_on_drop = stop.clone().drop_guard();
                 let fire_id = fire.id.clone();
                 let notification = matches!(fire.effect, Effect::Notify(_));
-                let result =
-                    tokio::time::timeout(Duration::from_secs(30), dispatcher.dispatch(fire, stop))
-                        .await;
-                let delivery = match result {
-                    Ok(Delivery::Retry(_)) | Err(_) if notification => {
+                let delivery = match dispatcher.dispatch(fire, stop).await {
+                    Delivery::Retry(_) if notification => {
                         Delivery::Blocked("Notification outcome unknown; not replayed".into())
                     }
-                    Ok(result) => result,
-                    Err(_) => Delivery::Retry(
-                        "Host admission timed out; retrying the same operation".into(),
-                    ),
+                    result => result,
                 };
                 Completed {
                     task_id: id,
@@ -169,7 +163,7 @@ impl Owner {
                         delay,
                     },
                 );
-                plan.task.last_error = Some(message.chars().take(1024).collect());
+                plan.task.last_error = Some(message.to_owned());
                 plan.task.updated_at = at;
                 return self.save(plan).await;
             }
@@ -178,7 +172,7 @@ impl Owner {
             id: completed.fire_id,
             at,
             outcome,
-            message: message.chars().take(1024).collect(),
+            message: message.to_owned(),
             session_id,
             run_id,
         })?;

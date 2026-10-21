@@ -18,7 +18,7 @@
  */
 
 //! Recoverable publication of complete Skill directories. Callers serialize this
-//! domain store and run its bounded filesystem work off the async executor.
+//! domain store and run its owned filesystem work off the async executor.
 use cap_std::fs::Dir;
 use maka_agent_facts::artifact::content_digest;
 use tokio_util::sync::CancellationToken;
@@ -188,9 +188,6 @@ impl Publisher {
             return Err(Error::Conflict);
         }
         let bytes = serde_json::to_vec(&intent)?;
-        if bytes.len() > 64 * 1024 {
-            return Err(Error::Invalid("Skill manifest exceeds limit".into()));
-        }
         let hash = content_digest(&bytes);
         let name = format!("tx-{}-{}", uuid::Uuid::new_v4(), &hash[7..]);
         self.transactions.create_dir(&name).await?;
@@ -236,9 +233,6 @@ impl Publisher {
     pub async fn recover(&self) -> Result<(), Error> {
         let mut names = Vec::new();
         for entry in self.transactions.entries().await? {
-            if names.len() == 128 {
-                return Err(Error::Invalid("Too many pending Skill publications".into()));
-            }
             let name = entry.name;
             if !matches!(
                 entry.kind,
@@ -257,7 +251,7 @@ impl Publisher {
                 continue;
             }
             let transaction = self.transactions.open(&name).await?;
-            match transaction.read("intent.json", 64 * 1024).await {
+            match transaction.read("intent.json").await {
                 Ok((bytes, _)) => {
                     let hash = content_digest(&bytes);
                     if !name.ends_with(&hash[7..]) {

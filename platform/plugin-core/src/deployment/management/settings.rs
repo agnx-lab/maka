@@ -25,7 +25,6 @@ use super::*;
 pub struct InstanceSettingsRead {
     pub source: DeploymentRef,
     pub instance: InstanceId,
-    #[schemars(length(max = 16))]
     pub path: Vec<String>,
     pub after: Option<String>,
 }
@@ -44,7 +43,6 @@ pub struct InstanceSettingsPage {
 pub struct SettingField {
     pub key: String,
     pub label: String,
-    #[schemars(length(max = 512))]
     pub description: String,
     pub kind: SettingKind,
     pub present: bool,
@@ -52,7 +50,6 @@ pub struct SettingField {
     pub nullable: bool,
     pub editable: bool,
     pub value: Option<SettingValue>,
-    #[schemars(length(max = 16))]
     pub options: Vec<SettingValue>,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
@@ -69,17 +66,9 @@ pub enum SettingKind {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SettingValue {
-    Text {
-        #[schemars(length(max = 4096))]
-        text: String,
-    },
-    Number {
-        #[schemars(length(max = 128))]
-        text: String,
-    },
-    Boolean {
-        value: bool,
-    },
+    Text { text: String },
+    Number { text: String },
+    Boolean { value: bool },
     Null,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -88,13 +77,13 @@ pub struct InstanceConfigure {
     #[schemars(range(min = 1, max = 9_007_199_254_740_990_u64))]
     pub expected_revision: u64,
     pub instance: InstanceId,
-    #[schemars(length(min = 1, max = 32))]
+    #[schemars(length(min = 1))]
     pub changes: Vec<SettingChange>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SettingChange {
-    #[schemars(length(min = 1, max = 16))]
+    #[schemars(length(min = 1))]
     pub path: Vec<String>,
     /// None removes the field; all other fields retain their original source.
     pub value: Option<SettingValue>,

@@ -25,7 +25,10 @@ import type {
 
 export type Position = { sourceSequence: number; itemIndex: number };
 type Fragment = { offset: number; text: string };
-export type Subscription = { next(): Promise<any | null>; close(): Promise<void> };
+export type Subscription = {
+  next(): Promise<any | null>;
+  close(): Promise<void>;
+};
 export type Row = {
   key: string;
   messageId: string;
@@ -49,6 +52,17 @@ export type Row = {
   startSequence?: number;
   closedAt?: number | null;
 };
+
+export function replayStartCursor(
+  through: number,
+  parts: readonly { startSequence: number }[],
+  toolSeeds: readonly { startSequence: number }[],
+): number {
+  let after = through;
+  for (const part of parts) after = Math.min(after, part.startSequence - 1);
+  for (const tool of toolSeeds) after = Math.min(after, tool.startSequence - 1);
+  return after;
+}
 
 // A send receipt and canonical history refer to the same user message.
 export const messageKey = (row: Row) =>

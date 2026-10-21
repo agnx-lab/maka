@@ -19,7 +19,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024;
 pub const ATTACHMENT_RESOURCE_PREFIX: &str = "maka://runtime/attachments/";
 
 pub fn parse_resource_ref(value: &str) -> Option<&str> {

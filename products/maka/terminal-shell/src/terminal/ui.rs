@@ -35,7 +35,7 @@ use ratatui::{
     layout::Rect,
 };
 use std::{
-    io::{self, Write},
+    io,
     sync::{Arc, Mutex, mpsc},
     thread,
     time::Instant,
@@ -231,9 +231,22 @@ impl Session {
             let control = self.engine.control();
             control.resize(self.environment.window);
             control.set_environment(self.environment);
-            self.terminal
-                .resize(self.area)
-                .map_err(|error| error.to_string())?;
+            // The supplied area is authoritative. Ratatui's resize path queries
+            // the process TTY even for a Fixed viewport, but this backend only
+            // encodes into memory for the separate physical output owner.
+            let mut terminal = Terminal::with_options(
+                CrosstermBackend::new(FrameWriter::default()),
+                TerminalOptions {
+                    viewport: Viewport::Fixed(self.area),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            crossterm::queue!(
+                terminal.backend_mut().writer_mut(),
+                crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+            )
+            .map_err(|error| error.to_string())?;
+            self.terminal = terminal;
             changed = true;
         }
         if let Some(protocol) = command.image_protocol {
@@ -465,15 +478,12 @@ impl Session {
             crossterm::terminal::EndSynchronizedUpdate
         )
         .map_err(|error| error.to_string())?;
-        self.terminal
-            .backend_mut()
-            .writer_mut()
-            .write_all(&self.effects)
-            .map_err(|error| error.to_string())?;
-        self.effects.clear();
         self.terminal.swap_buffers();
         Backend::flush(self.terminal.backend_mut()).map_err(|error| error.to_string())?;
-        let bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
+        let mut bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
+        // Complete clipboard effects share this immutable physical write
+        // and its original flush receipt.
+        bytes.append(&mut self.effects);
         Ok(Frame {
             epoch: self.epoch,
             bytes: Some(bytes),
@@ -499,6 +509,7 @@ mod tests {
     };
     use nsh_core::{EventKind, EventPayload, MountItem, ROOT_ID, ViewKind};
     use nsh_engine::{App, Bundle, Limits};
+    use std::io::Write;
 
     fn config(source: &str) -> EngineConfig {
         let mut config = EngineConfig::new(App::Js(Bundle::source(source.to_owned())));

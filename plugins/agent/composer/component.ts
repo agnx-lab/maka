@@ -125,12 +125,7 @@ function slashQuery(text: string): string | null {
 }
 function rememberSkills(entry: DraftEntry, literals: Iterable<string>) {
   for (const literal of literals) {
-    if (entry.knownSkillLiterals.length === 4096) break;
-    if (
-      literal.length <= 512 &&
-      /^\/skill:[A-Za-z0-9._-]+$/u.test(literal) &&
-      !entry.knownSkillLiterals.includes(literal)
-    )
+    if (/^\/skill:[A-Za-z0-9._-]+$/u.test(literal) && !entry.knownSkillLiterals.includes(literal))
       entry.knownSkillLiterals.push(literal);
   }
 }
@@ -324,7 +319,7 @@ export function composer<N extends Node>(
     const ui = presentation.paint(props.theme),
       text = copy(props.locale);
     // Each session retains its original native mount, including selection and
-    // undo. Only observed empty, idle editors can make room at the original limit.
+    // undo; native ownership and checkpoints stay with their original data source.
     if (
       props.context &&
       props.dataSource &&
@@ -332,33 +327,20 @@ export function composer<N extends Node>(
         (entry) => entry.context === props.context && sameValue(entry.dataSource, props.dataSource),
       )
     ) {
-      if (state.entries.length === 32 && !props.busy) {
-        const empty = state.entries.findIndex(
-          (entry) =>
-            !entry.delivery &&
-            entry.checkpoint?.state.kind === 'ready' &&
-            entry.checkpoint.state.saved &&
-            entry.observation?.snapshot.text.bytes === 0 &&
-            !entry.observation.snapshot.marked &&
-            (!entry.files || entry.files.selection.phase === 'empty'),
-        );
-        if (empty >= 0) state.entries.splice(empty, 1);
-      }
-      if (state.entries.length < 32)
-        state.entries.push({
-          prefix: { read: null, attempted: null, cached: null, selected: 0, dismissed: null },
-          knownSkillLiterals: [],
-          context: props.context,
-          dataSource: props.dataSource,
-          checkpoint: null,
-          retry: 0,
-          key: state.serial++ === 0 ? 'draft' : `draft-${state.serial}`,
-          observation: null,
-          files: null,
-          history: { after: 0, scope: null },
-          delivery: null,
-          notice: null,
-        });
+      state.entries.push({
+        prefix: { read: null, attempted: null, cached: null, selected: 0, dismissed: null },
+        knownSkillLiterals: [],
+        context: props.context,
+        dataSource: props.dataSource,
+        checkpoint: null,
+        retry: 0,
+        key: state.serial++ === 0 ? 'draft' : `draft-${state.serial}`,
+        observation: null,
+        files: null,
+        history: { after: 0, scope: null },
+        delivery: null,
+        notice: null,
+      });
     }
     const current = state.entries.find(
       (entry) => entry.context === props.context && sameValue(entry.dataSource, props.dataSource),

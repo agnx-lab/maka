@@ -23,4 +23,6 @@
 
 Implements outbound ACP agent conversations, installation and setup. It translates between Maka execution ports and an external agent process. The native wrapper supplies explicitly bound process, file and interaction services. This is the outbound executor; the ACP server exposed to editors lives under `products/maka/acp`.
 
+ACP prompt, attachment, file-read and output carriers preserve complete supported content through their original process and callback owners. Lossless text/write chunks remain; a prompt has no independent elapsed-work cutoff. Connect/configuration observation and cleanup deadlines retain their lifecycle meaning. Installer verification preserves exact release-owned filenames, lengths and hashes, with staged publication and cancellation; the public installer API does not imply a demonstrated production UI invocation.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

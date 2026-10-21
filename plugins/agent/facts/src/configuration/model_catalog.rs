@@ -104,16 +104,7 @@ impl ModelCatalogEntry {
     }
 
     pub fn validate(&self) -> validation::ValidationResult {
-        validation::text(&self.id, 512, true)?;
-        for (value, max) in [
-            (self.display_name.as_deref(), 512),
-            (self.description.as_deref(), 2048),
-            (self.knowledge_cutoff.as_deref(), 2048),
-        ] {
-            if let Some(value) = value {
-                validation::text(value, max, false)?;
-            }
-        }
+        validation::text(&self.id)?;
         for value in [
             self.context_window,
             self.input_limit,

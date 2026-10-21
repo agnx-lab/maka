@@ -88,9 +88,6 @@ impl ConfigurationStore {
                         slug,
                         name,
                     } => {
-                        if catalog.connections.len() >= 1024 {
-                            return Ok(P::Rejected(R::CatalogFull));
-                        }
                         if catalog.connections.iter().any(|r| r.slug == slug) {
                             return Ok(P::Rejected(R::SlugTaken));
                         }

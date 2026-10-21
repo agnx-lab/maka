@@ -214,3 +214,139 @@ async fn native_jev_evaluates_with_endpoint_credentials_and_revokes_inflight_acc
         f.app.shutdown().await.unwrap(); f.config.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+// The original implementation may refuse before HTTP dispatch. Observe that
+// actual result instead of waiting for a request which was never admitted.
+async fn complete_exchange(
+    f: &Fixture,
+    server: &TcpListener,
+    input: Value,
+    reply: &Value,
+) -> (Value, Option<(String, Value)>) {
+    let evaluated = mutation(f, "evaluate", input, None);
+    tokio::pin!(evaluated);
+    tokio::select! {
+        result = &mut evaluated => (result, None),
+        accepted = server.accept() => {
+            let (mut socket, _) = accepted.unwrap();
+            let observed = incoming(&mut socket).await;
+            let body = reply.to_string();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            (evaluated.await, Some(observed))
+        }
+    }
+}
+
+#[tokio::test]
+async fn complete_jev_form_and_endpoint_credentials_preserve_original_payloads() {
+    let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/decision", server.local_addr().unwrap());
+    let f = Fixture::with_services(
+        "http://127.0.0.1:1/v1",
+        None,
+        None,
+        Some(service_tools::Setup::jev()),
+    )
+    .await;
+    configure(&f, &url, true).await;
+    credential(
+        &f,
+        &url,
+        json!({"kind":"api_key"}),
+        Some("original-jev-key"),
+    )
+    .await;
+    let mut questions = serde_json::Map::new();
+    let mut answers = serde_json::Map::new();
+    for index in 0..65 {
+        let key = format!("{}-{index:02}", "original-question".repeat(10));
+        questions.insert(
+            key.clone(),
+            json!({"type":"noul","instructions":"Keep this original question"}),
+        );
+        answers.insert(key, json!({"type":"noul","noul":0.75}));
+    }
+    let criteria: BTreeMap<_, _> = (0..256)
+        .map(|i| (format!("choice-{i:03}"), Value::Null))
+        .collect();
+    let probabilities: BTreeMap<_, _> = (0..256)
+        .map(|i| {
+            (
+                format!("choice-{i:03}"),
+                json!(if i == 255 { 1.0 } else { 0.0 }),
+            )
+        })
+        .collect();
+    questions.insert(
+        "choice".into(),
+        json!({"type":"choice","instructions":"Choose the last","criteria":criteria}),
+    );
+    answers.insert("choice".into(),json!({"type":"choice","choice":"choice-255","confidence":1.0,"probabilities":probabilities}));
+    questions.insert("score".into(),json!({"type":"score","instructions":"Use the last score","criteria":(0..11).map(|i|json!(format!("point-{i}"))).collect::<Vec<_>>()}));
+    let probabilities: BTreeMap<_, _> = (0..11)
+        .map(|i| (i.to_string(), json!(if i == 10 { 1.0 } else { 0.0 })))
+        .collect();
+    let legend: BTreeMap<_, _> = (0..11)
+        .map(|i| (i.to_string(), format!("point-{i}")))
+        .collect();
+    answers.insert("score".into(),json!({"type":"score","score":10.0,"confidence":1.0,"probabilities":probabilities,"legend":legend}));
+    let input = json!({"state":{"original":"state-".repeat(7000)},"questions":questions});
+    let reply = json!({"model":"fixture-jev","answers":answers,"usage":{"input_tokens":123,"output_tokens":67}});
+    let (form_result, observed_form) = complete_exchange(&f, &server, input.clone(), &reply).await;
+    // Independently exercise complete response admission with a tiny request.
+    let response = json!({"model":"reported-model-".repeat(6000),"answers":{"ready":{"type":"noul","noul":0.9}},"usage":{"input_tokens":1,"output_tokens":1}});
+    let (response_result, observed_response) =
+        complete_exchange(&f, &server, evaluation(), &response).await;
+    let secret = "k".repeat(4097);
+    let large_secret = credential(&f, &url, json!({"kind":"api_key"}), Some(&secret)).await;
+    let mut header_results = Vec::new();
+    for index in 0..33 {
+        header_results.push(
+            credential(
+                &f,
+                &url,
+                json!({"kind":"header","name":format!("X-Original-{index:02}")}),
+                Some("value"),
+            )
+            .await,
+        );
+    }
+    let current = snapshot(&f).await;
+    let settings = mutation(&f,"save",json!({"revision":current["revision"],"settings":{"enabled":true,"url":url,"model":"original-model-".repeat(25),"timeoutMs":60001}}),None).await;
+    let final_snapshot = snapshot(&f).await;
+    f.app.shutdown().await.unwrap();
+    f.config.shutdown().await.unwrap();
+    assert_eq!(form_result, json!({"kind":"completed","value":reply}));
+    assert_eq!(
+        observed_form.unwrap().1,
+        json!({"model":"fixture-jev","state":input["state"],"questions":input["questions"]})
+    );
+    assert_eq!(
+        response_result,
+        json!({"kind":"completed","value":response})
+    );
+    assert_eq!(
+        observed_response.unwrap().1["questions"],
+        evaluation()["questions"]
+    );
+    assert_eq!(large_secret["kind"], "updated");
+    assert!(
+        header_results
+            .iter()
+            .all(|value| value["kind"] == "updated"),
+        "some original header updates refused"
+    );
+    assert_eq!(settings["kind"], "updated");
+    assert_eq!(
+        final_snapshot["headerNames"],
+        json!(
+            (0..33)
+                .map(|i| format!("X-Original-{i:02}"))
+                .collect::<Vec<_>>()
+        )
+    );
+    assert!(
+        !final_snapshot.to_string().contains(&secret),
+        "credential must remain private"
+    );
+}

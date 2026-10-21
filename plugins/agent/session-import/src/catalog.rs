@@ -107,15 +107,7 @@ struct Cursor {
 }
 
 fn prepare(mut query: Query) -> Result<Query, Error> {
-    if query.limit == 0
-        || query.limit > 100
-        || query.text.len() > 1024
-        || query.text.chars().any(char::is_control)
-        || query
-            .cursor
-            .as_ref()
-            .is_some_and(|cursor| cursor.len() > 16 * 1024)
-    {
+    if query.limit == 0 || query.limit > 100 || query.text.chars().any(char::is_control) {
         return Err(Error::Invalid("invalid catalog query"));
     }
     if let Some(cwd) = &query.cwd
@@ -242,12 +234,6 @@ fn scan(
                 Ok(()) => {}
                 Err(Error::Read(ReadError::Io(error)))
                     if error.kind() == io::ErrorKind::NotFound => {}
-                Err(Error::Read(ReadError::ScanLimit { max })) => {
-                    return Err(Error::Limit {
-                        kind: "catalog_candidates",
-                        max,
-                    });
-                }
                 Err(error) => return Err(error),
             }
         }
@@ -280,7 +266,9 @@ fn page(
         let cursor_bytes = serde_json::to_vec(&continuation)
             .map_err(|_| Error::Invalid("invalid catalog cursor"))?
             .len();
-        if entries.len() == limit || bytes + encoded.len() + cursor_bytes > PAGE_BYTES {
+        if entries.len() == limit
+            || (!entries.is_empty() && bytes + encoded.len() + cursor_bytes > PAGE_BYTES)
+        {
             more = true;
             break;
         }

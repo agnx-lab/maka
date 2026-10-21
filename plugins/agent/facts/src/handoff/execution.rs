@@ -62,14 +62,8 @@ impl HandoffExecution {
     pub(super) fn validate(&self) -> Result<(), &'static str> {
         self.replay.validate()?;
         if !valid_projection_digest(&self.tools.catalog_digest)
-            || self
-                .main_output_limit
-                .is_some_and(|n| n == 0 || n > 10_000_000_000)
-            || self
-                .tools
-                .loaded
-                .iter()
-                .any(|name| name.is_empty() || name.len() > 128)
+            || self.main_output_limit.is_some_and(|n| n == 0)
+            || self.tools.loaded.iter().any(|name| name.is_empty())
         {
             return Err("invalid handoff execution settings");
         }

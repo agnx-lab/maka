@@ -23,4 +23,6 @@
 
 Discovers and converts external conversation formats from Claude, Codex and OpenCode. `Transcript` is the normalized import representation; `source` and `catalog` handle discovery. The native Agent service validates the selected source and publishes the complete transcript and new Session in one transaction. Retries verify the original canonical records. Adapters give reused foreign tool IDs distinct normalized occurrence keys; a new imported Session rejects duplicate ToolCall keys. It does not execute imported instructions or replace the Host's canonical event writer.
 
+Source configuration preserves complete names and paths. Catalog and preview pages retain their original selection and continuation; previews do not replace the imported transcript.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

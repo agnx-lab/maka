@@ -24,7 +24,7 @@ use std::fs;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-async fn exact_caps_and_unscanned_paths_have_explicit_completeness() {
+async fn all_dense_matches_and_eligible_paths_are_searched() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     let reader = ReadExecutor::new(
@@ -34,13 +34,7 @@ async fn exact_caps_and_unscanned_paths_have_explicit_completeness() {
         },
     )
     .unwrap();
-    for (lines, complete) in [
-        (0, true),
-        (49, true),
-        (50, true),
-        (51, false),
-        (1187, false),
-    ] {
+    for (lines, complete) in [(0, true), (49, true), (50, true), (51, true), (1187, true)] {
         fs::write(root.join("single.txt"), "match\n".repeat(lines)).unwrap();
         let result = reader
             .invoke(
@@ -50,7 +44,7 @@ async fn exact_caps_and_unscanned_paths_have_explicit_completeness() {
             )
             .await
             .unwrap();
-        assert_eq!(result["matches"].as_array().unwrap().len(), lines.min(50));
+        assert_eq!(result["matches"].as_array().unwrap().len(), lines);
         assert_eq!(result["complete"], complete, "{lines} matching lines");
     }
     fs::create_dir(root.join("directory")).unwrap();
@@ -79,8 +73,8 @@ async fn exact_caps_and_unscanned_paths_have_explicit_completeness() {
         .unwrap();
     assert_eq!(unscanned["matches"], exact["matches"]);
     assert_eq!(
-        unscanned["complete"], false,
-        "no claim about an unscanned directory, even if it happens to be empty"
+        unscanned["complete"], true,
+        "later eligible directories are searched even after 200 matches"
     );
     let narrowed = reader
         .invoke(

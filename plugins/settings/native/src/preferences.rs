@@ -40,9 +40,7 @@ pub struct Preferences {
     pub compaction_prompt: String,
     pub default_compaction_prompt: String,
     pub revision: u64,
-    #[schemars(length(max = 256))]
     pub display_name: String,
-    #[schemars(length(max = 4096))]
     pub assistant_tone: String,
     pub workspace_instructions: bool,
     pub incognito_active: bool,
@@ -72,9 +70,7 @@ pub enum Mutation {
         prompt: Option<String>,
     },
     Personalization {
-        #[schemars(length(max = 256))]
         display_name: String,
-        #[schemars(length(max = 4096))]
         assistant_tone: String,
     },
     WorkspaceInstructions {

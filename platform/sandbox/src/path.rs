@@ -25,7 +25,6 @@ pub(crate) fn validate(path: &Path) -> Result<(), Error> {
         .to_str()
         .ok_or_else(|| Error::Invalid("policy path is not Unicode".into()))?;
     if !path.is_absolute()
-        || text.len() > 32 * 1024
         || text.contains('\0')
         || text
             .split(std::path::is_separator)

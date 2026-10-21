@@ -26,3 +26,5 @@ Exposes Root settings through a native application service. `provide` registers 
 Language is a single Root preference, updated with the existing policy revision. `assistantPreferences` returns both the saved selection and the resolved `en`, `zh-CN` or `zh-TW` language. An unset selection follows the configured product locale; explicit `auto` follows the native startup locale, and an explicit language overrides both. Activation accepts locale tags such as `zh-Hant-HK` and normalizes them before use.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)
+
+Settings preserves full configuration, labels, search inputs and authentication resources. Page targets bound each continuation slice rather than the full inventory; one complete larger item still advances. The Host owns physical resource admission and settlement; Settings retains domain syntax, CAS and credential authority.

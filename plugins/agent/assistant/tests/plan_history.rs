@@ -297,7 +297,7 @@ async fn revisions_replanning_and_admission_recovery_do_not_reuse_stale_authorit
 }
 
 #[tokio::test]
-async fn history_is_bounded_frozen_and_exact_retries_share_one_revision() {
+async fn history_advances_complete_large_snapshots_and_exact_retries_share_one_revision() {
     let temp = tempfile::tempdir().unwrap();
     let log = Arc::new(
         EventLog::open(&temp.path().join("state.sqlite"))
@@ -307,7 +307,7 @@ async fn history_is_bounded_frozen_and_exact_retries_share_one_revision() {
     let storage = Storage::new(log.clone());
     let repository = Repository::new(storage.clone(), "planner", "session").unwrap();
     let mut artifact = draft();
-    artifact.overview = Some("\\".repeat(12 * 1024));
+    artifact.overview = Some("\\".repeat(300 * 1024));
     let propose = request(
         "draft",
         0,
@@ -352,11 +352,11 @@ async fn history_is_bounded_frozen_and_exact_retries_share_one_revision() {
     let page = repository.history(None, 0).await.unwrap();
     let through = page.through_revision;
     assert!(page.next_after.is_some());
-    assert!(
-        page.snapshots.len() < 8,
-        "byte budget must paginate before the item budget"
+    assert_eq!(page.snapshots.len(), 1);
+    assert_eq!(
+        page.snapshots[0].proposal.as_ref().unwrap().artifact,
+        artifact
     );
-    assert!(serde_json::to_vec(&page).unwrap().len() <= 512 * 1024);
     let mut next = page.next_after;
     let mut history = page.snapshots;
     advance(
@@ -373,7 +373,7 @@ async fn history_is_bounded_frozen_and_exact_retries_share_one_revision() {
     while let Some(after) = next {
         let page = repository.history(Some(through), after).await.unwrap();
         assert!(!page.snapshots.is_empty());
-        assert!(serde_json::to_vec(&page).unwrap().len() <= 512 * 1024);
+        assert_eq!(page.snapshots.len(), 1);
         next = page.next_after;
         history.extend(page.snapshots);
     }

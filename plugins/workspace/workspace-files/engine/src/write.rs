@@ -19,7 +19,7 @@
 
 use crate::{
     ReadScope, failed,
-    mutation::{EDIT_NAME, MAX_PATH, Mutation, WRITE_NAME},
+    mutation::{EDIT_NAME, Mutation, WRITE_NAME},
     scoped::Authority,
 };
 use maka_agent_facts::tools::ToolError;
@@ -155,9 +155,6 @@ impl ToolExecutor for MutationExecutor {
             tokio::task::spawn_blocking(move || match input {
                 Request::File(input) => {
                     let output_path = authority.write_display_path(Path::new(input.path()))?;
-                    if output_path.len() > MAX_PATH {
-                        return Err(failed("Write output path exceeds byte limit"));
-                    }
                     run(
                         &authority,
                         &coordinator,
@@ -216,7 +213,7 @@ fn run(
         .lock()
         .map_err(|_| failed("Write coordinator poisoned"))?;
     check_cancelled(cancellation)?;
-    let (content, result) = target.prepare(input, output_path)?;
+    let (content, result) = target.prepare(input, output_path, cancellation)?;
     target.apply(content.as_bytes(), cancellation, started)?;
     Ok(result)
 }

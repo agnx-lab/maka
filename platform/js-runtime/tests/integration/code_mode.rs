@@ -171,11 +171,8 @@ async fn javascript_failure_cancels_and_drains_dispatched_tools() {
         // Admission precedes dispatch. Wait for the tool to enter before failing JS,
         // otherwise cancellation may correctly prevent dispatch altogether.
         let mut task = tokio::spawn(async move {
-            let context = maka_js_runtime::CellContext::new(
-                maka_js_runtime::CellStore::default(),
-                4096,
-                vec![],
-            );
+            let context =
+                maka_js_runtime::CellContext::new(maka_js_runtime::CellStore::default(), vec![]);
             executor()
                 .execute_module(
                     format!(

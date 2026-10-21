@@ -53,15 +53,6 @@ import {
 } from './theme.js';
 import { t } from './locale.js';
 
-/**
- * The most folders watched at once, the root included. Expanding one more
- * collapses the folder expanded longest ago (not the root, and not one the
- * new folder is inside), so every folder that shows is kept current. When
- * every folder open is one the new folder is inside, it does not open, and
- * a row under it says to collapse others first.
- */
-const MAX_WATCHED = 32;
-
 /** How many times a listing that failed while a `changed` waited is tried again. */
 const LIST_RETRIES = 3;
 
@@ -170,8 +161,6 @@ export class FileTree {
     this.shown = false;
     /** The key of the row selected, or null. */
     this.selected = null;
-    /** The folder that did not open because of MAX_WATCHED (its key), or null. */
-    this.refused = null;
     /**
      * The menu: the row it is for, then where the press was in the pane,
      * `{ key, x, y }`, or null. `pressed` holds the row between the row's
@@ -238,35 +227,23 @@ export class FileTree {
 
   /** Whether the folder `inner` is inside `outer` (both keys), by the parents recorded on expanding. */
   inside(inner, outer) {
+    const visited = new Set();
     for (let key = inner; key !== ROOT && key !== undefined; key = this.expanded.get(key)?.parent) {
       if (key === outer) return true;
+      if (visited.has(key)) break;
+      visited.add(key);
     }
     return false;
   }
 
   /**
    * Expands the folder `entry`, listed in the folder `parent` (a key), and
-   * watches it. One past MAX_WATCHED collapses the folder expanded longest
-   * ago first, or, when every folder open is around this one, does not
-   * open it (see MAX_WATCHED).
+   * watches it until the folder collapses or this owner is hidden/disposed.
    */
   expand(entry, parent) {
     if (this.closed || this.expanded.has(entry.key)) return;
     // Only a folder that shows: the root's, or one in an expanded folder.
     if (parent !== ROOT && !this.expanded.has(parent)) return;
-    if (this.expanded.size + 1 >= MAX_WATCHED) {
-      const oldest = [...this.expanded.keys()].find((key) => !this.inside(parent, key));
-      if (oldest === undefined) {
-        // Every folder open is one this one is inside; none can close for it.
-        log(`files: ${MAX_WATCHED} folders watched, all around ${entry.text}; not opening it`);
-        this.refused = entry.key;
-        this.touch();
-        return;
-      }
-      log(`files: ${MAX_WATCHED} folders watched; collapsing the one expanded first`);
-      this.collapse(oldest);
-    }
-    this.refused = null;
     this.expanded.set(entry.key, { path: entry.path, parent });
     const dir = this.dir(entry.key, entry.path);
     if (this.shown) this.watch(dir);
@@ -275,7 +252,6 @@ export class FileTree {
 
   /** Collapses the folder `key` and every folder inside it: their watches close and their listings go. */
   collapse(key) {
-    this.refused = null;
     const gone = [...this.expanded.keys()].filter((other) => this.inside(other, key));
     for (const other of gone) {
       this.expanded.delete(other);
@@ -295,7 +271,13 @@ export class FileTree {
    */
   async watch(dir) {
     if (dir.watch !== null || this.closed || !this.shown) return;
-    const watch = { handle: null, closed: false, identity: null, listing: false, again: false };
+    const watch = {
+      handle: null,
+      closed: false,
+      identity: null,
+      listing: false,
+      again: false,
+    };
     dir.watch = watch;
     let ended = null;
     try {
@@ -384,6 +366,7 @@ export class FileTree {
           const entries = [];
           let identity = null;
           let after = null;
+          const seen = new Set();
           do {
             const page = await query(this.endpoint, 'listFiles', {
               sessionId: this.sessionId,
@@ -398,6 +381,11 @@ export class FileTree {
             identity = page.directoryIdentity;
             entries.push(...page.entries);
             after = page.next;
+            if (after !== null) {
+              const key = JSON.stringify(after);
+              if (seen.has(key)) throw new Error('File cursor did not advance');
+              seen.add(key);
+            }
           } while (after !== null);
           if (watch.again) continue;
           if (identity !== watch.identity) {
@@ -474,7 +462,39 @@ export class FileTree {
     // Text is kept as message keys and translated as the rows are drawn,
     // so a change of language shows without rebuilding them.
     const items = [{ kind: 'root', key: 'root', name: this.rootName(), depth: 0 }];
-    const walk = (dir, depth) => {
+    /** @type {any[]} */
+    const pending = [{ dir: this.dir(ROOT, null), depth: 0 }];
+    const visited = new Set();
+    while (pending.length !== 0) {
+      const task = pending.pop();
+      const { dir, entry, parent, depth } = task;
+      if (entry !== undefined) {
+        if (entry.kind === 'directory') {
+          const open = this.expanded.has(entry.key);
+          items.push({
+            kind: 'directory',
+            key: `d/${entry.key}`,
+            entry,
+            parent,
+            depth,
+            open,
+          });
+          const inner = this.dirs.get(entry.key);
+          if (open && inner !== undefined) pending.push({ dir: inner, depth: depth + 1 });
+        } else {
+          const change = changes?.kindOf(entry.key);
+          items.push({
+            kind: 'file',
+            key: `f/${entry.key}`,
+            entry,
+            depth,
+            change,
+          });
+        }
+        continue;
+      }
+      if (visited.has(dir.key)) continue;
+      visited.add(dir.key);
       if (dir.error !== null) {
         items.push({
           kind: 'failed',
@@ -485,44 +505,26 @@ export class FileTree {
         });
       }
       if (dir.entries === null) {
-        if (dir.error === null) {
-          items.push({ kind: 'note', key: `note/${dir.key}`, depth, message: 'loading' });
-        }
-        return;
-      }
-      if (dir.entries.length === 0) {
-        items.push({ kind: 'note', key: `note/${dir.key}`, depth, message: 'filesEmpty' });
-      }
-      for (const entry of dir.entries) {
-        if (entry.kind === 'directory') {
-          const open = this.expanded.has(entry.key);
+        if (dir.error === null)
           items.push({
-            kind: 'directory',
-            key: `d/${entry.key}`,
-            entry,
-            parent: dir.key,
+            kind: 'note',
+            key: `note/${dir.key}`,
             depth,
-            open,
+            message: 'loading',
           });
-          const inner = this.dirs.get(entry.key);
-          if (open && inner !== undefined) walk(inner, depth + 1);
-          // Under the folder that did not open, from the tree's left edge: it
-          // is at least 32 levels down, where the indent leaves the text no room.
-          if (entry.key === this.refused) {
-            items.push({
-              kind: 'note',
-              key: `refused/${entry.key}`,
-              depth: 0,
-              message: 'filesTooManyOpen',
-            });
-          }
-        } else {
-          const change = changes?.kindOf(entry.key);
-          items.push({ kind: 'file', key: `f/${entry.key}`, entry, depth, change });
-        }
+        continue;
       }
-    };
-    walk(this.dir(ROOT, null), 0);
+      if (dir.entries.length === 0)
+        items.push({
+          kind: 'note',
+          key: `note/${dir.key}`,
+          depth,
+          message: 'filesEmpty',
+        });
+      for (let index = dir.entries.length - 1; index >= 0; index -= 1) {
+        pending.push({ entry: dir.entries[index], parent: dir.key, depth });
+      }
+    }
     for (const item of items) item.selected = item.key === this.selected;
     this.view = {
       version: this.version,
@@ -637,7 +639,9 @@ export class FileTree {
 
   /** Asks whether to open `entry`, which can run a program: a dialog with Cancel and Open. */
   askLaunch(entry) {
-    window.open_dialog(() => launchDialog(this, entry, this.cx), { backdrop_dismissable: false });
+    window.open_dialog(() => launchDialog(this, entry, this.cx), {
+      backdrop_dismissable: false,
+    });
   }
 
   /** The dialog's Open: opens `entry` after all, unless the tree closed meanwhile. */

@@ -50,12 +50,7 @@ pub struct Peer {
 impl Peer {
     pub fn new(source: DeploymentRef, consumers: BTreeSet<InstanceId>) -> Result<Self> {
         source.validate()?;
-        if consumers.is_empty()
-            || consumers.len() > 128
-            || consumers
-                .iter()
-                .any(|id| id.0.is_empty() || id.0.len() > 64 || id.0.iter().any(uuid::Uuid::is_nil))
-        {
+        if consumers.is_empty() || consumers.iter().any(|id| id.validate().is_err()) {
             return Err("invalid approved peer consumers".into());
         }
         Ok(Self { source, consumers })
@@ -126,9 +121,6 @@ impl Peers {
         current: &Approvals,
         peers: Vec<Peer>,
     ) -> Result<BTreeMap<u64, Arc<PeerApproval>>> {
-        if peers.len() > 256 {
-            return Err("maximum 256 approved sources".into());
-        }
         let mut next = BTreeMap::new();
         for peer in peers {
             if peer.source.state_domain != self.origin.state_domain
@@ -173,9 +165,6 @@ impl Peers {
         peer: Option<Peer>,
         retain: &BTreeSet<u64>,
     ) -> Result<Vec<Peer>> {
-        if retain.len() > 256 {
-            return Err("maximum 256 retained source approvals".into());
-        }
         let mut peers = current
             .tickets
             .values()
@@ -235,7 +224,6 @@ pub(super) fn check_grant(contract: &Contract, grant: &Grant) -> Result<()> {
     };
     if contract.transport != Transport::Remote
         || grant.methods.is_empty()
-        || grant.methods.len() > super::MAX_GRANTED_METHODS
         || grant.methods.iter().any(|name| !methods.contains_key(name))
     {
         return Err("invalid Application endpoint grant".into());
@@ -258,15 +246,10 @@ impl NativeGrant {
     pub fn validate(&self) -> Result<()> {
         if [&self.origin, &self.consumer, &self.provider]
             .iter()
-            .any(|id| id.0.is_empty() || id.0.len() > 64 || id.0.iter().any(uuid::Uuid::is_nil))
+            .any(|id| id.validate().is_err())
             || self.export.is_empty()
-            || self.export.len() > 256
             || self.methods.is_empty()
-            || self.methods.len() > super::MAX_GRANTED_METHODS
-            || self
-                .methods
-                .iter()
-                .any(|method| method.is_empty() || method.len() > 256)
+            || self.methods.iter().any(|method| method.is_empty())
         {
             return Err("invalid native service grant".into());
         }
@@ -285,9 +268,6 @@ pub struct PeerPolicy {
 }
 impl PeerPolicy {
     pub fn with_native_grants(native: Vec<NativeGrant>) -> Result<Self> {
-        if native.len() > 128 {
-            return Err("maximum 128 native service grants".into());
-        }
         for grant in &native {
             grant.validate()?;
         }

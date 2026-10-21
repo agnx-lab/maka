@@ -217,12 +217,7 @@ export function capture(state: State, actions: Action[]) {
       return n;
     };
     const modelKey = form.values.model!;
-    if (
-      !modelKey ||
-      modelKey.trim() !== modelKey ||
-      modelKey.length > 128 ||
-      /[\u0000-\u001f\u007f]/.test(modelKey)
-    )
+    if (!modelKey || modelKey.trim() !== modelKey || /[\u0000-\u001f\u007f]/.test(modelKey))
       throw Error();
     const pricing: Pricing = {
       modelKey,

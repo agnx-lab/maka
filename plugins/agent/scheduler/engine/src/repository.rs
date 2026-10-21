@@ -26,7 +26,6 @@ use maka_capabilities::storage::Store;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 
-const MAX_TASKS: usize = 256;
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Index {
@@ -102,10 +101,8 @@ impl Repository {
             });
         };
         let value: Index = decode(&index)?;
-        if value.schema_version != 1 || value.ids.len() > MAX_TASKS {
-            return Err(invalid(
-                "unsupported scheduled-task schema or catalog limit",
-            ));
+        if value.schema_version != 1 {
+            return Err(invalid("unsupported scheduled-task schema"));
         }
         let mut records = Vec::with_capacity(value.ids.len());
         for id in value.ids {
@@ -168,9 +165,6 @@ impl Repository {
         }
         let mut ids = catalog.plans.keys().cloned().collect::<Vec<_>>();
         if previous.is_none() {
-            if ids.len() >= MAX_TASKS {
-                return Err(invalid("scheduled-task catalog is full"));
-            }
             // Deleted keys retain revisions; a new task ID must not reuse them.
             if self.storage.read(self.key(&id)).await?.is_some() {
                 return Err(invalid("task identity has already been used"));

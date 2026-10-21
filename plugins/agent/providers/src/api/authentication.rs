@@ -28,7 +28,7 @@ use serde::Deserialize;
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Key {
-    #[schemars(length(min = 1, max = 65536))]
+    #[schemars(length(min = 1))]
     api_key: String,
 }
 
@@ -52,7 +52,7 @@ pub(super) fn authenticate(request: Authenticate) -> Result<Credential, Error> {
     let key: Key = serde_json::from_value(request.input)
         .map_err(|_| Error::Invalid("invalid API key".into()))?;
     let value = key.api_key.trim();
-    if value.is_empty() || value.len() > 65536 || value.chars().any(char::is_control) {
+    if value.is_empty() || value.chars().any(char::is_control) {
         return Err(Error::Invalid("invalid API key".into()));
     }
     Ok(Credential {

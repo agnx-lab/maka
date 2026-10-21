@@ -50,13 +50,13 @@ impl EventLog {
     ) -> Result<Page, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        if max_entries == 0
-            || max_entries > 32
-            || max_bytes == 0
-            || (before.is_some() && through.is_none())
-        {
+        if max_entries == 0 || max_bytes == 0 || (before.is_some() && through.is_none()) {
             return Err(invalid("invalid diagnostic page bounds"));
         }
+        let row_limit = i64::try_from(max_entries)
+            .ok()
+            .and_then(|n| n.checked_add(1))
+            .ok_or_else(|| invalid("diagnostic page count is not representable"))?;
         let session = session.to_owned();
         self.connection
             .read(move |connection| {
@@ -72,14 +72,13 @@ impl EventLog {
                             .bind(session)
                             .bind(through as i64)
                             .bind(before.map(|n| n as i64))
-                            .bind(max_entries as i64 + 1)
+                            .bind(row_limit)
                             .fetch(&mut *tx);
                         while let Some(row) = rows.try_next().await? {
                             let json: &str = row.try_get(0)?;
-                            if entries.len() == max_entries || json.len() > max_bytes {
-                                if entries.is_empty() {
-                                    return Err(StoreError::PrefixTooLarge);
-                                }
+                            if entries.len() == max_entries
+                                || (!entries.is_empty() && json.len() > max_bytes)
+                            {
                                 more = true;
                                 break;
                             }
@@ -100,9 +99,10 @@ impl EventLog {
                         if serde_json::to_vec(&page)?.len() <= max_bytes {
                             break;
                         }
-                        if page.entries.pop().is_none() || page.entries.is_empty() {
-                            return Err(StoreError::PrefixTooLarge);
+                        if page.entries.len() <= 1 {
+                            break;
                         }
+                        page.entries.pop();
                         more = true;
                     }
                     tx.commit().await?;

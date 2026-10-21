@@ -100,9 +100,6 @@ impl ConfigurationStore {
                 boundary,
             };
             let bytes = serde_json::to_string(&document)?;
-            if bytes.len() > 64 * 1024 {
-                return Err(ConfigError::Invalid("authorization exceeds 64 KiB".into()));
-            }
             sqlx::query("INSERT INTO plugin_authorizations (id, package_id, scope_id, operation_id, document) VALUES (?, ?, ?, ?, ?)")
                 .bind(id.0.to_string()).bind(namespace.package()).bind(scope).bind(document.request.operation_id.to_string()).bind(bytes)
                 .execute(&mut *connection).await?;

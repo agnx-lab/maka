@@ -48,7 +48,6 @@ struct PendingToolInput {
 /// and history projection. Only closed items can authorize streaming execution.
 #[derive(Default)]
 pub struct StepBuilder {
-    step_id_bytes: Option<usize>,
     parts: Vec<ModelPart>,
     accepted: Option<usize>,
     open: HashMap<String, usize>,

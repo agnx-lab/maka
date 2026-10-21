@@ -20,8 +20,6 @@
 use super::invalid;
 use crate::{EventLog, StoreError};
 use maka_capabilities::storage::Data;
-use maka_capabilities::storage::MAX_BATCH_BYTES;
-use maka_capabilities::storage::MAX_MUTATIONS;
 use maka_capabilities::storage::MAX_PAGE_BYTES;
 use maka_capabilities::storage::Mutation;
 use maka_capabilities::storage::Namespace;
@@ -53,8 +51,8 @@ impl EventLog {
                     SELECT key, ROW_NUMBER() OVER (ORDER BY key) AS position,
                         SUM(bytes) OVER (ORDER BY key) AS total FROM candidates
                  ) SELECT data.key, data.revision,
-                    CASE WHEN bounded.position <= 64 AND bounded.total <= ?5 THEN data.value_json END,
-                    bounded.position <= 64 AND bounded.total <= ?5
+                    CASE WHEN bounded.position = 1 OR (bounded.position <= 64 AND bounded.total <= ?5) THEN data.value_json END,
+                    bounded.position = 1 OR (bounded.position <= 64 AND bounded.total <= ?5)
                  FROM bounded JOIN plugin_data AS data
                    ON data.package_id = ?1 AND data.scope_id = ?2 AND data.key = bounded.key
                  ORDER BY data.key"
@@ -98,12 +96,11 @@ impl EventLog {
         mutations: Vec<Mutation>,
     ) -> Result<Vec<Record>, StoreError> {
         self.validate_root()?;
-        if mutations.is_empty() || mutations.len() > MAX_MUTATIONS {
-            return Err(invalid("plugin data batch must contain 1..=128 mutations"));
+        if mutations.is_empty() {
+            return Err(invalid("plugin data batch must not be empty"));
         }
         let mut keys = BTreeSet::new();
         let mut encoded = Vec::new();
-        let mut total = 0;
         for mutation in &mutations {
             mutation
                 .validate()
@@ -116,10 +113,6 @@ impl EventLog {
                 .value()
                 .map(serde_json::to_string)
                 .transpose()?;
-            total += value.as_ref().map_or(0, String::len);
-            if total > MAX_BATCH_BYTES {
-                return Err(invalid("plugin data batch exceeds 16 MiB"));
-            }
             encoded.push(value);
         }
         let namespace = namespace.clone();

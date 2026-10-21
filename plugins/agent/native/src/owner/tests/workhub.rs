@@ -1566,7 +1566,6 @@ async fn workhub_creates_selected_worker_and_transfers_original_attachment_bytes
         let mut files: Vec<_> = (0..9).map(|index| (format!("transfer-{index}.txt"), if index == 0 { "original user attachment\n中\0".repeat(6000).into_bytes() } else { format!("original user attachment {index}\n中\0tail-{index}").into_bytes() })).collect();
         if let Ok(size) = std::env::var("MAKA_WORKHUB_ARTIFACT_PROBE_BYTES") {
             let size: usize = size.parse().expect("MAKA_WORKHUB_ARTIFACT_PROBE_BYTES must be an integer");
-            assert!(size as u64 <= maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES);
             let pattern = b"original user attachment\n\0";
             let mut bytes = pattern.repeat(size / pattern.len() + 1);
             bytes.truncate(size);
@@ -2083,5 +2082,91 @@ async fn coordinator_http_fixture_accepts_empty_disconnect_but_rejects_partial_h
         let text = panic.downcast_ref::<String>().map(String::as_str)
             .or_else(|| panic.downcast_ref::<&str>().copied()).unwrap();
         assert!(text.contains("EOF before complete HTTP headers: buffered_bytes=36"), "{text}");
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn workhub_complete_dependency_capture_above_one_mib() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut fixture = Fixture::new(&format!("http://{}/v1", listener.local_addr().unwrap()), None).await;
+        activate_workers(&mut fixture, true, true, true).await;
+        let worker = worker_session(&fixture).await;
+        let (coordinator, parent, mut running) = active_task(&fixture, &listener, &worker).await;
+        let directory = query_import(&fixture, "worker", "directories", json!({"kind":"roots"}))
+            .await["roots"][0]["selection"].clone();
+        let downstream = control_turn(&fixture, &listener, &coordinator, json!({
+            "operation":"route", "worker":"worker",
+            "target":{"kind":"new", "title":"Complete dependency", "workspace":directory, "tools":[]},
+            "dependencies":[parent], "note":"Use every original dependency byte",
+            "model":fixture.selection().await,
+        })).await;
+        assert_eq!(downstream["status"]["kind"], "blocked");
+        let evidence = format!("K64_FIRST\n{}\nK64_LATE_AFTER_ONE_MIB", "甲🙂z".repeat(1152 * 1024 / 8));
+        response_with_text(&mut running, &evidence).await;
+        idle(&fixture, "worker", &worker).await;
+
+        // Observe an actual advance result even when the original implementation
+        // refuses the capture. Never await a child HTTP request on that branch.
+        fixture.send(&coordinator).await.unwrap();
+        let mut advanced = false;
+        let mut child_requests = 0;
+        let mut complete_request = false;
+        let advance_result = loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            if socket.peek(&mut [0; 1]).await.unwrap() == 0 { continue; }
+            let input = request(&mut socket).await;
+            if !is_coordinator(&input) {
+                child_requests += 1;
+                complete_request |= input["messages"].as_array().unwrap().iter().any(|message| {
+                    message["content"].as_str().is_some_and(|text| text.contains(&evidence))
+                });
+                response_with_text(&mut socket, "Complete dependent result").await;
+            } else if is_worker_notice(&input) {
+                response(&mut socket).await;
+            } else if !advanced {
+                task_response(&mut socket, json!({"operation":"advance", "taskId":downstream["taskId"]})).await;
+                advanced = true;
+            } else {
+                let result = input["messages"].as_array().unwrap().iter().rev()
+                    .find(|message| message["role"] == "tool").unwrap()["content"]
+                    .as_str().unwrap().to_owned();
+                response(&mut socket).await;
+                break result;
+            }
+        };
+        idle(&fixture, EXPORT, &coordinator).await;
+        let refused = advance_result.contains("workhub_dependency_capture_unknown");
+        let mut restored_same = false;
+        let mut sends = 0;
+        if !refused {
+            while child_requests == 0 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                if socket.peek(&mut [0; 1]).await.unwrap() == 0 { continue; }
+                let input = request(&mut socket).await;
+                if is_coordinator(&input) { response(&mut socket).await; continue; }
+                child_requests += 1;
+                complete_request |= input["messages"].as_array().unwrap().iter().any(|message| {
+                    message["content"].as_str().is_some_and(|text| text.contains(&evidence))
+                });
+                response_with_text(&mut socket, "Complete dependent result").await;
+            }
+            let child = query_import(&fixture, hub::EXPORT, "task", json!({"taskId":downstream["taskId"]})).await;
+            idle(&fixture, "worker", child["status"]["sessionId"].as_str().unwrap()).await;
+            let finished = query_import(&fixture, hub::EXPORT, "task", json!({"taskId":downstream["taskId"]})).await;
+            activate_workers(&mut fixture, false, true, true).await;
+            let restored = query_import(&fixture, hub::EXPORT, "task", json!({"taskId":downstream["taskId"]})).await;
+            restored_same = restored == finished;
+            sends = fixture.store.application_intents(fixture.app.source().unwrap().deployment, id(1), 0, 128)
+                .await.unwrap().iter().filter(|intent| intent.reference.method == "send").count();
+        }
+        fixture.app.shutdown().await.unwrap();
+        fixture.config.shutdown().await.unwrap();
+
+        assert!(!refused, "complete dependency capture refused: {}", advance_result.chars().take(256).collect::<String>());
+        assert!(complete_request, "downstream HTTP lost original dependency bytes");
+        assert_eq!(child_requests, 1);
+        assert!(restored_same, "restart changed the original dependent result");
+        assert_eq!(sends, 2, "recovery dispatched another worker message");
     }).await.unwrap();
 }

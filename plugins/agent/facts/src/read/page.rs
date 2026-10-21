@@ -79,7 +79,8 @@ impl ReadRequest {
         self.page_with_budget(text, MAX_PAGE_CHARS)
     }
 
-    /// Budget is the serialized page's UTF-16 length, including continuation.
+    /// Target serialized UTF-16 length, including the original continuation.
+    /// One complete scalar or an empty completed range always progresses.
     /// Callers adding execution metadata reserve its serialized size here.
     pub fn page_with_budget(&self, text: &str, budget: usize) -> Result<ReadPage, ReadError> {
         let mut scan = self.scan_with_budget(budget);
@@ -125,7 +126,9 @@ impl TextPageScan<'_> {
                     self.end = Some(self.position);
                 }
                 if self.end.is_none() && !self.full {
-                    if self.position.utf16 - start.utf16 + character.len_utf16() <= self.budget {
+                    if self.content.is_empty()
+                        || self.position.utf16 - start.utf16 + character.len_utf16() <= self.budget
+                    {
                         self.content.push(character);
                     } else {
                         self.full = true;
@@ -229,7 +232,11 @@ impl TextPageScan<'_> {
             }
         }
         if low == 0 {
-            return Err(ReadError::AddressTooLong);
+            // The first complete scalar (or empty completed range) owns its
+            // original continuation even when the envelope exceeds the target.
+            return Ok(make_page(
+                self.candidates[usize::from(self.candidates.len() > 1)],
+            ));
         }
         let mut stop = self.candidates[low];
         if let Some(relative) = self.content[..stop.byte - start.byte]
@@ -243,9 +250,6 @@ impl TextPageScan<'_> {
                 .expect("retained scalar boundary");
         }
         let page = make_page(stop);
-        if !fits(&page) {
-            return Err(ReadError::AddressTooLong);
-        }
         Ok(page)
     }
 }
@@ -350,10 +354,69 @@ mod tests {
         }
         let input: ReadInput =
             serde_json::from_value(json!({"path":"a".repeat(MAX_PAGE_CHARS)})).unwrap();
-        assert_eq!(
-            input.resolve().unwrap().page(&text),
-            Err(ReadError::AddressTooLong)
-        );
+        let page = input.resolve().unwrap().page(&text).unwrap();
+        assert_eq!(page.content, "😀");
+        assert!(page.next.is_some());
+    }
+
+    #[test]
+    fn soft_first_read_scalar_keeps_long_original_address_and_digest() {
+        let path = "original-中文😀-".repeat(600);
+        let text = "中😀\"尾".repeat(8);
+        let mut input = ReadInput {
+            path: path.clone(),
+            offset: None,
+            limit: None,
+        };
+        let mut actual = String::new();
+        let mut positions = Vec::new();
+        for _ in 0..=text.chars().count() {
+            let request = input.resolve().unwrap();
+            assert_eq!(request.path, path);
+            let page = request
+                .page_with_budget(&text, 16)
+                .expect("first scalar must progress beyond a full address envelope");
+            assert!(!page.content.is_empty());
+            actual.push_str(&page.content);
+            let Some(next) = page.next else { break };
+            let continuation = next.resolve().unwrap();
+            assert_eq!(continuation.path, path);
+            let Start::Continuation { position, .. } = &continuation.start else {
+                panic!("missing continuation")
+            };
+            assert_eq!(*position, actual.encode_utf16().count());
+            positions.push(*position);
+            assert_eq!(
+                continuation.page(&(text.to_owned() + "changed")),
+                Err(ReadError::ContentChanged)
+            );
+            input = next;
+        }
+        assert_eq!(actual, text);
+        assert!(!positions.is_empty());
+        let zero = ReadInput {
+            path: path.clone(),
+            offset: None,
+            limit: None,
+        }
+        .resolve()
+        .unwrap()
+        .page_with_budget("😀尾", 0)
+        .expect("a full outer envelope still retains one Unicode scalar");
+        assert_eq!(zero.content, "😀");
+        let next = zero.next.unwrap().resolve().unwrap();
+        assert_eq!(next.path, path);
+        assert_eq!(next.page_with_budget("😀尾", 0).unwrap().content, "尾");
+        let empty = ReadInput {
+            path,
+            offset: None,
+            limit: None,
+        }
+        .resolve()
+        .unwrap()
+        .page_with_budget("", 0)
+        .unwrap();
+        assert!(empty.content.is_empty() && empty.next.is_none());
     }
 
     #[test]

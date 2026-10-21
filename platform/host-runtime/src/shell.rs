@@ -100,7 +100,7 @@ impl ShellResources {
         if !record.output.is_pty()
             || record
                 .timeout_ms
-                .is_some_and(|ms| !(1..=86_400_000).contains(&ms))
+                .is_some_and(|ms| maka_process::validate_timeout(ms).is_err())
         {
             return Err(ShellError::Rejected("invalid PTY launch"));
         }

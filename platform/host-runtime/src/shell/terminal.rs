@@ -69,6 +69,9 @@ impl Terminal {
                     let pending: usize = self
                         .writes
                         .iter()
+                        // Accepted user controls own independent queued custody;
+                        // their extent is not an automatic parser reply budget.
+                        .filter(|write| write.reply.is_none())
                         .map(|write| write.remaining().len())
                         .sum();
                     if pending.saturating_add(replies.len()) > 1024 * 1024 {
@@ -316,6 +319,31 @@ mod tests {
             raw.extend_from_slice(&bytes);
         }
         assert_eq!(raw, expected);
+    }
+
+    #[test]
+    fn large_user_control_does_not_consume_automatic_reply_capacity() {
+        use super::{Output, PendingWrite, Terminal};
+        use maka_agent_facts::terminal::TerminalSize;
+        let size = TerminalSize::new(80, 24).unwrap();
+        let output = Output::new(size, tokio::sync::watch::channel(()).0).unwrap();
+        let mut terminal = Terminal::new(size, output);
+        let (reply, mut receipt) = tokio::sync::oneshot::channel();
+        let input = "x".repeat(1024 * 1024 + 1);
+        terminal
+            .writes
+            .push_back(PendingWrite::new(input.clone(), Some(reply), false, false));
+        terminal.output(b"\x1b[6n", false).unwrap();
+        assert!(terminal.screen.is_some());
+        assert_eq!(terminal.writes.len(), 2);
+        assert_eq!(terminal.writes[0].remaining(), input.as_bytes());
+        assert!(terminal.writes[0].reply.is_some());
+        assert!(terminal.writes[1].reply.is_none());
+        assert_eq!(terminal.writes[1].remaining(), b"\x1b[1;1R");
+        assert!(matches!(
+            receipt.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
     }
 
     #[test]

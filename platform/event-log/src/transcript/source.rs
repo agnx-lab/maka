@@ -100,7 +100,7 @@ impl EventLog {
             })
             .await
     }
-    /// Reads one selected immutable canonical field with bounded JSON paths.
+    /// Reads one selected immutable canonical field with a bounded UTF-8 body.
     #[allow(clippy::too_many_arguments)]
     pub async fn history_source(
         &self,
@@ -111,12 +111,10 @@ impl EventLog {
         path: Option<Vec<SourceSegment>>,
         position: SourcePosition,
         max_bytes: usize,
-        max_json_bytes: usize,
     ) -> Result<HistorySource, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        if !(4..=128 * 1024).contains(&max_bytes) || !(1024..=1024 * 1024).contains(&max_json_bytes)
-        {
+        if !(4..=128 * 1024).contains(&max_bytes) {
             return Err(invalid("invalid history source limits"));
         }
         let json_path = json_path(field, path.as_deref())?;
@@ -263,13 +261,7 @@ impl EventLog {
                         return Err(invalid("history source made no progress"));
                     }
                     let tool = if matches!(role, SourceRole::ToolCall | SourceRole::ToolResult) {
-                        Some(
-                            tool_metadata(&mut tx, &session, locator, fence_sql, max_json_bytes)
-                                .await?
-                                .ok_or_else(|| {
-                                    invalid("history source metadata exceeds JSON budget")
-                                })?,
-                        )
+                        Some(tool_metadata(&mut tx, &session, locator, fence_sql).await?)
                     } else {
                         None
                     };
@@ -291,9 +283,6 @@ impl EventLog {
                         text: text.to_owned(),
                         tool,
                     };
-                    if serde_json::to_vec(&source)?.len() > max_json_bytes {
-                        return Err(invalid("history source exceeds JSON budget"));
-                    }
                     tx.commit().await?;
                     Ok(source)
                 })
@@ -313,19 +302,17 @@ fn json_path(
     if !matches!(
         field,
         SourceField::Arguments | SourceField::Result | SourceField::Receipt
-    ) || path.len() > 16
-    {
+    ) {
         return Err(invalid("invalid structured history source path"));
     }
     let mut result = String::from("$");
     for segment in path {
         match segment {
-            SourceSegment::Key(key) if key.len() <= 256 => {
+            SourceSegment::Key(key) => {
                 result.push('.');
                 result.push_str(&serde_json::to_string(key)?);
             }
             SourceSegment::Index(index) => result.push_str(&format!("[{index}]")),
-            SourceSegment::Key(_) => return Err(invalid("history source key exceeds limit")),
         }
     }
     Ok(Some(result))

@@ -104,7 +104,7 @@ async fn interrupted_and_terminal_fallback_catalog_match_committed_presentation_
         log.create_session("a", "request", &json!({}), 1)
             .await
             .unwrap();
-        let mut view = InvocationView::new(16 * 1024 * 1024).unwrap();
+        let mut view = InvocationView::new();
         append(
             &log,
             &mut view,

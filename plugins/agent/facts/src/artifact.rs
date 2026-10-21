@@ -108,7 +108,6 @@ impl Artifact {
         crate::interaction::entity_id(&self.id)?;
         crate::interaction::entity_id(&self.session_id)?;
         if self.turn_id.is_empty()
-            || self.turn_id.encode_utf16().count() > 512
             || self.turn_id.bytes().any(|b| b < 32 || b == 127)
             || self.created_at > 9_007_199_254_740_991
             || self.size_bytes > 9_007_199_254_740_991
@@ -166,15 +165,7 @@ pub fn normalize_name(name: &str) -> String {
         }
     }
     let cleaned = cleaned.trim_matches([' ', '.', '-']);
-    let mut units = 0;
-    let end = cleaned
-        .char_indices()
-        .find_map(|(index, character)| {
-            units += character.len_utf16();
-            (units > 120).then_some(index)
-        })
-        .unwrap_or(cleaned.len());
-    let result = cleaned[..end].trim_end_matches([' ', '.', '-']);
+    let result = cleaned;
     if result.is_empty() {
         "artifact".into()
     } else {
@@ -252,18 +243,20 @@ mod tests {
     }
 
     #[test]
-    fn names_are_idempotent_with_javascript_whitespace_and_utf16_truncation() {
+    fn names_are_complete_and_idempotent_with_javascript_whitespace() {
         for (input, expected) in [
             (" ../unsafe:name?.txt ".into(), "unsafe-name-.txt".into()),
             ("-.gitignore".into(), "gitignore".into()),
             ("\u{feff}  . a\u{feff}".into(), "a".into()),
             ("\u{0085}a\u{0085}".into(), "\u{0085}a\u{0085}".into()),
-            (format!("{}😀", "a".repeat(119)), "a".repeat(119)),
+            (
+                format!("{}😀", "a".repeat(119)),
+                format!("{}😀", "a".repeat(119)),
+            ),
             (". -- ".into(), "artifact".into()),
         ] {
             assert_eq!(normalize_name(&input), expected);
             assert_eq!(normalize_name(&expected), expected);
-            assert!(expected.encode_utf16().count() <= 120);
         }
     }
 }

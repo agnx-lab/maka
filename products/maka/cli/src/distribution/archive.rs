@@ -31,10 +31,6 @@ use std::{
 };
 use tempfile::NamedTempFile;
 
-const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_EXPANDED_BYTES: u64 = 1100 * 1024 * 1024;
-const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
-
 #[derive(Deserialize)]
 struct Package {
     name: String,
@@ -113,10 +109,7 @@ pub(super) fn cached(
     }
     private_directory(directory)?;
     private_directory(&directory.join("bin"))?;
-    let receipt: Receipt = serde_json::from_reader(regular_file(
-        &directory.join("receipt.json"),
-        MAX_TEXT_BYTES,
-    )?)?;
+    let receipt: Receipt = serde_json::from_reader(regular_file(&directory.join("receipt.json"))?)?;
     decode_integrity(&receipt.integrity)?;
     if receipt.target != target
         || receipt.version != version
@@ -128,7 +121,7 @@ pub(super) fn cached(
         if !allowed(target, name) {
             return Err("native package cache contains an unexpected member".into());
         }
-        let file = member_file(directory, name, MAX_FILE_BYTES)?;
+        let file = member_file(directory, name)?;
         if digest(file)? != *expected {
             return Err("native package cache integrity mismatch".into());
         }
@@ -181,11 +174,10 @@ pub(super) fn publish(
     private_directory(&package)?;
     private_directory(&package.join("bin"))?;
     let mut files = BTreeMap::new();
-    let mut unpacked = 0_u64;
     let decoder = GzDecoder::new(archive.reopen()?);
     // Raw entries prevent unbounded GNU/PAX metadata allocation. The executable
     // and authored app use portable package paths, not general tar semantics.
-    let mut tar = tar::Archive::new(decoder.take(MAX_EXPANDED_BYTES + 1));
+    let mut tar = tar::Archive::new(decoder);
     for entry in tar.entries()?.raw(true) {
         let mut entry = entry?;
         let path = entry.path_bytes();
@@ -209,27 +201,13 @@ pub(super) fn publish(
             .strip_prefix("package/")
             .ok_or("native package member is outside package/")?;
         let executable = target.is_executable(name);
-        let limit = if executable {
-            MAX_FILE_BYTES
-        } else {
-            MAX_TEXT_BYTES
-        };
         if !allowed(target, name)
             || !entry.header().entry_type().is_file()
             || files.contains_key(name)
             || (entry.size() == 0
                 && (!in_app(target, name) || required(target).any(|member| member == name)))
-            || entry.size() > limit
         {
-            return Err(
-                "native package contains an invalid, duplicate, or oversized member".into(),
-            );
-        }
-        unpacked = unpacked
-            .checked_add(entry.size())
-            .ok_or("native package size overflow")?;
-        if unpacked > MAX_EXPANDED_BYTES {
-            return Err("native package exceeds the expanded size limit".into());
+            return Err("native package contains an invalid or duplicate member".into());
         }
         // Never use a tar member as an unrestricted filesystem path, restore
         // ownership/mode bits, follow links, or run package lifecycle scripts.
@@ -257,10 +235,7 @@ pub(super) fn publish(
     }
     // Read through the gzip trailer so a truncated stream cannot be published.
     let mut tail = tar.into_inner();
-    let trailing = std::io::copy(&mut tail, &mut std::io::sink())?;
-    if tail.limit() == 0 || unpacked.saturating_add(trailing) > MAX_EXPANDED_BYTES {
-        return Err("native package exceeds the expanded size limit".into());
-    }
+    std::io::copy(&mut tail, &mut std::io::sink())?;
     validate_package(&package, target, version)?;
     let receipt = Receipt {
         target,
@@ -290,11 +265,8 @@ pub(super) fn import_directory(
     version: &str,
 ) -> Result<String, HostError> {
     let mut bytes = Vec::new();
-    regular_file(&source.join("receipt.json"), MAX_TEXT_BYTES)?
-        .take(MAX_TEXT_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_TEXT_BYTES || hex::encode(Sha256::digest(&bytes)) != receipt_sha256
-    {
+    regular_file(&source.join("receipt.json"))?.read_to_end(&mut bytes)?;
+    if hex::encode(Sha256::digest(&bytes)) != receipt_sha256 {
         return Err("transferred native package receipt digest mismatch".into());
     }
     let receipt: Receipt = serde_json::from_slice(&bytes)?;
@@ -308,9 +280,7 @@ pub(super) fn import_directory(
     }
     if let Some(existing) = cached(destination, target, version)? {
         let mut existing_bytes = Vec::new();
-        regular_file(&destination.join("receipt.json"), MAX_TEXT_BYTES)?
-            .take(MAX_TEXT_BYTES + 1)
-            .read_to_end(&mut existing_bytes)?;
+        regular_file(&destination.join("receipt.json"))?.read_to_end(&mut existing_bytes)?;
         if existing != receipt.integrity || existing_bytes != bytes {
             return Err("cached package differs from the transferred native package".into());
         }
@@ -322,25 +292,19 @@ pub(super) fn import_directory(
     let package = stage.path().join("package");
     private_directory(&package)?;
     private_directory(&package.join("bin"))?;
-    let mut total = 0_u64;
     for (name, expected) in &receipt.files {
         let executable = target.is_executable(name);
-        let limit = if executable {
-            MAX_FILE_BYTES
-        } else {
-            MAX_TEXT_BYTES
-        };
-        if (expected.size == 0
-            && (!in_app(target, name) || required(target).any(|member| member == name)))
-            || expected.size > limit
+        if expected.size == 0
+            && (!in_app(target, name) || required(target).any(|member| member == name))
         {
-            return Err("transferred native package member exceeds its size limit".into());
+            return Err("transferred native package member is empty".into());
         }
-        total += expected.size;
-        if total > MAX_EXPANDED_BYTES {
-            return Err("transferred native package exceeds its size limit".into());
-        }
-        let mut input = member_file(source, name, limit)?.take(expected.size + 1);
+        let mut input = member_file(source, name)?.take(
+            expected
+                .size
+                .checked_add(1)
+                .ok_or("native member length overflow")?,
+        );
         let path = package.join(name);
         fs::create_dir_all(path.parent().ok_or("native package member has no parent")?)?;
         let mut output = File::create_new(&path)?;
@@ -379,9 +343,7 @@ pub(super) fn import_directory(
     // Includes the simultaneous publisher path; compare the authenticated
     // receipt, not just an archive identifier copied from it.
     let mut published = Vec::new();
-    regular_file(&destination.join("receipt.json"), MAX_TEXT_BYTES)?
-        .take(MAX_TEXT_BYTES + 1)
-        .read_to_end(&mut published)?;
+    regular_file(&destination.join("receipt.json"))?.read_to_end(&mut published)?;
     if published != bytes {
         return Err("another native package was published at this version".into());
     }
@@ -413,8 +375,7 @@ fn commit(
 }
 
 fn validate_package(directory: &Path, target: Target, version: &str) -> Result<(), HostError> {
-    let package: Package =
-        serde_json::from_reader(regular_file(&directory.join("package.json"), 64 * 1024)?)?;
+    let package: Package = serde_json::from_reader(regular_file(&directory.join("package.json"))?)?;
     if package.name != target.package_name()
         || package.version != version
         || package.os != [target.os()]
@@ -430,23 +391,20 @@ fn validate_package(directory: &Path, target: Target, version: &str) -> Result<(
         );
     }
     target.validate_binary(
-        &mut regular_file(&directory.join(target.executable()), MAX_FILE_BYTES)?,
+        &mut regular_file(&directory.join(target.executable()))?,
         false,
     )?;
     target.validate_binary(
-        &mut regular_file(&directory.join(target.desktop_executable()), MAX_FILE_BYTES)?,
+        &mut regular_file(&directory.join(target.desktop_executable()))?,
         true,
     )?;
     if let Some(service) = target.service_executable() {
-        target.validate_binary(
-            &mut regular_file(&directory.join(service), MAX_FILE_BYTES)?,
-            true,
-        )?;
+        target.validate_binary(&mut regular_file(&directory.join(service))?, true)?;
     }
     Ok(())
 }
 
-fn member_file(directory: &Path, name: &str, limit: u64) -> Result<File, HostError> {
+fn member_file(directory: &Path, name: &str) -> Result<File, HostError> {
     let mut parent = directory.to_owned();
     if let Some(relative) = Path::new(name).parent() {
         for component in relative.components() {
@@ -456,7 +414,7 @@ fn member_file(directory: &Path, name: &str, limit: u64) -> Result<File, HostErr
             }
         }
     }
-    regular_file(&directory.join(name), limit)
+    regular_file(&directory.join(name))
 }
 
 #[cfg(unix)]
@@ -482,10 +440,9 @@ fn digest(mut file: File) -> Result<Member, HostError> {
         if read == 0 {
             break;
         }
-        size += read as u64;
-        if size > MAX_FILE_BYTES {
-            return Err("native package member exceeds size limit".into());
-        }
+        size = size
+            .checked_add(read as u64)
+            .ok_or("native member length overflow")?;
         hash.update(&buffer[..read]);
     }
     Ok(Member {

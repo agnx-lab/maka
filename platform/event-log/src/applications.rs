@@ -35,10 +35,7 @@ use maka_plugin_core::{
     plan::{Plan, RemoteExports},
 };
 use sqlx::{Connection, Row, SqliteConnection};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::Write,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use uuid::Uuid;
 
@@ -106,30 +103,6 @@ impl LoadedDeployment {
 
 fn invalid(message: impl Into<String>) -> StoreError {
     StoreError::InvalidTransition(message.into())
-}
-struct LimitedJson {
-    bytes: Vec<u8>,
-    limit: usize,
-}
-impl Write for LimitedJson {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
-            return Err(std::io::Error::other("JSON exceeds byte limit"));
-        }
-        self.bytes.extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-fn encode<T: serde::Serialize + ?Sized>(value: &T, limit: usize) -> Result<String, StoreError> {
-    let mut writer = LimitedJson {
-        bytes: Vec::new(),
-        limit,
-    };
-    serde_json::to_writer(&mut writer, value)?;
-    String::from_utf8(writer.bytes).map_err(|_| invalid("invalid JSON encoding"))
 }
 fn validate(
     input: &Input,
@@ -461,7 +434,7 @@ async fn read_metadata(
         revision: row.try_get::<i64, _>("revision")? as u64,
     };
     reference.validate().map_err(invalid)?;
-    let refs = sqlx::query("SELECT CASE WHEN length(CAST(id AS BLOB)) <= 128 THEN id END AS id,
+    let refs = sqlx::query("SELECT id,
                 CASE WHEN length(CAST(revision AS BLOB)) = 71 THEN revision END AS revision
                 FROM application_source_packages WHERE deployment = ? AND source_revision = ? ORDER BY id, revision")
                 .bind(&id).bind(revision as i64).fetch_all(&mut *connection).await?;
@@ -494,29 +467,20 @@ async fn read_package(
     connection: &mut SqliteConnection,
     reference: &PackageRef,
 ) -> Result<Package, StoreError> {
-    use maka_packages::MAX_FILE_BYTES;
-    use maka_packages::MAX_FILES;
-    use maka_packages::MAX_PACKAGE_BYTES;
-    let rows = sqlx::query("SELECT CASE WHEN length(CAST(path AS BLOB)) <= 512 THEN path END AS path,
-        CASE WHEN typeof(payload) = 'blob' THEN length(payload) END AS bytes FROM application_package_files WHERE id = ? AND revision = ? ORDER BY path LIMIT 257")
+    let rows = sqlx::query("SELECT path,
+        CASE WHEN typeof(payload) = 'blob' THEN length(payload) END AS bytes FROM application_package_files WHERE id = ? AND revision = ? ORDER BY path")
         .bind(&reference.id).bind(&reference.revision).fetch_all(&mut *connection).await?;
-    if rows.is_empty() || rows.len() > MAX_FILES {
+    if rows.is_empty() {
         return Err(invalid("invalid stored application package file count"));
     }
-    let mut size = 0;
     for row in &rows {
-        let length = usize::try_from(
+        usize::try_from(
             row.try_get::<Option<i64>, _>("bytes")?
                 .ok_or_else(|| invalid("stored package payload must be a BLOB"))?,
         )
         .map_err(|_| invalid("invalid package payload length"))?;
-        size += length;
-        if length > MAX_FILE_BYTES || size > MAX_PACKAGE_BYTES {
-            return Err(invalid("stored application package exceeds byte limits"));
-        }
-        let path: Option<&str> = row.try_get("path")?;
-        maka_packages::validate_path(path.ok_or_else(|| invalid("invalid stored package path"))?)
-            .map_err(|e| invalid(e.to_string()))?;
+        let path: &str = row.try_get("path")?;
+        maka_packages::validate_path(path).map_err(|e| invalid(e.to_string()))?;
     }
     let mut files = BTreeMap::new();
     for row in rows {

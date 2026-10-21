@@ -61,9 +61,6 @@ pub(super) fn render<'a>(
         match event {
             Event::End(TagEnd::CodeBlock) => break,
             Event::Text(value) => {
-                if body.len().saturating_add(value.len()) > MAX_BYTES {
-                    return Err("Code block exceeds local capacity");
-                }
                 body.push_str(&value);
                 parts.push((value, range));
             }

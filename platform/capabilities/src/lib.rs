@@ -41,10 +41,7 @@ pub enum Error {
 }
 
 pub fn name(value: &str) -> Result<(), Error> {
-    if value.is_empty()
-        || value.len() > 256
-        || value.chars().any(|c| c.is_control() || c.is_whitespace())
-    {
+    if value.is_empty() || value.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err(Error::Invalid(format!("invalid identifier: {value:?}")));
     }
     Ok(())

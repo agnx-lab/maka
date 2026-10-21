@@ -169,7 +169,7 @@ impl Processes {
             && input
                 .justification
                 .as_ref()
-                .is_none_or(|s| s.trim().is_empty() || s.len() > 2048)
+                .is_none_or(|s| s.trim().is_empty())
         {
             return Err(failed(
                 "Protocol process permissions require a justification",
@@ -349,7 +349,7 @@ impl Processes {
                     Some(permissions) => {
                         let reason = input
                             .justification
-                            .filter(|s| !s.trim().is_empty() && s.len() <= 2048)
+                            .filter(|s| !s.trim().is_empty())
                             .ok_or_else(|| {
                                 failed("Protocol process permissions require a justification")
                             })?;

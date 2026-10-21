@@ -45,7 +45,7 @@ impl From<Literal> for Layout {
 }
 impl Layout {
     pub fn markdown(document: &Document, width: u16) -> maka_ui_runtime::Result<Self> {
-        let mut cursor = document.cursor(width, 0..crate::markdown::MAX_LINES);
+        let mut cursor = document.cursor(width, 0..usize::MAX);
         while !cursor
             .advance(usize::MAX)
             .map_err(|e| maka_ui_runtime::Error::Invalid(e.into()))?

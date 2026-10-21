@@ -28,9 +28,6 @@ impl Projection {
     ) -> Result<(), Error> {
         identity(&id)?;
         if !self.messages.iter().any(|message| message.id == id) {
-            if self.messages.len() >= 1024 {
-                return Err(Error::Invalid("ACP turn exceeds 1024 messages"));
-            }
             self.messages.push(Message {
                 id: id.clone(),
                 thought,
@@ -66,18 +63,6 @@ impl Projection {
                     message.text = text;
                 }
             }
-        }
-        if self
-            .messages
-            .iter()
-            .map(|message| message.text.len())
-            .sum::<usize>()
-            > 1024 * 1024 - 64
-        {
-            return Err(Error::Invalid("ACP message output exceeds 1 MiB"));
-        }
-        if serde_json::to_vec(&self.text())?.len() > 1024 * 1024 - 64 {
-            return Err(Error::Invalid("ACP final output exceeds 1 MiB"));
         }
         Ok(())
     }

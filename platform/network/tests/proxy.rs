@@ -266,6 +266,7 @@ async fn roundtrip(protocol: Option<ProxyProtocol>) {
         "OK"
     );
     let mut socket = connect_websocket(
+        &policy,
         policy.client_builder(),
         &url,
         HeaderMap::from_iter([(AUTHORIZATION, HeaderValue::from_static("Bearer model-key"))]),
@@ -306,9 +307,15 @@ async fn http_and_websocket_share_auth_bypass_and_remote_socks_dns() {
                 .is_err()
         );
         assert!(
-            connect_websocket(policy.client_builder(), &url, HeaderMap::new(), 1024)
-                .await
-                .is_err()
+            connect_websocket(
+                &policy,
+                policy.client_builder(),
+                &url,
+                HeaderMap::new(),
+                1024
+            )
+            .await
+            .is_err()
         );
         assert!(
             origin.accept().now_or_never().is_none(),

@@ -122,18 +122,13 @@ async fn metadata_cas_noop_and_reopen_preserve_activity_fingerprint_and_active_e
         panic!("current-revision no-op must succeed");
     };
     assert_eq!(unchanged, updated);
-    for rejected in [false, true] {
-        let error = log
-            .update_session_metadata("session", 3, move |value: &mut Value| {
-                value["name"] = json!("x".repeat(65536));
-                if rejected {
-                    return Err(StoreError::InvalidTransition("policy refused".into()));
-                }
-                Ok(())
-            })
-            .await;
-        assert!(error.is_err());
-    }
+    let error = log
+        .update_session_metadata("session", 3, move |value: &mut Value| {
+            value["name"] = json!("x".repeat(65536));
+            Err(StoreError::InvalidTransition("policy refused".into()))
+        })
+        .await;
+    assert!(error.is_err());
     assert_eq!(
         changed_catalog,
         log.list_sessions::<Value>(None, None, 32)

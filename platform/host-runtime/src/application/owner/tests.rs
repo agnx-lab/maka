@@ -311,6 +311,10 @@ async fn final_admission_rejects_failed_consumer_before_terminal_notification_is
             scope,
             attachments: Attachments::new(),
             capture: None,
+            admitted: resource_ingress::AttachmentSize {
+                payload: 0,
+                descriptors: 0,
+            },
             resources: Arc::new(Semaphore::new(0))
                 .try_acquire_many_owned(0)
                 .unwrap(),
@@ -680,6 +684,10 @@ async fn retirement_preserves_execution_cleanup(
         scope: scope.clone(),
         attachments: Attachments::new(),
         capture: None,
+        admitted: resource_ingress::AttachmentSize {
+            payload: 0,
+            descriptors: 0,
+        },
         resources: Arc::new(Semaphore::new(0))
             .try_acquire_many_owned(0)
             .unwrap(),

@@ -44,7 +44,7 @@ Use **Connections & models** on Home or **Settings** in the sidebar to add a con
 
 Open **Files** in a conversation header or **Commands** to browse its authorized workspace. Files and current Git changes open in session-owned preview tabs, docked on the right when space allows and in a dialog otherwise. Directory updates retain the already requested range; scrolling automatically requests later pages. Switching conversations closes its previews and watches while preserving the conversation draft.
 
-File previews are captured contents: **Refresh** reads the current file again. Text previews accept up to 2 MiB, and image captures up to 16 MiB; binary files, links, missing files and larger contents show explicit unavailable states. **Changes** and each diff have their own **Refresh** and describe the current workspace, rather than a turn's deliverables. Large diffs show a display-limit notice. Tool-result image tabs continue to use their original retained image.
+File previews are captured contents: **Refresh** reads the current file again. Text and image captures preserve complete original bytes; binary files, links and missing files show explicit unavailable states. **Changes** and each diff have their own **Refresh** and describe the current workspace, rather than a turn's deliverables. Diff tabs parse the complete returned patch and split long lines into display rows. Tool-result image tabs continue to use their original retained image.
 
 ## Keyboard
 
@@ -66,7 +66,7 @@ File previews are captured contents: **Refresh** reads the current file again. T
 
 Model selection uses **Ctrl+G** because classic terminals encode Ctrl+M as the same carriage return as Enter. Paste through your terminal's paste command.
 
-In a search field, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches titles within the chosen scope, using a case-sensitive literal substring of at most 128 Unicode characters. The Host applies this search before paging; it does not search conversation contents, paths or IDs. Model search uses the Host's catalog. Results load automatically as you scroll or move down.
+In a search field, type to search, use ↑/↓ to select, and Enter to activate. Sessions searches titles within the chosen scope, using the complete case-sensitive literal substring. The Host applies this search before paging; it does not search conversation contents, paths or IDs. Model search uses the Host's catalog. Results load automatically as you scroll or move down.
 
 Click the composer's model label or press Ctrl+G to open **Models**, then choose **Model** or **Effort**. Effort choices come from the selected model's published policy; **Off** appears only when supported. **Default · Use connection default** clears an explicit effort override and follows the connection's default. Re-selecting the same model on the same connection preserves an explicit effort choice. Escape or **Back** returns from either list to the menu; another Escape or **Close** closes it and restores focus to the opener, preserving the draft and caret.
 
@@ -86,7 +86,7 @@ Completed replies offer **Copy**, **Fork from here** and **Usage**, alongside th
 
 The activity header follows the latest thinking, streamed tool arguments or running tool. A request waiting for your response takes priority. Long titles shorten at complete Unicode characters, and title updates preserve your position in the activity reader.
 
-Expand a tool result containing an image to see its thumbnail, then activate **Open image** for a larger preview. Escape or **Close** returns to the conversation and restores focus without stopping the run. Both views use the original image retained by the Host, even if its workspace file changes. In Unicode presentation, inline images use Sixel when support and measured cell pixels are available, or colored Unicode half and quadrant blocks otherwise. Resizing invalidates the old measurements: images temporarily use Unicode, then restore Sixel when fresh measurements succeed. Unsupported image formats show an error in the result.
+Expand a tool result containing an image to see its thumbnail, then activate **Open image** for a larger preview. Escape or **Close** returns to the conversation and restores focus without stopping the run. Both views use the original image retained by the Host, even if its workspace file changes. In Unicode presentation, inline images use Sixel when support and measured cell pixels are available, or colored Unicode half and quadrant blocks otherwise. Resizing invalidates the old measurements: images temporarily use Unicode while the original query replies drain, then restore Sixel when a fresh query completes. Waiting for a terminal reply does not block Unicode rendering or input. Unsupported image formats show an error in the result.
 
 Open a pending request to review its original details:
 

@@ -18,11 +18,7 @@
  */
 
 use super::Closure;
-use crate::{
-    StoreError,
-    bundle::{MAX_SESSIONS, format::MAX_EVENTS},
-    sequence_number,
-};
+use crate::{StoreError, sequence_number};
 use sqlx::SqliteConnection;
 use std::collections::BTreeSet;
 
@@ -43,7 +39,7 @@ impl Closure {
         let mut current = session.to_owned();
         let mut seen = BTreeSet::new();
         while current != owner {
-            if !seen.insert(current.clone()) || seen.len() > MAX_SESSIONS {
+            if !seen.insert(current.clone()) {
                 return Err(invalid("bundle member ownership contains a cycle"));
             }
             if self.members.contains_key(&(current.clone(), sequence)) {
@@ -60,9 +56,6 @@ impl Closure {
                 (current, sequence),
                 archive.map(sequence_number).transpose()?,
             );
-            if self.copies.len() > MAX_SESSIONS || self.members.len() > MAX_EVENTS {
-                return Err(StoreError::PrefixTooLarge);
-            }
             self.add(sequence)?;
             if let Some(archive) = archive {
                 self.add(sequence_number(archive)?)?;

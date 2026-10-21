@@ -86,7 +86,6 @@ pub struct Request {
 impl Request {
     pub fn validate(&self) -> Result<(), crate::Error> {
         if self.title.trim().is_empty()
-            || self.title.len() > 256
             || self.title.chars().any(char::is_control)
             || self.capabilities.is_empty()
         {
@@ -115,7 +114,6 @@ impl Request {
             Target::PluginWorkspace { sandbox_mode } => self.validate_mode(*sandbox_mode)?,
             Target::Directory { path } => {
                 if path.is_empty()
-                    || path.len() > 32 * 1024
                     || path.contains('\0')
                     || self.capabilities.iter().any(|capability| {
                         !matches!(capability, Capability::ReadFiles | Capability::WriteFiles)
@@ -133,7 +131,7 @@ impl Request {
                 match workspace {
                     WorkspaceTarget::Project { project_id } => crate::name(project_id)?,
                     WorkspaceTarget::HostPath { path }
-                        if !path.is_empty() && path.len() <= 32 * 1024 && !path.contains('\0') => {}
+                        if !path.is_empty() && !path.contains('\0') => {}
                     _ => {
                         return Err(crate::Error::Invalid(
                             "invalid authorization workspace".into(),
@@ -305,11 +303,7 @@ pub struct SessionBoundary {
 impl SessionBoundary {
     pub fn validate(&self) -> Result<(), Error> {
         name(&self.session_id)?;
-        if self.boundary_revision >= (1 << 53)
-            || self.cwd.is_empty()
-            || self.cwd.len() > 32 * 1024
-            || self.cwd.contains('\0')
-        {
+        if self.boundary_revision >= (1 << 53) || self.cwd.is_empty() || self.cwd.contains('\0') {
             return Err(Error::Invalid("invalid Session execution boundary".into()));
         }
         Ok(())

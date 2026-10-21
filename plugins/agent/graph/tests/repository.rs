@@ -99,7 +99,7 @@ fn update(graph_id: GraphId) -> Update {
         },
         // Larger than one KV value. Work records and the schedule fence commit
         // in one batch; the repository must neither truncate nor publish a prefix.
-        add_work: (0..32)
+        add_work: (0..33)
             .map(|_| Work {
                 work_id: WorkId::new(),
                 target: Target::Agent {

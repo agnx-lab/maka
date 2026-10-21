@@ -60,10 +60,8 @@ impl Resources {
     }
     pub fn reserve(self: &Arc<Self>) -> Result<Ticket, ToolError> {
         let state = self.state.lock().unwrap();
-        if state.closed || self.tasks.len() >= 16 {
-            return Err(ToolError::Failed(
-                "invocation resources closed or full".into(),
-            ));
+        if state.closed {
+            return Err(ToolError::Failed("invocation resources closed".into()));
         }
         Ok(Ticket {
             group: self.clone(),

@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "WorkHubGraphRead")]
 pub struct Read {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub graph_id: Option<GraphId>,
     pub after: Option<WorkId>,
@@ -74,7 +74,7 @@ pub struct Work {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "WorkHubGraphWorkRead")]
 pub struct WorkRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub graph_id: GraphId,
     pub work_id: WorkId,
@@ -83,11 +83,11 @@ pub struct WorkRead {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "WorkHubGraphResultRead")]
 pub struct ResultRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub graph_id: GraphId,
     pub work_id: WorkId,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub result_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub offset: u64,
@@ -106,7 +106,7 @@ pub struct ResultPage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "WorkHubGraphHistoryRead")]
 pub struct HistoryRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub before: Option<u64>,
 }
@@ -123,7 +123,7 @@ pub struct History {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "WorkHubGraphChange")]
 pub struct Change {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub expected_graph_id: Option<GraphId>,
     pub action: Action,

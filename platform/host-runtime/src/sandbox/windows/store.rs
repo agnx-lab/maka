@@ -29,7 +29,6 @@ use std::{
 
 // A bounded deny subtree can contain many more native identities than the
 // input policy has rules. The serialized journal also has this byte ceiling.
-const LIMIT: u64 = 8 * 1024 * 1024;
 
 pub(super) fn lease_file(path: &Path) -> io::Result<()> {
     match create_private_file(path) {
@@ -60,22 +59,17 @@ pub(super) fn admission(root: &Path) -> io::Result<maka_event_log::root::FileLea
 }
 
 pub(super) fn read<T: DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
-    let file = match open_nofollow(path, false) {
+    let mut file = match open_nofollow(path, false) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
     validate_private(&file)?;
-    if !file.metadata()?.is_file() || file.metadata()?.len() > LIMIT {
+    if !file.metadata()?.is_file() {
         return Err(io::Error::other("invalid sandbox installation document"));
     }
     let mut bytes = Vec::new();
-    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > LIMIT {
-        return Err(io::Error::other(
-            "sandbox installation document exceeds its limit",
-        ));
-    }
+    file.read_to_end(&mut bytes)?;
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(io::Error::other)
@@ -91,9 +85,6 @@ pub(super) fn publish(root: &Path, name: &str, value: &impl Serialize) -> io::Re
     let target = root.join(name);
     let value = serde_json::to_value(value).map_err(io::Error::other)?;
     let bytes = serde_json::to_vec(&value).map_err(io::Error::other)?;
-    if bytes.len() as u64 > LIMIT {
-        return Err(io::Error::other("sandbox intent exceeds its size limit"));
-    }
     if let Some(previous) = read::<serde_json::Value>(&target)? {
         return if previous == value {
             Ok(())
@@ -146,7 +137,7 @@ pub(super) fn shared_lease(path: &Path) -> io::Result<File> {
 }
 
 pub(super) fn remove(path: &Path) -> io::Result<()> {
-    let file = match open_nofollow(path, false) {
+    let mut file = match open_nofollow(path, false) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),

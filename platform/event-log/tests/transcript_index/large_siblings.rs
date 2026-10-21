@@ -54,7 +54,6 @@ async fn source(
                 None,
                 SourcePosition::After { offset },
                 4096,
-                65_536,
             )
             .await
             .unwrap();
@@ -390,8 +389,7 @@ async fn large_sibling_arguments_preserve_exact_history_sources_across_fences_an
                 SourceField::Result,
                 None,
                 SourcePosition::Start,
-                4096,
-                65_536,
+                4096
             )
             .await
             .is_err()

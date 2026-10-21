@@ -255,7 +255,7 @@ export function subagentSettings<N extends Node>(
               disabled,
             ),
           ),
-        ui.button('new', t('subagents-new'), disabled || (state.saved?.entries.length ?? 0) >= 64),
+        ui.button('new', t('subagents-new'), disabled),
         ui.box(
           'subagent-form',
           [
@@ -558,8 +558,6 @@ export function subagentSettings<N extends Node>(
                   !state.draft ||
                   !state.saved ||
                   !captured.values.name?.trim() ||
-                  captured.values.name.length > 128 ||
-                  (captured.values.description?.length ?? 0) > 4000 ||
                   names.some(
                     (name) =>
                       !sameValue(
@@ -612,7 +610,7 @@ export function subagentSettings<N extends Node>(
                 state.draft = null;
                 state.tools = null;
                 read(state, actions);
-              } else if (input.key === 'new' && state.saved.entries.length < 64) {
+              } else if (input.key === 'new') {
                 let id = 1;
                 while (state.saved.entries.some((p) => p.id === 'agent-' + id)) id++;
                 edit(state, {
@@ -660,8 +658,7 @@ export function subagentSettings<N extends Node>(
                         !state.fields[name].ready ||
                         !!state.fields[name].command ||
                         !state.fields[name].observation ||
-                        state.fields[name].observation!.snapshot.marked ||
-                        state.fields[name].observation!.snapshot.text.bytes > 16384,
+                        state.fields[name].observation!.snapshot.marked,
                     )
                   )
                     state.notice = 'subagents-invalid';

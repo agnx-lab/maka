@@ -105,13 +105,9 @@ impl Rule {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Policy {
     pub default: Access,
-    #[schemars(length(max = MAX_RULES))]
     pub rules: Vec<Rule>,
-    #[schemars(length(max = MAX_GLOBS))]
     pub deny_globs: Vec<String>,
 }
-pub const MAX_RULES: usize = 512;
-pub const MAX_GLOBS: usize = 128;
 impl Policy {
     pub fn uniform(access: Access) -> Self {
         Self {
@@ -122,19 +118,14 @@ impl Policy {
     }
 
     pub fn compile(&self) -> Result<Compiled, Error> {
-        if self.rules.len() > MAX_RULES || self.deny_globs.len() > MAX_GLOBS {
-            return Err(Error::TooComplex);
-        }
         for rule in &self.rules {
             validate_path(&rule.path)?;
         }
         let mut builder = GlobSetBuilder::new();
         for pattern in &self.deny_globs {
             validate_path(Path::new(pattern))?;
-            if pattern.len() > 4096 || pattern.contains('\0') || !Path::new(pattern).is_absolute() {
-                return Err(Error::Invalid(
-                    "deny glob must be an absolute bounded path".into(),
-                ));
+            if pattern.contains('\0') || !Path::new(pattern).is_absolute() {
+                return Err(Error::Invalid("deny glob must be an absolute path".into()));
             }
             builder.add(compile_glob(pattern)?);
         }

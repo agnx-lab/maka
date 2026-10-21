@@ -45,7 +45,6 @@ pub(super) fn normalize(models: Vec<ModelInfo>) -> Result<Vec<ModelInfo>, Failur
     for mut model in models {
         let id = model.id.trim_matches(model_whitespace);
         if id.is_empty()
-            || id.encode_utf16().count() > 512
             || id.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             || !seen.insert(id.to_owned())
         {
@@ -54,9 +53,6 @@ pub(super) fn normalize(models: Vec<ModelInfo>) -> Result<Vec<ModelInfo>, Failur
         model.id = id.to_owned();
         model.validate().map_err(|_| Failure::InvalidResponse)?;
         normalized.push(model);
-        if normalized.len() > 2048 {
-            return Err(Failure::InvalidResponse);
-        }
     }
     Ok(normalized)
 }
@@ -203,15 +199,16 @@ mod tests {
     }
 
     #[test]
-    fn first_duplicate_wins_and_ids_use_javascript_text_rules() {
+    fn first_duplicate_wins_and_long_ids_preserve_complete_identity() {
         let body = json!({"data":[{"id":"\u{feff}x\u{feff}","name":"first"},
             {"id":"x","name":"second"},{"id":"a\u{7f}"},{"id":"😀".repeat(257)},
             {"id":"😀".repeat(256)},{"id":"\u{85}y\u{85}"}]})
         .to_string();
         let rows = decode(body.as_bytes()).unwrap();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4);
         assert_eq!(rows[0], json!({"id":"x","displayName":"first"}));
-        assert_eq!(rows[2]["id"], "\u{85}y\u{85}");
+        assert_eq!(rows[1]["id"], "😀".repeat(257));
+        assert_eq!(rows[3]["id"], "\u{85}y\u{85}");
     }
 
     #[test]
@@ -243,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn model_count_is_bounded_after_deduplication() {
+    fn complete_inventory_preserves_additional_models_after_deduplication() {
         let mut rows: Vec<Value> = (0..2048).map(|i| json!({"id":i.to_string()})).collect();
         rows.push(json!({"id":"0"}));
         assert_eq!(
@@ -253,10 +250,9 @@ mod tests {
             2048
         );
         rows.push(json!({"id":"extra"}));
-        assert_eq!(
-            decode(json!({"data":rows}).to_string().as_bytes()),
-            Err(Failure::InvalidResponse)
-        );
+        let models = decode(json!({"data":rows}).to_string().as_bytes()).unwrap();
+        assert_eq!(models.len(), 2049);
+        assert_eq!(models.last().unwrap()["id"], "extra");
     }
 
     #[test]

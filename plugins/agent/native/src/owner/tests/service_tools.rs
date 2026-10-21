@@ -1402,7 +1402,6 @@ async fn installed_javascript_service_is_a_real_model_tool_with_business_project
                             None,
                             position,
                             13,
-                            64 * 1024,
                         )
                         .await
                         .unwrap();

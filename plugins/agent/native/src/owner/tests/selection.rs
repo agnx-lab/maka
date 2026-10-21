@@ -474,8 +474,9 @@ async fn ordinary_settings_pages_keep_root_revision_and_exact_default_cas_withou
 #[tokio::test]
 async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalog_fences() {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let long_term = format!("{}終", "界".repeat(257));
     edit(&fixture, |changes| {
-        changes.name = Some("Research Account".into());
+        changes.name = Some(format!("Research Account {long_term}"));
         changes.enabled_model_ids = Some((0..300).map(|at| format!("model-{at:03}")).collect());
     })
     .await;
@@ -487,19 +488,12 @@ async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalo
             .await
             .is_err()
     );
-    assert!(
-        models(&fixture, json!({"kind":"start","query":"界".repeat(257)}))
-            .await
-            .is_err()
-    );
-    let first = models(
-        &fixture,
-        json!({"kind":"start","query":"RESEARCH model-299"}),
-    )
-    .await
-    .unwrap();
+    let query = format!("RESEARCH {long_term} model-299");
+    let first = models(&fixture, json!({"kind":"start","query":query}))
+        .await
+        .unwrap();
     assert!(first["choices"].as_array().unwrap().is_empty());
-    assert_eq!(first["next"]["query"], "RESEARCH model-299");
+    assert_eq!(first["next"]["query"], query);
     assert_eq!(first["next"]["model"], 256);
     let continuation =
         json!({"kind":"continue","revision":first["revision"],"cursor":first["next"]});
@@ -509,6 +503,22 @@ async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalo
     assert!(found["next"].is_null());
     assert!(!found.to_string().contains("private-fixture-key"));
     assert!(!found.to_string().contains("baseUrl"));
+    // A distinct tail beyond the old text boundary must participate in matching.
+    let missing_tail = format!("RESEARCH {}異 model-299", "界".repeat(257));
+    let missing = models(&fixture, json!({"kind":"start","query":missing_tail}))
+        .await
+        .unwrap();
+    assert!(missing["choices"].as_array().unwrap().is_empty());
+    assert_eq!(missing["next"]["query"], missing_tail);
+    assert_eq!(missing["next"]["model"], 256);
+    let missing = models(
+        &fixture,
+        json!({"kind":"continue","revision":missing["revision"],"cursor":missing["next"]}),
+    )
+    .await
+    .unwrap();
+    assert!(missing["choices"].as_array().unwrap().is_empty());
+    assert!(missing["next"].is_null());
     let matches = models(&fixture, json!({"kind":"start","query":"MoDeL-29"}))
         .await
         .unwrap();

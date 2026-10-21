@@ -35,12 +35,16 @@ struct Layer {
     in_git: bool,
 }
 pub(super) struct Filters {
+    cancellation: tokio_util::sync::CancellationToken,
     layers: Vec<Layer>,
     overrides: Override,
-    loaded_bytes: usize,
 }
 impl Filters {
-    pub(super) fn new(glob: Option<&str>, cwd: &Path) -> Result<Self, ToolError> {
+    pub(super) fn new(
+        glob: Option<&str>,
+        cwd: &Path,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<Self, ToolError> {
         let mut builder = OverrideBuilder::new(cwd);
         if let Some(glob) = glob.filter(|g| !g.is_empty()) {
             builder
@@ -48,9 +52,9 @@ impl Filters {
                 .map_err(|e| failed(format!("Grep glob: {e}")))?;
         }
         Ok(Self {
+            cancellation,
             layers: Vec::new(),
             overrides: builder.build().map_err(|e| failed(e.to_string()))?,
-            loaded_bytes: 0,
         })
     }
     pub(super) fn push(&mut self, root: &Dir, path: &Path) -> Result<(), ToolError> {
@@ -99,7 +103,7 @@ impl Filters {
     }
     fn rules(&mut self, root: &Dir, path: &Path, name: &str) -> Result<Gitignore, ToolError> {
         let source: PathBuf = path.join(name);
-        let file = match super::open(root, &source) {
+        let mut file = match super::open(root, &source) {
             Ok(file) => file,
             Err(error)
                 if matches!(
@@ -114,18 +118,23 @@ impl Filters {
             Err(error) => return Err(io_error(error)),
         };
         let metadata = file.metadata().map_err(io_error)?;
-        if !metadata.is_file() || metadata.len() > 256 * 1024 {
-            return Err(failed(
-                "Grep ignore source must be a regular file within 256 KiB",
-            ));
+        if !metadata.is_file() {
+            return Err(failed("Grep ignore source must be a regular file"));
         }
         let mut bytes = Vec::new();
-        file.take(256 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(io_error)?;
-        self.loaded_bytes += bytes.len();
-        if bytes.len() > 256 * 1024 || self.loaded_bytes > 16 * 1024 * 1024 {
-            return Err(failed("Grep ignore sources exceed byte limit"));
+        let mut buffer = [0; 8192];
+        let mut reader = (&mut file).take(metadata.len());
+        while reader.limit() != 0 {
+            if self.cancellation.is_cancelled() {
+                return Err(failed("Grep cancelled"));
+            }
+            let count = reader.read(&mut buffer).map_err(io_error)?;
+            if count == 0 {
+                return Err(failed(
+                    "Grep ignore source changed within its captured extent",
+                ));
+            }
+            bytes.extend_from_slice(&buffer[..count]);
         }
         let mut builder = GitignoreBuilder::new(path);
         for line in String::from_utf8_lossy(&bytes).lines() {

@@ -142,7 +142,8 @@ pub(super) fn flow(
             )
         })
         .collect();
-    let spacing = u32::from(gap) * children.len().saturating_sub(1) as u32;
+    let spacing = u32::from(gap)
+        .saturating_mul(u32::try_from(children.len().saturating_sub(1)).unwrap_or(u32::MAX));
     let occupied = bases
         .iter()
         .copied()
@@ -160,26 +161,27 @@ pub(super) fn flow(
     let shrinkable = shrinkable.max(1);
     let weight = children
         .iter()
-        .map(|(_, layout)| u32::from(layout.grow))
-        .sum::<u32>();
-    let (mut offset, mut cross, mut used_weight) = (0u32, 0u32, 0u32);
+        .map(|(_, layout)| u64::from(layout.grow))
+        .sum::<u64>();
+    let (mut offset, mut cross, mut used_weight) = (0u32, 0u32, 0u64);
     let mut used_shrink = 0u64;
     let mut placed = Vec::with_capacity(children.len());
     for (&(size, layout), base) in children.iter().zip(bases) {
         let before = used_weight;
-        used_weight += u32::from(layout.grow);
+        used_weight += u64::from(layout.grow);
         let extra = if weight == 0 {
             0
         } else {
-            (u64::from(free) * u64::from(used_weight) / u64::from(weight)
-                - u64::from(free) * u64::from(before) / u64::from(weight)) as u32
+            (u128::from(free) * u128::from(used_weight) / u128::from(weight)
+                - u128::from(free) * u128::from(before) / u128::from(weight)) as u32
         };
         let before_shrink = used_shrink;
         if layout.shrink {
             used_shrink += u64::from(base);
         }
-        let reduction =
-            (deficit * used_shrink / shrinkable - deficit * before_shrink / shrinkable) as u32;
+        let reduction = (u128::from(deficit) * u128::from(used_shrink) / u128::from(shrinkable)
+            - u128::from(deficit) * u128::from(before_shrink) / u128::from(shrinkable))
+            as u32;
         let length = base.saturating_sub(reduction).saturating_add(extra);
         let length = if horizontal {
             length.min(u32::from(width).saturating_sub(offset))

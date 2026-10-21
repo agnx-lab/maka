@@ -49,16 +49,14 @@ impl Default for Settings {
 impl Settings {
     pub fn validate(&self) -> Result<(), storage::StoreError> {
         let url = url::Url::parse(&self.url).map_err(|_| invalid())?;
-        if self.url.len() > 8192
-            || !matches!(url.scheme(), "http" | "https")
+        if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
             || url.password().is_some()
             || url.fragment().is_some()
             || self.model.trim().is_empty()
-            || self.model.len() > 256
             || self.model.chars().any(char::is_control)
-            || !(100..=60000).contains(&self.timeout_ms)
+            || self.timeout_ms == 0
         {
             return Err(invalid());
         }
@@ -143,7 +141,7 @@ impl Repository {
     }
 }
 fn invalid() -> storage::StoreError {
-    storage::StoreError::Unavailable("Invalid Jev settings: use an HTTP(S) URL without user credentials or fragment, a model, and a timeout from 100 to 60000 ms".into())
+    storage::StoreError::Unavailable("Invalid Jev settings: use an HTTP(S) URL without user credentials or fragment, a model, and a positive timeout in milliseconds".into())
 }
 
 /// Endpoint-bound request secrets. Never returned by a settings read.
@@ -156,11 +154,10 @@ pub struct Secrets {
 }
 impl Secrets {
     pub fn validate(&self) -> Result<(), storage::StoreError> {
-        if self.headers.len() > 32
-            || self
-                .api_key
-                .as_ref()
-                .is_some_and(|s| s.is_empty() || s.len() > 4096 || s.chars().any(char::is_control))
+        if self
+            .api_key
+            .as_ref()
+            .is_some_and(|s| s.is_empty() || s.chars().any(char::is_control))
         {
             return Err(invalid_headers());
         }
@@ -168,11 +165,9 @@ impl Secrets {
         for (name, value) in &self.headers {
             let lower = name.to_ascii_lowercase();
             if name.is_empty()
-                || name.len() > 128
                 || !name
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
-                || value.len() > 4096
                 || value.chars().any(char::is_control)
                 || !names.insert(lower.clone())
                 || matches!(

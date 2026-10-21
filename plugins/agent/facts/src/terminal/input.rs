@@ -29,9 +29,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub const MAX_INPUT_BYTES: usize = 64 * 1024;
-pub const MAX_INPUT_ACTIONS: usize = 64;
-
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("terminal input rejected: {0}")]
 pub struct InputError(pub &'static str);
@@ -104,8 +101,8 @@ pub fn encode_actions_with_paste(
     size: TerminalSize,
     bracketed_paste: bool,
 ) -> Result<String, InputError> {
-    if actions.is_empty() || actions.len() > MAX_INPUT_ACTIONS {
-        return Err(InputError("expected 1..64 input actions"));
+    if actions.is_empty() {
+        return Err(InputError("expected at least one input action"));
     }
     let mut output = String::new();
     for action in actions {
@@ -120,17 +117,11 @@ pub fn encode_actions_with_paste(
                         "text must be nonempty and contain no terminal controls",
                     ));
                 }
-                if text.len() > MAX_INPUT_BYTES.saturating_sub(output.len()) {
-                    return Err(InputError("encoded input exceeds 64 KiB"));
-                }
                 output.push_str(text);
                 continue;
             }
             InputAction::Paste(text) => {
                 validate_paste(text)?;
-                if text.len() + 12 > MAX_INPUT_BYTES.saturating_sub(output.len()) {
-                    return Err(InputError("encoded input exceeds 64 KiB"));
-                }
                 let text = text.replace("\r\n", "\n").replace('\r', "\n");
                 if bracketed_paste {
                     format!("\x1b[200~{text}\x1b[201~")
@@ -143,9 +134,6 @@ pub fn encode_actions_with_paste(
             }
             InputAction::Mouse(mouse) => mouse.encode(modes, size)?,
         };
-        if encoded.len() > MAX_INPUT_BYTES.saturating_sub(output.len()) {
-            return Err(InputError("encoded input exceeds 64 KiB"));
-        }
         output.push_str(&encoded);
     }
     Ok(output)
@@ -154,23 +142,36 @@ pub fn encode_actions_with_paste(
 /// Canonical requested byte count, independent of live modes or terminal size.
 /// Admission still encodes again against the actual worker cut before effects.
 pub fn encoded_actions_byte_len(actions: &[InputAction]) -> Result<usize, InputError> {
-    if actions.is_empty() || actions.len() > MAX_INPUT_ACTIONS {
-        return Err(InputError("expected 1..64 input actions"));
+    if actions.is_empty() {
+        return Err(InputError("expected at least one input action"));
     }
     let mut length = 0usize;
     for action in actions {
-        length += match action {
-            InputAction::Text(text) => text.len(),
+        let bytes = match action {
+            InputAction::Text(text) => {
+                if text.is_empty()
+                    || text
+                        .chars()
+                        .any(|c| c <= '\u{1f}' || ('\u{7f}'..='\u{9f}').contains(&c))
+                {
+                    return Err(InputError(
+                        "text must be nonempty and contain no terminal controls",
+                    ));
+                }
+                text.len()
+            }
             InputAction::Paste(text) => {
                 validate_paste(text)?;
-                text.len() + 12
+                text.len()
+                    .checked_add(12)
+                    .ok_or(InputError("input length overflow"))?
             }
             InputAction::Key { key, modifiers } => key.encode(*modifiers, false)?.len(),
             InputAction::Mouse(mouse) => mouse.encode_sgr().len(),
         };
-        if length > MAX_INPUT_BYTES {
-            return Err(InputError("encoded input exceeds 64 KiB"));
-        }
+        length = length
+            .checked_add(bytes)
+            .ok_or(InputError("input length overflow"))?;
     }
     Ok(length)
 }

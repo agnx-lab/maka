@@ -24,3 +24,5 @@
 Loads immutable application packages from declarations and files. It validates package paths, bytes and manifests before the composition planner sees them. A package reference identifies content; loading or installing that content neither starts an instance nor creates a binding. Start with `Package` and the `manifest` module.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)
+
+Directory loading and bundles retain every regular file and its original bytes, including binary assets and localized presentation. Content digests, portable paths, nonfollowing directory handles and nonoverwriting export publication bind the complete package; allocation and filesystem failures remain explicit.

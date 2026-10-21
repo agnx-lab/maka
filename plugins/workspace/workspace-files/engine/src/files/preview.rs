@@ -17,15 +17,12 @@
  * under the License.
  */
 
-//! One bounded current-file capture, not a durable artifact or an atomic filesystem snapshot.
+//! One complete current-file capture, not a durable artifact or an atomic filesystem snapshot.
 use super::*;
 use cap_fs_ext::MetadataExt;
 use cap_std::fs::Metadata;
 use maka_agent_facts::artifact::content_digest;
 use std::io::Read;
-
-const MAX_BYTES: usize = 16 * 1024 * 1024;
-const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(
@@ -55,7 +52,6 @@ pub enum FileCapture {
     Absent,
     Changed,
     Binary { bytes: u64 },
-    TooLarge { bytes: u64, limit: u64 },
     Unsupported { file_kind: FileKind },
 }
 
@@ -138,28 +134,16 @@ impl Directory {
         if !same_file(&before, &visible) {
             return Ok(FileCapture::Changed);
         }
-        if before.len() > MAX_BYTES as u64 {
-            return Ok(FileCapture::TooLarge {
-                bytes: before.len(),
-                limit: MAX_BYTES as u64,
-            });
-        }
         let mut bytes = Vec::new();
         let mut buffer = [0_u8; 8192];
-        loop {
+        let mut reader = (&mut file).take(before.len());
+        while reader.limit() != 0 {
             interrupted(cancel)?;
-            let remaining = (MAX_BYTES + 1 - bytes.len()).min(buffer.len());
-            let count = file.read(&mut buffer[..remaining])?;
+            let count = reader.read(&mut buffer)?;
             if count == 0 {
-                break;
+                return Ok(FileCapture::Changed);
             }
             bytes.extend_from_slice(&buffer[..count]);
-            if bytes.len() > MAX_BYTES {
-                return Ok(FileCapture::TooLarge {
-                    bytes: bytes.len() as u64,
-                    limit: MAX_BYTES as u64,
-                });
-            }
         }
         interrupted(cancel)?;
         let after = file.metadata()?;
@@ -200,12 +184,6 @@ impl Directory {
                 mime_type: mime_type.into(),
             }
         } else if !bytes.contains(&0) && std::str::from_utf8(&bytes).is_ok() {
-            if bytes.len() > MAX_TEXT_BYTES {
-                return Ok(FileCapture::TooLarge {
-                    bytes: bytes.len() as u64,
-                    limit: MAX_TEXT_BYTES as u64,
-                });
-            }
             FileContent::Text
         } else {
             return Ok(FileCapture::Binary {

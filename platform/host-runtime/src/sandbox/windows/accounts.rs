@@ -127,13 +127,6 @@ impl Plan {
         writes: &[WriteRule],
         network: &maka_sandbox::Network,
     ) -> io::Result<Self> {
-        network.validate().map_err(io::Error::other)?;
-        if rules.len() > super::policy::MAX_TARGETS || writes.len() > super::policy::MAX_TARGETS {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "too many account boundaries",
-            ));
-        }
         let mut rules = rules.to_vec();
         rules.sort_by(|a, b| {
             a.path

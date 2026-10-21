@@ -25,7 +25,6 @@ use serde_json::Value;
 pub struct Sse {
     line: Vec<u8>,
     data: Vec<u8>,
-    bytes: usize,
     cr: bool,
     first_line: bool,
 }
@@ -36,10 +35,6 @@ impl Sse {
             if byte == b'\n' {
                 return Ok(None);
             }
-        }
-        self.bytes += 1;
-        if self.bytes > 8 * 1024 * 1024 {
-            return Err(Error::Invalid("SSE record exceeds 8 MiB".into()));
         }
         if matches!(byte, b'\r' | b'\n') {
             self.cr = byte == b'\r';
@@ -58,7 +53,6 @@ impl Sse {
             &self.line
         };
         let value = if line.is_empty() {
-            self.bytes = 0;
             self.data.pop(); // SSE appends a newline after every data field.
             let value = if self.data.is_empty() || self.data == b"[DONE]" {
                 None
@@ -102,6 +96,6 @@ mod tests {
         for _ in 0..8 * 1024 * 1024 {
             assert!(stream.push(b':').unwrap().is_none());
         }
-        assert!(stream.push(b'x').is_err());
+        assert!(stream.push(b'x').unwrap().is_none());
     }
 }

@@ -131,12 +131,20 @@ async fn accounting_pages_bound_bytes_without_dropping_records_or_reading_respon
         }
     }
     assert_eq!(seen.len(), 80);
-    assert!(
-        matches!(log.usage_summary(query.clone()).await,
-        Err(maka_event_log::StoreError::InvalidTransition(message))
-            if message.contains("response capacity")),
-        "oversized complete breakdowns fail rather than silently dropping groups"
-    );
+    let complete = log.usage_summary(query.clone()).await.unwrap();
+    assert_eq!(complete.through, query.through.unwrap());
+    assert_eq!(complete.summary.models.calls, 80);
+    assert_eq!(complete.summary.by_model.len(), 80);
+    let expected_models: BTreeSet<_> = (0..80)
+        .map(|i| format!("{i}-{}", "model".repeat(400)))
+        .collect();
+    let complete_models: BTreeSet<_> = complete
+        .summary
+        .by_model
+        .iter()
+        .map(|row| row.model_id.clone())
+        .collect();
+    assert_eq!(complete_models, expected_models);
     // Native Settings can page the same oversized breakdown without changing
     // its full totals or fence, and without losing any long model identity.
     let mut offset = 0;
@@ -166,7 +174,7 @@ async fn accounting_pages_bound_bytes_without_dropping_records_or_reading_respon
             None => break,
         }
     }
-    assert_eq!(models.len(), 80);
+    assert_eq!(models, complete_models);
     log.close().await.unwrap();
 }
 

@@ -37,8 +37,6 @@ use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 
 const REGISTRY: &str = "https://registry.npmjs.org/";
-const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
 #[derive(Args, Clone)]
 pub(super) struct Fetch {
@@ -120,12 +118,9 @@ impl Fetch {
         // Honor the CLI environment's HTTP(S)/ALL_PROXY and NO_PROXY. No npm,
         // lifecycle scripts, registry credentials, or running Host are involved.
         let client = client()?;
-        let artifact = tokio::time::timeout(
-            crate::operation::remaining(Duration::from_secs(180)),
-            self.resolve_with_retry(client, Url::parse(REGISTRY)?),
-        )
-        .await
-        .map_err(|_| "native package download timed out")??;
+        let artifact = self
+            .resolve_with_retry(client, Url::parse(REGISTRY)?)
+            .await?;
         let prefix = if framed {
             "__MAKA_NATIVE_HOST_ARTIFACT__"
         } else {
@@ -206,19 +201,14 @@ impl Fetch {
             let integrity = self.integrity.ok_or("local archive requires integrity")?;
             return tokio::task::spawn_blocking(move || {
                 use std::io::{Read, Write};
-                let mut source = regular_file(&source, MAX_ARCHIVE_BYTES)?;
+                let mut source = regular_file(&source)?;
                 let mut temporary = NamedTempFile::new_in(&cache)?;
                 let mut hash = Sha512::new();
                 let mut buffer = [0; 64 * 1024];
-                let mut size = 0_u64;
                 loop {
                     let read = source.read(&mut buffer)?;
                     if read == 0 {
                         break;
-                    }
-                    size += read as u64;
-                    if size > MAX_ARCHIVE_BYTES {
-                        return Err("local archive exceeds the size limit".into());
                     }
                     hash.update(&buffer[..read]);
                     temporary.write_all(&buffer[..read])?;
@@ -252,9 +242,7 @@ impl Fetch {
         )
         .await??
         {
-            if bytes.len().saturating_add(chunk.len()) > MAX_METADATA_BYTES {
-                return Err("native package metadata exceeds the size limit".into());
-            }
+            bytes.try_reserve(chunk.len())?;
             bytes.extend_from_slice(&chunk);
         }
         let package: RegistryPackage = serde_json::from_slice(&bytes)?;
@@ -273,12 +261,8 @@ impl Fetch {
             return Err("native package tarball must belong to the npm registry origin".into());
         }
         let mut response = download_response(client.get(package.dist.tarball)).await?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|size| size > MAX_ARCHIVE_BYTES)
-        {
-            return Err("native package archive redirect or size is not allowed".into());
+        if !response.status().is_success() {
+            return Err("native package archive redirect is not allowed".into());
         }
         let temporary = NamedTempFile::new_in(&cache)?;
         let mut output = tokio::fs::File::from_std(temporary.reopen()?);
@@ -293,10 +277,9 @@ impl Fetch {
         )
         .await??
         {
-            size += chunk.len() as u64;
-            if size > MAX_ARCHIVE_BYTES {
-                return Err("native package archive exceeds the size limit".into());
-            }
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or("archive length overflow")?;
             hash.update(&chunk);
             output.write_all(&chunk).await?;
             if reported.elapsed() >= Duration::from_millis(250) {
@@ -357,14 +340,14 @@ fn transient_download_error(error: &HostError) -> bool {
 fn client() -> Result<Client, HostError> {
     Ok(Client::builder()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(120))
+        .read_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
         .build()?)
 }
 
 #[cfg(windows)]
 pub(crate) fn validate_windows_service(path: &Path) -> Result<(), HostError> {
-    Target::Win32X64.validate_binary(&mut regular_file(path, MAX_ARCHIVE_BYTES)?, true)
+    Target::Win32X64.validate_binary(&mut regular_file(path)?, true)
 }
 
 /// Resolve the preview channel once; subsequent retries use this exact version.
@@ -385,9 +368,7 @@ pub(crate) async fn preview_version() -> Result<Version, HostError> {
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
-        if bytes.len().saturating_add(chunk.len()) > MAX_METADATA_BYTES {
-            return Err("native package metadata exceeds the size limit".into());
-        }
+        bytes.try_reserve(chunk.len())?;
         bytes.extend_from_slice(&chunk);
     }
     let tags: Tags = serde_json::from_slice(&bytes)?;
@@ -413,12 +394,9 @@ async fn fetch_target(target: Target, version: Version) -> Result<Artifact, Host
         receipt_sha256: None,
         framed: false,
     };
-    tokio::time::timeout(
-        crate::operation::remaining(Duration::from_secs(180)),
-        fetch.resolve_with_retry(client()?, Url::parse(REGISTRY)?),
-    )
-    .await
-    .map_err(|_| "native package download timed out")?
+    fetch
+        .resolve_with_retry(client()?, Url::parse(REGISTRY)?)
+        .await
 }
 
 /// Resolve the Windows component of this exact native release. Never follow
@@ -480,10 +458,10 @@ fn artifact(directory: PathBuf, target: Target, version: String, integrity: Stri
     }
 }
 
-fn regular_file(path: &Path, limit: u64) -> Result<std::fs::File, HostError> {
+fn regular_file(path: &Path) -> Result<std::fs::File, HostError> {
     let metadata = path.symlink_metadata()?;
-    if !metadata.is_file() || metadata.len() > limit {
-        return Err("native package cache contains a non-file or oversized entry".into());
+    if !metadata.is_file() {
+        return Err("native package cache contains a non-file entry".into());
     }
     Ok(std::fs::File::open(path)?)
 }

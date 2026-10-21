@@ -260,7 +260,6 @@ pub struct Tool {
 #[schemars(rename = "HistoryToolCall")]
 pub struct ToolCall {
     /// Recorded ancestors in this Turn, nearest first; display references only.
-    #[schemars(length(max = 32))]
     pub ancestor_tool_use_ids: Vec<String>,
     /// Opaque display contract captured at dispatch; no execution authority.
     #[serde(default)]
@@ -344,7 +343,7 @@ pub enum SourceRole {
 #[serde(untagged)]
 #[schemars(rename = "HistorySourceSegment")]
 pub enum SourceSegment {
-    Key(#[schemars(length(max = 256))] String),
+    Key(String),
     Index(u32),
 }
 
@@ -387,7 +386,6 @@ pub struct HistorySource {
     pub field: SourceField,
     /// Omission reads the encoded field. A selected JSON string is literal text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(length(max = 16))]
     pub path: Option<Vec<SourceSegment>>,
     pub format: SourceFormat,
     #[schemars(range(max = 9_007_199_254_740_991u64))]

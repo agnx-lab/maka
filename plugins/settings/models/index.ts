@@ -237,10 +237,6 @@ function editableChoices(state: State, props: ModelsProps) {
 function capture(state: State, choice: SelectedModel | null = null): Action[] {
   const basis = state.observation?.snapshot.text;
   if (!basis || (state.pending && !(choice && state.pending.kind === 'page'))) return [];
-  if (basis.bytes > 1024) {
-    state.queryError = 'searchTooLong';
-    return [];
-  }
   const key = `models-${++state.serial}`;
   state.pending = { kind: 'text', key, basis, choice };
   state.queryError = null;
@@ -686,8 +682,7 @@ export function models<N extends Node>(
           } else if (result.status !== 'succeeded') state.queryError = 'modelsUnavailable';
           else {
             const query = (result.value as TextChunk).text.trim();
-            if ([...query].length > 256) state.queryError = 'searchTooLong';
-            else if (request.choice) {
+            if (request.choice) {
               if (editableChoices(state, props) && query === state.query) {
                 state.staleSelection = false;
                 state.preferenceUnavailable = false;

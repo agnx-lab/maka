@@ -814,11 +814,6 @@ impl Hub {
                 if truncated {
                     message.push_str(match language { Language::En => "\n[Result preview truncated; the supervisor can read view_agent_graph result pages using the original graph, work and result IDs.]\n", Language::ZhCn => "\n[结果预览已截断；主管可使用原始图、工作及结果 ID，通过 view_agent_graph 读取结果页。]\n", Language::ZhTw => "\n[結果預覽已截斷；主管可使用原始圖、工作及結果 ID，透過 view_agent_graph 讀取結果頁。]\n" });
                 }
-                if message.len() > 64 * 1024 {
-                    return Ok(Err(TaskStatus::Rejected {
-                        reason: "graph_result_input_too_large".into(),
-                    }));
-                }
                 if truncated {
                     break;
                 }

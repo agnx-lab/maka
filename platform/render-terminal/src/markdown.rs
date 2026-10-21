@@ -35,9 +35,6 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-pub const MAX_LINES: usize = 131_072;
-pub const MAX_BYTES: usize = 64 * 1024 * 1024;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualLine {
     pub line: Line<'static>,
@@ -149,9 +146,6 @@ impl Writer {
     }
     fn push_operation(&mut self, operation: prepared::Operation) -> Result<(), &'static str> {
         self.bytes += std::mem::size_of::<prepared::Operation>() + operation.bytes();
-        if self.bytes > MAX_BYTES {
-            return Err("Prepared transcript exceeds local capacity");
-        }
         self.recording
             .as_mut()
             .expect("recording writer")
@@ -161,9 +155,6 @@ impl Writer {
     fn flush(&mut self) -> Result<(), &'static str> {
         if self.recording.is_some() {
             return self.push_operation(prepared::Operation::Flush);
-        }
-        if self.lines.len() >= MAX_LINES || self.bytes > MAX_BYTES {
-            return Err("Transcript layout exceeds local capacity");
         }
         self.max_cells = self.max_cells.max(self.cells);
         let source = self.source.take().unwrap_or(self.last_source);
@@ -874,6 +865,6 @@ mod tests {
                 .all(|lines| lines[0].source < lines[1].source),
             "wrapped inline code needs positions within the event, not one shared anchor"
         );
-        assert!(plain(&"\n".repeat(MAX_LINES + 1), 1).is_err());
+        assert!(plain(&"\n".repeat(131_073), 1).is_ok());
     }
 }

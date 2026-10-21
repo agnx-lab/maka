@@ -50,7 +50,6 @@ pub enum Error {
 
 pub(crate) fn name(value: &str) -> Result<(), Error> {
     if value.is_empty()
-        || value.len() > 128
         || !value
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
@@ -130,8 +129,7 @@ pub mod wire_schema;
 
 /// Validate a stable package or entry identifier.
 pub fn identifier(value: &str) -> Result<(), Error> {
-    if value.len() > 128
-        || !value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+    if !value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
         || value.split(['.', '_', ':', '-']).any(|part| {
             part.is_empty()
                 || !part

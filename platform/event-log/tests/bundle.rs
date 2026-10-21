@@ -32,6 +32,18 @@ use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 mod export;
 
 #[tokio::test]
+async fn declared_huge_bundle_frame_without_payload_is_an_eof() {
+    let mut bytes = b"MAKA-SESSION\0\x02".to_vec();
+    bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+    let result = maka_event_log::bundle::inspect(bytes.as_slice()).await;
+    assert!(matches!(
+        result,
+        Err(BundleError::Store(maka_event_log::StoreError::Io(error)))
+            if error.kind() == std::io::ErrorKind::UnexpectedEof
+    ));
+}
+
+#[tokio::test]
 async fn inventory_confirms_only_selected_descendants_across_history_and_host_parent_edges() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
@@ -122,17 +134,18 @@ async fn inventory_confirms_only_selected_descendants_across_history_and_host_pa
     .unwrap();
     db.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
-    assert!(matches!(
-        log.preview_bundle("root").await,
-        Err(BundleError::TooManySessions)
-    ));
-    assert_eq!(
-        log.preview_bundle("unrelated")
-            .await
-            .unwrap()
-            .sessions
-            .len(),
-        1
-    );
+    let complete = log.preview_bundle("root").await;
+    let unrelated = log.preview_bundle("unrelated").await;
     log.close().await.unwrap();
+    let complete = complete.expect("complete owned subtree must be available for transfer");
+    assert_eq!(complete.sessions.len(), 4097);
+    assert_eq!(
+        complete
+            .sessions
+            .iter()
+            .filter(|session| session.id.starts_with("wide-"))
+            .count(),
+        4094
+    );
+    assert_eq!(unrelated.unwrap().sessions.len(), 1);
 }

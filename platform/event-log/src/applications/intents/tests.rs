@@ -446,59 +446,73 @@ async fn history_pages_bound_the_complete_encoded_array_without_skipping_the_nex
 }
 
 #[tokio::test]
-async fn recovery_metadata_bounds_encoded_bytes_and_rejects_oversized_stored_values() {
+async fn complete_recovery_metadata_retries_immutably_and_oversized_singletons_advance() {
     let (_dir, store) = store().await;
     let deployment = Uuid::new_v4();
     let caller = source(&store, deployment, 0).await;
-    let maximum = json!("x".repeat(MAX_RECOVERY - 2));
-    assert_eq!(serde_json::to_vec(&maximum).unwrap().len(), MAX_RECOVERY);
+    let recovery = json!({"original":"original recovery 中\n".repeat(MAX_PAGE / 10)});
     let original = reference();
     let token = store
-        .record_application_intent(caller.clone(), consumer(), original, maximum.clone())
+        .record_application_intent(
+            caller.clone(),
+            consumer(),
+            original.clone(),
+            recovery.clone(),
+        )
         .await
         .unwrap();
-    assert_eq!(token.intent().recovery, maximum);
-    for oversized in [
-        json!("x".repeat(MAX_RECOVERY - 1)),
-        json!("\n".repeat(MAX_RECOVERY / 2)),
-    ] {
-        assert!(
-            store
-                .record_application_intent(caller.clone(), consumer(), reference(), oversized)
-                .await
-                .is_err()
-        );
-    }
-    let before = store
+    let expected = token.intent().clone();
+    assert_eq!(expected.recovery, recovery);
+    let retry = store
+        .record_application_intent(
+            caller.clone(),
+            consumer(),
+            original.clone(),
+            recovery.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry.intent(), &expected);
+    assert!(matches!(
+        store
+            .record_application_intent(
+                caller.clone(),
+                consumer(),
+                original,
+                json!({"replacement":true})
+            )
+            .await,
+        Err(StoreError::EventConflict)
+    ));
+    let second = store
+        .record_application_intent(
+            caller,
+            consumer(),
+            reference(),
+            json!({"second":"original"}),
+        )
+        .await
+        .unwrap()
+        .intent()
+        .clone();
+    let first_page = store
         .application_intents(deployment, consumer(), 0, 128)
         .await
         .unwrap();
-    assert_eq!(
-        before.len(),
-        1,
-        "rejected correlation creates no dispatch token or row"
-    );
-    let cursor = token.intent().cursor;
-    store
-        .connection
-        .run(move |connection| {
-            Box::pin(async move {
-                sqlx::query("UPDATE application_intents SET recovery_json=? WHERE cursor=?")
-                    .bind(serde_json::to_string(&"x".repeat(MAX_RECOVERY)).unwrap())
-                    .bind(cursor as i64)
-                    .execute(connection)
-                    .await?;
-                Ok(())
-            })
-        })
+    assert_eq!(first_page, vec![expected.clone()]);
+    let second_page = store
+        .application_intents(deployment, consumer(), expected.cursor, 128)
         .await
         .unwrap();
+    assert_eq!(second_page, vec![second.clone()]);
     assert!(
         store
-            .application_intents(deployment, consumer(), 0, 128)
+            .application_intents(deployment, consumer(), second.cursor, 128)
             .await
-            .is_err()
+            .unwrap()
+            .is_empty()
     );
+    store.close().await.unwrap();
 }
 
 #[tokio::test]

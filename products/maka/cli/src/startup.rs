@@ -18,7 +18,7 @@
  */
 
 use clap::Args;
-use maka_host_runtime::application::host::startup::{REQUEST_LIMIT, Ready, Request};
+use maka_host_runtime::application::host::startup::{Ready, Request};
 use maka_host_runtime::{
     HostError,
     application::{host::discovery, transport::wire},
@@ -47,8 +47,7 @@ impl Ensure {
             None
         } else {
             let request: Request =
-                tokio::time::timeout(Duration::from_secs(5), input.read_bounded(REQUEST_LIMIT))
-                    .await??;
+                tokio::time::timeout(Duration::from_secs(5), input.read()).await??;
             request.validate()?;
             Some(request)
         };

@@ -58,7 +58,6 @@ impl Sandbox {
                 "private gateway requires a destination-restricted policy".into(),
             ));
         };
-        network.validate()?;
         crate::linux::prepare(&filesystem.compile()?, network, cwd, directory)
     }
     /// Compile only after Host authorization. No process starts here. The caller
@@ -110,7 +109,6 @@ impl Sandbox {
                 filesystem,
                 network,
             } => {
-                network.validate()?;
                 if matches!(network, crate::Network::Restricted { .. })
                     && (proxy.is_none() || !cfg!(target_os = "macos"))
                 {

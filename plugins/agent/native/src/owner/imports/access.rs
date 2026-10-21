@@ -128,7 +128,6 @@ impl SourceRead {
 }
 fn filename(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 255
         && !name.chars().any(char::is_control)
         && !name.contains(['/', '\\'])
         && name != "."
@@ -203,8 +202,7 @@ impl maka_session_import::access::ReadSource for SourceRead {
                 .map_err(|_| database::Error::Cancelled)?;
             let result = tokio::task::spawn_blocking(move || {
                 ticket.start();
-                let result =
-                    database::query::read_import(&path, input.queries, &cancelled, &stopping);
+                let result = database::query::read(&path, input.queries, &cancelled, &stopping);
                 ticket.complete(Ok(()));
                 result
             })
@@ -227,7 +225,6 @@ fn read_error(error: ReadError) -> database::Error {
         ReadError::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
             database::Error::NotFound
         }
-        ReadError::ScanLimit { .. } => database::Error::Limit(database::Limit::Work),
         _ => database::Error::Denied,
     }
 }

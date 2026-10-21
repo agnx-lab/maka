@@ -166,6 +166,7 @@ const gpuiUpstreamFiles = new Set(
     'gpui-fast',
     'gpui-kit',
     'async-io',
+    'gix-index',
     'sqlx-sqlite',
     'image-webp',
     'llrt-crypto',

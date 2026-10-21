@@ -338,7 +338,6 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           testID="session-search"
           accessibilityLabel="Search session titles"
           autoFocus={!props.docked}
-          maxLength={256}
           value={choosingWorkspace() ? '' : browser.titleQuery()}
           readonly={choosingWorkspace()}
           onChange={(text) => {

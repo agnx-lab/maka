@@ -52,7 +52,6 @@ impl LoginReceipt {
 
 pub(super) fn validate_attempt(value: &str) -> Result<()> {
     if value.is_empty()
-        || value.len() > 128
         || !value
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
@@ -108,14 +107,5 @@ pub(super) async fn write(
     .bind(serde_json::to_string(&saved.phase)?)
     .execute(&mut *tx)
     .await?;
-    // Monotonic SQLite order is internal; no timestamp tie or public counter.
-    sqlx::query("DELETE FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') != 'exchanging' AND completion_order NOT IN
-        (SELECT completion_order FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') != 'exchanging' ORDER BY completion_order DESC LIMIT 256)")
-        .execute(&mut *tx).await?;
     Ok(())
-}
-
-pub(super) async fn pending_count(tx: &mut SqliteConnection) -> Result<i64> {
-    Ok(sqlx::query_scalar("SELECT count(*) FROM oauth_login_receipts WHERE json_extract(phase, '$.phase') = 'exchanging'")
-        .fetch_one(tx).await?)
 }

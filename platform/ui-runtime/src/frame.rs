@@ -85,7 +85,7 @@ impl Surface {
         }
     }
     fn validate(&self) -> bool {
-        !self.binding().is_empty() && self.binding().len() <= 128
+        !self.binding().is_empty()
     }
 }
 /// One child of a committed component, owned by a committed native presentation.
@@ -102,12 +102,11 @@ pub struct ComponentSlot {
 impl ComponentSlot {
     pub(crate) fn validate(&self) -> Result<(), String> {
         if self.key.is_empty()
-            || self.key.len() > 128
             || self.binding.is_empty()
-            || self.binding.len() > 128
-            || self.on.iter().any(|(event, handler)| {
-                event.is_empty() || event.len() > 128 || handler.is_empty() || handler.len() > 128
-            })
+            || self
+                .on
+                .iter()
+                .any(|(event, handler)| event.is_empty() || handler.is_empty())
         {
             return Err("invalid component slot identity or binding".into());
         }

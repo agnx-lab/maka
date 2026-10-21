@@ -43,7 +43,7 @@ use std::time::Duration;
 pub enum Action {
     Check,
     Authenticate {
-        #[schemars(length(min = 1, max = 1024))]
+        #[schemars(length(min = 1))]
         method_id: String,
     },
 }
@@ -51,11 +51,11 @@ pub enum Action {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "ExecutorAuthenticationMethod")]
 pub struct Method {
-    #[schemars(length(min = 1, max = 1024))]
+    #[schemars(length(min = 1))]
     pub id: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub name: String,
-    #[schemars(length(max = 2048))]
+
     pub description: Option<String>,
     pub supported: bool,
 }
@@ -63,11 +63,10 @@ pub struct Method {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "ExecutorSetupInfo")]
 pub struct Info {
-    #[schemars(length(max = 256))]
     pub title: Option<String>,
-    #[schemars(length(max = 256))]
+
     pub name: String,
-    #[schemars(length(max = 256))]
+
     pub version: String,
 }
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -81,13 +80,12 @@ pub struct Info {
 pub enum Outcome {
     Checked {
         info: Option<Info>,
-        #[schemars(length(max = 32))]
+
         methods: Vec<Method>,
     },
     Authenticated,
     /// No authentication confirmation was observed; never automatically replay it.
     Unresolved {
-        #[schemars(length(max = 2048))]
         diagnostic: String,
     },
 }
@@ -95,25 +93,22 @@ pub enum Outcome {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "ExecutorSetupProgress")]
 pub enum Progress {
-    AuthorizationUrl {
-        #[schemars(length(max = 8192))]
-        url: String,
-    },
+    AuthorizationUrl { url: String },
 }
 pub trait Output: Send + Sync {
     fn emit(&self, progress: Progress) -> BoxFuture<'_, Result<(), Error>>;
 }
-fn checked_text(value: &str, max: usize) -> Result<String, Error> {
-    if value.len() > max || value.chars().any(char::is_control) {
+fn checked_text(value: &str) -> Result<String, Error> {
+    if value.chars().any(char::is_control) {
         return Err(Error::Invalid("Invalid ACP setup metadata".into()));
     }
     Ok(value.to_owned())
 }
 fn info(name: &str, version: &str, title: Option<&str>) -> Result<Info, Error> {
     Ok(Info {
-        title: title.map(|value| checked_text(value, 256)).transpose()?,
-        name: checked_text(name, 256)?,
-        version: checked_text(version, 256)?,
+        title: title.map(checked_text).transpose()?,
+        name: checked_text(name)?,
+        version: checked_text(version)?,
     })
 }
 fn method(
@@ -122,12 +117,12 @@ fn method(
     description: Option<&str>,
     supported: bool,
 ) -> Result<Method, Error> {
-    if id.is_empty() || name.is_empty() || description.is_some_and(|s| s.len() > 2048) {
+    if id.is_empty() || name.is_empty() {
         return Err(Error::Invalid("Invalid ACP authentication method".into()));
     }
     Ok(Method {
-        id: checked_text(id, 1024)?,
-        name: checked_text(name, 256)?,
+        id: checked_text(id)?,
+        name: checked_text(name)?,
         description: description.map(str::to_owned),
         supported,
     })
@@ -135,7 +130,7 @@ fn method(
 fn unresolved(error: impl std::fmt::Display) -> Outcome {
     let message = error.to_string();
     Outcome::Unresolved {
-        diagnostic: message[..message.floor_char_boundary(2048.min(message.len()))].to_owned(),
+        diagnostic: message,
     }
 }
 
@@ -155,7 +150,7 @@ pub async fn execute(
         if method_id.is_empty() {
             return Err(Error::Invalid("Invalid authentication method".into()));
         }
-        checked_text(method_id, 1024)?;
+        checked_text(method_id)?;
     }
     let authenticate = matches!(action, Action::Authenticate { .. });
     let mut command = agent.command();
@@ -228,18 +223,7 @@ async fn run(
             true,
         ),
     };
-    if methods.len() > 32 {
-        return Err(Error::Invalid(
-            "ACP authentication method limit exceeded".into(),
-        ));
-    }
     let checked = Outcome::Checked { info, methods };
-    let value = serde_json::to_value(&checked).map_err(provider)?;
-    if serde_json::to_vec(&value).map_err(provider)?.len() > 48 * 1024 {
-        return Err(Error::Invalid(
-            "ACP setup description exceeds its delivery limit".into(),
-        ));
-    }
     match action {
         Action::Check => Ok(checked),
         Action::Authenticate { method_id } => {
@@ -276,5 +260,29 @@ async fn run(
                 Err(error) => unresolved(error),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_metadata_and_unresolved_diagnostics_preserve_complete_values() {
+        let name = "external-agent-".repeat(6_000);
+        let description =
+            "Authentication instructions with a complete final marker. ".repeat(2_000);
+        let method = method(&name, &name, Some(&description), true).unwrap();
+        assert_eq!(method.id, name);
+        assert_eq!(method.name, name);
+        assert_eq!(method.description.as_deref(), Some(description.as_str()));
+        let info = info(&name, "2026.10", Some(&description)).unwrap();
+        assert_eq!(info.name, name);
+        assert_eq!(info.title.as_deref(), Some(description.as_str()));
+        let Outcome::Unresolved { diagnostic } = unresolved(&description) else {
+            panic!("expected unresolved authentication");
+        };
+        assert_eq!(diagnostic, description);
+        assert!(super::method("invalid\nmethod", "name", None, true).is_err());
     }
 }

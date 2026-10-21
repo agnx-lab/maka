@@ -53,9 +53,6 @@ pub(super) async fn read(
         .await?;
     let mut result = Vec::new();
     for row in rows {
-        if row.try_get::<i64, _>(2)? > 65536 || row.try_get::<i64, _>(3)? > 128 {
-            return Err(StoreError::PrefixTooLarge);
-        }
         let operation: String = row.try_get(1)?;
         result.push(ToolStreamSeed {
             tool_use_id: maka_agent_facts::tool_call::tool_use_id(
@@ -112,10 +109,7 @@ WITH starts AS (
                 AND json_extract(done.event_json,'$.fact.output.type')='tool_result'
                 AND json_extract(done.event_json,'$.fact.output.toolCallId')=s.operation)))
     )
-    GROUP BY operation ORDER BY sequence LIMIT 129
-), budget AS (
-    SELECT COUNT(*) AS count, COALESCE(SUM(length(CAST(operation AS BLOB))),0) AS bytes FROM active
+    GROUP BY operation
 )
-SELECT sequence, CASE WHEN bytes<=65536 AND count<=128 THEN operation END, bytes, count
-FROM active CROSS JOIN budget ORDER BY sequence
+SELECT sequence, operation FROM active ORDER BY sequence
 "#;

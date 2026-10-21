@@ -27,8 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 fn url(value: &str) -> Result<reqwest::Url> {
     let url = reqwest::Url::parse(value).map_err(|_| "invalid package URL")?;
-    if value.len() > 8192
-        || !matches!(url.scheme(), "https" | "http")
+    if !matches!(url.scheme(), "https" | "http")
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -38,7 +37,7 @@ fn url(value: &str) -> Result<reqwest::Url> {
     }
     Ok(url)
 }
-/// Bounded download for an explicitly requested bundle. Uses the operator's
+/// Complete download for an explicitly requested bundle. Uses the operator's
 /// HTTP(S)/ALL_PROXY and NO_PROXY environment, like native CLI package fetching.
 pub async fn download_bundle(
     address: &str,
@@ -53,9 +52,11 @@ pub async fn download_bundle(
     }
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 5
+            if attempt
+                .previous()
+                .iter()
+                .any(|previous| previous == attempt.url())
                 || url(attempt.url().as_str()).is_err()
                 || (attempt
                     .previous()
@@ -63,7 +64,7 @@ pub async fn download_bundle(
                     .is_some_and(|previous| previous.scheme() == "https")
                     && attempt.url().scheme() != "https")
             {
-                attempt.error("invalid package redirect or redirect limit exceeded")
+                attempt.error("invalid or repeated package redirect")
             } else {
                 attempt.follow()
             }
@@ -76,11 +77,9 @@ pub async fn download_bundle(
         result = async {
             let mut response = client.get(address).send().await.map_err(|_| "package download failed")?;
             if !response.status().is_success() { return Err(format!("package server returned HTTP {}", response.status().as_u16())); }
-            let limit = maka_packages::MAX_PACKAGE_BYTES * 2;
-            if response.content_length().is_some_and(|size| size > limit as u64) { return Err("package download exceeds 32 MiB".into()); }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| "package download interrupted")? {
-                if chunk.len() > limit.saturating_sub(bytes.len()) { return Err("package download exceeds 32 MiB".into()); }
+                bytes.try_reserve(chunk.len()).map_err(|_| "package download allocation failed")?;
                 bytes.extend_from_slice(&chunk);
             }
             if digest.is_some_and(|expected| !hex::encode(Sha256::digest(&bytes)).eq_ignore_ascii_case(expected)) {

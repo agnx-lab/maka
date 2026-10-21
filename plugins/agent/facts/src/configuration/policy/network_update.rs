@@ -50,8 +50,6 @@ impl CredentialTarget {
         }
     }
     pub fn normalize(&mut self) -> Result<(), String> {
-        validation::text(&self.host, 255, false)?;
-        validation::text(&self.username, 256, false)?;
         if self
             .host
             .chars()
@@ -110,7 +108,7 @@ impl Update {
             expected_target,
         } = &mut self.credential
         {
-            if secret.is_empty() || secret.len() > 10240 {
+            if secret.is_empty() {
                 return Err("invalid proxy credential secret".into());
             }
             if let Some(target) = expected_target {

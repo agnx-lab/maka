@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Exercise an actual migration-35 database, including retained image evidence.
+//! Exercise actual prior schemas and preserve their original durable evidence.
 use std::{path::Path, sync::Arc};
 
 use crate::{
@@ -37,7 +37,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 
 // Run the real historical migrations, then use the real current writer APIs.
 // No migration ledger entry or checksum is removed to manufacture an old schema.
-async fn open_at_35(path: &Path) -> EventLog {
+async fn open_at<const VERSION: i64>(path: &Path) -> EventLog {
     let lease =
         Arc::new(crate::root::FileLease::acquire(&path.with_extension("writer.lock")).unwrap());
     let connection = OwnedConnection::open(
@@ -45,7 +45,7 @@ async fn open_at_35(path: &Path) -> EventLog {
             .filename(path)
             .create_if_missing(true),
         ConnectionAuthority::Writer { lease, root: None },
-        |connection| {
+        move |connection| {
             Box::pin(async move {
                 sqlx::raw_sql(
                     "PRAGMA application_id = 1296124754; PRAGMA auto_vacuum = INCREMENTAL;",
@@ -55,7 +55,7 @@ async fn open_at_35(path: &Path) -> EventLog {
                 crate::sqlite_functions::register(connection).await?;
                 super::terminal_display::register(connection, true).await?;
                 super::MIGRATIONS
-                    .run_direct(Some(35), &mut *connection, false)
+                    .run_direct(Some(VERSION), &mut *connection, false)
                     .await?;
                 super::terminal_display::register(connection, false).await?;
                 sqlx::raw_sql("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
@@ -185,7 +185,7 @@ fn catalogs(db: &Connection) -> Vec<(String, i64)> {
 async fn migration_36_preserves_canonical_images_and_copies_and_accepts_large_tool_originals() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
-    let log = open_at_35(&path).await;
+    let log = open_at::<35>(&path).await;
     let image = seed_canonical_image(&log).await;
     let upload_bytes = b"uncaptured upload";
     log.commit_artifact(
@@ -299,4 +299,492 @@ async fn migration_36_preserves_canonical_images_and_copies_and_accepts_large_to
         .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn migration_37_preserves_interaction_receipts_and_relations_without_json_quotas() {
+    use maka_agent_facts::interaction::{
+        Decision, GrantCapability, GrantScope, GrantTarget, InteractionOutcome, InteractionRecord,
+        InteractionRequest, PermissionRequest,
+    };
+    use maka_sandbox::{Network, grant};
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("interactions.sqlite");
+    let log = open_at::<36>(&path).await;
+    log.create_session("session", "create", &json!({"boundary_revision":4}), 1)
+        .await
+        .unwrap();
+    let settled = InteractionRecord {
+        session_id: "session".into(),
+        turn_id: "turn".into(),
+        run_id: "run".into(),
+        request_id: "settled".into(),
+        created_at: 2,
+        outcome: None,
+        request: InteractionRequest::ClientCapability {
+            tool_use_id: "tool".into(),
+            base_revision: Some(4),
+            target: GrantTarget {
+                provider_id: "provider".into(),
+                contract_id: "contract".into(),
+                server_id: "desktop_browser".into(),
+                tool_name: "browser_navigate".into(),
+                capability: GrantCapability::Browser,
+                scope: GrantScope::BrowserOrigin {
+                    origin: "https://example.com".into(),
+                },
+            },
+        },
+    };
+    let pending = InteractionRecord {
+        request_id: "pending".into(),
+        ..settled.clone()
+    };
+    let permission = InteractionRecord {
+        request_id: "permissions".into(),
+        request: InteractionRequest::Permissions {
+            tool_use_id: Some("tool".into()),
+            base_revision: 4,
+            request: PermissionRequest {
+                reason: "Original permission basis".into(),
+                command: None,
+                permissions: grant::Permissions {
+                    filesystem: Vec::new(),
+                    network: Network::Allowed,
+                },
+            },
+        },
+        ..settled.clone()
+    };
+    for record in [&settled, &pending, &permission] {
+        assert!(log.establish_interaction(record).await.unwrap().matches);
+    }
+    log.commit_interaction_outcome(
+        "settled",
+        InteractionOutcome::ClientCapabilityDecision {
+            decision: Decision::Allow,
+            committed_at: 3,
+        },
+    )
+    .await
+    .unwrap();
+    let settled = log.interaction("settled").await.unwrap().unwrap();
+    log.close().await.unwrap();
+
+    fn rows(db: &Connection, table: &str, columns: &str) -> Vec<Vec<Value>> {
+        let mut statement = db
+            .prepare(&format!("SELECT {columns} FROM {table} ORDER BY 1, 2"))
+            .unwrap();
+        let count = statement.column_count();
+        statement
+            .query_map([], |row| {
+                (0..count)
+                    .map(|i| match row.get_ref(i)? {
+                        rusqlite::types::ValueRef::Integer(n) => Ok(json!(n)),
+                        rusqlite::types::ValueRef::Text(text) => {
+                            Ok(json!(std::str::from_utf8(text).unwrap()))
+                        }
+                        rusqlite::types::ValueRef::Null => Ok(Value::Null),
+                        _ => panic!("unexpected original durable column type"),
+                    })
+                    .collect()
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("SELECT max(version) FROM _sqlx_migrations", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        36
+    );
+    db.execute_batch(
+        "PRAGMA foreign_keys=ON;
+        INSERT INTO projects VALUES
+            ('00000000-0000-0000-0000-000000000001','identity-original','Original',10,NULL),
+            ('00000000-0000-0000-0000-000000000002','identity-archived','Archived',11,12);
+        INSERT INTO project_identities VALUES
+            ('00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000001'),
+            ('00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000001'),
+            ('00000000-0000-0000-0000-000000000021','00000000-0000-0000-0000-000000000002');
+        INSERT INTO project_locations VALUES
+            ('00000000-0000-0000-0000-000000000001','/original',0,13),
+            ('00000000-0000-0000-0000-000000000001','/worktree',1,14),
+            ('00000000-0000-0000-0000-000000000002','/archived',0,15);",
+    )
+    .unwrap();
+    assert!(
+        db.execute(
+            "UPDATE projects SET name=?1 WHERE identity='identity-original'",
+            ["完整".repeat(9000)]
+        )
+        .is_err()
+    );
+    assert!(
+        db.execute(
+            "UPDATE project_locations SET path=?1 WHERE path='/original'",
+            [format!("/{}", "location/".repeat(600))]
+        )
+        .is_err()
+    );
+    let prior_ledger = rows(
+        &db,
+        "_sqlx_migrations WHERE version<=36",
+        "version,hex(checksum)",
+    );
+    let tables = [
+        (
+            "interaction_requests",
+            "request_id,session_id,created_at,record_json",
+        ),
+        ("interaction_outcomes", "request_id,outcome_json"),
+        (
+            "client_capability_session_grants",
+            "authority_key,record_json",
+        ),
+        ("projects", "id,identity,name,last_used_at,archived_at"),
+        ("project_identities", "id,project_id"),
+        (
+            "project_locations",
+            "project_id,path,is_worktree,last_used_at",
+        ),
+    ];
+    let original: Vec<_> = tables
+        .iter()
+        .map(|(table, columns)| rows(&db, table, columns))
+        .collect();
+    assert_eq!(
+        original.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![3, 1, 1, 2, 3, 3]
+    );
+    drop(db);
+
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(log.interaction("settled").await.unwrap().unwrap(), settled);
+    assert_eq!(log.interaction("pending").await.unwrap().unwrap(), pending);
+    assert_eq!(
+        log.interaction("permissions").await.unwrap().unwrap(),
+        permission
+    );
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    assert_eq!(
+        db.query_row("SELECT max(version) FROM _sqlx_migrations", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        37
+    );
+    for ((table, columns), original) in tables.iter().zip(original) {
+        assert_eq!(rows(&db, table, columns), original);
+    }
+    assert_eq!(
+        rows(
+            &db,
+            "_sqlx_migrations WHERE version<=36",
+            "version,hex(checksum)"
+        ),
+        prior_ledger
+    );
+    for child in ["project_identities", "project_locations"] {
+        let table: String = db
+            .query_row(
+                &format!("SELECT \"table\" FROM pragma_foreign_key_list('{child}')"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table, "projects");
+    }
+    assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='project_identity_owner'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+    for sql in [
+        "INSERT INTO projects VALUES ('duplicate','identity-original','Name',1,NULL)",
+        "INSERT INTO projects VALUES ('empty','empty','',1,NULL)",
+        "INSERT INTO projects VALUES ('negative','negative','Name',-1,NULL)",
+        "INSERT INTO projects VALUES ('future','future','Name',9007199254740992,NULL)",
+        "INSERT INTO projects VALUES ('archived-invalid','archived-invalid','Name',1,-1)",
+        "INSERT INTO projects VALUES ('blob','blob',x'61',1,NULL)",
+        "INSERT INTO project_identities VALUES ('orphan','missing')",
+        "INSERT INTO project_locations VALUES ('missing','/orphan',0,1)",
+        "INSERT INTO project_locations VALUES ('00000000-0000-0000-0000-000000000001','',0,1)",
+        "INSERT INTO project_locations VALUES ('00000000-0000-0000-0000-000000000001','/invalid',2,1)",
+        "INSERT INTO project_locations VALUES ('00000000-0000-0000-0000-000000000001','/negative',0,-1)",
+        "INSERT INTO project_locations VALUES ('00000000-0000-0000-0000-000000000001','/original',0,1)",
+    ] {
+        assert!(
+            db.execute(sql, []).is_err(),
+            "retained project constraint accepted {sql}"
+        );
+    }
+    db.execute_batch(
+        "INSERT INTO projects VALUES ('disposable','disposable','Disposable',1,NULL);
+        INSERT INTO project_identities VALUES ('disposable-alias','disposable');
+        INSERT INTO project_locations VALUES ('disposable','/disposable',1,1);
+        DELETE FROM projects WHERE id='disposable';",
+    )
+    .unwrap();
+    for child in ["project_identities", "project_locations"] {
+        assert_eq!(
+            db.query_row(
+                &format!("SELECT count(*) FROM {child} WHERE project_id='disposable'"),
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+    let complete_project = log
+        .register_project(
+            crate::projects::ProjectRegistration {
+                identity: "complete-original".into(),
+                name: "完整".repeat(9000),
+                path: format!("/{}", "location/".repeat(600)),
+                is_worktree: true,
+            },
+            true,
+            20,
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete_project.name, "完整".repeat(9000));
+    assert_eq!(
+        complete_project.locations[0].path,
+        format!("/{}", "location/".repeat(600))
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT name FROM projects WHERE id=?1",
+            [&complete_project.id],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "完整".repeat(9000)
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT \"table\" FROM pragma_foreign_key_list('interaction_outcomes')",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "interaction_requests"
+    );
+    assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('interaction_session_pending','interaction_permission_basis')", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+    assert!(
+        db.execute(
+            "INSERT INTO interaction_outcomes VALUES ('orphan', '{}')",
+            []
+        )
+        .is_err()
+    );
+    assert!(
+        db.execute(
+            "DELETE FROM interaction_requests WHERE request_id='settled'",
+            []
+        )
+        .is_err()
+    );
+    assert!(
+        db.execute(
+            "INSERT INTO interaction_requests VALUES ('malformed','session',4,'{')",
+            []
+        )
+        .is_err()
+    );
+
+    let complete = serde_json::to_string(&json!({"original":"中文😀".repeat(6000)})).unwrap();
+    assert!(complete.len() > 20_480);
+    db.execute(
+        "INSERT INTO interaction_requests VALUES ('complete','session',4,?1)",
+        [&complete],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO interaction_outcomes VALUES ('complete',?1)",
+        [&complete],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO client_capability_session_grants VALUES ('complete',?1)",
+        [&complete],
+    )
+    .unwrap();
+    for (table, column) in [
+        ("interaction_requests", "record_json"),
+        ("interaction_outcomes", "outcome_json"),
+        ("client_capability_session_grants", "record_json"),
+    ] {
+        let key = if table == "client_capability_session_grants" {
+            "authority_key"
+        } else {
+            "request_id"
+        };
+        let actual: String = db
+            .query_row(
+                &format!("SELECT {column} FROM {table} WHERE {key}='complete'"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            actual == complete,
+            "complete interaction JSON changed in {table}"
+        );
+    }
+    // The historical outcomes table had no JSON CHECK. The application still
+    // rejects malformed durable outcomes instead of treating them as receipts.
+    db.execute(
+        "INSERT INTO interaction_outcomes VALUES ('pending','{')",
+        [],
+    )
+    .unwrap();
+    assert!(log.interaction("pending").await.is_err());
+    drop(db);
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn migration_37_preserves_artifact_metadata_and_copied_image_provenance() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("artifact-metadata.sqlite");
+    let log = open_at::<36>(&path).await;
+    let image = seed_canonical_image(&log).await;
+    let bytes = log
+        .read_artifact_chunk("original", &image.id, 0, 32 * 1024)
+        .await
+        .unwrap()
+        .unwrap()
+        .bytes;
+    let mut uncaptured = image.clone();
+    uncaptured.id = "uncaptured-metadata".into();
+    uncaptured.source = ArtifactSource::UserUpload;
+    uncaptured.summary = Some(content_digest(&bytes));
+    uncaptured.name = "uncaptured.gif".into();
+    log.commit_artifact(uncaptured, bytes.clone())
+        .await
+        .unwrap();
+    log.close().await.unwrap();
+
+    let ledger = |db: &Connection| -> Vec<(i64, Vec<u8>)> {
+        db.prepare(
+            "SELECT version,checksum FROM _sqlx_migrations WHERE version<=36 ORDER BY version",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    };
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(
+        db.query_row("SELECT max(version) FROM _sqlx_migrations", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        36
+    );
+    let prior = artifacts(&db);
+    assert_eq!(prior.len(), 3);
+    assert_eq!(prior.iter().filter(|row| row.6.is_some()).count(), 2);
+    assert_eq!(prior.iter().filter(|row| row.6.is_none()).count(), 1);
+    let provenance = mappings(&db);
+    assert_eq!(provenance.len(), 1);
+    let revisions = catalogs(&db);
+    let checksums = ledger(&db);
+    assert!(db.execute("UPDATE artifacts SET record_json=json_set(record_json,'$.name',?1) WHERE session_id='original' AND id=?2", rusqlite::params![format!("{}.gif", "metadata".repeat(2400)), image.id]).is_err());
+    drop(db);
+
+    let log = EventLog::open(&path).await.unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    assert_eq!(
+        db.query_row("SELECT max(version) FROM _sqlx_migrations", [], |row| row
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        37
+    );
+    assert_eq!(artifacts(&db), prior);
+    assert_eq!(mappings(&db), provenance);
+    assert_eq!(catalogs(&db), revisions);
+    assert_eq!(ledger(&db), checksums);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        0
+    );
+    assert_eq!(db.query_row("SELECT \"table\" FROM pragma_foreign_key_list('session_history_artifacts') WHERE \"from\"='artifact_id'", [], |row| row.get::<_, String>(0)).unwrap(), "artifacts");
+    assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name='artifacts_session_order'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+    for (field, value) in [
+        ("sessionId", json!("foreign")),
+        ("id", json!("different")),
+        ("createdAt", json!(999)),
+        ("sizeBytes", json!(bytes.len() + 1)),
+    ] {
+        assert!(db.execute("UPDATE artifacts SET record_json=json_set(record_json,?1,json(?2)) WHERE session_id='original' AND id=?3", rusqlite::params![format!("$.{field}"), value.to_string(), image.id]).is_err(), "original artifact identity check accepted {field}");
+    }
+    for sql in [
+        "UPDATE artifacts SET canonical_at=0",
+        "UPDATE artifacts SET created_at=-1",
+        "UPDATE artifacts SET record_json='{'",
+        "INSERT INTO artifacts SELECT * FROM artifacts LIMIT 1",
+        "INSERT INTO session_history_artifacts VALUES ('copied','original','missing','missing')",
+    ] {
+        assert!(
+            db.execute(sql, []).is_err(),
+            "retained artifact constraint accepted {sql}"
+        );
+    }
+    assert!(
+        db.execute(
+            "DELETE FROM artifacts WHERE session_id=?1 AND id=?2",
+            rusqlite::params![provenance[0].0, provenance[0].3]
+        )
+        .is_err()
+    );
+
+    let mut complete = image;
+    complete.id = "complete-metadata".into();
+    complete.source = ArtifactSource::UserUpload;
+    complete.summary = Some(content_digest(&bytes));
+    complete.name = format!("{}.gif", "metadata".repeat(2400));
+    log.commit_artifact(complete.clone(), bytes.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        log.get_artifact("original", "complete-metadata")
+            .await
+            .unwrap()
+            .record
+            .unwrap(),
+        complete
+    );
+    assert_eq!(
+        log.read_artifact_chunk("original", "complete-metadata", 0, 32 * 1024)
+            .await
+            .unwrap()
+            .unwrap()
+            .bytes,
+        bytes
+    );
+    drop(db);
+    log.close().await.unwrap();
 }

@@ -66,7 +66,7 @@ async fn admitted_large_text_attachment_reads_exact_ranges_and_canonical_continu
         .unwrap()
         .record
         .unwrap();
-    let window = maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES as usize;
+    let window = 50 * 1024 * 1024;
     let original = f
         .store
         .read_artifact_chunk(&session, id, 0, window)
@@ -289,6 +289,42 @@ pub(super) async fn upload(
         )]),
     )
     .await
+}
+
+#[tokio::test]
+async fn large_selected_upload_keeps_complete_bytes_and_session_authority() {
+    let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let session = f.create("Large selected upload").await;
+    let bytes = vec![b'z'; 50 * 1024 * 1024 + 1];
+    let file = f._dir.path().join("large.txt");
+    std::fs::write(&file, &bytes).unwrap();
+    let completed = async {
+        let snapshot = maka_ui_runtime::file::read_selected(
+            &file, &maka_ui_runtime::budget::NativeBudget::default(),
+        ).map_err(|error| error.to_string())?;
+        let uploaded = f.mutation_with(
+            2, "uploadAttachment",
+            json!({"sessionId":session,"name":"large.txt","bytes":bytes.len(),"digest":content_digest(&bytes)}),
+            Uuid::new_v4(),
+            BTreeMap::from([("file".into(), snapshot as Arc<dyn maka_capabilities::call::ReadResource>)]),
+        ).await?;
+        let id = uploaded["attachment"]["id"].as_str().ok_or("upload did not return an attachment")?;
+        let record = f.store.get_artifact(&session, id).await.map_err(|error| error.to_string())?.record.ok_or("upload did not retain its artifact")?;
+        let tail = f.store.read_artifact_chunk(&session, id, 50 * 1024 * 1024, 64).await.map_err(|error| error.to_string())?.ok_or("upload lost final bytes")?;
+        Ok::<_, String>((uploaded, record, tail))
+    }.await;
+    f.drained().await;
+    let app_shutdown = f.app.shutdown().await;
+    let config_shutdown = f.config.shutdown().await;
+    app_shutdown.unwrap();
+    config_shutdown.unwrap();
+    let (uploaded, record, tail) = completed.expect("selected upload must retain complete bytes");
+    assert_eq!(uploaded["kind"], "uploaded");
+    assert_eq!(uploaded["attachment"]["sessionId"], session);
+    assert_eq!(record.size_bytes, 50 * 1024 * 1024 + 1);
+    assert_eq!(record.summary, Some(content_digest(&bytes)));
+    assert_eq!(tail.total_bytes, 50 * 1024 * 1024 + 1);
+    assert_eq!(tail.bytes, b"z");
 }
 
 #[tokio::test]

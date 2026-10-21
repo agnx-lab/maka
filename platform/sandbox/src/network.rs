@@ -54,10 +54,7 @@ impl Destination {
 pub enum Network {
     Denied,
     Allowed,
-    Restricted {
-        #[schemars(length(max = 128))]
-        destinations: BTreeSet<Destination>,
-    },
+    Restricted { destinations: BTreeSet<Destination> },
 }
 
 impl Network {
@@ -65,12 +62,6 @@ impl Network {
         Self::Restricted {
             destinations: BTreeSet::from([destination]),
         }
-    }
-    pub fn validate(&self) -> Result<(), Error> {
-        if matches!(self, Self::Restricted { destinations } if destinations.len() > 128) {
-            return Err(Error::TooComplex);
-        }
-        Ok(())
     }
     pub fn allows(&self, destination: &Destination) -> bool {
         match self {
@@ -121,7 +112,6 @@ impl Network {
 
 fn normalize_host(value: &str) -> Result<String, Error> {
     if value.is_empty()
-        || value.len() > 1024
         || value.chars().any(|c| {
             c.is_whitespace()
                 || c.is_control()

@@ -26,7 +26,7 @@ use maka_skills::{
 fn host(tools: Vec<String>) -> Result<HostCapabilities, String> {
     if tools
         .iter()
-        .any(|name| name.is_empty() || name.len() > 128 || name.chars().any(char::is_control))
+        .any(|name| name.is_empty() || name.chars().any(char::is_control))
     {
         return Err("skills_tool_context_invalid".into());
     }
@@ -35,7 +35,7 @@ fn host(tools: Vec<String>) -> Result<HostCapabilities, String> {
         capabilities: Default::default(),
     })
 }
-// Keep the whole business result visible through the original archive projection.
+// Page toward the archive preview target; a complete first item can exceed it.
 fn fits(value: &impl serde::Serialize) -> bool {
     serde_json::to_string(value)
         .is_ok_and(|text| text.encode_utf16().count() <= maka_agent_facts::read::MAX_PAGE_CHARS)
@@ -79,20 +79,15 @@ impl Library {
             "search" => {
                 let input: ModelSearch =
                     serde_json::from_value(request.input).map_err(|_| "skills_query_invalid")?;
-                if input.query.len() > 16384
-                    || input.query.chars().count() > 4096
-                    || input.limit.is_some_and(|n| !(1..=8).contains(&n))
-                {
+                if input.limit.is_some_and(|n| !(1..=8).contains(&n)) {
                     return Err("skills_query_invalid".into());
                 }
                 let mut page = ModelSearchResult {
                     revision,
                     result: catalog.search(&input.query, input.limit.unwrap_or(8)),
                 };
-                while !fits(&page) {
-                    if page.result.matches.pop().is_none() {
-                        return Err("skills_page_too_large".into());
-                    }
+                while page.result.matches.len() > 1 && !fits(&page) {
+                    page.result.matches.pop();
                     page.result.truncated = true;
                 }
                 encode(page)
@@ -112,7 +107,7 @@ impl Library {
                                 request: if input.name.is_empty() {
                                     "[invalid]".into()
                                 } else {
-                                    bound(&input.name, 512)
+                                    input.name.clone()
                                 },
                                 reason: reason.clone(),
                             }),
@@ -155,7 +150,7 @@ impl Library {
                             next,
                             receipt: loaded.receipt(SkillInvocationMode::ModelTool, &input.name),
                         };
-                        if fits(&result) {
+                        if fits(&result) || budget <= 1 {
                             return encode(result);
                         }
                         budget /= 2;
@@ -196,10 +191,14 @@ impl Library {
                     if fits(&result) && (!instructions.is_empty() || remainder.is_empty()) {
                         return encode(result);
                     }
-                    if instructions.is_empty() {
-                        return Err("skills_page_too_large".into());
+                    if instructions.chars().count() <= 1 {
+                        return encode(result);
                     }
-                    instructions = bound(&instructions, instructions.len() / 2);
+                    let cut = instructions.len() / 2;
+                    let end = instructions
+                        .floor_char_boundary(cut)
+                        .max(instructions.chars().next().map_or(0, char::len_utf8));
+                    instructions.truncate(end);
                 }
             }
             _ => Err("skills_method_unavailable".into()),

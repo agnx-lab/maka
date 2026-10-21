@@ -86,12 +86,9 @@ function problem(field: FormField, value: FormValue | undefined): string | null 
     case 'string': {
       if (typeof value !== 'string') return 'Enter text.';
       const length = [...value].length;
-      if (
-        length < (field.minLength ?? 0) ||
-        length > (field.maxLength ?? 2048) ||
-        utf8Bytes(value) > 2048
-      )
-        return `Use ${field.minLength ?? 0}–${field.maxLength ?? 2048} characters, within 2048 UTF-8 bytes.`;
+      if (length < (field.minLength ?? 0)) return `Use at least ${field.minLength} characters.`;
+      if (field.maxLength !== undefined && field.maxLength !== null && length > field.maxLength)
+        return `Use at most ${field.maxLength} characters.`;
       if (field.format === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
         return 'Enter an email address.';
       if (field.format === 'uri') {
@@ -143,7 +140,6 @@ export function formSubmission(
 ): {
   answer: Extract<InteractionAnswer, { kind: 'form'; action: 'accept' }> | null;
   problems: Array<string | null>;
-  error: string | null;
 } {
   const values: Record<string, FormValue> = Object.create(null);
   const problems = fields.map((field, index) => {
@@ -162,20 +158,8 @@ export function formSubmission(
     if (!error && value !== undefined) values[field.name] = value;
     return error;
   });
-  const error =
-    utf8Bytes(
-      JSON.stringify({
-        kind: 'form_answer',
-        action: 'accept',
-        values,
-        committedAt: Number.MAX_SAFE_INTEGER,
-      }),
-    ) > 8192
-      ? 'The complete answers exceed 8192 UTF-8 bytes. Shorten the values or omit optional fields.'
-      : null;
   return {
-    answer: error || problems.some(Boolean) ? null : { kind: 'form', action: 'accept', values },
+    answer: problems.some(Boolean) ? null : { kind: 'form', action: 'accept', values },
     problems,
-    error,
   };
 }

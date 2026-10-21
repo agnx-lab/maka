@@ -793,13 +793,11 @@ export function rootCommands(
           ? ''
           : readyCopy?.status === 'loading'
             ? text.copyLoading
-            : readyCopy?.status === 'too_large'
-              ? text.copyTooLarge
-              : readyCopy?.status === 'empty'
-                ? text.copyEmpty
-                : readyCopy?.status === 'streaming'
-                  ? text.copyStreaming
-                  : text.copyUnavailable,
+            : readyCopy?.status === 'empty'
+              ? text.copyEmpty
+              : readyCopy?.status === 'streaming'
+                ? text.copyStreaming
+                : text.copyUnavailable,
         disabled: !route || !value,
         ...(value ? { copyText: value } : {}),
       };

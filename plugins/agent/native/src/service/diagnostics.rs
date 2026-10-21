@@ -61,7 +61,7 @@ pub(super) async fn query(
             break value;
         }
         if page.entries.len() <= 1 {
-            return Err("agent_diagnostics_unavailable".into());
+            break value;
         }
         page.entries.pop();
         page.next_before = page.entries.last().map(|entry| entry.sequence);

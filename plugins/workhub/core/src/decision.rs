@@ -48,13 +48,13 @@ pub struct Creation {
 )]
 pub enum Destination {
     Existing {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         revision: String,
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         candidate: String,
     },
     Create {
-        #[schemars(length(min = 1, max = 512))]
+        #[schemars(length(min = 1))]
         title: String,
     },
 }
@@ -67,31 +67,31 @@ pub enum Destination {
 )]
 pub enum Decision {
     Select {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         revision: String,
-        #[schemars(length(min = 2, max = 16), inner(length(min = 1, max = 256)), extend("uniqueItems" = true))]
+        #[schemars(length(min = 2), inner(length(min = 1)), extend("uniqueItems" = true))]
         candidates: Vec<String>,
-        #[schemars(length(min = 1, max = 49152))]
+        #[schemars(length(min = 1))]
         text: String,
     },
     Route {
         target: Destination,
-        #[schemars(length(min = 1, max = 49152))]
+        #[schemars(length(min = 1))]
         text: String,
     },
     Correct {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         assignment_id: String,
         target: Destination,
-        #[schemars(length(min = 1, max = 49152))]
+        #[schemars(length(min = 1))]
         text: String,
     },
     Stop {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         assignment_id: String,
     },
     Resume {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         assignment_id: String,
     },
 }
@@ -363,8 +363,10 @@ impl crate::Manager {
         text: &str,
         language: Language,
     ) -> Result<MessageInput, Error> {
-        if text.trim().is_empty() || text.len() > 48 * 1024 {
-            return Err(invalid("Delegation text must contain 1–49152 bytes"));
+        if text.trim().is_empty() || text.contains('\0') {
+            return Err(invalid(
+                "Delegation text must be nonempty and contain no NUL",
+            ));
         }
         let (coordinator, commands) = self.coordinator.resolve().await?;
         if source.session_id != coordinator.session_id {

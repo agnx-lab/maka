@@ -26,11 +26,8 @@ use crate::{EventLog, StoreError};
 use maka_agent_facts::artifact::Artifact;
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::artifact::content_digest;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use records::{advance, decode, invalid, read_record, require_session};
 use sqlx::Connection;
-
-const MAX_RECORD_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ArtifactDeletion {
@@ -176,16 +173,10 @@ pub(crate) fn validate_material(
     digest: &str,
 ) -> Result<String, StoreError> {
     artifact.validate().map_err(invalid)?;
-    if artifact.size_bytes != bytes
-        || (artifact.source == ArtifactSource::UserUpload
-            && artifact.size_bytes > MAX_ATTACHMENT_BYTES)
-    {
-        return Err(invalid("Artifact payload size mismatch or limit exceeded"));
+    if artifact.size_bytes != bytes {
+        return Err(invalid("Artifact payload size mismatch"));
     }
     let encoded = serde_json::to_string(artifact)?;
-    if encoded.len() > MAX_RECORD_BYTES {
-        return Err(invalid("Artifact metadata exceeds limit"));
-    }
     if artifact.source == ArtifactSource::UserUpload && artifact.summary.as_deref() != Some(digest)
     {
         return Err(StoreError::ArtifactConflict);

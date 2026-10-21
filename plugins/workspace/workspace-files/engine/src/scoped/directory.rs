@@ -101,6 +101,10 @@ impl Directory {
         parent.open_with(name, options.clone().follow(FollowSymlinks::No))
     }
 
+    pub(crate) fn identity(&self) -> io::Result<String> {
+        crate::directory::identity(&self.inner).map(String::from)
+    }
+
     pub(crate) fn open_dir(&self, relative: impl AsRef<Path>) -> io::Result<Self> {
         let relative = relative.as_ref();
         let resolved = if self.policy.is_some() {

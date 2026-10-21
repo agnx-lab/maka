@@ -43,16 +43,14 @@ pub enum Query {
 impl Query {
     pub fn validate(&self) -> Result<(), crate::Error> {
         match self {
-            Self::Get { task_id } => crate::task::text(task_id, 160),
+            Self::Get { task_id } => crate::task::text(task_id),
             Self::List {
                 cursor,
                 expected_revision,
             } => {
                 if cursor.is_some() != expected_revision.is_some()
                     || cursor.as_ref().is_some_and(|cursor| {
-                        cursor.is_empty()
-                            || cursor.len() > 160
-                            || !cursor.bytes().all(|byte| byte.is_ascii_digit())
+                        cursor.is_empty() || !cursor.bytes().all(|byte| byte.is_ascii_digit())
                     })
                     || expected_revision.is_some_and(|revision| revision > (1 << 53) - 1)
                 {

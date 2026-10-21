@@ -102,7 +102,6 @@ pub(super) fn read(
 }
 pub(super) fn safe_id(id: &str, claude: bool) -> bool {
     !id.is_empty()
-        && id.len() <= 128
         && id.bytes().all(|byte| {
             byte == b'-'
                 || if claude {

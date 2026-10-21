@@ -49,9 +49,9 @@ pub fn encode_projection(projection: &DurableToolProjection) -> Result<Vec<u8>, 
         DurableToolProjection::Failure => {
             string(&mut result, DURABLE_TOOL_PROJECTION_FAILURE_MESSAGE)?
         }
-        DurableToolProjection::Json { value } => value_json(&mut result, value, 0, &mut 0, false)?,
+        DurableToolProjection::Json { value } => value_json(&mut result, value, false)?,
         DurableToolProjection::Content { parts } => {
-            if parts.is_empty() || parts.len() > 64 {
+            if parts.is_empty() {
                 return Err("invalid archive content");
             }
             result.push('[');
@@ -86,11 +86,35 @@ pub fn encode_projection(projection: &DurableToolProjection) -> Result<Vec<u8>, 
 /// Key-sorted strict JSON identity of the native durable projection shape.
 /// Rust has no TS projection version envelope; body encoding is a separate hash.
 pub fn projection_digest(projection: &DurableToolProjection) -> Result<String, &'static str> {
-    // Validate the bounded embedded shape before serde walks it recursively.
-    encode_projection(projection)?;
-    let value = serde_json::to_value(projection).map_err(|_| "invalid projection")?;
     let mut json = String::new();
-    value_json(&mut json, &value, 0, &mut 0, true)?;
+    match projection {
+        DurableToolProjection::Text { text } => {
+            json.push_str("{\"kind\":\"text\",\"text\":");
+            string(&mut json, text)?;
+            json.push('}');
+        }
+        DurableToolProjection::Json { value } => {
+            json.push_str("{\"kind\":\"json\",\"value\":");
+            value_json(&mut json, value, true)?;
+            json.push('}');
+        }
+        DurableToolProjection::Failure => json.push_str("{\"kind\":\"failure\"}"),
+        DurableToolProjection::Content { parts } => {
+            if parts.is_empty() {
+                return Err("invalid archive content");
+            }
+            json.push_str("{\"kind\":\"content\",\"parts\":[");
+            for (index, part) in parts.iter().enumerate() {
+                if index > 0 {
+                    json.push(',');
+                }
+                // A typed part contains only flat strings/references, never nested raw JSON.
+                let value = serde_json::to_value(part).map_err(|_| "invalid projection part")?;
+                value_json(&mut json, &value, true)?;
+            }
+            json.push_str("]}");
+        }
+    }
     Ok(content_digest(json.as_bytes()))
 }
 
@@ -102,56 +126,61 @@ fn index(key: &str) -> Option<u32> {
     let index = key.parse::<u32>().ok()?;
     (index != u32::MAX && index.to_string() == key).then_some(index)
 }
-fn value_json(
-    output: &mut String,
-    value: &Value,
-    depth: usize,
-    nodes: &mut usize,
-    stable: bool,
-) -> Result<(), &'static str> {
-    *nodes += 1;
-    // Durable JSON has depth32/nodes20000; allow its typed envelope here too.
-    if depth > 36 || *nodes > 20_256 {
-        return Err("archive JSON exceeds shape limit");
+fn value_json(output: &mut String, value: &Value, stable: bool) -> Result<(), &'static str> {
+    enum Step<'a> {
+        Value(&'a Value),
+        Key(&'a str),
+        Literal(&'static str),
     }
-    match value {
-        Value::Null => output.push_str("null"),
-        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-        Value::Number(value) => {
-            output.push_str(ryu_js::Buffer::new().format(value.as_f64().ok_or("invalid number")?))
-        }
-        Value::String(value) => string(output, value)?,
-        Value::Array(values) => {
-            output.push('[');
-            for (i, value) in values.iter().enumerate() {
-                if i > 0 {
-                    output.push(',');
-                }
-                value_json(output, value, depth + 1, nodes, stable)?;
+    let mut pending = vec![Step::Value(value)];
+    while let Some(step) = pending.pop() {
+        let value = match step {
+            Step::Literal(text) => {
+                output.push_str(text);
+                continue;
             }
-            output.push(']');
-        }
-        Value::Object(values) => {
-            let mut keys: Vec<_> = values.keys().collect();
-            // JSON.stringify enumerates integer keys first, then strict sorted
-            // string keys. UTF-16 comparison also handles supplementary keys.
-            keys.sort_by(|a, b| match (index(a), index(b)) {
-                (Some(a), Some(b)) => a.cmp(&b),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) if stable => a.encode_utf16().cmp(b.encode_utf16()),
-                (None, None) => std::cmp::Ordering::Equal,
-            });
-            output.push('{');
-            for (i, key) in keys.into_iter().enumerate() {
-                if i > 0 {
-                    output.push(',');
-                }
+            Step::Key(key) => {
                 string(output, key)?;
-                output.push(':');
-                value_json(output, &values[key], depth + 1, nodes, stable)?;
+                continue;
             }
-            output.push('}');
+            Step::Value(value) => value,
+        };
+        match value {
+            Value::Null => output.push_str("null"),
+            Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+            Value::Number(value) => output
+                .push_str(ryu_js::Buffer::new().format(value.as_f64().ok_or("invalid number")?)),
+            Value::String(value) => string(output, value)?,
+            Value::Array(values) => {
+                output.push('[');
+                pending.push(Step::Literal("]"));
+                for (index, value) in values.iter().enumerate().rev() {
+                    pending.push(Step::Value(value));
+                    if index > 0 {
+                        pending.push(Step::Literal(","));
+                    }
+                }
+            }
+            Value::Object(values) => {
+                let mut keys: Vec<_> = values.keys().collect();
+                keys.sort_by(|a, b| match (index(a), index(b)) {
+                    (Some(a), Some(b)) => a.cmp(&b),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) if stable => a.encode_utf16().cmp(b.encode_utf16()),
+                    (None, None) => std::cmp::Ordering::Equal,
+                });
+                output.push('{');
+                pending.push(Step::Literal("}"));
+                for (index, key) in keys.into_iter().enumerate().rev() {
+                    pending.push(Step::Value(&values[key]));
+                    pending.push(Step::Literal(":"));
+                    pending.push(Step::Key(key));
+                    if index > 0 {
+                        pending.push(Step::Literal(","));
+                    }
+                }
+            }
         }
     }
     Ok(())

@@ -499,11 +499,11 @@ async fn native_acp_stop_settles_the_actual_process_before_releasing_execution()
 }
 
 #[tokio::test]
-async fn native_acp_v1_forwards_actual_attachments_and_rejects_oversized_prompt_before_dispatch() {
+async fn native_acp_v1_forwards_complete_actual_attachments_once() {
     attachment_prompt(1).await;
 }
 #[tokio::test]
-async fn native_acp_v2_forwards_actual_attachments_and_rejects_oversized_prompt_before_dispatch() {
+async fn native_acp_v2_forwards_complete_actual_attachments_once() {
     attachment_prompt(2).await;
 }
 async fn attachment_prompt(protocol: u8) {
@@ -553,17 +553,38 @@ async fn attachment_prompt(protocol: u8) {
         let mut large_image = vec![255;800_000];
         large_image[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
         let large = super::super::attachments::upload(&f, &session, "large.png", &large_image, Uuid::new_v4()).await.unwrap();
-        let rejected = f.mutation(2,"execute",json!({"sessionId":session,"message":"too large","attachments":[large["attachment"]["id"]],"executor":{"executor":"external","settings":{}}}),Uuid::new_v4()).await.unwrap();
+        let large_execution = f.mutation(2,"execute",json!({"sessionId":session,"message":"complete large image","attachments":[large["attachment"]["id"]],"executor":{"executor":"external","settings":{}}}),Uuid::new_v4()).await.unwrap();
         f.drained().await;
-        let observed = work(&f,&session,&rejected).await;
-        assert_eq!(observed["execution"]["state"],"failed","{observed}");
-        let third = execute(&f, &session, "after attachment rejection").await;
+        let large_observed = work(&f,&session,&large_execution).await;
+        let third = execute(&f, &session, "after complete attachment").await;
         f.drained().await;
-        assert_eq!(work(&f,&session,&third).await["execution"]["state"],"completed");
+        let third_observed = work(&f,&session,&third).await;
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+        assert_eq!(large_execution["kind"],"started");
+        assert_eq!(large_observed["execution"]["state"],"completed");
+        assert_eq!(third_observed["execution"]["state"],"completed");
         let requests=std::fs::read_to_string(&trace).unwrap();
         let requests:Vec<Value>=requests.lines().map(|line|serde_json::from_str(line).unwrap()).collect();
-        assert_eq!(requests.iter().filter(|v|v["method"]=="session/prompt").count(),2,"invalid attachment prompt must never reach the peer");
-        f.app.shutdown().await.unwrap(); f.config.shutdown().await.unwrap();
+        let prompts:Vec<_>=requests.iter().filter(|v|v["method"]=="session/prompt").collect();
+        assert_eq!(prompts.len(),3,"each accepted execution reaches the peer exactly once");
+        assert_eq!(requests.iter().filter(|v|v["method"]=="spawn").count(),if protocol==2 {1}else{2});
+        assert_eq!(requests.iter().filter(|v|v["method"]=="session/new").count(),1);
+        assert!(prompts.iter().all(|prompt|prompt["params"]["sessionId"]=="acp-persistent"));
+        let large_prompt=prompts[1]["params"]["prompt"].as_array().unwrap();
+        assert_eq!(large_prompt.iter().filter(|block|block["type"]=="text" && block["text"]=="complete large image").count(),1);
+        let large_media:Vec<_>=large_prompt.iter().filter(|block|matches!(block["type"].as_str(),Some("resource"|"image"))).collect();
+        assert_eq!(large_media.len(),1);
+        assert_eq!(large_media[0]["type"],"image");
+        assert_eq!(large_media[0]["mimeType"],"image/png");
+        let encoded=large_media[0]["data"].as_str().unwrap();
+        assert!(encoded==STANDARD.encode(&large_image),"peer receives the entire canonical image encoding");
+        assert!(STANDARD.decode(encoded).unwrap()==large_image,"peer receives every original image byte");
+        let wire_prompt=prompts[1]["params"]["prompt"].to_string();
+        assert!(!wire_prompt.contains(&f.workspace.to_string_lossy().to_string()));
+        assert!(!wire_prompt.contains(large["attachment"]["id"].as_str().unwrap()));
+        let last_prompt=prompts[2]["params"]["prompt"].as_array().unwrap();
+        assert_eq!(last_prompt.iter().filter(|block|block["type"]=="text" && block["text"]=="after complete attachment").count(),1);
     }).await.unwrap();
 }
 

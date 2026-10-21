@@ -432,10 +432,6 @@ fn scene_declarations_are_required_only_for_javascript_component_entries() {
             version: 1,
         },
         crate::package::SceneLanguage {
-            name: "x".repeat(129),
-            version: 1,
-        },
-        crate::package::SceneLanguage {
             name: "valid.scene".into(),
             version: 0,
         },
@@ -444,6 +440,13 @@ fn scene_declarations_are_required_only_for_javascript_component_entries() {
         invalid.scene = Some(language);
         assert!(invalid.validate().is_err());
     }
+    let mut complete = valid.clone();
+    complete.scene.as_mut().unwrap().name = "x".repeat(129);
+    complete.validate().unwrap();
+    assert_eq!(
+        serde_json::to_value(&complete).unwrap()["scene"]["name"],
+        json!("x".repeat(129))
+    );
     let host = Declaration {
         entries: BTreeMap::from([(EntryTarget::Host, valid.clone())]),
         composition: None,
@@ -682,7 +685,7 @@ fn nested_override_precedence_preserves_unrelated_template_defaults() {
 }
 
 #[test]
-fn recursive_template_expansion_is_bounded_and_source_keys_are_unique() {
+fn recursive_template_expansion_rejects_cycles_and_duplicate_source_keys() {
     let (mut input, mut packages) = fixture();
     input.instances.get_mut("b").unwrap().key = input.instances["a"].key;
     assert!(Plan::prepare(&input, &packages, &RemoteExports::new()).is_err());
@@ -710,7 +713,7 @@ fn recursive_template_expansion_is_bounded_and_source_keys_are_unique() {
         Plan::prepare(&input, &packages, &RemoteExports::new())
             .unwrap_err()
             .to_string()
-            .contains("expansion limits")
+            .contains("cyclic composition expansion")
     );
 }
 
@@ -774,4 +777,333 @@ fn explicit_null_parameter_default_survives_package_metadata_roundtrip() {
     input.instances.get_mut("a").unwrap().package = package("nullable-product", 1).into();
     let plan = Plan::prepare(&input, &packages, &RemoteExports::new()).unwrap();
     assert!(instance(&plan, &["a", "content"]).configuration["title"].is_null());
+}
+
+#[test]
+fn k64_finite_current_compositions_keep_shortening_overrides_and_sibling_identity() {
+    let (mut input, mut packages) = fixture();
+    let reference = package("finite-current", 1);
+    let mut executable = entry();
+    executable.configuration = json!({"type":"object","additionalProperties":false});
+    executable.exports = BTreeMap::from([(
+        "App".into(),
+        Export {
+            contract: contract(),
+            availability: Availability::Required,
+        },
+    )]);
+    executable.imports.insert(
+        "base".into(),
+        Import {
+            contract: contract(),
+            cardinality: Cardinality::Optional,
+        },
+    );
+    let mut child = node(10, reference.clone(), PackageUse::Composition);
+    child.bindings.insert(
+        "base".into(),
+        vec![Target::Import {
+            name: "base".into(),
+        }],
+    );
+    child.package = PackageSelection::Current;
+    packages
+        .insert(
+            reference.clone(),
+            Declaration {
+                entries: BTreeMap::from([(EntryTarget::Tui, executable)]),
+                composition: Some(Template {
+                    parameters: BTreeMap::new(),
+                    imports: BTreeMap::from([(
+                        "base".into(),
+                        Import {
+                            contract: contract(),
+                            cardinality: Cardinality::Optional,
+                        },
+                    )]),
+                    exports: BTreeMap::from([("App".into(), local(&["next"], "App"))]),
+                    children: BTreeMap::from([("next".into(), child)]),
+                }),
+            },
+        )
+        .unwrap();
+    for root in input.instances.values_mut() {
+        root.package = reference.clone().into();
+        root.overrides = vec![Override {
+            path: vec!["next".into(); 140],
+            use_package: Some(PackageUse::Entry),
+            ..Override::default()
+        }];
+    }
+    input
+        .instances
+        .get_mut("a")
+        .unwrap()
+        .bindings
+        .insert("base".into(), vec![local(&["b"], "App")]);
+    let plan = Plan::prepare(&input, &packages, &RemoteExports::new()).unwrap();
+    assert_eq!(plan.instances().len(), 282);
+    for (alias, source) in [("a", 1), ("b", 2)] {
+        let mut path = vec![alias];
+        path.extend(std::iter::repeat_n("next", 140));
+        let terminal = instance(&plan, &path);
+        let mut identity = vec![Uuid::from_u128(source)];
+        identity.extend(std::iter::repeat_n(Uuid::from_u128(10), 140));
+        assert_eq!(terminal.identity, InstanceId(identity));
+        assert_eq!(terminal.package, reference);
+        assert_eq!(terminal.configuration, json!({}));
+        assert!(terminal.entry.is_some());
+        if alias == "a" {
+            let mut provider = vec![Uuid::from_u128(2)];
+            provider.extend(std::iter::repeat_n(Uuid::from_u128(10), 140));
+            assert_eq!(
+                terminal.bindings["base"][0].provider,
+                Provider::Local {
+                    instance: InstanceId(provider),
+                    export: "App".into(),
+                }
+            );
+        } else {
+            assert_eq!(terminal.bindings["base"].len(), 0);
+        }
+    }
+    let mut selected = vec![Uuid::from_u128(1)];
+    selected.extend(std::iter::repeat_n(Uuid::from_u128(10), 140));
+    assert_eq!(
+        plan.launch().unwrap().provider,
+        Provider::Local {
+            instance: InstanceId(selected),
+            export: "App".into(),
+        }
+    );
+    input.instances.get_mut("a").unwrap().overrides.clear();
+    assert!(
+        Plan::prepare(&input, &packages, &RemoteExports::new())
+            .unwrap_err()
+            .to_string()
+            .contains("cyclic composition expansion")
+    );
+}
+
+#[test]
+fn k64_large_declared_bindings_expand_from_overrides_without_platform_cardinality() {
+    let (mut input, mut packages) = fixture();
+    let mut consumer = entry();
+    consumer.configuration = json!({"type":"object","additionalProperties":false});
+    consumer.imports.insert(
+        "all".into(),
+        Import {
+            contract: contract(),
+            cardinality: Cardinality::Many {
+                min: 4097,
+                max: 4097,
+            },
+        },
+    );
+    packages
+        .insert(
+            package("collector", 1),
+            Declaration {
+                entries: BTreeMap::from([(EntryTarget::Tui, consumer.clone())]),
+                composition: None,
+            },
+        )
+        .unwrap();
+    consumer.imports.clear();
+    let provider_export = "Content_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_";
+    let exported = consumer.exports.remove("Content").unwrap();
+    consumer.exports.insert(provider_export.into(), exported);
+    packages
+        .insert(
+            package("provider", 1),
+            Declaration {
+                entries: BTreeMap::from([(EntryTarget::Tui, consumer)]),
+                composition: None,
+            },
+        )
+        .unwrap();
+    let mut children = BTreeMap::from([(
+        "collector".into(),
+        node(1, package("collector", 1), PackageUse::Entry),
+    )]);
+    let mut targets = Vec::new();
+    for index in 0..4097 {
+        let alias = format!("provider-{index:04}");
+        children.insert(
+            alias.clone(),
+            node(index + 2, package("provider", 1), PackageUse::Entry),
+        );
+        targets.push(Target::Instance { path: vec![alias], export: "Content_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_".into() });
+    }
+    packages
+        .insert(
+            package("large-composition", 1),
+            Declaration {
+                entries: BTreeMap::new(),
+                composition: Some(Template {
+                    parameters: BTreeMap::new(),
+                    imports: BTreeMap::new(),
+                    exports: BTreeMap::new(),
+                    children,
+                }),
+            },
+        )
+        .unwrap();
+    let mut root = node(1, package("large-composition", 1), PackageUse::Composition);
+    root.overrides.push(Override {
+        path: vec!["collector".into()],
+        bindings: BTreeMap::from([("all".into(), targets)]),
+        ..Override::default()
+    });
+    input.instances = BTreeMap::from([("root".into(), root)]);
+    input.launch = None;
+    let plan = Plan::prepare(&input, &packages, &RemoteExports::new()).unwrap();
+    assert_eq!(plan.instances().len(), 4099);
+    let bindings = &instance(&plan, &["root", "collector"]).bindings["all"];
+    assert_eq!(bindings.len(), 4097);
+    assert_eq!(bindings[0].provider, Provider::Local {
+        instance: InstanceId(vec![Uuid::from_u128(1), Uuid::from_u128(2)]), export: "Content_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_".into(),
+    });
+    assert_eq!(bindings[4096].provider, Provider::Local {
+        instance: InstanceId(vec![Uuid::from_u128(1), Uuid::from_u128(4098)]), export: "Content_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_catalogue_".into(),
+    });
+}
+
+#[test]
+fn k64_deep_dependency_graph_accepts_acyclic_edges_and_rejects_a_back_edge() {
+    let declaration = Arc::new(Export {
+        contract: contract(),
+        availability: Availability::Required,
+    });
+    let mut instances = BTreeMap::new();
+    for source in 1..=4097 {
+        let identity = InstanceId(vec![Uuid::from_u128(source)]);
+        let bindings = if source < 4097 {
+            BTreeMap::from([(
+                "next".into(),
+                vec![Binding {
+                    provider: Provider::Local {
+                        instance: InstanceId(vec![Uuid::from_u128(source + 1)]),
+                        export: "Content".into(),
+                    },
+                    declaration: declaration.clone(),
+                }],
+            )])
+        } else {
+            BTreeMap::new()
+        };
+        instances.insert(
+            identity.clone(),
+            Instance {
+                identity,
+                path: vec![format!("node-{source}")],
+                parent: None,
+                package: package("provider", 1),
+                disabled: false,
+                configuration: json!({}),
+                entry: None,
+                bindings,
+                exports: BTreeMap::new(),
+            },
+        );
+    }
+    validate_dependencies(&instances).unwrap();
+    let terminal = instances
+        .get_mut(&InstanceId(vec![Uuid::from_u128(4097)]))
+        .unwrap();
+    terminal.bindings.insert(
+        "back".into(),
+        vec![Binding {
+            provider: Provider::Local {
+                instance: InstanceId(vec![Uuid::from_u128(1)]),
+                export: "Content".into(),
+            },
+            declaration,
+        }],
+    );
+    assert!(
+        validate_dependencies(&instances)
+            .unwrap_err()
+            .to_string()
+            .contains("cyclic capability dependency")
+    );
+}
+
+#[test]
+fn k64_recovery_namespace_preserves_deep_identity_and_rejects_invalid_uuid_sources() {
+    use crate::operation::{RecoveryContract, RecoveryProtocol, RecoveryRef};
+    let mut reference = RecoveryRef {
+        source: crate::deployment::DeploymentRef {
+            state_domain: "a".repeat(64),
+            deployment: Uuid::from_u128(1),
+            revision: 1,
+        },
+        namespace: InstanceId((1..=65).map(Uuid::from_u128).collect()),
+        export: "service".into(),
+        method: "change".into(),
+        operation: Uuid::from_u128(2),
+        fingerprint: format!("sha256-{}", "a".repeat(64)),
+        contract: RecoveryContract {
+            name: "example.Change".into(),
+            version: 1,
+            transport: Transport::Local,
+            digest: format!("sha256-{}", "b".repeat(64)),
+        },
+        recovery: RecoveryProtocol::JournalV1,
+    };
+    reference.validate().unwrap();
+    let encoded = serde_json::to_value(&reference).unwrap();
+    assert_eq!(encoded["namespace"].as_array().unwrap().len(), 65);
+    assert_eq!(
+        serde_json::from_value::<RecoveryRef>(encoded).unwrap(),
+        reference
+    );
+    reference.namespace.0[64] = Uuid::nil();
+    assert!(reference.validate().is_err());
+    reference.namespace.0.clear();
+    assert!(reference.validate().is_err());
+    reference.namespace.0.push(Uuid::from_u128(1));
+    reference.operation = Uuid::nil();
+    assert!(reference.validate().is_err());
+}
+
+#[test]
+fn forwarding_rejects_a_real_import_export_cycle() {
+    let (mut input, mut packages) = fixture();
+    packages
+        .insert(
+            package("forwarding-cycle", 1),
+            Declaration {
+                entries: BTreeMap::new(),
+                composition: Some(Template {
+                    parameters: BTreeMap::new(),
+                    imports: BTreeMap::from([(
+                        "base".into(),
+                        Import {
+                            contract: contract(),
+                            cardinality: Cardinality::One,
+                        },
+                    )]),
+                    exports: BTreeMap::from([(
+                        "App".into(),
+                        Target::Import {
+                            name: "base".into(),
+                        },
+                    )]),
+                    children: BTreeMap::new(),
+                }),
+            },
+        )
+        .unwrap();
+    input.instances.remove("b");
+    let root = input.instances.get_mut("a").unwrap();
+    root.package = package("forwarding-cycle", 1).into();
+    root.bindings
+        .insert("base".into(), vec![local(&["a"], "App")]);
+    assert!(
+        Plan::prepare(&input, &packages, &RemoteExports::new())
+            .unwrap_err()
+            .to_string()
+            .contains("cyclic import forwarding")
+    );
 }

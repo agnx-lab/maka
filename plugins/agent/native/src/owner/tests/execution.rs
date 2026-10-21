@@ -638,7 +638,7 @@ async fn work_answer_pages_preserve_exact_unicode_nul_and_owner_after_later_work
         let original=fixture.send(&session).await.unwrap();
         let target=json!({"kind":"invocation","invocationId":original["invocationId"]});
         let (mut socket,_)=listener.accept().await.unwrap();request(&mut socket).await;
-        let answer="中\0🦀\n".repeat(220);
+        let answer="中\0🦀\n".repeat(2200);
         response_with_thinking(&mut socket,&answer,Some("Hidden worker reasoning")).await;
         fixture.drained().await;
         fixture.send(&session).await.unwrap();
@@ -649,7 +649,7 @@ async fn work_answer_pages_preserve_exact_unicode_nul_and_owner_after_later_work
             let page=fixture.query("work",json!({"sessionId":session,"target":target,"cursor":cursor})).await.unwrap();
             assert_eq!(page["kind"],"delivered");assert_eq!(page["execution"]["invocationId"],original["invocationId"]);
             assert_eq!(page["execution"]["state"],"completed");assert_eq!(page["pendingInteractions"],0);
-            let text=page["answer"]["text"].as_str().unwrap();assert!(text.len()<=768);joined.push_str(text);pages+=1;
+            let text=page["answer"]["text"].as_str().unwrap();assert!(text.len()<=16_384);joined.push_str(text);pages+=1;
             cursor=page["answer"]["next"].clone();if cursor.is_null() {break;}
             assert_eq!(cursor["offset"],joined.len());
         }

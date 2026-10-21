@@ -29,7 +29,6 @@ use maka_agent_facts::tool_call::ToolCallIdentity;
 use maka_agent_facts::tool_call::ToolOrigin;
 use maka_agent_facts::tool_output::ToolOutput;
 
-mod limits;
 mod state;
 use state::CallState;
 pub(super) use state::Tools;
@@ -344,16 +343,6 @@ impl Tools {
         is_error: bool,
         content: ToolContent,
     ) -> Result<Message, ProjectionError> {
-        let raw_success = matches!(
-            event.fact,
-            Fact::ToolSettled {
-                outcome: maka_agent_facts::event::ToolOutcome::Succeeded { .. },
-                ..
-            }
-        );
-        if !raw_success {
-            limits::check(&content, self.limit)?;
-        }
         let pending = self
             .pending
             .remove(operation)
@@ -386,9 +375,6 @@ impl Tools {
                 metadata: pending.metadata,
             },
         );
-        if raw_success {
-            limits::check(&row, crate::MAX_TOOL_ROW_BYTES)?;
-        }
         Ok(row)
     }
 }

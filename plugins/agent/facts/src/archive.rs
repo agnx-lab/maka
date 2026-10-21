@@ -29,7 +29,6 @@ pub use reference::ToolResultAddress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const MAX_ARCHIVE_REF_CHARS: usize = 16_384;
 const ARCHIVE_READ_INSTRUCTIONS: &str = "Read the page below; pass page.next to Read to continue. The address is a Session resource, not a workspace file.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,7 +76,7 @@ struct CanonicalPlaceholder<'a> {
 }
 
 pub(crate) fn identity_string(value: &str) -> bool {
-    !value.is_empty() && value.encode_utf16().count() <= 512
+    !value.is_empty()
 }
 pub(crate) fn hash(value: &str) -> bool {
     value.len() == 64
@@ -137,7 +136,7 @@ impl ArchivedPlaceholder {
             .tool_result_page(
                 &identity.tool_name,
                 body,
-                MAX_PAGE_CHARS.saturating_sub(overhead),
+                MAX_PAGE_CHARS.saturating_sub(overhead).max(1),
             )
             .map_err(|_| "archive page cannot fit the model response")?;
         let placeholder = Self {
@@ -154,10 +153,6 @@ impl ArchivedPlaceholder {
         self.identity.validate()?;
         if self.original_estimated_tokens > 9_007_199_254_740_991 {
             return Err("archive exceeds token limit");
-        }
-        let model = self.canonical_value()?;
-        if model.to_string().encode_utf16().count() > MAX_PAGE_CHARS {
-            return Err("archive exceeds model page limit");
         }
         Ok(())
     }
@@ -194,6 +189,55 @@ fn canonical_header(identity: &ArchiveIdentity) -> Result<CanonicalHeader<'_>, &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_preserves_complete_wide_deep_and_ordered_projection_encoding() {
+        let wide = DurableToolProjection::Json {
+            value: serde_json::Value::Array(vec![serde_json::json!(7); 20_257]),
+        };
+        let expected = format!(
+            "[{}]",
+            std::iter::repeat_n("7", 20_257)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert_eq!(encode_projection(&wide).unwrap(), expected.as_bytes());
+        let mut deep = serde_json::json!("tail");
+        for _ in 0..40 {
+            deep = serde_json::Value::Array(vec![deep]);
+        }
+        let projection = DurableToolProjection::Json { value: deep };
+        assert_eq!(
+            encode_projection(&projection).unwrap(),
+            format!("{}\"tail\"{}", "[".repeat(40), "]".repeat(40)).as_bytes()
+        );
+        let content = DurableToolProjection::Content {
+            parts: (0..65)
+                .map(|index| crate::tool_output::ProjectionPart::Text {
+                    text: format!("part-{index:02}"),
+                })
+                .collect(),
+        };
+        let expected: Vec<_> = (0..65)
+            .map(|index| serde_json::json!({"type":"text","text":format!("part-{index:02}")}))
+            .collect();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&encode_projection(&content).unwrap())
+                .unwrap(),
+            serde_json::json!(expected)
+        );
+        assert_eq!(
+            projection_digest(&projection).unwrap(),
+            crate::artifact::content_digest(
+                format!(
+                    "{{\"kind\":\"json\",\"value\":{}\"tail\"{}}}",
+                    "[".repeat(40),
+                    "]".repeat(40)
+                )
+                .as_bytes()
+            )
+        );
+    }
 
     #[test]
     fn archive_body_can_exceed_four_mib_while_model_page_stays_bounded() {

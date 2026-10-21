@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Cell, Error, Limit, MAX_BYTES, MAX_ROWS, Query, Table};
+use super::{Cell, Error, Query, Table};
 use rusqlite::{
     Connection, OpenFlags,
     fallible_iterator::FallibleIterator,
@@ -25,14 +25,7 @@ use rusqlite::{
     limits::Limit as SqlLimit,
     types::{ToSqlOutput, ValueRef},
 };
-use std::{
-    path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 /// Reads a trusted, already authorized pathname. The embedding must retain its
@@ -42,27 +35,6 @@ pub fn read(
     queries: Vec<Query>,
     cancelled: &CancellationToken,
     stopping: &CancellationToken,
-) -> Result<Vec<Table>, Error> {
-    read_with_limits(path, queries, cancelled, stopping, true)
-}
-
-/// Local native imports do not serialize the snapshot through a plugin wire frame.
-/// Read the complete selected history, retaining read-only policy and cancellation.
-pub fn read_import(
-    path: &Path,
-    queries: Vec<Query>,
-    cancelled: &CancellationToken,
-    stopping: &CancellationToken,
-) -> Result<Vec<Table>, Error> {
-    read_with_limits(path, queries, cancelled, stopping, false)
-}
-
-fn read_with_limits(
-    path: &Path,
-    queries: Vec<Query>,
-    cancelled: &CancellationToken,
-    stopping: &CancellationToken,
-    bounded: bool,
 ) -> Result<Vec<Table>, Error> {
     if cancelled.is_cancelled() || stopping.is_cancelled() {
         return Err(Error::Cancelled);
@@ -74,7 +46,7 @@ fn read_with_limits(
             | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(failed)?;
-    read_connection(connection, queries, cancelled, stopping, bounded)
+    read_connection(connection, queries, cancelled, stopping)
 }
 
 fn read_connection(
@@ -82,7 +54,6 @@ fn read_connection(
     queries: Vec<Query>,
     cancelled: &CancellationToken,
     stopping: &CancellationToken,
-    bounded: bool,
 ) -> Result<Vec<Table>, Error> {
     connection
         .busy_timeout(Duration::from_millis(250))
@@ -99,58 +70,26 @@ fn read_connection(
     connection
         .pragma_update(None, "cache_size", -2048)
         .map_err(failed)?;
-    for (limit, value) in [
-        (SqlLimit::SQLITE_LIMIT_LENGTH, 8 * 1024 * 1024),
-        (SqlLimit::SQLITE_LIMIT_SQL_LENGTH, 128 * 1024),
-        (SqlLimit::SQLITE_LIMIT_COLUMN, 32),
-        (SqlLimit::SQLITE_LIMIT_EXPR_DEPTH, 32),
-        (SqlLimit::SQLITE_LIMIT_FUNCTION_ARG, 16),
-        (SqlLimit::SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 1024),
-        (SqlLimit::SQLITE_LIMIT_COMPOUND_SELECT, 32),
-        (SqlLimit::SQLITE_LIMIT_VARIABLE_NUMBER, 128),
-        (SqlLimit::SQLITE_LIMIT_ATTACHED, 0),
-    ] {
-        if bounded {
-            connection.set_limit(limit, value).map_err(failed)?;
-        }
-    }
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let exhausted = Arc::new(AtomicBool::new(false));
-    let work_exhausted = exhausted.clone();
+    // Data shape uses SQLite's physical defaults. ATTACH remains forbidden.
+    connection
+        .set_limit(SqlLimit::SQLITE_LIMIT_ATTACHED, 0)
+        .map_err(failed)?;
     let abort = cancelled.clone();
     let retired = stopping.clone();
-    let mut work = 0_u64;
     connection
         .progress_handler(
             1000,
-            Some(move || {
-                work += 1000;
-                if bounded && (work >= 50_000_000 || Instant::now() >= deadline) {
-                    work_exhausted.store(true, Ordering::Relaxed);
-                }
-                abort.is_cancelled()
-                    || retired.is_cancelled()
-                    || work_exhausted.load(Ordering::Relaxed)
-            }),
+            Some(move || abort.is_cancelled() || retired.is_cancelled()),
         )
         .map_err(failed)?;
     connection.execute_batch("BEGIN DEFERRED").map_err(failed)?;
     connection.authorizer(Some(authorize)).map_err(failed)?;
-    let result = collect(
-        &connection,
-        queries,
-        cancelled,
-        stopping,
-        bounded.then_some(deadline),
-    );
+    let result = collect(&connection, queries, cancelled, stopping);
     // Closing the connection releases the read transaction even after a rejected
     // statement. Never send user SQL a COMMIT/ROLLBACK or control hook capability.
     let closed = connection.close().map_err(|(_, error)| failed(error));
     if cancelled.is_cancelled() || stopping.is_cancelled() {
         return Err(Error::Cancelled);
-    }
-    if bounded && (exhausted.load(Ordering::Relaxed) || Instant::now() >= deadline) {
-        return Err(Error::Limit(Limit::Work));
     }
     closed?;
     result
@@ -218,20 +157,11 @@ fn collect(
     queries: Vec<Query>,
     cancelled: &CancellationToken,
     stopping: &CancellationToken,
-    deadline: Option<Instant>,
 ) -> Result<Vec<Table>, Error> {
     let mut tables = Vec::new();
-    let mut budget = Budget {
-        bytes: 2,
-        bounded: deadline.is_some(),
-    };
-    let mut count = 0;
     for query in queries {
         if cancelled.is_cancelled() || stopping.is_cancelled() {
             return Err(Error::Cancelled);
-        }
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            return Err(Error::Limit(Limit::Work));
         }
         // Batch rejects additional statements instead of silently executing a prefix.
         let mut statements = rusqlite::Batch::new(connection, &query.sql);
@@ -252,8 +182,6 @@ fn collect(
             .iter()
             .map(|column| (*column).into())
             .collect();
-        budget.add(&columns)?;
-        budget.reserve(32)?;
         let parameters = query.parameters.iter().map(Parameter).collect::<Vec<_>>();
         let mut rows = statement
             .query(rusqlite::params_from_iter(parameters.iter()))
@@ -263,25 +191,9 @@ fn collect(
             if cancelled.is_cancelled() || stopping.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                return Err(Error::Limit(Limit::Work));
-            }
-            count += 1;
-            if deadline.is_some() && count > MAX_ROWS {
-                return Err(Error::Limit(Limit::Rows));
-            }
-            budget.reserve(3)?; // Row brackets and separator.
             let mut value = Vec::with_capacity(columns.len());
             for index in 0..columns.len() {
                 let field = row.get_ref(index).map_err(failed)?;
-                // Check borrowed payloads before allocating; do not materialize an
-                // entire oversized row before discovering the output limit.
-                if let ValueRef::Text(bytes) | ValueRef::Blob(bytes) = field
-                    && budget.bounded
-                    && bytes.len() > MAX_BYTES.saturating_sub(budget.bytes)
-                {
-                    return Err(Error::Limit(Limit::Bytes));
-                }
                 let cell = match field {
                     ValueRef::Null => Cell::Null,
                     ValueRef::Integer(value) => Cell::Integer(value),
@@ -296,7 +208,6 @@ fn collect(
                     ),
                     ValueRef::Blob(bytes) => Cell::Blob(bytes.into()),
                 };
-                budget.add(&cell)?;
                 value.push(cell);
             }
             values.push(value);
@@ -320,38 +231,6 @@ impl rusqlite::ToSql for Parameter<'_> {
         }))
     }
 }
-struct Budget {
-    bytes: usize,
-    bounded: bool,
-}
-impl Budget {
-    fn reserve(&mut self, bytes: usize) -> Result<(), Error> {
-        if self.bounded && bytes > MAX_BYTES.saturating_sub(self.bytes) {
-            return Err(Error::Limit(Limit::Bytes));
-        }
-        self.bytes += bytes;
-        Ok(())
-    }
-    fn add(&mut self, value: &impl serde::Serialize) -> Result<(), Error> {
-        if !self.bounded {
-            return Ok(());
-        }
-        serde_json::to_writer(&mut *self, value).map_err(|_| Error::Limit(Limit::Bytes))?;
-        self.reserve(1)
-    }
-}
-impl std::io::Write for Budget {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if self.bounded && bytes.len() > MAX_BYTES.saturating_sub(self.bytes) {
-            return Err(std::io::Error::other("database result byte limit"));
-        }
-        self.bytes += bytes.len();
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
 fn failed(error: rusqlite::Error) -> Error {
     match error.sqlite_error_code() {
         Some(
@@ -360,7 +239,6 @@ fn failed(error: rusqlite::Error) -> Error {
         Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
             Error::Busy
         }
-        Some(rusqlite::ErrorCode::TooBig) => Error::Limit(Limit::Bytes),
         _ => Error::Unavailable(error.to_string()),
     }
 }
@@ -375,7 +253,7 @@ mod tests {
         }
     }
     #[test]
-    fn wal_snapshot_covers_the_batch_and_policy_denies_mutation_and_unbounded_work() {
+    fn wal_snapshot_covers_the_batch_and_policy_denies_mutation() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory
             .path()
@@ -412,7 +290,6 @@ mod tests {
             ],
             &cancelled,
             &retired,
-            true,
         )
         .unwrap();
         assert_eq!(tables[0].rows, [vec![Cell::Integer(1)]]);
@@ -459,27 +336,14 @@ mod tests {
         writer
             .execute("INSERT INTO oversized VALUES(?1)", [vec![0_u8; 9_000_000]])
             .unwrap();
-        let oversized = read(
+        let tables = read(
             &path,
             vec![query("SELECT payload FROM oversized")],
             &cancelled,
             &retired,
-        );
-        assert!(
-            matches!(oversized, Err(Error::Limit(Limit::Bytes))),
-            "{oversized:?}"
-        );
-        assert!(matches!(
-            read(
-                &path,
-                vec![query(
-                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n) SELECT sum(x) FROM n"
-                )],
-                &cancelled,
-                &retired
-            ),
-            Err(Error::Limit(Limit::Work))
-        ));
+        )
+        .unwrap();
+        assert_eq!(tables[0].rows, [vec![Cell::Blob(vec![0; 9_000_000])]]);
         cancelled.cancel();
         assert!(matches!(
             read(&path, vec![query("SELECT 1")], &cancelled, &retired),
@@ -494,5 +358,125 @@ mod tests {
         writer
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
             .unwrap();
+    }
+    #[test]
+    fn complete_request_preserves_many_queries_parameters_columns_and_large_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("complete.sqlite");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("CREATE TABLE source(value)")
+            .unwrap();
+        let original = "complete evidence 🦀\n".repeat(10000);
+        let mut parameters = vec![Cell::Text(original.clone())];
+        parameters.extend((2..=129).map(Cell::Integer));
+        let mut queries = vec![Query {
+            sql: format!(
+                "SELECT {}",
+                (1..=129)
+                    .map(|index| format!("?{index}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            parameters,
+        }];
+        queries.extend((1..=16).map(|value| query(&format!("SELECT {value}"))));
+        let request = super::super::Read {
+            path: path.to_string_lossy().into(),
+            queries,
+        };
+        request.validate().unwrap();
+        let tables = read(
+            &path,
+            request.queries,
+            &CancellationToken::new(),
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(tables.len(), 17);
+        assert_eq!(tables[0].columns.len(), 129);
+        assert_eq!(tables[0].rows[0][0], Cell::Text(original));
+        assert_eq!(tables[0].rows[0][128], Cell::Integer(129));
+        assert_eq!(tables[16].rows, [vec![Cell::Integer(16)]]);
+    }
+
+    #[test]
+    fn active_query_cancellation_and_stopping_release_the_snapshot() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI64, Ordering},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("cancel.sqlite");
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE source(value)")
+            .unwrap();
+        for stop_owner in [false, true] {
+            let cancelled = CancellationToken::new();
+            let stopping = CancellationToken::new();
+            let abort = if stop_owner {
+                stopping.clone()
+            } else {
+                cancelled.clone()
+            };
+            let visited = Arc::new(AtomicI64::new(0));
+            let observed = visited.clone();
+            let reader =
+                Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            reader
+                .create_scalar_function(
+                    "length",
+                    1,
+                    rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                    move |context| {
+                        let value = context.get::<i64>(0)?;
+                        observed.store(value, Ordering::Relaxed);
+                        if value == 2000 {
+                            abort.cancel();
+                        }
+                        Ok(value)
+                    },
+                )
+                .unwrap();
+            let result = read_connection(
+                reader,
+                vec![query(
+                    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT length(x+1) FROM n WHERE x<1000000) SELECT sum(x) FROM n",
+                )],
+                &cancelled,
+                &stopping,
+            );
+            assert!(matches!(result, Err(Error::Cancelled)));
+            let stopped_at = visited.load(Ordering::Relaxed);
+            assert!(
+                (2000..1000000).contains(&stopped_at),
+                "progress hook did not stop the active query: {stopped_at}"
+            );
+            writer
+                .execute(
+                    "INSERT INTO source VALUES(?1)",
+                    [if stop_owner { 2 } else { 1 }],
+                )
+                .unwrap();
+            writer
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                .unwrap();
+        }
+        assert_eq!(
+            writer
+                .query_row("SELECT sum(value) FROM source", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
     }
 }

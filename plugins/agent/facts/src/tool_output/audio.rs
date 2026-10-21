@@ -26,7 +26,6 @@ use std::time::SystemTime;
 pub fn valid_mime(mime: &str) -> bool {
     mime.strip_prefix("audio/").is_some_and(|subtype| {
         !subtype.is_empty()
-            && subtype.len() <= 100
             && subtype
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b".+-".contains(&b))
@@ -46,18 +45,12 @@ pub(super) fn project(
         "audio/mp3" => "audio/mpeg".to_string(),
         value => value.to_string(),
     };
-    if !valid_mime(&mime) || data.len() > super::media::MAX_MEDIA_BYTES.div_ceil(3) * 4 {
+    if !valid_mime(&mime) {
         return None;
     }
     let bytes = STANDARD.decode(data).ok()?;
-    if bytes.is_empty()
-        || bytes.len() > super::media::MAX_MEDIA_BYTES
-        || STANDARD.encode(&bytes) != data
-    {
+    if bytes.is_empty() || STANDARD.encode(&bytes) != data {
         return None;
-    }
-    if wav_shorter_than_25ms(&bytes) == Some(true) {
-        return Some((ProjectionPart::Text { text: "Audio output omitted because the clip is shorter than 25 ms; use a longer clip.".into() }, None));
     }
     let (reference, artifact) =
         super::media::media_artifact(bytes, &mime, id, part, time, invocation).ok()?;
@@ -72,57 +65,11 @@ pub(super) fn project(
     ))
 }
 
-/// Count actual PCM frames, including WAVs with a streaming/oversized data header.
-fn wav_shorter_than_25ms(bytes: &[u8]) -> Option<bool> {
-    if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
-        return None;
-    }
-    let mut offset = 12usize;
-    let mut format = None;
-    while let Some(header) = bytes.get(offset..offset.checked_add(8)?) {
-        let size = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
-        offset = offset.checked_add(8)?;
-        let available = bytes.get(offset..)?;
-        let chunk = &available[..size.min(available.len())];
-        match &header[..4] {
-            b"fmt " => {
-                let mut encoding = u16::from_le_bytes(chunk.get(..2)?.try_into().ok()?);
-                if encoding == 0xfffe {
-                    if chunk.get(26..40)?
-                        != [0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71]
-                    {
-                        return None;
-                    }
-                    encoding = u16::from_le_bytes(chunk.get(24..26)?.try_into().ok()?);
-                }
-                if !matches!(encoding, 1 | 3) {
-                    return None;
-                }
-                let rate = u32::from_le_bytes(chunk.get(4..8)?.try_into().ok()?);
-                let align = u16::from_le_bytes(chunk.get(12..14)?.try_into().ok()?);
-                if rate == 0 || align == 0 {
-                    return None;
-                }
-                format = Some((rate, align));
-            }
-            b"data" => {
-                let (rate, align) = format?;
-                return Some(
-                    (chunk.len() / usize::from(align)) as u64 * 1000 < u64::from(rate) * 25,
-                );
-            }
-            _ => {}
-        }
-        offset = offset.checked_add(size)?.checked_add(size % 2)?;
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn actual_pcm_frames_control_short_clip_omission_and_audio_keeps_owned_evidence() {
+    fn valid_short_and_long_audio_keep_owned_evidence() {
         let invocation = Invocation {
             session_id: "s".into(),
             turn_id: "t".into(),
@@ -141,20 +88,15 @@ mod tests {
                 &invocation,
             )
             .unwrap();
-            if samples < 200 {
-                assert!(matches!(part, ProjectionPart::Text { text } if text.contains("25 ms")));
-                assert!(artifact.is_none());
-            } else {
-                let artifact = artifact.unwrap();
-                assert_eq!(artifact.bytes(), wav);
-                assert_eq!(
-                    artifact.artifact().source,
-                    crate::artifact::ArtifactSource::ToolResultProjection
-                );
-                super::super::DurableToolProjection::Content { parts: vec![part] }
-                    .validate("s")
-                    .unwrap();
-            }
+            let artifact = artifact.unwrap();
+            assert_eq!(artifact.bytes(), wav);
+            assert_eq!(
+                artifact.artifact().source,
+                crate::artifact::ArtifactSource::ToolResultProjection
+            );
+            super::super::DurableToolProjection::Content { parts: vec![part] }
+                .validate("s")
+                .unwrap();
         }
         assert!(
             project(

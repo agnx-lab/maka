@@ -261,9 +261,6 @@ impl Provider for Codex {
                     .await
                     .map_err(|_| Error::Transport("model inventory read failed".into()))?
                 {
-                    if chunk.len() > 4 * 1024 * 1024 - bytes.len() {
-                        return Err(Error::Invalid("model inventory exceeds 4 MiB".into()));
-                    }
                     bytes.extend_from_slice(&chunk);
                 }
                 super::decode_model_inventory(&bytes)

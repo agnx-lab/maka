@@ -46,13 +46,12 @@ impl From<FileError> for EntriesError {
     fn from(error: FileError) -> Self {
         match error {
             FileError::Retired => Self::Scan(ScanError::Cancelled),
-            FileError::ScanLimit { .. } => Self::Scan(ScanError::LimitExceeded),
             FileError::Io(error) => Self::Read(classify(&error)),
             FileError::Invalid(_) => Self::Read(DiscoveryFailure::BlockedPath),
         }
     }
 }
-pub(super) enum ReadError {
+pub(crate) enum ReadError {
     Cancelled,
     Failure(DiscoveryFailure),
 }
@@ -61,7 +60,6 @@ pub(super) enum SkillRead {
     Document {
         bytes: Vec<u8>,
         origin: Option<super::origin::Origin>,
-        origin_bytes: usize,
     },
 }
 impl<'a, 'view> Captured<'a, 'view> {
@@ -86,20 +84,15 @@ impl<'a, 'view> Captured<'a, 'view> {
 
     pub(super) fn entries(
         &mut self,
-        remaining: &mut usize,
         cancellation: &CancellationToken,
     ) -> Result<Vec<OsString>, EntriesError> {
         let mut names = Vec::new();
         let path =
             portable(&self.path).map_err(|_| EntriesError::Read(DiscoveryFailure::BlockedPath))?;
-        let budget = *remaining as u64;
         let result = self
             .reader
             .visit_directory(&path, Symlinks::Reject, |entry| {
                 check_cancelled(cancellation).map_err(|_| FileError::Retired)?;
-                *remaining = remaining
-                    .checked_sub(1)
-                    .ok_or(FileError::ScanLimit { max: budget })?;
                 let name = OsString::from(entry.name);
                 if matches!(entry.kind, Kind::Directory) {
                     self.directories.insert(name.clone());
@@ -129,62 +122,52 @@ impl<'a, 'view> Captured<'a, 'view> {
             return Ok(None);
         }
         let directory = self.path.join(name);
-        let bytes = read_view(
-            self.reader,
-            &directory.join("SKILL.md"),
-            1024 * 1024,
-            cancellation,
-        )?;
+        let bytes = read_view(self.reader, &directory.join("SKILL.md"), cancellation)?;
         let Some(bytes) = bytes else {
             return Ok(self.directories.contains(name).then_some(SkillRead::Empty));
         };
-        let (origin, origin_bytes) = if collect_origin {
-            let (origin, size) = super::origin::read(
+        let origin = if collect_origin {
+            let origin = super::origin::read(
                 self.reader,
                 &directory,
                 name.to_str().expect("UTF-8 entry"),
                 cancellation,
             )?;
-            (Some(origin), size)
+            Some(origin)
         } else {
-            (None, 0)
+            None
         };
-        Ok(Some(SkillRead::Document {
-            bytes,
-            origin,
-            origin_bytes,
-        }))
+        Ok(Some(SkillRead::Document { bytes, origin }))
     }
 }
 
-pub(super) fn read_view(
+pub(crate) fn read_view(
     reader: &Reader<'_>,
     path: &Path,
-    limit: usize,
     cancellation: &CancellationToken,
 ) -> Result<Option<Vec<u8>>, ReadError> {
     check_cancelled(cancellation).map_err(|_| ReadError::Cancelled)?;
+    let path = portable(path).map_err(|_| ReadError::Failure(DiscoveryFailure::BlockedPath))?;
+    // One capability read opens one regular file and captures its initial prefix.
+    // Reopening by pathname for each page could splice atomic replacements.
     let input = ReadViewInput {
         file: ReadFile {
-            path: portable(path).map_err(|_| ReadError::Failure(DiscoveryFailure::BlockedPath))?,
+            path,
             offset: 0,
-            limit,
+            limit: usize::MAX,
         },
         symlinks: Symlinks::Reject,
     };
-    match reader.read(input) {
-        Ok(page) if page.next_offset.is_some() => {
-            Err(ReadError::Failure(DiscoveryFailure::SourceTooLarge))
-        }
-        Ok(page) => Ok(Some(page.bytes)),
+    let result = match reader.read(input) {
+        Ok(page) if page.next_offset.is_none() => Ok(Some(page.bytes)),
+        Ok(_) => Err(ReadError::Failure(DiscoveryFailure::ReadFailed)),
         Err(FileError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(FileError::Io(error)) => Err(read_error(error)),
         Err(FileError::Retired) => Err(ReadError::Cancelled),
         Err(FileError::Invalid(_)) => Err(ReadError::Failure(DiscoveryFailure::BlockedPath)),
-        Err(FileError::ScanLimit { .. }) => {
-            Err(ReadError::Failure(DiscoveryFailure::SourceTooLarge))
-        }
-    }
+    };
+    check_cancelled(cancellation).map_err(|_| ReadError::Cancelled)?;
+    result
 }
 fn portable(path: &Path) -> Result<String, ()> {
     path.components()

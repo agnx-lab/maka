@@ -19,12 +19,12 @@
 
 use super::{
     BundleError, BundleSummary, Inventory,
-    format::{Blob, CHUNK, MAGIC, MAX_BYTES, MAX_EVENTS, MAX_FRAME, Record},
+    format::{Blob, CHUNK, MAGIC, Record},
 };
 use crate::StoreError;
 use sha2::{Digest, Sha256};
 use std::{io, time::Duration};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 /// Decode a complete transfer for preview. Import must separately validate its
 /// original canonical proofs and destination authority before publication.
@@ -40,7 +40,7 @@ pub async fn inspect<R: AsyncRead + Unpin>(input: R) -> Result<BundleSummary, Bu
 }
 
 fn validate_inventory(inventory: &Inventory) -> Result<(), StoreError> {
-    if inventory.sessions.is_empty() || inventory.sessions.len() > super::MAX_SESSIONS {
+    if inventory.sessions.is_empty() {
         return Err(StoreError::PrefixTooLarge);
     }
     let mut digest = Sha256::new();
@@ -79,7 +79,6 @@ pub(super) struct Reader<R> {
     inventory: Option<Inventory>,
     fence: u64,
     previous_event: u64,
-    events: usize,
 }
 
 struct BlobRead {
@@ -100,7 +99,6 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             inventory: None,
             fence: 0,
             previous_event: 0,
-            events: 0,
         };
         let mut magic = vec![0; MAGIC.len()];
         reader.read(&mut magic).await?;
@@ -114,19 +112,26 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         if self.finished.is_some() || self.pending.is_some() {
             return Err(invalid("bundle frame boundary violated"));
         }
-        if self.frames >= 1_000_000 {
-            return Err(StoreError::PrefixTooLarge);
-        }
         let before = format!("sha256:{}", hex::encode(self.digest.clone().finalize()));
         let mut length = [0; 4];
         self.read(&mut length).await?;
         let length = u32::from_be_bytes(length) as usize;
-        if length == 0 || length > MAX_FRAME || length as u64 > MAX_BYTES.saturating_sub(self.bytes)
-        {
+        if length == 0 {
             return Err(StoreError::PrefixTooLarge);
         }
-        let mut bytes = vec![0; length];
-        self.read(&mut bytes).await?;
+        // A declared length is framing, not evidence that any payload exists.
+        // Grow only after consuming real bytes, never allocate the untrusted u32.
+        let mut bytes = Vec::new();
+        // Keep transport scratch off the enclosing async future's stack frame.
+        let mut chunk = Vec::new();
+        chunk.try_reserve_exact(CHUNK).map_err(io::Error::other)?;
+        chunk.resize(CHUNK, 0);
+        while bytes.len() < length {
+            let count = (length - bytes.len()).min(CHUNK);
+            self.read(&mut chunk[..count]).await?;
+            bytes.try_reserve(count).map_err(io::Error::other)?;
+            bytes.extend_from_slice(&chunk[..count]);
+        }
         let record: Record = serde_json::from_slice(&bytes)?;
         if self.frames == 0 && !matches!(record, Record::Header { .. }) {
             return Err(invalid("bundle must start with its inventory"));
@@ -146,11 +151,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
                 self.inventory = Some(inventory.clone());
                 self.fence = *source_high_water;
             }
-            Record::Event { sequence, json } => {
-                self.events += 1;
-                if self.events > MAX_EVENTS || json.len() > super::format::MAX_EVENT_BYTES {
-                    return Err(StoreError::PrefixTooLarge);
-                }
+            Record::Event { sequence, .. } => {
                 if *sequence <= self.previous_event || *sequence > self.fence {
                     return Err(invalid(
                         "bundle events are not ordered within their source fence",
@@ -159,9 +160,6 @@ impl<R: AsyncRead + Unpin> Reader<R> {
                 self.previous_event = *sequence;
             }
             Record::Blob(blob) => {
-                if blob.bytes() > MAX_BYTES.saturating_sub(self.bytes) {
-                    return Err(StoreError::PrefixTooLarge);
-                }
                 self.pending = Some(BlobRead {
                     descriptor: blob.clone(),
                     remaining: blob.bytes(),
@@ -183,7 +181,10 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             }
             _ => {}
         }
-        self.frames += 1;
+        self.frames = self
+            .frames
+            .checked_add(1)
+            .ok_or(StoreError::PrefixTooLarge)?;
         Ok(record)
     }
 
@@ -192,9 +193,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         output: &mut W,
     ) -> Result<(), StoreError> {
         while let Some(bytes) = self.blob_chunk().await? {
-            tokio::time::timeout(Duration::from_secs(30), output.write_all(&bytes))
-                .await
-                .map_err(stalled)??;
+            super::format::write_progress(output, &bytes).await?;
         }
         Ok(())
     }
@@ -235,14 +234,28 @@ impl<R: AsyncRead + Unpin> Reader<R> {
     }
 
     async fn read(&mut self, bytes: &mut [u8]) -> Result<(), StoreError> {
-        if bytes.len() as u64 > MAX_BYTES.saturating_sub(self.bytes) {
-            return Err(StoreError::PrefixTooLarge);
-        }
-        tokio::time::timeout(Duration::from_secs(30), self.input.read_exact(bytes))
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let count = tokio::time::timeout(
+                Duration::from_secs(30),
+                self.input.read(&mut bytes[offset..]),
+            )
             .await
             .map_err(stalled)??;
+            if count == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "bundle ended within a frame",
+                )
+                .into());
+            }
+            offset += count;
+        }
         self.digest.update(&*bytes);
-        self.bytes += bytes.len() as u64;
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or(StoreError::PrefixTooLarge)?;
         Ok(())
     }
 }

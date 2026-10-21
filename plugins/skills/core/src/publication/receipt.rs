@@ -78,7 +78,7 @@ pub(super) async fn reserve(
 ) -> Result<Option<Outcome>, Error> {
     operation.validate()?;
     let name = format!("{}.json", operation.id);
-    match requests.read(&name, 4096).await {
+    match requests.read(&name).await {
         Ok((bytes, _)) => {
             let previous: Operation = serde_json::from_slice(&bytes)?;
             if previous != *operation {
@@ -100,7 +100,7 @@ pub(super) async fn read(
 ) -> Result<Option<Outcome>, Error> {
     operation.validate()?;
     let name = format!("{}.json", operation.id);
-    match receipts.read(&name, 16 * 1024).await {
+    match receipts.read(&name).await {
         Ok((bytes, _)) => decode(&bytes, operation).map(Some),
         Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
@@ -112,22 +112,23 @@ pub async fn read_view(
     files: &maka_capabilities::filesystem::ReadDirectory,
     operation: &Operation,
 ) -> Result<Option<Outcome>, Error> {
-    use maka_capabilities::filesystem::ReadError;
-    use maka_capabilities::filesystem::entries::ReadFile;
     operation.validate()?;
-    match files
-        .read(ReadFile {
-            path: format!("{}.json", operation.id),
-            offset: 0,
-            limit: 16 * 1024,
+    let operation = operation.clone();
+    files
+        .with_reader(move |reader| {
+            let path = format!("{}.json", operation.id);
+            match crate::discovery::source::read_view(
+                &reader,
+                std::path::Path::new(&path),
+                &tokio_util::sync::CancellationToken::new(),
+            ) {
+                Ok(Some(bytes)) => decode(&bytes, &operation).map(Some),
+                Ok(None) => Ok(None),
+                Err(_) => Err(Error::Invalid("Skill receipt could not be read".into())),
+            }
         })
         .await
-    {
-        Ok(page) if page.next_offset.is_none() => decode(&page.bytes, operation).map(Some),
-        Ok(_) => Err(Error::Invalid("Skill receipt exceeds limit".into())),
-        Err(ReadError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(Error::Invalid(error.to_string())),
-    }
+        .map_err(Error::from)?
 }
 fn decode(bytes: &[u8], operation: &Operation) -> Result<Outcome, Error> {
     let record: Record = serde_json::from_slice(bytes)?;
@@ -145,7 +146,7 @@ pub(super) async fn complete(
 ) -> Result<(), Error> {
     operation.validate()?;
     let name = format!("{}.json", operation.id);
-    match receipts.read(&name, 16 * 1024).await {
+    match receipts.read(&name).await {
         Ok((bytes, _)) => {
             let previous: Record = serde_json::from_slice(&bytes)?;
             if previous.operation != *operation || previous.outcome != outcome {

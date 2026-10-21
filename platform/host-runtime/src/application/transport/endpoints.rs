@@ -25,6 +25,7 @@ use crate::application::{CapturedImport, Client};
 use maka_plugin_core::composition::InstanceId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
 use uuid::Uuid;
 
 /// One trusted exposure through an explicit Host consumer and declared import.
@@ -37,18 +38,10 @@ pub struct HostEndpoint {
 }
 impl HostEndpoint {
     pub fn validate(&self) -> Result<()> {
-        if self.consumer.0.is_empty()
-            || self.consumer.0.len() > 32
-            || self.consumer.0.iter().any(Uuid::is_nil)
+        if self.consumer.validate().is_err()
             || self.import.is_empty()
-            || self.import.len() > 256
             || self.grant.methods.is_empty()
-            || self.grant.methods.len() > super::MAX_GRANTED_METHODS
-            || self
-                .grant
-                .methods
-                .iter()
-                .any(|method| method.is_empty() || method.len() > 256)
+            || self.grant.methods.iter().any(|method| method.is_empty())
         {
             return Err("invalid Host endpoint selection or grant".into());
         }
@@ -141,13 +134,7 @@ impl Endpoints {
         Ok(())
     }
     pub(super) fn validate(&self) -> Result<()> {
-        if self.entries.is_empty()
-            || self.entries.len() > 128
-            || self
-                .entries
-                .keys()
-                .any(|name| name.is_empty() || name.len() > 256)
-        {
+        if self.entries.is_empty() || self.entries.keys().any(|name| name.is_empty()) {
             return Err("invalid Application endpoints".into());
         }
         Ok(())
@@ -198,7 +185,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_method_grants_share_capacity_without_admitting_unknown_methods() {
+    fn explicit_method_grants_keep_all_known_methods_without_admitting_unknown_methods() {
         use super::super::{NativeGrant, policy::check_grant};
         use maka_plugin_core::contract::Interface;
 
@@ -237,9 +224,9 @@ mod tests {
 
         endpoint.grant.methods = (0..129).map(|index| format!("read{index:03}")).collect();
         native.methods = endpoint.grant.methods.clone();
-        assert!(endpoint.validate().is_err());
-        assert!(native.validate().is_err());
-        assert!(check_grant(&contract, &endpoint.grant).is_err());
+        endpoint.validate().unwrap();
+        native.validate().unwrap();
+        check_grant(&contract, &endpoint.grant).unwrap();
     }
 
     #[test]

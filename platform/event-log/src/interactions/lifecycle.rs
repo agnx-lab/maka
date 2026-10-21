@@ -140,7 +140,7 @@ async fn visit_pending(
                 .map_err(invalid)?;
             sqlx::query("INSERT INTO interaction_outcomes VALUES (?, ?)")
                 .bind(id)
-                .bind(encode(closure, 8 * 1024)?)
+                .bind(encode(closure)?)
                 .execute(&mut *connection)
                 .await?;
             count += 1;

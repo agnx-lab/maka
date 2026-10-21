@@ -609,6 +609,116 @@ fn terminal_row_limits_resize_the_original_editor_and_reject_inverted_ranges() {
 }
 
 #[test]
+fn complete_inline_token_catalog_and_long_literal_keep_original_native_editing() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let (_runtime, mut tui) = presenter();
+    let completed = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+        draw(&mut tui, 50, 20);
+        let original = observation(&tui);
+        let mut literals: Vec<_> = (0..4096)
+            .map(|index| format!("/skill:item-{index}"))
+            .collect();
+        let tail = format!("/skill:{}", "技能".repeat(100));
+        assert!(tail.len() > 512);
+        literals.push(tail.clone());
+        let prefix = "普通 prefix ";
+        let source = format!("{prefix}{tail}");
+        let bounded = |error: Error| error.to_string().chars().take(240).collect::<String>();
+        let revision = tui.application.frame(&tui.root).unwrap().revision;
+        tui.application.dispatch(&tui.root, revision, "configure", json!({
+            "inlineTokens":literals,"command":{"owner":original["snapshot"]["text"]["owner"],
+                "sequence":1,"basedOn":original["revision"],"edit":{"kind":"reset","text":source}}
+        })).map_err(bounded)?;
+        tui.pump_settled().map_err(bounded)?;
+        let initialized = observation(&tui);
+        assert_eq!(initialized["receipt"]["outcome"]["status"], "applied");
+        assert_eq!(
+            initialized["snapshot"]["text"]["owner"],
+            original["snapshot"]["text"]["owner"]
+        );
+        let mount = draft(&tui);
+        assert_eq!(
+            editor_owner(&*tui.resources.owners[&mount.id()].state)
+                .editor
+                .text(),
+            source
+        );
+        draw(&mut tui, 50, 20);
+        tui.input_settled(Event::Key(KeyEvent::new(
+            KeyCode::Backspace,
+            KeyModifiers::NONE,
+        )))
+        .map_err(bounded)?;
+        assert_eq!(
+            editor_owner(&*tui.resources.owners[&mount.id()].state)
+                .editor
+                .text(),
+            prefix,
+            "the complete tail literal must delete as one atomic token"
+        );
+        tui.input_settled(Event::Key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL,
+        )))
+        .map_err(bounded)?;
+        assert_eq!(
+            editor_owner(&*tui.resources.owners[&mount.id()].state)
+                .editor
+                .text(),
+            source
+        );
+        let restored = observation(&tui);
+        assert_eq!(
+            restored["snapshot"]["text"]["owner"],
+            original["snapshot"]["text"]["owner"]
+        );
+        for invalid in ["", "two words", "bad\u{0000}literal"] {
+            let revision = tui.application.frame(&tui.root).unwrap().revision;
+            assert!(
+                tui.application
+                    .dispatch(
+                        &tui.root,
+                        revision,
+                        "configure",
+                        json!({"inlineTokens":[invalid]})
+                    )
+                    .and_then(|()| tui.settle())
+                    .is_err(),
+                "malformed inline literals remain invalid"
+            );
+            assert_eq!(observation(&tui)["snapshot"], restored["snapshot"]);
+        }
+        dispatch(
+            &mut tui,
+            "read",
+            json!({"end":source.len(),"capture":{
+                "kind":"at_revision","owner":restored["snapshot"]["text"]["owner"],"revision":restored["revision"]
+            }}),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tui.application.frame(&tui.root).unwrap().state["outcome"]["status"] != "succeeded" {
+            assert!(std::time::Instant::now() < deadline);
+            tui.pump_settled().map_err(bounded)?;
+            std::thread::yield_now();
+        }
+        let frame = tui.application.frame(&tui.root).unwrap();
+        assert_eq!(frame.state["outcome"]["value"]["text"], source);
+        assert_eq!(
+            frame.state["outcome"]["value"]["metadata"],
+            restored["snapshot"]["text"]
+        );
+        Ok(())
+    }));
+    close(&mut tui);
+    let result = completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(
+        result.is_ok(),
+        "complete native inline catalog failed: {}",
+        result.err().unwrap_or_default()
+    );
+}
+
+#[test]
 fn complete_large_reset_edits_and_reader_capture_preserve_original_text() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     let (_runtime, mut tui) = presenter();

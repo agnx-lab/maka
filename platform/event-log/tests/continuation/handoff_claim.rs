@@ -188,7 +188,7 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
             physical.invocation, source.invocation,
             "exact Run reads never jump to a successor"
         );
-        let mut view = InvocationView::new(1024).unwrap();
+        let mut view = InvocationView::new();
         assert!(
             view.push(&StoredEvent {
                 sequence,

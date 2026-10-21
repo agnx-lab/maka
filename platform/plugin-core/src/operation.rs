@@ -96,13 +96,10 @@ pub struct RecoveryRef {
 impl RecoveryRef {
     pub fn validate(&self) -> Result<(), crate::Error> {
         self.source.validate().map_err(crate::Error::Composition)?;
-        if self.namespace.0.is_empty()
-            || self.namespace.0.len() > 64
-            || self.namespace.0.iter().any(Uuid::is_nil)
-            || self.operation.is_nil()
-        {
+        self.namespace.validate()?;
+        if self.operation.is_nil() {
             return Err(crate::Error::Composition(
-                "invalid operation namespace or identity".into(),
+                "invalid operation identity".into(),
             ));
         }
         crate::name(&self.export)?;

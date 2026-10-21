@@ -64,12 +64,7 @@ impl Manager {
                 .ok_or("settings cursor unavailable")?;
             fields.drain(..=index);
         }
-        let (mut fields, next) = settings_page(fields)?;
-        if request.path.len() == 16 {
-            for field in &mut fields {
-                field.editable = false;
-            }
-        }
+        let (fields, next) = settings_page(fields)?;
         serde_json::to_value(InstanceSettingsPage {
             source: request.source,
             instance: request.instance,
@@ -172,14 +167,13 @@ pub(super) fn settings_page(
     let mut count = 0;
     for field in fields.iter().take(8) {
         let size = serde_json::to_vec(field).map_err(|e| e.to_string())?.len();
-        if size > 448 * 1024 - bytes {
+        if count > 0 && size > (448usize * 1024).saturating_sub(bytes) {
             break;
         }
-        bytes += size;
+        bytes = bytes
+            .checked_add(size)
+            .ok_or("settings page length overflow")?;
         count += 1;
-    }
-    if count == 0 && !fields.is_empty() {
-        return Err("setting field exceeds page limit".into());
     }
     let more = fields.len() > count;
     fields.truncate(count);
@@ -187,16 +181,14 @@ pub(super) fn settings_page(
     Ok((fields, next))
 }
 pub(super) fn check_path(path: &[String], root: bool) -> Result<()> {
-    if (!root && path.is_empty()) || path.len() > 16 || path.iter().any(|p| p.len() > 256) {
+    if !root && path.is_empty() {
         return Err("invalid settings path".into());
     }
     Ok(())
 }
 fn scalar(value: &Value) -> Option<SettingValue> {
     Some(match value {
-        Value::String(text) if text.chars().count() <= 4096 => {
-            SettingValue::Text { text: text.clone() }
-        }
+        Value::String(text) => SettingValue::Text { text: text.clone() },
         Value::Number(number) => SettingValue::Number {
             text: number.to_string(),
         },
@@ -207,9 +199,8 @@ fn scalar(value: &Value) -> Option<SettingValue> {
 }
 fn json(value: &SettingValue) -> Result<Value> {
     Ok(match value {
-        SettingValue::Text { text } if text.chars().count() <= 4096 => Value::String(text.clone()),
-        SettingValue::Text { .. } => return Err("setting text exceeds limit".into()),
-        SettingValue::Number { text } if text.len() <= 128 => {
+        SettingValue::Text { text } => Value::String(text.clone()),
+        SettingValue::Number { text } => {
             let value: Value =
                 serde_json::from_str(text).map_err(|e| format!("invalid number: {e}"))?;
             if !value.is_number() {
@@ -217,7 +208,6 @@ fn json(value: &SettingValue) -> Result<Value> {
             }
             value
         }
-        SettingValue::Number { .. } => return Err("setting number exceeds limit".into()),
         SettingValue::Boolean { value } => Value::Bool(*value),
         SettingValue::Null => Value::Null,
     })
@@ -226,8 +216,8 @@ pub(super) fn apply(
     configuration: &mut Value,
     changes: &[SettingChange],
 ) -> Result<BTreeSet<String>> {
-    if changes.is_empty() || changes.len() > 32 {
-        return Err("settings change limit exceeded".into());
+    if changes.is_empty() {
+        return Err("settings changes must not be empty".into());
     }
     let mut touched = BTreeSet::new();
     let mut paths = BTreeSet::new();
@@ -294,7 +284,8 @@ pub(super) fn resolved<'a>(
     root: &'a Value,
     value: Option<&Value>,
 ) -> &'a Value {
-    for _ in 0..16 {
+    let mut visited = BTreeSet::new();
+    while visited.insert(std::ptr::from_ref(schema)) {
         if let Some(reference) = schema
             .get("$ref")
             .and_then(Value::as_str)
@@ -418,7 +409,6 @@ pub(super) fn fields(
         .collect();
     Ok(keys
         .into_iter()
-        .filter(|key| key.len() <= 256)
         .map(|key| {
             let required = schema
                 .get("required")
@@ -462,7 +452,6 @@ fn field(
     let mut options: Vec<SettingValue> = schema
         .get("enum")
         .and_then(Value::as_array)
-        .filter(|v| v.len() <= 16)
         .map(|v| v.iter().filter_map(scalar).collect())
         .unwrap_or_default();
     let label = original
@@ -470,17 +459,13 @@ fn field(
         .or_else(|| schema.get("title"))
         .and_then(Value::as_str)
         .unwrap_or(&key)
-        .chars()
-        .take(256)
-        .collect();
+        .to_owned();
     let description = original
         .get("description")
         .or_else(|| schema.get("description"))
         .and_then(Value::as_str)
         .unwrap_or("")
-        .chars()
-        .take(512)
-        .collect();
+        .to_owned();
     let nullable = value.is_some_and(Value::is_null)
         || schema.get("type").and_then(Value::as_str) == Some("null")
         || original

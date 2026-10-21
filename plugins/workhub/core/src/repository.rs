@@ -88,9 +88,6 @@ impl Repository {
         let mut work = previous.map(|(_, work)| work).unwrap_or_default();
         if unfinished {
             if !work.contains(&pending) {
-                if work.len() >= 256 {
-                    return Err(invalid("WorkHub has 256 unfinished decisions"));
-                }
                 work.push(pending);
             }
         } else {

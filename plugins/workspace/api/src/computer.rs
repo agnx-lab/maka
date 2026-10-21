@@ -27,14 +27,12 @@ use std::collections::BTreeMap;
 #[schemars(rename = "ComputerEvaluate")]
 #[serde(deny_unknown_fields)]
 pub struct Evaluate {
-    #[schemars(length(max = 65536))]
     pub code: String,
     /// Wall-clock limit including asynchronous waits. Interrupted REPLs require reset.
     #[serde(default = "default_timeout")]
-    #[schemars(range(min = 1, max = 120000))]
+    #[schemars(range(min = 1))]
     pub timeout_ms: u64,
     /// Short, user-facing description of this call, in the user’s language.
-    #[schemars(length(max = 256))]
     pub title: Option<String>,
 }
 fn default_timeout() -> u64 {
@@ -46,10 +44,12 @@ pub fn validate(name: &str, input: &Value) -> Result<(), String> {
         "cua_repl" => {
             let input: Evaluate =
                 serde_json::from_value(input.clone()).map_err(|e| e.to_string())?;
-            if input.code.len() > 64 * 1024 || !(1..=120_000).contains(&input.timeout_ms) {
-                return Err(
-                    "Cua code must fit 64 KiB; timeout_ms must be between 1 and 120000".into(),
-                );
+            if input.timeout_ms == 0
+                || std::time::Instant::now()
+                    .checked_add(std::time::Duration::from_millis(input.timeout_ms))
+                    .is_none()
+            {
+                return Err("Cua timeout_ms must be positive and representable".into());
             }
             Ok(())
         }

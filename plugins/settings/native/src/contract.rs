@@ -31,7 +31,6 @@ use std::collections::BTreeMap;
 pub enum ModelsRead {
     Start {
         #[serde(default)]
-        #[schemars(length(max = 256))]
         query: String,
     },
     Continue {
@@ -44,11 +43,8 @@ pub enum ModelsRead {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "SettingsModelCursor")]
 pub struct ModelCursor {
-    #[schemars(length(max = 256))]
     pub query: String,
-    #[schemars(range(max = 1024))]
     pub connection: usize,
-    #[schemars(range(max = 4096))]
     pub model: usize,
 }
 #[derive(Serialize, JsonSchema, Deserialize)]
@@ -60,9 +56,7 @@ pub struct ModelChoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<ModelLimitSettings>,
     pub selection: ModelSelection,
-    #[schemars(length(max = 256))]
     pub connection_name: String,
-    #[schemars(length(max = 512))]
     pub label: String,
     #[schemars(length(max = 8))]
     pub thinking_levels: Vec<maka_agent_facts::execution::ThinkingLevel>,
@@ -147,11 +141,7 @@ pub enum ModelsPage {
 #[schemars(rename = "SettingsConnectionsRead")]
 pub enum ConnectionsRead {
     Start,
-    Continue {
-        revision: u64,
-        #[schemars(range(max = 1024))]
-        offset: usize,
-    },
+    Continue { revision: u64, offset: usize },
 }
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -196,7 +186,7 @@ pub enum ConnectionsPage {
 pub struct ConnectionRead {
     pub connection_id: String,
     pub revision: u64,
-    /// Opt in to the bounded editing projection; credential reads stay narrow.
+    /// Opt in to the complete editing projection; credential reads stay narrow.
     #[serde(default)]
     pub include_editing_facts: bool,
 }
@@ -204,7 +194,6 @@ pub struct ConnectionRead {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SettingsConnectionEditingFacts")]
 pub struct ConnectionEditingFacts {
-    #[schemars(length(max = 512))]
     pub enabled_model_ids: Vec<String>,
     #[schemars(
         with = "maka_plugin_core::wire_schema::RequiredNullable<BTreeMap<String, maka_agent_facts::configuration::ModelOverride>>"
@@ -244,7 +233,6 @@ pub enum ConnectionDetail {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "SettingsProvidersRead")]
 pub struct ProvidersRead {
-    #[schemars(range(max = 1024))]
     pub offset: usize,
 }
 #[derive(Serialize, JsonSchema)]
@@ -311,7 +299,6 @@ pub enum CredentialRejection {
     AttemptConflict,
     ConnectionChanged,
     CredentialChanged,
-    Capacity,
     SlugTaken,
     Authentication,
 }
@@ -325,16 +312,13 @@ pub struct LoginCredential {
         with = "maka_plugin_core::wire_schema::RequiredNullable<maka_agent_facts::configuration::CredentialVersionBasis>"
     )]
     pub expected_credential: Option<maka_agent_facts::configuration::CredentialVersionBasis>,
-    #[schemars(length(max = 128))]
     pub method: String,
 }
 #[derive(Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SettingsLoginPrompt")]
 pub struct LoginPrompt {
-    #[schemars(length(max = 2048))]
     pub url: String,
-    #[schemars(length(max = 1024))]
     pub user_code: String,
 }
 #[derive(Serialize, JsonSchema)]
@@ -349,7 +333,6 @@ pub enum CredentialLoginResult {
     },
     Failed {
         reason: LoginFailure,
-        #[schemars(length(max = 512))]
         message: String,
     },
 }

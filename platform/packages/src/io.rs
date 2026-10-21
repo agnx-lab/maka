@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{MAX_FILE_BYTES, MAX_FILES, MAX_PACKAGE_BYTES, Package, validate_path};
+use super::{Package, validate_path};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{
     ambient_authority,
@@ -56,7 +56,7 @@ impl Package {
         let parent = Dir::open_ambient_dir(parent, ambient_authority())?;
         let directory = parent.open_dir_nofollow(name)?;
         let mut files = BTreeMap::new();
-        collect(&directory, "", &mut files, &mut Budget::default())?;
+        collect(&directory, "", &mut files)?;
         Ok(super::content_digest(
             files
                 .iter()
@@ -80,15 +80,10 @@ impl Package {
         if metadata.is_dir() && !metadata.is_symlink() {
             let directory = parent.open_dir_nofollow(name)?;
             let mut files = BTreeMap::new();
-            let mut budget = Budget::default();
-            collect(&directory, "", &mut files, &mut budget)?;
+            collect(&directory, "", &mut files)?;
             Ok(Self::new(files)?)
         } else if metadata.is_file() && !metadata.is_symlink() {
-            Ok(Self::from_bundle(&read(
-                &parent,
-                name.as_ref(),
-                MAX_PACKAGE_BYTES * 2,
-            )?)?)
+            Ok(Self::from_bundle(&read(&parent, name.as_ref())?)?)
         } else {
             Err(invalid(
                 "package source must be a regular file or directory, not a symlink",
@@ -131,27 +126,25 @@ impl Package {
     }
 }
 
-#[derive(Default)]
-struct Budget {
-    bytes: usize,
-    entries: usize,
-}
-
 fn collect(
     directory: &Dir,
     prefix: &str,
     files: &mut BTreeMap<String, Vec<u8>>,
-    budget: &mut Budget,
 ) -> Result<(), PackageIoError> {
-    for entry in directory.entries()? {
+    // Keep only the current DFS path open. Queuing opened sibling directories
+    // would turn a wide package into a file-descriptor admission limit.
+    let directory = directory.try_clone()?;
+    let entries = directory.entries()?;
+    let mut pending = vec![(directory, prefix.to_owned(), entries)];
+    while let Some((directory, prefix, entries)) = pending.last_mut() {
+        let Some(entry) = entries.next() else {
+            pending.pop();
+            continue;
+        };
         let entry = entry?;
         let name = entry.file_name();
         if name == ".git" {
             continue;
-        }
-        budget.entries += 1;
-        if budget.entries > 4096 {
-            return Err(invalid("package contains too many directory entries"));
         }
         let name = name
             .to_str()
@@ -165,18 +158,10 @@ fn collect(
         let kind = entry.file_type()?;
         if kind.is_dir() && !kind.is_symlink() {
             let child = directory.open_dir_nofollow(name)?;
-            collect(&child, &path, files, budget)?;
+            let entries = child.entries()?;
+            pending.push((child, path, entries));
         } else if kind.is_file() && !kind.is_symlink() {
-            if files.len() >= MAX_FILES {
-                return Err(invalid("package contains too many files"));
-            }
-            let bytes = read(
-                directory,
-                Path::new(name),
-                MAX_FILE_BYTES.min(MAX_PACKAGE_BYTES - budget.bytes),
-            )?;
-            budget.bytes += bytes.len();
-            files.insert(path, bytes);
+            files.insert(path, read(directory, Path::new(name))?);
         } else {
             return Err(invalid("package contains a symlink or non-regular file"));
         }
@@ -184,7 +169,7 @@ fn collect(
     Ok(())
 }
 
-fn read(directory: &Dir, name: &Path, limit: usize) -> Result<Vec<u8>, PackageIoError> {
+fn read(directory: &Dir, name: &Path) -> Result<Vec<u8>, PackageIoError> {
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
     #[cfg(unix)]
@@ -192,16 +177,13 @@ fn read(directory: &Dir, name: &Path, limit: usize) -> Result<Vec<u8>, PackageIo
         use cap_std::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let file = directory.open_with(name, &options)?;
+    let mut file = directory.open_with(name, &options)?;
     let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > limit as u64 {
-        return Err(invalid("package file exceeds its limit or is not regular"));
+    if !metadata.is_file() {
+        return Err(invalid("package file is not regular"));
     }
     let mut bytes = Vec::new();
-    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > limit {
-        return Err(invalid("package file grew beyond its byte limit"));
-    }
+    file.read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
@@ -255,6 +237,66 @@ mod tests {
             assert!(Package::read_from(&package_root).is_err());
             assert!(Package::directory_digest(&package_root).is_err());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wide_directory_import_keeps_only_the_current_path_open() {
+        const CHILD: &str = "MAKA_PACKAGE_WIDE_DIRECTORY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "io::tests::wide_directory_import_keeps_only_the_current_path_open",
+                    "--test-threads=1",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "isolated wide directory import failed: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        // This exact-test subprocess owns its FD limit.96 siblings exceed64
+        // while the original recursive traversal and depth-first frames need
+        // only a few descriptors for this two-level tree.
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
+            0
+        );
+        limit.rlim_cur = limit.rlim_max.min(64);
+        assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) }, 0);
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("package");
+        fs::create_dir(&root).unwrap();
+        let mut files = BTreeMap::from([("maka.extension.json".into(), br#"{"schemaVersion":1,"id":"wide.package","application":{"entries":{"host":{"implementation":{"kind":"native","implementation":"example.host"},"configuration":{"type":"object"}}}}}"#.to_vec())]);
+        for index in 0..96 {
+            files.insert(
+                format!("dir-{index:03}/original.bin"),
+                vec![index as u8, 255, 0],
+            );
+        }
+        for (name, bytes) in &files {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let expected = Package::new(files).unwrap();
+        let imported = Package::read_from(&root).unwrap();
+        assert!(
+            imported.files() == expected.files(),
+            "wide import changed original bytes"
+        );
+        assert_eq!(imported.digest(), expected.digest());
+        assert_eq!(Package::directory_digest(&root).unwrap(), expected.digest());
     }
 
     #[test]

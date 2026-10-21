@@ -92,7 +92,7 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     configuration: {
       type: 'object';
       additionalProperties: false;
-      properties: { path: { type: ['string', 'null']; minLength: 1; maxLength: 4096 } };
+      properties: { path: { type: ['string', 'null']; minLength: 1 } };
       title: 'TextFileConfiguration';
       $schema: 'https://json-schema.org/draft/2020-12/schema';
     };
@@ -128,14 +128,9 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
                 };
               };
               minItems: 1;
-              maxItems: 32;
             };
             radius: { type: 'number'; format: 'float'; minimum: 0.01; maximum: 0.2 };
-            miters: {
-              type: 'array';
-              items: { type: 'integer'; format: 'uint'; minimum: 0 };
-              maxItems: 32;
-            };
+            miters: { type: 'array'; items: { type: 'integer'; format: 'uint'; minimum: 0 } };
             columns: { type: 'integer'; format: 'uint'; minimum: 32; maximum: 256 };
           };
           required: ['paths', 'radius', 'miters', 'columns'];
@@ -258,7 +253,7 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
           type: 'object';
           additionalProperties: false;
           properties: {
-            filesystem: { type: 'array'; items: { $ref: '#/$defs/Rule' }; maxItems: 32 };
+            filesystem: { type: 'array'; items: { $ref: '#/$defs/Rule' } };
             network: { $ref: '#/$defs/Network' };
           };
           required: ['filesystem', 'network'];
@@ -293,7 +288,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
                       type: 'array';
                       uniqueItems: true;
                       items: { $ref: '#/$defs/Destination' };
-                      maxItems: 128;
                     };
                   };
                   additionalProperties: false;
@@ -491,7 +485,7 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
     configuration: {
       type: 'object',
       additionalProperties: false,
-      properties: { path: { type: ['string', 'null'], minLength: 1, maxLength: 4096 } },
+      properties: { path: { type: ['string', 'null'], minLength: 1 } },
       title: 'TextFileConfiguration',
       $schema: 'https://json-schema.org/draft/2020-12/schema',
     },
@@ -527,14 +521,9 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
                 },
               },
               minItems: 1,
-              maxItems: 32,
             },
             radius: { type: 'number', format: 'float', minimum: 0.01, maximum: 0.2 },
-            miters: {
-              type: 'array',
-              items: { type: 'integer', format: 'uint', minimum: 0 },
-              maxItems: 32,
-            },
+            miters: { type: 'array', items: { type: 'integer', format: 'uint', minimum: 0 } },
             columns: { type: 'integer', format: 'uint', minimum: 32, maximum: 256 },
           },
           required: ['paths', 'radius', 'miters', 'columns'],
@@ -656,7 +645,7 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
           type: 'object',
           additionalProperties: false,
           properties: {
-            filesystem: { type: 'array', items: { $ref: '#/$defs/Rule' }, maxItems: 32 },
+            filesystem: { type: 'array', items: { $ref: '#/$defs/Rule' } },
             network: { $ref: '#/$defs/Network' },
           },
           required: ['filesystem', 'network'],
@@ -693,7 +682,6 @@ export const nativeImplementations = /* @__PURE__ */ ((): {
                       type: 'array',
                       uniqueItems: true,
                       items: { $ref: '#/$defs/Destination' },
-                      maxItems: 128,
                     },
                   },
                   additionalProperties: false,

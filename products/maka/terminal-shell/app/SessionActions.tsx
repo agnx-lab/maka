@@ -75,7 +75,7 @@ export function SessionActions(props: {
       return;
     if (
       (action.kind === 'rename' || action.kind === 'fork') &&
-      (action.title !== title() || !action.title.trim() || [...action.title].length > 128)
+      (action.title !== title() || !action.title.trim())
     )
       return;
     pending.set(true);
@@ -237,7 +237,6 @@ export function SessionActions(props: {
                 autoFocus
                 accessibilityLabel="Conversation title"
                 value={title()}
-                maxLength={256}
                 readonly={pending()}
                 onChange={(value) => title.set(value)}
                 placeholder="Conversation title"
@@ -259,11 +258,8 @@ export function SessionActions(props: {
                   its original conversation.
                 </Text>
               </If>
-              <Text style={{ color: [...title()].length > 128 ? C.danger : C.muted }}>
-                {[...title()].length}/128 characters
-              </Text>
               <Button
-                disabled={pending() || !title().trim() || [...title()].length > 128}
+                disabled={pending() || !title().trim()}
                 accessibilityLabel={
                   page() === 'fork' ? 'Create conversation fork' : 'Save conversation title'
                 }

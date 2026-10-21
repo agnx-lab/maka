@@ -60,8 +60,8 @@ pub struct Selection {
 }
 impl Selection {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.search.len() > 1024 || self.search.chars().any(char::is_control) {
-            return Err("Usage search exceeds 1 KiB or contains control characters");
+        if self.search.chars().any(char::is_control) {
+            return Err("Usage search contains control characters");
         }
         Ok(())
     }

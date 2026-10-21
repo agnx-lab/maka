@@ -153,11 +153,10 @@ impl EventLog {
                                 Group::ByModel => summary.by_model.len(),
                                 Group::ByTool => summary.by_tool.len(),
                             };
-                            if len <= 32 && serde_json::to_vec(&summary)?.len() <= 48 * 1024 {
+                            if len <= 1
+                                || (len <= 32 && serde_json::to_vec(&summary)?.len() <= 48 * 1024)
+                            {
                                 break;
-                            }
-                            if len <= 1 {
-                                return Err(invalid("one Usage group exceeds response capacity"));
                             }
                             match group {
                                 Group::ByProvider => {
@@ -172,10 +171,6 @@ impl EventLog {
                             }
                             next_offset = Some(offset + len as u64 - 1);
                         }
-                    } else if serde_json::to_vec(&summary)?.len() > 48 * 1024 {
-                        return Err(invalid(
-                            "Usage summary exceeds response capacity; narrow the time range",
-                        ));
                     }
                     tx.commit().await?;
                     Ok(Report {
@@ -204,17 +199,14 @@ async fn groups(
     let mut sql = QueryBuilder::<Sqlite>::new("SELECT ");
     sql.push(key).push(" AS key, ").push(columns);
     query.restrict(&mut sql, through);
-    sql.push(" GROUP BY key ORDER BY calls DESC, key LIMIT ")
-        .push_bind(if page.is_some() { 33 } else { 129 });
+    sql.push(" GROUP BY key ORDER BY calls DESC, key");
+    if page.is_some() {
+        sql.push(" LIMIT ").push_bind(33);
+    }
     if let Some((_, offset)) = page {
         sql.push(" OFFSET ").push_bind(offset as i64);
     }
     let rows = sql.build().fetch_all(connection).await?;
-    if page.is_none() && rows.len() > 128 {
-        return Err(invalid(
-            "Usage breakdown exceeds 128 groups; narrow the time range",
-        ));
-    }
     Ok(rows)
 }
 

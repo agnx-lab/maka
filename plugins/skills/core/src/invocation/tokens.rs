@@ -121,6 +121,5 @@ pub fn inline_references(
                 start: display_text[..token.range.start].encode_utf16().count() as u64,
             })
         })
-        .take(32)
         .collect()
 }

@@ -194,7 +194,7 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
         .unwrap();
     assert_eq!(committed.event, first);
     assert_eq!(committed.sequence, sequence);
-    let mut view = InvocationView::new(65536).unwrap();
+    let mut view = InvocationView::new();
     assert!(
         view.push(&committed).unwrap().iter().all(|row| matches!(
             row.message.content,

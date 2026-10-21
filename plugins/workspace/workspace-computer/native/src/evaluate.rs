@@ -97,13 +97,10 @@ impl Computer {
         };
         let input: api::Evaluate = serde_json::from_value(input).map_err(failed)?;
         let limits = CellLimits {
-            max_tool_calls: 256,
-            max_value_bytes: 16 * 1024 * 1024,
             heap_bytes: 128 * 1024 * 1024,
             ..Default::default()
         };
-        let context = CellContext::new(Default::default(), limits.max_value_bytes, vec![])
-            .with_image_deduplication();
+        let context = CellContext::new(Default::default(), vec![]).with_image_deduplication();
         let runtime =
             repl.get_or_insert_with(|| Repl::new(maka_computer_use::facade_for(platform), limits));
         let bridge = Arc::new(Bridge {

@@ -230,14 +230,6 @@ async fn run(
             None => ModelError::Adapter(format!("Responses HTTP {status}: error body interrupted")),
         };
         let mut bytes = Vec::new();
-        if header(&response.head, "content-length")
-            .and_then(|v| v.parse::<u64>().ok())
-            .is_some_and(|len| len > 8 * 1024 * 1024)
-        {
-            return Err(ModelError::Adapter(
-                "provider response body exceeds 8 MiB".into(),
-            ));
-        }
         while let Some(chunk) = wait(idle_timeout, &decoder, response.body.next())
             .await
             .map_err(|_| body_failure())?
@@ -246,11 +238,6 @@ async fn run(
                 _ => body_failure(),
             })?
         {
-            if bytes.len() + chunk.len() > 8 * 1024 * 1024 {
-                return Err(ModelError::Adapter(
-                    "provider response body exceeds 8 MiB".into(),
-                ));
-            }
             bytes.extend_from_slice(&chunk);
         }
         let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
@@ -274,15 +261,8 @@ async fn run(
             let message = value["error"]["message"]
                 .as_str()
                 .or_else(|| value["detail"].as_str())
-                .unwrap_or("request rejected")
-                .chars()
-                .take(4096)
-                .collect::<String>();
-            let content_type = content_type
-                .unwrap_or("missing Content-Type")
-                .chars()
-                .take(256)
-                .collect::<String>();
+                .unwrap_or("request rejected");
+            let content_type = content_type.unwrap_or("missing Content-Type");
             return Err(ModelError::Adapter(format!(
                 "Responses HTTP {status} returned {content_type}, expected text/event-stream: {message}"
             )));

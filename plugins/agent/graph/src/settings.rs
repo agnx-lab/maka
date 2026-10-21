@@ -98,23 +98,15 @@ impl Settings {
 }
 
 fn validate(presets: &[Preset]) -> Result<(), Error> {
-    if presets.len() > 64 {
-        return Err(Error::Invalid(
-            "At most 64 agent presets are supported".into(),
-        ));
-    }
     let mut ids = BTreeSet::new();
     for preset in presets {
         crate::identity(&preset.id)?;
-        if preset.id.len() > 128
-            || !ids.insert(&preset.id)
+        if !ids.insert(&preset.id)
             || !preset
                 .id
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
             || preset.name.trim().is_empty()
-            || preset.name.len() > 512
-            || preset.description.len() > 4000
         {
             return Err(Error::Invalid("Invalid or duplicate agent preset".into()));
         }

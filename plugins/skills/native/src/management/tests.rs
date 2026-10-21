@@ -833,8 +833,9 @@ async fn source_import_checks_actual_resources_and_never_accepts_path_or_metadat
                 );
             }
             5 => {
-                let bytes = vec![b'x'; 1024 * 1024 + 1];
+                let bytes = vec![0xff; 1024 * 1024 + 1];
                 input.bytes = bytes.len();
+                input.digest = maka_agent_facts::artifact::content_digest(&bytes);
                 resources.insert(
                     "file".into(),
                     Arc::new(ImportResource { bytes, text: false }),

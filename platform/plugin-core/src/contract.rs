@@ -345,7 +345,7 @@ impl Contract {
 impl Cardinality {
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if let Self::Many { min, max } = self
-            && (min > max || *max > 4096)
+            && min > max
         {
             return Err(Error::Declaration("invalid import cardinality".into()));
         }

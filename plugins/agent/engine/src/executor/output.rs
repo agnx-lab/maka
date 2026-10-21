@@ -42,8 +42,6 @@ pub(super) struct Recorder {
 #[derive(Default)]
 struct State {
     closed: bool,
-    bytes: usize,
-    events: usize,
     calls: HashSet<String>,
     pending: HashSet<String>,
     failure: Option<CommitError>,
@@ -98,21 +96,9 @@ impl OutputSink for Recorder {
             output
                 .validate()
                 .map_err(|reason| Error::Invalid(reason.into()))?;
-            let bytes = serde_json::to_vec(&output)
-                .map_err(|error| Error::Invalid(error.to_string()))?
-                .len();
-            if state.events >= 8192 || bytes > (8 * 1024 * 1024usize).saturating_sub(state.bytes) {
-                return Err(Error::Invalid("executor output capacity exceeded".into()));
-            }
             match &output {
-                Output::ToolStart { tool_call_id, .. }
-                    if state.calls.contains(tool_call_id)
-                        || state.calls.len() >= 4096
-                        || state.pending.len() >= 128 =>
-                {
-                    return Err(Error::Invalid(
-                        "duplicate tool activity ID or capacity exceeded".into(),
-                    ));
+                Output::ToolStart { tool_call_id, .. } if state.calls.contains(tool_call_id) => {
+                    return Err(Error::Invalid("duplicate tool activity ID".into()));
                 }
                 Output::ToolProgress { tool_call_id, .. }
                 | Output::ToolResult { tool_call_id, .. }
@@ -137,8 +123,6 @@ impl OutputSink for Recorder {
                 self.cancellation.cancel();
                 return Err(Error::Persistence(message));
             }
-            state.events += 1;
-            state.bytes += bytes;
             match output {
                 Output::ToolStart { tool_call_id, .. } => {
                     state.calls.insert(tool_call_id.clone());

@@ -77,9 +77,7 @@ impl Hub {
         }
     }
     pub(super) async fn validate_dependencies(&self, ids: &[String]) -> Result<(), String> {
-        if ids.len() > 16
-            || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
-        {
+        if ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len() {
             return Err("workhub_dependencies_invalid".into());
         }
         for id in ids {

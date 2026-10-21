@@ -21,7 +21,8 @@
 use super::*;
 use crate::budget::{Kind, NativeBudget, Permit};
 use maka_agent_facts::terminal::TerminalCursor;
-use maka_agent_facts::terminal::input::MAX_INPUT_ACTIONS;
+/// Scheduling target for recoverable native batches, not an action admission limit.
+const MAX_INPUT_ACTIONS: usize = 64;
 use maka_agent_facts::terminal::input::encoded_actions_byte_len;
 use std::collections::VecDeque;
 
@@ -49,8 +50,9 @@ pub struct State {
 }
 impl State {
     pub fn new(budget: &NativeBudget) -> Self {
-        // Bounds retained canonical text, queue (including the in-flight batch)
-        // and serialization copies. No worker or process lives in this owner.
+        // Retain native presentation custody. The input window separately packs
+        // complete actions and retains their actual bytes until the exact ACK.
+        // No worker or process lives in this owner.
         let permit = budget.reserve(Kind::Encoded, 384 * 1024).ok();
         Self {
             observation: TerminalViewObservation {
@@ -208,9 +210,9 @@ impl State {
         let bytes = serde_json::to_vec(&action)
             .expect("typed terminal input")
             .len();
-        if !encoded_actions_byte_len(std::slice::from_ref(&action))
-            .is_ok_and(|n| n <= MAX_BATCH_BYTES)
-            || self.queued_bytes.saturating_add(bytes) > 64 * 1024
+        if encoded_actions_byte_len(std::slice::from_ref(&action)).is_err()
+            || self.queued_bytes.checked_add(bytes).is_none()
+            || (self.queued_bytes != 0 && self.queued_bytes.saturating_add(bytes) > 64 * 1024)
         {
             if self.observation.error != Some(TerminalViewError::InputFull) {
                 self.observation.error = Some(TerminalViewError::InputFull);
@@ -250,15 +252,18 @@ impl State {
         let actions = if size.is_some() {
             vec![]
         } else if !self.queue.is_empty() {
-            // Drain already queued input within the service bounds. The batch
-            // stays immutable until its exact receipt; do not serialize a
-            // complete mutation round trip for each buffered character.
+            // Batch queued actions to a scheduling target, admitting a complete
+            // oversized first action. This original batch stays immutable until
+            // its exact receipt; a paste is never split into new actions.
             let mut actions = Vec::new();
             let mut encoded_bytes = 0;
             while let Some((action, _)) = self.queue.front() {
                 let bytes = encoded_actions_byte_len(std::slice::from_ref(action))
                     .expect("validated queued input");
-                if actions.len() == MAX_INPUT_ACTIONS || encoded_bytes + bytes > MAX_BATCH_BYTES {
+                if actions.len() == MAX_INPUT_ACTIONS
+                    || (!actions.is_empty()
+                        && bytes > MAX_BATCH_BYTES.saturating_sub(encoded_bytes))
+                {
                     break;
                 }
                 let (action, retained_bytes) = self.queue.pop_front().unwrap();

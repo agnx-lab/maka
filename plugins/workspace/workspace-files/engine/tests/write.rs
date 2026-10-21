@@ -82,7 +82,7 @@ async fn write_contract_authority_bounds_and_inode() {
     assert_eq!(fs::read(root.join("new")).unwrap(), b"");
     assert_eq!(created["previousContent"], "");
     for previous in [vec![0xff, 0x00], vec![b'x'; 8193]] {
-        fs::write(root.join("new"), previous).unwrap();
+        fs::write(root.join("new"), &previous).unwrap();
         let result = executor
             .invoke(
                 "Write".into(),
@@ -91,7 +91,11 @@ async fn write_contract_authority_bounds_and_inode() {
             )
             .await
             .unwrap();
-        assert!(result.get("previousContent").is_none());
+        if let Ok(text) = std::str::from_utf8(&previous) {
+            assert_eq!(result["previousContent"], text);
+        } else {
+            assert!(result.get("previousContent").is_none());
+        }
         assert_eq!(fs::read(root.join("new")).unwrap(), b"replacement");
     }
     fs::create_dir(root.join("dir")).unwrap();
@@ -201,7 +205,7 @@ async fn write_large_utf8_content_creates_and_overwrites_without_replacing_inode
             )
             .await
             .unwrap(),
-        json!({"kind":"file_write","path":path,"bytes":content.len()})
+        json!({"kind":"file_write","path":path,"bytes":content.len(),"previousContent":""})
     );
     assert_eq!(fs::read(&path).unwrap(), content.as_bytes());
     #[cfg(unix)]
@@ -220,7 +224,7 @@ async fn write_large_utf8_content_creates_and_overwrites_without_replacing_inode
             )
             .await
             .unwrap(),
-        json!({"kind":"file_write","path":path,"bytes":replacement.len()})
+        json!({"kind":"file_write","path":path,"bytes":replacement.len(),"previousContent":content})
     );
     assert_eq!(
         fs::read(root.join("alias")).unwrap(),

@@ -26,9 +26,6 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use url::Url;
 
-const MAX_MODELS: usize = 2048;
-const MAX_ACCOUNTS: usize = 32;
-
 pub(super) async fn cohere(
     client: &InventoryClient,
     mut base: Url,
@@ -80,9 +77,9 @@ pub(super) async fn cloudflare(
     base.query_pairs_mut()
         .extend_pairs([("per_page", "50"), ("task", "Text Generation")]);
     let mut models = Vec::new();
-    let mut count = 0;
     // Ask for an empty terminal page; a short page alone does not prove exhaustion.
-    for page in 1..=MAX_MODELS.div_ceil(50) + 1 {
+    let mut page = 1u64;
+    loop {
         let mut url = base.clone();
         url.query_pairs_mut().append_pair("page", &page.to_string());
         let root = client.get(url).await?;
@@ -92,16 +89,12 @@ pub(super) async fn cloudflare(
             return Err(invalid());
         }
         let items = rows(&root, "result")?;
-        count += items.len();
-        if count > MAX_MODELS {
-            return Err(invalid());
-        }
         if items.is_empty() {
             return normalize(models);
         }
         models.extend(names(items, false));
+        page = page.checked_add(1).ok_or_else(invalid)?;
     }
-    Err(invalid())
 }
 
 pub(super) async fn fireworks(
@@ -130,9 +123,6 @@ pub(super) async fn fireworks(
         .filter(|name| seen.insert((*name).to_owned()))
         .map(str::to_owned)
         .collect();
-    if accounts.len() > MAX_ACCOUNTS {
-        return Err(invalid());
-    }
     // Preserve account order while limiting in-flight requests and response ownership.
     let mut batches = stream::iter(accounts.into_iter().map(|account| {
         let mut url = base.clone();
@@ -150,13 +140,8 @@ pub(super) async fn fireworks(
         async move { fetch_pages(client, url, Pagination::FireworksModels).await }
     }))
     .buffered(4);
-    let mut count = 0;
     let mut models = Vec::new();
     while let Some(batch) = batches.try_next().await? {
-        count += batch.len();
-        if count > MAX_MODELS {
-            return Err(invalid());
-        }
         for row in batch {
             let Some(name) = row
                 .get("name")
@@ -199,49 +184,27 @@ async fn fetch_pages(
     base: Url,
     pagination: Pagination,
 ) -> Result<Vec<Value>, Error> {
-    let (field, token_field, token_parameter, limit, max_pages) = match pagination {
-        Pagination::CohereModels => (
-            "models",
-            "next_page_token",
-            "page_token",
-            MAX_MODELS,
-            MAX_MODELS.div_ceil(1000) + 1,
-        ),
-        Pagination::FireworksAccounts => (
-            "accounts",
-            "nextPageToken",
-            "pageToken",
-            MAX_ACCOUNTS,
-            MAX_MODELS.div_ceil(200) + 1,
-        ),
-        Pagination::FireworksModels => (
-            "models",
-            "nextPageToken",
-            "pageToken",
-            MAX_MODELS,
-            MAX_MODELS.div_ceil(200) + 1,
-        ),
+    let (field, token_field, token_parameter) = match pagination {
+        Pagination::CohereModels => ("models", "next_page_token", "page_token"),
+        Pagination::FireworksAccounts => ("accounts", "nextPageToken", "pageToken"),
+        Pagination::FireworksModels => ("models", "nextPageToken", "pageToken"),
     };
     let mut seen = HashSet::new();
     let mut token: Option<String> = None;
     let mut items = Vec::new();
-    for _ in 0..max_pages {
+    loop {
         let mut url = base.clone();
         if let Some(token) = &token {
             url.query_pairs_mut().append_pair(token_parameter, token);
         }
         let root = client.get(url).await?;
         let page = rows(&root, field)?;
-        if page.len() > limit - items.len() {
-            return Err(invalid());
-        }
         items.extend_from_slice(page);
         let next = match root.get(token_field) {
             None | Some(Value::Null) => return Ok(items),
             Some(Value::String(value)) if value.is_empty() => return Ok(items),
             Some(Value::String(value))
-                if value.encode_utf16().count() <= 2048
-                    && !value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') =>
+                if !value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}') =>
             {
                 value
             }
@@ -252,7 +215,6 @@ async fn fetch_pages(
         }
         token = Some(next.clone());
     }
-    Err(invalid())
 }
 
 fn token_limit(value: Option<&Value>) -> Option<u64> {

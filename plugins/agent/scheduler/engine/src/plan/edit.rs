@@ -96,7 +96,6 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         }
         next.check_expiry()?;
         next.task.updated_at = next.task.updated_at.max(now);
-        next.task.bound_history()?;
         next.validate()?;
         Ok(next)
     }
@@ -141,8 +140,8 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         Ok(next)
     }
     pub fn snooze(&self, delay_ms: i64, now: i64) -> Result<Self, Error> {
-        if !(1..=7 * 24 * 60 * 60 * 1000).contains(&delay_ms) {
-            return Err(invalid("snooze must be between 1 ms and 7 days"));
+        if delay_ms <= 0 {
+            return Err(invalid("snooze must be positive"));
         }
         if self.task.status != Status::Active
             || (self.pending.is_some() && !self.waiting_notification())
@@ -160,6 +159,9 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
             at.checked_add(delay_ms)
                 .ok_or_else(|| invalid("time overflow"))?,
         );
+        if let Some(at) = next.task.next_fire_at {
+            crate::schedule::timestamp(at)?;
+        }
         next.task.updated_at = next.task.updated_at.max(now);
         next.check_expiry()?;
         Ok(next)
@@ -239,7 +241,7 @@ mod tests {
         assert_eq!(restored.pending.as_ref(), Some(&fire));
         restored.pending.as_mut().unwrap().scheduled_at = -1;
         assert!(restored.validate().is_err());
-        let now = 2 * crate::MAX_DELAY_MS;
+        let now = 2 * 366 * 24 * 60 * 60 * 1000;
         let mut next = plan
             .update(
                 Update {

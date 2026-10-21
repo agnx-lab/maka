@@ -41,9 +41,6 @@ pub fn catalog_entry(value: &ConnectionCatalogEntry) -> ValidationResult {
     {
         return Err("stored connection must be canonical".into());
     }
-    if value.models.len() > 2048 {
-        return Err("too many stored models".into());
-    }
     let mut ids = std::collections::BTreeSet::new();
     for model in &value.models {
         model.validate()?;
@@ -60,7 +57,7 @@ pub fn catalog_entry(value: &ConnectionCatalogEntry) -> ValidationResult {
         revision(t, false)?;
     }
     if let Some(test) = &value.last_test {
-        text(&test.checked_at, 128, true)?;
+        text(&test.checked_at)?;
     }
     Ok(())
 }

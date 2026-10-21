@@ -64,9 +64,6 @@ impl Scheduler {
             .transpose()
             .map_err(reason)?
             .unwrap_or(Index { ids: vec![] });
-        if index.ids.len() > 256 {
-            return Err("scheduler_catalog_invalid".into());
-        }
         let mut plans = BTreeMap::new();
         for id in index.ids {
             let record = self
@@ -140,11 +137,11 @@ impl Scheduler {
         &self,
         catalog: &mut Catalog,
         id: &str,
-        mut plan: Option<Plan>,
+        plan: Option<Plan>,
         receipt: Option<Mutation>,
     ) -> Result<(), String> {
-        if let Some(plan) = &mut plan {
-            prepare_record(plan)?;
+        if let Some(plan) = &plan {
+            plan.validate().map_err(reason)?;
         }
         let mut ids = catalog
             .plans
@@ -155,9 +152,6 @@ impl Scheduler {
             ids.insert(id.into());
         } else {
             ids.remove(id);
-        }
-        if ids.len() > 256 {
-            return Err("scheduler_catalog_full".into());
         }
         let expected = catalog.plans.get(id).map(|saved| saved.revision);
         let mut mutations = vec![
@@ -197,16 +191,6 @@ impl Scheduler {
         }
         Ok(())
     }
-}
-pub(super) fn prepare_record(plan: &mut Plan) -> Result<(), String> {
-    plan.validate().map_err(reason)?;
-    // Detail stays deliverable even with escaped text and full history.
-    while serde_json::to_vec(&plan.task).map_err(reason)?.len() > 32 * 1024 {
-        if plan.task.runs.pop().is_none() {
-            return Err("scheduler_task_too_large".into());
-        }
-    }
-    Ok(())
 }
 pub(super) fn receipt_mutation(
     reference: &RecoveryRef,

@@ -26,9 +26,9 @@ pub struct Prepare {
     pub language: maka_agent_facts::language::Language,
     pub message: String,
     /// Actual selected tools bound to this Library; these names grant no access.
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub load_tool: Option<String>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub search_tool: Option<String>,
 }
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]

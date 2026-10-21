@@ -26,9 +26,6 @@ use crate::{
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Admission for the independent MCP and audio routes.
-pub(super) const MAX_MEDIA_BYTES: usize = 5 * 1024 * 1024;
-
 /// Effect output awaiting T2 normalization. This is intentionally not serializable:
 /// pending image bytes must become an immutable Session ref before delivery.
 #[derive(Debug)]
@@ -104,13 +101,6 @@ impl ToolSuccess {
     ) -> Result<NormalizedToolSuccess, &'static str> {
         let (output, pending_image) = match self.0 {
             ToolSuccessValue::Content { output, parts } => {
-                if parts.len() > 64 {
-                    return Ok(NormalizedToolSuccess {
-                        output,
-                        projection: DurableToolProjection::Failure,
-                        artifacts: Vec::new(),
-                    });
-                }
                 let mut projection = Vec::new();
                 let mut artifacts = Vec::new();
                 let mut valid = true;

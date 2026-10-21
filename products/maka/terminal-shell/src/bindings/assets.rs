@@ -33,9 +33,6 @@ pub(super) struct HostAssets(pub(super) Arc<Owner>);
 impl Assets for HostAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         if let Some(encoded) = uri.strip_prefix(super::files::PREFIX) {
-            if uri.len() > 8192 {
-                return Err("Current file selector is too long".into());
-            }
             let source: maka_agent_api::contract::FileRead = serde_json::from_slice(
                 &URL_SAFE_NO_PAD
                     .decode(encoded)
@@ -46,10 +43,7 @@ impl Assets for HostAssets {
                 .path
                 .validate()
                 .map_err(|_| "Invalid current file path")?;
-            if source.session_id.is_empty()
-                || source.session_id.len() > 128
-                || source.expected_version.is_none()
-            {
+            if source.session_id.is_empty() || source.expected_version.is_none() {
                 return Err("Invalid current file selector".into());
             }
             let owner = self.0.clone();
@@ -71,9 +65,6 @@ impl Assets for HostAssets {
             }));
         }
         let source = if let Some(encoded) = uri.strip_prefix("asset:/tool-image/") {
-            if uri.len() > 2048 {
-                return Err("Tool image source is too long".into());
-            }
             let source: ToolImageRead = serde_json::from_slice(
                 &URL_SAFE_NO_PAD
                     .decode(encoded)
@@ -89,9 +80,6 @@ impl Assets for HostAssets {
             }
             ImageSource::Tool(source)
         } else if let Some(encoded) = uri.strip_prefix("asset:/attachment-image/") {
-            if uri.len() > 4096 {
-                return Err("Attachment image source is too long".into());
-            }
             let source: AttachmentImageRead = serde_json::from_slice(
                 &URL_SAFE_NO_PAD
                     .decode(encoded)
@@ -99,7 +87,7 @@ impl Assets for HostAssets {
             )
             .map_err(|_| "Invalid attachment image source")?;
             match &source.source {
-                AttachmentImageSource::Uploaded { id } if id.is_empty() || id.len() > 256 => {
+                AttachmentImageSource::Uploaded { id } if id.is_empty() => {
                     return Err("Invalid uploaded image source".into());
                 }
                 AttachmentImageSource::History {
@@ -119,7 +107,7 @@ impl Assets for HostAssets {
         } else {
             return crate::ApplicationAssets.read(uri);
         };
-        if source.session().is_empty() || source.session().len() > 128 {
+        if source.session().is_empty() {
             return Err("Invalid image session".into());
         }
         let owner = self.0.clone();
@@ -137,9 +125,7 @@ impl Assets for HostAssets {
 }
 
 async fn read_image(owner: &Owner, source: ImageSource) -> Result<(Vec<u8>, String), String> {
-    // Match the existing NSH decoder's encoded-byte ceiling, including valid
-    // 50 MiB Host images. Image bytes never enter the JavaScript heap.
-    const MAX_BYTES: u64 = 64 << 20;
+    // Image bytes remain on the original native reader, outside the JS heap.
     let (method, mut input, expected) = source.request();
     let mut bytes = Vec::new();
     let mut metadata: Option<(u64, String, String)> = None;
@@ -149,8 +135,8 @@ async fn read_image(owner: &Owner, source: ImageSource) -> Result<(Vec<u8>, Stri
         let page = owner.client.query("agent", method, input.clone()).await?;
         let total = page["totalBytes"]
             .as_u64()
-            .filter(|total| *total > 0 && *total <= MAX_BYTES)
-            .ok_or("Image exceeds the terminal decoder's 64 MiB limit")?;
+            .filter(|total| *total > 0)
+            .ok_or("Invalid original image length")?;
         let mime = page["mimeType"].as_str().ok_or("Missing image MIME type")?;
         let digest = page["digest"].as_str().ok_or("Missing image digest")?;
         let data = page["data"].as_str().ok_or("Missing image bytes")?;
@@ -184,7 +170,10 @@ async fn read_image(owner: &Owner, source: ImageSource) -> Result<(Vec<u8>, Stri
         }
         if metadata.is_none() {
             bytes
-                .try_reserve_exact(total as usize)
+                .try_reserve_exact(
+                    usize::try_from(total)
+                        .map_err(|_| "Tool image length cannot be represented")?,
+                )
                 .map_err(|error| error.to_string())?;
             metadata = Some((total, mime.to_owned(), digest.to_owned()));
         }

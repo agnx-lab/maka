@@ -345,6 +345,8 @@ impl<V: ?Sized> Default for Actions<V> {
         }
     }
 }
+const RESOURCE_WINDOW: usize = 64 * 1024 * 1024;
+
 impl<V: ?Sized> Actions<V> {
     /// The handler key is also the author's correlation for one-shot feedback.
     /// Completed cleanup failures no longer reserve it after feedback delivery.
@@ -389,15 +391,18 @@ impl<V: ?Sized> Actions<V> {
             .chain(self.running.values().map(|r| &r.resources))
             .flat_map(|r| r.values())
             .map(|r| r.bytes())
-            .sum::<usize>()
-            + self
-                .queue
-                .iter()
-                .flat_map(|a| &a.witnesses)
-                .chain(self.running.values().flat_map(|a| &a.continuations))
-                .chain(self.outcomes.iter().flat_map(|a| &a.continuations))
-                .map(|c| c.witness.bytes())
-                .sum::<usize>()
+            .chain(
+                self.queue
+                    .iter()
+                    .flat_map(|a| &a.witnesses)
+                    .chain(self.preparing.values().flat_map(|p| &p.action.witnesses))
+                    .chain(self.running.values().flat_map(|a| &a.continuations))
+                    .chain(self.outcomes.iter().flat_map(|a| &a.continuations))
+                    .map(|c| c.witness.bytes()),
+            )
+            .fold(0usize, |charge, bytes| {
+                charge.saturating_add(bytes).min(RESOURCE_WINDOW)
+            })
     }
 }
 fn unavailable(
@@ -409,9 +414,7 @@ fn unavailable(
         caller,
         reply: Box::new(OperationReply {
             reference,
-            receipt: Receipt::Unavailable {
-                diagnostic: bounded_reason(diagnostic),
-            },
+            receipt: Receipt::Unavailable { diagnostic },
         }),
     }
 }
@@ -471,7 +474,7 @@ impl<V: ?Sized + 'static> Application<V> {
                     format!("operation result delivery failed: {error}; read original receipt"),
                 ),
                 _ => ActionOutcome::Failed {
-                    reason: bounded_reason(format!("action result delivery failed: {error}")),
+                    reason: format!("action result delivery failed: {error}"),
                 },
             },
         }
@@ -485,15 +488,9 @@ impl<V: ?Sized + 'static> Application<V> {
         subscription: bool,
     ) -> Result<PreparingAction<V>> {
         for name in [&action.key, &action.binding, &action.method] {
-            if name.is_empty() || name.len() > 128 {
+            if name.is_empty() {
                 return Err(Error::Invalid("invalid action name".into()));
             }
-        }
-        if action.resources.len() > 16 {
-            return Err(Error::Invalid("action resource limit".into()));
-        }
-        if action.continuations.len() > 16 {
-            return Err(Error::Invalid("action continuation limit".into()));
         }
         let provider = self.provider(consumer)?;
         let caps = self.runtime.bind(&provider, &action.binding)?;
@@ -587,13 +584,8 @@ impl<V: ?Sized + 'static> Application<V> {
         mut edges: Vec<Edge>,
         update: &mut tree::Update<V>,
     ) -> Result<PendingCapture<V>> {
-        if source.child.is_empty()
-            || source.child.len() > 128
-            || source.method.is_empty()
-            || source.method.len() > 128
-            || edges.len() >= 32
-        {
-            return Err(Error::Invalid("invalid capture source/depth".into()));
+        if source.child.is_empty() || source.method.is_empty() {
+            return Err(Error::Invalid("invalid capture source".into()));
         }
         let view = self.current(parent, update)?;
         let child = view
@@ -611,7 +603,6 @@ impl<V: ?Sized + 'static> Application<V> {
             child: child.clone(),
             slot: source.child.clone(),
         });
-        update.step(self.mount_depth(&child)?)?;
         let execution = self.runtime.admit_mount(&child)?;
         let Export::Component {
             implementation,
@@ -819,7 +810,6 @@ impl<V: ?Sized + 'static> Application<V> {
         })
     }
     fn reject_action(&mut self, action: Prepared<V>, reason: String) {
-        let reason = bounded_reason(reason);
         self.actions.outcomes.push_back(Outcome {
             consumer: action.consumer,
             key: action.key,
@@ -862,7 +852,8 @@ impl<V: ?Sized + 'static> Application<V> {
             }
             let result = (|| {
                 let mut resources = Attachments::new();
-                let mut bytes = self.actions.bytes();
+                let held = self.actions.bytes();
+                let mut bytes = 0usize;
                 for (slot, target) in &action.captures {
                     let NativeCapture::Resource(resource) = capture(target)? else {
                         return Err(Error::Invalid("native capture output mismatch".into()));
@@ -877,8 +868,8 @@ impl<V: ?Sized + 'static> Application<V> {
                     bytes = bytes
                         .checked_add(resource.bytes())
                         .ok_or_else(|| Error::Invalid("resource byte overflow".into()))?;
-                    if bytes > 64 * 1024 * 1024 {
-                        return Err(Error::Invalid("action resources exceed 64 MiB".into()));
+                    if held + bytes.min(RESOURCE_WINDOW) > RESOURCE_WINDOW {
+                        return Err(Error::Invalid("action resource window is busy".into()));
                     }
                     resources.insert(slot.clone(), resource);
                 }
@@ -890,8 +881,8 @@ impl<V: ?Sized + 'static> Application<V> {
                     bytes = bytes
                         .checked_add(witness.bytes())
                         .ok_or_else(|| Error::Invalid("continuation byte overflow".into()))?;
-                    if bytes > 64 * 1024 * 1024 {
-                        return Err(Error::Invalid("action resources exceed 64 MiB".into()));
+                    if held + bytes.min(RESOURCE_WINDOW) > RESOURCE_WINDOW {
+                        return Err(Error::Invalid("action resource window is busy".into()));
                     }
                     witnesses.push(witness);
                 }
@@ -1041,22 +1032,16 @@ impl<V: ?Sized + 'static> Application<V> {
                 match valid {
                     Ok(()) => ActionOutcome::Succeeded { value },
                     Err(e) => ActionOutcome::Failed {
-                        reason: bounded_reason(e.to_string()),
+                        reason: e.to_string(),
                     },
                 }
             }
-            Err(reason) => ActionOutcome::Failed {
-                reason: if reason.len() > 64 * 1024 {
-                    "service error exceeds 64 KiB".into()
-                } else {
-                    reason
-                },
-            },
+            Err(reason) => ActionOutcome::Failed { reason },
         };
         let consumer = running.consumer.clone();
         let key = running.key.clone();
         let request = running.stream.as_ref().map(|_| id);
-        let cleanup_result = completion.cleanup.map_err(bounded_reason);
+        let cleanup_result = completion.cleanup;
         let failure = cleanup_result.as_ref().err().cloned();
         let cleanup = self.runtime.settle(&running.execution, cleanup_result);
         let continuations = std::mem::take(
@@ -1106,7 +1091,6 @@ impl<V: ?Sized + 'static> Application<V> {
         if !running.completed {
             return Err(Error::Invalid("executor has not completed".into()));
         }
-        let cleanup = cleanup.map_err(bounded_reason);
         let failure = cleanup.as_ref().err().cloned();
         self.runtime.settle(&running.execution, cleanup)?;
         if let Some(reason) = failure {
@@ -1256,13 +1240,5 @@ impl<V: ?Sized + 'static> Application<V> {
         }
         self.sync_subscription_demand();
         Ok(())
-    }
-}
-
-fn bounded_reason(reason: String) -> String {
-    if reason.len() > 64 * 1024 {
-        "action diagnostic exceeds 64 KiB".into()
-    } else {
-        reason
     }
 }

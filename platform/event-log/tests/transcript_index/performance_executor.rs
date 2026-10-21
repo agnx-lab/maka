@@ -116,7 +116,7 @@ async fn executor_invocation_transcript() {
         let through = end(&log, "a", InvocationOutcome::Completed).await;
         assert_eq!(through, (count * 3 + 4) as u64);
         let prefix = log.prefix(10_000, 16 * 1024 * 1024).await.unwrap();
-        let mut view = maka_presentation::InvocationView::new(16 * 1024 * 1024).unwrap();
+        let mut view = maka_presentation::InvocationView::new();
         let expected = prefix
             .events
             .iter()

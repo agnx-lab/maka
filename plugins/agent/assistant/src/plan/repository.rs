@@ -61,7 +61,6 @@ pub struct HistoryPage<A = maka_capabilities::authorization::Id> {
     pub next_after: Option<u64>,
 }
 
-const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
 const MAX_PAGE_BYTES: usize = 512 * 1024;
 const MAX_PAGE_ITEMS: usize = 8;
 
@@ -156,9 +155,6 @@ impl<A: Clone + Serialize + DeserializeOwned> Repository<A> {
         let head = Head {
             revision: snapshot.revision,
         };
-        if serde_json::to_vec(&snapshot).map_err(invalid)?.len() > MAX_SNAPSHOT_BYTES {
-            return Err(invalid("Plan snapshot exceeds 256 KiB"));
-        }
         let decision = Decision {
             operation_id: request.operation_id.clone(),
             fingerprint: digest(request)?,
@@ -235,18 +231,17 @@ impl<A: Clone + Serialize + DeserializeOwned> Repository<A> {
             snapshots: Vec::new(),
             next_after: None,
         };
-        let mut bytes = 256; // JSON envelope and separators.
+        let mut bytes = 256usize; // JSON envelope and separators.
         let mut last = after;
         while last < through && page.snapshots.len() < MAX_PAGE_ITEMS {
             let snapshot = self.decision(last + 1).await?.snapshot;
             let size = serde_json::to_vec(&snapshot).map_err(invalid)?.len();
-            if size > MAX_SNAPSHOT_BYTES {
-                return Err(Error::Corrupt("oversized Plan snapshot".into()));
-            }
-            if bytes + size + 1 > MAX_PAGE_BYTES {
+            if !page.snapshots.is_empty()
+                && bytes.saturating_add(size).saturating_add(1) > MAX_PAGE_BYTES
+            {
                 break;
             }
-            bytes += size + 1;
+            bytes = bytes.saturating_add(size).saturating_add(1);
             last += 1;
             page.snapshots.push(snapshot);
         }

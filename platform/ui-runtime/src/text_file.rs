@@ -37,11 +37,10 @@ use std::{
     sync::{Arc, mpsc},
 };
 
-const MAX_BYTES: usize = 16 * 1024;
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TextFileConfiguration {
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: Option<PathBuf>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -63,7 +62,6 @@ pub enum TextFileOperation {
     Write {
         #[serde(rename = "expectedDigest")]
         expected_digest: Option<String>,
-        #[schemars(length(max = 16384))]
         text: String,
     },
 }
@@ -96,7 +94,6 @@ pub enum TextFileError {
     ReadFailed,
     WriteFailed,
     InvalidFile,
-    TooLarge,
     InvalidUtf8,
     Conflict,
     WorkerFailed,
@@ -116,7 +113,11 @@ pub fn contract() -> Contract {
         },
     }
 }
-fn read(directory: &Dir, name: &std::ffi::OsStr) -> Result<Option<String>, TextFileError> {
+fn read(
+    directory: &Dir,
+    name: &std::ffi::OsStr,
+    budget: &NativeBudget,
+) -> Result<(Option<String>, Option<Permit>), TextFileError> {
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
     #[cfg(unix)]
@@ -126,40 +127,55 @@ fn read(directory: &Dir, name: &std::ffi::OsStr) -> Result<Option<String>, TextF
     }
     let file = match directory.open_with(name, &options) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((None, None)),
         Err(_) => return Err(TextFileError::ReadFailed),
     };
     let metadata = file.metadata().map_err(|_| TextFileError::ReadFailed)?;
     if !metadata.is_file() {
         return Err(TextFileError::InvalidFile);
     }
-    if metadata.len() > MAX_BYTES as u64 {
-        return Err(TextFileError::TooLarge);
+    let length = usize::try_from(metadata.len()).map_err(|_| TextFileError::WorkerFailed)?;
+    let admitted = length
+        .checked_add(1)
+        .and_then(|n| n.checked_mul(6))
+        .ok_or(TextFileError::WorkerFailed)?;
+    let mut permit = budget
+        .reserve(Kind::Encoded, admitted)
+        .map_err(|_| TextFileError::WorkerFailed)?;
+    let mut bytes = Vec::with_capacity(length);
+    file.take(
+        u64::try_from(length)
+            .map_err(|_| TextFileError::WorkerFailed)?
+            .checked_add(1)
+            .ok_or(TextFileError::WorkerFailed)?,
+    )
+    .read_to_end(&mut bytes)
+    .map_err(|_| TextFileError::ReadFailed)?;
+    if bytes.len() != length {
+        return Err(TextFileError::Conflict);
     }
-    let mut bytes = Vec::new();
-    file.take(MAX_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| TextFileError::ReadFailed)?;
-    if bytes.len() > MAX_BYTES {
-        return Err(TextFileError::TooLarge);
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|_| TextFileError::InvalidUtf8)
+    let text = String::from_utf8(bytes).map_err(|_| TextFileError::InvalidUtf8)?;
+    let encoded = serde_json::to_vec(&text)
+        .map_err(|_| TextFileError::WorkerFailed)?
+        .len();
+    permit.shrink_to(encoded);
+    Ok((Some(text), Some(permit)))
 }
+
 fn digest(text: Option<&str>) -> Option<String> {
     text.map(|text| format!("sha256:{}", hex::encode(Sha256::digest(text.as_bytes()))))
 }
-fn perform(path: &Path, operation: TextFileOperation) -> Result<TextFileState, TextFileError> {
+fn perform_admitted(
+    path: &Path,
+    operation: TextFileOperation,
+    budget: &NativeBudget,
+) -> Result<(TextFileState, Option<Permit>), TextFileError> {
     if !path.is_absolute() {
         return Err(TextFileError::InvalidFile);
     }
     let parent = path.parent().ok_or(TextFileError::InvalidFile)?;
     let name = path.file_name().ok_or(TextFileError::InvalidFile)?;
-    if let TextFileOperation::Write { text, .. } = &operation {
-        if text.len() > MAX_BYTES {
-            return Err(TextFileError::TooLarge);
-        }
+    if matches!(operation, TextFileOperation::Write { .. }) {
         std::fs::create_dir_all(parent).map_err(|_| TextFileError::WriteFailed)?;
     }
     let directory = match Dir::open_ambient_dir(parent, ambient_authority()) {
@@ -168,14 +184,17 @@ fn perform(path: &Path, operation: TextFileOperation) -> Result<TextFileState, T
             if error.kind() == std::io::ErrorKind::NotFound
                 && matches!(operation, TextFileOperation::Read) =>
         {
-            return Ok(TextFileState::Ready {
-                digest: None,
-                text: None,
-            });
+            return Ok((
+                TextFileState::Ready {
+                    digest: None,
+                    text: None,
+                },
+                None,
+            ));
         }
         Err(_) => return Err(TextFileError::ReadFailed),
     };
-    let current = read(&directory, name)?;
+    let (current, mut retained) = read(&directory, name, budget)?;
     let text = match operation {
         TextFileOperation::Read => current,
         TextFileOperation::Write {
@@ -185,6 +204,8 @@ fn perform(path: &Path, operation: TextFileOperation) -> Result<TextFileState, T
             if digest(current.as_deref()) != expected_digest {
                 return Err(TextFileError::Conflict);
             }
+            drop(current);
+            retained = None;
             let temporary = format!(".maka-text-{}", uuid::Uuid::new_v4());
             let result = (|| {
                 let mut options = OpenOptions::new();
@@ -202,7 +223,8 @@ fn perform(path: &Path, operation: TextFileOperation) -> Result<TextFileState, T
                     .map_err(|_| TextFileError::WriteFailed)?;
                 // Detect ordinary external edits. This is not an atomic CAS against
                 // arbitrary external writers between the check and rename.
-                if digest(read(&directory, name)?.as_deref()) != expected_digest {
+                let (checked, _checking) = read(&directory, name, budget)?;
+                if digest(checked.as_deref()) != expected_digest {
                     return Err(TextFileError::Conflict);
                 }
                 directory
@@ -214,21 +236,24 @@ fn perform(path: &Path, operation: TextFileOperation) -> Result<TextFileState, T
             Some(text)
         }
     };
-    Ok(TextFileState::Ready {
-        digest: digest(text.as_deref()),
-        text,
-    })
+    Ok((
+        TextFileState::Ready {
+            digest: digest(text.as_deref()),
+            text,
+        },
+        retained,
+    ))
 }
 struct Reply {
     state: TextFileState,
-    _bytes: Permit,
+    _bytes: Vec<Permit>,
 }
 pub struct TextFile {
     path: Option<PathBuf>,
     resources: Arc<Resources>,
     budget: NativeBudget,
     receiver: Option<mpsc::Receiver<Reply>>,
-    bytes: Option<Permit>,
+    bytes: Vec<Permit>,
     current: TextFileObservation,
     announced: Option<TextFileObservation>,
     closed: bool,
@@ -252,7 +277,7 @@ impl TextFile {
             resources,
             budget,
             receiver: None,
-            bytes: None,
+            bytes: Vec::new(),
             announced: None,
             closed: false,
         }
@@ -280,15 +305,17 @@ impl TextFile {
         };
         self.current.sequence = command.sequence;
         let result = (|| {
-            if let TextFileOperation::Write { text, .. } = &command.operation
-                && text.len() > MAX_BYTES
-            {
-                return Err(TextFileError::TooLarge);
+            let mut bytes = Vec::new();
+            if let TextFileOperation::Write { text, .. } = &command.operation {
+                let length = maka_plugin_core::json::encoded_size(text, usize::MAX)
+                    .map_err(|_| TextFileError::WorkerFailed)?;
+                bytes.push(
+                    self.budget
+                        .reserve(Kind::Encoded, length)
+                        .map_err(|_| TextFileError::WorkerFailed)?,
+                );
             }
-            let bytes = self
-                .budget
-                .reserve(Kind::Encoded, MAX_BYTES * 6)
-                .map_err(|_| TextFileError::WorkerFailed)?;
+            let budget = self.budget.clone();
             let mut ticket = self
                 .resources
                 .reserve()
@@ -300,9 +327,13 @@ impl TextFile {
                 .name("native-text-file".into())
                 .spawn(move || {
                     ticket.start();
-                    let result = std::panic::catch_unwind(|| perform(&path, operation));
+                    let result =
+                        std::panic::catch_unwind(|| perform_admitted(&path, operation, &budget));
                     let (state, cleanup) = match result {
-                        Ok(Ok(state)) => (state, Ok(())),
+                        Ok(Ok((state, retained))) => {
+                            bytes.extend(retained);
+                            (state, Ok(()))
+                        }
                         Ok(Err(error)) => (TextFileState::Failed { error }, Ok(())),
                         Err(_) => (
                             TextFileState::Failed {
@@ -327,7 +358,7 @@ impl TextFile {
             })
         })();
         self.current.state = result.unwrap_or_else(|error| TextFileState::Failed { error });
-        self.bytes = None;
+        self.bytes.clear();
     }
     fn poll(&mut self) {
         let Some(receiver) = &self.receiver else {
@@ -336,7 +367,7 @@ impl TextFile {
         match receiver.try_recv() {
             Ok(reply) => {
                 self.current.state = reply.state;
-                self.bytes = Some(reply._bytes);
+                self.bytes = reply._bytes;
                 self.receiver = None;
             }
             Err(mpsc::TryRecvError::Disconnected) => {
@@ -373,6 +404,14 @@ pub fn native() -> maka_plugin_core::package::NativeDefinition {
 
 #[cfg(test)]
 mod tests {
+    fn perform(
+        path: &std::path::Path,
+        operation: super::TextFileOperation,
+    ) -> Result<super::TextFileState, super::TextFileError> {
+        super::perform_admitted(path, operation, &super::NativeBudget::default())
+            .map(|(state, _)| state)
+    }
+
     use super::*;
     fn write(expected: Option<&str>, text: &str) -> TextFileOperation {
         TextFileOperation::Write {
@@ -381,7 +420,7 @@ mod tests {
         }
     }
     #[test]
-    fn bounded_atomic_replacement_detects_external_changes_and_preserves_original() {
+    fn complete_atomic_replacement_detects_external_changes_and_preserves_original() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("nested/theme.json");
         assert_eq!(
@@ -407,15 +446,12 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "external");
         let external = digest(Some("external")).unwrap();
-        let exact = "色".repeat(MAX_BYTES / 3) + "x";
-        assert_eq!(exact.len(), MAX_BYTES);
+        let exact = "色😀".repeat(4000) + "COMPLETE END";
+        assert!(exact.len() > 16 * 1024);
         assert!(perform(&path, write(Some(&external), &exact)).is_ok());
         assert_eq!(
-            perform(
-                &path,
-                write(digest(Some(&exact)).as_deref(), &(exact.clone() + "x"))
-            ),
-            Err(TextFileError::TooLarge)
+            perform(&path, write(Some(&external), &(exact.clone() + "x"))),
+            Err(TextFileError::Conflict)
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), exact);
         assert_eq!(
@@ -424,18 +460,13 @@ mod tests {
         );
     }
     #[test]
-    fn reads_reject_non_regular_files_invalid_utf8_and_oversize_without_following_links() {
+    fn reads_reject_non_regular_files_and_invalid_utf8_without_following_links() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("file");
         std::fs::write(&path, [255]).unwrap();
         assert_eq!(
             perform(&path, TextFileOperation::Read),
             Err(TextFileError::InvalidUtf8)
-        );
-        std::fs::write(&path, vec![b'x'; MAX_BYTES + 1]).unwrap();
-        assert_eq!(
-            perform(&path, TextFileOperation::Read),
-            Err(TextFileError::TooLarge)
         );
         assert_eq!(
             perform(directory.path(), TextFileOperation::Read),

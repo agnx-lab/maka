@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded, localizable display text; never an execution identity.
+//! Localizable display text; never an execution identity.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -31,13 +31,12 @@ pub struct Text {
     pub translations: BTreeMap<String, String>,
 }
 impl Text {
-    /// A bounded display line from model-authored text, never executable input.
+    /// A display line from model-authored text, never executable input.
     pub fn single_line(value: &str) -> Option<Self> {
         let mut value = value.split_whitespace().collect::<Vec<_>>().join(" ");
         value.retain(|c| {
             !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
         });
-        value.truncate(value.floor_char_boundary(value.len().min(256)));
         let title = Self::plain(value);
         title.validate().ok().map(|()| title)
     }
@@ -70,16 +69,13 @@ impl Text {
     pub fn validate(&self) -> Result<(), &'static str> {
         let valid_text = |text: &str| {
             !text.trim().is_empty()
-                && text.len() <= 256
                 && !text.chars().any(|c| {
                     c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
                 })
         };
         if !valid_text(&self.fallback)
-            || self.translations.len() > 8
             || self.translations.iter().any(|(locale, text)| {
                 locale.is_empty()
-                    || locale.len() > 64
                     || locale.split('-').any(|part| {
                         part.is_empty() || !part.bytes().all(|c| c.is_ascii_alphanumeric())
                     })
@@ -95,7 +91,6 @@ impl Text {
 /// Renderer keys are opaque to the runtime and confer no resource authority.
 pub fn validate_presentation(key: &str) -> Result<(), &'static str> {
     if key.is_empty()
-        || key.len() > 128
         || !key
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"._-:/@".contains(&c))

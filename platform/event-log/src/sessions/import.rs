@@ -41,7 +41,7 @@ impl EventLog {
         limit: usize,
     ) -> Result<(Vec<super::SessionRecord<T>>, Option<String>), StoreError> {
         self.validate_root()?;
-        if prefix.is_empty() || prefix.len() > 128 || !(1..=16).contains(&limit) {
+        if prefix.is_empty() || !(1..=16).contains(&limit) {
             return Err(invalid("invalid import history query"));
         }
         if let Some(after) = after {
@@ -87,7 +87,7 @@ impl EventLog {
     ) -> Result<super::SessionRecord<T>, StoreError> {
         self.validate_root()?;
         owner.validate()?;
-        if owner.fingerprint.is_empty() || owner.fingerprint.len() > 512 {
+        if owner.fingerprint.is_empty() {
             return Err(invalid("invalid import fingerprint"));
         }
         source.validate().map_err(invalid)?;
@@ -99,9 +99,6 @@ impl EventLog {
             record.validate().map_err(invalid)?;
         }
         let configuration = serde_json::to_string(configuration)?;
-        if configuration.len() > super::MAX_CONFIGURATION_BYTES {
-            return Err(invalid("import configuration exceeds capacity"));
-        }
         let source = serde_json::to_string(source)?;
         let owner = owner.clone();
         let commits = self.commits.clone();

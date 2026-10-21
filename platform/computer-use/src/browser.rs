@@ -101,7 +101,7 @@ impl Cdp {
             Duration::from_secs(10),
             cua_driver_core::browser::cdp_ws::CdpConnection::connect_bounded(
                 url.as_str(),
-                16 * 1024 * 1024,
+                usize::MAX,
             ),
         )
         .await
@@ -159,17 +159,8 @@ async fn http(provider: &BrowserConnection, path: &str) -> Result<Value, ToolErr
         .map_err(failed)?
         .error_for_status()
         .map_err(failed)?;
-    if response
-        .content_length()
-        .is_some_and(|size| size > 1024 * 1024)
-    {
-        return Err(failed("browser inventory exceeds limit"));
-    }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(failed)? {
-        if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err(failed("browser inventory exceeds limit"));
-        }
         bytes.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&bytes).map_err(failed)
@@ -706,14 +697,7 @@ impl Tab {
                 Language::ZhCn => "标签页",
                 Language::ZhTw => "分頁",
             };
-            let mut state = format!("{label} {}: {}\n{body}", self.info.id, self.info.url);
-            if nodes.len() > 2000 {
-                state.push_str(match language {
-                    Language::En => "\nAccessibility tree truncated at 2000 nodes.",
-                    Language::ZhCn => "\n无障碍树已在 2000 个节点处截断。",
-                    Language::ZhTw => "\n輔助使用樹已在 2000 個節點處截斷。",
-                });
-            }
+            let state = format!("{label} {}: {}\n{body}", self.info.id, self.info.url);
             value["state"] = json!(state);
             self.previous = Some(full);
         } else {

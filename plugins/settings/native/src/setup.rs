@@ -109,11 +109,6 @@ pub(crate) async fn discover_prepared(
         return encode(SetupResult::Failed);
     }
     // Preserve existing choices; first-time setup exposes the discovered models.
-    let manual_count = row
-        .enabled_model_ids
-        .iter()
-        .filter(|id| !models.iter().any(|model| &model.id == *id))
-        .count();
     let mut enabled: Vec<String> = row
         .enabled_model_ids
         .iter()
@@ -121,14 +116,7 @@ pub(crate) async fn discover_prepared(
         .cloned()
         .collect();
     if enabled.is_empty() {
-        if manual_count >= 256 {
-            return encode(SetupResult::Failed);
-        }
-        enabled = models
-            .iter()
-            .take(256 - manual_count)
-            .map(|model| model.id.clone())
-            .collect();
+        enabled = models.iter().map(|model| model.id.clone()).collect();
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

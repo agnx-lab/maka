@@ -34,7 +34,7 @@ async fn automatic_summary_is_hidden_without_interrupting_main_delivery_or_read_
             .await
             .unwrap();
         let inv = identity("main");
-        let mut view = InvocationView::new(1024).unwrap();
+        let mut view = InvocationView::new();
         let opened = append(
             &log,
             &inv,

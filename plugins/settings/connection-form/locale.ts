@@ -84,7 +84,6 @@ import {
   msg_settings,
   msg_useConnection,
   msg_useDefaultField,
-  msg_searchTooLong,
   msg_searchUnavailable,
 } from '../../shared/locale-messages.js';
 import { translate } from '../../shared/tui-locale.js';
@@ -99,7 +98,6 @@ import {
 
 const messages = {
   searchUnavailable: msg_searchUnavailable,
-  searchTooLong: msg_searchTooLong,
   advancedSettings: msg_advancedSettings,
   back: msg_back,
   basicSettings: msg_basicSettings,

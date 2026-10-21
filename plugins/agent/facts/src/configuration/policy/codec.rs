@@ -38,10 +38,6 @@ pub fn normalize_mutation(mut input: Value) -> Result<RuntimePolicyMutationInput
 }
 
 pub fn decode_canonical_snapshot(mut input: Value) -> Result<RuntimePolicySnapshot, String> {
-    let encoded = crate::capability::json::stringify(&input).map_err(|e| e.to_string())?;
-    if encoded.len() > MAX_POLICY_SNAPSHOT_BYTES {
-        return Err("policy snapshot exceeds byte limit".into());
-    }
     integer_field(&mut input, "revision");
     if let Some(value) = input
         .get_mut("policy")
@@ -75,7 +71,6 @@ pub(super) fn integer_field(value: &mut Value, key: &str) {
 
 fn normalize_policy(policy: &mut RuntimePolicy) -> Result<(), String> {
     proxy(&mut policy.network_proxy)?;
-    personalization(&policy.personalization)?;
     shell(&mut policy.shell)?;
     external_agents(&policy.external_agents)?;
     Ok(())
@@ -84,33 +79,19 @@ fn normalize_policy(policy: &mut RuntimePolicy) -> Result<(), String> {
 fn normalize_operation(operation: &mut RuntimePolicyMutation) -> Result<(), String> {
     match operation {
         RuntimePolicyMutation::SetNetworkProxy { value } => proxy(value),
-        RuntimePolicyMutation::SetPersonalization { value } => personalization(value),
         RuntimePolicyMutation::SetShell { value } => shell(value),
         RuntimePolicyMutation::SetExternalAgents { value } => external_agents(value),
-        RuntimePolicyMutation::PatchAgentSettings { value } => {
-            if let Some(value) = &value.personalization {
-                if let Some(name) = &value.display_name {
-                    text(name, 256, false)?;
-                }
-                if let Some(tone) = &value.assistant_tone {
-                    text(tone, 4096, false)?;
-                }
-            }
-            Ok(())
-        }
-        RuntimePolicyMutation::SetMemory { .. }
+        RuntimePolicyMutation::SetPersonalization { .. }
+        | RuntimePolicyMutation::PatchAgentSettings { .. }
+        | RuntimePolicyMutation::SetMemory { .. }
         | RuntimePolicyMutation::SetWorkspaceInstructions { .. }
         | RuntimePolicyMutation::SetPrivacy { .. }
         | RuntimePolicyMutation::SetChatDefaults { .. } => Ok(()),
     }
 }
-fn personalization(value: &Personalization) -> Result<(), String> {
-    text(&value.display_name, 256, false)?;
-    text(&value.assistant_tone, 4096, false)
-}
 fn external_agents(value: &ExternalAgents) -> Result<(), String> {
     let executable = &value.antigravity.executable;
-    text(executable, 4096, false)?;
+
     if !executable.is_empty()
         && (!executable.starts_with('/') || executable.chars().any(|c| c <= '\u{1f}'))
     {
@@ -128,7 +109,6 @@ pub(super) fn trim(value: &str) -> &str {
     value.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
 }
 pub(super) fn proxy(value: &mut NetworkProxy) -> Result<(), String> {
-    text(&value.host, 255, false)?;
     if controls(&value.host) {
         return Err("network proxy host contains controls".into());
     }
@@ -139,14 +119,11 @@ pub(super) fn proxy(value: &mut NetworkProxy) -> Result<(), String> {
     if value.port == 0 {
         return Err("invalid proxy port".into());
     }
-    text(&value.username, 256, false)?;
+
     for values in [&value.bypass_list, &value.auto_bypass_domains] {
-        if values.len() > 256 {
-            return Err("too many proxy domains".into());
-        }
         let mut seen = BTreeSet::new();
         for item in values {
-            text(item, 512, true)?;
+            text(item)?;
             if !seen.insert(item) {
                 return Err("duplicate proxy domain".into());
             }
@@ -155,7 +132,6 @@ pub(super) fn proxy(value: &mut NetworkProxy) -> Result<(), String> {
     Ok(())
 }
 fn shell(value: &mut ShellPolicy) -> Result<(), String> {
-    text(&value.executable, 4096, false)?;
     value.executable = trim(&value.executable).into();
     if controls(&value.executable)
         || (value.preference == ShellPreference::GitBash && value.executable.is_empty())

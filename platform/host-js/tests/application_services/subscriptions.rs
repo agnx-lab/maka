@@ -255,23 +255,16 @@ async fn retained_context_cannot_publish_after_producer_end_or_block_eof() {
 }
 
 #[tokio::test]
-async fn large_items_preserve_schema_and_unpolled_pending_emit_bounds() {
+async fn large_items_preserve_schema_and_all_unpolled_emissions() {
     tokio::time::timeout(Duration::from_secs(15), async {
         let (app, client, binding, issuer) = native_stream(|_, context| {
             Box::pin(async move {
                 assert!(context.emit(json!(false)).await.is_err());
                 context.emit(wide_item(0)).await?;
                 let mut pending = Vec::new();
-                for i in 0..16 {
+                for i in 0..33 {
                     pending.push(context.emit(json!(format!("item:{i}"))));
                 }
-                assert!(
-                    context
-                        .emit(json!("excess"))
-                        .await
-                        .unwrap_err()
-                        .contains("pending emit capacity")
-                );
                 for emitted in pending {
                     emitted.await?;
                 }
@@ -293,7 +286,7 @@ async fn large_items_preserve_schema_and_unpolled_pending_emit_bounds() {
             stream.recv().await == Some(wide_item(0)),
             "original native item changed"
         );
-        for i in 0..16 {
+        for i in 0..33 {
             assert_eq!(stream.recv().await, Some(json!(format!("item:{i}"))));
         }
         assert_eq!(stream.recv().await, None);

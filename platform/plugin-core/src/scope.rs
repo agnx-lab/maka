@@ -38,7 +38,6 @@ impl TryFrom<String> for Scope {
                     .strip_prefix("session:")
                     .ok_or_else(|| "invalid root".to_string())?;
                 if session.is_empty()
-                    || session.len() > 256
                     || session.chars().any(|c| c.is_control() || c.is_whitespace())
                 {
                     return Err("invalid Session scope".into());

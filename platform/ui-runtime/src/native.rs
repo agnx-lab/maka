@@ -59,7 +59,7 @@ fn input_validators(
     }
     let mut inputs = BTreeMap::new();
     for (key, schema) in schemas {
-        if key.is_empty() || key.len() > 128 {
+        if key.is_empty() {
             return Err(Error::Invalid("invalid native input key".into()));
         }
         inputs.insert(
@@ -376,10 +376,7 @@ impl<V: ?Sized + 'static> NativeRegistry<V> {
         ) -> Result<BTreeMap<String, NativeExport<V>>>
         + 'static,
     ) -> Result<()> {
-        if implementation.is_empty()
-            || implementation.len() > 128
-            || self.factories.contains_key(implementation)
-        {
+        if implementation.is_empty() || self.factories.contains_key(implementation) {
             return Err(Error::Invalid(
                 "invalid or duplicate native implementation".into(),
             ));
@@ -466,7 +463,6 @@ impl<V: ?Sized + 'static> NativeRegistry<V> {
 #[derive(Clone, PartialEq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LabelProps {
-    #[schemars(length(max = 4096))]
     pub text: String,
     pub appearance: crate::appearance::TextAppearance,
     #[serde(default, rename = "terminalForeground")]

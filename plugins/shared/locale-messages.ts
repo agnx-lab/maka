@@ -2713,11 +2713,6 @@ export const msg_copyLoading: Message = [
   '正在读取完整消息…',
   '正在讀取完整訊息…',
 ];
-export const msg_copyTooLarge: Message = [
-  'Copy exceeds size limit',
-  '复制内容超过大小上限',
-  '複製內容超過大小上限',
-];
 export const msg_copyEmpty: Message = ['Empty message', '消息为空', '訊息為空'];
 export const msg_copyUnavailable: Message = ['Message unavailable', '消息不可用', '訊息無法取得'];
 export const msg_copyStreaming: Message = [

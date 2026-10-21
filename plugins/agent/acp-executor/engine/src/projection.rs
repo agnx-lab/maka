@@ -25,7 +25,6 @@ use std::collections::BTreeMap;
 
 pub(crate) mod v2;
 
-const MAX_BYTES: usize = 1024 * 1024;
 // JSON escaping expands each byte at most sixfold; leave room for identities.
 const CHUNK_BYTES: usize = 8 * 1024;
 
@@ -41,9 +40,7 @@ pub(crate) struct Projection {
     session_id: String,
     invocation_id: String,
     tools: BTreeMap<String, Tool>,
-    tool_bytes: usize,
     text: String,
-    text_json_bytes: usize,
     config_options: Option<Vec<acp::SessionConfigOption>>,
     finished: bool,
 }
@@ -57,9 +54,7 @@ impl Projection {
             session_id,
             invocation_id,
             tools: BTreeMap::new(),
-            tool_bytes: 0,
             text: String::new(),
-            text_json_bytes: 0,
             config_options: None,
             finished: false,
         }
@@ -84,13 +79,8 @@ impl Projection {
         match notification.update {
             acp::SessionUpdate::AgentMessageChunk(chunk) => {
                 let text = content_text(chunk.content)?;
-                let bytes = json(&text)?.len() - 2;
-                if self.text_json_bytes + bytes > MAX_BYTES - 64 {
-                    return Err(invalid("ACP final output exceeds 1 MiB"));
-                }
                 emit_text(&text, sink, |text| Output::OutputDelta { text }).await?;
                 self.text.push_str(&text);
-                self.text_json_bytes += bytes;
             }
             acp::SessionUpdate::AgentThoughtChunk(chunk) => {
                 emit_text(&content_text(chunk.content)?, sink, |text| {
@@ -117,9 +107,6 @@ impl Projection {
                 emit_text(&json(&plan)?, sink, |text| Output::ThinkingDelta { text }).await?;
             }
             acp::SessionUpdate::ConfigOptionUpdate(update) => {
-                if json(&update.config_options)?.len() > MAX_BYTES {
-                    return Err(invalid("ACP configuration exceeds 1 MiB"));
-                }
                 self.config_options = Some(update.config_options);
             }
             // User echoes and session metadata do not form assistant output.
@@ -168,11 +155,6 @@ impl Projection {
             ),
             None => fields.raw_output.as_ref().map(json).transpose()?,
         };
-        let previous = self.tools.get(&id).map_or(0, |tool| tool.text.len());
-        let next_bytes = self.tool_bytes - previous + text.as_ref().map_or(previous, String::len);
-        if next_bytes > MAX_BYTES {
-            return Err(invalid("ACP tool content exceeds 1 MiB"));
-        }
         let tool_call_id = self.tool_id(&id);
         if !self.tools.contains_key(&id) {
             emit(
@@ -204,7 +186,6 @@ impl Projection {
                 .await?;
             }
             tool.text = text;
-            self.tool_bytes = next_bytes;
         }
         if done {
             if let Err(error) = emit_result(
@@ -216,14 +197,11 @@ impl Projection {
             .await
             {
                 tool.closure_error = Some(match &error {
-                    Error::Invalid(_) => {
-                        "ACP tool result contains invalid text or exceeds the 64 KiB event limit"
-                    }
+                    Error::Invalid(_) => "ACP tool result contains invalid text",
                     _ => "ACP tool result could not be recorded",
                 });
                 return Err(error);
             }
-            self.tool_bytes -= tool.text.len();
             tool.text.clear();
             tool.done = true;
         }
@@ -244,7 +222,6 @@ impl Projection {
                     true,
                 )
                 .await?;
-                self.tool_bytes -= tool.text.len();
                 tool.text.clear();
                 tool.done = true;
             }
@@ -281,9 +258,6 @@ fn tool_text(content: Vec<acp::ToolCallContent>) -> Result<String, Error> {
             ),
             _ => return Err(invalid("ACP sent unsupported tool content")),
         };
-        if text.len() + part.len() + 1 > MAX_BYTES {
-            return Err(invalid("ACP tool content exceeds 1 MiB"));
-        }
         if !text.is_empty() {
             text.push('\n');
         }
@@ -294,9 +268,6 @@ fn tool_text(content: Vec<acp::ToolCallContent>) -> Result<String, Error> {
 
 pub(crate) async fn emit(sink: &dyn OutputSink, output: Output) -> Result<(), Error> {
     output.validate().map_err(invalid)?;
-    if json(&output)?.len() > 64 * 1024 {
-        return Err(invalid("ACP output event exceeds 64 KiB"));
-    }
     sink.emit(output).await
 }
 
@@ -325,8 +296,7 @@ pub(crate) async fn emit_result(
     text: &str,
     is_error: bool,
 ) -> Result<(), Error> {
-    // Reloaded tool cards use the terminal fact, not transient progress. Reject
-    // oversized results rather than committing a successful empty result.
+    // Reloaded tool cards use the complete terminal fact, not transient progress.
     emit(
         sink,
         Output::ToolResult {
@@ -396,7 +366,7 @@ mod tests {
     async fn unicode_chunks_round_trip_and_foreign_sessions_fail() {
         let sink = Sink::default();
         let mut projection = Projection::new("s".into(), "turn".into());
-        let text = "界\n".repeat(20_000);
+        let text = "界\n".repeat(400_000);
         let notification = update(
             serde_json::json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}}),
         );
@@ -422,27 +392,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_output_and_late_completions_fail_without_extra_events() {
+    async fn complete_large_output_keeps_late_completion_refusal() {
         let sink = Sink::default();
         let mut projection = Projection::new("s".into(), "turn".into());
         let oversized = update(serde_json::json!({
             "sessionUpdate":"agent_message_chunk",
-            "content":{"type":"text","text":"\n".repeat(MAX_BYTES / 2)}
+            "content":{"type":"text","text":"\n".repeat(1024 * 1024 / 2)}
         }));
-        assert!(projection.update(oversized, &sink).await.is_err());
-        assert!(projection.text().is_empty());
-        assert!(sink.0.lock().unwrap().is_empty());
+        projection.update(oversized, &sink).await.unwrap();
+        assert_eq!(projection.text(), "\n".repeat(1024 * 1024 / 2));
+        let emitted = sink.0.lock().unwrap().len();
         let terminal = update(serde_json::json!({
             "sessionUpdate":"tool_call_update","toolCallId":"a","status":"completed"
         }));
         projection.update(terminal.clone(), &sink).await.unwrap();
         assert!(projection.update(terminal, &sink).await.is_err());
         projection.finish(&sink).await.unwrap();
-        assert_eq!(sink.0.lock().unwrap().len(), 2);
+        assert_eq!(sink.0.lock().unwrap().len(), emitted + 2);
     }
 
     #[tokio::test]
-    async fn terminal_text_is_durable_or_explicitly_rejected() {
+    async fn terminal_text_is_complete_and_durable() {
         let sink = Sink::default();
         let mut projection = Projection::new("s".into(), "turn".into());
         let terminal = |id: &str, text: String| {
@@ -457,10 +427,7 @@ mod tests {
             .await
             .unwrap();
         let oversized = terminal("b", "x".repeat(64 * 1024));
-        assert!(matches!(
-            projection.update(oversized, &sink).await,
-            Err(Error::Invalid(_))
-        ));
+        projection.update(oversized, &sink).await.unwrap();
         projection.finish(&sink).await.unwrap();
         let events = sink.0.lock().unwrap();
         assert_eq!(events.len(), 4);
@@ -468,7 +435,7 @@ mod tests {
             matches!(&events[1], Output::ToolResult { text: actual, is_error: false, .. } if actual == &text)
         );
         assert!(
-            matches!(&events[3], Output::ToolResult { text, is_error: true, .. } if text.contains("64 KiB"))
+            matches!(&events[3], Output::ToolResult { text, is_error: false, .. } if text == &"x".repeat(64 * 1024))
         );
     }
 }

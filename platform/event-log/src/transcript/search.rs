@@ -59,7 +59,6 @@ impl EventLog {
         let through = sql_number(input.through)?;
         let after = input.after.map(sql_position).transpose()?;
         if input.query.is_empty()
-            || input.query.len() > 512
             || !(1..=64).contains(&input.max_matches)
             || input
                 .after
@@ -109,9 +108,6 @@ impl EventLog {
                         let size: i64 = sqlx::query_scalar("SELECT total_bytes FROM transcript_rows WHERE session_id=?1 AND source_sequence=?2 AND item_index=?3")
                             .bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
                         let size = sequence_number(size)?;
-                        if size > maka_presentation::MAX_TOOL_ROW_BYTES as u64 {
-                            return Err(StoreError::PrefixTooLarge);
-                        }
                         if index > 0 && bytes + size > 16 * 1024 * 1024 {
                             result.next_after = position;
                             break;
@@ -156,8 +152,8 @@ async fn internal(
     }
     let owned;
     let call = if row["type"] == "tool_result" {
-        owned = super::tool_metadata::read(tx, session, position, through, 64 * 1024).await?;
-        let Some(call) = owned.as_ref().and_then(|tool| tool.call.as_ref()) else {
+        owned = super::tool_metadata::read(tx, session, position, through).await?;
+        let Some(call) = owned.call.as_ref() else {
             return Ok(false);
         };
         (row["origin"].as_str(), Some(call.name.as_str()))

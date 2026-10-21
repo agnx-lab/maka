@@ -43,12 +43,6 @@ pub struct Command {
 impl Command {
     pub fn validate(&self) -> Result<(), Error> {
         if !std::path::Path::new(&self.executable).is_absolute()
-            || self.args.len() > 256
-            || self.env.len() > 128
-            || serde_json::to_vec(&(&self.executable, &self.args, &self.env))
-                .map_err(|e| Error::Invalid(e.to_string()))?
-                .len()
-                > 64 * 1024
             || self.executable.contains('\0')
             || self.args.iter().any(|arg| arg.contains('\0'))
             || self.env.iter().any(|(key, value)| {

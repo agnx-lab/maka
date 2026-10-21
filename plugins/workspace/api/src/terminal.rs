@@ -128,7 +128,6 @@ pub struct Control {
     #[schemars(range(min = 1, max = 9007199254740991u64))]
     pub sequence: u64,
     #[serde(default)]
-    #[schemars(length(max = 64))]
     pub actions: Vec<InputAction>,
     pub size: Option<TerminalSize>,
 }

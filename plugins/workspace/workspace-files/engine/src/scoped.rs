@@ -239,8 +239,8 @@ impl Authority {
                 });
             }
         };
-        if paths.is_empty() || paths.len() > 32 {
-            return Err(failed("Read requires between 1 and 32 admitted roots"));
+        if paths.is_empty() {
+            return Err(failed("Read requires an admitted root"));
         }
         let mut roots: Vec<Root> = Vec::new();
         for path in paths {

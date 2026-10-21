@@ -16,7 +16,7 @@
 # under the License.
 
 [workspace]
-exclude = ["third-party/gpui-fast", "third-party/async-io", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
+exclude = ["third-party/gpui-fast", "third-party/async-io", "third-party/gix-index", "third-party/sqlx-sqlite", "third-party/image-webp", "third-party/llrt-crypto", "third-party/termina"]
 default-members = ["products/maka/cli"]
 members = [
     "plugins/agent/facts",
@@ -204,6 +204,7 @@ debug = "line-tables-only"
 opt-level = 0
 
 [patch.crates-io]
+gix-index = { path = "third-party/gix-index" }
 image-webp = { path = "third-party/image-webp" }
 sqlx-sqlite = { path = "third-party/sqlx-sqlite" }
 async-io = { path = "third-party/async-io" }

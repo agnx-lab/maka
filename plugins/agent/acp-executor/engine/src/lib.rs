@@ -51,10 +51,7 @@ impl Agent {
     pub fn validate(&self) -> Result<(), maka_capabilities::Error> {
         maka_agent_facts::executor::ExecutorId::try_from(self.id.clone())
             .map_err(|error| maka_capabilities::Error::Invalid(error.to_string()))?;
-        if self.display_name.trim().is_empty()
-            || self.display_name.len() > 256
-            || self.display_name.chars().any(char::is_control)
-        {
+        if self.display_name.trim().is_empty() || self.display_name.chars().any(char::is_control) {
             return Err(maka_capabilities::Error::Invalid(
                 "invalid agent display name".into(),
             ));

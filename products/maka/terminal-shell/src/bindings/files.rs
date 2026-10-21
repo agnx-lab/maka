@@ -112,20 +112,18 @@ async fn collect_inner(subscription: &Subscription, source: &FileRead) -> Result
                         bytes,
                         content,
                     } if capture.is_none() => {
-                        if bytes > 16 * 1024 * 1024
-                            || !is_digest(&version)
+                        if !is_digest(&version)
                             || !is_digest(&digest)
                             || source
                                 .expected_version
                                 .as_ref()
                                 .is_some_and(|expected| expected != &version)
-                            || matches!(&content, FileContent::Text) && bytes > 2 * 1024 * 1024
                             || matches!(&content, FileContent::Image { mime_type } if !matches!(mime_type.as_str(), "image/png"|"image/jpeg"|"image/gif"|"image/webp"))
                         {
                             return Err(invalid());
                         }
                         let mut data = Vec::new();
-                        data.try_reserve_exact(bytes as usize)
+                        data.try_reserve_exact(usize::try_from(bytes).map_err(|_| invalid())?)
                             .map_err(|_| invalid())?;
                         capture = Some(Capture {
                             version,
@@ -169,7 +167,6 @@ async fn collect_inner(subscription: &Subscription, source: &FileRead) -> Result
                     status @ (FileReadPart::Absent
                     | FileReadPart::Changed
                     | FileReadPart::Binary { .. }
-                    | FileReadPart::TooLarge { .. }
                     | FileReadPart::Unsupported { .. })
                         if capture.is_none() =>
                     {
@@ -211,8 +208,8 @@ pub(super) fn presentation(outcome: Outcome, mut source: FileRead) -> Result<Val
         FileContent::Text => {
             let text =
                 std::str::from_utf8(&capture.bytes).map_err(|_| "Current file is not UTF-8")?;
-            // Prepare once; recycled rows bound per-frame shaping even for a 2 MiB
-            // single line. Offsets retain source order, and no text is truncated.
+            // Prepare once; recycled rows bound per-frame shaping for long lines.
+            // Offsets retain source order, and no text is truncated.
             let mut rows = Vec::new();
             let mut start = 0;
             let mut count = 0;

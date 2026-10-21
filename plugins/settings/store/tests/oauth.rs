@@ -187,11 +187,20 @@ async fn refresh_failure_rolls_back_secret_and_version_and_never_claims_unknown_
         .execute(&mut sql)
         .await
         .unwrap();
-    for invalid in [String::new(), "😀".repeat(32 * 1024) + "x"] {
+    for invalid in [
+        credential(""),
+        maka_agent_facts::provider::Credential {
+            refresh_at: Some(validation::MAX_SAFE_INTEGER + 1),
+            ..credential("invalid-expiry-grant")
+        },
+    ] {
         assert!(matches!(
-            original.commit_refresh(credential(&invalid), 20).await,
+            original.commit_refresh(invalid, 20).await,
             Err(ConfigError::Invalid(_))
         ));
+        let unchanged = fixture.snapshot().await;
+        assert_eq!(unchanged.basis(), original.basis());
+        assert!(unchanged.credential() == original.credential());
     }
     // A deferred constraint fails at COMMIT, not at UPDATE. The caller must
     // receive unknown and reconcile from canonical storage, never use the candidate.

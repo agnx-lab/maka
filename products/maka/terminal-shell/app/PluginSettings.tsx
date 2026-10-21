@@ -21,8 +21,8 @@ import { Input, inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { SettingValue } from '../../../../packages/plugin-sdk/src/index.js';
 import { sameValue } from '../../../../plugins/shared/value';
-import { pluginTitle, settingCaption } from './pluginSettings';
-import type { PluginSettingsOwner, PluginAction } from './pluginSettings';
+import { pluginTitle, settingCaption } from './pluginSettings.ts';
+import type { PluginSettingsOwner, PluginAction } from './pluginSettings.ts';
 import { SettingsField } from './SettingsField';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
@@ -204,11 +204,7 @@ export function PluginSettings(props: { owner: PluginSettingsOwner }) {
                             const group = () => ['object', 'array'].includes(field().kind);
                             return (
                               <Button
-                                disabled={
-                                  owner.disabled() ||
-                                  !field().editable ||
-                                  (group() && request.path.length >= 16)
-                                }
+                                disabled={owner.disabled() || !field().editable}
                                 accessibilityLabel={`${group() ? 'Open plugin group' : 'Edit plugin setting'} ${field().label}`}
                                 onPress={
                                   group()

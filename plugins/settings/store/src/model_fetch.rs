@@ -92,9 +92,9 @@ impl PreparedModelFetch {
         fetched_at: u64,
     ) -> Result<ConnectionModelFetchResult> {
         validation::revision(fetched_at, false).map_err(ConfigError::Invalid)?;
-        if models.is_empty() || models.len() > 2048 {
+        if models.is_empty() {
             return Err(ConfigError::Invalid(
-                "discovery requires 1..2048 models".into(),
+                "discovery requires at least one model".into(),
             ));
         }
         for model in &models {

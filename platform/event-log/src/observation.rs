@@ -102,9 +102,6 @@ impl EventLog {
         sessions: &[String],
     ) -> Result<std::collections::BTreeMap<String, ObservationVersion>, StoreError> {
         self.validate_root()?;
-        if sessions.len() > 64 {
-            return Err(invalid("too many observation targets"));
-        }
         for id in sessions {
             crate::sessions::validate_id(id)?;
         }
@@ -229,10 +226,9 @@ impl EventLog {
                         while let Some(row) = rows.try_next().await? {
                             let size = usize::try_from(row.try_get::<i64, _>(1)?)
                                 .map_err(|_| StoreError::PrefixTooLarge)?;
-                            if events.len() == max_events || size > max_bytes.saturating_sub(bytes)
+                            if events.len() == max_events || (!events.is_empty() && size > max_bytes.saturating_sub(bytes))
                             {
-                                let last = events.last().ok_or(StoreError::PrefixTooLarge)?;
-                                next_after = Some(last.sequence);
+                                next_after = events.last().map(|event| event.sequence);
                                 break;
                             }
                             let sequence = sequence_number(row.try_get(0)?)?;

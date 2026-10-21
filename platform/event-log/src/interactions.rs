@@ -41,8 +41,7 @@ pub struct InteractionCommit {
 }
 
 impl EventLog {
-    /// Publish for the exact live execution, checking capacity in the same
-    /// transaction as insertion. Independent native producers share this gate.
+    /// Publish for the exact live execution in the insertion transaction.
     pub async fn establish_run_interaction(
         &self,
         invocation: &maka_agent_facts::event::Invocation,
@@ -75,7 +74,7 @@ impl EventLog {
         if request.outcome.is_some() {
             return Err(invalid("request establishment cannot include an outcome"));
         }
-        let encoded = records::encode(request, 20 * 1024)?;
+        let encoded = records::encode(request)?;
         let request = request.clone();
         let commits = self.commits.clone();
         self.connection
@@ -98,9 +97,6 @@ impl EventLog {
                             || matches!(turn.state, crate::turns::InvocationState::Ended { .. })
                         {
                             return Err(invalid("interaction invocation is no longer active"));
-                        }
-                        if pending(&mut tx, &request.session_id).await?.len() >= 16 {
-                            return Err(invalid("pending interaction capacity exhausted"));
                         }
                     }
                     permissions::require_revision(&mut tx, &request).await?;
@@ -163,7 +159,7 @@ impl EventLog {
                     }
                     sqlx::query("INSERT INTO interaction_outcomes VALUES (?, ?)")
                         .bind(&request_id)
-                        .bind(records::encode(&outcome, 8 * 1024)?)
+                        .bind(records::encode(&outcome)?)
                         .execute(&mut *tx)
                         .await?;
                     if let InteractionOutcome::ClientCapabilityDecision {
@@ -188,7 +184,7 @@ impl EventLog {
                                COALESCE(json_extract(client_capability_session_grants.record_json,'$.baseRevision'),-1)",
                         )
                         .bind(records::authority_key(&grant.session_id, &grant.target)?)
-                        .bind(records::encode(&grant, 12 * 1024)?)
+                        .bind(records::encode(&grant)?)
                         .execute(&mut *tx)
                         .await?;
                     }
@@ -273,7 +269,7 @@ pub(crate) async fn capability_grant(
     let Some(raw) = raw else {
         return Ok(None);
     };
-    let grant: SessionGrant = records::decode(&raw, 12 * 1024)?;
+    let grant: SessionGrant = records::decode(&raw)?;
     grant.validate().map_err(invalid)?;
     if records::authority_key(&grant.session_id, &grant.target)? != key {
         return Err(invalid("stored Session grant authority changed"));
@@ -295,16 +291,11 @@ pub(crate) async fn pending(
         "SELECT request_id FROM interaction_requests AS request WHERE session_id = ?
          AND NOT EXISTS (SELECT 1 FROM interaction_outcomes AS outcome
                          WHERE outcome.request_id = request.request_id)
-         ORDER BY created_at, request_id LIMIT 17",
+         ORDER BY created_at, request_id",
     )
     .bind(session_id)
     .fetch_all(&mut *connection)
     .await?;
-    if ids.len() > 16 {
-        return Err(invalid(
-            "pending interactions exceed Session projection capacity",
-        ));
-    }
     let mut records = Vec::with_capacity(ids.len());
     for id in ids {
         records.push(

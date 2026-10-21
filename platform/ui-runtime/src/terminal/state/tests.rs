@@ -235,3 +235,60 @@ fn canonical_scrollback_and_redaction_never_replay_raw_text_and_budget_follows_o
         Some(TerminalViewError::BudgetExhausted)
     );
 }
+
+#[test]
+fn oversized_paste_stays_one_original_batch_until_its_exact_ack() {
+    let mut state = State::new(&NativeBudget::default());
+    let mut props = props();
+    state.apply(&props);
+    state.presentation(true);
+    state.capture(true);
+    state.resize(80, 24);
+    let resize = state.observation().batch.clone().unwrap();
+    let text = format!("{}\nlast", "中🙂".repeat(12_000));
+    assert!(text.len() > 64 * 1024);
+    state.paste(&text);
+    assert!(state.queued_bytes > 64 * 1024);
+    assert_eq!(state.pending_bytes, 0);
+    assert_eq!(state.observation().batch.as_ref(), Some(&resize));
+    state.write(InputAction::Text("must retry after ACK".into()));
+    assert_eq!(
+        state.observation().error,
+        Some(TerminalViewError::InputFull)
+    );
+    acknowledge(&mut state, &mut props, true);
+    let paste = state.observation().batch.clone().unwrap();
+    assert_eq!(paste.sequence, resize.sequence + 1);
+    assert_eq!(paste.actions, vec![InputAction::Paste(text)]);
+    assert_eq!(state.pending_bytes, state.queued_bytes);
+    let pending = state.pending_bytes;
+    state.apply(&props); // The preceding resize ACK cannot release the paste.
+    assert_eq!(state.observation().batch.as_ref(), Some(&paste));
+    assert_eq!(state.pending_bytes, pending);
+    props.acknowledgement.as_mut().unwrap().sequence = paste.sequence + 1;
+    state.apply(&props);
+    assert_eq!(state.pending_bytes, pending);
+    acknowledge(&mut state, &mut props, true);
+    assert_eq!(state.queued_bytes, 0);
+    assert_eq!(state.pending_bytes, 0);
+    assert!(state.observation().batch.is_none());
+    state.write(InputAction::Text("after original paste".into()));
+    let after = state.observation().batch.clone().unwrap();
+    assert_eq!(after.sequence, paste.sequence + 1);
+    assert_eq!(
+        after.actions,
+        vec![InputAction::Text("after original paste".into())]
+    );
+    state.apply(&props); // Duplicate paste ACK must not consume the later action.
+    assert_eq!(state.observation().batch.as_ref(), Some(&after));
+    acknowledge(&mut state, &mut props, false);
+    state.apply(&props);
+    assert!(state.observation().batch.is_none());
+    assert!(state.queue.is_empty());
+    assert_eq!(state.queued_bytes, 0);
+    assert_eq!(state.pending_bytes, 0);
+    assert_eq!(
+        state.observation().error,
+        Some(TerminalViewError::InputFailed)
+    );
+}

@@ -404,7 +404,7 @@ fn a_component_without_a_real_required_callback_cannot_publish() {
 }
 
 #[test]
-fn dispatch_at_a_deep_mount_cannot_restart_the_whole_tree_depth_budget() {
+fn dispatch_at_a_deep_mount_preserves_the_complete_acyclic_component_tree() {
     use maka_plugin_core::package::{EntryTarget, Realm};
     let (mut input, mut packages) =
         support::composed_fixture(support::CHILD_UPDATE, support::PARENT_EVENT);
@@ -490,9 +490,12 @@ fn dispatch_at_a_deep_mount_cannot_restart_the_whole_tree_depth_budget() {
         deepest = app.child_mount(&deepest, "nested").unwrap().clone();
     }
     assert_eq!(app.frame(&deepest).unwrap().state["count"], 0);
-    assert!(app.dispatch(&deepest, 0, "inc", Value::Null).is_err());
-    assert_eq!(app.frame(&deepest).unwrap().revision, 0);
-    assert!(app.child_mount(&deepest, "nested").is_err());
+    app.dispatch(&deepest, 0, "inc", Value::Null).unwrap();
+    assert_eq!(app.frame(&deepest).unwrap().revision, 1);
+    assert_eq!(app.frame(&deepest).unwrap().state["count"], 1);
+    let nested = app.child_mount(&deepest, "nested").unwrap();
+    assert_eq!(app.frame(nested).unwrap().revision, 0);
+    assert_eq!(app.frame(nested).unwrap().state["count"], 0);
     assert!(app.retiring_mounts().is_empty());
     close_all(&mut app, &root);
 }

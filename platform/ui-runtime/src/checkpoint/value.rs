@@ -17,10 +17,10 @@
  * under the License.
  */
 
-//! Small plugin-owned UI preferences using the existing instance checkpoint store.
+//! Plugin-owned UI preferences using the existing instance checkpoint store.
 //! Accepted writes drain before native retirement; paint never performs storage I/O.
 use super::Scope;
-use crate::budget::{Kind, NativeBudget};
+use crate::budget::{Kind, NativeBudget, Permit};
 use maka_capabilities::call::Resources;
 use maka_plugin_core::contract::{Contract, Interface, Transport};
 use schemars::JsonSchema;
@@ -32,9 +32,9 @@ use tokio::sync::mpsc;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValueCheckpointProps {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub key: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub format: String,
     pub command: Option<ValueCheckpointCommand>,
 }
@@ -95,12 +95,15 @@ pub fn contract() -> Contract {
 pub struct ValueCheckpoint {
     key: String,
     format: String,
-    command: Option<ValueCheckpointCommand>,
+    command: Option<u64>,
     pending: Option<u64>,
-    sender: Option<mpsc::Sender<ValueCheckpointCommand>>,
-    receiver: mpsc::Receiver<ValueCheckpointObservation>,
+    sender: Option<mpsc::Sender<(ValueCheckpointCommand, Option<Arc<Permit>>)>>,
+    receiver: mpsc::Receiver<(ValueCheckpointObservation, Option<Arc<Permit>>)>,
     current: ValueCheckpointObservation,
     announced: Option<ValueCheckpointObservation>,
+    current_memory: Option<Arc<Permit>>,
+    announced_memory: Option<Arc<Permit>>,
+    budget: NativeBudget,
 }
 fn failure(sequence: u64, error: impl std::fmt::Display) -> ValueCheckpointObservation {
     ValueCheckpointObservation {
@@ -124,6 +127,7 @@ impl ValueCheckpoint {
         };
         let (reply, receiver) = mpsc::channel(2);
         let (sender, requests) = mpsc::channel(1);
+        let worker_budget = budget.clone();
         let started = (|| {
             let scope = scope.ok_or("UI preferences require an owned UI Root")?;
             let store = scope
@@ -139,105 +143,117 @@ impl ValueCheckpoint {
                 let mut requests = requests;
                 let mut checkpoints = None;
                 let mut command = ValueCheckpointCommand::Read { sequence: 0 };
+                let mut memory = None;
+                let budget = worker_budget;
                 loop {
                     let sequence = command.sequence();
-                    let result: Result<ValueCheckpointState, String> = async {
-                        if checkpoints.is_none() {
-                            checkpoints = Some(scope.open(&store)?);
-                        }
-                        let checkpoints = checkpoints.as_ref().unwrap();
-                        match command {
-                            ValueCheckpointCommand::Read { .. } => {
-                                let budget = budget.clone();
-                                let saved = checkpoints
-                                    .read(&key, move |content_bytes| {
-                                        if content_bytes > 16384 {
-                                            return Err(
-                                                maka_event_log::StoreError::InvalidTransition(
-                                                    "UI preference format is incompatible".into(),
-                                                ),
-                                            );
-                                        }
-                                        budget
-                                            .reserve(
-                                                Kind::Encoded,
-                                                content_bytes
-                                                    + super::MAX_METADATA
-                                                    + super::MAX_SOURCE
-                                                    + 128,
-                                            )
-                                            .map_err(|error| {
-                                                maka_event_log::StoreError::InvalidTransition(
-                                                    error.to_string(),
-                                                )
-                                            })
-                                    })
-                                    .await
-                                    .map_err(|e| e.to_string())?;
-                                match saved {
-                                    None => Ok(ValueCheckpointState::Ready {
-                                        revision: None,
-                                        value: None,
-                                    }),
-                                    Some((saved, _bytes)) => {
-                                        if saved.format != format
-                                            || saved.data_source != Value::Null
-                                        {
-                                            return Err(
-                                                "UI preference format is incompatible".into()
-                                            );
-                                        }
-                                        let value = serde_json::from_slice(&saved.content)
-                                            .map_err(|e| e.to_string())?;
-                                        Ok(ValueCheckpointState::Ready {
-                                            revision: Some(saved.revision),
-                                            value: Some(value),
+                    let result: Result<(ValueCheckpointState, Option<Arc<Permit>>), String> =
+                        async {
+                            if checkpoints.is_none() {
+                                checkpoints = Some(scope.open(&store)?);
+                            }
+                            let checkpoints = checkpoints.as_ref().unwrap();
+                            match command {
+                                ValueCheckpointCommand::Read { .. } => {
+                                    let budget = budget.clone();
+                                    let saved = checkpoints
+                                        .read(&key, move |total_bytes| {
+                                            budget
+                                                .reserve(Kind::Encoded, total_bytes)
+                                                .map(Arc::new)
+                                                .map_err(|error| {
+                                                    maka_event_log::StoreError::InvalidTransition(
+                                                        error.to_string(),
+                                                    )
+                                                })
                                         })
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                    match saved {
+                                        None => Ok((
+                                            ValueCheckpointState::Ready {
+                                                revision: None,
+                                                value: None,
+                                            },
+                                            None,
+                                        )),
+                                        Some((saved, bytes)) => {
+                                            if saved.format != format
+                                                || saved.data_source != Value::Null
+                                            {
+                                                return Err(
+                                                    "UI preference format is incompatible".into()
+                                                );
+                                            }
+                                            let value = serde_json::from_slice(&saved.content)
+                                                .map_err(|e| e.to_string())?;
+                                            Ok((
+                                                ValueCheckpointState::Ready {
+                                                    revision: Some(saved.revision),
+                                                    value: Some(value),
+                                                },
+                                                Some(bytes),
+                                            ))
+                                        }
                                     }
                                 }
-                            }
-                            ValueCheckpointCommand::Write {
-                                expected_revision,
-                                value,
-                                ..
-                            } => {
-                                let mut bytes = budget
-                                    .reserve(Kind::Encoded, 16384)
-                                    .map_err(|e| e.to_string())?;
-                                let content =
-                                    serde_json::to_vec(&value).map_err(|e| e.to_string())?;
-                                if content.len() > 16384 {
-                                    return Err("UI preferences exceed 16 KiB".into());
+                                ValueCheckpointCommand::Write {
+                                    expected_revision,
+                                    value,
+                                    ..
+                                } => {
+                                    let bytes = match memory.take() {
+                                        Some(bytes) => bytes,
+                                        None => {
+                                            let size = maka_plugin_core::json::value_size(
+                                                &value,
+                                                usize::MAX,
+                                            )?;
+                                            Arc::new(
+                                                budget
+                                                    .reserve(Kind::Encoded, size)
+                                                    .map_err(|e| e.to_string())?,
+                                            )
+                                        }
+                                    };
+                                    let content =
+                                        serde_json::to_vec(&value).map_err(|e| e.to_string())?;
+                                    let revision = checkpoints
+                                        .write(
+                                            &key,
+                                            expected_revision,
+                                            &format,
+                                            &Value::Null,
+                                            &Value::Null,
+                                            content,
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                    Ok((
+                                        ValueCheckpointState::Ready {
+                                            revision: Some(revision),
+                                            value: Some(value),
+                                        },
+                                        Some(bytes),
+                                    ))
                                 }
-                                bytes.shrink_to(content.len());
-                                let revision = checkpoints
-                                    .write(
-                                        &key,
-                                        expected_revision,
-                                        &format,
-                                        &Value::Null,
-                                        &Value::Null,
-                                        content,
-                                    )
-                                    .await
-                                    .map_err(|e| e.to_string())?;
-                                Ok(ValueCheckpointState::Ready {
-                                    revision: Some(revision),
-                                    value: Some(value),
-                                })
                             }
                         }
-                    }
-                    .await;
+                        .await;
                     let _ = reply
                         .send(match result {
-                            Ok(state) => ValueCheckpointObservation { sequence, state },
-                            Err(error) => failure(sequence, error),
+                            Ok((state, memory)) => {
+                                (ValueCheckpointObservation { sequence, state }, memory)
+                            }
+                            Err(error) => (failure(sequence, error), None),
                         })
                         .await;
                     wake.notify();
                     match requests.recv().await {
-                        Some(next) => command = next,
+                        Some((next, next_memory)) => {
+                            command = next;
+                            memory = next_memory;
+                        }
                         None => break,
                     }
                 }
@@ -254,6 +270,9 @@ impl ValueCheckpoint {
             receiver,
             current: started.err().map_or(initial, |error| failure(0, error)),
             announced: None,
+            current_memory: None,
+            announced_memory: None,
+            budget,
         }
     }
     pub fn publication_capacity(&self, props: &ValueCheckpointProps) -> usize {
@@ -262,51 +281,60 @@ impl ValueCheckpoint {
             && props.command.as_ref().is_some_and(|command| {
                 self.command
                     .as_ref()
-                    .is_none_or(|prior| command.sequence() > prior.sequence())
+                    .is_none_or(|prior| command.sequence() > *prior)
             });
         2 * (usize::from(self.announced.is_none()) + usize::from(command))
     }
     pub fn update(&mut self, props: &ValueCheckpointProps) {
         if props.key != self.key || props.format != self.format {
+            self.current_memory = None;
             self.current = failure(
                 self.current.sequence,
                 "UI preference identity cannot change on a live mount",
             );
             return;
         }
-        let Some(command) = props
-            .command
-            .as_ref()
-            .filter(|command| Some(*command) != self.command.as_ref())
-        else {
+        let Some(command) = props.command.as_ref() else {
             return;
         };
-        if self
-            .command
-            .as_ref()
-            .is_some_and(|prior| command.sequence() <= prior.sequence())
-        {
+        let sequence = command.sequence();
+        if self.command.is_some_and(|prior| sequence <= prior) {
             return;
         }
-        if let ValueCheckpointCommand::Write { value, .. } = command
-            && serde_json::to_vec(value).map_or(true, |bytes| bytes.len() > 16384)
-        {
-            self.current = failure(command.sequence(), "UI preferences exceed 16 KiB");
-            self.command = Some(command.clone());
-            return;
-        }
-        self.command = Some(command.clone());
+        self.command = Some(sequence);
         if self.pending.is_some() {
+            self.current_memory = None;
             self.current = failure(command.sequence(), "UI preferences are busy");
             return;
         }
+        let memory = match command {
+            ValueCheckpointCommand::Write { value, .. } => {
+                let reservation =
+                    maka_plugin_core::json::value_size(value, usize::MAX).and_then(|size| {
+                        self.budget
+                            .reserve(Kind::Encoded, size)
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string())
+                    });
+                match reservation {
+                    Ok(memory) => Some(memory),
+                    Err(error) => {
+                        self.current = failure(sequence, error);
+                        self.current_memory = None;
+                        return;
+                    }
+                }
+            }
+            ValueCheckpointCommand::Read { .. } => None,
+        };
+        self.current_memory = None;
         self.current = match self
             .sender
             .as_ref()
             .ok_or("UI preferences are unavailable")
             .and_then(|sender| {
                 sender
-                    .try_send(command.clone())
+                    .try_send((command.clone(), memory))
                     .map_err(|_| "UI preferences are busy")
             }) {
             Ok(()) => {
@@ -324,11 +352,12 @@ impl ValueCheckpoint {
         };
     }
     fn poll(&mut self) {
-        if let Ok(reply) = self.receiver.try_recv() {
+        if let Ok((reply, memory)) = self.receiver.try_recv() {
             if self.pending == Some(reply.sequence) {
                 self.pending = None;
             }
             self.current = reply;
+            self.current_memory = memory;
         }
     }
     pub fn observe(&mut self) -> Option<ValueCheckpointObservation> {
@@ -336,6 +365,7 @@ impl ValueCheckpoint {
         // worker. A ready reply must not overwrite an unannounced busy/error.
         if self.announced.as_ref() != Some(&self.current) {
             self.announced = Some(self.current.clone());
+            self.announced_memory = self.current_memory.clone();
             return Some(self.current.clone());
         }
         self.poll();
@@ -343,6 +373,7 @@ impl ValueCheckpoint {
             return None;
         }
         self.announced = Some(self.current.clone());
+        self.announced_memory = self.current_memory.clone();
         Some(self.current.clone())
     }
     pub fn close(&mut self) {

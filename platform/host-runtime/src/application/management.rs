@@ -517,7 +517,7 @@ fn rejected(reason: ManagementRejection) -> Result<Value> {
 fn rejected_diagnostic(reason: ManagementRejection, message: String) -> Result<Value> {
     serde_json::to_value(ManagementResult::<DeploymentRef>::Rejected {
         reason,
-        diagnostic: Some(message.chars().take(512).collect()),
+        diagnostic: Some(message),
     })
     .map_err(|e| e.to_string())
 }
@@ -593,7 +593,10 @@ fn read_document_resource(
         return Err("source document must be nonempty immutable UTF-8".into());
     }
     let length = resource.bytes();
-    let mut bytes = Vec::with_capacity(length);
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| "package resource allocation failed")?;
     while bytes.len() < length {
         let offset = bytes.len();
         let mut end = length.min(offset + RESOURCE_CHUNK_LIMIT);
@@ -616,18 +619,15 @@ fn read_document_resource(
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 fn read_bundle(resource: &Arc<dyn maka_capabilities::call::ReadResource>) -> Result<Package> {
-    let bytes = read_binary_resource(resource, maka_packages::MAX_PACKAGE_BYTES * 2)?;
+    let bytes = read_binary_resource(resource)?;
     Package::from_bundle(&bytes).map_err(|error| error.to_string())
 }
 fn read_package_bundles(
     resource: &Arc<dyn maka_capabilities::call::ReadResource>,
 ) -> Result<Vec<Package>> {
-    let bytes = read_binary_resource(resource, 64 * 1024 * 1024)?;
+    let bytes = read_binary_resource(resource)?;
     let bundles: Vec<&serde_json::value::RawValue> =
         serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    if bundles.len() > 128 {
-        return Err("maximum 128 supplied package bundles".into());
-    }
     bundles
         .into_iter()
         .map(|bundle| {
@@ -637,19 +637,20 @@ fn read_package_bundles(
 }
 fn read_binary_resource(
     resource: &Arc<dyn maka_capabilities::call::ReadResource>,
-    max_bytes: usize,
 ) -> Result<Vec<u8>> {
     use maka_capabilities::call::ResourceEncoding;
     let length = resource.bytes();
     if resource.resource_type() != binary_resource_type()
         || resource.encoding() != ResourceEncoding::Bytes
-        || length > max_bytes
     {
         return Err("invalid immutable package bundle resource".into());
     }
-    let mut bytes = Vec::with_capacity(length);
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| "package resource allocation failed")?;
     for offset in (0..length).step_by(RESOURCE_CHUNK_LIMIT) {
-        let end = (offset + RESOURCE_CHUNK_LIMIT).min(length);
+        let end = offset.saturating_add(RESOURCE_CHUNK_LIMIT).min(length);
         let chunk = resource.read(offset..end)?;
         if chunk.len() != end - offset {
             return Err("package bundle snapshot length changed".into());

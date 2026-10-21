@@ -73,7 +73,6 @@ pub fn provide(registry: &mut NativeRegistry) -> Result<(), String> {
 impl Jev {
     async fn open(context: NativeContext, input: Value) -> Result<Arc<Self>, String> {
         let input: Configuration = serde_json::from_value(input).map_err(message)?;
-        input.network.validate().map_err(message)?;
         let persistence = context.persistence().ok_or("jev_requires_persistence")?;
         let root = persistence.store().owned_root().map_err(message)?;
         let configuration = Arc::new(ConfigurationStore::for_root(root).await.map_err(message)?);
@@ -166,9 +165,6 @@ impl Handler for Service {
                                 .attachments()
                                 .get("secret")
                                 .ok_or("jev_secret_required")?;
-                            if secret.bytes() > 4096 {
-                                return encode(Update::Invalid);
-                            }
                             let Ok(value) = String::from_utf8(secret.read(0..secret.bytes())?)
                             else {
                                 return encode(Update::Invalid);

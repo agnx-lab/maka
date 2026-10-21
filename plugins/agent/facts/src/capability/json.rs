@@ -21,8 +21,7 @@ use serde::Serialize;
 use serde_json::{Value, ser::Formatter};
 use std::io;
 
-/// Compact ECMAScript number spellings keep physical interaction records inside
-/// the same byte bounds used by the client contract.
+/// Use compact ECMAScript number spellings for canonical interaction records.
 pub fn stringify(value: &impl Serialize) -> Result<String, serde_json::Error> {
     struct JsFormatter;
     impl Formatter for JsFormatter {
@@ -55,10 +54,4 @@ pub fn stringify(value: &impl Serialize) -> Result<String, serde_json::Error> {
         JsFormatter,
     ))?;
     Ok(String::from_utf8(bytes).expect("JSON serialization emits UTF-8"))
-}
-pub fn encoded_limit(value: &impl Serialize, limit: usize) -> Result<(), &'static str> {
-    if stringify(value).map_err(|_| "Invalid JSON value")?.len() > limit {
-        return Err("Client Capability JSON exceeds byte limit");
-    }
-    Ok(())
 }

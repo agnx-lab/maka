@@ -300,7 +300,7 @@ impl Owner {
                             Command::Reject {
                                 execution_id: execution.id.clone(),
                                 request_digest: execution.request.digest().map_err(invalid)?,
-                                reason: bounded(&error.to_string()),
+                                reason: reason(&error.to_string()),
                             },
                         )
                         .await?;
@@ -358,10 +358,10 @@ impl Owner {
         let outcome = match outcome {
             InvocationOutcome::Completed => Settlement::Completed,
             InvocationOutcome::Failed { class, message, .. } => Settlement::Interrupted {
-                reason: bounded(&message.unwrap_or(class)),
+                reason: reason(&message.unwrap_or(class)),
             },
             InvocationOutcome::Cancelled { source } => Settlement::Interrupted {
-                reason: bounded(&format!("Host execution cancelled: {source}")),
+                reason: reason(&format!("Host execution cancelled: {source}")),
             },
             _ => return Err(invalid("Unexpected Plan execution outcome")),
         };
@@ -395,13 +395,9 @@ pub(super) fn now() -> Result<u64, Error> {
     .map_err(invalid)
 }
 
-fn bounded(value: &str) -> String {
+fn reason(value: &str) -> String {
     let value = value.replace('\0', "");
-    let mut end = value.len().min(1024);
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    let value = value[..end].trim();
+    let value = value.trim();
     if value.is_empty() {
         "Host execution interrupted".into()
     } else {

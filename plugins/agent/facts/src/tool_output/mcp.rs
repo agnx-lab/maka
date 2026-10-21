@@ -17,19 +17,14 @@
  * under the License.
  */
 
-use super::media::MAX_MEDIA_BYTES;
 use super::{DurableToolProjection, ImageOutput, ProjectionPart};
 use crate::{
     capability::{CallResult, ContentBlock},
     event::{Invocation, ProjectionArtifactWrite},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::time::SystemTime;
-
-const MAX_TEXT: usize = 200_000;
-const MAX_IMAGE_CHARS: usize = 20_000_000;
-const TRUNCATION_MARKER: &str = "\n…[truncated by Maka]";
 
 /// Freeze the existing MCP text/image policy before T2; raw bytes stay untouched.
 pub(super) fn project(
@@ -40,57 +35,30 @@ pub(super) fn project(
 ) -> Option<(DurableToolProjection, Vec<ProjectionArtifactWrite>)> {
     let mut parts = Vec::new();
     let mut artifacts = Vec::new();
-    let mut summaries = Vec::new();
-    let mut remaining_text = MAX_TEXT;
-    let mut image_chars = 0;
-    let mut omitted = 0usize;
     for block in &result.content {
-        if let ContentBlock::Text { text } = block {
-            append_text(&mut parts, &mut remaining_text, text);
-            continue;
-        }
-        if let ContentBlock::Image { data, mime_type } = block {
-            let chars = utf16_len(data);
-            if artifacts.len() < 4 && chars <= MAX_IMAGE_CHARS - image_chars {
+        match block {
+            ContentBlock::Text { text } => parts.push(ProjectionPart::Text { text: text.clone() }),
+            ContentBlock::Image { data, mime_type } => {
                 let (image, artifact) =
                     image_artifact(data, mime_type, id, parts.len(), time, invocation)?;
                 parts.push(ProjectionPart::Artifact { image });
                 artifacts.push(artifact);
-                image_chars += chars;
-                continue;
             }
-        }
-        if let ContentBlock::Audio { data, mime_type } = block {
-            let chars = utf16_len(data);
-            if artifacts.len() < 4 && chars <= MAX_IMAGE_CHARS - image_chars {
+            ContentBlock::Audio { data, mime_type } => {
                 let (part, artifact) =
                     super::audio::project(data, mime_type, id, parts.len(), time, invocation)?;
                 parts.push(part);
                 artifacts.extend(artifact);
-                image_chars += chars;
-                continue;
             }
-        }
-        if summaries.len() < 100 {
-            summaries.push(summarize(block));
-        } else {
-            omitted += 1;
+            _ => parts.push(ProjectionPart::Text {
+                text: serde_json::to_string(block).ok()?,
+            }),
         }
     }
-    if remaining_text > 0
-        && (!summaries.is_empty() || omitted > 0 || result.structured_content.is_some())
-    {
-        let mut summary = json!({});
-        if !summaries.is_empty() {
-            summary["content"] = summaries.into();
-        }
-        if omitted > 0 {
-            summary["omittedContentBlocks"] = json!(omitted);
-        }
-        if let Some(structured) = &result.structured_content {
-            summary["structuredContent"] = structured.clone();
-        }
-        append_text(&mut parts, &mut remaining_text, &summary.to_string());
+    if let Some(structured) = &result.structured_content {
+        parts.push(ProjectionPart::Text {
+            text: json!({"structuredContent": structured}).to_string(),
+        });
     }
     if parts.is_empty() {
         parts.push(ProjectionPart::Text {
@@ -108,77 +76,11 @@ fn image_artifact(
     time: SystemTime,
     invocation: &Invocation,
 ) -> Option<(ImageOutput, ProjectionArtifactWrite)> {
-    if data.len() > MAX_MEDIA_BYTES.div_ceil(3) * 4 {
-        return None;
-    }
     let bytes = STANDARD.decode(data).ok()?;
-    if bytes.len() > MAX_MEDIA_BYTES || STANDARD.encode(&bytes) != data {
+    if STANDARD.encode(&bytes) != data {
         return None;
     }
     super::media::image_artifact(bytes, mime, event_id, part, time, invocation).ok()
-}
-
-fn summarize(block: &ContentBlock) -> Value {
-    match block {
-        ContentBlock::Audio { data, mime_type } => {
-            json!({"type":"audio","mimeType":mime_type,"base64Chars":utf16_len(data)})
-        }
-        ContentBlock::Image { data, mime_type } => {
-            json!({"type":"image","mimeType":mime_type,"base64Chars":utf16_len(data),"omitted":"too_large"})
-        }
-        ContentBlock::Unknown { .. } => json!({"type":"unknown","omitted":true}),
-        ContentBlock::Resource {
-            uri,
-            mime_type,
-            text,
-            blob,
-        } => {
-            let mut summary = json!({"type":"resource","uri":uri});
-            if let Some(mime) = mime_type {
-                summary["mimeType"] = json!(mime);
-            }
-            if let Some(text) = text {
-                summary["text"] = json!(clip_text(text, MAX_TEXT));
-            }
-            if let Some(blob) = blob {
-                if blob.is_empty() {
-                    summary["blob"] = json!("");
-                } else {
-                    summary["base64Chars"] = json!(utf16_len(blob));
-                }
-            }
-            summary
-        }
-        _ => serde_json::to_value(block).expect("content blocks contain JSON values"),
-    }
-}
-fn utf16_len(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
-}
-fn append_text(parts: &mut Vec<ProjectionPart>, remaining: &mut usize, text: &str) {
-    if *remaining > 0 {
-        let text = clip_text(text, *remaining);
-        *remaining -= utf16_len(&text);
-        parts.push(ProjectionPart::Text { text });
-    }
-}
-fn clip_text(text: &str, limit: usize) -> String {
-    if utf16_len(text) <= limit {
-        return text.to_owned();
-    }
-    let marker_len = utf16_len(TRUNCATION_MARKER);
-    if limit <= marker_len {
-        return TRUNCATION_MARKER.chars().take(limit).collect();
-    }
-    let mut units = 0;
-    let prefix: String = text
-        .chars()
-        .take_while(|ch| {
-            units += ch.len_utf16();
-            units <= limit - marker_len
-        })
-        .collect();
-    prefix + TRUNCATION_MARKER
 }
 
 #[cfg(test)]
@@ -247,24 +149,25 @@ mod tests {
     }
 
     #[test]
-    fn utf16_clipping_and_empty_resource_blob_match_source_policy() {
-        let text = clip_text(&"🦊".repeat(MAX_TEXT), MAX_TEXT);
-        assert!(utf16_len(&text) <= MAX_TEXT);
-        assert!(text.ends_with(TRUNCATION_MARKER));
-        for limit in 0..=utf16_len(TRUNCATION_MARKER) {
-            assert_eq!(
-                clip_text(&"🦊".repeat(30), limit),
-                TRUNCATION_MARKER.chars().take(limit).collect::<String>()
-            );
-        }
+    fn complete_resource_text_is_not_clipped() {
+        let invocation = Invocation {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            run_id: "r".into(),
+            invocation_id: "i".into(),
+        };
+        let text = "🦊".repeat(200_001);
+        let result = CallResult {
+            content: vec![ContentBlock::Text { text: text.clone() }],
+            structured_content: None,
+        };
+        let (projection, artifacts) = project(&result, "e", UNIX_EPOCH, &invocation).unwrap();
         assert_eq!(
-            summarize(&ContentBlock::Resource {
-                uri: "x".into(),
-                mime_type: None,
-                text: None,
-                blob: Some(String::new())
-            })["blob"],
-            ""
+            projection,
+            DurableToolProjection::Content {
+                parts: vec![ProjectionPart::Text { text }]
+            }
         );
+        assert!(artifacts.is_empty());
     }
 }

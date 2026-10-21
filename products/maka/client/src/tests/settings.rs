@@ -73,16 +73,18 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
             (json!({"credential":"unknown"}), Attachments::new(), "settings network credential action is invalid"),
             (json!({"credential":"keep"}), secret(), "settings mutation does not accept resources"),
             (json!({"credential":"delete"}), secret(), "settings mutation does not accept resources"),
-            (json!({"credential":"replace"}), Attachments::new(), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
-            (json!({"credential":"replace"}), extra, "settings network credential requires one UTF-8 secret resource within 10 KiB"),
-            (json!({"credential":"replace"}), resource(vec![]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
-            (json!({"credential":"replace"}), resource(vec![0xff]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
-            (json!({"credential":"replace"}), resource(vec![b'x'; 10241]), "settings network credential requires one UTF-8 secret resource within 10 KiB"),
+            (json!({"credential":"replace"}), Attachments::new(), "settings network credential requires one nonempty UTF-8 secret resource"),
+            (json!({"credential":"replace"}), extra, "settings network credential requires one nonempty UTF-8 secret resource"),
+            (json!({"credential":"replace"}), resource(vec![]), "settings network credential requires one nonempty UTF-8 secret resource"),
+            (json!({"credential":"replace"}), resource(vec![0xff]), "settings network credential requires one nonempty UTF-8 secret resource"),
         ] {
             let id = Uuid::new_v4();
             assert_eq!(first.settings_mutation(id, "settings", "updateNetwork", input, resources).await.err().unwrap(), expected);
             assert_eq!(first.operation(id).await.unwrap_err(), "original client operation not found for this Host");
         }
+        let inexact = Uuid::new_v4();
+        assert_eq!(first.mutation(inexact, "agent", "selectBackend", Value::Null, Attachments::new(), Some("session-one".into()), json!({"attempt":9_007_199_254_740_993u64})).await.err().unwrap(), "JSON integer cannot be represented exactly as a JavaScript Number");
+        assert_eq!(first.operation(inexact).await.unwrap_err(), "original client operation not found for this Host");
         for (endpoint, method, session, correlation) in [
             ("agent", "selectBackend", Some("session-one".into()), json!({"kind":"agent-control"})),
             ("settings", "create", Some("session-one".into()), json!({"kind":"settings"})),
@@ -163,7 +165,7 @@ async fn settings_admission_and_original_secret_receipt_survive_independent_clie
         update.prepare().await.unwrap();
         assert!(matches!(update.confirm().await.unwrap().receipt, Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. } if value == &json!({"sent":3})));
         let network = json!({"expectedPolicyRevision":0,"expectedCredential":null,"networkProxy":{"enabled":true,"protocol":"http","host":"proxy.test","port":8080,"authEnabled":true,"username":"user","bypassList":[],"autoBypassDomains":[]},"credential":"replace"});
-        let password = format!("{}x", "密".repeat(3413)).into_bytes();
+        let password = format!("{}x", "密".repeat(5_000)).into_bytes();
         let update = first.settings_mutation(Uuid::new_v4(), "settings", "updateNetwork", network.clone(), resource(password.clone())).await.unwrap();
         let prepared = update.prepare().await.unwrap();
         update.confirm().await.unwrap();

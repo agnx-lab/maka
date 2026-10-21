@@ -130,7 +130,10 @@ async fn settings_confirmed_validation_rejections_do_not_downgrade_sql_uncertain
     let row = &original.connections[0];
     let basis = json!({"connectionId":row.connection_id,"revision":row.revision});
     for (changes, reason) in [
-        (json!({"name":"x".repeat(257)}), "invalid_input"),
+        (
+            json!({"enabledModelIds":["fixture-model","fixture-model"]}),
+            "invalid_input",
+        ),
         (
             json!({"configuration":{"baseUrl":17}}),
             "invalid_configuration",
@@ -404,37 +407,40 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
     .await
     .0;
     assert_eq!(removed["kind"], "committed");
-    // A valid large catalog may exceed the editing projection's wire budget.
-    // Its original narrow read must still support actual credential replacement.
+    // Complete editing metadata and narrow credential reads share the same basis.
+    let large_overrides = (0..128)
+        .map(|index| {
+            (
+                format!("manual-{index}"),
+                ModelOverride {
+                    description: Some("x".repeat(1024)),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     selection::edit(&fixture, |changes| {
-        changes.model_overrides = Patch::Set(
-            (0..128)
-                .map(|index| {
-                    (
-                        format!("manual-{index}"),
-                        ModelOverride {
-                            description: Some("x".repeat(1024)),
-                            ..Default::default()
-                        },
-                    )
-                })
-                .collect(),
-        );
+        changes.model_overrides = Patch::Set(large_overrides.clone());
     })
     .await;
+    let before_read = fixture.config.catalog().await.unwrap();
     let page = query(&fixture, "connections", json!({"kind":"start"})).await;
     let basis = page["connections"][0]["basis"].clone();
     let detail = query(&fixture, "connection", basis.clone()).await;
     assert_eq!(detail["kind"], "ready");
     assert!(detail.get("editing").is_none());
-    let error = fixture.app.client().start(
-        binding(&fixture).await,
-        "connection".into(),
-        json!({"connectionId":basis["connectionId"],"revision":basis["revision"],"includeEditingFacts":true}),
-        scope(&fixture.issuer, true),
-        Attachments::new().into(),
-    ).await.unwrap().result().await.unwrap_err();
-    assert_eq!(error, "settings_output_budget");
+    let editable = query(&fixture, "connection", json!({"connectionId":basis["connectionId"],"revision":basis["revision"],"includeEditingFacts":true})).await;
+    assert_eq!(editable["target"], detail["target"]);
+    assert_eq!(
+        editable["editing"]["enabledModelIds"],
+        json!(["fixture-model", "manual-other"])
+    );
+    assert_eq!(
+        editable["editing"]["modelOverrides"],
+        serde_json::to_value(&large_overrides).unwrap()
+    );
+    assert!(editable["editing"]["requestBodyOverlay"].is_null());
+    assert_eq!(fixture.config.catalog().await.unwrap(), before_read);
     let status = query(&fixture, "credentialStatus", json!({"locator":locator})).await;
     let current: CredentialStatus = serde_json::from_value(status["status"].clone()).unwrap();
     let (saved, _) = mutate(
@@ -445,6 +451,12 @@ async fn root_settings_create_partial_edit_save_capture_and_stale_vault_basis_us
     )
     .await;
     assert_eq!(saved["kind"], "saved");
+    assert_eq!(
+        fixture.config.catalog().await.unwrap().connections[0]
+            .model_overrides
+            .as_ref(),
+        Some(&large_overrides)
+    );
     // Read the actual persisted operation/caller/enrollment rows, excluding the
     // vault table where storing the credential envelope is the intended effect.
     for (database, sql) in [

@@ -26,21 +26,14 @@ use maka_ui_runtime::{
 use std::{collections::BTreeMap, sync::Arc};
 struct Service;
 fn plain(source: &str) -> Result<MarkdownTextResult, String> {
-    if source.len() > 65536 {
-        return Ok(MarkdownTextResult::TooLarge);
-    }
     let document = crate::markdown::prepared::Document::markdown(
         source,
         false,
         crate::markdown::Palette::default(),
     )
     .map_err(str::to_owned)?;
-    Ok(if document.text().len() > 65536 {
-        MarkdownTextResult::TooLarge
-    } else {
-        MarkdownTextResult::Ready {
-            text: document.text().to_owned(),
-        }
+    Ok(MarkdownTextResult::Ready {
+        text: document.text().to_owned(),
     })
 }
 impl NativeService for Service {
@@ -82,12 +75,10 @@ pub(super) fn register(registry: &mut NativeRegistry<dyn super::Widget>) {
 mod tests {
     use super::*;
     #[test]
-    fn copy_reuses_native_markdown_semantics_and_enforces_utf8_byte_budget() {
+    fn copy_reuses_native_markdown_semantics_for_complete_utf8() {
         let source =
             "# Heading\n\n**bold** [link](https://example.org)\n\n```rs\nlet x = 1;\n```\n";
-        let MarkdownTextResult::Ready { text } = plain(source).unwrap() else {
-            panic!()
-        };
+        let MarkdownTextResult::Ready { text } = plain(source).unwrap();
         assert!(text.contains("Heading"));
         assert!(text.contains("bold link"));
         assert!(text.contains("let x = 1;"));
@@ -95,7 +86,7 @@ mod tests {
         assert!(text.contains("https://example.org"));
         assert!(matches!(
             plain(&"中".repeat(21846)).unwrap(),
-            MarkdownTextResult::TooLarge
+            MarkdownTextResult::Ready { .. }
         ));
         assert!(matches!(
             plain(&"a".repeat(65536)).unwrap(),

@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 #[schemars(rename = "AgentPendingInteractions")]
 pub struct PendingInteractions {
     pub revision: u64,
-    #[schemars(length(max = 16))]
     pub entries: Vec<InteractionSummary>,
 }
 #[derive(Serialize, JsonSchema, PartialEq, Deserialize)]
@@ -53,18 +52,18 @@ pub enum InteractionKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentInteractionRead")]
 pub struct InteractionRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub request_id: String,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentInteractionRespond")]
 pub struct InteractionRespond {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub request_id: String,
     pub answer: InteractionAnswer,
 }

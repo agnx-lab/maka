@@ -121,12 +121,7 @@ export function updateToolActivity(active: ToolActivity[], event: Delivery): Too
     default:
       return active;
   }
-  const result = previous ? active.map((tool) => (matches(tool) ? next : tool)) : [...active, next];
-  // Match the Host's bounded active-tool replay contract. A missing active
-  // identity must be an explicit stream failure, never a fabricated idle state.
-  if (result.length > 128)
-    throw new Error('Live tool activity exceeds its 128-tool display budget.');
-  return result;
+  return previous ? active.map((tool) => (matches(tool) ? next : tool)) : [...active, next];
 }
 
 export function latestToolActivity(

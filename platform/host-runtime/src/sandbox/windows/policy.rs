@@ -23,7 +23,6 @@ use std::{collections::BTreeMap, io, os::windows::fs::MetadataExt, path::Path};
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 // Native targets include deny descendants, not just caller-supplied rules.
-pub(super) const MAX_TARGETS: usize = 16_384;
 
 pub(super) struct Plan {
     pub reads: Vec<Rule>,
@@ -126,11 +125,6 @@ impl Plan {
                     Scope::Exact
                 };
                 reads.entry(path.clone()).or_insert((scope, Access::Deny));
-                if reads.len() > MAX_TARGETS {
-                    return Err(unsupported(
-                        "Windows deny surface exceeds native target limit",
-                    ));
-                }
                 if metadata.is_dir() {
                     directories.push(path);
                 }

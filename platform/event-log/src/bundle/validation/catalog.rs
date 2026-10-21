@@ -48,7 +48,6 @@ pub(super) async fn validate(
             parent,
             created_at,
             updated_at,
-            configuration,
             ..
         } = serde_json::from_str(&json)?
         else {
@@ -57,9 +56,6 @@ pub(super) async fn validate(
         crate::sessions::validate_id(&id)?;
         crate::sessions::validate_time(created_at)?;
         crate::sessions::validate_time(updated_at)?;
-        if serde_json::to_vec(&configuration)?.len() > crate::sessions::MAX_CONFIGURATION_BYTES {
-            return Err(invalid("bundle Session configuration exceeds its limit"));
-        }
         let edges = parents
             .get_mut(id.as_str())
             .ok_or_else(|| invalid("bundle catalog differs from its inventory"))?;

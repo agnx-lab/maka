@@ -91,18 +91,19 @@ struct Processes {
 }
 impl Processes {
     async fn open(context: NativeContext, input: Value) -> Result<Arc<Self>, String> {
-        if !serde_json::to_vec(&input).is_ok_and(|b| b.len() <= 64 * 1024)
-            || !jsonschema::validator_for(&configuration_schema())
-                .expect("process configuration schema")
-                .is_valid(&input)
+        if !jsonschema::validator_for(&configuration_schema())
+            .expect("process configuration schema")
+            .is_valid(&input)
         {
             return Err("workspace_process_configuration_invalid".into());
         }
         let settings: Configuration =
             serde_json::from_value(input).map_err(|_| "workspace_process_configuration_invalid")?;
-        if settings.session_owner.as_ref().is_some_and(|id| {
-            id.0.is_empty() || id.0.len() > 32 || id.0.iter().any(uuid::Uuid::is_nil)
-        }) {
+        if settings
+            .session_owner
+            .as_ref()
+            .is_some_and(|id| id.validate().is_err())
+        {
             return Err("workspace_process_session_owner_invalid".into());
         }
         settings

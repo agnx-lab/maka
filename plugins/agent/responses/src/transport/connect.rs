@@ -44,11 +44,18 @@ pub(super) async fn open(
             .map_err(|_| error("invalid Responses WebSocket header"))?;
         let value = HeaderValue::from_str(value)
             .map_err(|_| error("invalid Responses WebSocket header"))?;
-        request_headers.insert(name, value);
+        request_headers
+            .try_insert(name, value)
+            .map_err(|_| error("Responses WebSocket headers cannot be represented"))?;
     }
-    request_headers
-        .entry("openai-beta")
-        .or_insert(HeaderValue::from_static("responses_websockets=2026-02-06"));
+    if !request_headers.contains_key("openai-beta") {
+        request_headers
+            .try_insert(
+                "openai-beta",
+                HeaderValue::from_static("responses_websockets=2026-02-06"),
+            )
+            .map_err(|_| error("Responses WebSocket headers cannot be represented"))?;
+    }
     // One initial attempt, then five exponential retries. The caller's select
     // owns cancellation and the model idle budget, including these sleeps. No
     // response.create has been sent yet, so reconnecting cannot replay it.

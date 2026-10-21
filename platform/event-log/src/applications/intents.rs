@@ -18,7 +18,7 @@
  */
 
 //! Caller-owned original references. These records do not assert business journal facts.
-use super::{encode, invalid};
+use super::invalid;
 use crate::{EventLog, StoreError, root::RootOwner};
 use maka_plugin_core::{
     composition::InstanceId, deployment::DeploymentRef, operation::RecoveryRef,
@@ -29,11 +29,12 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 const MAX_PAGE: usize = 1024 * 1024;
-const MAX_RECOVERY: usize = 32 * 1024;
 
 /// Caller-owned correlation only; no business outcome or execution authority.
 pub fn validate_recovery(value: &serde_json::Value) -> Result<(), StoreError> {
-    encode(value, MAX_RECOVERY).map(|_| ())
+    serde_json::to_string(value)
+        .map(|_| ())
+        .map_err(StoreError::from)
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -61,7 +62,6 @@ impl CallerIntent {
     pub fn validate(&self) -> Result<(), StoreError> {
         self.confirmation().validate()?;
         validate_recovery(&self.recovery)?;
-        encode(self, MAX_PAGE)?;
         Ok(())
     }
     pub fn confirmation(&self) -> CallerConfirmation {
@@ -80,7 +80,6 @@ impl CallerConfirmation {
         }
         self.caller.validate().map_err(invalid)?;
         consumer_valid(&self.consumer)?;
-        encode(self, MAX_PAGE)?;
         self.reference
             .validate()
             .map_err(|e| invalid(e.to_string()))?;
@@ -99,11 +98,11 @@ impl RecordedIntent {
     }
 }
 fn consumer_valid(consumer: &InstanceId) -> Result<(), StoreError> {
-    if consumer.0.is_empty() || consumer.0.len() > 64 || consumer.0.iter().any(Uuid::is_nil) {
-        return Err(invalid("invalid caller consumer"));
-    }
-    Ok(())
+    consumer
+        .validate()
+        .map_err(|error| invalid(error.to_string()))
 }
+
 async fn read(
     connection: &mut SqliteConnection,
     domain: &str,
@@ -111,15 +110,12 @@ async fn read(
     consumer: &InstanceId,
     operation: Uuid,
 ) -> Result<Option<CallerIntent>, StoreError> {
-    let row = sqlx::query("SELECT cursor, source_revision, reference_json, CASE WHEN length(CAST(recovery_json AS BLOB)) <= 32768 THEN recovery_json END AS recovery_json FROM application_intents WHERE deployment=? AND consumer=? AND operation=?")
-        .bind(deployment.to_string()).bind(encode(consumer,4096)?).bind(operation.to_string()).fetch_optional(connection).await?;
+    let row = sqlx::query("SELECT cursor, source_revision, reference_json, recovery_json FROM application_intents WHERE deployment=? AND consumer=? AND operation=?")
+        .bind(deployment.to_string()).bind(serde_json::to_string(consumer)?).bind(operation.to_string()).fetch_optional(connection).await?;
     row.map(|row| {
         let reference: RecoveryRef =
             serde_json::from_str(&row.try_get::<String, _>("reference_json")?)?;
-        let recovery = serde_json::from_str(
-            &row.try_get::<Option<String>, _>("recovery_json")?
-                .ok_or_else(|| invalid("caller recovery metadata exceeds 32 KiB"))?,
-        )?;
+        let recovery = serde_json::from_str(&row.try_get::<String, _>("recovery_json")?)?;
         reference.validate().map_err(|e| invalid(e.to_string()))?;
         if reference.operation != operation {
             return Err(StoreError::EventConflict);
@@ -178,7 +174,7 @@ impl EventLog {
     ) -> Result<RecordedIntent, StoreError> {
         consumer_valid(&consumer)?;
         reference.validate().map_err(|e| invalid(e.to_string()))?;
-        encode(&recovery, MAX_RECOVERY)?;
+        validate_recovery(&recovery)?;
         let loaded = self
             .load_application_at(&caller)
             .await?
@@ -201,7 +197,7 @@ impl EventLog {
         let caller = source.reference().clone();
         reference.validate().map_err(|e| invalid(e.to_string()))?;
         let encoded = serde_json::to_string(&reference)?;
-        let encoded_recovery = encode(&recovery, MAX_RECOVERY)?;
+        let encoded_recovery = serde_json::to_string(&recovery)?;
         let domain = self.application_domain()?;
         let owner = self.root_owner.as_ref().expect("owned caller Root").clone();
         let commits = self.commits.clone();
@@ -214,7 +210,7 @@ impl EventLog {
                 old
             } else {
                 let result = sqlx::query("INSERT INTO application_intents (deployment,consumer,operation,source_revision,reference_json,recovery_json) VALUES (?,?,?,?,?,?)")
-                    .bind(caller.deployment.to_string()).bind(encode(&consumer,4096)?).bind(reference.operation.to_string()).bind(caller.revision as i64).bind(encoded).bind(encoded_recovery).execute(&mut *tx).await?;
+                    .bind(caller.deployment.to_string()).bind(serde_json::to_string(&consumer)?).bind(reference.operation.to_string()).bind(caller.revision as i64).bind(encoded).bind(encoded_recovery).execute(&mut *tx).await?;
                 CallerIntent {cursor:result.last_insert_rowid() as u64,caller,consumer,reference,recovery}
             };
             tx.commit().await.map_err(StoreError::CommitUnknown)?;
@@ -262,9 +258,9 @@ impl EventLog {
         }
         self.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin().await?;
-            let mut query = sqlx::QueryBuilder::new("SELECT CASE WHEN length(CAST(operation AS BLOB)) = 36 THEN operation END AS operation, CASE WHEN length(CAST(consumer AS BLOB)) <= 4096 THEN consumer END AS consumer FROM application_intents WHERE deployment=");
+            let mut query = sqlx::QueryBuilder::new("SELECT CASE WHEN length(CAST(operation AS BLOB)) = 36 THEN operation END AS operation, consumer FROM application_intents WHERE deployment=");
             query.push_bind(deployment.to_string());
-            if let Some(consumer) = &consumer { query.push(" AND consumer=").push_bind(encode(consumer,4096)?); }
+            if let Some(consumer) = &consumer { query.push(" AND consumer=").push_bind(serde_json::to_string(consumer)?); }
             query.push(" AND cursor>").push_bind(after as i64).push(" ORDER BY cursor LIMIT ").push_bind(limit as i64);
             let operations = query.build().fetch_all(&mut *tx).await?;
             let mut intents = Vec::with_capacity(operations.len());
@@ -274,9 +270,9 @@ impl EventLog {
                 let consumer: InstanceId = serde_json::from_str(&row.try_get::<Option<String>, _>("consumer")?.ok_or_else(|| invalid("invalid caller consumer"))?)?;
                 consumer_valid(&consumer)?;
                 let intent = read(&mut tx,&domain,deployment,&consumer,Uuid::parse_str(&operation).map_err(|_| invalid("invalid caller operation"))?).await?.ok_or_else(|| invalid("caller intent disappeared"))?;
-                let encoded = encode(&intent, MAX_PAGE)?;
+                let encoded = serde_json::to_string(&intent)?;
                 let size = encoded.len() + usize::from(!intents.is_empty());
-                if size > MAX_PAGE - bytes { break; }
+                if !intents.is_empty() && size > MAX_PAGE.saturating_sub(bytes) { break; }
                 bytes += size;
                 intents.push(intent);
             }

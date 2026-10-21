@@ -45,8 +45,6 @@ impl SourceCatalog {
         for skill in &self.publication.discovery.inventory {
             let location = &skill.location;
             if location.id.is_empty()
-                || location.id.len() > 128
-                || location.reference.len() > 384
                 || location
                     .reference
                     .chars()
@@ -178,13 +176,12 @@ async fn catalog(
         let snapshot = super::scan_with_origins(&[source], cancellation)
             .await
             .map_err(SourceCatalogError::Scan)?;
-        if let Some(error) = snapshot.discovery.diagnostics.iter().find(|d| {
-            d.path == root
-                || matches!(
-                    d.reason,
-                    DiscoveryFailure::ReadFailed | DiscoveryFailure::SourceTooLarge
-                )
-        }) {
+        if let Some(error) = snapshot
+            .discovery
+            .diagnostics
+            .iter()
+            .find(|d| d.path == root || matches!(d.reason, DiscoveryFailure::ReadFailed))
+        {
             return Err(SourceCatalogError::Read(error.reason));
         }
         snapshot
@@ -201,7 +198,6 @@ async fn catalog(
 
 pub fn safe_source_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= 81
         && id.as_bytes()[0].is_ascii_alphanumeric()
         && id
             .bytes()
@@ -218,9 +214,7 @@ mod tests {
             .iter()
             .find(|source| source.id == "maka-plugin-authoring")
             .unwrap();
-        let resources =
-            crate::Resources::embedded(source.files, &mut crate::resources::Budget::default())
-                .unwrap();
+        let resources = crate::Resources::embedded(source.files).unwrap();
         assert!(!resources.fingerprint().0);
         for (path, _) in source.files {
             resources

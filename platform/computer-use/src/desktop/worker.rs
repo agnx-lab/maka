@@ -49,7 +49,6 @@ use tokio_util::sync::CancellationToken;
 
 const ENTRY: &str = "__maka-cua-desktop";
 const PROTOCOL: u32 = 1;
-const MAX_FRAME: usize = 16 * 1024 * 1024;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -378,7 +377,7 @@ async fn serve(
                 command,
                 language,
             } => {
-                if session.is_empty() || session.len() > 256 {
+                if session.is_empty() {
                     Err(failed("invalid desktop Session identity"))
                 } else if sessions.len() >= 16 && !sessions.contains_key(&session) {
                     Err(failed("desktop Session capacity reached"))
@@ -438,7 +437,7 @@ async fn serve(
 
 fn length(length: u32) -> io::Result<usize> {
     let length = length as usize;
-    if length == 0 || length > MAX_FRAME {
+    if length == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid desktop frame length",
@@ -450,13 +449,19 @@ fn encode(value: &impl Serialize) -> io::Result<Vec<u8>> {
     let mut bytes = vec![0; 4];
     serde_json::to_writer(&mut bytes, value)?;
     let size = bytes.len() - 4;
-    if size > MAX_FRAME {
+    let size = u32::try_from(size).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "desktop message is not representable",
+        )
+    })?;
+    if size == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "desktop message too large",
         ));
     }
-    bytes[..4].copy_from_slice(&(size as u32).to_be_bytes());
+    bytes[..4].copy_from_slice(&size.to_be_bytes());
     Ok(bytes)
 }
 #[cfg(feature = "native-desktop")]
@@ -636,8 +641,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn desktop_frames_reject_oversize_and_partial_responses() {
-        let mut oversize = ((MAX_FRAME + 1) as u32).to_be_bytes().as_slice().to_vec();
+    async fn desktop_frames_reject_empty_and_partial_responses() {
+        let mut oversize = 0_u32.to_be_bytes().as_slice().to_vec();
         assert_eq!(
             read::<_, Response>(&mut oversize.as_slice())
                 .await

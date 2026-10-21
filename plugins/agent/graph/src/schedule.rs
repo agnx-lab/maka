@@ -33,15 +33,15 @@ use std::collections::{BTreeMap, BTreeSet};
 #[schemars(rename = "GraphTarget")]
 pub enum Target {
     Agent {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         agent_id: String,
     },
     Preset {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         preset_id: String,
     },
     Executor {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         executor_id: String,
     },
     Operator {
@@ -53,7 +53,7 @@ pub enum Target {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoricalInput {
     pub source_graph_id: GraphId,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub result_id: String,
 }
 
@@ -74,9 +74,9 @@ pub struct Work {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Stop {
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub target_id: String,
-    #[schemars(length(min = 1, max = 4000))]
+    #[schemars(length(min = 1))]
     pub reason: String,
 }
 
@@ -116,28 +116,22 @@ impl Update {
         ] {
             identity(id)?;
         }
-        if self.add_work.len() > 32
-            || self.stop.len() > 20
-            || (self.add_work.is_empty() && self.stop.is_empty() && self.finish.is_none())
+        if (self.add_work.is_empty() && self.stop.is_empty() && self.finish.is_none())
             || (self.finish.is_some() && !self.add_work.is_empty())
         {
             return Err(Error::Invalid("invalid schedule update cardinality".into()));
         }
         let mut work_ids = BTreeSet::new();
-        let mut selected = 0;
         for work in &self.add_work {
             if !work_ids.insert(&work.work_id) {
                 return Err(Error::Invalid("duplicate work".into()));
             }
-            bounded_text(&work.instruction, 60_000)?;
+            text(&work.instruction)?;
             match &work.target {
                 Target::Agent { agent_id } => identity(agent_id)?,
                 Target::Preset { preset_id } => identity(preset_id)?,
                 Target::Executor { executor_id } => identity(executor_id)?,
                 Target::Operator { .. } => {}
-            }
-            if work.input_ids.len() + work.selected_result_inputs.len() > 64 {
-                return Err(Error::Invalid("work input limit exceeded".into()));
             }
             let mut inputs = BTreeSet::new();
             for id in work.input_ids.iter().chain(
@@ -157,26 +151,22 @@ impl Update {
                     ));
                 }
             }
-            selected += work.selected_result_inputs.len();
             if let Some(id) = &work.replaces {
                 identity(id)?;
             }
         }
-        if selected > 64 {
-            return Err(Error::Invalid("historical input limit exceeded".into()));
-        }
         let mut stops = BTreeSet::new();
         for stop in &self.stop {
             identity(&stop.target_id)?;
-            bounded_text(&stop.reason, 4_000)?;
+            text(&stop.reason)?;
             if !stops.insert(&stop.target_id) {
                 return Err(Error::Invalid("duplicate stop target".into()));
             }
         }
         if let Some(finish) = &self.finish {
-            bounded_text(&finish.reason, 4_000)?;
-            if finish.result_ids.is_empty() || finish.result_ids.len() > 64 {
-                return Err(Error::Invalid("finish requires 1..=64 results".into()));
+            text(&finish.reason)?;
+            if finish.result_ids.is_empty() {
+                return Err(Error::Invalid("finish requires results".into()));
             }
             let mut results = BTreeSet::new();
             for id in &finish.result_ids {
@@ -201,8 +191,8 @@ impl Update {
     }
 }
 
-fn bounded_text(value: &str, characters: usize) -> Result<(), Error> {
-    if value.trim().is_empty() || value.chars().count() > characters || value.contains('\0') {
+fn text(value: &str) -> Result<(), Error> {
+    if value.trim().is_empty() || value.contains('\0') {
         return Err(Error::Invalid("invalid instruction or reason".into()));
     }
     Ok(())
@@ -257,9 +247,6 @@ impl Schedule {
 
     pub fn apply(&mut self, committed: &CommittedUpdate) -> Result<(), Error> {
         committed.update.validate()?;
-        if self.work.len() + committed.update.add_work.len() > 1024 {
-            return Err(Error::Invalid("graph epoch exceeds 1024 work items".into()));
-        }
         if committed.update.graph_id != self.epoch.graph_id
             || committed.update.source.invocation.session_id != self.epoch.root_session_id
             || committed.committed_at > (1 << 53) - 1

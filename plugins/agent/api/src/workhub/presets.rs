@@ -25,13 +25,12 @@ use serde::{Deserialize, Serialize};
 pub struct Preset {
     #[serde(default)]
     pub isolated_workspace: bool,
-    #[schemars(length(min = 1, max = 128), regex(pattern = "^[a-zA-Z0-9._:-]+$"))]
+    #[schemars(length(min = 1), regex(pattern = "^[a-zA-Z0-9._:-]+$"))]
     pub id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub name: String,
-    #[schemars(length(max = 4000))]
     pub description: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub worker: String,
     /// Exact installed names; an empty list permits reasoning without tools.
     #[schemars(extend("uniqueItems" = true))]
@@ -46,7 +45,6 @@ pub struct Preset {
 pub struct Presets {
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<u64>")]
     pub revision: Option<u64>,
-    #[schemars(length(max = 64))]
     pub entries: Vec<Preset>,
 }
 #[derive(Serialize, JsonSchema)]

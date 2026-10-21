@@ -696,7 +696,49 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(created["workspace"]["path"], fixture.directory.path().join("workspace").canonicalize().unwrap().to_str().unwrap());
         wait_view(&mut view, |screen| screen.contains("Search models…")).await;
         wait_focused_input(&mut view, "Search models").await;
-        view.handle_event(Event::Paste("model-alt".into()));
+        let model_query = format!("{}fixture-model-alt", "model-alt ".repeat(30));
+        view.handle_event(Event::Paste(model_query.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(model_query.as_str()));
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
+        let missing_model_tail = format!("{}fixture-model-alX", "model-alt ".repeat(30));
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(missing_model_tail.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(missing_model_tail.as_str()));
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                view.poll().unwrap();
+                support::tick(&mut view);
+                assert!(view.last_error().is_none(), "model-query view failed: {:?}", view.last_error());
+                let screen = view.snapshot();
+                let viewport = view.surface().viewport();
+                // Virtualized list cells retain their old accessibility labels
+                // while parked offscreen. Reject an old choice only when its
+                // positive-area frame actually intersects the viewport.
+                let original_choice_visible = view.accessibility_snapshot().iter().any(|node| {
+                    let frame = node.frame;
+                    node.label == "Use fixture-model-alt · NSH fixture"
+                        && frame.size.width.0 > 0.0
+                        && frame.size.height.0 > 0.0
+                        && frame.origin.x.0 < viewport.width.0
+                        && frame.origin.y.0 < viewport.height.0
+                        && frame.origin.x.0 + frame.size.width.0 > 0.0
+                        && frame.origin.y.0 + frame.size.height.0 > 0.0
+                });
+                let original_query = view.surface().input_context().and_then(|input| input.text.clone());
+                if original_query.as_deref() == Some(missing_model_tail.as_str())
+                    && screen.contains("0 models")
+                    && !screen.contains("Loading…")
+                    && !original_choice_visible
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the complete negative query did not settle without a visible old model choice");
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(model_query));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high") && !screen.contains("Close") && !screen.contains("Back")).await;
@@ -940,6 +982,38 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::evidence_cells("workbench-stopped-clears-tool-input", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         assert_eq!(client.load_draft("agent", &fixture.session, EDITOR).await.unwrap().unwrap().text, "Draft A stays in its own conversation");
+
+        // The native search callback must deliver the complete original query
+        // to the Host subscription, including a distinguishing final character.
+        let long_query = format!("{}終", "界".repeat(257));
+        let long_title = format!("LONG_QUERY_MATCH {long_query}");
+        let long_created = support::mutate(&client, "create", json!({
+            "title":long_title,"automaticTitle":false,"labels":[],
+            "workspace":{"kind":"session","sessionId":fixture.session}
+        })).await;
+        assert_eq!(long_created["kind"], "created");
+        assert_eq!(long_created["session"]["title"], long_title);
+        shortcut(&mut view, 'o');
+        wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
+        wait_focused_input(&mut view, "Search session titles").await;
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(long_query.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(long_query.as_str()));
+        wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == format!("Open conversation {long_title}")));
+        let missing_tail = format!("{}異", "界".repeat(257));
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(missing_tail.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(missing_tail.as_str()));
+        wait_view(&mut view, |screen| screen.contains("No matching conversations.") && !screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("No matching conversations.") && !screen.contains("Loading…")).await;
+        support::click_button(&mut view, "Close session browser").await;
+        wait_editable_composer(&mut view).await;
+        wait_view(&mut view, |screen| !screen.contains("No matching conversations.") && !screen.contains("All workspaces")).await;
 
         // The target belongs to the Host's second matching page. Physical
         // wheel scrolling must obtain it without a manual continuation action.
@@ -1934,7 +2008,8 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         })).await;
         assert_eq!(sent["kind"], "started");
         let mut request = fixture.next_request().await;
-        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
+        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler 中文😀\n".repeat(60_000));
+        assert!(source.len() > 1024 * 1024);
         request.delta(&source).await;
         let long_formatted = wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source") && !screen.contains("```") && !screen.contains("Formatting unavailable")).await;
         evidence("rich-response-long-formatted", &long_formatted);

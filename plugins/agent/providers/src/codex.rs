@@ -97,8 +97,7 @@ pub fn request_headers(
     access_token: &str,
     session_id: &str,
 ) -> Result<BTreeMap<String, String>, Error> {
-    if session_id.is_empty() || session_id.len() > 1024 || session_id.chars().any(char::is_control)
-    {
+    if session_id.is_empty() || session_id.chars().any(char::is_control) {
         return Err(Error::Adapter(
             "invalid subscription session identity".into(),
         ));

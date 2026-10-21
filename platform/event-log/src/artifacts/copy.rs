@@ -21,7 +21,6 @@ use super::records::{advance, invalid, read_record, require_session};
 use crate::StoreError;
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::attachment::AttachmentRef;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use sqlx::SqliteConnection;
 
@@ -52,10 +51,7 @@ pub(crate) async fn copy_in_transaction(
         .await?
         .ok_or_else(|| invalid("Delegated attachment source no longer exists"))?;
     artifact.validate_attachment(source).map_err(invalid)?;
-    if artifact.size_bytes > MAX_ATTACHMENT_BYTES
-        || artifact.source == ArtifactSource::UserUpload
-            && artifact.summary.as_ref() != Some(&digest)
-    {
+    if artifact.source == ArtifactSource::UserUpload && artifact.summary.as_ref() != Some(&digest) {
         return Err(StoreError::ArtifactConflict);
     }
     require_session(tx, target_session).await?;
@@ -66,9 +62,6 @@ pub(crate) async fn copy_in_transaction(
     artifact.validate().map_err(invalid)?;
     artifact.validate_attachment(destination).map_err(invalid)?;
     let encoded = serde_json::to_string(&artifact)?;
-    if encoded.len() > super::MAX_RECORD_BYTES {
-        return Err(invalid("Copied attachment metadata exceeds limit"));
-    }
     if let Some((existing, target_digest)) = read_record(tx, target_session, target_id).await? {
         if existing != artifact || target_digest != digest {
             return Err(StoreError::ArtifactConflict);

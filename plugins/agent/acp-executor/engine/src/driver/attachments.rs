@@ -22,8 +22,6 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-// Leave room for the SDK's RPC envelope and the bounded protocol Session ID.
-const MAX_CONTENT: usize = crate::transport::MAX_LINE - 4096;
 impl Driver<'_> {
     pub(super) fn prompt_content<T: DeserializeOwned>(
         &self,
@@ -83,16 +81,10 @@ fn blocks(
         .into_iter()
         .map(|text| json!({"type":"text","text":text}))
         .collect();
-    let mut size = serde_json::to_vec(&blocks)?.len();
-    if size > MAX_CONTENT {
-        return Err(Error::Invalid("ACP prompt exceeds its content limit"));
-    }
     for (index, attachment) in attachments.into_iter().enumerate() {
         if attachment.name.is_empty()
-            || attachment.name.len() > 512
             || attachment.name.chars().any(char::is_control)
             || attachment.mime_type.is_empty()
-            || attachment.mime_type.len() > 256
             || attachment.mime_type.chars().any(char::is_control)
         {
             return Err(Error::Invalid("ACP attachment metadata is invalid"));
@@ -104,11 +96,6 @@ fn blocks(
             ));
         }
         let resource = attachment.resource;
-        if resource.bytes() > MAX_CONTENT.saturating_sub(size) {
-            return Err(Error::Invalid(
-                "ACP attachments exceed the prompt frame limit",
-            ));
-        }
         let mut bytes = Vec::with_capacity(resource.bytes());
         for start in (0..resource.bytes()).step_by(64 * 1024) {
             if cancellation.is_cancelled() {
@@ -150,15 +137,6 @@ fn blocks(
             maka_agent_facts::language::Language::ZhTw => "附件：",
         };
         let name = json!({"type":"text","text":format!("{label}{}", attachment.name)});
-        size = size
-            .saturating_add(serde_json::to_vec(&block)?.len())
-            .saturating_add(serde_json::to_vec(&name)?.len())
-            .saturating_add(2);
-        if size > MAX_CONTENT {
-            return Err(Error::Invalid(
-                "ACP attachments exceed the prompt frame limit",
-            ));
-        }
         blocks.push(name);
         blocks.push(block);
     }

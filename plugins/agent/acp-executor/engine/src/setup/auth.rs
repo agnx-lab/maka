@@ -77,7 +77,6 @@ async fn observe(event: Event, send: &dyn Output, stderr: &mut Urls) -> Result<(
 #[derive(Default)]
 pub(super) struct Urls {
     line: Vec<u8>,
-    discard: bool,
 }
 impl Urls {
     pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<String>, Error> {
@@ -85,11 +84,10 @@ impl Urls {
         let mut urls = vec![];
         for byte in bytes {
             if *byte == b'\n' {
-                if !self.discard
-                    && let Ok(line) = std::str::from_utf8(&self.line)
+                if let Ok(line) = std::str::from_utf8(&self.line)
                     && let Some(value) = line.trim_end_matches('\r').strip_prefix(PREFIX)
                 {
-                    if value.len() > 8192 || value.chars().any(char::is_control) {
+                    if value.chars().any(char::is_control) {
                         return Err(Error::Provider("Invalid authentication URL".into()));
                     }
                     let url = url::Url::parse(value)
@@ -109,14 +107,8 @@ impl Urls {
                     urls.push(value.to_owned());
                 }
                 self.line.clear();
-                self.discard = false;
-            } else if !self.discard {
-                if self.line.len() == 32 * 1024 {
-                    self.line.clear();
-                    self.discard = true;
-                } else {
-                    self.line.push(*byte);
-                }
+            } else {
+                self.line.push(*byte);
             }
         }
         Ok(urls)
@@ -126,6 +118,22 @@ impl Urls {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authorization_url_retains_complete_long_state_across_chunks() {
+        let url = format!(
+            "https://example.org/login?state={}",
+            "state-token-".repeat(6_000)
+        );
+        let line = format!("Open the following link to authenticate the ACP server: {url}\r\n");
+        let mut parser = Urls::default();
+        let mut observed = Vec::new();
+        for chunk in line.as_bytes().chunks(997) {
+            observed.extend(parser.feed(chunk).unwrap());
+        }
+        assert_eq!(observed, vec![url]);
+        assert_eq!(parser.feed(b"Open the following link to authenticate the ACP server: https://example.org/next\n").unwrap(), vec!["https://example.org/next"]);
+    }
 
     #[test]
     fn accepts_only_exact_prefix_and_https_without_credentials() {

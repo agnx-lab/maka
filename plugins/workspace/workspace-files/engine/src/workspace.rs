@@ -41,7 +41,6 @@ pub mod permissions;
 pub mod project;
 
 pub const MARKER_FILE: &str = ".maka-workspace.json";
-const MAX_MARKER_BYTES: usize = 4096;
 
 /// Read-only safety observation: never creates, repairs or rebinds a marker.
 pub fn read_identity(path: &Path) -> io::Result<WorkspaceIdentity> {
@@ -146,13 +145,8 @@ impl Workspace {
     }
 
     fn read_opened(&self, mut file: File) -> io::Result<WorkspaceIdentity> {
-        let bytes = read_bounded(
-            &self.dir,
-            OsStr::new(MARKER_FILE),
-            &mut file,
-            MAX_MARKER_BYTES,
-        )
-        .map_err(after_open)?;
+        let bytes =
+            read_complete(&self.dir, OsStr::new(MARKER_FILE), &mut file).map_err(after_open)?;
         self.validate_directory().map_err(after_open)?;
         let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
         let object = value
@@ -211,22 +205,17 @@ fn identity(metadata: &Metadata) -> (u64, u64) {
     (metadata.dev(), metadata.ino())
 }
 
-fn read_bounded(dir: &Dir, name: &OsStr, file: &mut File, max: usize) -> io::Result<Vec<u8>> {
+fn read_complete(dir: &Dir, name: &OsStr, file: &mut File) -> io::Result<Vec<u8>> {
     let before = file.metadata()?;
     let visible = dir.symlink_metadata(name)?;
-    if !before.is_file()
-        || !visible.is_file()
-        || before.len() > max as u64
-        || identity(&before) != identity(&visible)
-    {
-        return Err(invalid("marker must be one bounded regular file"));
+    if !before.is_file() || !visible.is_file() || identity(&before) != identity(&visible) {
+        return Err(invalid("marker must be one regular file"));
     }
     let mut bytes = Vec::new();
-    (&mut *file).take(max as u64 + 1).read_to_end(&mut bytes)?;
+    (&mut *file).take(before.len()).read_to_end(&mut bytes)?;
     let after = file.metadata()?;
     let visible = dir.symlink_metadata(name)?;
-    if bytes.len() > max
-        || bytes.len() as u64 != before.len()
+    if bytes.len() as u64 != before.len()
         || after.len() != before.len()
         || before.modified()? != after.modified()?
         || !visible.is_file()

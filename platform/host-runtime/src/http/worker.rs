@@ -38,15 +38,6 @@ pub(super) async fn run(
         .iter()
         .map(|(name, value)| (name.as_str().to_owned(), value.as_bytes().to_vec()))
         .collect::<Vec<_>>();
-    if headers
-        .iter()
-        .map(|(name, value)| name.len() + value.len())
-        .sum::<usize>()
-        > 64 * 1024
-    {
-        let _ = head.send(Err("HTTP response headers exceed 64 KiB".into()));
-        return Err("HTTP response headers exceed 64 KiB".into());
-    }
     let status = response.status().as_u16();
     if head
         .send(Ok(Head {

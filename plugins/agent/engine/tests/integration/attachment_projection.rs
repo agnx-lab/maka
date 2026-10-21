@@ -115,7 +115,7 @@ async fn attachment_references_remain_structured_after_reopen() {
         )
         .unwrap();
         let text = model[0]["content"][0]["text"].as_str().unwrap();
-        let mut view = maka_presentation::InvocationView::new(32 * 1024).unwrap();
+        let mut view = maka_presentation::InvocationView::new();
         let rows = view.push(&prefix.events[0]).unwrap();
         let user = serde_json::to_value(&rows[0].message).unwrap();
         let steered = view.push(&prefix.events[1]).unwrap();

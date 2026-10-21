@@ -107,9 +107,6 @@ pub fn open(specs: Vec<DirectoryRootSpec>, managed: &Path) -> Result<Vec<Root>, 
             })
         })
         .collect::<Result<_, String>>()?;
-    if !fits(&root_page(&roots)?) {
-        return Err("agent_workspace_configuration_invalid".into());
-    }
     Ok(roots)
 }
 fn root<'a>(roots: &'a [Root], id: &str) -> Result<&'a Root, String> {
@@ -126,10 +123,7 @@ fn choice(
     segments: Vec<String>,
     name: String,
 ) -> Result<Directory, String> {
-    if segments
-        .iter()
-        .any(|s| s.len() > 255 || s.chars().any(char::is_control))
-    {
+    if segments.iter().any(|s| s.chars().any(char::is_control)) {
         return Err("agent_directory_invalid".into());
     }
     let selected = root
@@ -154,9 +148,6 @@ fn choice(
 }
 fn host_path(path: &Path) -> Result<String, String> {
     let path = workspace::project::host_path(path).map_err(|_| "agent_directory_invalid")?;
-    if path.len() > 4096 {
-        return Err("agent_directory_invalid".into());
-    }
     Ok(path.into())
 }
 fn root_page(roots: &[Root]) -> Result<DirectoryPage, String> {
@@ -212,7 +203,6 @@ pub async fn query_excluding(
         }
         if after.as_ref().is_some_and(|name| {
             name.is_empty()
-                || name.len() > 255
                 || name.contains(['/', '\\', '\0'])
                 || name.chars().any(char::is_control)
         }) {
@@ -264,7 +254,7 @@ pub async fn query_excluding(
                 unreachable!()
             };
             if children.len() <= 1 {
-                return Err("agent_directory_unavailable".into());
+                break;
             }
             children.pop();
             *after = children.last().map(|child| child.name.clone());
@@ -295,7 +285,7 @@ pub async fn initialize(
     if selection
         .segments
         .iter()
-        .any(|s| s.len() > 255 || s.chars().any(char::is_control))
+        .any(|s| s.chars().any(char::is_control))
     {
         return Ok(None);
     }

@@ -43,10 +43,6 @@ impl LocalListener {
             return Err("socket parent must be a private current-account directory".into());
         }
         let path = parent.join(path.file_name().ok_or("socket filename required")?);
-        use std::os::unix::ffi::OsStrExt;
-        if path.as_os_str().as_bytes().len() > 100 {
-            return Err("Unix socket path exceeds portable 100-byte limit".into());
-        }
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         let meta = path.symlink_metadata()?;

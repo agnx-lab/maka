@@ -180,9 +180,6 @@ pub(super) async fn send(
             .await
             .map_err(|_| Error::Transport("provider response read failed".into()))?
         {
-            if chunk.len() > 4 * 1024 * 1024 - bytes.len() {
-                return Err(Error::Invalid("provider response exceeds 4 MiB".into()));
-            }
             bytes.extend_from_slice(&chunk);
         }
         Ok(bytes)

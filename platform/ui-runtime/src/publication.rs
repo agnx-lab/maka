@@ -37,7 +37,6 @@ use std::{
 use tokio::sync::oneshot;
 
 const MAX_PENDING: usize = 128;
-const MAX_VALUE_BYTES: usize = 1024 * 1024;
 struct Observation {
     key: String,
     value: Value,
@@ -99,11 +98,6 @@ impl Observations {
         }
         let mut required = BTreeMap::<&str, (usize, usize)>::new();
         for (key, bytes) in requirements {
-            if bytes > MAX_VALUE_BYTES {
-                return Err(Error::Invalid(
-                    "native publication bound exceeds wire capacity".into(),
-                ));
-            }
             let capacity = required.entry(key).or_default();
             capacity.0 += 1;
             capacity.1 = capacity.1.max(bytes);
@@ -176,11 +170,7 @@ impl Observations {
         let bytes = serde_json::to_vec(&value)
             .map_err(|e| Error::Invalid(e.to_string()))?
             .len();
-        if bytes > MAX_VALUE_BYTES {
-            return Err(Error::Invalid(
-                "native publication exceeds wire capacity".into(),
-            ));
-        }
+
         let mut permit = if !input
             && !replaceable
             && state
@@ -415,5 +405,63 @@ impl Observations {
     }
     pub fn pending(&self) -> bool {
         !self.state.borrow().pending.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn complete_native_publications_keep_original_acknowledgements_and_release_budget() {
+        let budget = NativeBudget::default();
+        let observations = Observations::new(budget.clone(), || {});
+        let text = format!(
+            "PUBLICATION START{}PUBLICATION END",
+            "保留😀z".repeat(100_000)
+        );
+        let value = serde_json::json!({"text":text});
+        let bytes = serde_json::to_vec(&value).unwrap().len();
+        assert!(bytes > 1024 * 1024);
+        let capacity = observations.prepare([("observed", bytes)]);
+        let prepared = capacity.is_ok();
+        if let Ok(capacity) = capacity {
+            observations.adopt(capacity);
+        }
+        let captured = observations.capture("observed", value.clone(), false);
+        let input = observations.capture_input("physical", value.clone());
+        let mut committed = Vec::new();
+        let mut errors = Vec::new();
+        for _ in 0..2 {
+            errors.extend(observations.advance(
+                (1, 1),
+                &mut committed,
+                |_, _, _| Ok(Job::ready(Ok(()))),
+                |key, value, committed| committed.push((key.to_owned(), value.clone())),
+            ));
+        }
+        observations.close();
+        assert_eq!(budget.usage(), (0, 0, 0));
+        assert!(
+            prepared,
+            "complete observation must reserve its actual native budget"
+        );
+        let acknowledgement = captured
+            .expect("complete observation must enqueue")
+            .expect("original observation must retain an acknowledgement");
+        acknowledgement.await.unwrap();
+        input
+            .expect("complete original physical input must enqueue")
+            .await
+            .unwrap();
+        assert!(errors.is_empty());
+        assert_eq!(committed.len(), 2);
+        assert_eq!(committed[0].0, "observed");
+        assert_eq!(committed[1].0, "physical");
+        assert!(
+            committed.iter().all(|(_, actual)| actual == &value),
+            "complete original native publication bytes changed"
+        );
+        assert!(!observations.pending());
     }
 }

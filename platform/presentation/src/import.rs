@@ -26,16 +26,8 @@ pub(super) fn project(
     event: &RuntimeEvent,
     record: &import::Record,
     ts: u64,
-    max_bytes: usize,
 ) -> Result<Vec<Message>, ProjectionError> {
     record.validate().map_err(ProjectionError::Invalid)?;
-    if serde_json::to_vec(record)
-        .map_err(|_| ProjectionError::Invalid("invalid import"))?
-        .len()
-        > max_bytes
-    {
-        return Err(ProjectionError::TooLarge);
-    }
     let make = |id, content| Message {
         id,
         turn_id: event.invocation.turn_id.clone(),

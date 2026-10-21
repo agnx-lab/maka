@@ -20,11 +20,10 @@
 use super::{
     BundleError, Inventory,
     closure::Closure,
-    format::{self, Copy, Record, Valuation, Writer},
+    format::{Copy, Record, Valuation, Writer},
 };
 use crate::{EventLog, StoreError, sequence_number};
 use sqlx::{Connection, SqliteConnection};
-use std::{io, time::Duration};
 use tokio::io::AsyncWrite;
 
 /// Inventory and checksum of a complete uncompressed transfer, not permission
@@ -46,37 +45,65 @@ impl EventLog {
         self.validate_root()?;
         crate::sessions::validate_id(root)?;
         let (root, expected) = (root.to_owned(), expected_subtree_digest.to_owned());
-        self.connection.read(move |db| Box::pin(async move {
-            let mut tx = db.begin().await?;
-            // Bound snapshot ownership even when a reader keeps making tiny
-            // progress, or the caller disappears without cancelling owned work.
-            let result = tokio::time::timeout(Duration::from_secs(300), async {
-                let inventory = super::inventory(&mut tx, &root).await?;
-                inventory.verify_confirmation(&expected)?;
-                require_idle(&mut tx, &inventory).await?;
-                let through = sequence_number(sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sequence),0) FROM event_log")
-                    .fetch_one(&mut *tx).await.map_err(StoreError::from)?)?;
-                let closure = Closure::capture(&mut tx, &inventory, through).await?;
-                let mut writer = Writer::new(output).await?;
-                writer.record(&Record::Header { inventory: inventory.clone(), source_high_water: through }).await?;
-                catalog(&mut tx, &inventory, &mut writer).await?;
-                histories(&mut tx, &closure, &mut writer).await?;
-                for sequence in &closure.events {
-                    let json: String = sqlx::query_scalar(
-                        "SELECT event_json FROM runtime_events WHERE sequence=? AND length(CAST(event_json AS BLOB))<=?"
-                    ).bind(*sequence as i64).bind(format::MAX_EVENT_BYTES as i64).fetch_one(&mut *tx).await.map_err(StoreError::from)?;
-                    writer.record(&Record::Event { sequence: *sequence, json }).await?;
-                }
-                super::blobs::export(&mut tx, &inventory, &closure, &mut writer).await?;
-                accounting(&mut tx, &closure, &mut writer).await?;
-                let (output, bytes, digest) = writer.finish().await?;
-                Ok((output, BundleSummary { inventory, bytes, digest }))
-            }).await.unwrap_or_else(|_| Err(StoreError::Io(io::Error::new(
-                io::ErrorKind::TimedOut, "Session bundle export deadline exceeded",
-            )).into()));
-            tx.rollback().await?;
-            Ok(result)
-        })).await?
+        self.connection
+            .read(move |db| {
+                Box::pin(async move {
+                    let mut tx = db.begin().await?;
+                    let result = async {
+                        let inventory = super::inventory(&mut tx, &root).await?;
+                        inventory.verify_confirmation(&expected)?;
+                        require_idle(&mut tx, &inventory).await?;
+                        let through = sequence_number(
+                            sqlx::query_scalar::<_, i64>(
+                                "SELECT COALESCE(MAX(sequence),0) FROM event_log",
+                            )
+                            .fetch_one(&mut *tx)
+                            .await
+                            .map_err(StoreError::from)?,
+                        )?;
+                        let closure = Closure::capture(&mut tx, &inventory, through).await?;
+                        let mut writer = Writer::new(output).await?;
+                        writer
+                            .record(&Record::Header {
+                                inventory: inventory.clone(),
+                                source_high_water: through,
+                            })
+                            .await?;
+                        catalog(&mut tx, &inventory, &mut writer).await?;
+                        histories(&mut tx, &closure, &mut writer).await?;
+                        for sequence in &closure.events {
+                            let json: String = sqlx::query_scalar(
+                                "SELECT event_json FROM runtime_events WHERE sequence=?",
+                            )
+                            .bind(*sequence as i64)
+                            .fetch_one(&mut *tx)
+                            .await
+                            .map_err(StoreError::from)?;
+                            writer
+                                .record(&Record::Event {
+                                    sequence: *sequence,
+                                    json,
+                                })
+                                .await?;
+                        }
+                        super::blobs::export(&mut tx, &inventory, &closure, &mut writer).await?;
+                        accounting(&mut tx, &closure, &mut writer).await?;
+                        let (output, bytes, digest) = writer.finish().await?;
+                        Ok((
+                            output,
+                            BundleSummary {
+                                inventory,
+                                bytes,
+                                digest,
+                            },
+                        ))
+                    }
+                    .await;
+                    tx.rollback().await?;
+                    Ok(result)
+                })
+            })
+            .await?
     }
 }
 

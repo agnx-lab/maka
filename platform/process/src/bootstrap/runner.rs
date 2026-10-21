@@ -327,7 +327,7 @@ struct Running {
     console: Option<pty::windows::console::Console>,
 }
 async fn launch(start: Start) -> io::Result<Running> {
-    if start.capabilities.is_empty() || start.capabilities.len() > 32 {
+    if start.capabilities.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid sandbox capabilities",

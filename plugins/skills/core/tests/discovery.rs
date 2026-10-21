@@ -208,8 +208,8 @@ async fn snapshot_precedence_preferences_and_capabilities_preserve_selected_iden
             .all(|entry| entry.skill.id != "review")
     );
     let long_query = catalog.search(&"😀".repeat(300), 8);
-    assert_eq!(long_query.query.encode_utf16().count(), 512);
-    assert!(long_query.query_truncated);
+    assert_eq!(long_query.query, "😀".repeat(300));
+    assert!(!long_query.query_truncated);
     for budget in [0, 100, 600, 18_000] {
         let prompt = catalog.prompt(budget, maka_agent_facts::language::Language::En);
         assert!(prompt.len() <= budget);
@@ -543,10 +543,18 @@ async fn discovery_reads_only_contained_regular_files_and_reports_source_failure
         .map(|skill| skill.location.id.as_str())
         .collect();
     assert_eq!(ids, BTreeSet::from(["chain", "inside", "normal"]));
+    let rejected = snapshot
+        .rejected
+        .iter()
+        .find(|skill| skill.location.id == "large")
+        .unwrap();
+    assert_eq!(
+        rejected.content_sha256,
+        maka_agent_facts::artifact::content_digest(&vec![0; 1024 * 1024 + 1])
+    );
     for (relative, reason) in [
         (".maka/skills/escape", DiscoveryFailure::BlockedPath),
         (".agents/skills", DiscoveryFailure::BlockedPath),
-        (".maka/skills/large", DiscoveryFailure::SourceTooLarge),
     ] {
         assert!(
             snapshot
@@ -667,7 +675,6 @@ async fn linked_resources_freeze_with_the_skill_and_preserve_paging_and_containm
         ".maka/private.txt",
         "references/escape/file",
         "references/binary.bin",
-        "references/oversized.md",
     ] {
         let input = ReadInput {
             path: path.into(),
@@ -679,6 +686,20 @@ async fn linked_resources_freeze_with_the_skill_and_preserve_paging_and_containm
             "{path}"
         );
     }
+    let (_, oversized) = loaded
+        .skill
+        .resources
+        .page(
+            reference,
+            &ReadInput {
+                path: "references/oversized.md".into(),
+                offset: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert!(oversized.content.starts_with("xxxx"));
+    assert!(oversized.next.is_some());
     let current = scan(&sources, &CancellationToken::new()).await.unwrap();
     let current_catalog = Catalog {
         discovery: &current,

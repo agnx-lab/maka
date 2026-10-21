@@ -172,7 +172,6 @@ impl Cells {
             .collect();
         let context = CellContext::with_notification_gate(
             self.0.store.clone(),
-            tool.cells.limits().max_value_bytes,
             metadata,
             self.0.notification_gate.clone(),
         );

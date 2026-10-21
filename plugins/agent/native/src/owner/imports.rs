@@ -40,10 +40,7 @@ impl From<maka_session_import::Error> for Failure {
     fn from(error: maka_session_import::Error) -> Self {
         use maka_session_import::Error;
         match error {
-            Error::Limit { .. }
-            | Error::Database(maka_capabilities::filesystem::database::Error::Limit(_)) => {
-                Self::Limit
-            }
+            Error::Limit { .. } => Self::Limit,
             Error::Invalid(_) | Error::Decode { .. } => Self::Invalid,
             _ => Self::Unavailable,
         }
@@ -109,9 +106,6 @@ impl Owner {
                 serde_json::from_value(value).map_err(|_| Failure::Unavailable)?
             }
         };
-        if !workspace::fits(&sources) {
-            return Err(Failure::Limit);
-        }
         Ok(Sources { revision, sources })
     }
     async fn import_source(
@@ -169,10 +163,10 @@ impl Owner {
         let mut result = match input {
             ImportsRead::Sources => {
                 let snapshot = self.import_sources().await?;
-                ImportsPage::Sources {
+                return Ok(ImportsPage::Sources {
                     revision: snapshot.revision,
                     sources: snapshot.sources,
-                }
+                });
             }
             ImportsRead::Catalog { source, query } => {
                 let reader = self.import_source(&source, scope).await?;
@@ -202,11 +196,11 @@ impl Owner {
                         archived: entry.archived,
                     })
                     .collect();
-                ImportsPage::Catalog {
+                return Ok(ImportsPage::Catalog {
                     source,
                     entries,
                     next: page.next,
-                }
+                });
             }
             ImportsRead::Preview {
                 source,
@@ -278,7 +272,8 @@ impl Owner {
                     sessions.pop();
                     *next = sessions.last().map(|session| session.id.clone());
                 }
-                _ => return Err(Failure::Limit),
+                // A complete first item and its source metadata must always advance.
+                _ => break,
             }
         }
         Ok(result)
@@ -387,10 +382,7 @@ impl Owner {
                             return Err(Failure::Changed);
                         }
                         let name = name.trim().to_owned();
-                        if name.is_empty()
-                            || name.chars().count() > 128
-                            || name.chars().any(char::is_control)
-                        {
+                        if name.is_empty() || name.chars().any(char::is_control) {
                             return Err(Failure::Invalid);
                         }
                         let private = self
@@ -435,12 +427,6 @@ impl Owner {
                         current.sources.retain(|source| source.id != id);
                     }
                     ImportChange::Copy { .. } => unreachable!(),
-                }
-                if !workspace::fits(&ImportResult::Sources {
-                    revision: current.revision,
-                    sources: current.sources.clone(),
-                }) {
-                    return Err(Failure::Limit);
                 }
                 if scope.cancellation.is_cancelled() {
                     return Err(Failure::Unavailable);

@@ -166,7 +166,7 @@ async fn yielding_cells_keep_ancestry_deliver_deltas_share_json_and_drain_on_run
         assert_eq!(last["result"]["value"],Value::Null);
         assert_eq!(last["content"],json!([{"kind":"text","text":"late"}]));
         loaded.clear();
-        let next = invoke(&log,&run,&invocation,"next","exec",json!({"code":"text(load('n'));"})).await;
+        let next = invoke(&log,&run,&invocation,"next","exec",json!({"code":format!("const complete_source = {}; text(load('n'));", serde_json::to_string(&"甲".repeat(24_000)).unwrap())})).await;
         assert_eq!(next["content"][0]["text"],"42");
         let stopping = invoke(&log,&run,&invocation,"stopping","exec",json!({"code":"notify('stoppable'); await yield_control(); await tools.block({});"})).await;
         assert_eq!(stopping["state"],"running");

@@ -17,12 +17,7 @@
  * under the License.
  */
 
-use crate::{
-    failed,
-    mutation::{MAX_PATH, Mutation},
-    scoped::Authority,
-    write::WriteCoordinator,
-};
+use crate::{failed, mutation::Mutation, scoped::Authority, write::WriteCoordinator};
 use apply_patch::{PatchOperation, parse_create, parse_patch, parse_update};
 use maka_agent_facts::tools::ToolError;
 use serde::{Deserialize, Serialize};
@@ -40,7 +35,7 @@ pub fn patch_schema() -> Value {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct NativeInput {
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     call_id: String,
     operation: NativeOperation,
 }
@@ -49,19 +44,19 @@ struct NativeInput {
 enum NativeOperation {
     #[serde(rename = "create_file")]
     Create {
-        #[schemars(length(min = 1, max = MAX_PATH))]
+        #[schemars(length(min = 1))]
         path: String,
         diff: String,
     },
     #[serde(rename = "update_file")]
     Update {
-        #[schemars(length(min = 1, max = MAX_PATH))]
+        #[schemars(length(min = 1))]
         path: String,
         diff: String,
     },
     #[serde(rename = "delete_file")]
     Delete {
-        #[schemars(length(min = 1, max = MAX_PATH))]
+        #[schemars(length(min = 1))]
         path: String,
     },
 }
@@ -88,8 +83,8 @@ impl Batch {
         } else {
             let NativeInput { call_id, operation } =
                 serde_json::from_value(input).map_err(patch_error)?;
-            if call_id.is_empty() || call_id.len() > 4096 {
-                return Err(failed("apply_patch callId exceeds identity bounds"));
+            if call_id.is_empty() {
+                return Err(failed("apply_patch callId must be nonempty"));
             }
             let operation = match operation {
                 NativeOperation::Create { path, diff } => PatchOperation::Add {
@@ -111,12 +106,8 @@ impl Batch {
             let path = operation_path(operation)
                 .to_str()
                 .ok_or_else(|| failed("patch requires a UTF-8 path"))?;
-            if path.is_empty()
-                || path.len() > MAX_PATH
-                || path.contains('\0')
-                || path.contains("://")
-            {
-                return Err(failed("patch requires bounded filesystem paths"));
+            if path.is_empty() || path.contains('\0') || path.contains("://") {
+                return Err(failed("patch requires filesystem paths"));
             }
         }
         Ok(batch)
@@ -230,9 +221,6 @@ fn apply_one(
     use crate::write_target::Target;
     let path = operation_path(&operation);
     let output_path = authority.write_display_path(path)?;
-    if output_path.len() > MAX_PATH {
-        return Err(failed("patch output path exceeds byte limit"));
-    }
     let mut target = Target::capture(
         authority,
         path,
@@ -268,7 +256,7 @@ fn apply_one(
             }
         }
     };
-    let (content, _) = target.prepare(mutation, &output_path)?;
+    let (content, _) = target.prepare(mutation, &output_path, cancellation)?;
     started.store(true, Ordering::SeqCst);
     target.apply(content.as_bytes(), cancellation, &local_started)
 }

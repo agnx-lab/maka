@@ -226,7 +226,7 @@ pub(super) async fn run(
                     },
                     Ready::Complete(id, result) => {
                         let mut request = requests.remove(&id).expect("pending call has an owner");
-                        let result = result.and_then(|value| engine::value(&mut runtime, value, None));
+                        let result = result.and_then(|value| engine::value(&mut runtime, value));
                         // Context capabilities expire before completion becomes observable.
                         drop(request.context.take());
                         let _ = request.reply.send(result);

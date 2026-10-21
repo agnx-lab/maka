@@ -25,4 +25,6 @@ Exposes file operations for an explicitly selected workspace. `provide` register
 
 `readText` also pages uploaded attachments and original tool-result resources visible to the calling Session. A selected Read tool uses its current live Invocation; resource addresses and continuations do not grant access to another Session. Each text attachment page loads the complete admitted upload and validates UTF-8 and the absence of NUL bytes before returning a bounded page. Archived results reuse the original model projection without executing the source tool again. Each archive page currently loads the complete original projection before paging, and cancellation waits for that storage operation to settle.
 
+Search calls return complete admitted results; they do not introduce a cursor or replace source authority. Cancellation waits for the original worker, including ignore-file reads. Paged Read and file-resource transfer retain their existing complete continuation and chunk protocols.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

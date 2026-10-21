@@ -21,14 +21,13 @@ use crate::{Catalog, LoadedInstructions, fields};
 use crate::{
     LoadedSkill, SkillFailedReceipt, SkillFailureReason, SkillInvocationFailure,
     SkillInvocationMode, SkillInvocationReceipt, SkillInvocationResult, SkillLoadedReceipt,
-    SkillOverflowFailure, SkillRequestFailure, TooManyRequests,
+    SkillRequestFailure,
 };
 use maka_agent_facts::language::Language;
 use std::collections::{BTreeSet, HashSet};
 
 mod tokens;
 pub use tokens::inline_references;
-const MAX_REQUESTS: usize = 50;
 
 /// Blocked preparation has no provider input. Passthrough leaves the caller's
 /// original content untouched; Ready carries the exact text to commit and use.
@@ -63,18 +62,6 @@ impl Catalog<'_> {
             if !seen.insert(request.to_lowercase()) {
                 continue;
             }
-            if requests.len() == MAX_REQUESTS {
-                return PreparedInvocation::Blocked(SkillInvocationResult {
-                    loaded: Vec::new(),
-                    failed: vec![SkillInvocationFailure::Overflow(SkillOverflowFailure {
-                        reason: TooManyRequests::TooManyRequests,
-                        request_limit: MAX_REQUESTS as u64,
-                    })],
-                    receipts: vec![SkillInvocationReceipt::Overflow {
-                        request_limit: MAX_REQUESTS as u64,
-                    }],
-                });
-            }
             requests.push(request);
         }
         if requests.is_empty() {
@@ -91,24 +78,14 @@ impl Catalog<'_> {
                         .push(skill.receipt(SkillInvocationMode::Explicit, request));
                     if loaded_ids.insert(skill.skill.location.id.to_lowercase()) {
                         result.loaded.push(LoadedSkill {
-                            id: truncate_utf8(&skill.skill.location.id, 128).to_owned(),
-                            name: truncate_utf8(&skill.skill.document.manifest.name, 256)
-                                .to_owned(),
+                            id: skill.skill.location.id.clone(),
+                            name: skill.skill.document.manifest.name.clone(),
                         });
                         loaded.push(skill);
                     }
                 }
                 Err(reason) => add_failure(&mut result, request, reason),
             }
-        }
-        if result.validate().is_err() {
-            // Metadata can individually fit while the combined wire receipt
-            // does not. Never start with unrepresentable admission evidence.
-            result = SkillInvocationResult::default();
-            for request in requests {
-                add_failure(&mut result, request, SkillFailureReason::ResolutionFailed);
-            }
-            return PreparedInvocation::Blocked(result);
         }
         if loaded.is_empty() {
             return PreparedInvocation::Blocked(result);
@@ -142,10 +119,10 @@ impl LoadedInstructions<'_> {
         let location = &self.skill.location;
         SkillInvocationReceipt::Loaded(SkillLoadedReceipt {
             invocation,
-            request: bound_request(request),
-            skill_ref: truncate_utf8(&location.reference, 512).to_owned(),
-            id: truncate_utf8(&location.id, 128).to_owned(),
-            name: truncate_utf8(&self.skill.document.manifest.name, 256).to_owned(),
+            request: request.to_owned(),
+            skill_ref: location.reference.clone(),
+            id: location.id.clone(),
+            name: self.skill.document.manifest.name.clone(),
             scope: location.scope.clone(),
             source: location.source.clone(),
             truncated: self.truncated,
@@ -154,7 +131,11 @@ impl LoadedInstructions<'_> {
 }
 
 fn add_failure(result: &mut SkillInvocationResult, request: &str, reason: SkillFailureReason) {
-    let request = bound_request(request);
+    let request = if request.is_empty() {
+        "[invalid]".into()
+    } else {
+        request.to_owned()
+    };
     result
         .failed
         .push(SkillInvocationFailure::Request(SkillRequestFailure {
@@ -168,29 +149,6 @@ fn add_failure(result: &mut SkillInvocationResult, request: &str, reason: SkillF
             request,
             reason,
         }));
-}
-
-fn bound_request(request: &str) -> String {
-    // A request is repeated in failure and receipt projections. Bound its JSON
-    // content as well as UTF-8 so fifty escaped identifiers still fit 72 KiB.
-    let mut encoded_bytes = 0;
-    let cleaned: String = request
-        .chars()
-        .filter(|c| !matches!(c, '\u{0000}'..='\u{001f}' | '\u{007f}'))
-        .take_while(|c| {
-            encoded_bytes += c.len_utf8() + usize::from(matches!(c, '"' | '\\'));
-            encoded_bytes <= 512
-        })
-        .collect();
-    if cleaned.is_empty() {
-        "[invalid]".into()
-    } else {
-        cleaned
-    }
-}
-
-fn truncate_utf8(value: &str, maximum: usize) -> &str {
-    &value[..value.floor_char_boundary(value.len().min(maximum))]
 }
 
 fn compose(user_text: &str, skills: &[LoadedInstructions<'_>], language: Language) -> String {
@@ -240,7 +198,7 @@ mod tests {
     use crate::{DiscoverySnapshot, HostCapabilities, Preferences};
 
     #[test]
-    fn escaped_request_diagnostics_cannot_overflow_a_blocked_result() {
+    fn unresolved_requests_preserve_complete_diagnostic_identity() {
         let discovery = DiscoverySnapshot {
             inventory: Vec::new(),
             rejected: Vec::new(),
@@ -253,7 +211,7 @@ mod tests {
             preferences: &preferences,
             host: &host,
         };
-        let requests = (0..50)
+        let requests = (0..75)
             .map(|i| format!("{}{i:02}", "\"".repeat(510)))
             .collect::<Vec<_>>();
         let PreparedInvocation::Blocked(result) =
@@ -261,7 +219,9 @@ mod tests {
         else {
             panic!("an unreadable preference snapshot must never yield provider input");
         };
-        assert_eq!(result.failed.len(), 50);
+        assert_eq!(result.failed.len(), 75);
+        let SkillInvocationFailure::Request(first) = &result.failed[0];
+        assert_eq!(first.request, requests[0]);
         result.validate().unwrap();
     }
 }

@@ -915,7 +915,7 @@ async fn undeclared_exports_fail_startup_and_unsupported_modes_never_activate() 
                 .contains("missing required export")
         );
         app.shutdown().await.unwrap();
-        let mut too_many = attached_entry(
+        let mut complete = attached_entry(
             true,
             Implementation::JavaScript {
                 module: "host.mjs".into(),
@@ -923,7 +923,7 @@ async fn undeclared_exports_fail_startup_and_unsupported_modes_never_activate() 
             },
         );
         let Interface::Service { methods } =
-            &mut too_many.exports.get_mut("echo").unwrap().contract.interface
+            &mut complete.exports.get_mut("echo").unwrap().contract.interface
         else {
             unreachable!()
         };
@@ -947,31 +947,47 @@ async fn undeclared_exports_fail_startup_and_unsupported_modes_never_activate() 
             },
         );
         consumer_entry.imports.get_mut("echo").unwrap().contract =
-            too_many.exports["echo"].contract.clone();
+            complete.exports["echo"].contract.clone();
         let consumer = package(
-            "consumer.too-many-attachments",
+            "consumer.complete-attachments",
             consumer_entry,
             Some("export function activate() { return {}; }".into()),
         );
-        let provider = package(
-            "unsupported.too-many-attachments",
-            too_many,
-            Some("throw Error('must not activate invalid resource declaration');".into()),
-        );
+        let source = format!(r#"
+            let calls=0;
+            export const service={{async echo(input,observation,context){{
+                calls++;
+                for(let i=0;i<17;i++){{
+                    const bytes=await context.invoke({{operation:'read',slot:'slot'+i,start:0,end:3}});
+                    if(bytes.length!==3 || bytes[0]!==i || bytes[1]!==255 || bytes[2]!==0) throw Error('original slot bytes changed');
+                }}
+                return 'verified:'+input+':'+calls;
+            }}}};
+            export function activate(){{return {{echo:{{contract:{},service:['service']}}}};}}
+        "#, serde_json::to_string(&complete.exports["echo"].contract).unwrap());
+        let provider = package("complete.attachments", complete, Some(source));
         let issuer = Issuer::default();
-        assert!(
-            Application::start(
-                input(&provider, &consumer),
-                vec![provider, consumer],
-                NativeRegistry::default(),
-                issuer.clone(),
-                Arc::new(Grant(issuer)),
-                Some(maka_host_js::factory(Limits::default()))
-            )
-            .err()
-            .unwrap()
-            .contains("maximum 16 resource slots")
-        );
+        let app = Application::start(
+            input(&provider, &consumer), vec![provider, consumer], NativeRegistry::default(),
+            issuer.clone(), Arc::new(Grant(issuer.clone())), Some(maka_host_js::factory(Limits::default())),
+        ).unwrap();
+        app.ready().await.unwrap();
+        let client = app.client();
+        let binding = client.bind(client.activation(&id(2)).unwrap(), "echo".into()).await.unwrap().remove(0);
+        let mut retained = Vec::new();
+        let attachments: Attachments = (0..17).map(|i| {
+            let resource = Arc::new(Bytes { data: vec![i as u8,255,0], version:1 });
+            retained.push(Arc::downgrade(&resource));
+            (format!("slot{i}"), resource as Arc<dyn ReadResource>)
+        }).collect();
+        let scope = scope(&issuer, true);
+        let completion = client.start(binding, "echo".into(), json!("original"), scope.clone(), attachments.into()).await.unwrap().completion().await;
+        completion.cleanup.unwrap();
+        assert_eq!(completion.result.unwrap(), json!("verified:original:1"));
+        scope.finish().await.unwrap();
+        assert!(scope.resources.is_idle());
+        assert!(retained.iter().all(|resource| resource.upgrade().is_none()));
+        app.shutdown().await.unwrap();
         {
             let mode = MethodMode::Mutation;
             let provider = package(

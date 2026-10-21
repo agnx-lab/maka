@@ -61,7 +61,6 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
                 ON parent.session_id = owner.session_id AND parent.turn_id = owner.turn_id
                 AND parent.message_id = ancestors.parent_id
             WHERE (parent.source_sequence, parent.item_index) < (ancestors.source_sequence, ancestors.item_index) AND parent.role = 'tool_call'
-                AND ancestors.depth < 32
         ), activity AS MATERIALIZED (
             SELECT row.source_sequence, row.item_index, row.tool_name AS name,
                 row.tool_title AS title,
@@ -119,7 +118,7 @@ const METADATA_SQL: &str = "WITH RECURSIVE owner AS MATERIALIZED (
                     'isError', json(CASE error WHEN 1 THEN 'true' ELSE 'false' END),
                     'image', json(CASE image WHEN 1 THEN 'true' ELSE 'false' END))
                     ELSE (SELECT result_ref FROM pair) END)) AS value FROM owner
-        ) SELECT length(CAST(value AS BLOB)), CASE WHEN length(CAST(value AS BLOB)) <= ?5 THEN value END FROM metadata";
+        ) SELECT value FROM metadata";
 
 /// Read scalar metadata only. The unique call key and the bounded result index
 /// lookup avoid loading payloads or scanning an entire Turn for each fragment.
@@ -129,29 +128,16 @@ pub(super) async fn read(
     session: &str,
     position: RowPosition,
     through: i64,
-    budget: usize,
-) -> Result<Option<Tool>, StoreError> {
+) -> Result<Tool, StoreError> {
     let (source_sequence, item_index) = sql_position(position)?;
-    let (bytes, encoded): (i64, Option<String>) = sqlx::query_as(METADATA_SQL)
+    let encoded: String = sqlx::query_scalar(METADATA_SQL)
         .bind(session)
         .bind(source_sequence)
         .bind(item_index)
         .bind(through)
-        .bind(budget as i64)
         .fetch_one(tx)
         .await?;
-    if bytes < 0 {
-        return Err(StoreError::InvalidTransition(
-            "invalid history tool metadata size".into(),
-        ));
-    }
-    if bytes as usize > budget {
-        return Ok(None);
-    }
-    let mut tool: Tool =
-        serde_json::from_str(&encoded.ok_or_else(|| {
-            StoreError::InvalidTransition("missing history tool metadata".into())
-        })?)?;
+    let mut tool: Tool = serde_json::from_str(&encoded)?;
     if let Some(call) = &mut tool.call
         && call
             .title
@@ -168,7 +154,7 @@ pub(super) async fn read(
     {
         call.presentation = None;
     }
-    Ok(Some(tool))
+    Ok(tool)
 }
 
 #[cfg(test)]
@@ -241,10 +227,7 @@ mod tests {
             child["parentToolCallId"] = json!("parent");
             child["parentOperationId"] = json!("parent-operation");
             insert(&mut db, "a", "turn", 2, "child", child).await;
-            let metadata = read(&mut db, "a", position(2), 2, 65536)
-                .await
-                .unwrap()
-                .unwrap();
+            let metadata = read(&mut db, "a", position(2), 2).await.unwrap();
             assert_eq!(
                 metadata.call.unwrap().ancestor_tool_use_ids,
                 expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
@@ -256,21 +239,30 @@ mod tests {
     async fn trace_ancestors_retain_the_chain_through_internal_cells() {
         let mut db = database().await;
         insert(&mut db, "a", "turn", 1, "exec", call()).await;
-        for (sequence, id, parent) in [(2, "cell", "exec"), (3, "shell", "cell")] {
+        for sequence in 2..=34 {
+            let id = format!("cell-{sequence}");
+            let parent = if sequence == 2 {
+                "exec".into()
+            } else {
+                format!("cell-{}", sequence - 1)
+            };
             let mut child = call();
-            child["origin"] = json!("code_mode");
+            child["origin"] = json!(if sequence % 2 == 0 {
+                "code_mode"
+            } else {
+                "host_sdk"
+            });
             child["parentToolCallId"] = json!(parent);
             child["parentOperationId"] = json!(format!("operation-{parent}"));
-            insert(&mut db, "a", "turn", sequence, id, child).await;
+            insert(&mut db, "a", "turn", sequence, &id, child).await;
         }
-        let metadata = read(&mut db, "a", position(3), 3, 65536)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            metadata.call.unwrap().ancestor_tool_use_ids,
-            ["cell", "exec"]
-        );
+        let metadata = read(&mut db, "a", position(34), 34).await.unwrap();
+        let expected = (2..34)
+            .rev()
+            .map(|sequence| format!("cell-{sequence}"))
+            .chain(std::iter::once("exec".into()))
+            .collect::<Vec<_>>();
+        assert_eq!(metadata.call.unwrap().ancestor_tool_use_ids, expected);
     }
 
     #[tokio::test]
@@ -280,84 +272,42 @@ mod tests {
         insert(&mut db, "a", "turn", 2, "result", result()).await;
         insert(&mut db, "other", "turn", 1, "call", call()).await;
         insert(&mut db, "other", "turn", 2, "result", result()).await;
-        let before = read(&mut db, "a", position(1), 1, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let before = read(&mut db, "a", position(1), 1).await.unwrap();
         assert!(before.call.is_some() && before.result.is_none());
-        let paired = read(&mut db, "a", position(1), 2, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let paired = read(&mut db, "a", position(1), 2).await.unwrap();
         assert_eq!(paired.call.as_ref().unwrap().position, position(1));
         assert_eq!(paired.result.as_ref().unwrap().position, position(2));
-        assert_eq!(
-            paired,
-            read(&mut db, "a", position(2), 2, 65536)
-                .await
-                .unwrap()
-                .unwrap()
-        );
+        assert_eq!(paired, read(&mut db, "a", position(2), 2).await.unwrap());
         insert(&mut db, "a", "foreign-turn", 3, "foreign-result", result()).await;
         assert!(
-            read(&mut db, "a", position(3), 3, 65536)
+            read(&mut db, "a", position(3), 3)
                 .await
-                .unwrap()
                 .unwrap()
                 .call
                 .is_none()
         );
-        assert_eq!(
-            paired,
-            read(&mut db, "a", position(1), 3, 65536)
-                .await
-                .unwrap()
-                .unwrap()
-        );
+        assert_eq!(paired, read(&mut db, "a", position(1), 3).await.unwrap());
         insert(&mut db, "a", "turn", 4, "duplicate", result()).await;
-        assert_eq!(
-            paired,
-            read(&mut db, "a", position(1), 3, 65536)
-                .await
-                .unwrap()
-                .unwrap()
-        );
+        assert_eq!(paired, read(&mut db, "a", position(1), 3).await.unwrap());
         assert!(
-            read(&mut db, "a", position(1), 4, 65536)
+            read(&mut db, "a", position(1), 4)
                 .await
-                .unwrap()
                 .unwrap()
                 .result
                 .is_none()
         );
         for sequence in [2, 4] {
-            let orphan = read(&mut db, "a", position(sequence), 4, 65536)
-                .await
-                .unwrap()
-                .unwrap();
+            let orphan = read(&mut db, "a", position(sequence), 4).await.unwrap();
             assert!(orphan.call.is_none());
             assert_eq!(orphan.result.unwrap().position, position(sequence));
         }
-        let encoded = serde_json::to_vec(&paired).unwrap();
-        assert_eq!(
-            Some(paired),
-            read(&mut db, "a", position(1), 2, encoded.len())
-                .await
-                .unwrap()
-        );
-        assert!(
-            read(&mut db, "a", position(1), 2, encoded.len() - 1)
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert_eq!(paired, read(&mut db, "a", position(1), 2).await.unwrap());
         let plan = format!("EXPLAIN QUERY PLAN {METADATA_SQL}");
         let rows = sqlx::query(sqlx::AssertSqlSafe(plan.as_str()))
             .bind("a")
             .bind(1i64)
             .bind(0i64)
             .bind(4i64)
-            .bind(65536i64)
             .fetch_all(&mut db)
             .await
             .unwrap();
@@ -396,19 +346,13 @@ mod tests {
             source_sequence: 9,
             item_index: 257,
         };
-        let paired = read(&mut db, "a", call_position, 9, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let paired = read(&mut db, "a", call_position, 9).await.unwrap();
         assert_eq!(paired.call.as_ref().unwrap().position, call_position);
         assert!(paired.call.as_ref().unwrap().dispatched);
         assert_eq!(paired.result.as_ref().unwrap().position, result_position);
         assert_eq!(
             paired,
-            read(&mut db, "a", result_position, 9, 65536)
-                .await
-                .unwrap()
-                .unwrap()
+            read(&mut db, "a", result_position, 9).await.unwrap()
         );
     }
 
@@ -433,13 +377,11 @@ mod tests {
             let (call_sequence, result_sequence) = if case == 6 { (2, 1) } else { (1, 2) };
             insert(&mut db, "a", "turn", call_sequence, "call", call).await;
             insert(&mut db, "a", "turn", result_sequence, "result", result).await;
-            let call = read(&mut db, "a", position(call_sequence as u64), 2, 65536)
+            let call = read(&mut db, "a", position(call_sequence as u64), 2)
                 .await
-                .unwrap()
                 .unwrap();
-            let result = read(&mut db, "a", position(result_sequence as u64), 2, 65536)
+            let result = read(&mut db, "a", position(result_sequence as u64), 2)
                 .await
-                .unwrap()
                 .unwrap();
             assert!(call.result.is_none(), "case {case}");
             assert!(result.call.is_none(), "case {case}");
@@ -466,10 +408,7 @@ mod tests {
         let mut outcome = result();
         outcome["origin"] = json!("future");
         insert(&mut db, "a", "turn", 3, "result", outcome).await;
-        let metadata = read(&mut db, "a", position(3), 3, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let metadata = read(&mut db, "a", position(3), 3).await.unwrap();
         assert!(metadata.call.is_none());
         assert_eq!(metadata.result.unwrap().position, position(3));
     }
@@ -517,18 +456,12 @@ mod tests {
             json!({"type":"turn_state","status":"running"}),
         )
         .await;
-        let before = read(&mut db, "a", position(2), 2, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let before = read(&mut db, "a", position(2), 2).await.unwrap();
         assert!(before.call.as_ref().unwrap().pending);
         assert!(!before.call.as_ref().unwrap().dispatched);
         assert!(before.call.as_ref().unwrap().presentation.is_none());
         assert!(before.call.unwrap().title.is_none());
-        let open = read(&mut db, "a", position(2), 3, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        let open = read(&mut db, "a", position(2), 3).await.unwrap();
         assert!(open.call.as_ref().unwrap().pending && open.result.is_none());
         assert!(open.call.as_ref().unwrap().dispatched);
         assert_eq!(
@@ -545,47 +478,14 @@ mod tests {
                 .resolve("zh-CN"),
             "查看文件"
         );
-        assert_eq!(
-            Some(open.clone()),
-            read(
-                &mut db,
-                "a",
-                position(2),
-                3,
-                serde_json::to_vec(&open).unwrap().len()
-            )
-            .await
-            .unwrap()
-        );
-        assert!(
-            read(
-                &mut db,
-                "a",
-                position(2),
-                3,
-                serde_json::to_vec(&open).unwrap().len() - 1
-            )
-            .await
-            .unwrap()
-            .is_none()
-        );
-        let closed = read(&mut db, "a", position(2), 6, 65536)
-            .await
-            .unwrap()
-            .unwrap();
+        assert_eq!(open, read(&mut db, "a", position(2), 3).await.unwrap());
+        let closed = read(&mut db, "a", position(2), 6).await.unwrap();
         assert!(!closed.call.as_ref().unwrap().pending);
-        assert_eq!(
-            closed,
-            read(&mut db, "a", position(4), 6, 65536)
-                .await
-                .unwrap()
-                .unwrap()
-        );
+        assert_eq!(closed, read(&mut db, "a", position(4), 6).await.unwrap());
         insert(&mut db, "a", "turn", 7, "duplicate", activity).await;
         assert!(
-            !read(&mut db, "a", position(2), 7, 65536)
+            !read(&mut db, "a", position(2), 7)
                 .await
-                .unwrap()
                 .unwrap()
                 .call
                 .unwrap()
@@ -593,9 +493,8 @@ mod tests {
         );
 
         assert!(
-            read(&mut db, "a", position(2), 7, 65536)
+            read(&mut db, "a", position(2), 7)
                 .await
-                .unwrap()
                 .unwrap()
                 .call
                 .unwrap()
@@ -603,29 +502,21 @@ mod tests {
                 .is_none()
         );
         assert!(
-            read(&mut db, "a", position(2), 7, 65536)
+            read(&mut db, "a", position(2), 7)
                 .await
-                .unwrap()
                 .unwrap()
                 .call
                 .unwrap()
                 .title
                 .is_none()
         );
-        assert_eq!(
-            closed,
-            read(&mut db, "a", position(2), 6, 65536)
-                .await
-                .unwrap()
-                .unwrap()
-        );
+        assert_eq!(closed, read(&mut db, "a", position(2), 6).await.unwrap());
         let query = format!("EXPLAIN QUERY PLAN {METADATA_SQL}");
         let plan = sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
             .bind("a")
             .bind(2i64)
             .bind(0i64)
             .bind(7i64)
-            .bind(65536i64)
             .fetch_all(&mut db)
             .await
             .unwrap()
@@ -705,13 +596,12 @@ mod tests {
                 activity,
             )
             .await;
-            let tool = read(&mut db, "a", position(3), 4, 65536)
-                .await
-                .unwrap()
-                .unwrap();
+            let tool = read(&mut db, "a", position(3), 4).await.unwrap();
             let call = tool.call.unwrap();
             assert!(!call.pending, "case {case}");
-            if case != 0 {
+            if case == 6 {
+                assert_eq!(call.title.as_ref().unwrap().fallback, "x".repeat(257));
+            } else if case != 0 {
                 assert!(call.title.is_none(), "case {case}");
             }
             assert!(tool.result.is_none());

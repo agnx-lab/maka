@@ -353,9 +353,6 @@ impl Coordinator {
                 Language::ZhTw => "\n任務：\n",
             });
             input.push_str(&item.work.instruction);
-            if input.len() > 64 * 1024 {
-                return Err(Error::Invalid("rendered work exceeds 64 KiB".into()));
-            }
             let (operator_id, child) = self.provision(work).await?;
             let request = Submit {
                 orchestration_mode: None,
@@ -598,9 +595,6 @@ fn render(text: &mut String, record: &Record, language: Language) -> Result<(), 
             Language::ZhCn => "\n[输出预览已截断；检查源执行以获取完整内容。]",
             Language::ZhTw => "\n[輸出預覽已截斷；檢查來源執行以取得完整內容。]",
         });
-    }
-    if text.len() > 64 * 1024 {
-        return Err(Error::Invalid("rendered inputs exceed 64 KiB".into()));
     }
     Ok(())
 }

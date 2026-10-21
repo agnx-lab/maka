@@ -18,7 +18,7 @@
  */
 
 use crate::{Error, invalid};
-use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
+use jiff::{Timestamp, civil::Date, tz::TimeZone};
 
 /// The product's five numeric cron fields: lists, ranges, steps, Sunday 0 or 7.
 /// Bits avoid allocating sets while evaluating recurring plans.
@@ -81,9 +81,6 @@ impl Field {
 }
 impl Cron {
     pub fn parse(expression: &str) -> Result<Self, Error> {
-        if expression.len() > 80 {
-            return Err(invalid("cron expression exceeds 80 bytes"));
-        }
         let fields: Vec<_> = expression.split_whitespace().collect();
         let [minute, hour, day, month, weekday] = fields.as_slice() else {
             return Err(invalid("cron requires five fields"));
@@ -120,45 +117,50 @@ impl Cron {
             day && weekday
         }
     }
-    pub fn next(
-        &self,
-        after: i64,
-        not_before: i64,
-        through: i64,
-        zone: &TimeZone,
-    ) -> Result<Option<i64>, Error> {
-        let lower = (after + 1).max(not_before);
-        if lower > through {
+    pub fn next(&self, after: i64, not_before: i64, zone: &TimeZone) -> Result<Option<i64>, Error> {
+        let Some(lower) = after.checked_add(1).map(|next| next.max(not_before)) else {
+            return Ok(None);
+        };
+        if lower > Timestamp::MAX.as_millisecond() {
             return Ok(None);
         }
-        let mut date = Timestamp::from_millisecond(lower)?
+        let first = Timestamp::from_millisecond(lower)?
             .to_zoned(zone.clone())
             .date();
-        let last = Timestamp::from_millisecond(through)?
-            .to_zoned(zone.clone())
-            .date();
-        while date <= last {
-            if self.matches_date(date) {
-                let mut next = None;
-                for hour in self.hour.values() {
-                    for minute in self.minute.values() {
-                        let local = date.at(hour, minute, 0, 0);
-                        let ambiguous = zone.to_ambiguous_zoned(local);
-                        // Gaps have no matching wall time. Folds have two real
-                        // occurrences: select by timestamp, not wall-clock order.
-                        for resolved in [ambiguous.clone().earlier()?, ambiguous.later()?] {
-                            let at = resolved.timestamp().as_millisecond();
-                            if resolved.datetime() == local && at >= lower && at <= through {
-                                next = Some(next.map_or(at, |previous: i64| previous.min(at)));
+        // Iterate the finite representable Gregorian calendar, jumping over
+        // unselected months. Sparse dates (including century leap years) do not
+        // impose an elapsed-time horizon or require scanning individual minutes.
+        for year in first.year()..=Date::MAX.year() {
+            for month in self.month.values() {
+                if year == first.year() && month < first.month() {
+                    continue;
+                }
+                let month_start = Date::new(year, month, 1)?;
+                for day in 1..=month_start.days_in_month() {
+                    let date = Date::new(year, month, day)?;
+                    if date < first || !self.matches_date(date) {
+                        continue;
+                    }
+                    let mut next = None;
+                    for hour in self.hour.values() {
+                        for minute in self.minute.values() {
+                            let local = date.at(hour, minute, 0, 0);
+                            let ambiguous = zone.to_ambiguous_zoned(local);
+                            // Gaps have no matching wall time; folds have two
+                            // real occurrences, selected in timestamp order.
+                            for resolved in [ambiguous.clone().earlier()?, ambiguous.later()?] {
+                                let at = resolved.timestamp().as_millisecond();
+                                if resolved.datetime() == local && at >= lower {
+                                    next = Some(next.map_or(at, |previous: i64| previous.min(at)));
+                                }
                             }
                         }
                     }
-                }
-                if next.is_some() {
-                    return Ok(next);
+                    if next.is_some() {
+                        return Ok(next);
+                    }
                 }
             }
-            date = date.checked_add(1.day())?;
         }
         Ok(None)
     }

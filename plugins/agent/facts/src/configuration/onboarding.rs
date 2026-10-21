@@ -35,7 +35,6 @@ pub enum OnboardingRejection {
     CredentialNotConfigured,
     BaseUrlNotConfigured,
     SlugTaken,
-    CatalogFull,
     ModelUnavailable,
     Superseded,
 }

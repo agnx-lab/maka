@@ -601,14 +601,12 @@ export function networkSettings<N extends Node>(
                       !state.fields[name].ready ||
                       state.fields[name].command ||
                       !state.fields[name].observation ||
-                      state.fields[name].observation!.snapshot.marked ||
-                      state.fields[name].observation!.snapshot.text.bytes > 65536,
+                      state.fields[name].observation!.snapshot.marked,
                   ) ||
                   (state.credential === 'replace' &&
                     (!secret ||
                       secret.snapshot.marked ||
                       !secret.snapshot.text.bytes ||
-                      secret.snapshot.text.bytes > 10240 ||
                       state.fields.secret.command))
                 )
                   state.notice = 'network-invalid';

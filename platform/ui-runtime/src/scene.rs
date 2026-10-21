@@ -54,7 +54,6 @@ mod tests {
                 "/wide/children/list",
                 json!({"basis":1,"basis_fraction":{"numerator":1,"denominator":2}}),
             ),
-            ("/wide/children/list", json!({"grow":1025})),
             ("/wide/children/list", json!({"wrap":true})),
         ] {
             let mut value = base.clone();
@@ -83,13 +82,27 @@ mod tests {
         for (field, replacement) in [
             ("scroll", json!("none")),
             ("wheel", json!({"up":"","down":"next"})),
-            ("wheel", json!({"up":"previous","down":"x".repeat(129)})),
         ] {
             let mut invalid = value.clone();
             invalid[field] = replacement;
             let node: terminal::Node = serde_json::from_value(invalid).unwrap();
             assert!(node.validate_root().is_err());
         }
+        let mut complete = value.clone();
+        complete["wheel"]["down"] = json!("x".repeat(129));
+        complete["padding"] = json!(u16::MAX);
+        complete["gap"] = json!(u16::MAX);
+        let node: terminal::Node = serde_json::from_value(complete.clone()).unwrap();
+        node.validate_root().unwrap();
+        assert_eq!(
+            node.metadata(Default::default()).unwrap().inputs[&"x".repeat(129)],
+            json!(true)
+        );
+        complete["padding"] = json!(u32::from(u16::MAX) + 1);
+        assert!(
+            serde_json::from_value::<terminal::Node>(complete).is_err(),
+            "native geometry remains representable as u16"
+        );
     }
 
     #[test]
@@ -125,8 +138,9 @@ mod tests {
     }
 
     #[test]
-    fn copy_button_text_has_a_byte_budget_and_no_conflicting_native_default() {
-        for text in ["".to_owned(), "界".repeat(24 * 1024)] {
+    fn copy_button_keeps_complete_text_and_no_conflicting_native_default() {
+        {
+            let text = String::new();
             let value = json!({"kind":"button","key":"copy","label":"Copy","copy_text":text});
             assert!(
                 serde_json::from_value::<terminal::Node>(value.clone())
@@ -136,7 +150,7 @@ mod tests {
             );
         }
         let value =
-            json!({"kind":"button","key":"copy","label":"Copy","copy_text":"x".repeat(64 * 1024)});
+            json!({"kind":"button","key":"copy","label":"Copy","copy_text":"界".repeat(24 * 1024)});
         serde_json::from_value::<terminal::Node>(value.clone())
             .unwrap()
             .validate_root()

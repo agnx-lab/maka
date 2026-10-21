@@ -55,24 +55,15 @@ type DiffRow = {
   new: number | null;
   continuation: boolean;
 };
-const MAX_PATCH_CODE_UNITS = 2 * 1024 * 1024;
-const MAX_DIFF_ROWS = 8192;
 
-// Display budgets only: Host still returns the whole patch. String.length is
-// UTF-16 code units, not bytes; reject before the shared parser allocates rows.
-function diffRows(patch: string): DiffRow[] | null {
-  if (patch.length > MAX_PATCH_CODE_UNITS) return null;
-  let sourceRows = patch.endsWith('\n') ? 0 : 1;
-  for (let index = 0; index < patch.length; index += 1) {
-    if (patch.charCodeAt(index) === 10 && ++sourceRows > MAX_DIFF_ROWS) return null;
-  }
+// Parse the complete original patch; rows split long lines for presentation.
+function diffRows(patch: string): DiffRow[] {
   const rows: DiffRow[] = [];
   for (const [index, row] of parsePatch(patch).entries()) {
     let text = '';
     let length = 0;
     let segment = 0;
     const append = () => {
-      if (rows.length === MAX_DIFF_ROWS) return false;
       rows.push({
         key: `${index}:${segment}`,
         kind: row.kind,
@@ -84,14 +75,13 @@ function diffRows(patch: string): DiffRow[] | null {
       segment += 1;
       text = '';
       length = 0;
-      return true;
     };
     for (const point of row.text) {
-      if (length === 256 && !append()) return null;
+      if (length === 256) append();
       text += point;
       length += 1;
     }
-    if (!append()) return null;
+    append();
   }
   return rows;
 }
@@ -99,7 +89,6 @@ function diffRows(patch: string): DiffRow[] | null {
 type DiffState =
   | { kind: 'loading' }
   | { kind: 'unavailable' }
-  | { kind: 'too_large' }
   | { kind: 'error'; message: string }
   | { kind: 'text'; rows: DiffRow[] }
   | Exclude<GitDiff, { kind: 'text' }>;
@@ -138,16 +127,12 @@ export function createCurrentDiff(target: CurrentDiffTarget): CurrentDiffModel {
             (result.kind !== 'text' ||
               (previous.kind === 'text' && previous.patch === result.patch)));
       if (!same) model.position = { x: 0, y: 0 };
-      const rows = result?.kind === 'text' ? diffRows(result.patch) : null;
-      // Do not keep a rejected whole patch resident in an inactive resource tab.
-      previous = result?.kind === 'text' && rows === null ? undefined : result;
+      previous = result;
       state.set(
         result === null
           ? { kind: 'unavailable' }
           : result.kind === 'text'
-            ? rows === null
-              ? { kind: 'too_large' }
-              : { kind: 'text', rows }
+            ? { kind: 'text', rows: diffRows(result.patch) }
             : result,
       );
     } catch (reason) {
@@ -177,8 +162,6 @@ export function CurrentDiff(props: { model: CurrentDiffModel }) {
         return 'Reading current diff…';
       case 'unavailable':
         return 'Not a Git workspace.';
-      case 'too_large':
-        return 'This diff is too large to display in the terminal.';
       case 'binary':
         return 'Binary file. A text diff is unavailable.';
       case 'unchanged':

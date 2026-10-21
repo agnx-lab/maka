@@ -72,9 +72,8 @@ impl EventLog {
                  EXISTS(SELECT 1 FROM shell_runs r WHERE r.session_id = s.id AND
                     json_extract(r.record_json, '$.state.outcome.kind') = 'orphaned') AS orphaned
                  FROM session_control s WHERE COALESCE(json_extract(s.configuration, '$.workspace.path'), json_extract(s.configuration, '$.workspace.hostCwd')) = ?
-                 ORDER BY s.id LIMIT 257"
+                 ORDER BY s.id"
             ).bind(cwd).fetch_all(&mut *tx).await?;
-            if rows.len() > 256 { return Err(StoreError::PrefixTooLarge); }
             let mut result = Vec::with_capacity(rows.len());
             for row in rows {
                 result.push(WorkspaceSession {

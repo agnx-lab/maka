@@ -29,18 +29,11 @@ pub(super) fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())
 }
 
-pub(super) fn encode(value: &impl Serialize, limit: usize) -> Result<String, StoreError> {
-    let json = maka_agent_facts::capability::json::stringify(value)?;
-    if json.len() > limit {
-        return Err(invalid("interaction record exceeds storage limit"));
-    }
-    Ok(json)
+pub(super) fn encode(value: &impl Serialize) -> Result<String, StoreError> {
+    Ok(maka_agent_facts::capability::json::stringify(value)?)
 }
 
-pub(super) fn decode<T: DeserializeOwned>(json: &str, limit: usize) -> Result<T, StoreError> {
-    if json.len() > limit {
-        return Err(invalid("stored interaction exceeds storage limit"));
-    }
+pub(super) fn decode<T: DeserializeOwned>(json: &str) -> Result<T, StoreError> {
     Ok(serde_json::from_str(json)?)
 }
 
@@ -107,7 +100,7 @@ pub(super) async fn read(
     .fetch_optional(connection)
     .await?;
     let Some(row) = row else { return Ok(None) };
-    let mut record: InteractionRecord = decode(row.try_get(2)?, 20 * 1024)?;
+    let mut record: InteractionRecord = decode(row.try_get(2)?)?;
     if record.outcome.is_some()
         || record.request_id != request_id
         || record.session_id != row.try_get::<&str, _>(0)?
@@ -115,10 +108,7 @@ pub(super) async fn read(
     {
         return Err(invalid("stored interaction identity changed"));
     }
-    record.outcome = row
-        .try_get::<Option<&str>, _>(3)?
-        .map(|json| decode(json, 8 * 1024))
-        .transpose()?;
+    record.outcome = row.try_get::<Option<&str>, _>(3)?.map(decode).transpose()?;
     record.validate().map_err(invalid)?;
     Ok(Some(record))
 }

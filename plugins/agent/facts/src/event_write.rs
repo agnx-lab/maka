@@ -91,11 +91,8 @@ impl EventWrite {
                 text,
                 model_text,
             } if operation_id.is_empty()
-                || operation_id.len() > 4096
                 || text.trim().is_empty()
-                || text.len() > 128 * 1024
-                || model_text.trim().is_empty()
-                || model_text.len() > 128 * 1024 =>
+                || model_text.trim().is_empty() =>
             {
                 return Err(CommitError::Rejected(
                     "invalid Code Mode notification".into(),
@@ -113,11 +110,6 @@ impl EventWrite {
             Fact::ExecutorObserved { output } => output
                 .validate()
                 .map_err(|reason| CommitError::Rejected(reason.into()))?,
-            Fact::ExecutorCompleted { text } if text.len() > 1024 * 1024 => {
-                return Err(CommitError::Rejected(
-                    "executor result exceeds 1 MiB".into(),
-                ));
-            }
             _ => {}
         }
         let operation = match &event.fact {
@@ -137,17 +129,6 @@ impl EventWrite {
                 .reference
                 .validate()
                 .map_err(|error| CommitError::Rejected(error.to_string()))?;
-            if serde_json::to_vec(operation)
-                .map_err(|error| CommitError::Rejected(error.to_string()))?
-                .len()
-                // Host business JSON may itself reach 1 MiB; its original
-                // bounded Ref/receipt adds independent envelope bytes.
-                > 2 * 1024 * 1024
-            {
-                return Err(CommitError::Rejected(
-                    "service operation observation exceeds 2 MiB".into(),
-                ));
-            }
         }
         if let Fact::InvocationOpened { input, .. } = &event.fact {
             input

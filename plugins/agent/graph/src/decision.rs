@@ -28,17 +28,17 @@ use sha2::{Digest, Sha256};
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Decision {
     AddWork {
-        #[schemars(length(min = 1, max = 32))]
+        #[schemars(length(min = 1))]
         work: Vec<NewWork>,
     },
     Stop {
-        #[schemars(length(min = 1, max = 20))]
+        #[schemars(length(min = 1))]
         targets: Vec<Stop>,
     },
     Finish {
-        #[schemars(length(min = 1, max = 64), inner(length(min = 1, max = 256)))]
+        #[schemars(length(min = 1), inner(length(min = 1)))]
         result_ids: Vec<String>,
-        #[schemars(length(min = 1, max = 4000))]
+        #[schemars(length(min = 1))]
         reason: String,
     },
 }
@@ -46,15 +46,13 @@ pub enum Decision {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct NewWork {
     pub target: Target,
-    #[schemars(length(min = 1, max = 60000))]
+    #[schemars(length(min = 1))]
     pub instruction: String,
     #[serde(default)]
-    #[schemars(length(max = 64), inner(length(min = 1, max = 256)))]
+    #[schemars(inner(length(min = 1)))]
     pub input_ids: Vec<String>,
     #[serde(default)]
-    #[schemars(length(max = 64))]
     pub selected_result_inputs: Vec<HistoricalInput>,
-    #[schemars(length(max = 256))]
     pub replaces: Option<String>,
 }
 impl Decision {

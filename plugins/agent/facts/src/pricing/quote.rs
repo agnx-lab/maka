@@ -34,7 +34,6 @@ pub struct Quote {
 impl Quote {
     pub fn validate(&self, model: &str) -> Result<(), &'static str> {
         if self.provider_id.is_empty()
-            || self.provider_id.len() > 1024
             || self.provider_id.chars().any(char::is_control)
             || self.revision > 9_007_199_254_740_991
         {

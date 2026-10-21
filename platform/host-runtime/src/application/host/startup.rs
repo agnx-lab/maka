@@ -38,8 +38,6 @@ use std::{
 use tokio::process::{Child, ChildStdin, Command};
 use uuid::Uuid;
 
-pub const REQUEST_LIMIT: usize = 512 * 1024;
-
 /// Whether a State Root ID has its canonical lowercase hexadecimal representation.
 pub fn valid_root_id(root_id: &str) -> bool {
     root_id.len() == 64
@@ -66,13 +64,11 @@ impl Request {
                 .as_ref()
                 .is_some_and(|domain| !valid_root_id(domain))
             || self.endpoints.is_empty()
-            || self.endpoints.len() > 128
-            || self.native.len() > 128
         {
             return Err("invalid local Host startup selection".into());
         }
         for (name, endpoint) in &self.endpoints {
-            if name.is_empty() || name.len() > 256 {
+            if name.is_empty() {
                 return Err("invalid Host endpoint name".into());
             }
             endpoint.validate()?;
@@ -175,7 +171,7 @@ async fn prepare_target(
 ) -> Result<Prepared> {
     if let Some(request) = target.request() {
         request.validate()?;
-        wire::encode_bounded(request, REQUEST_LIMIT)?;
+        wire::encode_bounded(request, usize::MAX)?;
     } else if !target.root().is_absolute() {
         return Err("local Host startup root must be absolute".into());
     }
@@ -272,7 +268,7 @@ async fn launch(executable: &Path, target: Target<'_>) -> Result<(Anchor, Ready)
     let mut input = child.stdin.take().expect("piped startup input");
     let output = child.stdout.take().expect("piped startup output");
     if let Some(request) = target.request() {
-        wire::write_bounded(&mut input, request, REQUEST_LIMIT).await?;
+        wire::write(&mut input, request).await?;
     }
     let ready: Ready = wire::Reader::new(output).read_bounded(4096).await?;
     if !valid_root_id(&ready.root_id)

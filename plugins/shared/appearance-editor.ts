@@ -235,11 +235,9 @@ export function appearanceEvent(
       file.message =
         observed.state.error === 'conflict'
           ? 'theme-file-changed'
-          : observed.state.error === 'too_large'
-            ? 'theme-file-large'
-            : writing
-              ? 'theme-file-save'
-              : 'theme-file-unreadable';
+          : writing
+            ? 'theme-file-save'
+            : 'theme-file-unreadable';
       return true;
     }
     if (observed.state.kind !== 'ready') return true;

@@ -126,9 +126,6 @@ impl EventLog {
                         queue_revision,
                     };
                     let encoded = serde_json::to_string(&receipt)?;
-                    if encoded.len() > 65536 {
-                        return Err(StoreError::PrefixTooLarge);
-                    }
                     sqlx::query("INSERT INTO message_submit_receipts VALUES (?, ?, ?, ?)")
                         .bind(&epoch)
                         .bind(session)
@@ -150,8 +147,8 @@ async fn read(
     session: &str,
     message: &str,
 ) -> Result<Option<MessageSubmitReceipt>, StoreError> {
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(receipt_json AS BLOB)) <= 65536 THEN receipt_json END
+    let json: Option<String> = sqlx::query_scalar(
+        "SELECT receipt_json
          FROM message_submit_receipts WHERE host_epoch = ? AND session_id = ? AND message_id = ?",
     )
     .bind(epoch)
@@ -159,10 +156,6 @@ async fn read(
     .bind(message)
     .fetch_optional(connection)
     .await?;
-    json.map(|json| {
-        Ok(serde_json::from_str(
-            &json.ok_or(StoreError::PrefixTooLarge)?,
-        )?)
-    })
-    .transpose()
+    json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
+        .transpose()
 }

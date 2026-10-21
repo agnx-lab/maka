@@ -79,9 +79,8 @@ function valid(field: Field, value: Value | null): value is Value {
     case 'string':
       return (
         typeof value === 'string' &&
-        bytes(value) <= 2048 &&
         [...value].length >= (field.minLength ?? 0) &&
-        [...value].length <= (field.maxLength ?? 2048)
+        [...value].length <= (field.maxLength ?? Infinity)
       );
     case 'number':
     case 'integer':
@@ -111,21 +110,6 @@ function finish(state: State, props: QuestionEditorProps, events: Emission[]) {
   const values = state.submission;
   state.submission = null;
   if (!available(state, props)) return;
-  // Preserve the canonical answer/outcome byte ceiling, including escaped text.
-  if (
-    bytes(
-      JSON.stringify({
-        kind: 'form_answer',
-        action: 'accept',
-        values,
-        committedAt: Number.MAX_SAFE_INTEGER,
-      }),
-    ) > 8192
-  ) {
-    state.notice = 'formInvalid';
-    state.invalidField = null;
-    return;
-  }
   events.push({
     name: 'submit',
     value: { requestId: state.requestId, answer: { kind: 'form', action: 'accept', values } },
@@ -140,7 +124,7 @@ function submit(state: State, props: QuestionEditorProps, actions: Action[], eve
     if (!draft.included) continue;
     if (textual(field)) {
       const captured = draft.observation;
-      if (!captured || captured.snapshot.marked || captured.snapshot.text.bytes > 8192) {
+      if (!captured || captured.snapshot.marked) {
         state.notice = 'formInvalid';
         state.invalidField = index;
         return;
@@ -160,8 +144,7 @@ function submit(state: State, props: QuestionEditorProps, actions: Action[], eve
   readNext(state, actions);
   finish(state, props, events);
 }
-// A form may contain 32 fields; native component output admits at most 16 actions.
-// Reading one immutable editor snapshot at a time also keeps response buffers bounded.
+// Read one immutable editor snapshot at a time.
 function readNext(state: State, actions: Action[]) {
   const read = state.reads.shift();
   if (!read) return;

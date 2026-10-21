@@ -20,30 +20,23 @@
 use std::collections::{BTreeMap, HashSet};
 
 /// Explicit input-provider selections, not tool permissions or prepared receipts.
-/// The provider interprets its own selectors; Host only bounds the envelope.
+/// The provider interprets its own selectors; Host validates their identity.
 pub type Selections = BTreeMap<String, Vec<String>>;
 
 pub fn validate_selections(selections: &Selections) -> Result<(), &'static str> {
-    let mut count = 0usize;
     for (provider, values) in selections {
-        if provider.is_empty()
-            || provider.len() > 128
-            || provider.chars().any(char::is_control)
-            || values.is_empty()
-        {
+        if provider.is_empty() || provider.chars().any(char::is_control) || values.is_empty() {
             return Err("invalid input-provider selection");
         }
         let mut seen = HashSet::new();
         if values.iter().any(|value| !seen.insert(value)) {
             return Err("duplicate input-provider selector");
         }
-        count = count.saturating_add(values.len());
-        if count > 50
-            || values.iter().any(|value| {
-                value.is_empty() || value.len() > 512 || value.chars().any(char::is_control)
-            })
+        if values
+            .iter()
+            .any(|value| value.is_empty() || value.chars().any(char::is_control))
         {
-            return Err("input-provider selectors exceed their limits");
+            return Err("invalid input-provider selector");
         }
     }
     Ok(())

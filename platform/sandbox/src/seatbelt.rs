@@ -72,9 +72,6 @@ pub(crate) fn prepare(
                 "\n(allow {operation} (require-all {}))",
                 filters.join(" ")
             ));
-            if profile.len() > 128 * 1024 {
-                return Err(Error::TooComplex);
-            }
         }
     }
     // A rename of an allowed ancestor could move protected descendants outside
@@ -116,9 +113,6 @@ pub(crate) fn prepare(
         if let Some(parents) = parents {
             args.push(format!("-DGP{index}={parents}").into());
             profile.push_str(&format!("\n(deny file-write-unlink (require-all (vnode-type DIRECTORY) (regex (param \"GP{index}\"))))"));
-        }
-        if profile.len() + args.iter().map(|arg| arg.len()).sum::<usize>() > 128 * 1024 {
-            return Err(Error::TooComplex);
         }
     }
     args.splice(0..0, [OsString::from("-p"), profile.into()]);

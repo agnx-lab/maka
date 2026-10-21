@@ -70,7 +70,7 @@ Helpers:
 - setTimeout(callback, delayMs=0), clearTimeout(id): timers alone do not keep a finished cell alive.
 - ALL_TOOLS: frozen name/description metadata for all authorized nested tools, including deferred tools omitted from this description. Find a tool here and call it in the same cell.
 Use wait only after exec returns a running cell_id. Tool permissions and schemas stay frozen for the cell. Calls to other advertised tools must be made directly. Do not invoke exec in parallel with other model tools.
-Host limits: 64 KiB source, 1 MiB cell result/output/store, 64 MiB V8 heap, 30 seconds cumulative synchronous execution (async waits excluded), 32 tool calls per cell, 8 simultaneous calls, 4 uncollected cells per Run, 128 pending timers."#.into(),
+Host execution: 64 MiB V8 heap, 30 seconds cumulative synchronous execution (async waits excluded), 4 uncollected cells per Run and 128 pending timers. Tool work remains owned until cleanup; use wait to collect running cells."#.into(),
         input_schema: schemars::schema_for!(CodeInput).into(),
     }
 }
@@ -78,7 +78,7 @@ Host limits: 64 KiB source, 1 MiB cell result/output/store, 64 MiB V8 heap, 30 s
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CodeInput {
-    /// Async JavaScript module, at most 64 KiB UTF-8. Emit content using helpers.
+    /// Async JavaScript module. Emit content using helpers.
     code: String,
     /// Observation wait in milliseconds (0..60000), not an execution timeout.
     #[serde(default = "default_yield")]
@@ -167,9 +167,6 @@ pub(super) fn source(input: &Value) -> Result<CodeInput, ToolRejection> {
         .map_err(|error| invalid(error.to_string()))
         .and_then(|input| {
             observation_limits(input.yield_time_ms, input.max_output_tokens)?;
-            if input.code.len() > 64 * 1024 {
-                return Err(invalid("code exceeds 64 KiB"));
-            }
             Ok(input)
         })
 }

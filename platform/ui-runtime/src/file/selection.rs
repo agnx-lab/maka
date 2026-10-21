@@ -51,7 +51,7 @@ pub struct FileSnapshotWriter {
 }
 impl FileSnapshotWriter {
     pub fn new(name: &str, budget: NativeBudget) -> Result<Self, FileError> {
-        if name.is_empty() || name.len() > 512 || name.chars().any(char::is_control) {
+        if name.is_empty() || name.chars().any(char::is_control) {
             return Err(FileError::InvalidFile);
         }
         Ok(Self {
@@ -79,9 +79,6 @@ impl FileSnapshotWriter {
     fn write_bytes(&mut self, mut bytes: &[u8]) -> Result<(), FileError> {
         if let Some(error) = self.error {
             return Err(error);
-        }
-        if bytes.len() > MAX_FILE_BYTES - self.bytes {
-            return Err(FileError::LimitExceeded);
         }
         while !bytes.is_empty() {
             if self
@@ -171,9 +168,6 @@ pub fn read_selected(path: &Path, budget: &NativeBudget) -> Result<Arc<FileSnaps
     if !metadata.is_file() {
         return Err(FileError::InvalidFile);
     }
-    if metadata.len() > MAX_FILE_BYTES as u64 {
-        return Err(FileError::LimitExceeded);
-    }
     let mut chunks = Vec::new();
     let mut total = 0;
     let mut hash = Sha256::new();
@@ -182,9 +176,6 @@ pub fn read_selected(path: &Path, budget: &NativeBudget) -> Result<Arc<FileSnaps
         let mut first = [0];
         if file.read(&mut first).map_err(|_| FileError::ReadFailed)? == 0 {
             break;
-        }
-        if total == MAX_FILE_BYTES {
-            return Err(FileError::LimitExceeded);
         }
         let permit = budget.reserve(Kind::Encoded, CHUNK)?;
         let mut bytes = Vec::with_capacity(CHUNK);
@@ -214,7 +205,7 @@ pub fn read_selected(path: &Path, budget: &NativeBudget) -> Result<Arc<FileSnaps
     Ok(Arc::new(FileSnapshot {
         chunks,
         descriptor: FileDescriptor {
-            name: name.to_string_lossy().chars().take(512).collect(),
+            name: name.to_string_lossy().into_owned(),
             bytes: total,
             digest: format!("sha256:{}", hex::encode(hash.finalize())),
         },
@@ -395,16 +386,16 @@ mod tests {
             Err(FileError::InvalidFile)
         ));
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.set_len(MAX_FILE_BYTES as u64 + 1).unwrap();
+        file.set_len(50 * 1024 * 1024 + 1).unwrap();
         assert!(matches!(
             read_selected(&path, &budget),
-            Err(FileError::LimitExceeded)
+            Err(FileError::BudgetExhausted)
         ));
-        file.set_len(MAX_FILE_BYTES as u64).unwrap();
+        file.set_len(50 * 1024 * 1024).unwrap();
         let full_budget = NativeBudget::default();
         let full = read_selected(&path, &full_budget).unwrap();
         assert_eq!(full.bytes(), 50 * 1024 * 1024);
-        assert_eq!(full_budget.usage(), (MAX_FILE_BYTES, 0, 0));
+        assert_eq!(full_budget.usage(), (50 * 1024 * 1024, 0, 0));
         drop(full);
         assert_eq!(full_budget.usage(), (0, 0, 0));
         file.set_len(0).unwrap();

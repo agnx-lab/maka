@@ -34,11 +34,9 @@ pub struct RowsProps {
     /// Select this row on keyboard entry. None retains the current selection,
     /// or selects the first row when there is no current selection.
     pub entry: Option<String>,
-    #[schemars(length(max = 64))]
     pub rows: Vec<Row>,
-    #[schemars(length(max = 32))]
     pub shortcuts: Vec<Shortcut>,
-    #[schemars(range(min = 1, max = 64))]
+    #[schemars(range(min = 1))]
     pub max_rows: u16,
     /// Optional smaller row cap below the nearest declared layout viewport's
     /// height, in cells; defaults to the surface when no viewport is declared.
@@ -57,7 +55,7 @@ pub struct RowsProps {
 pub struct CompactRows {
     #[schemars(range(min = 1))]
     pub height: u16,
-    #[schemars(range(min = 1, max = 64))]
+    #[schemars(range(min = 1))]
     pub max_rows: u16,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -71,19 +69,16 @@ pub struct RowScrollbar {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Row {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub key: String,
-    #[schemars(length(max = 1024))]
     pub text: String,
-    #[schemars(length(max = 8))]
     pub actions: Vec<RowAction>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RowAction {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub key: String,
-    #[schemars(length(max = 64))]
     pub label: String,
     pub enabled: bool,
 }

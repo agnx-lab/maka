@@ -134,9 +134,6 @@ impl EventLog {
             super::validate_id(turn)?;
         }
         let configuration = serde_json::to_string(configuration)?;
-        if configuration.len() > super::MAX_CONFIGURATION_BYTES {
-            return Err(super::invalid("session configuration exceeds 64 KiB"));
-        }
         let encoded = serde_json::to_string(&request)?;
         let fingerprint = origin.as_ref().map_or_else(
             || maka_agent_facts::artifact::content_digest(encoded.as_bytes()),

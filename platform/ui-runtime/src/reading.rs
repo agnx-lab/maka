@@ -48,19 +48,17 @@ pub enum ReadingTarget {
     /// Find over native readable descendants, including folded slots. SourceText uses
     /// original literal bytes; Markdown uses its width-independent rendered text.
     Find {
-        #[schemars(length(max = 512))]
         query: String,
         step: FindStep,
     },
     ClearFind,
     /// Move the original terminal viewport by physical rows.
     ScrollRows {
-        #[schemars(range(min = -65536, max = 65536))]
         rows: i32,
     },
     /// Reveal a UTF-8 byte in the descendant's native readable text, as returned by Find.
     RevealSource {
-        #[schemars(length(min = 1, max = 32))]
+        #[schemars(length(min = 1))]
         path: Vec<String>,
         offset: u32,
         /// If supplied, reveal only while this accepted find retains its original physical intent.
@@ -70,11 +68,11 @@ pub enum ReadingTarget {
     /// TUI: focus and minimally reveal an enabled scene Item. Settlement waits
     /// for its successful presentation; this never submits the item.
     FocusItem {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         key: String,
     },
     RevealChild {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         key: String,
     },
 }
@@ -88,7 +86,7 @@ pub enum FindStep {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadingMatch {
-    #[schemars(length(min = 1, max = 32))]
+    #[schemars(length(min = 1))]
     pub path: Vec<String>,
     pub offset: u32,
 }
@@ -96,7 +94,6 @@ pub struct ReadingMatch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadingFind {
     pub sequence: u64,
-    #[schemars(range(max = 4096))]
     pub count: u32,
     pub limited: bool,
     /// One-based current match, or null when no match remains.
@@ -106,19 +103,17 @@ pub struct ReadingFind {
 impl ReadingCommand {
     pub fn valid_target(&self) -> bool {
         match &self.target {
-            ReadingTarget::Find { query, .. } => query.len() <= 512,
-            ReadingTarget::FocusItem { key } => !key.is_empty() && key.len() <= 128,
-            ReadingTarget::ScrollRows { rows } => (-65536..=65536).contains(rows),
+            ReadingTarget::Find { .. } => true,
+            ReadingTarget::FocusItem { key } => !key.is_empty(),
+            ReadingTarget::ScrollRows { .. } => true,
             ReadingTarget::RevealSource {
                 path,
-                offset,
+                offset: _,
                 find_sequence,
             } => {
                 find_sequence.is_none_or(|sequence| sequence > 0)
                     && !path.is_empty()
-                    && path.len() <= 32
-                    && *offset <= 65536
-                    && path.iter().all(|key| !key.is_empty() && key.len() <= 128)
+                    && path.iter().all(|key| !key.is_empty())
             }
             _ => true,
         }
@@ -145,7 +140,6 @@ pub struct ReadingViewport {
     #[serde(default)]
     pub at_start: bool,
     pub at_end: bool,
-    #[schemars(length(max = 4096))]
     pub visible_child_keys: Vec<String>,
 }
 /// Most recent physical scroll. Layout changes and programmatic landings do not
@@ -172,7 +166,6 @@ pub struct ReadingObservation {
     pub scroll: Option<ReadingScroll>,
     /// Direct content child containing the native selection focus. Renderers
     /// without this observation return null. This key conveys no read authority.
-    #[schemars(length(max = 256))]
     pub selected_child_key: Option<String>,
     pub pending_command: Option<u64>,
     /// Only the most recently settled command is retained, without a ledger.

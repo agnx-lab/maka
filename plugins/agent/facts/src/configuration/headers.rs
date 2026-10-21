@@ -118,9 +118,6 @@ pub enum RequestHeadersReplaceResult {
 }
 
 pub fn normalize_updates(updates: &mut [RequestHeaderUpdate]) -> ValidationResult {
-    if updates.len() > 32 {
-        return Err("too many request headers".into());
-    }
     let mut seen = BTreeSet::new();
     for update in updates {
         update.name = normalize_name(&update.name)?.into();
@@ -137,7 +134,6 @@ pub fn normalize_updates(updates: &mut [RequestHeaderUpdate]) -> ValidationResul
 pub(crate) fn normalize_name(raw: &str) -> ValidationResult<&str> {
     let name = raw.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}');
     if name.is_empty()
-        || name.len() > 128
         || !name
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+.^_`|~-".contains(&c))
@@ -163,7 +159,6 @@ pub(crate) fn normalize_name(raw: &str) -> ValidationResult<&str> {
 
 pub(crate) fn validate_value(value: &str) -> ValidationResult {
     if value.is_empty()
-        || value.encode_utf16().count() > 8192
         || !value
             .chars()
             .all(|c| c == '\t' || (' '..='~').contains(&c) || ('\u{80}'..='\u{ff}').contains(&c))

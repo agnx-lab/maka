@@ -90,8 +90,7 @@ export function createAttachmentDraft(options: {
       typeof attachment.name !== 'string' ||
       typeof attachment.mimeType !== 'string' ||
       !Number.isSafeInteger(attachment.bytes) ||
-      attachment.bytes < 0 ||
-      attachment.bytes > 50 * 1024 * 1024
+      attachment.bytes < 0
     )
       return null;
     return {

@@ -140,9 +140,6 @@ impl State {
                 .iter()
                 .map(|span| span.content.len() + std::mem::size_of::<Span<'static>>())
                 .sum::<usize>();
-        if writer.bytes > MAX_BYTES || writer.lines.len() >= MAX_LINES {
-            return Err("Transcript layout exceeds local capacity");
-        }
         writer.lines.push(line);
         self.next += 1;
         progress.work += 1;

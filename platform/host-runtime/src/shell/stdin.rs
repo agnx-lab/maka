@@ -21,7 +21,6 @@ use super::request::parse_ref;
 use crate::shell::ControlInput;
 use maka_agent_facts::terminal::TerminalSize;
 use maka_agent_facts::terminal::input::InputAction;
-use maka_agent_facts::terminal::input::MAX_INPUT_BYTES;
 use maka_agent_facts::terminal::input::encoded_actions_byte_len;
 use maka_agent_facts::tools::ToolError;
 use serde::{Deserialize, Deserializer};
@@ -34,7 +33,7 @@ pub fn schema() -> Value {
     "properties":{
       "ref":{"type":"string"},
       "input":{"type":"string","description":"Raw terminal input, exclusive with actions."},
-      "actions":{"type":["array","null"],"maxItems":64,"items":{
+      "actions":{"type":["array","null"],"items":{
         "type":"object","additionalProperties":false,"required":["type"],
         "properties":{
           "type":{"enum":["text","key","mouse"]},
@@ -109,8 +108,8 @@ impl Input {
                 ));
             }
             (Some(text), None) => {
-                if text.is_empty() || text.len() > MAX_INPUT_BYTES {
-                    return Err(failed("input must contain 1..65536 UTF-8 bytes"));
+                if text.is_empty() {
+                    return Err(failed("input must contain UTF-8 bytes"));
                 }
                 let bytes = text.len();
                 (ControlInput::Raw(text), Some(bytes))

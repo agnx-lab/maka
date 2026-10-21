@@ -39,7 +39,6 @@ use std::{
 };
 
 const RECORD: &str = "targets.json";
-const MAX_RECORD: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct Target {
@@ -262,9 +261,6 @@ impl Registry {
             .truncate(true)
             .open(&pending)?;
         let bytes = serde_json::to_vec(&self.targets).map_err(invalid)?;
-        if bytes.len() as u64 > MAX_RECORD {
-            return Err(Error::TooComplex);
-        }
         file.write_all(&bytes)?;
         file.sync_all()?;
         fs::rename(pending, self.directory.join(RECORD))?;
@@ -367,10 +363,7 @@ fn collect(roots: &[PathBuf]) -> Result<BTreeSet<Target>, Error> {
     let mut active = BTreeSet::new();
     let mut retired = Vec::new();
     for root in roots {
-        for (count, entry) in fs::read_dir(root)?.enumerate() {
-            if count >= 4096 {
-                return Err(Error::TooComplex);
-            }
+        for entry in fs::read_dir(root)? {
             let entry = entry?;
             if entry.file_name() == "lock" {
                 continue;
@@ -449,10 +442,8 @@ fn read(directory: &Path) -> Result<Vec<Target>, Error> {
         Err(error) => return Err(error.into()),
     };
     let mut bytes = Vec::new();
-    file.take(MAX_RECORD + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_RECORD {
-        return Err(Error::TooComplex);
-    }
+    let mut file = file;
+    file.read_to_end(&mut bytes)?;
     let targets: Vec<Target> = serde_json::from_slice(&bytes).map_err(invalid)?;
     for target in &targets {
         crate::path::validate(&target.path)?;

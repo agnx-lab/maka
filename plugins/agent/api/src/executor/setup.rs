@@ -24,7 +24,7 @@ pub use maka_external_agent::setup::{Action, Outcome, Progress};
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "ExecutorSetupBinding")]
 pub struct Binding {
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub import: String,
     #[serde(default)]
     pub member: usize,
@@ -33,7 +33,7 @@ pub struct Binding {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "AgentExecutorSetup")]
 pub struct Input {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub executor: String,
     pub action: Action,
 }

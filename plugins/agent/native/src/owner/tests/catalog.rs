@@ -107,14 +107,15 @@ async fn catalog_observes_metadata_pending_and_removal_at_its_original_location(
             .unwrap()["sessions"],
         json!([])
     );
-    assert!(
+    assert_eq!(
         fixture
             .query(
                 "list",
                 json!({"filter":"all","position":{"kind":"start"},"titleQuery":"界".repeat(129)})
             )
             .await
-            .is_err()
+            .unwrap()["sessions"],
+        json!([])
     );
     let mut filtered = fixture.app.client().subscribe(
         fixture.binding(2).await, "catalog".into(),
@@ -529,4 +530,38 @@ async fn session_lifecycle_is_revision_checked_reversible_and_scoped() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn k64_complete_session_metadata_persists_and_remains_searchable() {
+    let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
+    let title = "Complete authored conversation title ".repeat(20);
+    let labels: Vec<_> = (0..40)
+        .map(|index| format!("{index}: {}", "Complete authored label ".repeat(10)))
+        .collect();
+    let mut input = fixture.create_input(&title).await;
+    input["labels"] = json!(labels);
+    let created = fixture
+        .mutation(2, "create", input, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(created["session"]["title"], title);
+    assert_eq!(created["session"]["labels"], json!(labels));
+    let id = created["session"]["id"].as_str().unwrap();
+    let stored = fixture.owner.session(id).await.unwrap();
+    assert_eq!(stored.configuration.title, title);
+    assert_eq!(stored.configuration.labels, labels);
+    let found = fixture
+        .query(
+            "list",
+            json!({
+                "filter":"all", "position":{"kind":"start"}, "titleQuery":title
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(found["sessions"][0]["id"], id);
+    assert_eq!(found["sessions"][0]["title"], title);
+    fixture.app.shutdown().await.unwrap();
+    fixture.config.shutdown().await.unwrap();
 }
