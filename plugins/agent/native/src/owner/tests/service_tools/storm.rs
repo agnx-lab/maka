@@ -1056,3 +1056,6 @@ async fn mutation_storm_repeated_summaries_preserve_original_effects() {
     assert!(result["summary_requests"].as_u64().unwrap() >= 2);
     assert_eq!(result["confirmed_results"], 16);
 }
+
+#[path = "storm/combined.rs"]
+mod combined;

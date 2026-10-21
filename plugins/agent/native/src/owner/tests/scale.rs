@@ -435,7 +435,7 @@ async fn real_host_agent_scale() {
 mod flowing;
 
 #[path = "scale/compaction.rs"]
-mod compaction;
+pub(in crate::owner::tests) mod compaction;
 
 #[path = "scale/image_upload.rs"]
-mod image_upload;
+pub(in crate::owner::tests) mod image_upload;
