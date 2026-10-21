@@ -23,7 +23,7 @@ import { Image } from 'nsh/image';
 import { List } from 'nsh/list';
 import { host } from 'maka/host';
 import type { AgentFileChange, AgentFileKind } from '../../../../packages/plugin-sdk/src/index.js';
-import type { WorkspaceFileTarget } from './workspaceFiles';
+import type { WorkspaceFileTarget } from './workspaceFileState';
 import { C } from './ui';
 
 // This is the native collector's verified presentation, not the Host wire stream.

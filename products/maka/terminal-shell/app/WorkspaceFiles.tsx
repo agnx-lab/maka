@@ -23,7 +23,7 @@ import { List } from 'nsh/list';
 import { host } from 'maka/host';
 import type { WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
 import { C } from './ui';
-import type { WorkspaceFilesModel } from './workspaceFiles';
+import type { WorkspaceFilesModel } from './workspaceFileState';
 
 export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
   const model = props.model;
