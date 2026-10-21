@@ -104,7 +104,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         let wide = wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("Read lines") && screen.contains("起点_原始")).await;
         support::scroll_snapshot_text(&mut view, &wide, "起点_原始", MouseEventKind::ScrollDown);
-        let reading = wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && screen.contains("↓ Latest") && !screen.contains("起点_原始")).await;
+        let reading = wait_view_state(&mut view, |view, screen| screen.contains("WorkspaceDocument") && !screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Return to latest" && !node.state.disabled)).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         let numbered_source = original.lines().enumerate()
             .map(|(index, line)| format!("{} │ {line}", index + 1)).collect::<Vec<_>>();
@@ -134,7 +134,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         wait_enabled_node(&mut view, "INNER_STREAM_A").await;
         support::click_button(&mut view, "Return to latest").await;
         wait_focused_input(&mut view, "Message composer").await;
-        wait_view(&mut view, |screen| screen.contains("INNER_STREAM_A") && !screen.contains("↓ Latest")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("INNER_STREAM_A") && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Return to latest")).await;
         let appended: String = (0..36).map(|line| format!("\nINNER_RESUMED_{line:02}")).collect();
         continuation.thinking(&appended).await;
         let resumed = wait_view(&mut view, |screen| screen.contains("INNER_RESUMED_35")).await;

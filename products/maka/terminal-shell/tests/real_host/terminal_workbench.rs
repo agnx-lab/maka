@@ -130,8 +130,11 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
         evidence("terminal-workbench-original-pty", &output);
 
         support::click_button(&mut view, "Close workspace preview").await;
-        wait_view(&mut view, |screen| {
-            !screen.contains("Close · Esc") && screen.contains("WORKBENCH_UNSENT_DRAFT")
+        wait_view_state(&mut view, |view, screen| {
+            !view.accessibility_snapshot().iter().any(|node| {
+                node.role == nsh_core::AccessibilityRole::Button
+                    && node.label == "Close workspace preview"
+            }) && screen.contains("WORKBENCH_UNSENT_DRAFT")
         })
         .await;
         tab_to_label(&mut view, "Message composer").await;

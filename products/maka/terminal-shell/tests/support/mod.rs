@@ -1088,6 +1088,14 @@ pub fn wait_view(
     view: &mut AppView,
     predicate: impl Fn(&str) -> bool,
 ) -> impl std::future::Future<Output = String> {
+    wait_view_state(view, move |_, snapshot| predicate(snapshot))
+}
+
+#[track_caller]
+pub fn wait_view_state(
+    view: &mut AppView,
+    predicate: impl Fn(&AppView, &str) -> bool,
+) -> impl std::future::Future<Output = String> {
     let caller = std::panic::Location::caller();
     async move {
         let started = Instant::now();
@@ -1100,7 +1108,7 @@ pub fn wait_view(
                 view.last_error()
             );
             let snapshot = view.snapshot();
-            if predicate(&snapshot) {
+            if predicate(view, &snapshot) {
                 return snapshot;
             }
             assert!(

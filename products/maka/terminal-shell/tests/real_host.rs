@@ -51,7 +51,7 @@ use serde_json::{Value, json};
 #[cfg(unix)]
 use std::time::Instant;
 use std::{sync::atomic::Ordering, time::Duration};
-use support::{EDITOR, Fixture, ReplyGate, evidence, wait_view};
+use support::{EDITOR, Fixture, ReplyGate, evidence, wait_view, wait_view_state};
 use uuid::Uuid;
 
 fn shortcut(view: &mut AppView, key: char) {
@@ -525,7 +525,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Save this preference").await;
         wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("Preferences saved.")).await;
         activate(&mut view, "Assistant language: 简体中文").await;
-        wait_view(&mut view, |screen| screen.contains("General settings") && screen.contains("● 简体中文")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("General settings") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Assistant language: 简体中文" && node.state.selected)).await;
         let saved_preferences = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(saved_preferences["displayName"], "已保存的中文用户");
         assert_eq!(saved_preferences["assistantTone"], "请用简洁清楚的方式回答");
@@ -1609,7 +1609,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert_eq!(checklist["completed"], 1);
         assert_eq!(checklist["current"], todos[1]);
         assert!(checklist["nextOffset"].is_null());
-        wait_view(&mut view, |screen| screen.contains("▸ Todo 1/3")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Todo 1/3") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Toggle conversation todo" && !node.state.selected)).await;
         let nodes = view.accessibility_snapshot();
         let dock = nodes.iter().find(|node| node.label == "Conversation todo dock").unwrap().frame;
         let composer = nodes.iter().find(|node| node.label == "Conversation composer").unwrap().frame;
@@ -1621,8 +1621,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
         support::wait_enabled_button(&mut view, "Toggle tool todo_write").await;
         assert_eq!(view.accessibility_snapshot().iter().filter(|node| node.label == "Toggle tool todo_write").count(), 1);
-        support::click_text(&mut view, "▸ Todo 1/3");
-        let checklist_visible = wait_view(&mut view, |screen| screen.contains("▾ Todo 1/3") && screen.contains("NATIVE_TODO_DONE") && screen.contains("NATIVE_TODO_PENDING")).await;
+        support::click_button(&mut view, "Toggle conversation todo").await;
+        let checklist_visible = wait_view_state(&mut view, |view, screen| screen.contains("Todo 1/3") && screen.contains("NATIVE_TODO_DONE") && screen.contains("NATIVE_TODO_PENDING") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Toggle conversation todo" && node.state.selected)).await;
         evidence("real-tool-and-checklist", &checklist_visible);
         support::evidence_cells("real-tool-and-checklist", &view);
 
@@ -1989,7 +1989,7 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         support::evidence_cells("workspace-current-diff-dock", &view);
         assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
         view.resize(80, 24);
-        let narrow = wait_view(&mut view, |screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && screen.contains("Close · Esc")).await;
+        let narrow = wait_view_state(&mut view, |view, screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview" && !node.state.disabled)).await;
         evidence("workspace-current-diff-dialog", &narrow);
         support::evidence_cells("workspace-current-diff-dialog", &view);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
@@ -2003,8 +2003,8 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         support::evidence_cells("workspace-current-image-dialog", &view);
         view.resize(120, 40);
         wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
-        support::click_label(&mut view, "Close workspace preview");
-        wait_view(&mut view, |screen| !screen.contains("Captured image") && !screen.contains("Close · Esc")).await;
+        support::click_button(&mut view, "Close workspace preview").await;
+        wait_view_state(&mut view, |view, screen| !screen.contains("Captured image") && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse workspace files"));
         tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
@@ -2039,8 +2039,8 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let refreshed_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "file: page-139v2.txt").unwrap().frame.origin.y.0;
         assert_eq!(tail_y, refreshed_y, "a watch refresh discarded the already requested prefix");
         support::evidence_cells("workspace-files-automatic-pagination-and-watch", &view);
-        support::click_label(&mut view, "Close workspace preview");
-        wait_view(&mut view, |screen| !screen.contains("page-139v2.txt") && !screen.contains("Close · Esc")).await;
+        support::click_button(&mut view, "Close workspace preview").await;
+        wait_view_state(&mut view, |view, screen| !screen.contains("page-139v2.txt") && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close workspace preview")).await;
         let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
         let other = support::mutate(&client, "create", json!({"title":"Other preview owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
         shortcut(&mut view, 'o');
@@ -2124,7 +2124,7 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         terminal.resize(120, 40);
         terminal.wait_for("Open image · 192 × 128").await;
         terminal.wait_for("192 × 128 · Original image").await;
-        terminal.click_text("Close · Esc");
+        terminal.click_text_in_row("×", "Changes");
         terminal.wait_for_absent("Image preview").await;
         terminal.wait_for("Open image · 192 × 128").await;
         request.delta("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
