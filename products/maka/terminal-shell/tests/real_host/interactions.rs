@@ -26,7 +26,7 @@ use maka_plugin_core::operation::{OperationOutcome, Receipt};
 use nsh_platform_tui::AppView;
 use serde_json::{Value, json};
 use std::{sync::atomic::Ordering, time::Duration};
-use support::{Fixture, ReplyGate, wait_view};
+use support::{Fixture, ReplyGate, wait_view, wait_view_state};
 
 const PRIVATE_NOTE: &str = "PRIVATE_FORM_VALUE_门口";
 
@@ -88,13 +88,14 @@ fn form_request() -> Value {
     })
 }
 
-async fn open_request(view: &mut AppView, title: &str) {
+async fn open_request(view: &mut AppView, title: &str, content: &str) {
     wait_view(view, |screen| screen.contains("Your input is needed")).await;
     support::click_text(view, "! Your input is needed");
     wait_view(view, |screen| {
-        screen.contains(title) && screen.contains("Esc closes without answering")
+        screen.contains(title) && screen.contains(content)
     })
     .await;
+    support::wait_enabled_button(view, "Close request").await;
 }
 
 fn escape(view: &mut AppView) {
@@ -192,16 +193,16 @@ async fn computer_consent_keeps_the_original_target_boundary_and_single_click_re
         let request = fixture.next_request().await;
         let denied = publish(&fixture, "native_computer_deny", computer_request()).await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        open_request(&mut view, "Capability request").await;
+        open_request(&mut view, "Capability request", "Computer access for this session").await;
         wait_view(&mut view, |screen| screen.contains("Computer access for this session") && screen.contains("cua_repl") && screen.contains("Permission boundary: 0")).await;
         escape(&mut view);
         wait_view(&mut view, |screen| !screen.contains("Capability request") && screen.contains("Your input is needed")).await;
         assert!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome.is_none());
         assert!(client.pending_controls().await.unwrap().is_empty());
 
-        open_request(&mut view, "Capability request").await;
-        wait_enabled_node(&mut view, "[D] Deny").await;
-        support::click_button(&mut view, "[D] Deny").await;
+        open_request(&mut view, "Capability request", "Computer access for this session").await;
+        wait_enabled_node(&mut view, "Deny").await;
+        support::click_button(&mut view, "Deny").await;
         wait_view(&mut view, |screen| screen.contains("Recorded outcome") && screen.contains("deny")).await;
         assert!(matches!(fixture.store.interaction(&denied.request_id).await.unwrap().unwrap().outcome, Some(InteractionOutcome::ClientCapabilityDecision { decision: Decision::Deny, .. })));
         let target = maka_workspace_api::computer::target();
@@ -210,10 +211,10 @@ async fn computer_consent_keeps_the_original_target_boundary_and_single_click_re
         wait_view(&mut view, |screen| !screen.contains("Capability request")).await;
 
         let allowed = publish(&fixture, "native_computer_allow", computer_request()).await;
-        open_request(&mut view, "Capability request").await;
-        wait_enabled_node(&mut view, "[Ctrl+Enter] Allow").await;
+        open_request(&mut view, "Capability request", "Computer access for this session").await;
+        wait_enabled_node(&mut view, "Allow").await;
         gate.arm();
-        support::click_button(&mut view, "[Ctrl+Enter] Allow").await;
+        support::click_button(&mut view, "Allow").await;
         await_response_gate(&mut view, &gate).await;
         let original = original_response(&client, &allowed.request_id).await;
         let canonical = fixture.store.interaction(&allowed.request_id).await.unwrap().unwrap();
@@ -259,10 +260,10 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
         let request = fixture.next_request().await;
         let record = publish(&fixture, "native_structured_form", form_request()).await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        open_request(&mut view, "Form request").await;
-        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
-        for label in ["(*) No · Confirm", "(*) Basic", "(*) Logs", "Include Optional confirm", "Include Optional extras"] {
-            assert!(view.accessibility_snapshot().iter().any(|node| node.label == label), "the original defaults or omission state were not presented: {label}");
+        open_request(&mut view, "Form request", "Review the original delivery form").await;
+        wait_enabled_node(&mut view, "Submit form").await;
+        for (label, selected) in [("No · Confirm", true), ("Basic", true), ("Logs", true), ("Include Optional confirm", false), ("Include Optional extras", false)] {
+            assert!(view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == label && node.state.selected == selected && !node.state.disabled), "the original defaults or omission state were not presented: {label} selected={selected}");
         }
         tab_to_label(&mut view, "Ratio").await;
         wait_focused_input(&mut view, "Ratio").await;
@@ -270,7 +271,7 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
         shortcut(&mut view, 'a');
         view.handle_event(Event::Paste("invalid-number".into()));
         commit_input(&mut view).await;
-        assert!(view.accessibility_snapshot().iter().any(|node| node.label == "[Ctrl+Enter] Submit form" && node.state.disabled));
+        assert!(view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Submit form" && node.state.disabled));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
         commit_input(&mut view).await;
         assert!(fixture.store.interaction(&record.request_id).await.unwrap().unwrap().outcome.is_none());
@@ -278,22 +279,21 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
         shortcut(&mut view, 'a');
         view.handle_event(Event::Paste("1.25".into()));
         commit_input(&mut view).await;
-        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
+        wait_enabled_node(&mut view, "Submit form").await;
 
         activate(&mut view, "Include Optional note").await;
-        wait_enabled_node(&mut view, "Omit Optional note").await;
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Omit Optional note" && node.state.selected && !node.state.disabled)).await;
         tab_to_label(&mut view, "Optional note").await;
         wait_focused_input(&mut view, "Optional note").await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
         tab_to_label(&mut view, "Copies").await;
         wait_focused_input(&mut view, "Copies").await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("0"));
-        activate(&mut view, "( ) Full").await;
-        wait_enabled_node(&mut view, "(*) Full").await;
-        activate(&mut view, "( ) Metrics").await;
-        wait_enabled_node(&mut view, "(*) Metrics").await;
-        activate(&mut view, "(*) Logs").await;
-        wait_enabled_node(&mut view, "( ) Logs").await;
+        for (label, before, after) in [("Full", false, true), ("Metrics", false, true), ("Logs", true, false)] {
+            wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == label && node.state.selected == before && !node.state.disabled)).await;
+            activate(&mut view, label).await;
+            wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == label && node.state.selected == after && !node.state.disabled)).await;
+        }
         activate(&mut view, "Hide Private note").await;
         wait_enabled_node(&mut view, "Reveal Private note").await;
         tab_to_label(&mut view, "Private note").await;
@@ -304,13 +304,13 @@ async fn structured_form_defaults_omission_validation_masking_and_receipt_are_re
         let context = view.surface().input_context().unwrap();
         assert!(context.secure);
         assert_eq!(context.text, None);
-        let masked = wait_view(&mut view, |screen| screen.contains("Reveal Private note") && !screen.contains(PRIVATE_NOTE)).await;
+        let masked = wait_view_state(&mut view, |view, screen| view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Reveal Private note" && !node.state.disabled) && !screen.contains(PRIVATE_NOTE)).await;
         assert!(!format!("{:?}", view.accessibility_snapshot()).contains(PRIVATE_NOTE));
         support::evidence("structured-form-masked", &masked);
 
-        wait_enabled_node(&mut view, "[Ctrl+Enter] Submit form").await;
+        wait_enabled_node(&mut view, "Submit form").await;
         gate.arm();
-        support::click_button(&mut view, "[Ctrl+Enter] Submit form").await;
+        support::click_button(&mut view, "Submit form").await;
         await_response_gate(&mut view, &gate).await;
         let original = original_response(&client, &record.request_id).await;
         let canonical = fixture.store.interaction(&record.request_id).await.unwrap().unwrap();
@@ -363,8 +363,8 @@ async fn the_production_pty_closes_without_answering_then_records_cancel_and_dec
         let declined = publish(&fixture, "physical_form_decline", prompt).await;
         terminal.wait_for("Open request (1)").await;
         terminal.click_text("Open request");
-        terminal.wait_for("[D] Decline").await;
-        terminal.click_text("[D] Decline");
+        terminal.wait_for("Decline").await;
+        terminal.click_text("Decline");
         let screen = terminal.wait_for("Form declined").await;
         assert_eq!(serde_json::to_value(fixture.store.interaction(&declined.request_id).await.unwrap().unwrap()).unwrap()["outcome"]["action"], "decline");
         support::evidence("production-pty-form-declined", &screen);
