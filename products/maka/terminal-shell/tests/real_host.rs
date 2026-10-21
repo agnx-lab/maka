@@ -1557,6 +1557,33 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         evidence("activity-title-cadence", &titles.iter().map(|(at, title)| format!("{}ms {title}", at.as_millis())).collect::<Vec<_>>().join("\n"));
         support::evidence_cells("activity-title-unicode", &view);
 
+        // The elapsed-time label keeps advancing while deltas continuously
+        // refresh this same turn and the user keeps its source reader anchored.
+        let duration_seconds = |screen: &str| {
+            let mut fields = screen.lines().nth(cadence_header_row)?.split_whitespace().rev();
+            let seconds = fields.next()?.strip_suffix('s')?.parse::<u64>().ok()?;
+            let minutes = fields.next().and_then(|field| field.strip_suffix('m'))
+                .map(str::parse::<u64>).transpose().ok()?.unwrap_or(0);
+            Some(minutes * 60 + seconds)
+        };
+        let previous_duration = duration_seconds(&view.snapshot())
+            .expect("the active turn must paint its elapsed-time label");
+        let advancing = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                request.thinking(" ").await;
+                view.poll().unwrap();
+                support::tick(&mut view);
+                let screen = view.snapshot();
+                assert!(at_source_start(&screen), "continuous thinking moved the source reader:\n{screen}");
+                assert_eq!(screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row));
+                if duration_seconds(&screen).is_some_and(|seconds| seconds > previous_duration) {
+                    break screen;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("continuous thinking deltas postponed the turn's elapsed-time updates");
+        evidence("activity-duration-advances-during-stream", &advancing);
+
         request.thinking("\n\nNATIVE_ACTIVITY_HEADER_TAIL_APPENDED").await;
         let anchored = wait_view(&mut view, |screen| at_source_start(screen) && screen.matches("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED").count() == 1).await;
         evidence("activity-append-keeps-source-top", &anchored);

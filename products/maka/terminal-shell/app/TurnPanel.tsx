@@ -379,8 +379,9 @@ export function TurnPanel(props: {
     turnOutcome(props.turn()) === null &&
     (!props.group().closed || props.toolActivity() !== undefined);
   const clock = signal(Date.now());
+  const hasDuration = computed(() => active() && props.turn().timing?.startedAt != null);
   effect(() => {
-    if (!active() || props.turn().timing?.startedAt == null) return;
+    if (!hasDuration()) return;
     const timer = setInterval(() => clock.set(Date.now()), 1000);
     cleanup(() => clearInterval(timer));
   });
