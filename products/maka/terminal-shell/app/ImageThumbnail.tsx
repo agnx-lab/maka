@@ -23,6 +23,7 @@ import { windowSize } from 'nsh/device';
 import { Image } from 'nsh/image';
 import type { YNode } from 'nsh';
 import { C, captionTextStyle, controlStyle } from './ui';
+import { Icon } from './Icon';
 import { immutableAsset } from './immutableAsset';
 import type {
   AgentToolImageRead,
@@ -42,8 +43,9 @@ export type ImagePreview = {
 
 export function ImageThumbnail(props: {
   source: PreviewSource;
-  small?: boolean;
+  compact?: boolean;
   label?: string;
+  tooltip?: string;
   preview(image: ImagePreview): void;
 }) {
   const source = props.source;
@@ -83,34 +85,68 @@ export function ImageThumbnail(props: {
     attempt.set(attempt() + 1);
   };
   return (
-    <View style={{ gap: 16 }}>
+    <View
+      style={
+        props.compact
+          ? { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flexShrink: 0 }
+          : { gap: 16 }
+      }
+    >
       <Button
         ref={(node) => {
           button = node;
         }}
         accessibilityLabel={props.label ?? 'Open image preview'}
+        tooltip={
+          props.compact
+            ? `${props.tooltip ?? props.label ?? 'Open image preview'}\n${
+                size()
+                  ? `${size()!.width} × ${size()!.height}`
+                  : error()
+                    ? 'Image unavailable'
+                    : 'Loading image…'
+              }`
+            : undefined
+        }
         disabled={!size()}
         onPress={inputAction(preview, action)}
-        style={{
-          alignSelf: 'flex-start',
-          maxWidth: '100%',
-          backgroundColor: C.surface,
-          padding: 8,
-          gap: 8,
-        }}
+        style={
+          props.compact
+            ? {
+                width: 64,
+                height: 64,
+                flexShrink: 0,
+                backgroundColor: C.surface,
+                borderWidth: 1,
+                borderColor: C.line,
+                borderRadius: 8,
+                overflow: 'hidden',
+              }
+            : {
+                alignSelf: 'flex-start',
+                maxWidth: '100%',
+                backgroundColor: C.surface,
+                padding: 8,
+                gap: 8,
+              }
+        }
+        hoverStyle={props.compact ? { borderColor: C.secondary } : {}}
+        focusStyle={props.compact ? { borderColor: C.accent } : {}}
       >
-        <Text style={{ ...captionTextStyle, color: size() ? C.accent : C.muted }}>
-          {size()
-            ? `Open image · ${size()!.width} × ${size()!.height}`
-            : error()
-              ? 'Image unavailable'
-              : 'Loading image…'}
-        </Text>
+        <If when={!props.compact}>
+          <Text style={{ ...captionTextStyle, color: size() ? C.accent : C.muted }}>
+            {size()
+              ? `Open image · ${size()!.width} × ${size()!.height}`
+              : error()
+                ? 'Image unavailable'
+                : 'Loading image…'}
+          </Text>
+        </If>
         <Each of={[attempt()]} key={(value: number) => value}>
           {() => (
             <Image
               src={uri}
-              resizeMode="contain"
+              resizeMode={props.compact ? 'cover' : 'contain'}
               onLoad={(dimensions) => {
                 if (alive) size.set(dimensions);
               }}
@@ -121,28 +157,58 @@ export function ImageThumbnail(props: {
                 }
               }}
               style={{
-                width: props.small ? 112 : 320,
+                width: props.compact ? 64 : 320,
                 maxWidth: '100%',
-                height: props.small
+                height: props.compact
                   ? 64
                   : Math.max(64, Math.min(192, Math.floor(windowSize().height / 48) * 16)),
               }}
             />
           )}
         </Each>
+        <If when={props.compact && !size()}>
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: 64,
+              height: 64,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon name="image" color={error() ? C.danger : C.muted} />
+          </View>
+        </If>
       </Button>
       <If when={error()}>
-        <Text selectable style={{ color: C.danger }}>
-          {error()}
-        </Text>
-        <Button
-          onPress={inputAction(retry, action)}
-          style={controlStyle}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+        <View
+          style={{
+            width: props.compact ? 240 : undefined,
+            maxWidth: '100%',
+            gap: props.compact ? 8 : 16,
+          }}
         >
-          <Text style={{ color: C.accent }}>Retry image</Text>
-        </Button>
+          <If when={props.compact}>
+            <Text selectable style={{ ...captionTextStyle, color: C.text }}>
+              {props.tooltip ?? props.label ?? 'Image'}
+            </Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>Image unavailable</Text>
+          </If>
+          <Text selectable style={{ color: C.danger }}>
+            {error()}
+          </Text>
+          <Button
+            onPress={inputAction(retry, action)}
+            style={controlStyle}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.line }}
+          >
+            <Text style={{ color: C.accent }}>Retry image</Text>
+          </Button>
+        </View>
       </If>
     </View>
   );
