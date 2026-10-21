@@ -19,7 +19,8 @@
 
 import { Text, View } from 'nsh';
 import type { InteractionRequest } from '../../../../packages/plugin-sdk/src/generated/runtime';
-import { C } from './ui';
+import { Icon } from './Icon';
+import { bodyTextStyle, C, captionTextStyle, codeTextStyle } from './ui';
 
 type Request = Extract<InteractionRequest, { kind: 'client_capability' }>;
 // The Agent's response gate accepts this exact producer-owned Computer target.
@@ -40,27 +41,72 @@ export function computerCapability(request: Request): boolean {
 export function CapabilityRequest(props: { request: Request; sessionId: string }) {
   return (
     <View style={{ gap: 16 }}>
-      <Text style={{ color: C.text, fontSize: 16, lineHeight: 16, fontWeight: '600' }}>
-        {computerCapability(props.request)
-          ? 'Computer access for this session'
-          : 'Requested client capability'}
-      </Text>
-      <If when={computerCapability(props.request)}>
-        <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-          This allows the requesting tool to inspect and control the local computer, including
-          screenshots, keyboard and pointer actions. The grant lasts for this session's current
-          permission boundary.
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 12,
+          padding: 16,
+          backgroundColor: C.raised,
+          borderRadius: 12,
+        }}
+      >
+        <Icon name="shield" color={C.warning} />
+        <View style={{ flex: 1, minWidth: 0, gap: 8 }}>
+          <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
+            {computerCapability(props.request)
+              ? 'Computer access for this session'
+              : 'Requested client capability'}
+          </Text>
+          <Text selectable style={{ ...codeTextStyle, color: C.secondary }}>
+            {`${props.request.target.toolName} · Permission boundary: ${props.request.baseRevision ?? 'unavailable'}`}
+          </Text>
+          <If when={computerCapability(props.request)}>
+            <Text selectable style={{ ...bodyTextStyle, color: C.secondary }}>
+              This allows the requesting tool to inspect and control the local computer, including
+              screenshots, keyboard and pointer actions. The grant lasts for this session's current
+              permission boundary.
+            </Text>
+          </If>
+        </View>
+      </View>
+      <View style={{ gap: 8 }}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>Scope</Text>
+        <Text selectable style={{ ...bodyTextStyle, color: C.secondary }}>
+          {props.request.target.scope.kind === 'browser_origin'
+            ? `Browser origin: ${props.request.target.scope.origin}`
+            : props.request.target.scope.kind === 'mcp_tool'
+              ? `Only ${props.request.target.scope.serverId} · ${props.request.target.scope.toolName}`
+              : 'Applies to this capability within the current permission boundary.'}
         </Text>
-      </If>
-      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-        {`Session: ${props.sessionId}\nProvider: ${props.request.target.providerId}\nContract: ${props.request.target.contractId}\nServer: ${props.request.target.serverId}\nTool: ${props.request.target.toolName}\nCapability: ${props.request.target.capability}\nScope: ${JSON.stringify(props.request.target.scope)}\nPermission boundary: ${props.request.baseRevision ?? 'unavailable'}`}
-      </Text>
+      </View>
       <If when={!computerCapability(props.request)}>
-        <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+        <Text style={{ ...bodyTextStyle, color: C.warning }}>
           This Host cannot answer the requested capability. Closing leaves the original request
           pending.
         </Text>
       </If>
+      <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 16 }}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>Request details</Text>
+        <Each
+          of={[
+            ['Session', props.sessionId],
+            ['Provider', props.request.target.providerId],
+            ['Contract', props.request.target.contractId],
+            ['Server', props.request.target.serverId],
+            ['Tool', props.request.target.toolName],
+            ['Capability', props.request.target.capability],
+            ['Scope', JSON.stringify(props.request.target.scope)],
+            ['Permission boundary', String(props.request.baseRevision ?? 'unavailable')],
+          ]}
+        >
+          {(detail) => (
+            <Text selectable style={{ ...codeTextStyle, color: C.secondary }}>
+              {`${detail()[0]}: ${detail()[1]}`}
+            </Text>
+          )}
+        </Each>
+      </View>
     </View>
   );
 }

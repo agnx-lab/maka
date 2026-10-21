@@ -21,7 +21,19 @@ import { Input, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { FormField } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import type { FormDraft, FormRequest as Request } from './interaction-form';
-import { C } from './ui';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import {
+  bodyTextStyle,
+  C,
+  captionTextStyle,
+  compact,
+  controlDisabledStyle,
+  controlFocusStyle,
+  controlHoverStyle,
+  controlStyle,
+  inputBorderRadius,
+  inputTextStyle,
+} from './ui';
 
 type Change = Partial<FormDraft>;
 function Choice(props: {
@@ -29,6 +41,8 @@ function Choice(props: {
   selected?: boolean;
   disabled: boolean;
   onPress: () => void;
+  text?: string;
+  kind?: 'checkbox' | 'radio' | 'switch';
 }) {
   return (
     <Button
@@ -36,10 +50,24 @@ function Choice(props: {
       selected={props.selected}
       accessibilityLabel={props.label}
       onPress={props.onPress}
-      style={{ paddingHorizontal: 8, backgroundColor: C.surface }}
+      style={{
+        ...controlStyle,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        gap: 8,
+        backgroundColor: props.selected ? C.raised : C.surface,
+      }}
+      hoverStyle={controlHoverStyle}
+      focusStyle={controlFocusStyle}
+      disabledStyle={controlDisabledStyle}
     >
-      <Text style={{ color: props.selected ? C.accent : C.text, fontSize: 16, lineHeight: 16 }}>
-        {props.label}
+      <If when={props.kind}>
+        <ChoiceIndicator kind={props.kind!} checked={!!props.selected} disabled={props.disabled} />
+      </If>
+      <Text style={{ ...bodyTextStyle, flexShrink: 1, color: props.disabled ? C.muted : C.text }}>
+        {props.text ?? props.label}
       </Text>
     </Button>
   );
@@ -57,15 +85,17 @@ export function FormRequest(props: {
   const original = JSON.stringify(props.request);
   return (
     <View style={{ gap: 16 }}>
-      <Text selectable style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-        {props.request.requester.name}
-      </Text>
-      <If when={props.request.requester.source}>
-        <Text selectable style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-          {props.request.requester.source}
+      <View style={{ gap: 4 }}>
+        <Text selectable style={{ ...bodyTextStyle, color: C.secondary, fontWeight: '500' }}>
+          {props.request.requester.name}
         </Text>
-      </If>
-      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+        <If when={props.request.requester.source}>
+          <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
+            {props.request.requester.source}
+          </Text>
+        </If>
+      </View>
+      <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
         {props.request.message}
       </Text>
       <Each<FormField> of={props.request.fields}>
@@ -87,23 +117,31 @@ export function FormRequest(props: {
               : [];
           };
           return (
-            <View style={{ gap: 16 }}>
-              <Text style={{ color: C.text, fontSize: 16, lineHeight: 16, fontWeight: '600' }}>
-                {field().label}
-                {field().required ? ' · Required' : ' · Optional'}
-              </Text>
+            <View style={{ gap: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: C.line }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                  <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
+                    {field().label}
+                  </Text>
+                  <Text style={{ ...captionTextStyle, color: C.muted }}>
+                    {field().required ? 'Required' : 'Optional'}
+                  </Text>
+                </View>
+                <If when={!field().required}>
+                  <Choice
+                    label={draft()?.included ? `Omit ${field().label}` : `Include ${field().label}`}
+                    text={draft()?.included ? 'Included' : 'Include'}
+                    kind="switch"
+                    disabled={props.blocked}
+                    selected={draft()?.included}
+                    onPress={props.action(index(), { included: !draft()?.included })}
+                  />
+                </If>
+              </View>
               <If when={field().description}>
-                <Text selectable style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                <Text selectable style={{ ...bodyTextStyle, color: C.muted }}>
                   {field().description}
                 </Text>
-              </If>
-              <If when={!field().required}>
-                <Choice
-                  label={draft()?.included ? `Omit ${field().label}` : `Include ${field().label}`}
-                  disabled={props.blocked}
-                  selected={draft()?.included}
-                  onPress={props.action(index(), { included: !draft()?.included })}
-                />
               </If>
               <If when={draft()?.included}>
                 <If when={['string', 'number', 'integer'].includes(field().kind)}>
@@ -116,29 +154,38 @@ export function FormRequest(props: {
                     placeholder={placeholder()}
                     onChange={(value) => props.edit(index(), original, value)}
                     style={{
-                      minHeight: 32,
-                      paddingHorizontal: 8,
+                      ...inputTextStyle,
+                      height: compact() ? 32 : 40,
+                      paddingHorizontal: 12,
+                      paddingVertical: compact() ? 4 : 8,
                       color: C.text,
-                      backgroundColor: C.surface,
+                      backgroundColor: C.background,
+                      borderRadius: inputBorderRadius,
+                      borderWidth: 1,
+                      borderColor: C.line,
                       placeholderColor: C.muted,
-                      fontSize: 16,
-                      lineHeight: 16,
                     }}
+                    focusStyle={{ borderColor: C.accent }}
                   />
                   <If when={field().kind === 'string'}>
-                    <Choice
-                      label={`${draft()?.hidden ? 'Reveal' : 'Hide'} ${field().label}`}
-                      disabled={props.blocked}
-                      onPress={props.action(index(), { hidden: !draft()?.hidden })}
-                    />
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Choice
+                        label={`${draft()?.hidden ? 'Reveal' : 'Hide'} ${field().label}`}
+                        text={draft()?.hidden ? 'Reveal value' : 'Hide value'}
+                        disabled={props.blocked}
+                        onPress={props.action(index(), { hidden: !draft()?.hidden })}
+                      />
+                    </View>
                   </If>
                 </If>
                 <If when={field().kind === 'boolean'}>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     <Each of={[true, false]}>
                       {(value) => (
                         <Choice
-                          label={`${draft()?.value === value() ? '(*)' : '( )'} ${value() ? 'Yes' : 'No'} · ${field().label}`}
+                          label={`${value() ? 'Yes' : 'No'} · ${field().label}`}
+                          text={value() ? 'Yes' : 'No'}
+                          kind="radio"
                           disabled={disabled()}
                           selected={draft()?.value === value()}
                           onPress={props.action(index(), { value: value() })}
@@ -168,7 +215,8 @@ export function FormRequest(props: {
                           : option().value;
                       return (
                         <Choice
-                          label={`${selected() ? '(*)' : '( )'} ${option().label}`}
+                          label={option().label}
+                          kind={field().kind === 'multi_select' ? 'checkbox' : 'radio'}
                           disabled={disabled()}
                           selected={selected()}
                           onPress={props.action(index(), { value: next() })}
@@ -178,7 +226,7 @@ export function FormRequest(props: {
                   </Each>
                 </If>
                 <If when={props.problems[index()]}>
-                  <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+                  <Text style={{ ...bodyTextStyle, color: C.warning }}>
                     {props.problems[index()]}
                   </Text>
                 </If>

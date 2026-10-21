@@ -22,7 +22,22 @@ import { host } from './host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
-import { C } from './ui';
+import type { InteractionOutcome } from '../../../../packages/plugin-sdk/src/generated/runtime';
+import {
+  bodyTextStyle,
+  C,
+  captionTextStyle,
+  codeTextStyle,
+  compact,
+  controlDisabledStyle,
+  controlFocusStyle,
+  controlHoverStyle,
+  controlStyle,
+  inputBorderRadius,
+  inputTextStyle,
+} from './ui';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import { Icon } from './Icon';
 import { CapabilityRequest, computerCapability } from './CapabilityRequest';
 import { FormRequest } from './FormRequest';
 import {
@@ -45,6 +60,10 @@ function InteractionAction(props: {
   disabled?: boolean;
   selected?: boolean;
   primary?: boolean;
+  kind?: 'radio';
+  icon?: 'close' | 'refresh';
+  iconOnly?: boolean;
+  tooltip?: string;
 }) {
   return (
     <Button
@@ -52,21 +71,41 @@ function InteractionAction(props: {
       disabled={props.disabled}
       selected={props.selected}
       onPress={props.onPress}
+      tooltip={props.tooltip}
       style={{
-        paddingHorizontal: 8,
-        paddingVertical: 0,
-        backgroundColor: props.primary ? C.line : C.surface,
+        ...controlStyle,
+        minWidth: 32,
+        paddingHorizontal: props.iconOnly ? 8 : 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: props.primary ? C.accent : props.selected ? C.raised : C.surface,
       }}
+      hoverStyle={props.primary ? { backgroundColor: C.accentHover } : controlHoverStyle}
+      focusStyle={props.primary ? { backgroundColor: C.accentHover } : controlFocusStyle}
+      disabledStyle={controlDisabledStyle}
     >
-      <Text
-        style={{
-          fontSize: 16,
-          lineHeight: 16,
-          color: props.disabled ? C.muted : props.primary ? C.accent : C.text,
-        }}
-      >
-        {props.label}
-      </Text>
+      <If when={props.kind}>
+        <ChoiceIndicator kind="radio" checked={!!props.selected} disabled={props.disabled} />
+      </If>
+      <If when={props.icon}>
+        <Icon
+          name={props.icon!}
+          color={props.disabled ? C.muted : props.primary ? C.background : C.secondary}
+        />
+      </If>
+      <If when={!props.iconOnly}>
+        <Text
+          style={{
+            ...bodyTextStyle,
+            flexShrink: 1,
+            color: props.disabled ? C.muted : props.primary ? C.background : C.text,
+            fontWeight: props.primary ? '600' : '400',
+          }}
+        >
+          {props.label}
+        </Text>
+      </If>
     </Button>
   );
 }
@@ -82,6 +121,25 @@ function interactionPermissions(value: any): string {
         ? 'Network: no additional access'
         : `Network: listed destinations only\n${value.network.restricted.destinations.map((target: any) => `  ${target.host}:${target.port}`).join('\n')}`;
   return [...(paths.length ? paths : ['Filesystem: no additional access']), network].join('\n\n');
+}
+
+function outcomeSummary(outcome: InteractionOutcome): string {
+  if (outcome.kind === 'form_answer')
+    return outcome.action === 'accept'
+      ? `Form submitted · ${Object.keys(outcome.values).length} fields`
+      : outcome.action === 'decline'
+        ? 'Form declined'
+        : 'Form cancelled';
+  if (outcome.kind === 'question_answer') return 'Answers submitted';
+  if (outcome.kind === 'permissions_decision')
+    return outcome.decision.decision === 'allow'
+      ? `Access allowed · ${outcome.decision.scope === 'once' ? 'This call' : outcome.decision.scope === 'turn' ? 'This turn' : 'This session'}`
+      : 'Access denied';
+  if (outcome.kind === 'service_approval_decision')
+    return outcome.decision === 'allow' ? 'Tool call allowed' : 'Tool call denied';
+  if (outcome.kind === 'client_capability_decision')
+    return outcome.decision === 'allow' ? 'Capability allowed' : 'Capability denied';
+  return `Request closed · ${outcome.reason.replaceAll('_', ' ')}`;
 }
 
 export function InteractionPanel({
@@ -501,22 +559,44 @@ export function InteractionPanel({
         style={{
           width: Math.max(8, Math.min(768, windowSize().width - 16)),
           height: Math.max(80, Math.min(640, windowSize().height - 32)),
-          padding: 16,
-          gap: 16,
-          backgroundColor: C.background,
+          backgroundColor: C.surface,
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: C.line,
         }}
       >
-        <View style={{ flexDirection: 'row', gap: 16 }}>
-          <Text
-            style={{ flex: 1, color: C.warning, fontSize: 16, lineHeight: 16, fontWeight: '700' }}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderBottomWidth: 1,
+            borderBottomColor: C.line,
+          }}
+        >
+          <If
+            when={['service_approval', 'permissions', 'client_capability'].includes(
+              request()?.kind,
+            )}
           >
+            <Icon name="shield" color={C.secondary} />
+          </If>
+          <Text style={{ ...bodyTextStyle, flex: 1, color: C.text, fontWeight: '600' }}>
             {title()}
           </Text>
-          <InteractionAction label="[Esc] Close" onPress={close} />
+          <InteractionAction
+            label="Close request"
+            icon="close"
+            iconOnly
+            tooltip="Close · Esc"
+            onPress={close}
+          />
         </View>
-        <Scroll style={{ flex: 1, minHeight: 0 }} contentStyle={{ gap: 16 }}>
+        <Scroll style={{ flex: 1, minHeight: 0 }} contentStyle={{ padding: 16, gap: 16 }}>
           <If when={!record()}>
-            <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>
               {loading() ? 'Reading the original request…' : 'Request not available.'}
             </Text>
           </If>
@@ -525,17 +605,26 @@ export function InteractionPanel({
             else={
               <View style={{ gap: 16 }}>
                 <If when={request()?.kind === 'service_approval'}>
-                  <Text
-                    selectable
-                    style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
-                  >{`${request()?.toolName}\n${request()?.service}.${request()?.method}`}</Text>
-                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                  <View style={{ gap: 4 }}>
+                    <Text selectable style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
+                      {request()?.toolName}
+                    </Text>
+                    <Text selectable style={{ ...codeTextStyle, color: C.muted }}>
+                      {`${request()?.service}.${request()?.method}`}
+                    </Text>
+                  </View>
+                  <Text style={{ ...bodyTextStyle, color: C.secondary }}>
                     Approve this original call only. This does not grant access to future calls.
                   </Text>
-                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                    {argumentsText()}
-                  </Text>
-                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
+                  <View
+                    style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 8 }}
+                  >
+                    <Text style={{ ...captionTextStyle, color: C.muted }}>Original arguments</Text>
+                    <Text selectable style={{ ...codeTextStyle, color: C.text }}>
+                      {argumentsText()}
+                    </Text>
+                  </View>
+                  <Text style={{ ...captionTextStyle, color: C.muted }}>
                     {completeArguments()
                       ? 'Complete original arguments loaded.'
                       : `${interactionBytes(argumentsText())} of ${argumentTotal() ?? '?'} argument bytes loaded. Read all before allowing.`}
@@ -543,6 +632,7 @@ export function InteractionPanel({
                   <If when={argumentError()}>
                     <InteractionAction
                       label="Retry original arguments"
+                      icon="refresh"
                       disabled={argumentBusy()}
                       onPress={inputAction(readRenderedArguments, {
                         sessionId,
@@ -550,70 +640,85 @@ export function InteractionPanel({
                         sourceJSON: sourceIdentity(),
                       })}
                     />
-                  </If>
-                  <If when={argumentError()}>
-                    <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>
-                      {argumentError()}
-                    </Text>
+                    <Text style={{ ...bodyTextStyle, color: C.danger }}>{argumentError()}</Text>
                   </If>
                 </If>
                 <If when={request()?.kind === 'permissions'}>
-                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+                  <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
                     {request()?.request.reason}
                   </Text>
                   <If when={request()?.request.command}>
-                    <Text
-                      selectable
-                      style={{ color: C.text, fontSize: 16, lineHeight: 16 }}
-                    >{`$ ${request()?.request.command.command}\nIn ${request()?.request.command.cwd}`}</Text>
-                  </If>
-                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                    {request()?.kind === 'permissions'
-                      ? interactionPermissions(request().request.permissions)
-                      : ''}
-                  </Text>
-                  <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                    Allow exactly these paths and network destinations for:
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                    <Each
-                      of={
-                        request()?.toolUseId === null
-                          ? ['turn', 'session']
-                          : ['once', 'turn', 'session']
-                      }
+                    <View
+                      style={{
+                        gap: 8,
+                        padding: 12,
+                        backgroundColor: C.background,
+                        borderRadius: 8,
+                      }}
                     >
-                      {(duration) => (
-                        <InteractionAction
-                          label={`${scope() === duration() ? '(*)' : '( )'} ${duration() === 'once' ? 'This call' : duration() === 'turn' ? 'This turn' : 'This session'}`}
-                          disabled={blocked()}
-                          selected={scope() === duration()}
-                          onPress={inputAction(chooseScope, {
-                            sessionId,
-                            requestId,
-                            value: duration() as InteractionScope,
-                          })}
-                        />
-                      )}
-                    </Each>
+                      <Text selectable style={{ ...codeTextStyle, color: C.text }}>
+                        {request()?.request.command.command}
+                      </Text>
+                      <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
+                        {`Working directory: ${request()?.request.command.cwd}`}
+                      </Text>
+                    </View>
+                  </If>
+                  <View style={{ gap: 8 }}>
+                    <Text style={{ ...captionTextStyle, color: C.muted }}>Requested access</Text>
+                    <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
+                      {request()?.kind === 'permissions'
+                        ? interactionPermissions(request().request.permissions)
+                        : ''}
+                    </Text>
+                  </View>
+                  <View style={{ gap: 8 }}>
+                    <Text style={{ ...bodyTextStyle, color: C.secondary }}>
+                      Allow exactly these paths and network destinations for:
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      <Each
+                        of={
+                          request()?.toolUseId === null
+                            ? ['turn', 'session']
+                            : ['once', 'turn', 'session']
+                        }
+                      >
+                        {(duration) => (
+                          <InteractionAction
+                            label={
+                              duration() === 'once'
+                                ? 'This call'
+                                : duration() === 'turn'
+                                  ? 'This turn'
+                                  : 'This session'
+                            }
+                            kind="radio"
+                            disabled={blocked()}
+                            selected={scope() === duration()}
+                            onPress={inputAction(chooseScope, {
+                              sessionId,
+                              requestId,
+                              value: duration() as InteractionScope,
+                            })}
+                          />
+                        )}
+                      </Each>
+                    </View>
                   </View>
                 </If>
                 <If when={request()?.kind === 'question'}>
                   <Each<InteractionQuestion> of={request()?.questions ?? []}>
                     {(question, index) => (
-                      <View style={{ gap: 16 }}>
+                      <View style={{ gap: 8 }}>
                         <Text
                           selectable
-                          style={{
-                            color: C.text,
-                            fontSize: 16,
-                            lineHeight: 16,
-                            fontWeight: '600',
-                          }}
+                          style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}
                         >{`${index() + 1}. ${question().question}`}</Text>
                         <Each of={question().options}>
                           {(option) => (
                             <Button
+                              accessibilityLabel={option().label}
                               disabled={blocked()}
                               selected={answers()[index()]?.value === option().label}
                               onPress={inputAction(chooseRendered, {
@@ -624,31 +729,45 @@ export function InteractionPanel({
                                 value: option().label,
                                 other: false,
                               })}
-                              style={{ paddingHorizontal: 8, backgroundColor: C.surface }}
+                              style={{
+                                ...controlStyle,
+                                flexDirection: 'row',
+                                alignItems: 'flex-start',
+                                justifyContent: 'flex-start',
+                                gap: 12,
+                                backgroundColor:
+                                  answers()[index()]?.value === option().label
+                                    ? C.raised
+                                    : C.surface,
+                              }}
+                              hoverStyle={controlHoverStyle}
+                              focusStyle={controlFocusStyle}
+                              disabledStyle={controlDisabledStyle}
                             >
-                              <Text
-                                style={{
-                                  color:
-                                    answers()[index()]?.value === option().label
-                                      ? C.accent
-                                      : C.text,
-                                  fontSize: 16,
-                                  lineHeight: 16,
-                                }}
-                              >{`${answers()[index()]?.value === option().label ? '(*)' : '( )'} ${option().label}`}</Text>
-                              <If when={option().description}>
-                                <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-                                  {option().description}
+                              <ChoiceIndicator
+                                kind="radio"
+                                checked={answers()[index()]?.value === option().label}
+                                disabled={blocked()}
+                              />
+                              <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                                <Text
+                                  style={{ ...bodyTextStyle, color: blocked() ? C.muted : C.text }}
+                                >
+                                  {option().label}
                                 </Text>
-                              </If>
+                                <If when={option().description}>
+                                  <Text style={{ ...bodyTextStyle, color: C.muted }}>
+                                    {option().description}
+                                  </Text>
+                                </If>
+                              </View>
                             </Button>
                           )}
                         </Each>
-                        <View style={{ flexDirection: 'row', gap: 16 }}>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           <InteractionAction
-                            label={
-                              answers()[index()]?.other ? '(*) Other answer' : '( ) Other answer'
-                            }
+                            label="Other answer"
+                            kind="radio"
                             disabled={blocked()}
                             selected={answers()[index()]?.other}
                             onPress={inputAction(chooseRendered, {
@@ -661,7 +780,8 @@ export function InteractionPanel({
                             })}
                           />
                           <InteractionAction
-                            label={answers()[index()]?.value === null ? '(*) Skip' : '( ) Skip'}
+                            label="Skip"
+                            kind="radio"
                             disabled={blocked()}
                             selected={answers()[index()]?.value === null}
                             onPress={inputAction(chooseRendered, {
@@ -676,19 +796,24 @@ export function InteractionPanel({
                         </View>
                         <If when={answers()[index()]?.other}>
                           <Input
+                            accessibilityLabel={`Other answer ${index() + 1}`}
                             value={String(answers()[index()]?.value ?? '')}
                             readonly={blocked()}
                             placeholder="Your answer"
                             onChange={(value) => choose(index(), value, true)}
                             style={{
+                              ...inputTextStyle,
                               placeholderColor: C.muted,
-                              minHeight: 32,
-                              paddingHorizontal: 8,
+                              height: compact() ? 32 : 40,
+                              paddingHorizontal: 12,
+                              paddingVertical: compact() ? 4 : 8,
                               color: C.text,
-                              backgroundColor: C.surface,
-                              fontSize: 16,
-                              lineHeight: 16,
+                              backgroundColor: C.background,
+                              borderRadius: inputBorderRadius,
+                              borderWidth: 1,
+                              borderColor: C.line,
                             }}
+                            focusStyle={{ borderColor: C.accent }}
                           />
                         </If>
                       </View>
@@ -705,9 +830,7 @@ export function InteractionPanel({
                     edit={editForm}
                   />
                   <If when={form().error}>
-                    <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
-                      {form().error}
-                    </Text>
+                    <Text style={{ ...bodyTextStyle, color: C.warning }}>{form().error}</Text>
                   </If>
                 </If>
                 <If when={request()?.kind === 'client_capability'}>
@@ -716,95 +839,149 @@ export function InteractionPanel({
               </View>
             }
           >
-            <Text style={{ color: C.accent, fontSize: 16, lineHeight: 16 }}>Recorded outcome</Text>
-            <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-              {record()?.outcome?.kind === 'form_answer'
-                ? record().outcome.action === 'accept'
-                  ? `Form submitted · ${Object.keys(record().outcome.values).length} fields`
-                  : record().outcome.action === 'decline'
-                    ? 'Form declined'
-                    : 'Form cancelled'
-                : JSON.stringify(record()?.outcome, null, 2)}
-            </Text>
+            <View style={{ gap: 8 }}>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>Recorded outcome</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Icon name="check" color={C.accent} />
+                <Text
+                  selectable
+                  style={{
+                    ...bodyTextStyle,
+                    flex: 1,
+                    minWidth: 0,
+                    color: C.text,
+                    fontWeight: '600',
+                  }}
+                >
+                  {record()?.outcome ? outcomeSummary(record().outcome) : ''}
+                </Text>
+              </View>
+            </View>
+            <If when={record()?.outcome?.kind !== 'form_answer'}>
+              <View style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 8 }}>
+                <Text style={{ ...captionTextStyle, color: C.muted }}>Original response</Text>
+                <Text selectable style={{ ...codeTextStyle, color: C.secondary }}>
+                  {JSON.stringify(record()?.outcome, null, 2)}
+                </Text>
+              </View>
+            </If>
           </If>
           <If when={error()}>
-            <Text style={{ color: C.danger, fontSize: 16, lineHeight: 16 }}>{error()}</Text>
+            <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
+              {error()}
+            </Text>
           </If>
           <If when={uncertain() && !record()?.outcome}>
-            <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+            <Text style={{ ...bodyTextStyle, color: C.warning }}>
               An original answer receipt is unresolved. Refresh is read-only; further answers stay
               disabled.
             </Text>
           </If>
           <If when={request()?.kind === 'question' && !record()?.outcome && !questionReady()}>
-            <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-              Choose an option, type Other, or explicitly Skip each question. Other answers allow up
-              to 2048 UTF-8 bytes.
+            <Text style={{ ...captionTextStyle, color: C.muted }}>
+              Choose an option, write another answer, or skip each question. Written answers allow
+              up to 2048 UTF-8 bytes.
             </Text>
           </If>
           <If when={record() && !record().outcome && !pending() && !loading()}>
-            <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+            <Text style={{ ...bodyTextStyle, color: C.warning }}>
               This request is no longer listed as pending. Refresh to read its canonical outcome.
             </Text>
           </If>
         </Scroll>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-          <If when={request()?.kind === 'form' && !record()?.outcome}>
-            <InteractionAction
-              label="[D] Decline"
-              disabled={blocked()}
-              onPress={answerBinding(denialAnswer())}
-            />
-            <InteractionAction
-              label="Cancel request"
-              disabled={blocked()}
-              onPress={answerBinding({ kind: 'form', action: 'cancel' })}
-            />
-          </If>
-          <If
-            when={
-              !record()?.outcome &&
-              (['service_approval', 'permissions', 'question', 'form'].includes(request()?.kind) ||
-                (request()?.kind === 'client_capability' && computerCapability(request())))
-            }
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            padding: 12,
+            borderTopWidth: 1,
+            borderTopColor: C.line,
+          }}
+        >
+          <InteractionAction
+            label="Refresh status"
+            icon="refresh"
+            iconOnly={windowSize().width < 720}
+            tooltip="Refresh status · Ctrl+R"
+            disabled={loading() || busy()}
+            onPress={inputAction(refreshRendered, { sessionId, requestId })}
+          />
+          <View
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              justifyContent: 'flex-end',
+              gap: 8,
+            }}
           >
-            <InteractionAction
-              primary
-              label={
-                busy()
-                  ? 'Recording answer…'
-                  : request()?.kind === 'form'
-                    ? '[Ctrl+Enter] Submit form'
-                    : request()?.kind === 'question'
-                      ? '[Ctrl+Enter] Submit answers'
-                      : '[Ctrl+Enter] Allow'
-              }
-              disabled={
-                blocked() ||
-                (request()?.kind === 'question' && !questionReady()) ||
-                (request()?.kind === 'form' && !form().answer) ||
-                (request()?.kind === 'service_approval' &&
-                  (!completeArguments() || argumentBusy() || !!argumentError()))
-              }
-              onPress={answerBinding(submissionAnswer())}
-            />
-            <If when={!['question', 'form'].includes(request()?.kind)}>
+            <If when={request()?.kind === 'form' && !record()?.outcome}>
               <InteractionAction
-                label="[D] Deny"
+                label="Cancel request"
+                disabled={blocked()}
+                onPress={answerBinding({ kind: 'form', action: 'cancel' })}
+              />
+              <InteractionAction
+                label="Decline"
+                tooltip="Decline · D"
                 disabled={blocked()}
                 onPress={answerBinding(denialAnswer())}
               />
             </If>
-          </If>
-          <InteractionAction
-            label="[Ctrl+R] Refresh status"
-            disabled={loading() || busy()}
-            onPress={inputAction(refreshRendered, { sessionId, requestId })}
-          />
+            <If
+              when={
+                !record()?.outcome &&
+                (['service_approval', 'permissions'].includes(request()?.kind) ||
+                  (request()?.kind === 'client_capability' && computerCapability(request())))
+              }
+            >
+              <InteractionAction
+                label="Deny"
+                tooltip="Deny · D"
+                disabled={blocked()}
+                onPress={answerBinding(denialAnswer())}
+              />
+            </If>
+            <If
+              when={
+                !record()?.outcome &&
+                (['service_approval', 'permissions', 'question', 'form'].includes(
+                  request()?.kind,
+                ) ||
+                  (request()?.kind === 'client_capability' && computerCapability(request())))
+              }
+            >
+              <InteractionAction
+                primary
+                tooltip={
+                  request()?.kind === 'form'
+                    ? 'Submit form · Ctrl+Enter'
+                    : request()?.kind === 'question'
+                      ? 'Submit answers · Ctrl+Enter'
+                      : 'Allow · Ctrl+Enter'
+                }
+                label={
+                  busy()
+                    ? 'Recording answer…'
+                    : request()?.kind === 'form'
+                      ? 'Submit form'
+                      : request()?.kind === 'question'
+                        ? 'Submit answers'
+                        : 'Allow'
+                }
+                disabled={
+                  blocked() ||
+                  (request()?.kind === 'question' && !questionReady()) ||
+                  (request()?.kind === 'form' && !form().answer) ||
+                  (request()?.kind === 'service_approval' &&
+                    (!completeArguments() || argumentBusy() || !!argumentError()))
+                }
+                onPress={answerBinding(submissionAnswer())}
+              />
+            </If>
+          </View>
         </View>
-        <Text style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>
-          Tab to move · Enter to activate · Esc closes without answering
-        </Text>
       </View>
     </Dialog>
   );
