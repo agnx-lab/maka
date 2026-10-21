@@ -48,6 +48,7 @@ export function MessageRow({
   ownerKey,
   reasoningPreview,
   toolBodyMaxHeight,
+  onToolReading,
   finalActions,
 }: {
   item: () => Row;
@@ -59,6 +60,7 @@ export function MessageRow({
   ownerKey?: () => string;
   reasoningPreview?: () => boolean;
   toolBodyMaxHeight?: () => number;
+  onToolReading?(key: string): void;
   finalActions?(row: () => Row, ownerKey: () => string): JSX.Element;
 }) {
   const rowKey = (row: Row) => ownerKey?.() ?? messageKey(row);
@@ -218,6 +220,9 @@ export function MessageRow({
                       expanded={() => expanded() ?? false}
                       original={() => sourceMode() ?? false}
                       bodyMaxHeight={toolBodyMaxHeight}
+                      reading={() => {
+                        if (expanded()) onToolReading?.(rowKey(row()));
+                      }}
                       previewImage={previewImage}
                       expand={setExpanded}
                       showOriginal={setSourceMode}

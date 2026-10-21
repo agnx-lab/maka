@@ -93,6 +93,42 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         let narrow = wait_view(&mut view, |screen| screen.contains("Read lines") && screen.contains("起点_原始")).await;
         evidence("tool-read-narrow-reopened", &narrow);
         view.resize(120, 40);
+
+        // Reading inside the card also pauses the enclosing turn's follower.
+        // A real reasoning part appends another row to this same process group.
+        support::focus_activity(&mut view).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+        let wide = wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("Read lines") && screen.contains("起点_原始")).await;
+        support::scroll_snapshot_text(&mut view, &wide, "起点_原始", MouseEventKind::ScrollDown);
+        let reading = wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument") && screen.contains("↓ Latest") && !screen.contains("起点_原始")).await;
+        let visible_source = |screen: &str| screen.lines().enumerate()
+            .filter(|(_, line)| line.contains(" │ "))
+            .map(|(row, line)| (row, line.to_owned())).collect::<Vec<_>>();
+        let anchor = visible_source(&reading);
+        assert!(!anchor.is_empty());
+        continuation.thinking("INNER_STREAM_A").await;
+        let anchored = wait_view(&mut view, |screen| screen.contains("Analyzing the request") && screen.contains("INNER_STREAM_A")).await;
+        assert_eq!(visible_source(&anchored), anchor, "new same-group reasoning moved the original tool reader:\n{anchored}");
+        assert!(anchored.contains("v WorkspaceDocument") && anchored.contains("Original details"));
+        evidence("tool-read-stream-keeps-local-position", &anchored);
+
+        // Return through the real control, expand the actual new reasoning
+        // source, then explicitly resume following before its height grows.
+        support::click_button(&mut view, "Return to latest").await;
+        wait_view(&mut view, |screen| screen.contains("◇ Think · INNER_STREAM_A")).await;
+        support::click_text(&mut view, "◇ Think");
+        wait_enabled_node(&mut view, "INNER_STREAM_A").await;
+        support::click_button(&mut view, "Return to latest").await;
+        wait_focused_input(&mut view, "Message composer").await;
+        wait_view(&mut view, |screen| screen.contains("INNER_STREAM_A") && !screen.contains("↓ Latest")).await;
+        let appended: String = (0..36).map(|line| format!("\nINNER_RESUMED_{line:02}")).collect();
+        continuation.thinking(&appended).await;
+        let resumed = wait_view(&mut view, |screen| screen.contains("INNER_RESUMED_35")).await;
+        assert!(resumed.contains("INNER_RESUMED_34"), "the real expanded source tail must follow, rather than only its header:\n{resumed}");
+        continuation.thinking("\nINNER_RESUMED_AFTER").await;
+        let following = wait_view(&mut view, |screen| screen.contains("INNER_RESUMED_AFTER")).await;
+        evidence("tool-read-return-resumes-real-stream", &following);
+
         continuation.delta("TOOL_CARD_TURN_CONTINUES").await;
         continuation.finish().await;
         fixture.idle(&client, &fixture.session).await;

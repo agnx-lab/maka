@@ -207,6 +207,7 @@ export function ToolCard(props: {
   expanded(): boolean;
   original(): boolean;
   bodyMaxHeight?(): number;
+  reading?(): void;
   expand(action: { sessionId: string; key: string; value: boolean }): void;
   showOriginal(action: { sessionId: string; key: string; value: boolean }): void;
   previewImage(image: ImagePreview): void;
@@ -300,6 +301,7 @@ export function ToolCard(props: {
           </Button>
           <Scroll
             accessibilityLabel="Tool details"
+            onScroll={() => props.reading?.()}
             style={{
               minHeight: 16,
               minWidth: 0,

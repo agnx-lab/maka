@@ -228,6 +228,19 @@ function ActivityLog(props: {
           onScroll={(event) => {
             if (!alive || lease !== state.lease) return;
             const away = event.y < Math.max(0, event.contentHeight - event.height) - 1;
+            // A capped tool reader can be at the turn's bottom while the user
+            // is reading its original. Only an explicit return resumes follow.
+            if (
+              !away &&
+              !state.following() &&
+              props.group().rowIds.some((id) => {
+                const row = props.row(id);
+                return (
+                  (row?.tool != null || row?.role === 'tool_call' || row?.role === 'tool_result') &&
+                  props.rowState(id).expanded() === true
+                );
+              })
+            ) return;
             state.following.set(!away);
             props.reading(away);
           }}
@@ -284,6 +297,14 @@ function ActivityLog(props: {
                       viewState={props.rowState(ownedId())}
                       reasoningPreview={() => props.reasoningPreview(ownedId())}
                       toolBodyMaxHeight={() => Math.max(16, bodyMaxHeight() - 32)}
+                      onToolReading={(key) => {
+                        if (
+                          !alive || lease !== state.lease || key !== ownedId() ||
+                          !props.group().rowIds.includes(key) || !props.rowState(key).expanded()
+                        ) return;
+                        state.following.set(false);
+                        props.reading(true);
+                      }}
                       sessionId={props.sessionId}
                       through={props.through}
                       previewImage={props.previewImage}

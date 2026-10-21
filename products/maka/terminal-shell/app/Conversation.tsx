@@ -1480,12 +1480,16 @@ export function Conversation(props: ConversationProps) {
     jumpLatest(turnId) {
       cancelTurnNavigation();
       awayFromLatest.set(false);
-      innerReader.set(null);
       const group = projection().entries.findLast(
         (entry) => entry.kind === 'process' && entry.turnId === turnId,
       );
-      if (group?.kind === 'process')
-        groupStates.get(group.key)?.list?.scrollToEnd({ animated: false });
+      if (group?.kind === 'process') {
+        const state = groupState(group.key);
+        state.following.set(true);
+        if (state.list) state.list.scrollToEnd({ animated: false });
+        else state.opening = 'bottom';
+      }
+      innerReader.set(null);
       list?.scrollToEnd({ animated: false });
       props.focusComposer();
     },
