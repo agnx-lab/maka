@@ -32,6 +32,44 @@ pub(super) struct HostAssets(pub(super) Arc<Owner>);
 
 impl Assets for HostAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
+        if let Some(encoded) = uri.strip_prefix(super::files::PREFIX) {
+            if uri.len() > 8192 {
+                return Err("Current file selector is too long".into());
+            }
+            let source: maka_agent_api::contract::FileRead = serde_json::from_slice(
+                &URL_SAFE_NO_PAD
+                    .decode(encoded)
+                    .map_err(|_| "Invalid current file selector")?,
+            )
+            .map_err(|_| "Invalid current file selector")?;
+            source
+                .path
+                .validate()
+                .map_err(|_| "Invalid current file path")?;
+            if source.session_id.is_empty()
+                || source.session_id.len() > 128
+                || source.expected_version.is_none()
+            {
+                return Err("Invalid current file selector".into());
+            }
+            let owner = self.0.clone();
+            return self.0.runtime.block_on(execute(owner.clone(), async move {
+                match super::files::read(&owner, &source).await? {
+                    super::files::Outcome::Ready(capture)
+                        if matches!(
+                            capture.content,
+                            maka_agent_api::contract::FileContent::Image { .. }
+                        ) =>
+                    {
+                        Ok(capture.bytes)
+                    }
+                    _ => Err(
+                        "The current image changed or is unavailable; refresh the file preview"
+                            .into(),
+                    ),
+                }
+            }));
+        }
         let Some(encoded) = uri.strip_prefix("asset:/tool-image/") else {
             return crate::ApplicationAssets.read(uri);
         };

@@ -20,6 +20,7 @@
 //! The application receives this already connected Host object; it cannot choose a Root.
 
 mod assets;
+mod files;
 
 use maka_app_client::{Client, Subscription, SubscriptionEvent};
 use nsh_core::{JsonValue, ui::prelude::*};
@@ -130,6 +131,13 @@ async fn execute<T: Send + 'static>(
 
 #[class]
 impl ApplicationHost {
+    /// Display only. Keep the original opaque WorkspacePath for every Host call.
+    pub fn path_label(&self, path: JsonValue) -> Result<String, String> {
+        let path: maka_agent_api::contract::WorkspacePath =
+            serde_json::from_value(path).map_err(|_| "Invalid workspace path")?;
+        path.validate().map_err(|_| "Invalid workspace path")?;
+        files::path_label(&path)
+    }
     /// The optional session initially requested by the launcher.
     #[getter]
     pub fn initial_session(&self) -> Option<String> {
@@ -173,11 +181,19 @@ impl ApplicationHost {
     ) -> Result<Instance<ScopedSubscription>, String> {
         let owner = this.with(|host| host.owner.clone());
         drop(this);
+        let kind = if endpoint == AGENT && method == "readFile" {
+            SubscriptionKind::File(Some(
+                serde_json::from_value(input.clone()).map_err(|_| "Invalid file read selector")?,
+            ))
+        } else {
+            SubscriptionKind::Events
+        };
         let subscription = execute(owner.clone(), async move {
             let subscription = owner.client.subscribe(&endpoint, &method, input).await?;
             Ok(ScopedSubscription {
                 owner,
                 subscription: Arc::new(subscription),
+                kind,
             })
         })
         .await?;
@@ -373,6 +389,11 @@ impl Scope {
 pub struct ScopedSubscription {
     owner: Arc<Owner>,
     subscription: Arc<Subscription>,
+    kind: SubscriptionKind,
+}
+enum SubscriptionKind {
+    Events,
+    File(Option<maka_agent_api::contract::FileRead>),
 }
 
 impl Drop for ScopedSubscription {
@@ -385,8 +406,30 @@ impl Drop for ScopedSubscription {
 
 #[class]
 impl ScopedSubscription {
+    /// Verify a complete current-file stream using its original selector, off the JS heap.
+    pub async fn read_file(this: Instance<Self>) -> Result<JsonValue, String> {
+        let (owner, subscription, source) = this.with_mut(|item| {
+            let source = match &mut item.kind {
+                SubscriptionKind::File(source) => source.take(),
+                SubscriptionKind::Events => None,
+            };
+            (item.owner.clone(), item.subscription.clone(), source)
+        });
+        drop(this);
+        let source = source.ok_or("File subscription already consumed or is not a file read")?;
+        execute(owner, async move {
+            let outcome = files::collect(&subscription, &source).await?;
+            tokio::task::spawn_blocking(move || files::presentation(outcome, source))
+                .await
+                .map_err(|_| "Current file presentation worker failed")?
+        })
+        .await
+    }
     /// Pull one observation from the original subscription.
     pub async fn next(this: Instance<Self>) -> Result<JsonValue, String> {
+        if this.with(|item| matches!(item.kind, SubscriptionKind::File(_))) {
+            return Err("Consume file subscriptions with readFile".into());
+        }
         let (owner, subscription) =
             this.with(|item| (item.owner.clone(), item.subscription.clone()));
         drop(this);
