@@ -1964,10 +1964,32 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
             }).unwrap_or_else(|| panic!("formatted token {token} is not visible:\n{rendered}"));
             assert!((0..token.len()).all(|index| buffer[(cells.0 + index as u16, cells.1)].modifier.contains(expected)), "terminal cells for {token} lost {expected:?}");
         }
-        let suffix = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n```txt\nRICH_CODE_BLOCK 中文原文\n```";
-        request.delta(suffix).await;
+        let table = "\n\n- RICH_LIST\n\n> RICH_QUOTE\n\n| RICH_TABLE_NAME | RICH_TABLE_VALUE |\n| :--- | ---: |\n| 中文表格 | 42 |\n| 完整单元格 | 8 |";
+        request.delta(table).await;
+        let rendered_table = wait_view_state(&mut view, |view, screen| {
+            view.accessibility_snapshot().iter().any(|node| node.label == "Markdown table")
+                && screen.contains("RICH_TABLE_NAME") && screen.contains("RICH_TABLE_VALUE")
+                && screen.lines().any(|line| line.contains("中文表格") && line.contains("42"))
+                && screen.lines().any(|line| line.contains("完整单元格") && line.contains("8"))
+                && !screen.contains("| RICH_TABLE_NAME")
+        }).await;
+        evidence("rich-response-live-table", &rendered_table);
+        let code = "\n\n```txt\nRICH_CODE_BLOCK 中文原文\n\tkeep trailing  \n\n```";
+        let suffix = format!("{table}{code}");
+        request.delta(code).await;
         // The stream remains physically open: parsing cannot wait for final.
         wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt")).await;
+        view.drain_service_output().for_each(drop);
+        support::click_button(&mut view, "Copy code").await;
+        let copied_code = wait_view(&mut view, |screen| screen.contains("Copied") && screen.contains("RICH_CODE_BLOCK")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "one code copy must emit exactly one native clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied, "RICH_CODE_BLOCK 中文原文\n\tkeep trailing  \n");
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("code copy must encode one complete OSC 52 command");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), "RICH_CODE_BLOCK 中文原文\n\tkeep trailing  \n".as_bytes());
+        evidence("rich-response-copies-exact-code", &copied_code);
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         // Host idle may precede the completed-turn seat in this native List.
