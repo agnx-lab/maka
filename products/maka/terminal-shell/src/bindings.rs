@@ -390,6 +390,24 @@ impl ScopedHost {
         Instance::new(uploads::UploadSubscription::new(self.scope.clone()))
     }
 
+    /// Distinguish a local selection failure from an original journaled upload.
+    pub async fn find_upload(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        let id = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+        execute(scope.owner.clone(), async move {
+            let operation = scope
+                .owner
+                .client
+                .find_upload(&scope.session, EDITOR, id)
+                .await?;
+            serde_json::to_value(operation).map_err(|error| error.to_string())
+        })
+        .await
+    }
+
     /// Read an original upload's receipt without selecting or uploading bytes again.
     pub async fn recover_upload(
         this: Instance<Self>,
