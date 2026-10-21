@@ -22,7 +22,7 @@ import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from './host';
 import { keymap } from 'nsh/keymap';
-import { C, Header } from './ui';
+import { C, Header, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
@@ -576,6 +576,9 @@ function App() {
       <If when={recoveredFork()}>
         <Button
           onPress={inputAction(openRecoveredFork, { id: recoveredFork()!.id, origin: selected() })}
+          style={{ ...controlStyle, alignSelf: 'flex-start' }}
+          hoverStyle={controlHoverStyle}
+          focusStyle={controlFocusStyle}
         >
           <Text style={{ color: C.accent }}>Open recovered fork · {recoveredFork()!.title}</Text>
         </Button>
@@ -583,7 +586,9 @@ function App() {
       <If
         when={error() || status() || switching() || busy() || !controlsKnown() || controls().length}
       >
-        <View style={{ backgroundColor: C.surface, paddingHorizontal: 16 }}>
+        <View
+          style={{ backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
+        >
           <If when={error()}>
             <Text selectable style={{ color: C.danger }}>
               {error()}
@@ -598,7 +603,13 @@ function App() {
             <Text style={{ color: C.muted }}>{status()}</Text>
           </If>
           <If when={!controlsKnown() || controls().length > 0}>
-            <Button disabled={recovering()} onPress={inputAction(recoverControls, null)}>
+            <Button
+              disabled={recovering()}
+              onPress={inputAction(recoverControls, null)}
+              style={controlStyle}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+            >
               <Text style={{ color: C.warning }}>
                 {recovering()
                   ? 'Reading original action receipts…'
@@ -612,7 +623,12 @@ function App() {
               key={(original) => original.id}
             >
               {(original) => (
-                <Button onPress={inputAction(abandonControl, original().id)}>
+                <Button
+                  onPress={inputAction(abandonControl, original().id)}
+                  style={controlStyle}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                >
                   <Text style={{ color: C.warning }}>
                     Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
                   </Text>
@@ -656,6 +672,9 @@ function App() {
                     maxHeight: 640,
                     backgroundColor: C.surface,
                     padding: 8,
+                    borderWidth: 1,
+                    borderColor: C.line,
+                    borderRadius: 16,
                   }}
                 >
                   <WorkspaceBrowser

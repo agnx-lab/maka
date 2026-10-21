@@ -22,7 +22,7 @@ import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 import { Image } from 'nsh/image';
 import type { YNode } from 'nsh';
-import { C } from './ui';
+import { C, captionTextStyle, controlStyle } from './ui';
 import { immutableAsset } from './immutableAsset';
 import type {
   AgentToolImageRead,
@@ -99,7 +99,7 @@ export function ImageThumbnail(props: {
           gap: 8,
         }}
       >
-        <Text style={{ color: size() ? C.accent : C.muted }}>
+        <Text style={{ ...captionTextStyle, color: size() ? C.accent : C.muted }}>
           {size()
             ? `Open image · ${size()!.width} × ${size()!.height}`
             : error()
@@ -135,7 +135,12 @@ export function ImageThumbnail(props: {
         <Text selectable style={{ color: C.danger }}>
           {error()}
         </Text>
-        <Button onPress={inputAction(retry, action)}>
+        <Button
+          onPress={inputAction(retry, action)}
+          style={controlStyle}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
           <Text style={{ color: C.accent }}>Retry image</Text>
         </Button>
       </If>

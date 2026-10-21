@@ -1107,14 +1107,14 @@ export function Conversation(props: ConversationProps) {
     const backend = observed.session.backend ?? observed.rememberedBackend;
     if (expectedBackend !== undefined && !sameBackend(backendIdentity(backend), expectedBackend))
       throw new Error('The model changed before confirmation. Send again to confirm it.');
-    if (backend?.kind !== 'model') throw new Error('Choose a model with Ctrl+G before sending.');
+    if (backend?.kind !== 'model') throw new Error('Choose a model before sending.');
     const resolved = await host.query('settings', 'resolveModel', {
       connectionId: backend.connectionId,
       modelId: backend.modelId,
     });
     if (!alive) return null;
     if (resolved.kind !== 'ready')
-      throw new Error(`Model unavailable: ${backend.modelId}. Press Ctrl+G to choose another.`);
+      throw new Error(`Model unavailable: ${backend.modelId}. Choose another model.`);
     return { model: resolved.choice.selection, thinkingLevel: backend.thinkingLevel ?? null };
   };
 
