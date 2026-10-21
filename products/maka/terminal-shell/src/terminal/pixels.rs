@@ -167,7 +167,7 @@ pub(super) fn run(
                 }
                 Phase::Upload(upload) => Phase::Ack {
                     upload,
-                    deadline: at + Duration::from_millis(250),
+                    deadline: at + Duration::from_secs(5),
                 },
                 Phase::Publish(offer) => {
                     let mut state = presentation.state.lock().unwrap();
