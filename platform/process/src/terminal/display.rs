@@ -359,9 +359,12 @@ mod tests {
     fn viewport_reads_only_the_requested_physical_extent_and_clamps_to_retained_history() {
         let mut source = Screen::new(maka_agent_facts::terminal::TerminalSize::new(8, 3).unwrap());
         source.write("zero\r\none\r\ntwo\r\nthree").unwrap();
-        let text = |view: &Viewport| view.rows.iter()
-            .map(|row| row.iter().map(|run| run.text.as_str()).collect::<String>())
-            .collect::<Vec<_>>();
+        let text = |view: &Viewport| {
+            view.rows
+                .iter()
+                .map(|row| row.iter().map(|run| run.text.as_str()).collect::<String>())
+                .collect::<Vec<_>>()
+        };
         let bottom = source.viewport(0, 2).unwrap();
         assert_eq!(bottom.first_line, 1);
         assert_eq!(bottom.scrollback_rows, 1);

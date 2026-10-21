@@ -137,7 +137,10 @@ impl Args {
     }
 }
 
-fn configuration(registry: nsh_core::ui::Registry, runtime: tokio::runtime::Handle) -> EngineConfig {
+fn configuration(
+    registry: nsh_core::ui::Registry,
+    runtime: tokio::runtime::Handle,
+) -> EngineConfig {
     let viewport = Size::new(Points(960.0), Points(640.0));
     let mut capabilities = nsh_core::access::Capabilities::default();
     capabilities.clipboard = true;
@@ -206,7 +209,11 @@ mod tests {
         const CHILD: &str = "MAKA_TERMINAL_DEFAULT_ROOT_TEST";
         if std::env::var_os(CHILD).is_some() {
             let select = |args: &[&str]| {
-                Command::try_parse_from(args).unwrap().args.root_path().unwrap()
+                Command::try_parse_from(args)
+                    .unwrap()
+                    .args
+                    .root_path()
+                    .unwrap()
             };
             assert_eq!(
                 select(&["maka-terminal-shell"]),

@@ -449,7 +449,11 @@ impl ScopedHost {
     }
 
     /// Execute one original terminal mutation in this immutable session.
-    pub async fn terminal(this: Instance<Self>, method: String, input: JsonValue) -> Result<JsonValue, String> {
+    pub async fn terminal(
+        this: Instance<Self>,
+        method: String,
+        input: JsonValue,
+    ) -> Result<JsonValue, String> {
         let scope = this.with(|host| host.scope.clone());
         drop(this);
         terminal::mutate(scope, method, input).await
@@ -463,14 +467,20 @@ impl ScopedHost {
     }
 
     /// Recover an original terminal receipt, never repeat its business input.
-    pub async fn recover_terminal(this: Instance<Self>, operation_id: String) -> Result<JsonValue, String> {
+    pub async fn recover_terminal(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
         let scope = this.with(|host| host.scope.clone());
         drop(this);
         terminal::recover(scope, operation_id).await
     }
 
     /// Fence a terminal original only if preparation did not commit.
-    pub async fn abandon_terminal(this: Instance<Self>, operation_id: String) -> Result<JsonValue, String> {
+    pub async fn abandon_terminal(
+        this: Instance<Self>,
+        operation_id: String,
+    ) -> Result<JsonValue, String> {
         let scope = this.with(|host| host.scope.clone());
         drop(this);
         terminal::abandon(scope, operation_id).await
@@ -705,9 +715,13 @@ impl ScopedSubscription {
         if this.with(|item| matches!(item.kind, SubscriptionKind::File(_))) {
             return Err("Consume file subscriptions with readFile".into());
         }
-        let (owner, subscription, terminal) = this.with(|item| (
-            item.owner.clone(), item.subscription.clone(), matches!(item.kind, SubscriptionKind::Terminal),
-        ));
+        let (owner, subscription, terminal) = this.with(|item| {
+            (
+                item.owner.clone(),
+                item.subscription.clone(),
+                matches!(item.kind, SubscriptionKind::Terminal),
+            )
+        });
         drop(this);
         execute(owner, async move {
             match subscription.next().await? {

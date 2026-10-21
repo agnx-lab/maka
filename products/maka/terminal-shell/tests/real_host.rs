@@ -35,9 +35,9 @@ mod oauth;
 mod plugin_settings;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
+mod support;
 #[path = "real_host/tool_cards.rs"]
 mod tool_cards;
-mod support;
 
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,

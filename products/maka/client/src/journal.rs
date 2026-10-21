@@ -480,7 +480,11 @@ impl Journal {
             .fetch_all(&self.0).await.map_err(error)?;
         rows.into_iter().map(decode_operation).collect()
     }
-    pub(crate) async fn pending_terminals(&self, host: &DeploymentRef, session: &str) -> Result<Vec<Operation>> {
+    pub(crate) async fn pending_terminals(
+        &self,
+        host: &DeploymentRef,
+        session: &str,
+    ) -> Result<Vec<Operation>> {
         let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner IS NULL AND json_extract(context,'$.endpoint')='terminal' AND json_extract(context,'$.sessionId')=? AND json_extract(context,'$.correlation')=? AND json_extract(context,'$.method') IN ('start','stop','control','release') AND (receipt IS NULL OR json_extract(receipt,'$.cleanup.kind')!='confirmed') AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(session).bind(serde_json::json!({"kind":"terminal"}).to_string())

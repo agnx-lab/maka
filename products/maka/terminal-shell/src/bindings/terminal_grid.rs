@@ -24,8 +24,8 @@ use maka_agent_facts::terminal::{
     display::{Assembly, Display, Part},
 };
 use maka_process::terminal::{Screen, display::Viewport};
-use nsh_core::{JsonValue, ui::prelude::*};
 use maka_workspace_api::terminal::OutputEvent as Output;
+use nsh_core::{JsonValue, ui::prelude::*};
 use serde_json::json;
 
 /// Native styled cells for a single terminal; the Host retains process ownership.
@@ -82,7 +82,9 @@ impl Live {
             self.initial_size = Some(initial);
         }
         if self.screen.size() != size {
-            self.screen.resize(size).map_err(|error| error.to_string())?;
+            self.screen
+                .resize(size)
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
@@ -101,7 +103,11 @@ impl Live {
 impl TerminalGrid {
     pub fn new(size: JsonValue) -> Result<Self, String> {
         let size: TerminalSize = serde_json::from_value(size).map_err(|error| error.to_string())?;
-        Ok(Self { content: Content::Live(Box::new(Live::new(size))), after: 0, transfer: None })
+        Ok(Self {
+            content: Content::Live(Box::new(Live::new(size))),
+            after: 0,
+            transfer: None,
+        })
     }
 
     /// Begin replaying a different original stream from sequence zero.
@@ -117,7 +123,9 @@ impl TerminalGrid {
             return Err("A retained terminal display is being received".into());
         }
         let Content::Live(live) = &mut self.content else {
-            return Err("A retained display is not a parser checkpoint; reset before raw replay".into());
+            return Err(
+                "A retained display is not a parser checkpoint; reset before raw replay".into(),
+            );
         };
         let terminal_duplicate = match (&event, live.status) {
             (Output::Closed { after, .. }, Status::Closed) => *after == self.after,
@@ -132,10 +140,17 @@ impl TerminalGrid {
         }
         let closed = matches!(&event, Output::Closed { .. });
         match event {
-            Output::Data { sequence, size, initial_size, data_base64 } => {
+            Output::Data {
+                sequence,
+                size,
+                initial_size,
+                data_base64,
+            } => {
                 validate_sequence(sequence, false)?;
                 if sequence > self.after {
-                    let bytes = STANDARD.decode(data_base64).map_err(|_| "Invalid terminal output base64")?;
+                    let bytes = STANDARD
+                        .decode(data_base64)
+                        .map_err(|_| "Invalid terminal output base64")?;
                     if bytes.is_empty() {
                         return Err("Empty terminal Data event".into());
                     }
@@ -144,14 +159,27 @@ impl TerminalGrid {
                     self.after = sequence;
                 }
             }
-            Output::Resize { sequence, size, initial_size } => {
+            Output::Resize {
+                sequence,
+                size,
+                initial_size,
+            } => {
                 validate_sequence(sequence, false)?;
                 if sequence > self.after {
                     live.geometry(initial_size, size)?;
                     self.after = sequence;
                 }
             }
-            Output::Pending { after, size, initial_size } | Output::Closed { after, size, initial_size } => {
+            Output::Pending {
+                after,
+                size,
+                initial_size,
+            }
+            | Output::Closed {
+                after,
+                size,
+                initial_size,
+            } => {
                 validate_sequence(after, true)?;
                 if after != self.after {
                     return Err("Terminal output cursor does not match the applied stream".into());
@@ -172,8 +200,21 @@ impl TerminalGrid {
     /// original PTY height until its own resize is observed in the raw stream.
     pub fn display(&self, offset: u32, rows: u16) -> Result<JsonValue, String> {
         let (viewport, status) = match &self.content {
-            Content::Live(live) => (live.screen.viewport(offset as usize, usize::from(rows.min(live.screen.size().rows())))?, live.status.name()),
-            Content::Settled(display) => (Viewport::from_display(display, offset as usize, usize::from(rows.min(display.metadata.size.rows())))?, "settled"),
+            Content::Live(live) => (
+                live.screen.viewport(
+                    offset as usize,
+                    usize::from(rows.min(live.screen.size().rows())),
+                )?,
+                live.status.name(),
+            ),
+            Content::Settled(display) => (
+                Viewport::from_display(
+                    display,
+                    offset as usize,
+                    usize::from(rows.min(display.metadata.size.rows())),
+                )?,
+                "settled",
+            ),
         };
         let mut value = serde_json::to_value(viewport).map_err(|error| error.to_string())?;
         value["after"] = json!(self.after);
@@ -192,15 +233,33 @@ impl TerminalGrid {
             }
         };
         let result = match part {
-            Part::Begin { metadata, scrollback_rows, last_alternate_size, .. } => {
+            Part::Begin {
+                metadata,
+                scrollback_rows,
+                last_alternate_size,
+                ..
+            } => {
                 self.transfer = None;
-                Assembly::begin(metadata, scrollback_rows, last_alternate_size)
-                    .map(|assembly| { self.transfer = Some(assembly); false })
+                Assembly::begin(metadata, scrollback_rows, last_alternate_size).map(|assembly| {
+                    self.transfer = Some(assembly);
+                    false
+                })
             }
-            Part::Rows { parts } => self.transfer.as_mut().ok_or("Terminal rows arrived without Begin")
-                .and_then(|assembly| assembly.rows(parts)).map(|()| false),
-            Part::End => self.transfer.take().ok_or("Terminal End arrived without Begin")
-                .and_then(Assembly::finish).map(|display| { self.content = Content::Settled(Box::new(display)); true }),
+            Part::Rows { parts } => self
+                .transfer
+                .as_mut()
+                .ok_or("Terminal rows arrived without Begin")
+                .and_then(|assembly| assembly.rows(parts))
+                .map(|()| false),
+            Part::End => self
+                .transfer
+                .take()
+                .ok_or("Terminal End arrived without Begin")
+                .and_then(Assembly::finish)
+                .map(|display| {
+                    self.content = Content::Settled(Box::new(display));
+                    true
+                }),
         };
         if result.is_err() {
             self.transfer = None;
@@ -234,14 +293,23 @@ impl Decoder {
         let mut consumed = 0;
         while consumed < self.pending.len() {
             match std::str::from_utf8(&self.pending[consumed..]) {
-                Ok(valid) => { text.push_str(valid); consumed = self.pending.len(); }
+                Ok(valid) => {
+                    text.push_str(valid);
+                    consumed = self.pending.len();
+                }
                 Err(error) => {
                     let end = consumed + error.valid_up_to();
                     text.push_str(std::str::from_utf8(&self.pending[consumed..end]).unwrap());
                     consumed = end;
                     match error.error_len() {
-                        Some(length) => { text.push('\u{fffd}'); consumed += length; }
-                        None if eof => { text.push('\u{fffd}'); consumed = self.pending.len(); }
+                        Some(length) => {
+                            text.push('\u{fffd}');
+                            consumed += length;
+                        }
+                        None if eof => {
+                            text.push('\u{fffd}');
+                            consumed = self.pending.len();
+                        }
                         None => break,
                     }
                 }
@@ -262,8 +330,12 @@ mod tests {
     }
 
     fn text(frame: &JsonValue, row: usize) -> String {
-        frame["rows"][row].as_array().unwrap().iter()
-            .map(|run| run["text"].as_str().unwrap()).collect::<String>()
+        frame["rows"][row]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|run| run["text"].as_str().unwrap())
+            .collect::<String>()
     }
 
     #[test]
@@ -277,20 +349,40 @@ mod tests {
             grid.apply(first).unwrap();
             grid.apply(data(2, &bytes[cut..], size.clone())).unwrap();
             let frame = grid.display(0, 2).unwrap();
-            assert_eq!(grid.display(0, 24).unwrap()["rows"].as_array().unwrap().len(), 2);
+            assert_eq!(
+                grid.display(0, 24).unwrap()["rows"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
             assert!(grid.display(0, 0).is_err());
             // The wide spacer is a real physical cell; the combining mark stays
             // attached to e rather than changing subsequent terminal columns.
-            assert_eq!(text(&frame, 0), "中 e\u{301}     ", "UTF-8/VT split at {cut}");
+            assert_eq!(
+                text(&frame, 0),
+                "中 e\u{301}     ",
+                "UTF-8/VT split at {cut}"
+            );
             assert_eq!(frame["metadata"]["cursor"]["x"], 3);
-            assert_eq!(frame["rows"][0][0]["style"]["foreground"], json!({"named":1}));
-            let combined = frame["rows"][0].as_array().unwrap().iter()
-                .find(|run| run["text"].as_str().unwrap().starts_with('e')).unwrap();
+            assert_eq!(
+                frame["rows"][0][0]["style"]["foreground"],
+                json!({"named":1})
+            );
+            let combined = frame["rows"][0]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|run| run["text"].as_str().unwrap().starts_with('e'))
+                .unwrap();
             assert_eq!(combined["lengths"][0], 2);
             assert_eq!(frame["metadata"]["input"]["mouseTrackingMode"], "drag");
             assert_eq!(frame["metadata"]["input"]["mouseEncoding"], "sgr");
             assert_eq!(frame["after"], 2);
-            grid.apply(json!({"kind":"resize","sequence":3,"initialSize":size,"size":{"cols":6,"rows":3}})).unwrap();
+            grid.apply(
+                json!({"kind":"resize","sequence":3,"initialSize":size,"size":{"cols":6,"rows":3}}),
+            )
+            .unwrap();
             let frame = grid.display(0, 3).unwrap();
             assert_eq!(frame["metadata"]["size"], json!({"cols":6,"rows":3}));
             assert_eq!(frame["rows"].as_array().unwrap().len(), 3);
@@ -302,11 +394,17 @@ mod tests {
         let size = json!({"cols":8,"rows":2});
         let mut grid = TerminalGrid::new(size.clone()).unwrap();
         grid.apply(data(1, &[0xe4, 0xb8], size.clone())).unwrap();
-        grid.apply(json!({"kind":"pending","after":1,"size":size,"initialSize":size})).unwrap();
+        grid.apply(json!({"kind":"pending","after":1,"size":size,"initialSize":size}))
+            .unwrap();
         assert_eq!(text(&grid.display(0, 2).unwrap(), 0), "        ");
-        assert!(grid.apply(json!({"kind":"pending","after":2,"size":size,"initialSize":size})).is_err());
-        grid.apply(data(2, &[0xad, 0x1b, b'[', b'6', b'n', 0xe4], size.clone())).unwrap();
-        grid.apply(json!({"kind":"closed","after":2,"size":size,"initialSize":size})).unwrap();
+        assert!(
+            grid.apply(json!({"kind":"pending","after":2,"size":size,"initialSize":size}))
+                .is_err()
+        );
+        grid.apply(data(2, &[0xad, 0x1b, b'[', b'6', b'n', 0xe4], size.clone()))
+            .unwrap();
+        grid.apply(json!({"kind":"closed","after":2,"size":size,"initialSize":size}))
+            .unwrap();
         let frame = grid.display(0, 2).unwrap();
         assert_eq!(text(&frame, 0), "中 �     ");
         assert_eq!(frame["status"], "closed");
@@ -321,21 +419,43 @@ mod tests {
         let mut original = Screen::new(TerminalSize::new(8, 2).unwrap());
         original.write("\x1b[32mretained").unwrap();
         let display = original.display();
-        let begin = Part::Begin { revision: 7, metadata: display.metadata, scrollback_rows: 0, last_alternate_size: None };
-        assert!(!grid.display_part(serde_json::to_value(&begin).unwrap()).unwrap());
+        let begin = Part::Begin {
+            revision: 7,
+            metadata: display.metadata,
+            scrollback_rows: 0,
+            last_alternate_size: None,
+        };
+        assert!(
+            !grid
+                .display_part(serde_json::to_value(&begin).unwrap())
+                .unwrap()
+        );
         assert_eq!(text(&grid.display(0, 2).unwrap(), 0), "live    ");
         assert!(grid.display_part(json!({"kind":"end"})).is_err());
         assert_eq!(text(&grid.display(0, 2).unwrap(), 0), "live    ");
-        grid.display_part(serde_json::to_value(begin).unwrap()).unwrap();
-        let parts = display.screen.into_iter().enumerate().map(|(row, runs)| RowPart {
-            buffer: Buffer::Screen, row: row as u32, column: 0, runs,
-        }).collect();
-        grid.display_part(serde_json::to_value(Part::Rows { parts }).unwrap()).unwrap();
+        grid.display_part(serde_json::to_value(begin).unwrap())
+            .unwrap();
+        let parts = display
+            .screen
+            .into_iter()
+            .enumerate()
+            .map(|(row, runs)| RowPart {
+                buffer: Buffer::Screen,
+                row: row as u32,
+                column: 0,
+                runs,
+            })
+            .collect();
+        grid.display_part(serde_json::to_value(Part::Rows { parts }).unwrap())
+            .unwrap();
         assert!(grid.display_part(json!({"kind":"end"})).unwrap());
         let frame = grid.display(0, 2).unwrap();
         assert_eq!(text(&frame, 0), "retained");
         assert_eq!(frame["status"], "settled");
-        assert!(grid.apply(data(2, b"unsafe continuation", size.clone())).is_err());
+        assert!(
+            grid.apply(data(2, b"unsafe continuation", size.clone()))
+                .is_err()
+        );
         grid.reset(size.clone()).unwrap();
         grid.apply(data(1, b"fresh", size)).unwrap();
         assert_eq!(text(&grid.display(0, 2).unwrap(), 0), "fresh   ");
