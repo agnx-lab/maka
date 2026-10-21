@@ -39,6 +39,7 @@ import {
   controlFocusStyle,
   controlDisabledStyle,
 } from './ui';
+import { Icon } from './Icon';
 
 type Location = {
   id: number;
@@ -61,6 +62,7 @@ export function WorkspacePicker(props: {
   const selected = signal(0);
   const loading = signal(false);
   const error = signal('');
+  const viewportHeight = signal(0);
   let alive = true;
   let serial = 0;
   const newLocation = (trail: AgentDirectory[]): Location => ({
@@ -80,7 +82,7 @@ export function WorkspacePicker(props: {
     const needle = query().trim().toLowerCase();
     return entries().filter((directory) => directory.name.toLowerCase().includes(needle));
   });
-  const count = () => Math.max(1, Math.min(8, Math.floor((windowSize().height - 288) / 32)));
+  const count = () => Math.max(1, Math.ceil(viewportHeight() / 32));
   const index = () => Math.min(selected(), Math.max(0, matches().length - 1));
   const isSelected = (directory: AgentDirectory) => {
     const row = matches()[index()];
@@ -150,6 +152,10 @@ export function WorkspacePicker(props: {
     if (owns(read) && original === read.id && read.trail.length)
       navigate(roots ? [] : read.trail.slice(0, -1));
   };
+  const retry = ({ location: original }: { location: number }) => {
+    const read = location();
+    if (owns(read) && original === read.id) navigate(read.trail);
+  };
   const choose = (action: FolderAction) => {
     const read = location();
     const directory = currentDirectory();
@@ -204,6 +210,46 @@ export function WorkspacePicker(props: {
       <Each of={[location().id]} key={(id: number) => id}>
         {() => {
           const read = location();
+          const status = () => (
+            <View style={{ gap: 8, padding: 12 }}>
+              <If when={loading()}>
+                <Text style={{ color: C.muted, fontSize: 13, lineHeight: 16 }}>
+                  Loading folders…
+                </Text>
+              </If>
+              <If when={!loading() && !error() && !matches().length}>
+                <Text style={{ color: C.muted, fontSize: 13, lineHeight: 16 }}>
+                  {query()
+                    ? 'No matching folders.'
+                    : read.trail.length
+                      ? 'This folder has no subfolders.'
+                      : 'No workspace locations are published by this Host.'}
+                </Text>
+              </If>
+              <If when={error()}>
+                <Text selectable style={{ color: C.danger, fontSize: 13, lineHeight: 16 }}>
+                  {error()}
+                </Text>
+                <Button
+                  accessibilityLabel="Retry folder"
+                  onPress={inputAction(retry, { location: read.id })}
+                  style={{
+                    ...controlStyle,
+                    alignSelf: 'flex-start',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
+                >
+                  <Icon name="refresh" color={C.secondary} />
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>Retry folder</Text>
+                </Button>
+              </If>
+            </View>
+          );
           return (
             <View
               ref={(node) => {
@@ -222,65 +268,198 @@ export function WorkspacePicker(props: {
               }}
               style={{
                 width: '100%',
-                maxWidth: 640,
+                maxWidth: 680,
+                height: Math.min(500, windowSize().height - 32),
                 maxHeight: '100%',
                 backgroundColor: C.surface,
-                padding: 16,
-                gap: 8,
                 borderWidth: 1,
                 borderRadius: 16,
                 borderColor: C.line,
               }}
             >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingHorizontal: 16,
+                  paddingTop: 12,
+                  paddingBottom: 8,
+                }}
+              >
+                <Icon name="folder" color={C.secondary} />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: C.text,
+                    fontSize: 18,
+                    lineHeight: 24,
+                    fontWeight: '600',
+                  }}
+                >
                   Choose workspace
                 </Text>
                 <Button
                   accessibilityLabel="Close workspace picker"
+                  tooltip="Close · Esc"
                   onPress={inputAction(props.close, props.instance)}
-                  style={controlStyle}
+                  style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.muted }}>Close</Text>
+                  <Icon name="close" color={C.muted} />
                 </Button>
               </View>
-              <Text numberOfLines={1} style={{ color: C.text }}>
-                {read.trail.length ? `Folder · ${read.trail.at(-1)!.name}` : 'Workspace locations'}
-              </Text>
-              <Text numberOfLines={1} style={{ color: C.muted }}>
-                {currentDirectory(read)?.path ??
-                  read.trail.at(-1)?.path ??
-                  'Open a location, then choose the folder where the conversation can work.'}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View
+                style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}
+              >
                 <Button
                   disabled={!read.trail.length}
                   accessibilityLabel="Parent workspace folder"
+                  tooltip="Parent folder · Alt+Up"
                   onPress={inputAction(back, { location: read.id })}
-                  style={controlStyle}
+                  style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>↑ Parent</Text>
+                  <Icon name="back" color={C.secondary} />
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>Parent</Text>
                 </Button>
                 <Button
                   disabled={!read.trail.length}
                   accessibilityLabel="Workspace locations"
                   onPress={inputAction(back, { location: read.id, roots: true })}
-                  style={controlStyle}
+                  style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>Locations</Text>
+                  <Icon name="folder" color={C.secondary} />
+                  <Text style={{ color: C.secondary, fontSize: 13 }}>Locations</Text>
                 </Button>
+              </View>
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                <Input
+                  ref={(node) => {
+                    removeSearchKeys();
+                    const unbind = [
+                      keymap.bind('up', () => move(read, -1), {
+                        when: 'always',
+                        repeat: true,
+                        within: node,
+                      }),
+                      keymap.bind('down', () => move(read, 1), {
+                        when: 'always',
+                        repeat: true,
+                        within: node,
+                      }),
+                      keymap.bind('enter', () => activate(read), { when: 'always', within: node }),
+                    ];
+                    removeSearchKeys = () => unbind.forEach((remove) => remove());
+                  }}
+                  autoFocus
+                  accessibilityLabel="Search workspace folders"
+                  value={query()}
+                  onChange={(text) => {
+                    if (!owns(read)) return;
+                    selected.set(0);
+                    query.set(text);
+                    list?.scrollToIndex({ index: 0, animated: false });
+                  }}
+                  placeholder="Search workspaces…"
+                  style={{
+                    placeholderColor: C.muted,
+                    color: C.text,
+                    height: compact() ? 32 : 40,
+                    backgroundColor: C.background,
+                    borderRadius: inputBorderRadius,
+                    paddingHorizontal: 12,
+                    fontSize: 14,
+                  }}
+                />
+              </View>
+              <List
+                each={matches()}
+                keyExtractor={(entry) => selectionKey(entry.selection)}
+                ref={(node) => {
+                  list = node;
+                }}
+                estimatedItemSize={32}
+                header={() => (
+                  <View style={{ gap: 4, paddingHorizontal: 16, paddingBottom: 12 }}>
+                    <Text
+                      style={{ color: C.text, fontSize: 13, lineHeight: 16, fontWeight: '600' }}
+                    >
+                      {read.trail.length
+                        ? `Folder · ${read.trail.at(-1)!.name}`
+                        : 'Workspace locations'}
+                    </Text>
+                    <Text selectable style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
+                      {currentDirectory(read)?.path ??
+                        read.trail.at(-1)?.path ??
+                        'Open a location, then choose the folder where the conversation can work.'}
+                    </Text>
+                  </View>
+                )}
+                empty={status}
+                footer={() => (
+                  <If when={matches().length > 0 && (loading() || error())}>{status()}</If>
+                )}
+                onLayout={(frame) => {
+                  if (owns(read)) viewportHeight.set(frame.size.height);
+                }}
+                onLoadMore={() => {
+                  void load(read);
+                }}
+                accessibilityLabel="Workspace folders"
+                style={{ flex: 1, minHeight: 32 }}
+              >
+                {(entry) => (
+                  <Button
+                    disabled={!!error()}
+                    accessibilityLabel={`Browse folder ${entry().name}`}
+                    tooltip={entry().path}
+                    selected={isSelected(entry())}
+                    onPress={inputAction(browse, {
+                      location: read.id,
+                      selection: entry().selection,
+                    })}
+                    style={{
+                      height: 32,
+                      paddingHorizontal: 16,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      backgroundColor: isSelected(entry()) ? C.line : C.surface,
+                    }}
+                    hoverStyle={{ backgroundColor: C.raised }}
+                    focusStyle={{ backgroundColor: C.raised }}
+                    disabledStyle={controlDisabledStyle}
+                  >
+                    <Icon name="folder" color={C.muted} />
+                    <Text numberOfLines={1} style={{ flex: 1, color: C.text, fontSize: 13 }}>
+                      {entry().name}
+                    </Text>
+                    <Icon name="right" color={C.muted} />
+                  </Button>
+                )}
+              </List>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'flex-end',
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: C.line,
+                }}
+              >
                 <Button
                   disabled={!currentDirectory(read) || !!error()}
                   accessibilityLabel="Use this workspace folder"
+                  tooltip="Use this folder · Ctrl+Enter"
                   onPress={
                     currentDirectory(read)
                       ? inputAction(choose, {
@@ -289,123 +468,23 @@ export function WorkspacePicker(props: {
                         })
                       : undefined
                   }
-                  style={controlStyle}
-                  hoverStyle={controlHoverStyle}
-                  focusStyle={controlFocusStyle}
-                  disabledStyle={controlDisabledStyle}
+                  style={{ ...controlStyle, backgroundColor: C.accent }}
+                  hoverStyle={{ backgroundColor: C.accentHover }}
+                  focusStyle={{ backgroundColor: C.accentHover }}
+                  disabledStyle={{ ...controlDisabledStyle, backgroundColor: C.line }}
                 >
-                  <Text style={{ color: currentDirectory(read) && !error() ? C.accent : C.muted }}>
+                  <Text
+                    style={{
+                      color: currentDirectory(read) && !error() ? C.background : C.muted,
+                      fontSize: 13,
+                      lineHeight: 16,
+                      fontWeight: '600',
+                    }}
+                  >
                     Use this folder
                   </Text>
                 </Button>
               </View>
-              <Input
-                ref={(node) => {
-                  removeSearchKeys();
-                  const unbind = [
-                    keymap.bind('up', () => move(read, -1), {
-                      when: 'always',
-                      repeat: true,
-                      within: node,
-                    }),
-                    keymap.bind('down', () => move(read, 1), {
-                      when: 'always',
-                      repeat: true,
-                      within: node,
-                    }),
-                    keymap.bind('enter', () => activate(read), { when: 'always', within: node }),
-                  ];
-                  removeSearchKeys = () => unbind.forEach((remove) => remove());
-                }}
-                autoFocus
-                accessibilityLabel="Search workspace folders"
-                value={query()}
-                onChange={(text) => {
-                  if (!owns(read)) return;
-                  selected.set(0);
-                  query.set(text);
-                  list?.scrollToIndex({ index: 0, animated: false });
-                }}
-                placeholder="Search workspaces…"
-                style={{
-                  placeholderColor: C.muted,
-                  color: C.text,
-                  height: compact() ? 32 : 40,
-                  backgroundColor: C.background,
-                  borderRadius: inputBorderRadius,
-                  paddingHorizontal: 12,
-                  fontSize: 14,
-                }}
-              />
-              <List
-                each={matches()}
-                keyExtractor={(entry) => selectionKey(entry.selection)}
-                ref={(node) => {
-                  list = node;
-                }}
-                estimatedItemSize={32}
-                onLoadMore={() => {
-                  void load(read);
-                }}
-                accessibilityLabel="Workspace folders"
-                style={{ height: count() * 32, flexShrink: 1, minHeight: 32 }}
-              >
-                {(entry) => (
-                  <Button
-                    disabled={!!error()}
-                    accessibilityLabel={`Browse folder ${entry().name}`}
-                    selected={isSelected(entry())}
-                    onPress={inputAction(browse, {
-                      location: read.id,
-                      selection: entry().selection,
-                    })}
-                    style={{
-                      height: 32,
-                      paddingHorizontal: 8,
-                      backgroundColor: isSelected(entry()) ? C.line : C.surface,
-                    }}
-                    hoverStyle={{ backgroundColor: C.raised }}
-                    focusStyle={{ backgroundColor: C.raised }}
-                    disabledStyle={controlDisabledStyle}
-                  >
-                    <Text numberOfLines={1} style={{ color: C.text }}>
-                      {entry().name} /
-                    </Text>
-                  </Button>
-                )}
-              </List>
-              <If when={loading()}>
-                <Text style={{ color: C.muted }}>Loading folders…</Text>
-              </If>
-              <If when={!loading() && !error() && !matches().length}>
-                <Text style={{ color: C.muted }}>
-                  {query()
-                    ? 'No matching folders.'
-                    : read.trail.length
-                      ? 'This folder has no subfolders.'
-                      : 'No workspace locations are published by this Host.'}
-                </Text>
-              </If>
-              <If when={error()}>
-                <Text numberOfLines={2} style={{ color: C.danger }}>
-                  {error()}
-                </Text>
-                <Button
-                  onPress={inputAction(
-                    ({ location: original }: { location: number }) => {
-                      if (owns(location()) && original === location().id)
-                        navigate(location().trail);
-                    },
-                    { location: read.id },
-                  )}
-                  style={controlStyle}
-                  hoverStyle={controlHoverStyle}
-                  focusStyle={controlFocusStyle}
-                  disabledStyle={controlDisabledStyle}
-                >
-                  <Text style={{ color: C.accent }}>Retry folder</Text>
-                </Button>
-              </If>
             </View>
           );
         }}

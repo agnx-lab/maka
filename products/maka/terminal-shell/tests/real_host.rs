@@ -466,7 +466,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Back from connection settings").await;
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close")).await;
         support::click_button(&mut view, "Choose composer workspace").await;
-        wait_view(&mut view, |screen| screen.contains("Workspace locations") && screen.contains("Workspace /") && !screen.contains("Loading folders…")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Workspace locations") && !screen.contains("Loading folders…") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Browse folder Workspace" && !node.state.disabled)).await;
         support::click_button(&mut view, "Browse folder Workspace").await;
         wait_view(&mut view, |screen| screen.contains("Folder · Workspace") && !screen.contains("Loading folders…")).await;
         wait_enabled_node(&mut view, "Use this workspace folder").await;
@@ -1210,6 +1210,12 @@ async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority
         view.handle_event(Event::Paste("NEW_FOLDER_DRAFT".into()));
         support::wait_draft(&client, created_id, "NEW_FOLDER_DRAFT").await;
         support::wait_draft(&client, &fixture.session, DRAFT).await;
+        // An empty selected session keeps its actual workspace chip interactive.
+        // Pointer-opened dialogs return to that opener while preserving the draft.
+        support::click_button(&mut view, "Choose composer workspace").await;
+        wait_focused_input(&mut view, "Search workspace folders").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view_state(&mut view, |view, screen| screen.contains("NEW_FOLDER_DRAFT") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Choose composer workspace" && node.focused)).await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::evidence_cells("workspace-picker-deep-directory-and-draft-isolation", &view);
         drop(view);
@@ -2699,6 +2705,29 @@ async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_
 async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_terminal() {
     use maka_app_client::{Client, Journal};
     use maka_host_runtime::application::host::Client as HostClient;
+    async fn wait_folder_row(terminal: &mut support::pty::Pty, name: &str) {
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                // Use a complete synchronized frame, then distinguish an actual
+                // folder row from the same label in the search field or heading.
+                let screen = terminal.wait_for(name).await;
+                if screen
+                    .lines()
+                    .any(|line| line.contains(name) && line.contains('›'))
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "production terminal did not show folder {name:?}:\n{}",
+                terminal.snapshot()
+            )
+        });
+    }
     tokio::time::timeout(Duration::from_secs(90), async {
         let fixture = Fixture::registered().await;
         let child_path = fixture.directory.path().join("workspace/中文工程/子目录");
@@ -2750,8 +2779,8 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
             terminal.wait_for("Workspace locations").await;
-            terminal.wait_for("Workspace /").await;
-            terminal.click_text("Workspace /");
+            wait_folder_row(&mut terminal, "Workspace").await;
+            terminal.click_text_in_row("Workspace", "›");
             terminal.wait_for("Folder · Workspace").await;
             terminal.wait_for("Use this folder").await;
             // Click the actual new native search field before typing. A first
@@ -2759,11 +2788,11 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             terminal.wait_for("Search workspaces…").await;
             terminal.click_text("Search workspaces…");
             terminal.paste("中文工程");
-            terminal.wait_for("中文工程 /").await;
+            wait_folder_row(&mut terminal, "中文工程").await;
             terminal.send(b"\r");
             terminal.wait_for("Folder · 中文工程").await;
-            terminal.wait_for("子目录 /").await;
-            terminal.click_text("子目录 /");
+            wait_folder_row(&mut terminal, "子目录").await;
+            terminal.click_text_in_row("子目录", "›");
             terminal.wait_for("Folder · 子目录").await;
             terminal.wait_for("This folder has no subfolders.").await;
             if choose {
@@ -2771,8 +2800,8 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             } else {
                 terminal.send(b"\x1b[1;3A");
                 terminal.wait_for("Folder · 中文工程").await;
-                terminal.wait_for("子目录 /").await;
-                terminal.click_text("子目录 /");
+                wait_folder_row(&mut terminal, "子目录").await;
+                terminal.click_text_in_row("子目录", "›");
                 terminal.wait_for("Folder · 子目录").await;
                 for (columns, rows) in [(80, 24), (120, 40)] {
                     let before = terminal.wire().len();
@@ -2781,7 +2810,7 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
                     terminal.wait_for("Folder · 子目录").await;
                 }
                 terminal.send(b"\x1b");
-                terminal.wait_for_absent("Close").await;
+                terminal.wait_for_absent("Search workspaces…").await;
                 terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
                 support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好")
                     .await;

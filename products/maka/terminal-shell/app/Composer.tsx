@@ -94,6 +94,10 @@ export function Composer(props: {
     const details = owner.modelDetails();
     return `${modelCaption(backend, details)} · ${effortCaption(backend, details)}`;
   };
+  const workspaceLabel = () => {
+    const path = props.session()?.workspace();
+    return path ? (path.split('/').filter(Boolean).at(-1) ?? path) : 'Choose workspace';
+  };
   return (
     <View
       ref={(node) => {
@@ -156,24 +160,28 @@ export function Composer(props: {
               gap: 8,
             }}
           >
-            <If when={props.session() === null}>
-              <Button
-                accessibilityLabel="Choose composer workspace"
-                onPress={props.chooseWorkspace}
-                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-                hoverStyle={{ backgroundColor: C.surface }}
-                focusStyle={{ backgroundColor: C.raised }}
-              >
-                <Icon name="folder" color={C.secondary} />
-                <Text style={{ color: C.secondary, fontSize: 13 }}>Choose workspace</Text>
-                <Icon name="down" color={C.secondary} />
-              </Button>
-            </If>
-            <If when={props.session()?.workspace()}>
-              <Text numberOfLines={1} style={{ color: C.secondary, flexShrink: 1 }}>
-                Workspace · {props.session()?.workspace().split('/').filter(Boolean).at(-1)}
+            <Button
+              accessibilityLabel="Choose composer workspace"
+              tooltip={props.session()?.workspace() || 'Choose workspace'}
+              onPress={props.chooseWorkspace}
+              style={{
+                ...controlStyle,
+                flexDirection: 'row',
+                alignItems: 'center',
+                maxWidth: '100%',
+                minWidth: 0,
+                flexShrink: 1,
+                gap: 8,
+              }}
+              hoverStyle={{ backgroundColor: C.surface }}
+              focusStyle={{ backgroundColor: C.raised }}
+            >
+              <Icon name="folder" color={C.secondary} />
+              <Text numberOfLines={1} style={{ color: C.secondary, fontSize: 13, flexShrink: 1 }}>
+                {workspaceLabel()}
               </Text>
-            </If>
+              <Icon name="down" color={C.secondary} />
+            </Button>
             <Button
               accessibilityLabel="Connections & models"
               onPress={props.settings}

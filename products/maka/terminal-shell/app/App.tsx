@@ -569,7 +569,7 @@ function App() {
           }}
           commands={({ sessionId }) => open({ kind: 'commands', sessionId })}
           models={({ sessionId }) => open({ kind: 'models', sessionId })}
-          chooseWorkspace={inputAction(open, { kind: 'workspaces', sessionId: null })}
+          chooseWorkspace={inputAction(open, { kind: 'workspaces', sessionId: selected() })}
           settings={inputAction(open, { kind: 'settings', sessionId: selected() })}
         />
       </Workbench>
