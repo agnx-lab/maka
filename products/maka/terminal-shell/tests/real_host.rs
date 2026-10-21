@@ -201,6 +201,172 @@ async fn browse_workspace_folder(view: &mut AppView, name: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_before_one_send() {
+    async fn activate(view: &mut AppView, label: &str) {
+        tab_to_label(view, label).await;
+        view.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+    }
+    async fn fill(view: &mut AppView, label: &str, value: &str) {
+        tab_to_label(view, label).await;
+        wait_focused_input(view, label).await;
+        shortcut(view, 'a');
+        view.handle_event(Event::Paste(value.into()));
+        // Commit the real native onChange before another control can save it.
+        let (done, committed) = tokio::sync::oneshot::channel();
+        view.control()
+            .unwrap()
+            .advance_clock(Duration::ZERO, move || {
+                let _ = done.send(());
+            });
+        tokio::time::timeout(Duration::from_secs(20), committed)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(90), async {
+        #[cfg(unix)]
+        let mut fixture = Fixture::registered_empty_settings().await;
+        #[cfg(not(unix))]
+        let mut fixture = Fixture::empty_settings().await;
+        let client = fixture.client().await;
+        let empty = client.query("settings", "connections", json!({"kind":"start"})).await.unwrap();
+        assert_eq!(empty["kind"], "ready");
+        assert_eq!(empty["connections"], json!([]));
+        assert_eq!(empty["defaultTarget"], Value::Null);
+        let sessions = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
+        assert_eq!(sessions["sessions"], json!([]));
+        let (mut view, bindings) = fixture.view(client.clone(), None);
+        wait_view(&mut view, |screen| screen.contains("Make something remarkable.")).await;
+        support::click_label(&mut view, "Connections & models");
+        wait_view(&mut view, |screen| screen.contains("Add your first connection, then fetch or add a model.")).await;
+        activate(&mut view, "Add connection").await;
+        wait_view(&mut view, |screen| screen.contains("Choose the API provider for this connection.") && !screen.contains("Loading settings…")).await;
+        // Provider inventory uses the production virtual List. Wheel its real
+        // painted rows until the compatible provider is physically available.
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                support::tick(&mut view);
+                let screen = view.snapshot();
+                if screen.contains("Chat Completions") {
+                    break;
+                }
+                let anchor = view.accessibility_snapshot().into_iter().find_map(|node| {
+                    let label = node.label.strip_prefix("Connect ")?;
+                    screen.lines().any(|line| line.contains(label)).then(|| label.to_owned())
+                });
+                if let Some(anchor) = anchor {
+                    support::scroll_text(&mut view, &anchor, MouseEventKind::ScrollDown);
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the real provider inventory did not reveal Chat Completions");
+        support::click_label(&mut view, "Connect Chat Completions");
+        wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
+        fill(&mut view, "Connection name", "UI connection").await;
+        fill(&mut view, "Connection ID", "ui-connection").await;
+        fill(&mut view, "Base URL", &fixture.base_url).await;
+        fill(&mut view, "API key", support::PROVIDER_KEY).await;
+        assert!(!view.snapshot().contains(support::PROVIDER_KEY), "the raw key was painted by the form");
+        fill(&mut view, "Advanced request JSON", r#"{"provider":{"only":["openrouter","deepseek"]},"temperature":0.22}"#).await;
+        activate(&mut view, "Save connection").await;
+        wait_view(&mut view, |screen| screen.contains("Connection and API key saved.") && !screen.contains("Saving…")).await;
+        // Saving the key advances the connection revision. Fetch immediately
+        // through the same editor, without reopening or refreshing its basis.
+        activate(&mut view, "Fetch models").await;
+        wait_view(&mut view, |screen| screen.contains("Models fetched and enabled.") && screen.contains("Models · 1")).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while fixture.discovery_count.load(Ordering::SeqCst) != 1 {
+                support::tick(&mut view);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("Fetch models did not perform exactly one real discovery request");
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        activate(&mut view, "Manage models").await;
+        wait_view(&mut view, |screen| screen.contains("Connection models") && screen.contains("fixture-discovered-model")).await;
+        activate(&mut view, "Add model manually").await;
+        wait_view(&mut view, |screen| screen.contains("Model settings") && screen.contains("Model ID")).await;
+        fill(&mut view, "Model ID", "manual-ui-agent").await;
+        fill(&mut view, "Model display name", "Manual UI Agent").await;
+        activate(&mut view, "Support effort high").await;
+        activate(&mut view, "Default effort high").await;
+        activate(&mut view, "Save model").await;
+        wait_view(&mut view, |screen| screen.contains("Connection models") && screen.contains("Model saved.") && screen.contains("Manual UI Agent")).await;
+        activate(&mut view, "Set default manual-ui-agent").await;
+        wait_view(&mut view, |screen| screen.contains("Default model saved.")).await;
+        let catalog = client.query("settings", "connections", json!({"kind":"start"})).await.unwrap();
+        assert_eq!(catalog["connections"].as_array().unwrap().len(), 1);
+        assert_eq!(catalog["connections"][0]["name"], "UI connection");
+        let basis = &catalog["connections"][0]["basis"];
+        let target = json!({"connectionId":basis["connectionId"],"modelId":"manual-ui-agent"});
+        assert_eq!(catalog["defaultTarget"], target);
+        let detail = client.query("settings", "connection", json!({"connectionId":basis["connectionId"],"revision":basis["revision"],"includeEditingFacts":true})).await.unwrap();
+        assert_eq!(detail["target"]["configuration"], json!({"baseUrl":fixture.base_url}));
+        assert_eq!(detail["editing"], json!({"enabledModelIds":["fixture-discovered-model","manual-ui-agent"],"modelOverrides":{"manual-ui-agent":{"displayName":"Manual UI Agent","thinkingLevels":["high"],"defaultThinkingLevel":"high"}},"requestBodyOverlay":{"provider":{"only":["openrouter","deepseek"]},"temperature":0.22}}));
+        let models = client.query("settings", "models", json!({"kind":"start","query":"manual-ui-agent"})).await.unwrap();
+        assert_eq!(models["choices"].as_array().unwrap().len(), 1);
+        assert_eq!(models["choices"][0]["thinkingLevels"], json!(["high"]));
+        assert_eq!(models["choices"][0]["defaultThinkingLevel"], "high");
+        assert_eq!(models["defaultModel"]["kind"], "ready");
+        assert_eq!(models["defaultModel"]["choice"]["selection"]["modelId"], "manual-ui-agent");
+        activate(&mut view, "Back from connection settings").await;
+        wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
+        activate(&mut view, "Back from connection settings").await;
+        wait_view(&mut view, |screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && screen.contains("Close · Esc")).await;
+        activate(&mut view, "Back from connection settings").await;
+        wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close · Esc")).await;
+        support::click_label(&mut view, "Choose composer workspace");
+        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("› Workspace") && !screen.contains("Loading…")).await;
+        select_palette(&mut view, "Search workspaces…", "Workspace", "Workspace").await;
+        wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
+        select_palette(&mut view, "Search models…", "manual-ui-agent", "Manual UI Agent").await;
+        wait_view(&mut view, |screen| screen.contains("Manual UI Agent · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Back · Esc") && !screen.contains("Close · Esc")).await;
+        let sessions = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
+        assert_eq!(sessions["sessions"].as_array().unwrap().len(), 1);
+        let session = sessions["sessions"][0]["id"].as_str().unwrap().to_owned();
+        let observed = client.query("agent", "observe", json!({"sessionId":session})).await.unwrap();
+        assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":basis["connectionId"],"modelId":"manual-ui-agent","thinkingLevel":null}));
+        wait_focused_input(&mut view, "Message composer").await;
+        view.handle_event(Event::Paste("Use my new connection exactly once".into()));
+        support::wait_draft(&client, &session, "Use my new connection exactly once").await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        let mut request = fixture.next_request().await;
+        assert_eq!(request.body["model"], "manual-ui-agent");
+        assert_eq!(request.body["reasoning_effort"], "high");
+        assert_eq!(request.body["provider"], json!({"only":["openrouter","deepseek"]}));
+        assert_eq!(request.body["temperature"], 0.22);
+        assert!(request.body["messages"].as_array().unwrap().iter().any(|message| message["role"] == "user" && message["content"].to_string().contains("Use my new connection exactly once")));
+        request.thinking("SETTINGS_CONNECTION_REASONING").await;
+        request.delta("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
+        request.finish().await;
+        fixture.idle(&client, &session).await;
+        let completed = wait_view(&mut view, |screen| screen.contains("SETTINGS_CONNECTION_SINGLE_SEND_DONE") && screen.contains("Enter sends")).await;
+        evidence("settings-empty-to-real-provider", &completed);
+        support::evidence_cells("settings-empty-to-real-provider", &view);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 1);
+        drop(view);
+        bindings.close().await.unwrap();
+        drop(client);
+        #[cfg(unix)]
+        {
+            let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&session));
+            terminal.wait_for("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;
+            let restored = terminal.wait_for("Manual UI Agent · Default · high · Ctrl+G").await;
+            assert!(!restored.contains(support::PROVIDER_KEY));
+            assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "restoring the configured session must not resend");
+            assert_eq!(fixture.discovery_count.load(Ordering::SeqCst), 1, "restoring the configured session must not rediscover models");
+            evidence("settings-real-pty-restores-manual-model", &restored);
+            terminal.send(b"\x11");
+            terminal.finish().await;
+        }
+        fixture.finish().await;
+    }).await.expect("empty settings real Host/PTY flow timed out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_home_palette_creates_switches_models_and_stops_a_real_session_without_mixing_drafts() {
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::reasoning_models().await;
