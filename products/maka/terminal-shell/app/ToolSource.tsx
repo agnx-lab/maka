@@ -51,12 +51,17 @@ export function createToolSource(
     resultPosition: reference.resultPosition ? { ...reference.resultPosition } : null,
     sessionId,
     through,
-    path: path === null ? null : path.slice() as NonNullable<AgentHistorySourceRead['path']>,
+    path: path === null ? null : (path.slice() as NonNullable<AgentHistorySourceRead['path']>),
   };
-  const content = signal(''), total = signal<number | null>(null), format = signal('');
-  const busy = signal(false), error = signal('');
+  const content = signal(''),
+    total = signal<number | null>(null),
+    format = signal('');
+  const busy = signal(false),
+    error = signal('');
   let alive = true;
-  cleanup(() => { alive = false; });
+  cleanup(() => {
+    alive = false;
+  });
   const complete = () => total() !== null && messageBytes(content()) === total();
   const read = async () => {
     if (!alive || busy() || complete()) return;
@@ -73,27 +78,36 @@ export function createToolSource(
         position: offset === 0 ? { kind: 'start' } : { kind: 'after', offset },
       });
       if (!alive) return;
-      const source = page.source, tool = source?.tool;
+      const source = page.source,
+        tool = source?.tool;
       const owned = original.field === 'arguments' ? tool?.call : tool?.result;
       const end = offset + messageBytes(source?.text ?? '');
       if (
-        page.kind !== 'ready' || page.through !== original.through ||
-        source?.field !== original.field || !sameValue(source.path ?? null, original.path) ||
+        page.kind !== 'ready' ||
+        page.through !== original.through ||
+        source?.field !== original.field ||
+        !sameValue(source.path ?? null, original.path) ||
         !sameValue(source.position, original.position) ||
         source.role !== (original.field === 'arguments' ? 'tool_call' : 'tool_result') ||
-        tool?.toolUseId !== original.toolUseId || !sameValue(owned?.position, original.position) ||
+        tool?.toolUseId !== original.toolUseId ||
+        !sameValue(owned?.position, original.position) ||
         !sameValue(tool?.call?.position ?? null, original.callPosition) ||
         !sameValue(tool?.result?.position ?? null, original.resultPosition) ||
         (original.name !== undefined && tool?.call?.name !== original.name) ||
-        (original.presentation !== undefined && tool?.call?.presentation !== original.presentation) ||
-        source.offset !== offset || messageBytes(content()) !== offset ||
-        !Number.isSafeInteger(source.totalBytes) || source.totalBytes < 0 || end > source.totalBytes ||
+        (original.presentation !== undefined &&
+          tool?.call?.presentation !== original.presentation) ||
+        source.offset !== offset ||
+        messageBytes(content()) !== offset ||
+        !Number.isSafeInteger(source.totalBytes) ||
+        source.totalBytes < 0 ||
+        end > source.totalBytes ||
         (total() !== null && source.totalBytes !== total()) ||
         (end === offset && end !== source.totalBytes) ||
         (format() !== '' && source.format !== format()) ||
         !['text', 'json', 'image_descriptor'].includes(source.format) ||
         (original.field === 'arguments' && original.path === null && source.format !== 'json')
-      ) throw new Error('The original tool source could not be verified.');
+      )
+        throw new Error('The original tool source could not be verified.');
       total.set(source.totalBytes);
       format.set(source.format);
       content.set(content() + source.text);
@@ -109,7 +123,11 @@ export function createToolSource(
   void Promise.resolve().then(read);
   const json = (): unknown => {
     if (!complete() || error() || format() !== 'json') return undefined;
-    try { return JSON.parse(content()); } catch { return undefined; }
+    try {
+      return JSON.parse(content());
+    } catch {
+      return undefined;
+    }
   };
   return { original, content, total, format, busy, error, complete, read, json };
 }
@@ -120,16 +138,24 @@ export function OriginalToolSource(props: { source: ToolSource; label: string })
   return (
     <View style={{ gap: 8 }}>
       <Text style={{ color: C.muted }}>{props.label}</Text>
-      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>{source.content()}</Text>
+      <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
+        {source.content()}
+      </Text>
       <If when={source.error()}>
         <Text style={{ color: C.danger }}>{source.error()}</Text>
       </If>
       <If when={!source.complete()}>
-        <Button disabled={!source.error()} onPress={inputAction(source.read, {
-          sessionId: source.original.sessionId, key: source.original.key, through: source.original.through,
-        })}>
+        <Button
+          disabled={!source.error()}
+          onPress={inputAction(source.read, {
+            sessionId: source.original.sessionId,
+            key: source.original.key,
+            through: source.original.through,
+          })}
+        >
           <Text style={{ color: C.muted }}>
-            {source.error() ? 'Retry original source' : 'Reading…'} · {messageBytes(source.content())}/{source.total() ?? '?'} bytes
+            {source.error() ? 'Retry original source' : 'Reading…'} ·{' '}
+            {messageBytes(source.content())}/{source.total() ?? '?'} bytes
           </Text>
         </Button>
       </If>

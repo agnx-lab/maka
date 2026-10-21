@@ -22,13 +22,19 @@ import { TerminalGrid } from 'maka/host';
 import { host, terminalMutation, pendingTerminals, recoverTerminal, abandonTerminal } from './host';
 import type { ScopedHost } from './host';
 import type {
-  ClientOperation, OperationReply, RawAction, ResourceUpdate, TerminalSize,
+  ClientOperation,
+  OperationReply,
+  RawAction,
+  ResourceUpdate,
+  TerminalSize,
 } from '../../../../packages/plugin-sdk/src/index.js';
 
 type Stream<T> = { next(): Promise<T | null>; close(): Promise<void> };
 type Watch<T> = { closed: boolean; stream: Stream<T> | null };
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
-export function completed<T>(outcome: { kind: 'completed'; value: T } | { kind: 'failed'; message: string }): T {
+const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
+export function completed<T>(
+  outcome: { kind: 'completed'; value: T } | { kind: 'failed'; message: string },
+): T {
   if (outcome.kind === 'failed') throw new Error(outcome.message);
   return outcome.value;
 }
@@ -60,30 +66,51 @@ export function createTerminals(options: {
   let alive = true;
   let watch: Watch<unknown> | null = null;
   let listGeneration = 0;
-  const owns = (session: string) => alive && options.sessionId() === session && sessionId === session;
+  const owns = (session: string) =>
+    alive && options.sessionId() === session && sessionId === session;
   const refreshPending = async (session: string, owner: ScopedHost) => {
     const originals = await pendingTerminals(owner);
-    if (owns(session) && scope === owner) { pending.set(originals); known.set(true); }
+    if (owns(session) && scope === owner) {
+      pending.set(originals);
+      known.set(true);
+    }
   };
   const mutate = async <M extends 'start' | 'stop' | 'control' | 'release'>(
-    owner: ScopedHost, method: M,
+    owner: ScopedHost,
+    method: M,
     input: Parameters<typeof terminalMutation<M>>[2],
   ): Promise<Awaited<ReturnType<typeof terminalMutation<M>>>> => {
     // Releases are cleanup of their immutable original, including after selection changes.
-    if (method !== 'release' && (!owns(owner.sessionId) || scope !== owner || !known() || pending().length))
+    if (
+      method !== 'release' &&
+      (!owns(owner.sessionId) || scope !== owner || !known() || pending().length)
+    )
       throw new Error('Recover the unresolved terminal action before sending new input.');
-    try { return await terminalMutation(owner, method, input); }
-    catch (reason) {
+    try {
+      return await terminalMutation(owner, method, input);
+    } catch (reason) {
       if (owns(owner.sessionId) && scope === owner) {
-        try { await refreshPending(owner.sessionId, owner); }
-        catch (failure) { if (owns(owner.sessionId) && scope === owner) { known.set(false); error.set(message(failure)); } }
+        try {
+          await refreshPending(owner.sessionId, owner);
+        } catch (failure) {
+          if (owns(owner.sessionId) && scope === owner) {
+            known.set(false);
+            error.set(message(failure));
+          }
+        }
       }
       throw reason;
     }
   };
   const accept = (resources: ResourceUpdate[]) => {
-    entries.set(resources.filter((entry) => entry.sessionId === sessionId && entry.result.kind === 'shell_run')
-      .sort((a, b) => a.result.startedAt - b.result.startedAt || a.result.ref.localeCompare(b.result.ref)));
+    entries.set(
+      resources
+        .filter((entry) => entry.sessionId === sessionId && entry.result.kind === 'shell_run')
+        .sort(
+          (a, b) =>
+            a.result.startedAt - b.result.startedAt || a.result.ref.localeCompare(b.result.ref),
+        ),
+    );
     for (const entry of entries()) models.get(entry.result.ref)?.update(entry);
   };
   const follow = (session: string) => {
@@ -91,13 +118,24 @@ export function createTerminals(options: {
     const run: Watch<unknown> = { closed: false, stream: null };
     watch = run;
     const generation = ++listGeneration;
-    const current = () => owns(session) && options.active() && watch === run && !run.closed && generation === listGeneration;
+    const current = () =>
+      owns(session) &&
+      options.active() &&
+      watch === run &&
+      !run.closed &&
+      generation === listGeneration;
     loading.set(true);
     error.set('');
     void (async () => {
       try {
-        const opened = await host.subscribe('terminal', 'watchList', { sessionId: session, offset: 0 });
-        if (!current()) { await opened.close(); return; }
+        const opened = await host.subscribe('terminal', 'watchList', {
+          sessionId: session,
+          offset: 0,
+        });
+        if (!current()) {
+          await opened.close();
+          return;
+        }
         run.stream = opened;
         for (;;) {
           const outcome = await opened.next();
@@ -105,8 +143,10 @@ export function createTerminals(options: {
           if (!outcome) throw new Error('The Host closed the terminal list.');
           const page = completed(outcome);
           const resources = [...page.resources];
-          for (let offset = page.nextOffset ?? null; offset !== null;) {
-            const more = completed(await host.query('terminal', 'list', { sessionId: session, offset }));
+          for (let offset = page.nextOffset ?? null; offset !== null; ) {
+            const more = completed(
+              await host.query('terminal', 'list', { sessionId: session, offset }),
+            );
             if (!current()) return;
             resources.push(...more.resources);
             offset = more.nextOffset ?? null;
@@ -115,8 +155,14 @@ export function createTerminals(options: {
           loading.set(false);
         }
       } catch (reason) {
-        if (current()) { error.set(message(reason)); loading.set(false); }
-      } finally { stop(run); if (watch === run) watch = null; }
+        if (current()) {
+          error.set(message(reason));
+          loading.set(false);
+        }
+      } finally {
+        stop(run);
+        if (watch === run) watch = null;
+      }
     })();
   };
   const open = (entry: ResourceUpdate) => {
@@ -136,48 +182,77 @@ export function createTerminals(options: {
     const selected = options.sessionId();
     untracked(() => {
       if (selected === sessionId) return;
-      stop(watch); watch = null;
+      stop(watch);
+      watch = null;
       for (const model of [...models.values()]) model.dispose();
       models.clear();
       sessionId = selected;
       scope = selected ? host.session(selected) : null;
-      entries.set([]); error.set(''); starting.set(false); recovering.set(false); pending.set([]); known.set(false);
+      entries.set([]);
+      error.set('');
+      starting.set(false);
+      recovering.set(false);
+      pending.set([]);
+      known.set(false);
       const owner = scope;
-      if (selected && owner) void refreshPending(selected, owner).catch((reason) => {
-        if (owns(selected) && scope === owner) error.set(message(reason));
-      });
+      if (selected && owner)
+        void refreshPending(selected, owner).catch((reason) => {
+          if (owns(selected) && scope === owner) error.set(message(reason));
+        });
     });
   });
   effect(() => {
     const selected = options.sessionId();
     const visible = options.active();
     untracked(() => {
-      if (selected && selected === sessionId && visible) { if (!watch) follow(selected); }
-      else { stop(watch); watch = null; }
+      if (selected && selected === sessionId && visible) {
+        if (!watch) follow(selected);
+      } else {
+        stop(watch);
+        watch = null;
+      }
     });
   });
   const refresh = () => {
     if (!sessionId || !scope || !owns(sessionId)) return;
-    const selected = sessionId; const owner = scope;
-    void refreshPending(selected, owner).catch((reason) => { if (owns(selected) && scope === owner) error.set(message(reason)); });
+    const selected = sessionId;
+    const owner = scope;
+    void refreshPending(selected, owner).catch((reason) => {
+      if (owns(selected) && scope === owner) error.set(message(reason));
+    });
     if (options.active()) follow(selected);
   };
   const start = async () => {
-    const selected = sessionId; const owner = scope;
-    if (!selected || !owner || !owns(selected) || starting() || !known() || pending().length) return;
-    starting.set(true); error.set('');
+    const selected = sessionId;
+    const owner = scope;
+    if (!selected || !owner || !owns(selected) || starting() || !known() || pending().length)
+      return;
+    starting.set(true);
+    error.set('');
     try {
-      const entry = completed(await mutate(owner, 'start', { sessionId: selected, size: DEFAULT_SIZE }));
+      const entry = completed(
+        await mutate(owner, 'start', { sessionId: selected, size: DEFAULT_SIZE }),
+      );
       if (!owns(selected) || scope !== owner) return;
       accept([...entries().filter((item) => item.result.ref !== entry.result.ref), entry]);
       open(entry);
-    } catch (reason) { if (owns(selected) && scope === owner) error.set(message(reason)); }
-    finally { if (owns(selected) && scope === owner) starting.set(false); }
+    } catch (reason) {
+      if (owns(selected) && scope === owner) error.set(message(reason));
+    } finally {
+      if (owns(selected) && scope === owner) starting.set(false);
+    }
   };
   const recover = async (target: { sessionId: string; id: string; abandon: boolean }) => {
     const owner = scope;
-    if (!owner || !owns(target.sessionId) || recovering() || !pending().some((item) => item.id === target.id)) return;
-    recovering.set(true); error.set('');
+    if (
+      !owner ||
+      !owns(target.sessionId) ||
+      recovering() ||
+      !pending().some((item) => item.id === target.id)
+    )
+      return;
+    recovering.set(true);
+    error.set('');
     try {
       if (target.abandon) await abandonTerminal(owner, target.id);
       else {
@@ -187,22 +262,42 @@ export function createTerminals(options: {
       }
       await refreshPending(target.sessionId, owner);
       if (owns(target.sessionId) && scope === owner && options.active()) follow(target.sessionId);
-    } catch (reason) { if (owns(target.sessionId) && scope === owner) error.set(message(reason)); }
-    finally { if (owns(target.sessionId) && scope === owner) recovering.set(false); }
+    } catch (reason) {
+      if (owns(target.sessionId) && scope === owner) error.set(message(reason));
+    } finally {
+      if (owns(target.sessionId) && scope === owner) recovering.set(false);
+    }
   };
   cleanup(() => {
-    alive = false; stop(watch);
+    alive = false;
+    stop(watch);
     for (const model of [...models.values()]) model.dispose();
     models.clear();
   });
-  return { entries, error, loading, starting, pending, recovering, known, start, refresh, recover, open };
+  return {
+    entries,
+    error,
+    loading,
+    starting,
+    pending,
+    recovering,
+    known,
+    start,
+    refresh,
+    recover,
+    open,
+  };
 }
 
-function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
-  admitted(): boolean;
-  mutate: typeof terminalMutation;
-  removed(): void;
-}) {
+function createTerminal(
+  initial: ResourceUpdate,
+  scope: ScopedHost,
+  hooks: {
+    admitted(): boolean;
+    mutate: typeof terminalMutation;
+    removed(): void;
+  },
+) {
   const entry = signal(initial);
   const version = signal(0);
   const state = signal<'idle' | 'loading' | 'live' | 'closed' | 'unavailable' | 'failed'>('idle');
@@ -225,24 +320,39 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
   let sending = false;
   const local = () => entry().ownership.kind === 'local';
   const agentOwned = () => entry().sourceTurnId !== entry().sourceToolCallId;
-  const controllable = () => alive && active && !stopping() && hooks.admitted() && local() && running(entry()) && entry().result.mode === 'pty' && state() === 'live';
+  const controllable = () =>
+    alive &&
+    active &&
+    !stopping() &&
+    hooks.admitted() &&
+    local() &&
+    running(entry()) &&
+    entry().result.mode === 'pty' &&
+    state() === 'live';
   const release = () => {
     queue = [];
     const previous = lease;
-    lease = null; control.set('none');
+    lease = null;
+    control.set('none');
     if (!previous) return;
     previous.closed = true;
     // Closing acquire itself revokes its native controller, including if release fails.
     void (async () => {
       try {
-        if (previous.held && previous.id) completed(await hooks.mutate(scope, 'release', { target, controllerId: previous.id }));
-      } catch (reason) { if (alive) error.set(message(reason)); }
-      finally { stop(previous); }
+        if (previous.held && previous.id)
+          completed(await hooks.mutate(scope, 'release', { target, controllerId: previous.id }));
+      } catch (reason) {
+        if (alive) error.set(message(reason));
+      } finally {
+        stop(previous);
+      }
     })();
   };
   const fail = (reason: unknown) => {
     if (!alive || !active) return;
-    error.set(message(reason)); state.set('failed'); release();
+    error.set(message(reason));
+    state.set('failed');
+    release();
   };
   const snapshot = () => {
     if (!alive || !active || running(entry()) || retained) return;
@@ -252,7 +362,10 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
     void (async () => {
       try {
         const opened = await host.subscribe('terminal', 'readDisplay', target);
-        if (!alive || !active || retained !== run) { await opened.close(); return; }
+        if (!alive || !active || retained !== run) {
+          await opened.close();
+          return;
+        }
         run.stream = opened;
         let installed = false;
         for (;;) {
@@ -261,14 +374,20 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
           if (!value) break;
           installed = grid.displayPart(completed(value)) || installed;
         }
-        await opened.close(); run.stream = null;
+        await opened.close();
+        run.stream = null;
         if (!alive || !active || run.closed || retained !== run) return;
         if (!installed) throw new Error('The retained terminal display did not complete.');
-        version.set(version() + 1); state.set('closed');
-      } catch (reason) { if (!run.closed && alive && active) fail(reason); }
-      finally {
+        version.set(version() + 1);
+        state.set('closed');
+      } catch (reason) {
+        if (!run.closed && alive && active) fail(reason);
+      } finally {
         stop(run);
-        if (retained === run) { grid.discardDisplay(); retained = null; }
+        if (retained === run) {
+          grid.discardDisplay();
+          retained = null;
+        }
       }
     })();
   };
@@ -278,7 +397,10 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
     void (async () => {
       try {
         const opened = await host.subscribe('terminal', 'watch', target);
-        if (!alive || !active || observing !== run) { await opened.close(); return; }
+        if (!alive || !active || observing !== run) {
+          await opened.close();
+          return;
+        }
         run.stream = opened;
         for (;;) {
           const value = await opened.next();
@@ -287,40 +409,73 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
           entry.set(completed(value));
           if (state() === 'unavailable' && !running(entry())) snapshot();
         }
-      } catch (reason) { if (!run.closed && alive && active) fail(reason); }
-      finally { stop(run); if (observing === run) observing = null; }
+      } catch (reason) {
+        if (!run.closed && alive && active) fail(reason);
+      } finally {
+        stop(run);
+        if (observing === run) observing = null;
+      }
     })();
   };
   const follow = () => {
     if (!alive || !active || reading) return;
-    if (entry().result.mode === 'pipes') { state.set('live'); return; }
+    if (entry().result.mode === 'pipes') {
+      state.set('live');
+      return;
+    }
     if (state() === 'closed') return;
-    if (state() === 'unavailable') { if (!observing) observe(); snapshot(); return; }
+    if (state() === 'unavailable') {
+      if (!observing) observe();
+      snapshot();
+      return;
+    }
     const run: Watch<unknown> = { closed: false, stream: null };
-    reading = run; state.set('loading'); error.set('');
+    reading = run;
+    state.set('loading');
+    error.set('');
     void (async () => {
       try {
         const opened = await host.subscribe('terminal', 'watchOutput', { target, after });
-        if (!alive || !active || reading !== run) { await opened.close(); return; }
+        if (!alive || !active || reading !== run) {
+          await opened.close();
+          return;
+        }
         run.stream = opened;
         for (;;) {
           const value = await opened.next();
           if (!alive || !active || run.closed || reading !== run) return;
           if (!value) throw new Error('The Host closed output without an end marker.');
           const event = completed(value);
-          if (!parsed && event.kind !== 'unavailable') { grid.reset(event.initialSize); parsed = true; }
+          if (!parsed && event.kind !== 'unavailable') {
+            grid.reset(event.initialSize);
+            parsed = true;
+          }
           const applied = grid.apply(event) as { after: number; status: string };
           after = applied.after;
           version.set(version() + 1);
-          if (event.kind === 'unavailable') { state.set('unavailable'); release(); if (!observing) observe(); snapshot(); break; }
+          if (event.kind === 'unavailable') {
+            state.set('unavailable');
+            release();
+            if (!observing) observe();
+            snapshot();
+            break;
+          }
           state.set(event.kind === 'closed' ? 'closed' : 'live');
-          if (event.kind === 'closed') { release(); break; }
+          if (event.kind === 'closed') {
+            release();
+            break;
+          }
         }
-      } catch (reason) { if (!run.closed && alive && active) fail(reason); }
-      finally { stop(run); if (reading === run) reading = null; }
+      } catch (reason) {
+        if (!run.closed && alive && active) fail(reason);
+      } finally {
+        stop(run);
+        if (reading === run) reading = null;
+      }
     })();
   };
-  const wantedSize = () => agentOwned() || (sentSize?.cols === size.cols && sentSize?.rows === size.rows) ? null : size;
+  const wantedSize = () =>
+    agentOwned() || (sentSize?.cols === size.cols && sentSize?.rows === size.rows) ? null : size;
   const pump = async () => {
     const owner = lease;
     if (sending || !owner || !owner.held || !owner.id) return;
@@ -337,40 +492,78 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
           const action = queue[0]!;
           const length = 'text' in action ? new TextEncoder().encode(action.text).length + 12 : 32;
           if (actions.length && bytes + length > 32 * 1024) break;
-          actions.push(queue.shift()!); bytes += length;
+          actions.push(queue.shift()!);
+          bytes += length;
         }
-        const receipt = completed(await hooks.mutate(scope, 'control', {
-          controller: { target, controllerId: owner.id }, sequence: owner.next, actions,
-          ...(resize ? { size: resize } : {}),
-        }));
+        const receipt = completed(
+          await hooks.mutate(scope, 'control', {
+            controller: { target, controllerId: owner.id },
+            sequence: owner.next,
+            actions,
+            ...(resize ? { size: resize } : {}),
+          }),
+        );
         if (lease !== owner || owner.closed) return;
         owner.next = receipt.sequence + 1;
         if (resize) sentSize = resize;
       }
     } catch (reason) {
-      if (lease === owner && !owner.closed) { release(); control.set('refused'); error.set(message(reason)); }
-    } finally { sending = false; if (lease && lease !== owner && lease.held) void pump(); }
+      if (lease === owner && !owner.closed) {
+        release();
+        control.set('refused');
+        error.set(message(reason));
+      }
+    } finally {
+      sending = false;
+      if (lease && lease !== owner && lease.held) void pump();
+    }
   };
   const acquire = async () => {
     if (!controllable() || lease) return;
-    const owner = { closed: false, stream: null as Stream<unknown> | null, id: null as string | null, next: 1, held: false };
-    lease = owner; control.set('acquiring'); error.set('');
+    const owner = {
+      closed: false,
+      stream: null as Stream<unknown> | null,
+      id: null as string | null,
+      next: 1,
+      held: false,
+    };
+    lease = owner;
+    control.set('acquiring');
+    error.set('');
     try {
       const opened = await host.subscribe('terminal', 'acquire', target);
-      if (lease !== owner || owner.closed || !controllable()) { await opened.close(); return; }
+      if (lease !== owner || owner.closed || !controllable()) {
+        await opened.close();
+        return;
+      }
       owner.stream = opened;
       for (;;) {
         const outcome = await opened.next();
         if (lease !== owner || owner.closed) return;
         if (!outcome) throw new Error('Terminal input control was released by the Host.');
         const held = completed(outcome);
-        if (!held.held || held.nextSequence == null) throw new Error('Another controller owns this terminal.');
-        owner.id = held.controllerId; owner.next = held.nextSequence; owner.held = true;
-        sentSize = null; control.set('held'); void pump();
+        if (!held.held || held.nextSequence == null)
+          throw new Error('Another controller owns this terminal.');
+        owner.id = held.controllerId;
+        owner.next = held.nextSequence;
+        owner.held = true;
+        sentSize = null;
+        control.set('held');
+        void pump();
       }
     } catch (reason) {
-      if (lease === owner && !owner.closed) { release(); control.set('refused'); error.set(message(reason)); }
-    } finally { stop(owner); if (lease === owner) { lease = null; control.set('none'); } }
+      if (lease === owner && !owner.closed) {
+        release();
+        control.set('refused');
+        error.set(message(reason));
+      }
+    } finally {
+      stop(owner);
+      if (lease === owner) {
+        lease = null;
+        control.set('none');
+      }
+    }
   };
   const input = (actions: RawAction[]) => {
     if (!controllable()) return;
@@ -380,7 +573,7 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
       if ('text' in action) {
         // At most three UTF-8 bytes per UTF-16 unit; leave the original control
         // framing room and never split a surrogate pair between native calls.
-        for (let offset = 0; offset < action.text.length;) {
+        for (let offset = 0; offset < action.text.length; ) {
           let end = Math.min(offset + 8 * 1024, action.text.length);
           const last = action.text.charCodeAt(end - 1);
           if (end < action.text.length && last >= 0xd800 && last <= 0xdbff) end--;
@@ -389,32 +582,96 @@ function createTerminal(initial: ResourceUpdate, scope: ScopedHost, hooks: {
         }
       } else queue.push(action);
     }
-    if (lease?.held) void pump(); else if (!lease) void acquire();
+    if (lease?.held) void pump();
+    else if (!lease) void acquire();
   };
   const suspend = () => {
-    active = false; stop(reading); reading = null; stop(observing); observing = null;
-    stop(retained); retained = null; grid.discardDisplay(); release();
+    active = false;
+    stop(reading);
+    reading = null;
+    stop(observing);
+    observing = null;
+    stop(retained);
+    retained = null;
+    grid.discardDisplay();
+    release();
   };
   const model = {
-    target, entry, version, grid, state, error, control, stopping,
-    running: () => running(entry()), local, agentOwned, controllable,
-    position: { x: 0, y: 0 }, atBottom: true,
-    update(value: ResourceUpdate) { if (alive && value.sessionId === target.sessionId && value.result.ref === target.ref) { entry.set(value); if (state() === 'unavailable' && !running(value)) snapshot(); } },
-    activate() { if (!alive || active) return; active = true; if (entry().result.mode === 'pipes') observe(); follow(); },
+    target,
+    entry,
+    version,
+    grid,
+    state,
+    error,
+    control,
+    stopping,
+    running: () => running(entry()),
+    local,
+    agentOwned,
+    controllable,
+    position: { x: 0, y: 0 },
+    atBottom: true,
+    update(value: ResourceUpdate) {
+      if (alive && value.sessionId === target.sessionId && value.result.ref === target.ref) {
+        entry.set(value);
+        if (state() === 'unavailable' && !running(value)) snapshot();
+      }
+    },
+    activate() {
+      if (!alive || active) return;
+      active = true;
+      if (entry().result.mode === 'pipes') observe();
+      follow();
+    },
     suspend,
     input,
-    resize(value: TerminalSize) { size = { cols: value.cols, rows: Math.min(value.rows, Math.floor(65536 / value.cols)) }; if (lease?.held) void pump(); },
-    takeControl() { if (control() === 'refused') control.set('none'); void acquire(); },
-    release,
-    retry() { if (alive && active) { if (state() === 'failed') { stop(reading); reading = null; stop(retained); retained = null; grid.reset(DEFAULT_SIZE); after = 0; parsed = false; state.set('idle'); if (entry().result.mode === 'pipes' && !observing) observe(); follow(); } else model.takeControl(); } },
-    async stop() {
-      if (!alive || !active || !hooks.admitted() || !local() || !running(entry()) || stopping()) return;
-      stopping.set(true);
-      try { entry.set(completed(await hooks.mutate(scope, 'stop', target)).resource); release(); }
-      catch (reason) { if (alive) { error.set(message(reason)); release(); } }
-      finally { if (alive) stopping.set(false); }
+    resize(value: TerminalSize) {
+      size = { cols: value.cols, rows: Math.min(value.rows, Math.floor(65536 / value.cols)) };
+      if (lease?.held) void pump();
     },
-    dispose() { if (!alive) return; alive = false; suspend(); hooks.removed(); },
+    takeControl() {
+      if (control() === 'refused') control.set('none');
+      void acquire();
+    },
+    release,
+    retry() {
+      if (alive && active) {
+        if (state() === 'failed') {
+          stop(reading);
+          reading = null;
+          stop(retained);
+          retained = null;
+          grid.reset(DEFAULT_SIZE);
+          after = 0;
+          parsed = false;
+          state.set('idle');
+          if (entry().result.mode === 'pipes' && !observing) observe();
+          follow();
+        } else model.takeControl();
+      }
+    },
+    async stop() {
+      if (!alive || !active || !hooks.admitted() || !local() || !running(entry()) || stopping())
+        return;
+      stopping.set(true);
+      try {
+        entry.set(completed(await hooks.mutate(scope, 'stop', target)).resource);
+        release();
+      } catch (reason) {
+        if (alive) {
+          error.set(message(reason));
+          release();
+        }
+      } finally {
+        if (alive) stopping.set(false);
+      }
+    },
+    dispose() {
+      if (!alive) return;
+      alive = false;
+      suspend();
+      hooks.removed();
+    },
   };
   return model;
 }

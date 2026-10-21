@@ -17,7 +17,19 @@
  * under the License.
  */
 
-import { cleanup, computed, effect, Input, inputAction, Scroll, signal, Text, View, type GestureResponderEvent, type YNode } from 'nsh';
+import {
+  cleanup,
+  computed,
+  effect,
+  Input,
+  inputAction,
+  Scroll,
+  signal,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type YNode,
+} from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { keymap } from 'nsh/keymap';
@@ -26,15 +38,45 @@ import type { TerminalModel } from './terminalState';
 import { C } from './ui';
 
 type Color = { named: number } | { indexed: number } | { rgb: number[] };
-type Run = { text: string; lengths?: number[]; style: { foreground: Color; background: Color; flags: number; underline?: Color | null } };
+type Run = {
+  text: string;
+  lengths?: number[];
+  style: { foreground: Color; background: Color; flags: number; underline?: Color | null };
+};
 type Frame = {
-  metadata: { size: TerminalSize; cursor: { x: number; y: number; visible: boolean }; cursorShape: string;
-    input: { mouseTrackingMode: string }; palette: [number, number[]][] };
-  rows: Run[][]; offset: number; totalRows: number; scrollbackRows: number; firstLine: number;
+  metadata: {
+    size: TerminalSize;
+    cursor: { x: number; y: number; visible: boolean };
+    cursorShape: string;
+    input: { mouseTrackingMode: string };
+    palette: [number, number[]][];
+  };
+  rows: Run[][];
+  offset: number;
+  totalRows: number;
+  scrollbackRows: number;
+  firstLine: number;
 };
 const CELL = 8;
 const LINE = 16;
-const ANSI = ['#2c2c2e', '#f48a8a', '#a3d7a5', '#e7b86b', '#7aaaff', '#cf9ee8', '#8dd7d2', '#cfd3d6', '#6d737c', '#ff9999', '#b3e5b0', '#f2cf86', '#9cbdff', '#dfb6f4', '#a6e8e3', '#f9fafb'];
+const ANSI = [
+  '#2c2c2e',
+  '#f48a8a',
+  '#a3d7a5',
+  '#e7b86b',
+  '#7aaaff',
+  '#cf9ee8',
+  '#8dd7d2',
+  '#cfd3d6',
+  '#6d737c',
+  '#ff9999',
+  '#b3e5b0',
+  '#f2cf86',
+  '#9cbdff',
+  '#dfb6f4',
+  '#a6e8e3',
+  '#f9fafb',
+];
 function color(value: Color, palette: [number, number[]][], foreground: boolean): string {
   let rgb: number[] | undefined;
   if ('rgb' in value) rgb = value.rgb;
@@ -43,8 +85,11 @@ function color(value: Color, palette: [number, number[]][], foreground: boolean)
     rgb = palette.find(([slot]) => slot === index)?.[1];
     if (!rgb) {
       if (index < 16) return ANSI[index]!;
-      if (index < 232) { const n = index - 16; const levels = [0, 95, 135, 175, 215, 255]; rgb = [levels[Math.floor(n / 36)]!, levels[Math.floor(n / 6) % 6]!, levels[n % 6]!]; }
-      else if (index < 256) rgb = Array(3).fill(8 + (index - 232) * 10);
+      if (index < 232) {
+        const n = index - 16;
+        const levels = [0, 95, 135, 175, 215, 255];
+        rgb = [levels[Math.floor(n / 36)]!, levels[Math.floor(n / 6) % 6]!, levels[n % 6]!];
+      } else if (index < 256) rgb = Array(3).fill(8 + (index - 232) * 10);
       else return foreground ? C.text : '#151517';
     }
   }
@@ -81,150 +126,374 @@ export function Terminal(props: { model: TerminalModel }) {
     model.version();
     return model.grid.display(offset(), rows()) as unknown as Frame;
   });
-  const pointerInput = () => model.controllable() && model.control() === 'held' && offset() === 0 && frame().metadata.input.mouseTrackingMode !== 'none';
-  const key = (name: string, modifiers: ('ctrl' | 'alt' | 'shift')[] = []) => model.input([{ type: 'key', key: name, modifiers }]);
+  const pointerInput = () =>
+    model.controllable() &&
+    model.control() === 'held' &&
+    offset() === 0 &&
+    frame().metadata.input.mouseTrackingMode !== 'none';
+  const key = (name: string, modifiers: ('ctrl' | 'alt' | 'shift')[] = []) =>
+    model.input([{ type: 'key', key: name, modifiers }]);
   const copy = async () => {
     try {
-      await Clipboard.setString(frame().rows.map((row) => row.map((run) => cells(run).text).join('').trimEnd()).join('\n'));
+      await Clipboard.setString(
+        frame()
+          .rows.map((row) =>
+            row
+              .map((run) => cells(run).text)
+              .join('')
+              .trimEnd(),
+          )
+          .join('\n'),
+      );
       if (mounted) copyStatus.set('Visible terminal copied.');
-    } catch (reason) { if (mounted) copyStatus.set(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) {
+      if (mounted) copyStatus.set(reason instanceof Error ? reason.message : String(reason));
+    }
   };
   const attach = (node: YNode) => {
-    input = node; unbind();
+    input = node;
+    unbind();
     const bindings: Record<string, () => void> = {};
-    const names: Record<string, string> = { enter: 'enter', escape: 'escape', tab: 'tab', backspace: 'backspace', delete: 'delete', insert: 'insert', up: 'arrow_up', down: 'arrow_down', left: 'arrow_left', right: 'arrow_right', home: 'home', end: 'end', pageup: 'page_up', pagedown: 'page_down' };
+    const names: Record<string, string> = {
+      enter: 'enter',
+      escape: 'escape',
+      tab: 'tab',
+      backspace: 'backspace',
+      delete: 'delete',
+      insert: 'insert',
+      up: 'arrow_up',
+      down: 'arrow_down',
+      left: 'arrow_left',
+      right: 'arrow_right',
+      home: 'home',
+      end: 'end',
+      pageup: 'page_up',
+      pagedown: 'page_down',
+    };
     for (let index = 1; index <= 12; index++) if (index !== 11) names[`f${index}`] = `f${index}`;
-    const variants: ('ctrl' | 'alt' | 'shift')[][] = [[], ['shift'], ['ctrl'], ['alt'], ['ctrl', 'shift'], ['alt', 'shift']];
-    for (const [stroke, name] of Object.entries(names)) for (const modifiers of variants) {
-      if (stroke === 'f4' && modifiers.includes('alt')) continue;
-      if (stroke === 'tab' && modifiers.some((modifier) => modifier !== 'shift')) continue;
-      bindings[[...modifiers, stroke].join('+')] = () => {
-        if (['enter', 'escape', 'backspace'].includes(stroke)) {
-          if (modifiers.includes('alt')) model.input([{ type: 'key', key: 'escape' }, { type: 'key', key: name }]);
-          else if (stroke === 'backspace' && modifiers.includes('ctrl')) key('h', ['ctrl']);
-          else key(name);
-        } else key(name, modifiers);
-      };
-    }
+    const variants: ('ctrl' | 'alt' | 'shift')[][] = [
+      [],
+      ['shift'],
+      ['ctrl'],
+      ['alt'],
+      ['ctrl', 'shift'],
+      ['alt', 'shift'],
+    ];
+    for (const [stroke, name] of Object.entries(names))
+      for (const modifiers of variants) {
+        if (stroke === 'f4' && modifiers.includes('alt')) continue;
+        if (stroke === 'tab' && modifiers.some((modifier) => modifier !== 'shift')) continue;
+        bindings[[...modifiers, stroke].join('+')] = () => {
+          if (['enter', 'escape', 'backspace'].includes(stroke)) {
+            if (modifiers.includes('alt'))
+              model.input([
+                { type: 'key', key: 'escape' },
+                { type: 'key', key: name },
+              ]);
+            else if (stroke === 'backspace' && modifiers.includes('ctrl')) key('h', ['ctrl']);
+            else key(name);
+          } else key(name, modifiers);
+        };
+      }
     for (const letter of 'abcdefghijklmnopqrstuvwxyz') {
-      if (letter !== 'q' && letter !== 'v') bindings[`ctrl+${letter}`] = () => key(letter, ['ctrl']);
+      if (letter !== 'q' && letter !== 'v')
+        bindings[`ctrl+${letter}`] = () => key(letter, ['ctrl']);
       bindings[`alt+${letter}`] = () => key(letter, ['alt']);
     }
-    const controlCharacters: Record<string, string> = { '2': '@', '3': '[', '4': '\\', '5': ']', '6': '^', '7': '_', '8': '?', minus: '_', '/': '_', '[': '[', ']': ']', '\\': '\\', space: ' ' };
-    for (const [stroke, character] of Object.entries(controlCharacters)) bindings[`ctrl+${stroke}`] = () => key(character, ['ctrl']);
+    const controlCharacters: Record<string, string> = {
+      '2': '@',
+      '3': '[',
+      '4': '\\',
+      '5': ']',
+      '6': '^',
+      '7': '_',
+      '8': '?',
+      minus: '_',
+      '/': '_',
+      '[': '[',
+      ']': ']',
+      '\\': '\\',
+      space: ' ',
+    };
+    for (const [stroke, character] of Object.entries(controlCharacters))
+      bindings[`ctrl+${stroke}`] = () => key(character, ['ctrl']);
     for (const digit of '0123456789') bindings[`alt+${digit}`] = () => key(digit, ['alt']);
     bindings['ctrl+shift+c'] = () => void copy();
-    bindings['ctrl+shift+space'] = () => { model.release(); fallback?.focus(); };
-    bindings['shift+pageup'] = () => { model.atBottom = false; scroll?.scrollTo({ y: Math.max(0, model.position.y - rows() * LINE) }); };
+    bindings['ctrl+shift+space'] = () => {
+      model.release();
+      fallback?.focus();
+    };
+    bindings['shift+pageup'] = () => {
+      model.atBottom = false;
+      scroll?.scrollTo({ y: Math.max(0, model.position.y - rows() * LINE) });
+    };
     bindings['shift+pagedown'] = () => scroll?.scrollTo({ y: model.position.y + rows() * LINE });
     unbind = keymap.bind(bindings, { when: 'always', repeat: true, within: node });
   };
   const text = (value: string) => {
     const previous = inputValue();
     let shared = 0;
-    while (shared < previous.length && shared < value.length && previous[shared] === value[shared]) shared++;
+    while (shared < previous.length && shared < value.length && previous[shared] === value[shared])
+      shared++;
     const removed = [...previous.slice(shared)].length;
     const added = value.slice(shared);
-    const actions: RawAction[] = Array.from({ length: removed }, () => ({ type: 'key', key: 'backspace' }));
-    const inserted = added.replace(typed === added ? /[\x00-\x1f\x7f-\x9f]/g : /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '');
-    if (inserted) actions.push(typed === added ? { type: 'text', text: inserted } : { type: 'paste', text: inserted });
+    const actions: RawAction[] = Array.from({ length: removed }, () => ({
+      type: 'key',
+      key: 'backspace',
+    }));
+    const inserted = added.replace(
+      typed === added ? /[\x00-\x1f\x7f-\x9f]/g : /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,
+      '',
+    );
+    if (inserted)
+      actions.push(
+        typed === added ? { type: 'text', text: inserted } : { type: 'paste', text: inserted },
+      );
     typed = '';
     if (actions.length) model.input(actions);
     inputValue.set(value);
     // Normal input state owns IME and paste; release its completed transport buffer
     // on a later turn, after its latest controlled value reached the native editor.
-    if (value.length > 4096 && !reset) reset = setTimeout(() => {
-      reset = null; if (mounted) inputValue.set('');
-    }, 0);
+    if (value.length > 4096 && !reset)
+      reset = setTimeout(() => {
+        reset = null;
+        if (mounted) inputValue.set('');
+      }, 0);
   };
   const mouse = async (event: GestureResponderEvent, kind: 'press' | 'release' | 'move') => {
     if (!pointerInput() || !body) return;
-    const x = event.pageX, y = event.pageY;
+    const x = event.pageX,
+      y = event.pageY;
     const original = body;
     const version = model.version();
     const geometry = dimensions();
     const current = frame();
     const bounds = await original.measure();
-    if (!mounted || body !== original || !bounds || !pointerInput() || version !== model.version() || geometry !== dimensions()) return;
+    if (
+      !mounted ||
+      body !== original ||
+      !bounds ||
+      !pointerInput() ||
+      version !== model.version() ||
+      geometry !== dimensions()
+    )
+      return;
     const column = Math.floor((x - bounds.pageX + model.position.x) / CELL);
     const row = current.firstLine + Math.floor((y - bounds.pageY) / LINE);
-    if (column < 0 || row < 0 || column >= current.metadata.size.cols || row >= current.metadata.size.rows) return;
+    if (
+      column < 0 ||
+      row < 0 ||
+      column >= current.metadata.size.cols ||
+      row >= current.metadata.size.rows
+    )
+      return;
     model.input([{ type: 'mouse', event: kind, x: column, y: row, button: 'left' }]);
   };
   effect(() => {
     const size = dimensions();
-    model.resize({ cols: Math.max(2, Math.min(1024, Math.floor(size.width / CELL))), rows: Math.max(1, Math.min(1024, Math.floor(size.height / LINE))) });
+    model.resize({
+      cols: Math.max(2, Math.min(1024, Math.floor(size.width / CELL))),
+      rows: Math.max(1, Math.min(1024, Math.floor(size.height / LINE))),
+    });
   });
   effect(() => {
-    model.version(); dimensions();
-    if (model.atBottom) { offset.set(0); scroll?.scrollToEnd({ animated: false }); }
+    model.version();
+    dimensions();
+    if (model.atBottom) {
+      offset.set(0);
+      scroll?.scrollToEnd({ animated: false });
+    }
   });
   cleanup(() => {
-    mounted = false; unbind(); model.release();
+    mounted = false;
+    unbind();
+    model.release();
     if (reset) clearTimeout(reset);
   });
-  const pipes = () => { const output = model.entry().result.output; return output?.mode === 'pipes' ? output.stdout + output.stderr : ''; };
+  const pipes = () => {
+    const output = model.entry().result.output;
+    return output?.mode === 'pipes' ? output.stdout + output.stderr : '';
+  };
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-        <Button ref={(node) => { fallback = node; }} disabled={!model.local() || !model.running() || model.state() !== 'live'}
-          onPress={() => { model.takeControl(); input?.focus(); }} accessibilityLabel="Focus terminal input"
-          hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
-          <Text style={{ color: C.accent }}>{model.control() === 'held' ? 'Terminal focused' : 'Take input'}</Text>
+        <Button
+          ref={(node) => {
+            fallback = node;
+          }}
+          disabled={!model.local() || !model.running() || model.state() !== 'live'}
+          onPress={() => {
+            model.takeControl();
+            input?.focus();
+          }}
+          accessibilityLabel="Focus terminal input"
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
+          <Text style={{ color: C.accent }}>
+            {model.control() === 'held' ? 'Terminal focused' : 'Take input'}
+          </Text>
         </Button>
-        <If when={model.control() === 'held'}><Button onPress={inputAction(model.release, null)}><Text style={{ color: C.accent }}>Release input</Text></Button></If>
-        <Button onPress={() => void copy()} accessibilityLabel="Copy visible terminal"><Text style={{ color: C.accent }}>Copy</Text></Button>
-        <If when={model.local() && model.running()}><Button disabled={model.stopping()} onPress={() => confirmation.set(true)}>
-          <Text style={{ color: C.warning }}>{model.stopping() ? 'Stopping…' : 'Stop process'}</Text>
-        </Button></If>
-        <Text style={{ color: C.muted }}>{model.entry().result.status} · {model.control() === 'held' ? 'input held' : model.local() ? 'viewing' : 'shared · view only'}</Text>
+        <If when={model.control() === 'held'}>
+          <Button onPress={inputAction(model.release, null)}>
+            <Text style={{ color: C.accent }}>Release input</Text>
+          </Button>
+        </If>
+        <Button onPress={() => void copy()} accessibilityLabel="Copy visible terminal">
+          <Text style={{ color: C.accent }}>Copy</Text>
+        </Button>
+        <If when={model.local() && model.running()}>
+          <Button disabled={model.stopping()} onPress={() => confirmation.set(true)}>
+            <Text style={{ color: C.warning }}>
+              {model.stopping() ? 'Stopping…' : 'Stop process'}
+            </Text>
+          </Button>
+        </If>
+        <Text style={{ color: C.muted }}>
+          {model.entry().result.status} ·{' '}
+          {model.control() === 'held'
+            ? 'input held'
+            : model.local()
+              ? 'viewing'
+              : 'shared · view only'}
+        </Text>
       </View>
-      <If when={model.error()}><Text selectable style={{ color: C.danger }}>{model.error()}</Text></If>
+      <If when={model.error()}>
+        <Text selectable style={{ color: C.danger }}>
+          {model.error()}
+        </Text>
+      </If>
       <If when={model.state() === 'failed' || model.control() === 'refused'}>
-        <Button onPress={inputAction(model.retry, null)}><Text style={{ color: C.accent }}>Retry terminal observation</Text></Button>
+        <Button onPress={inputAction(model.retry, null)}>
+          <Text style={{ color: C.accent }}>Retry terminal observation</Text>
+        </Button>
       </If>
-      <If when={copyStatus()}><Text style={{ color: C.muted }}>{copyStatus()}</Text></If>
+      <If when={copyStatus()}>
+        <Text style={{ color: C.muted }}>{copyStatus()}</Text>
+      </If>
       <If when={model.state() === 'unavailable'}>
-        <Text style={{ color: C.warning }}>Live output is no longer retained. Input is released; the final display will appear after the process settles.</Text>
+        <Text style={{ color: C.warning }}>
+          Live output is no longer retained. Input is released; the final display will appear after
+          the process settles.
+        </Text>
       </If>
-      <View ref={(node) => { body = node; }}
+      <View
+        ref={(node) => {
+          body = node;
+        }}
         onLayout={(event) => dimensions.set({ width: event.width, height: event.height })}
-        onPress={() => { input?.focus(); if (!model.agentOwned()) model.takeControl(); }}
+        onPress={() => {
+          input?.focus();
+          if (!model.agentOwned()) model.takeControl();
+        }}
         onStartShouldSetResponder={() => pointerInput()}
-        onResponderGrant={(event) => { void mouse(event, 'press'); return true; }}
+        onResponderGrant={(event) => {
+          void mouse(event, 'press');
+          return true;
+        }}
         onResponderMove={(event) => void mouse(event, 'move')}
         onResponderRelease={(event) => void mouse(event, 'release')}
         onResponderTerminate={() => model.release()}
-        accessibilityLabel="Terminal output" style={{ flex: 1, minHeight: LINE, backgroundColor: '#151517', overflow: 'hidden' }}>
+        accessibilityLabel="Terminal output"
+        style={{ flex: 1, minHeight: LINE, backgroundColor: '#151517', overflow: 'hidden' }}
+      >
         <If when={model.entry().result.mode === 'pty'}>
-          <Scroll horizontal onScroll={(event) => { model.position.x = event.x; }} style={{ flex: 1 }}>
-            <Scroll ref={(node) => { scroll = node; }} contentOffset={model.position}
+          <Scroll
+            horizontal
+            onScroll={(event) => {
+              model.position.x = event.x;
+            }}
+            style={{ flex: 1 }}
+          >
+            <Scroll
+              ref={(node) => {
+                scroll = node;
+              }}
+              contentOffset={model.position}
               onScroll={(event) => {
                 model.position.y = event.y;
                 const current = frame();
-                const distance = Math.max(0, current.totalRows - rows() - Math.floor(event.y / LINE));
+                const distance = Math.max(
+                  0,
+                  current.totalRows - rows() - Math.floor(event.y / LINE),
+                );
                 model.atBottom = distance <= 1;
                 offset.set(model.atBottom ? 0 : distance);
-              }} style={{ width: Math.max(dimensions().width, frame().metadata.size.cols * CELL), height: dimensions().height }}>
-              <View style={{ height: Math.max(rows(), frame().totalRows) * LINE, width: frame().metadata.size.cols * CELL }}>
-                <View style={{ position: 'absolute', top: Math.max(0, frame().scrollbackRows + frame().firstLine) * LINE, left: 0 }}>
+              }}
+              style={{
+                width: Math.max(dimensions().width, frame().metadata.size.cols * CELL),
+                height: dimensions().height,
+              }}
+            >
+              <View
+                style={{
+                  height: Math.max(rows(), frame().totalRows) * LINE,
+                  width: frame().metadata.size.cols * CELL,
+                }}
+              >
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: Math.max(0, frame().scrollbackRows + frame().firstLine) * LINE,
+                    left: 0,
+                  }}
+                >
                   <Each of={frame().rows} key={(_, index) => index}>
                     {(row, index) => (
                       <View style={{ flexDirection: 'row', height: LINE }}>
                         <Each of={row()} key={(_, index) => index}>
                           {(run) => {
-                            const foreground = () => color(run().style.foreground, frame().metadata.palette, true);
-                            const background = () => color(run().style.background, frame().metadata.palette, false);
-                            return <Text numberOfLines={1} selectable={false} style={{ fontFamily: 'monospace', fontSize: 16, lineHeight: LINE,
-                              width: cells(run()).columns * CELL, flexShrink: 0,
-                              color: run().style.flags & 1 ? background() : foreground(), backgroundColor: run().style.flags & 1 ? foreground() : background(),
-                              fontWeight: run().style.flags & 2 ? '700' : '400', fontStyle: run().style.flags & 4 ? 'italic' : 'normal',
-                              textDecorationLine: run().style.flags & 512 ? 'line-through' : run().style.flags & (8 | 2048 | 4096 | 8192 | 16384) ? 'underline' : 'none', opacity: run().style.flags & 128 ? 0.6 : 1,
-                            }}>{cells(run()).text}</Text>;
+                            const foreground = () =>
+                              color(run().style.foreground, frame().metadata.palette, true);
+                            const background = () =>
+                              color(run().style.background, frame().metadata.palette, false);
+                            return (
+                              <Text
+                                numberOfLines={1}
+                                selectable={false}
+                                style={{
+                                  fontFamily: 'monospace',
+                                  fontSize: 16,
+                                  lineHeight: LINE,
+                                  width: cells(run()).columns * CELL,
+                                  flexShrink: 0,
+                                  color: run().style.flags & 1 ? background() : foreground(),
+                                  backgroundColor:
+                                    run().style.flags & 1 ? foreground() : background(),
+                                  fontWeight: run().style.flags & 2 ? '700' : '400',
+                                  fontStyle: run().style.flags & 4 ? 'italic' : 'normal',
+                                  textDecorationLine:
+                                    run().style.flags & 512
+                                      ? 'line-through'
+                                      : run().style.flags & (8 | 2048 | 4096 | 8192 | 16384)
+                                        ? 'underline'
+                                        : 'none',
+                                  opacity: run().style.flags & 128 ? 0.6 : 1,
+                                }}
+                              >
+                                {cells(run()).text}
+                              </Text>
+                            );
                           }}
                         </Each>
-                        <If when={model.control() === 'held' && frame().metadata.cursor.visible && frame().metadata.cursor.y === frame().firstLine + index()}>
-                          <View style={{ position: 'absolute', left: frame().metadata.cursor.x * CELL, top: 0, width: CELL, height: LINE, borderBottomWidth: 2, borderBottomColor: C.text }} />
+                        <If
+                          when={
+                            model.control() === 'held' &&
+                            frame().metadata.cursor.visible &&
+                            frame().metadata.cursor.y === frame().firstLine + index()
+                          }
+                        >
+                          <View
+                            style={{
+                              position: 'absolute',
+                              left: frame().metadata.cursor.x * CELL,
+                              top: 0,
+                              width: CELL,
+                              height: LINE,
+                              borderBottomWidth: 2,
+                              borderBottomColor: C.text,
+                            }}
+                          />
                         </If>
                       </View>
                     )}
@@ -235,22 +504,74 @@ export function Terminal(props: { model: TerminalModel }) {
           </Scroll>
         </If>
         <If when={model.entry().result.mode === 'pipes'}>
-          <Scroll style={{ flex: 1 }}><Text selectable style={{ color: C.text, fontFamily: 'monospace', fontSize: 16, lineHeight: LINE }}>{pipes()}</Text></Scroll>
+          <Scroll style={{ flex: 1 }}>
+            <Text
+              selectable
+              style={{ color: C.text, fontFamily: 'monospace', fontSize: 16, lineHeight: LINE }}
+            >
+              {pipes()}
+            </Text>
+          </Scroll>
         </If>
         <If when={model.entry().result.mode === 'pty' && model.local() && model.state() === 'live'}>
-        <Input ref={attach} value={inputValue()} onChange={text} onKeyPress={typedKey} onFocus={() => { if (!model.agentOwned()) model.takeControl(); }} onBlur={() => model.release()}
-          autoCapitalize="none" autoCorrect={false} caretHidden multiline submitBehavior="newline"
-          accessibilityLabel="Terminal keyboard input" style={{ position: 'absolute', width: CELL, height: LINE, left: 0, bottom: 0, opacity: 0.01 }} />
+          <Input
+            ref={attach}
+            value={inputValue()}
+            onChange={text}
+            onKeyPress={typedKey}
+            onFocus={() => {
+              if (!model.agentOwned()) model.takeControl();
+            }}
+            onBlur={() => model.release()}
+            autoCapitalize="none"
+            autoCorrect={false}
+            caretHidden
+            multiline
+            submitBehavior="newline"
+            accessibilityLabel="Terminal keyboard input"
+            style={{
+              position: 'absolute',
+              width: CELL,
+              height: LINE,
+              left: 0,
+              bottom: 0,
+              opacity: 0.01,
+            }}
+          />
         </If>
       </View>
-      <Text style={{ color: C.muted }}>Ctrl+Shift+Space · leave terminal · Shift+PageUp/Down · history</Text>
+      <Text style={{ color: C.muted }}>
+        Ctrl+Shift+Space · leave terminal · Shift+PageUp/Down · history
+      </Text>
       <If when={confirmation()}>
-        <Dialog animation="none" onOpenChange={() => confirmation.set(false)} style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000cc' }}>
+        <Dialog
+          animation="none"
+          onOpenChange={() => confirmation.set(false)}
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: '#000000cc',
+          }}
+        >
           <View style={{ padding: 16, maxWidth: 480, gap: 16, backgroundColor: C.surface }}>
-            <Text style={{ color: C.text }}>{model.agentOwned() ? 'Stop the agent’s running terminal? This interrupts its command.' : 'Stop this terminal and its running process?'}</Text>
+            <Text style={{ color: C.text }}>
+              {model.agentOwned()
+                ? 'Stop the agent’s running terminal? This interrupts its command.'
+                : 'Stop this terminal and its running process?'}
+            </Text>
             <View style={{ flexDirection: 'row', gap: 24 }}>
-              <Button onPress={() => confirmation.set(false)}><Text style={{ color: C.text }}>Keep running</Text></Button>
-              <Button onPress={() => { confirmation.set(false); void model.stop(); }}><Text style={{ color: C.danger }}>Stop process</Text></Button>
+              <Button onPress={() => confirmation.set(false)}>
+                <Text style={{ color: C.text }}>Keep running</Text>
+              </Button>
+              <Button
+                onPress={() => {
+                  confirmation.set(false);
+                  void model.stop();
+                }}
+              >
+                <Text style={{ color: C.danger }}>Stop process</Text>
+              </Button>
             </View>
           </View>
         </Dialog>

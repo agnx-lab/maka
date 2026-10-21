@@ -93,10 +93,20 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
         </Button>
         <Button
           accessibilityLabel="Show conversation terminals"
-          onPress={inputAction(resources.inventory, { sessionId: resources.sessionId()!, kind: 'terminals' })}
-          style={{ paddingHorizontal: 8, backgroundColor: resources.active() === 'terminals' ? C.raised : 'transparent' }}
-          hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
-          <Text style={{ color: resources.active() === 'terminals' ? C.text : C.accent }}>Terminal</Text>
+          onPress={inputAction(resources.inventory, {
+            sessionId: resources.sessionId()!,
+            kind: 'terminals',
+          })}
+          style={{
+            paddingHorizontal: 8,
+            backgroundColor: resources.active() === 'terminals' ? C.raised : 'transparent',
+          }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
+          <Text style={{ color: resources.active() === 'terminals' ? C.text : C.accent }}>
+            Terminal
+          </Text>
         </Button>
         <View style={{ flex: 1 }} />
         <Button
@@ -151,7 +161,9 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           </View>
         </Scroll>
       </If>
-      <If when={resources.active() === 'terminals'}><Terminals model={resources.terminals} sessionId={resources.sessionId()!} /></If>
+      <If when={resources.active() === 'terminals'}>
+        <Terminals model={resources.terminals} sessionId={resources.sessionId()!} />
+      </If>
       <If when={resources.active() === 'files'}>
         <WorkspaceFiles model={resources.files} />
       </If>

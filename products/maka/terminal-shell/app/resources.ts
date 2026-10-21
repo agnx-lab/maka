@@ -183,11 +183,18 @@ export function createResources(options: { selected(): string | null; blocked():
   };
   const terminals = createTerminals({
     sessionId: options.selected,
-    active: () => shown() && (active() === 'terminals' || tabs().some((tab) => tab.instance === active() && tab.kind === 'terminal')),
+    active: () =>
+      shown() &&
+      (active() === 'terminals' ||
+        tabs().some((tab) => tab.instance === active() && tab.kind === 'terminal')),
     open(entry: ResourceUpdate, model: TerminalModel) {
       open(entry.sessionId, `terminal:${entry.result.ref}`, (instance) => ({
-        kind: 'terminal', instance, identity: `terminal:${entry.result.ref}`,
-        sessionId: entry.sessionId, title: entry.result.cmd || 'Terminal', model,
+        kind: 'terminal',
+        instance,
+        identity: `terminal:${entry.result.ref}`,
+        sessionId: entry.sessionId,
+        title: entry.result.cmd || 'Terminal',
+        model,
       }));
     },
   });

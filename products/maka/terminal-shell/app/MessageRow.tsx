@@ -175,23 +175,49 @@ export function MessageRow({
                     </View>
                   }
                 >
-                  <If when={isTool()} else={
-                    <View>
-                      <Button selected={expanded()} onPress={inputAction(setExpanded, {
-                        sessionId, key: rowKey(row()), value: !expanded(),
-                      })} style={{ height: 16, paddingVertical: 0 }}>
-                        <Text numberOfLines={1} style={{ height: 16, color: C.muted, fontSize: 16, lineHeight: 16 }}>{summary()}</Text>
-                      </Button>
-                      <If when={expanded()}>
-                        <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
-                          <Text selectable style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}>{text()}</Text>
-                        </View>
-                      </If>
-                    </View>
-                  }>
-                    <ToolCard row={row} sessionId={sessionId} through={through} ownerKey={() => rowKey(row())}
-                      expanded={expanded} original={sourceMode} previewImage={previewImage}
-                      expand={setExpanded} showOriginal={setSourceMode}
+                  <If
+                    when={isTool()}
+                    else={
+                      <View>
+                        <Button
+                          selected={expanded()}
+                          onPress={inputAction(setExpanded, {
+                            sessionId,
+                            key: rowKey(row()),
+                            value: !expanded(),
+                          })}
+                          style={{ height: 16, paddingVertical: 0 }}
+                        >
+                          <Text
+                            numberOfLines={1}
+                            style={{ height: 16, color: C.muted, fontSize: 16, lineHeight: 16 }}
+                          >
+                            {summary()}
+                          </Text>
+                        </Button>
+                        <If when={expanded()}>
+                          <View style={{ paddingLeft: 16, paddingVertical: 16 }}>
+                            <Text
+                              selectable
+                              style={{ color: C.muted, fontSize: 16, lineHeight: 16 }}
+                            >
+                              {text()}
+                            </Text>
+                          </View>
+                        </If>
+                      </View>
+                    }
+                  >
+                    <ToolCard
+                      row={row}
+                      sessionId={sessionId}
+                      through={through}
+                      ownerKey={() => rowKey(row())}
+                      expanded={expanded}
+                      original={sourceMode}
+                      previewImage={previewImage}
+                      expand={setExpanded}
+                      showOriginal={setSourceMode}
                     />
                   </If>
                 </If>

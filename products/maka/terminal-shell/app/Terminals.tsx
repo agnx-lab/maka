@@ -28,27 +28,59 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-        <Button onPress={inputAction(model.start, null)} disabled={model.starting() || !model.known() || !!model.pending().length}
-          accessibilityLabel="Start interactive terminal" style={{ paddingHorizontal: 8 }}
-          hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
-          <Text style={{ color: C.accent }}>{model.starting() ? 'Starting shell…' : '+ New terminal'}</Text>
+        <Button
+          onPress={inputAction(model.start, null)}
+          disabled={model.starting() || !model.known() || !!model.pending().length}
+          accessibilityLabel="Start interactive terminal"
+          style={{ paddingHorizontal: 8 }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
+          <Text style={{ color: C.accent }}>
+            {model.starting() ? 'Starting shell…' : '+ New terminal'}
+          </Text>
         </Button>
-        <Button onPress={inputAction(model.refresh, null)} accessibilityLabel="Refresh terminals"
-          style={{ paddingHorizontal: 8 }} hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
+        <Button
+          onPress={inputAction(model.refresh, null)}
+          accessibilityLabel="Refresh terminals"
+          style={{ paddingHorizontal: 8 }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
+        >
           <Text style={{ color: C.accent }}>↻</Text>
         </Button>
       </View>
-      <If when={model.error()}><Text selectable style={{ color: C.danger }}>{model.error()}</Text></If>
+      <If when={model.error()}>
+        <Text selectable style={{ color: C.danger }}>
+          {model.error()}
+        </Text>
+      </If>
       <Each of={model.pending()} key={(operation) => operation.id}>
         {(operation) => (
           <View style={{ gap: 8, padding: 8, backgroundColor: C.raised }}>
-            <Text style={{ color: C.warning }}>Unresolved {operation().method} · input has not been repeated.</Text>
+            <Text style={{ color: C.warning }}>
+              Unresolved {operation().method} · input has not been repeated.
+            </Text>
             <View style={{ flexDirection: 'row', gap: 16 }}>
-              <Button disabled={model.recovering()} onPress={inputAction(model.recover, { sessionId: props.sessionId, id: operation().id, abandon: false })}>
+              <Button
+                disabled={model.recovering()}
+                onPress={inputAction(model.recover, {
+                  sessionId: props.sessionId,
+                  id: operation().id,
+                  abandon: false,
+                })}
+              >
                 <Text style={{ color: C.accent }}>Recover original</Text>
               </Button>
               <If when={!operation().reference}>
-                <Button disabled={model.recovering()} onPress={inputAction(model.recover, { sessionId: props.sessionId, id: operation().id, abandon: true })}>
+                <Button
+                  disabled={model.recovering()}
+                  onPress={inputAction(model.recover, {
+                    sessionId: props.sessionId,
+                    id: operation().id,
+                    abandon: true,
+                  })}
+                >
                   <Text style={{ color: C.accent }}>Cancel undispatched action</Text>
                 </Button>
               </If>
@@ -56,17 +88,36 @@ export function Terminals(props: { model: TerminalsModel; sessionId: string }) {
           </View>
         )}
       </Each>
-      <If when={model.loading() && !model.entries().length}><Text style={{ color: C.muted }}>Reading terminals…</Text></If>
-      <If when={!model.loading() && !model.error() && !model.entries().length}>
-        <Text style={{ color: C.muted }}>Start a shell in this conversation’s workspace. Agent terminals also appear here.</Text>
+      <If when={model.loading() && !model.entries().length}>
+        <Text style={{ color: C.muted }}>Reading terminals…</Text>
       </If>
-      <List each={model.entries()} keyExtractor={(entry) => entry.result.ref} estimatedItemSize={64}
-        accessibilityLabel="Conversation terminals" style={{ flex: 1, minHeight: 0 }}>
+      <If when={!model.loading() && !model.error() && !model.entries().length}>
+        <Text style={{ color: C.muted }}>
+          Start a shell in this conversation’s workspace. Agent terminals also appear here.
+        </Text>
+      </If>
+      <List
+        each={model.entries()}
+        keyExtractor={(entry) => entry.result.ref}
+        estimatedItemSize={64}
+        accessibilityLabel="Conversation terminals"
+        style={{ flex: 1, minHeight: 0 }}
+      >
         {(entry) => (
-          <Button onPress={inputAction(model.open, entry())} accessibilityLabel={`Open terminal: ${entry().result.cmd}`}
-            style={{ padding: 8, minHeight: 64 }} hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
-            <Text numberOfLines={1} style={{ color: C.text }}>⌁ {entry().result.cmd || 'Interactive shell'}</Text>
-            <Text numberOfLines={1} style={{ color: C.muted }}>{entry().result.status} · {entry().result.mode} · {entry().ownership.kind === 'local' ? entry().result.cwd : 'shared · view only'}</Text>
+          <Button
+            onPress={inputAction(model.open, entry())}
+            accessibilityLabel={`Open terminal: ${entry().result.cmd}`}
+            style={{ padding: 8, minHeight: 64 }}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.line }}
+          >
+            <Text numberOfLines={1} style={{ color: C.text }}>
+              ⌁ {entry().result.cmd || 'Interactive shell'}
+            </Text>
+            <Text numberOfLines={1} style={{ color: C.muted }}>
+              {entry().result.status} · {entry().result.mode} ·{' '}
+              {entry().ownership.kind === 'local' ? entry().result.cwd : 'shared · view only'}
+            </Text>
           </Button>
         )}
       </List>

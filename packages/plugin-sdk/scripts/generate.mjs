@@ -152,23 +152,28 @@ const object = (properties) => ({
   additionalProperties: false,
 });
 const services = Object.fromEntries(
-  ['agent', 'settings', 'settingsAuthentication', 'settingsSetup', 'deploymentManager', 'terminal'].map(
-    (service) => [
-      service,
-      object(
-        Object.fromEntries(
-          Object.entries(catalog.contracts[service].interface.methods).map(([name, method]) => [
-            name,
-            object({
-              mode: { const: method.mode },
-              input: methodSchema(method.input, `${service}_${name}_input_`),
-              output: methodSchema(method.output, `${service}_${name}_output_`),
-            }),
-          ]),
-        ),
+  [
+    'agent',
+    'settings',
+    'settingsAuthentication',
+    'settingsSetup',
+    'deploymentManager',
+    'terminal',
+  ].map((service) => [
+    service,
+    object(
+      Object.fromEntries(
+        Object.entries(catalog.contracts[service].interface.methods).map(([name, method]) => [
+          name,
+          object({
+            mode: { const: method.mode },
+            input: methodSchema(method.input, `${service}_${name}_input_`),
+            output: methodSchema(method.output, `${service}_${name}_output_`),
+          }),
+        ]),
       ),
-    ],
-  ),
+    ),
+  ]),
 );
 outputs.set(
   new URL('../src/generated/methods.ts', import.meta.url),

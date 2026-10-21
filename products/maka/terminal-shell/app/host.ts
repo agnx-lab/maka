@@ -236,7 +236,9 @@ export async function terminalMutation<M extends Method<'terminal', 'mutation'>>
   if (reply.receipt.kind !== 'recorded' || reply.receipt.outcome.kind !== 'returned')
     throw new Error('Terminal result is unknown. Recover the original action before trying again.');
   if (observed.cleanupError)
-    throw new Error(`Terminal result was recorded, but its original call did not finish cleanup: ${String(observed.cleanupError)}. Do not repeat this action.`);
+    throw new Error(
+      `Terminal result was recorded, but its original call did not finish cleanup: ${String(observed.cleanupError)}. Do not repeat this action.`,
+    );
   return reply.receipt.outcome.value as Output<'terminal', M>;
 }
 export const pendingTerminals = (scope: ScopedHost) =>
