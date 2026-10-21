@@ -1559,15 +1559,24 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
 
         // The elapsed-time label keeps advancing while deltas continuously
         // refresh this same turn and the user keeps its source reader anchored.
-        let duration_seconds = |screen: &str| {
-            let mut fields = screen.lines().nth(cadence_header_row)?.split_whitespace().rev();
-            let seconds = fields.next()?.strip_suffix('s')?.parse::<u64>().ok()?;
-            let minutes = fields.next().and_then(|field| field.strip_suffix('m'))
-                .map(str::parse::<u64>).transpose().ok()?.unwrap_or(0);
-            Some(minutes * 60 + seconds)
+        let duration_seconds = |text: &str| {
+            let (minutes, seconds) = text.split_once("m ").unwrap_or(("0", text));
+            Some(minutes.parse::<u64>().ok()? * 60 + seconds.strip_suffix('s')?.parse::<u64>().ok()?)
         };
-        let previous_duration = duration_seconds(&view.snapshot())
-            .expect("the active turn must paint its elapsed-time label");
+        // Read the actual duration Text frame. The whole row also includes
+        // the turn panel's border and the outer List's scrollbar.
+        let painted_duration = |view: &AppView| {
+            let metrics = view.surface().metrics();
+            view.accessibility_snapshot().into_iter().find_map(|node| {
+                if (node.frame.origin.y.0 / metrics.height().0 - 0.5).ceil() != cadence_header_row as f32 {
+                    return None;
+                }
+                duration_seconds(&node.label)?;
+                duration_seconds(&support::painted_text(view, &node.label, cadence_header_row))
+            })
+        };
+        let previous_duration = painted_duration(&view)
+            .unwrap_or_else(|| panic!("the active turn must paint its elapsed-time label:\n{}", view.snapshot()));
         let advancing = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 request.thinking(" ").await;
@@ -1576,7 +1585,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 let screen = view.snapshot();
                 assert!(at_source_start(&screen), "continuous thinking moved the source reader:\n{screen}");
                 assert_eq!(screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row));
-                if duration_seconds(&screen).is_some_and(|seconds| seconds > previous_duration) {
+                if painted_duration(&view).is_some_and(|seconds| seconds > previous_duration) {
                     break screen;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
