@@ -1368,6 +1368,127 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
     }).await.expect("real Host rich response workflow timed out");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn current_workspace_previews_keep_real_contents_drafts_and_session_ownership() {
+    use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::open().await;
+        let client = fixture.client().await;
+        let workspace = fixture.directory.path().join("workspace");
+        let text_path = workspace.join("000-preview.txt");
+        std::fs::write(&text_path, "BEFORE_CURRENT_EDIT\n").unwrap();
+        for arguments in [
+            vec!["init", "--quiet"],
+            vec!["add", "000-preview.txt"],
+            vec!["-c", "user.name=Preview fixture", "-c", "user.email=preview@example.invalid", "commit", "--quiet", "-m", "baseline"],
+        ] {
+            let output = std::process::Command::new("git").args(arguments).current_dir(&workspace).output().unwrap();
+            assert!(output.status.success(), "git fixture failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        std::fs::write(&text_path, "AFTER_CURRENT_EDIT\n").unwrap();
+        let pixels: Vec<u8> = (0..64 * 48).flat_map(|index| if index % 64 < 32 { [255, 64, 32, 255] } else { [32, 220, 96, 255] }).collect();
+        let mut png_bytes = Vec::new();
+        png::PngEncoder::new(&mut png_bytes).write_image(&pixels, 64, 48, ExtendedColorType::Rgba8).unwrap();
+        std::fs::write(workspace.join("001-scene.data"), png_bytes).unwrap();
+        support::mutate(&client, "send", json!({"sessionId":fixture.session,"message":"Keep running during workspace inspection","model":fixture.selection})).await;
+        let mut request = fixture.next_request().await;
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let invocation = observed["run"]["invocationId"].clone();
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        view.resize(120, 40);
+        wait_focused_input(&mut view, "Message composer").await;
+        view.handle_event(Event::Paste("UNSENT_PREVIEW_DRAFT".into()));
+        support::wait_draft(&client, &fixture.session, "UNSENT_PREVIEW_DRAFT").await;
+        let composer = view.surface().focused().unwrap();
+        support::click_label(&mut view, "Browse workspace files");
+        wait_view(&mut view, |screen| screen.contains("000-preview.txt") && screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
+        support::click_label(&mut view, "file: 000-preview.txt");
+        let first = wait_view(&mut view, |screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version") && !screen.contains("Reading current file…")).await;
+        assert!(!first.contains("BEFORE_CURRENT_EDIT"));
+        let first_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
+        std::fs::write(&text_path, "REFRESHED_CURRENT_EDIT\n").unwrap();
+        wait_view(&mut view, |screen| screen.contains("workspace may have changed")).await;
+        assert!(view.snapshot().contains("AFTER_CURRENT_EDIT"), "a capture must not silently become current contents");
+        support::click_label(&mut view, "Refresh current file");
+        wait_view(&mut view, |screen| screen.contains("REFRESHED_CURRENT_EDIT") && !screen.contains("Reading current file…")).await;
+        let next_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
+        assert_ne!(first_version, next_version);
+        support::click_label(&mut view, "Browse current changes");
+        wait_view(&mut view, |screen| screen.contains("Current changes") && screen.contains("000-preview.txt") && !screen.contains("Reading current changes…")).await;
+        support::click_label(&mut view, "Open Worktree diff: 000-preview.txt");
+        let diff = wait_view(&mut view, |screen| screen.contains("Current worktree diff") && screen.contains("-BEFORE_CURRENT_EDIT") && screen.contains("+REFRESHED_CURRENT_EDIT")).await;
+        evidence("workspace-current-diff-dock", &diff);
+        support::evidence_cells("workspace-current-diff-dock", &view);
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
+        view.resize(80, 24);
+        let narrow = wait_view(&mut view, |screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && screen.contains("Close · Esc")).await;
+        evidence("workspace-current-diff-dialog", &narrow);
+        support::evidence_cells("workspace-current-diff-dialog", &view);
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| !screen.contains("Current worktree diff") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
+        support::click_label(&mut view, "Browse workspace files");
+        wait_view(&mut view, |screen| screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
+        support::click_label(&mut view, "file: 001-scene.data");
+        let image = wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains('▀')).await;
+        evidence("workspace-current-image-dialog", &image);
+        support::evidence_cells("workspace-current-image-dialog", &view);
+        view.resize(120, 40);
+        wait_view(&mut view, |screen| screen.contains("64 × 48 · Captured image") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
+        support::click_label(&mut view, "Close workspace preview");
+        wait_view(&mut view, |screen| !screen.contains("Captured image") && !screen.contains("Close · Esc")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "Browse workspace files"));
+        tab_to_label(&mut view, "Message composer");
+        assert_eq!(view.surface().focused(), Some(composer));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("UNSENT_PREVIEW_DRAFT"));
+        request.delta("WORKSPACE_RUN_CONTINUES").await;
+        wait_view(&mut view, |screen| screen.contains("WORKSPACE_RUN_CONTINUES")).await;
+        let continuing = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(continuing["run"]["invocationId"], invocation);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+
+        // Cross the real 128-entry Host page by native wheel input, then let
+        // its watch replace the listing while the reader remains at the tail.
+        for index in 0..140 {
+            std::fs::write(workspace.join(format!("page-{index:03}.txt")), "file\n").unwrap();
+        }
+        support::click_label(&mut view, "Browse workspace files");
+        wait_view(&mut view, |screen| screen.contains("page-000.txt") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                support::tick(&mut view);
+                let screen = view.snapshot();
+                if screen.contains("page-139.txt") { break; }
+                support::scroll_text(&mut view, "page-", MouseEventKind::ScrollDown);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("native file scrolling did not load the second Host page");
+        let tail_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "file: page-139.txt").unwrap().frame.origin.y.0;
+        std::fs::rename(workspace.join("page-139.txt"), workspace.join("page-139v2.txt")).unwrap();
+        wait_view(&mut view, |screen| screen.contains("page-139v2.txt")).await;
+        let refreshed_y = view.accessibility_snapshot().into_iter().find(|node| node.label == "file: page-139v2.txt").unwrap().frame.origin.y.0;
+        assert_eq!(tail_y, refreshed_y, "a watch refresh discarded the already requested prefix");
+        support::evidence_cells("workspace-files-automatic-pagination-and-watch", &view);
+        support::click_label(&mut view, "Close workspace preview");
+        wait_view(&mut view, |screen| !screen.contains("page-139v2.txt") && !screen.contains("Close · Esc")).await;
+        let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
+        let other = support::mutate(&client, "create", json!({"title":"Other preview owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
+        shortcut(&mut view, 'o');
+        select_palette(&mut view, "Search sessions…", "Other preview owner", "Other preview owner").await;
+        wait_view(&mut view, |screen| screen.contains("Other preview owner") && !screen.contains("UNSENT_PREVIEW_DRAFT") && screen.contains("Enter sends")).await;
+        support::click_label(&mut view, "Browse workspace files");
+        wait_view(&mut view, |screen| screen.contains("000-preview.txt") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
+        assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Preview 000-preview.txt" || node.label == "Preview 001-scene.data"), "resource tabs moved to another session");
+        assert_ne!(other["session"]["id"], fixture.session);
+        support::wait_draft(&client, &fixture.session, "UNSENT_PREVIEW_DRAFT").await;
+        drop(view);
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host current workspace preview workflow timed out");
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn immutable_tool_images_render_and_preview_without_stopping_the_running_turn() {
@@ -1418,11 +1539,24 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         assert!(preview.contains("Image preview") && preview.contains("192 × 128") && preview.contains('▀'));
         evidence("tool-image-preview", &preview);
         terminal.send(b"\x1b");
+        terminal.wait_for_absent("Image preview").await;
         terminal.wait_for("Open image · 192 × 128").await;
-        // Native modal focus must return to its opener, so Enter opens it again.
+        // Closing either presentation returns focus to the original opener.
         terminal.send(b"\r");
         terminal.wait_for("Original image").await;
+        terminal.resize(80, 24);
+        let narrow = terminal.wait_for("192 × 128 · Original image").await;
+        assert!(narrow.contains("Image preview") && narrow.contains('▀'));
+        evidence("tool-image-preview-dialog", &narrow);
+        terminal.send(b"\x1b");
+        terminal.wait_for_absent("Image preview").await;
+        terminal.send(b"\r");
+        terminal.wait_for("192 × 128 · Original image").await;
+        terminal.resize(120, 40);
+        terminal.wait_for("Open image · 192 × 128").await;
+        terminal.wait_for("192 × 128 · Original image").await;
         terminal.click_text("Close · Esc");
+        terminal.wait_for_absent("Image preview").await;
         terminal.wait_for("Open image · 192 × 128").await;
         request.delta("IMAGE_RUN_CONTINUES_AFTER_ESCAPE").await;
         terminal.wait_for("Writing response").await;

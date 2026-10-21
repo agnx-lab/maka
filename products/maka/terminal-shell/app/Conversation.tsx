@@ -57,6 +57,8 @@ type ConversationProps = {
   control: Control;
   commands(): void;
   browse(): void;
+  files(): void;
+  filesOpener(node: YNode): void;
   interaction(target: { sessionId: string; requestId: string }): void;
   previewImage(image: ImagePreview): void;
   attach(handle: ConversationHandle): void;
@@ -1141,6 +1143,8 @@ export function Conversation(props: ConversationProps) {
         active={invocation() !== null}
         commands={props.commands}
         browse={props.browse}
+        files={props.files}
+        filesOpener={props.filesOpener}
       />
       <View
         style={{

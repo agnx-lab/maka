@@ -31,7 +31,8 @@ import type { PaletteEntry, PaletteKind } from './Palette';
 import { ModelSelect } from './ModelSelect';
 import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
-import { ImageViewer, type ImagePreview } from './ToolImage';
+import type { ImagePreview } from './ToolImage';
+import { createResources } from './resources';
 import { createPresentationSettings } from './presentation';
 import { createBrowsing } from './browsing';
 import type { BrowserWorkspace } from './browsing';
@@ -41,7 +42,6 @@ import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser
 type Overlay = { instance: number } & (
   | { kind: PaletteKind | 'models' | 'sessions'; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
-  | { kind: 'image'; sessionId: string; image: ImagePreview }
 );
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
@@ -49,6 +49,7 @@ function App() {
   const browsing = createBrowsing();
   const selected = signal<string | null>(host.initialSession);
   const overlay = signal<Overlay | null>(null);
+  const resources = createResources({ selected, blocked: () => overlay() !== null });
   const sidebarExpanded = signal(true);
   const browserFocus = signal(false);
   const error = signal('');
@@ -144,6 +145,7 @@ function App() {
   }) => {
     if (!alive || selected() !== sessionId) return;
     if (kind === 'sessions' && canDockBrowser()) {
+      resources.hide();
       status.set('');
       overlay.set(null);
       sidebarExpanded.set(true);
@@ -220,6 +222,10 @@ function App() {
   const commandModels = (context: CommandContext) => {
     if (closeCommand(context)) open({ kind: 'models', sessionId: context.sessionId });
   };
+  const commandFiles = (context: CommandContext) => {
+    if (closeCommand(context) && context.sessionId)
+      resources.openFiles({ sessionId: context.sessionId });
+  };
   const commandLatest = (context: CommandContext & { turnId: string | null }) => {
     if (closeCommand(context)) handle()?.jumpLatest(context.turnId);
   };
@@ -254,6 +260,16 @@ function App() {
       hint: 'Ctrl+G',
       run: inputAction(commandModels, context),
     },
+    ...(context.sessionId
+      ? [
+          {
+            id: 'files',
+            title: 'Files',
+            detail: 'Browse workspace files and current changes',
+            run: inputAction(commandFiles, context),
+          },
+        ]
+      : []),
     {
       id: 'latest',
       title: 'Jump to latest',
@@ -360,12 +376,7 @@ function App() {
   const previewImage = (image: ImagePreview) => {
     if (!alive || selected() !== image.source.sessionId || overlay()) return;
     browserFocus.set(false);
-    overlay.set({
-      kind: 'image',
-      sessionId: image.source.sessionId,
-      image,
-      instance: ++overlayInstance,
-    });
+    resources.openImage(image);
   };
   const closeSidebar = () => {
     if (!alive || overlay()) return;
@@ -424,6 +435,7 @@ function App() {
         expanded={() => sidebarExpanded() && overlay()?.kind !== 'sessions'}
         browser={browserProps}
         stop={stop}
+        resources={resources}
       >
         <If when={selected() === null}>
           <View>
@@ -442,6 +454,8 @@ function App() {
               control={control}
               commands={inputAction(open, { kind: 'commands', sessionId: id() })}
               browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
+              files={inputAction(resources.openFiles, { sessionId: id() })}
+              filesOpener={(node) => resources.attachOpener(id(), node)}
               interaction={openInteraction}
               previewImage={previewImage}
               focusComposer={focusComposer}
@@ -510,7 +524,6 @@ function App() {
         {(value) => {
           const current = value();
           const close = inputAction(closeOverlay, current.instance);
-          if (current.kind === 'image') return <ImageViewer image={current.image} close={close} />;
           if (current.kind === 'interaction')
             return (
               <InteractionPanel

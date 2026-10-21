@@ -39,6 +39,10 @@ Choose **Choose workspace** or press Ctrl+N to open **Workspaces**, then choose 
 
 **Sessions** uses a collapsible sidebar when the terminal has room for both it and the conversation; smaller windows use a dialog. Open either with the header's browse button or Ctrl+O. Drag the divider or use **Narrower** / **Wider** to adjust the sidebar. Choose **All workspaces**, the current session's exact workspace, or a project. A project's **+** creates in its Host-authorized directory; **New in current workspace** follows the open conversation. An isolated worktree is not necessarily part of its parent project.
 
+Open **Files** in a conversation header or **Commands** to browse its authorized workspace. Files and current Git changes open in session-owned preview tabs, docked on the right when space allows and in a dialog otherwise. Directory updates retain the already requested range; scrolling automatically requests later pages. Switching conversations closes its previews and watches while preserving the conversation draft.
+
+File previews are captured contents: **Refresh** reads the current file again. Text previews accept up to 2 MiB, and image captures up to 16 MiB; binary files, links, missing files and larger contents show explicit unavailable states. **Changes** and each diff have their own **Refresh** and describe the current workspace, rather than a turn's deliverables. Large diffs show a display-limit notice. Tool-result image tabs continue to use their original retained image.
+
 ## Keyboard
 
 | Key | Action |

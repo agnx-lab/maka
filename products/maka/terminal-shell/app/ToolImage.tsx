@@ -19,10 +19,11 @@
 
 import { Buffer } from 'buffer';
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
-import { Button, Dialog } from 'nsh/base';
+import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 import { Image } from 'nsh/image';
 import type { Position } from './history';
+import type { YNode } from 'nsh';
 import { C } from './ui';
 
 type ImageSource = { sessionId: string; through: number; position: Position; offset: 0 };
@@ -31,6 +32,7 @@ export type ImagePreview = {
   uri: string;
   width: number;
   height: number;
+  restoreFocus?(): boolean;
 };
 
 export function ToolImage(props: {
@@ -56,6 +58,7 @@ export function ToolImage(props: {
   const error = signal('');
   const attempt = signal(0);
   let alive = true;
+  let button: YNode | undefined;
   cleanup(() => {
     alive = false;
   });
@@ -65,7 +68,18 @@ export function ToolImage(props: {
     selected.position.sourceSequence === source.position.sourceSequence &&
     selected.position.itemIndex === source.position.itemIndex;
   const preview = (selected: ImageSource) => {
-    if (alive && owns(selected) && size()) props.preview({ source, uri, ...size()! });
+    const originalButton = button;
+    if (alive && owns(selected) && size())
+      props.preview({
+        source,
+        uri,
+        ...size()!,
+        restoreFocus: () => {
+          if (!alive || !size() || !originalButton || button !== originalButton) return false;
+          originalButton.focus();
+          return true;
+        },
+      });
   };
   const retry = (selected: ImageSource) => {
     if (!alive || !owns(selected) || !error()) return;
@@ -76,6 +90,9 @@ export function ToolImage(props: {
   return (
     <View style={{ gap: 16 }}>
       <Button
+        ref={(node) => {
+          button = node;
+        }}
         accessibilityLabel="Open image preview"
         disabled={!size()}
         onPress={inputAction(preview, source)}
@@ -126,51 +143,5 @@ export function ToolImage(props: {
         </Button>
       </If>
     </View>
-  );
-}
-
-export function ImageViewer(props: { image: ImagePreview; close(): void }) {
-  const error = signal('');
-  return (
-    <Dialog
-      animation="none"
-      onOpenChange={props.close}
-      style={{
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        backgroundColor: '#000000cc',
-      }}
-    >
-      <View
-        style={{
-          width: '100%',
-          height: Math.max(80, windowSize().height - 32),
-          backgroundColor: C.background,
-          padding: 16,
-          gap: 16,
-        }}
-      >
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 16 }}>
-          <Text style={{ color: C.text, fontWeight: '700', flex: 1 }}>Image preview</Text>
-          <Button onPress={props.close}>
-            <Text style={{ color: C.muted }}>Close · Esc</Text>
-          </Button>
-        </View>
-        <Image
-          src={props.image.uri}
-          resizeMode="contain"
-          onError={(reason) => error.set(reason.message)}
-          style={{ flex: 1, minHeight: 0, width: '100%' }}
-        />
-        <Text style={{ color: C.muted }}>
-          {props.image.width} × {props.image.height} · Original image
-        </Text>
-        <If when={error()}>
-          <Text style={{ color: C.danger }}>{error()}</Text>
-        </If>
-      </View>
-    </Dialog>
   );
 }

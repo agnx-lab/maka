@@ -17,27 +17,45 @@
  * under the License.
  */
 
-import { cleanup, effect, signal, View, type JSX } from 'nsh';
+import { cleanup, effect, inputAction, signal, View, type JSX } from 'nsh';
 import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
+import { Dialog } from 'nsh/base';
 import { C } from './ui';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
+import { ResourcePane } from './ResourcePane';
+import type { Resources } from './resources';
 
 const CELL = 8;
 const CENTER_MIN = 72 * CELL;
 const BROWSER_MIN = 24 * CELL;
 const BROWSER_MAX = 40 * CELL;
+const PREVIEW_MIN = 40 * CELL;
 
 export const canDockBrowser = () => windowSize().width >= CENTER_MIN + BROWSER_MIN + CELL;
+// Current layout policy, not a claim that narrower terminal columns are impossible.
+const canDockPreview = () => windowSize().width >= CENTER_MIN + PREVIEW_MIN + CELL;
 
 export function Workbench(props: {
   expanded(): boolean;
   browser: WorkspaceBrowserProps;
   stop(): void;
+  resources: Resources;
   children: JSX.Element;
 }) {
   const preferredWidth = signal(28 * CELL);
-  const width = () => Math.min(preferredWidth(), windowSize().width - CENTER_MIN - CELL);
+  const preview = () => props.resources.shown() && canDockPreview();
+  const browser = () =>
+    canDockBrowser() &&
+    props.expanded() &&
+    (!preview() || windowSize().width >= CENTER_MIN + BROWSER_MIN + PREVIEW_MIN + 2 * CELL);
+  const width = () =>
+    Math.min(
+      preferredWidth(),
+      windowSize().width - CENTER_MIN - CELL - (preview() ? PREVIEW_MIN + CELL : 0),
+    );
+  const previewWidth = () =>
+    Math.min(48 * CELL, windowSize().width - CENTER_MIN - CELL - (browser() ? width() + CELL : 0));
   const clamp = (value: number) =>
     Math.max(
       BROWSER_MIN,
@@ -56,9 +74,22 @@ export function Workbench(props: {
     drag = null;
   });
   const resize = (delta: number) => preferredWidth.set(clamp(width() + delta * CELL));
+  const previewDialog = signal(false);
+  let wasPreviewDocked = canDockPreview();
+  effect(() => {
+    const docked = canDockPreview();
+    const root = props.resources.root();
+    if (!props.resources.shown() || docked) previewDialog.set(false);
+    else if (!wasPreviewDocked || (root && keymap.focusedWithin(root))) previewDialog.set(true);
+    else {
+      props.resources.hide();
+      previewDialog.set(false);
+    }
+    wasPreviewDocked = docked;
+  });
   return (
     <View style={{ flex: 1, flexDirection: 'row', minHeight: 0 }}>
-      <If when={canDockBrowser() && props.expanded()}>
+      <If when={browser()}>
         <View style={{ width: width(), flexShrink: 0, backgroundColor: C.surface }}>
           <WorkspaceBrowser {...props.browser} docked resize={resize} />
         </View>
@@ -92,6 +123,24 @@ export function Workbench(props: {
       >
         {props.children}
       </View>
+      <If when={preview()}>
+        <View style={{ width: CELL, backgroundColor: C.line }} />
+        <View style={{ width: previewWidth(), flexShrink: 0, minHeight: 0 }}>
+          <ResourcePane resources={props.resources} docked />
+        </View>
+      </If>
+      <If when={previewDialog()}>
+        <Dialog
+          animation="none"
+          onOpenChange={inputAction(props.resources.close, {
+            sessionId: props.resources.sessionId()!,
+            instance: props.resources.instance(),
+          })}
+          style={{ flex: 1, padding: 8, backgroundColor: '#000000cc' }}
+        >
+          <ResourcePane resources={props.resources} docked={false} />
+        </Dialog>
+      </If>
     </View>
   );
 }

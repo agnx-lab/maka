@@ -18,6 +18,7 @@
  */
 
 import { signal, Text, View } from 'nsh';
+import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 
@@ -41,6 +42,8 @@ export function Header(props: {
   active?: boolean;
   commands(): void;
   browse?(): void;
+  files?(): void;
+  filesOpener?(node: YNode): void;
 }) {
   const width = signal(windowSize().width);
   return (
@@ -78,6 +81,17 @@ export function Header(props: {
       <Text numberOfLines={1} style={{ color: C.text, flex: 1 }}>
         {props.title}
       </Text>
+      <If when={props.files}>
+        <Button
+          accessibilityLabel="Browse workspace files"
+          ref={props.filesOpener}
+          onPress={props.files}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
+        >
+          <Text style={{ color: C.accent }}>Files</Text>
+        </Button>
+      </If>
       <If when={width() >= 880 && props.workspace}>
         <Text numberOfLines={1} style={{ color: C.muted, maxWidth: 240 }}>
           {props.workspace?.split('/').filter(Boolean).at(-1)}
