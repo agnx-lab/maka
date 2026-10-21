@@ -115,8 +115,8 @@ impl EventReader {
         }
     }
 
-    /// Returns a platform-specific waker that can unblock [`poll`](Self::poll) and
-    /// [`read`](Self::read) calls.
+    /// Returns a platform-specific waker that can unblock [`poll`](Self::poll),
+    /// [`read`](Self::read), and [`wait_ready`](Self::wait_ready) calls.
     ///
     /// The waker is cheap to clone and can be freely moved to another thread. Calling its
     /// `wake` method does not require the calling thread to hold the [`EventReader`]'s internal
@@ -125,6 +125,21 @@ impl EventReader {
     /// returns `Err` with [`io::ErrorKind::Interrupted`].
     pub fn waker(&self) -> PlatformWaker {
         self.waker.clone()
+    }
+
+    /// Waits for input readiness without reading, decoding, or removing input.
+    ///
+    /// Already buffered events return immediately. Otherwise this waits for the original input
+    /// handle, a resize notification, a parser reply deadline, or [`Self::waker`]. Readiness is
+    /// advisory: the next nonblocking [`Self::poll`] may find no complete event. Parser deadlines
+    /// are checked by that later poll, rather than changing parser state while waiting here.
+    /// A waker interrupts the wait with [`io::ErrorKind::Interrupted`].
+    pub fn wait_ready(&self) -> io::Result<()> {
+        let mut reader = self.shared.lock();
+        if !reader.events.is_empty() || !reader.skipped_events.is_empty() {
+            return Ok(());
+        }
+        reader.source.wait_ready()
     }
 
     /// Polls for availability of an event matching `filter`.
@@ -236,5 +251,123 @@ impl Shared {
                 ));
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::{event::KeyCode, terminal::FileDescriptor};
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+        sync::mpsc,
+        thread,
+    };
+
+    fn fixture() -> (EventReader, UnixStream, UnixStream) {
+        let (input, peer) = UnixStream::pair().unwrap();
+        let probe = input.try_clone().unwrap();
+        let write = FileDescriptor::Owned(input.try_clone().unwrap().into());
+        let read = FileDescriptor::Owned(input.into());
+        let source = super::super::source::UnixEventSource::new(read, write).unwrap();
+        (EventReader::new(source), peer, probe)
+    }
+
+    fn wait(reader: &EventReader) -> io::Result<()> {
+        let waiting = reader.clone();
+        let (finished, result) = mpsc::channel();
+        let task = thread::spawn(move || {
+            let _ = finished.send(waiting.wait_ready());
+        });
+        // A deadlock watchdog, not an input-latency expectation. Wake before unwinding on failure.
+        let result = result.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|error| {
+            let _ = reader.waker().wake();
+            panic!("readiness wait did not finish: {error}");
+        });
+        task.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn readiness_preserves_os_input_and_both_buffered_event_queues() {
+        let (reader, mut peer, mut probe) = fixture();
+        probe.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        peer.write_all("你好".as_bytes()).unwrap();
+        wait(&reader).unwrap();
+        let mut bytes = [0; 6];
+        probe.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, "你好".as_bytes());
+
+        peer.write_all(b"ab").unwrap();
+        assert!(reader.poll(Some(Duration::ZERO), |_| true).unwrap());
+        wait(&reader).unwrap();
+        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('a').into()));
+        // The OS bytes and reader queue are now empty, but the parser still owns 'b'.
+        wait(&reader).unwrap();
+        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('b').into()));
+        assert!(!reader.poll(Some(Duration::ZERO), |_| true).unwrap());
+    }
+
+    #[test]
+    fn readiness_accepts_prewake_and_concurrent_cancel_without_reader_lock() {
+        let (reader, _peer, _probe) = fixture();
+        reader.waker().wake().unwrap();
+        assert_eq!(wait(&reader).unwrap_err().kind(), io::ErrorKind::Interrupted);
+
+        let waiting = reader.clone();
+        let (started, starting) = mpsc::channel();
+        let (finished, result) = mpsc::channel();
+        let task = thread::spawn(move || {
+            started.send(()).unwrap();
+            let _ = finished.send(waiting.wait_ready());
+        });
+        starting.recv().unwrap();
+        // This also permits cancellation to win the check-to-wait race.
+        reader.waker().wake().unwrap();
+        let result = result.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|error| {
+            let _ = reader.waker().wake();
+            panic!("cancel did not finish the readiness wait: {error}");
+        });
+        task.join().unwrap();
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn readiness_preserves_filtered_events_after_poll_is_interrupted() {
+        let (reader, mut peer, _probe) = fixture();
+        peer.write_all(b"a").unwrap();
+        reader.waker().wake().unwrap();
+        // The input is parsed first, then the original waker interrupts the filtered poll.
+        assert!(!reader.poll(None, |_| false).unwrap());
+        wait(&reader).unwrap();
+        reader.poll(Some(Duration::ZERO), |_| true).unwrap();
+        assert_eq!(reader.read(|_| true).unwrap(), Event::Key(KeyCode::Char('a').into()));
+    }
+
+    #[test]
+    fn readiness_keeps_reply_expiration_in_the_following_poll_and_reports_closed_input() {
+        let (reader, mut peer, _probe) = fixture();
+        peer.write_all(b"\x1b_Gi=31;").unwrap();
+        assert!(!reader.poll(Some(Duration::ZERO), |_| true).unwrap());
+        wait(&reader).unwrap();
+        assert_eq!(
+            reader.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        // The sticky failure is also ready; waiting must not restart its original deadline.
+        wait(&reader).unwrap();
+        assert_eq!(
+            reader.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+
+        let (closed, peer, _probe) = fixture();
+        drop(peer);
+        wait(&closed).unwrap();
+        assert_eq!(
+            closed.poll(Some(Duration::ZERO), |_| true).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
     }
 }

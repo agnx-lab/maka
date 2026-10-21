@@ -26,6 +26,8 @@ pub type PlatformWaker = WindowsWaker;
 
 // CREDIT: <https://github.com/crossterm-rs/crossterm/blob/36d95b26a26e64b0f8c12edfe11f410a6d56a812/src/event/source.rs#L12-L27>
 pub(crate) trait EventSource: Send + Sync {
+    fn wait_ready(&mut self) -> std::io::Result<()>;
+
     fn try_read(&mut self, timeout: Option<Duration>) -> std::io::Result<Option<crate::Event>>;
 
     fn set_max_pending_bytes(&mut self, limit: usize) -> std::io::Result<()>;

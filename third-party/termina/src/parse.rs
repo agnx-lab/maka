@@ -122,6 +122,10 @@ impl Parser {
         self.events.pop_front()
     }
 
+    pub(crate) fn is_ready(&self) -> bool {
+        !self.events.is_empty() || self.failure.is_some()
+    }
+
     /// Adds bytes to the parser and queues any completed events.
     ///
     /// Set `maybe_more` to `true` when the input source may provide more bytes for the same

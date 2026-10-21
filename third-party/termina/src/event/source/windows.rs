@@ -29,6 +29,42 @@ impl WindowsEventSource {
 }
 
 impl EventSource for WindowsEventSource {
+    fn wait_ready(&mut self) -> io::Result<()> {
+        use windows_sys::Win32::Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use Threading::{WaitForMultipleObjects, INFINITE};
+
+        if self.parser.is_ready() || self.input.has_pending_input_events()? {
+            return Ok(());
+        }
+        let mut handles = [self.input.as_raw_handle(), self.waker.as_raw_handle()];
+        let wait = self
+            .parser
+            .reply_poll_timeout(None)
+            .map(|timeout| {
+                // Windows waits in whole milliseconds. Round up without turning a finite
+                // parser deadline into INFINITE or repeatedly polling its final fraction.
+                let millis = timeout.as_millis()
+                    + u128::from(timeout.subsec_nanos() % 1_000_000 != 0);
+                millis.min(u128::from(INFINITE - 1)) as u32
+            })
+            .unwrap_or(INFINITE);
+        let result = unsafe {
+            WaitForMultipleObjects(handles.len() as u32, handles.as_mut_ptr(), 0, wait)
+        };
+        match result {
+            WAIT_OBJECT_0 | WAIT_TIMEOUT => Ok(()),
+            value if value == WAIT_OBJECT_0 + 1 => Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Readiness wait was woken up",
+            )),
+            WAIT_FAILED => Err(io::Error::last_os_error()),
+            _ => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "unexpected terminal readiness wait result",
+            )),
+        }
+    }
+
     fn set_max_pending_bytes(&mut self, limit: usize) -> io::Result<()> {
         self.parser.set_max_pending_bytes(limit)
     }

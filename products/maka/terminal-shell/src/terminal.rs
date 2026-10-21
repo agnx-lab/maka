@@ -305,6 +305,7 @@ fn drive(
 
 fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reader, String> {
     let stop = presentation.stop.clone();
+    let waker = reader.waker();
     let handle = thread::Builder::new()
         .name("maka-nsh-input".into())
         .spawn(move || {
@@ -375,25 +376,38 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         }
                     }
                 }
-                thread::sleep(Duration::from_millis(2));
+                if !stop.load(Ordering::Acquire) {
+                    match reader.wait_ready() {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                        Err(error) => {
+                            state.lock().unwrap().error = Some(error.to_string());
+                            presentation.wake_driver();
+                            return;
+                        }
+                    }
+                }
             }
             presentation.wake_driver();
         })
         .map_err(|error| error.to_string())?;
     Ok(Reader {
         stop,
+        waker,
         handle: Some(handle),
     })
 }
 
 struct Reader {
     stop: Arc<AtomicBool>,
+    waker: termina::PlatformWaker,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Drop for Reader {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        let _ = self.waker.wake();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }

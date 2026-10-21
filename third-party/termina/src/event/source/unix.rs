@@ -78,6 +78,28 @@ impl Drop for UnixEventSource {
 }
 
 impl EventSource for UnixEventSource {
+    fn wait_ready(&mut self) -> io::Result<()> {
+        if self.parser.is_ready() {
+            return Ok(());
+        }
+        let [_, _, wake_ready] = poll(
+            [
+                self.read.as_fd(),
+                self.sigwinch_pipe.as_fd(),
+                self.wake_pipe.as_fd(),
+            ],
+            self.parser.reply_poll_timeout(None),
+        )?;
+        if wake_ready {
+            while read_complete(&self.wake_pipe, &mut [0; 1024])? != 0 {}
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Readiness wait was woken up",
+            ));
+        }
+        Ok(())
+    }
+
     fn set_max_pending_bytes(&mut self, limit: usize) -> io::Result<()> {
         self.parser.set_max_pending_bytes(limit)
     }
@@ -179,12 +201,11 @@ fn read_complete<F: Read>(mut file: F, buf: &mut [u8]) -> io::Result<usize> {
 /// A small abstraction over platform specific polling behavior.
 ///
 /// macOS `poll(2)` doesn't work on file descriptors to `/dev/tty` so we need to use `select(2)`
-/// instead. This provides a function which abstracts over the parts of `poll(2)` and
-/// `select(2)` we want. Specifically we are looking for `POLLIN` events from `poll(2)` and we
-/// consider that to be "ready."
+/// instead. This provides a function which abstracts over input readiness from `poll(2)` and
+/// `select(2)` without consuming terminal bytes.
 ///
-/// This module is not meant to be generic. We consider `POLLIN` to be "ready" and do not look at
-/// other poll flags. For the sake of simplicity we also only allow polling exactly three FDs at
+/// This module is not meant to be generic. Read hangup reaches the original read/EOF path, while
+/// other descriptor errors are reported directly. We only allow polling exactly three FDs at
 /// a time - the exact amount we need for the event source.
 fn poll(fds: [BorrowedFd<'_>; 3], timeout: Option<Duration>) -> std::io::Result<[bool; 3]> {
     use rustix::event::Timespec;
@@ -200,8 +221,27 @@ fn poll(fds: [BorrowedFd<'_>; 3], timeout: Option<Duration>) -> std::io::Result<
 
         rustix::event::poll(&mut fds, timeout)?;
 
+        if fds.iter().any(|fd| {
+            fd.revents()
+                .intersects(PollFlags::ERR | PollFlags::NVAL)
+        }) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal event descriptor failed",
+            ));
+        }
+        if fds[1..]
+            .iter()
+            .any(|fd| fd.revents().contains(PollFlags::HUP))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "terminal event notification pipe closed",
+            ));
+        }
+
         Ok([
-            fds[0].revents().contains(PollFlags::IN),
+            fds[0].revents().intersects(PollFlags::IN | PollFlags::HUP),
             fds[1].revents().contains(PollFlags::IN),
             fds[2].revents().contains(PollFlags::IN),
         ])
