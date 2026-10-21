@@ -101,9 +101,17 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         let wide = wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("Read lines") && screen.contains("起点_原始")).await;
         support::scroll_snapshot_text(&mut view, &wide, "起点_原始", MouseEventKind::ScrollDown);
         let reading = wait_view(&mut view, |screen| screen.contains("v WorkspaceDocument") && screen.contains("↓ Latest") && !screen.contains("起点_原始")).await;
-        let visible_source = |screen: &str| screen.lines().enumerate()
-            .filter(|(_, line)| line.contains(" │ "))
-            .map(|(row, line)| (row, line.to_owned())).collect::<Vec<_>>();
+        let numbered_source = original.lines().enumerate()
+            .map(|(index, line)| format!("{} │ {line}", index + 1)).collect::<Vec<_>>();
+        // Keep exact source glyphs and screen coordinates. The enclosing
+        // turn's right-edge scrollbar changes when another row arrives.
+        let visible_source = |screen: &str| screen.lines().enumerate().filter_map(|(row, line)| {
+            numbered_source.iter().find_map(|source| {
+                let column = line.find(source.as_str())?;
+                (column == 0 || !line.as_bytes()[column - 1].is_ascii_digit())
+                    .then(|| (row, line[..column].chars().count(), source.clone()))
+            })
+        }).collect::<Vec<_>>();
         let anchor = visible_source(&reading);
         assert!(!anchor.is_empty());
         continuation.thinking("INNER_STREAM_A").await;
