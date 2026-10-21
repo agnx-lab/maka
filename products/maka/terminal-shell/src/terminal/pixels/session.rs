@@ -432,7 +432,15 @@ fn run(
                     .unwrap()
                     .effects = Some(bytes);
             }
-            if !platform.has_pending() {
+            let input_pending = presentation
+                .state
+                .lock()
+                .unwrap()
+                .pixels
+                .as_ref()
+                .unwrap()
+                .has_pending_input();
+            if !platform.has_pending() && !input_pending {
                 let wait = platform
                     .next_deadline()
                     .map_or(Duration::from_millis(16), |deadline| {

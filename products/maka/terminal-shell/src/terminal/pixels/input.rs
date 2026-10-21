@@ -217,13 +217,14 @@ impl Inbox {
         self.events.retain(|input| !pointer(&input.event));
     }
 
-    pub(super) fn pop(&mut self) -> Option<Input> {
-        if self
-            .events
+    pub(super) fn has_pending_input(&self) -> bool {
+        self.events
             .front()
-            .is_some_and(|input| input.token.is_none())
-            && self.published.is_none()
-        {
+            .is_some_and(|input| input.token.is_some() || self.published.is_some())
+    }
+
+    pub(super) fn pop(&mut self) -> Option<Input> {
+        if !self.has_pending_input() {
             return None;
         }
         self.events.pop_front()
@@ -292,6 +293,10 @@ mod tests {
         let paste = Event::Paste("你好\nworld".repeat(16384));
         assert!(!inbox.push(paste.clone()).unwrap());
         expected.push(paste);
+        assert!(
+            !inbox.has_pending_input(),
+            "startup input waits for its first presentation"
+        );
         let size = WindowSize {
             cols: 80,
             rows: 24,
