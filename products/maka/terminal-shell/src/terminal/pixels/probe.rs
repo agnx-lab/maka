@@ -98,6 +98,7 @@ impl Capabilities {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct Probe {
     pub(super) slots: Slots,
     deadline: Option<Instant>,
@@ -110,24 +111,6 @@ pub(crate) struct Probe {
     synchronized: Option<(bool, Instant)>,
     pub(super) measurement: PixelSizeQuery,
     cancelled: bool,
-}
-
-impl Default for Probe {
-    fn default() -> Self {
-        Self {
-            slots: Slots::default(),
-            deadline: None,
-            kitty: None,
-            mouse: None,
-            identity: None,
-            sixel: None,
-            sixel_mode: None,
-            inline: None,
-            synchronized: None,
-            measurement: PixelSizeQuery::default(),
-            cancelled: false,
-        }
-    }
 }
 
 impl Probe {

@@ -86,13 +86,14 @@ fn run(
         Box::new(move |frame| {
             if let Some(snapshot) = sampled.borrow().sample() {
                 retained.borrow_mut().insert(frame.token(), snapshot);
-                if let Some(inbox) = &mut delivered.state.lock().unwrap().pixels {
-                    if drawn_geometry.get() == inbox.geometry && inbox.resize.is_none() {
-                        inbox.pending = Some(super::input::Candidate {
-                            frame,
-                            geometry: drawn_geometry.get(),
-                        });
-                    }
+                if let Some(inbox) = &mut delivered.state.lock().unwrap().pixels
+                    && drawn_geometry.get() == inbox.geometry
+                    && inbox.resize.is_none()
+                {
+                    inbox.pending = Some(super::input::Candidate {
+                        frame,
+                        geometry: drawn_geometry.get(),
+                    });
                 }
             }
         }),
