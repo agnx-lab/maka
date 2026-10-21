@@ -1705,6 +1705,7 @@ export function Conversation(props: ConversationProps) {
                       </If>
                       <MessageRow
                         item={row}
+                        toolMaxHeight={() => readingSize().height}
                         ownerKey={() => initial.rowId}
                         viewState={rowState(initial.rowId)}
                         sessionId={sessionId}

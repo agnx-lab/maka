@@ -19,7 +19,6 @@
 
 import { computed, inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
-import { windowSize } from 'nsh/device';
 import type { HistoryTool } from '../../../../packages/plugin-sdk/src/index.js';
 import type { Row } from './history';
 import type { ImagePreview } from './ImageThumbnail';
@@ -34,6 +33,8 @@ import {
 } from './toolCards';
 import { C, codeTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
+
+const detailsGap = 8;
 
 function reference(tool: HistoryTool, field: 'arguments' | 'result'): ToolSourceRef | null {
   const position = (field === 'arguments' ? tool.call : tool.result)?.position;
@@ -206,7 +207,7 @@ export function ToolCard(props: {
   through(): number;
   expanded(): boolean;
   original(): boolean;
-  bodyMaxHeight?(): number;
+  maxHeight(): number;
   reading?(): void;
   expand(action: { sessionId: string; key: string; value: boolean }): void;
   showOriginal(action: { sessionId: string; key: string; value: boolean }): void;
@@ -241,53 +242,60 @@ export function ToolCard(props: {
       : 'Not completed';
   };
   return (
-    <View style={{ width: '100%', minWidth: 0 }}>
-      <Button
-        selected={props.expanded()}
-        accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
-        onPress={inputAction(props.expand, {
-          sessionId: props.sessionId,
-          key: props.ownerKey(),
-          value: !props.expanded(),
-        })}
-        style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-        hoverStyle={{ backgroundColor: C.raised }}
-        focusStyle={{ backgroundColor: C.line }}
-      >
-        <Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} />
-        <Text
-          numberOfLines={1}
-          style={{ flex: 1, minWidth: 0, color: C.secondary, fontSize: 13, lineHeight: 16 }}
+    <View style={{ width: '100%', minWidth: 0, gap: detailsGap }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', minWidth: 0 }}>
+        <Button
+          selected={props.expanded()}
+          accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
+          onPress={inputAction(props.expand, {
+            sessionId: props.sessionId,
+            key: props.ownerKey(),
+            value: !props.expanded(),
+          })}
+          style={{
+            ...controlStyle,
+            flex: 1,
+            minWidth: 0,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+          hoverStyle={{ backgroundColor: C.raised }}
+          focusStyle={{ backgroundColor: C.line }}
         >
-          {tool()?.call?.name ?? 'Tool'}
-          {tool()?.call?.title?.fallback ? ` · ${tool()!.call!.title!.fallback}` : ''}
-        </Text>
-        <If
-          when={
-            family() &&
-            result() &&
-            tool()?.result?.settlement === 'returned' &&
-            !tool()?.result?.isError
-          }
-          else={
-            <Text style={{ color: tool()?.result?.isError ? C.danger : C.muted }}>
-              {fallbackState()}
-            </Text>
-          }
-        >
-          <Each of={result() ? [result()!] : []} key={(value) => value.key}>
-            {(value) => (
-              <Outcome
-                reference={value()}
-                sessionId={props.sessionId}
-                through={props.row().metadataThrough ?? props.through()}
-              />
-            )}
-          </Each>
-        </If>
-      </Button>
-      <If when={props.expanded()}>
-        <View style={{ paddingLeft: 16, gap: 8 }}>
+          <Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} />
+          <Text
+            numberOfLines={1}
+            style={{ flex: 1, minWidth: 0, color: C.secondary, fontSize: 13, lineHeight: 16 }}
+          >
+            {tool()?.call?.name ?? 'Tool'}
+            {tool()?.call?.title?.fallback ? ` · ${tool()!.call!.title!.fallback}` : ''}
+          </Text>
+          <If
+            when={
+              family() &&
+              result() &&
+              tool()?.result?.settlement === 'returned' &&
+              !tool()?.result?.isError
+            }
+            else={
+              <Text style={{ color: tool()?.result?.isError ? C.danger : C.muted }}>
+                {fallbackState()}
+              </Text>
+            }
+          >
+            <Each of={result() ? [result()!] : []} key={(value) => value.key}>
+              {(value) => (
+                <Outcome
+                  reference={value()}
+                  sessionId={props.sessionId}
+                  through={props.row().metadataThrough ?? props.through()}
+                />
+              )}
+            </Each>
+          </If>
+        </Button>
+        <If when={props.expanded()}>
           <Button
             accessibilityLabel="Toggle original tool details"
             selected={props.original()}
@@ -296,23 +304,25 @@ export function ToolCard(props: {
               key: props.ownerKey(),
               value: !props.original(),
             })}
-            style={{ ...controlStyle, alignSelf: 'flex-start' }}
+            style={{ ...controlStyle, flexShrink: 0 }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.line }}
           >
-            <Text style={{ color: C.accent }}>
+            <Text numberOfLines={1} style={{ color: C.accent }}>
               {props.original() ? 'Readable card' : 'Original details'}
             </Text>
           </Button>
+        </If>
+      </View>
+      <If when={props.expanded()}>
+        <View style={{ paddingLeft: 16 }}>
           <Scroll
             accessibilityLabel="Tool details"
             onScroll={() => props.reading?.()}
             style={{
               minHeight: 16,
               minWidth: 0,
-              maxHeight:
-                props.bodyMaxHeight?.() ??
-                Math.max(16, Math.min(192, Math.floor(windowSize().height / 64) * 16 - 32)),
+              maxHeight: Math.max(16, props.maxHeight() - controlStyle.minHeight - detailsGap),
             }}
             contentStyle={{ gap: 16 }}
           >

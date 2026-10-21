@@ -22,6 +22,7 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import type { AnimatedValue } from 'nsh/animated';
 import { List } from 'nsh/list';
+import { platform } from 'nsh/device';
 import type { Row } from './history';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import type { ProcessGroup, TurnPresentation } from './processGroups';
@@ -29,6 +30,16 @@ import { C, controlStyle } from './ui';
 import { Icon } from './Icon';
 import type { ImagePreview } from './ToolImage';
 import { toolActivitySummary, type ToolActivity } from './toolActivity';
+
+const panelStyle = {
+  marginVertical: 8,
+  gap: 8,
+  padding: 8,
+  backgroundColor: C.surface,
+  borderWidth: 1,
+  borderColor: C.line,
+  borderRadius: 12,
+};
 
 export type LiveActivity = {
   kind: 'working' | 'thinking' | 'response' | 'waiting';
@@ -183,8 +194,14 @@ function ActivityLog(props: {
   });
   // Native cell measurements fit short groups. Unmeasured cells start at the
   // one-line row minimum; text length never acts as a layout authority.
-  const bodyMaxHeight = () =>
-    Math.max(16, Math.min(400, Math.floor(props.viewport().height / 32) * 16));
+  const bodyMaxHeight = () => {
+    const chrome =
+      controlStyle.minHeight +
+      panelStyle.gap +
+      2 * (panelStyle.marginVertical + panelStyle.padding + panelStyle.borderWidth);
+    const available = Math.max(16, props.viewport().height - chrome);
+    return platform.isTerminal ? Math.floor(available / 16) * 16 : available;
+  };
   const bodyHeight = () => {
     measurements();
     const viewport = props.viewport();
@@ -298,7 +315,7 @@ function ActivityLog(props: {
                       item={() => props.row(ownedId()) ?? first}
                       ownerKey={ownedId}
                       viewState={props.rowState(ownedId())}
-                      toolBodyMaxHeight={() => Math.max(24, bodyMaxHeight() - 64)}
+                      toolMaxHeight={bodyMaxHeight}
                       onToolReading={(key) => {
                         if (
                           !alive ||
@@ -412,17 +429,7 @@ export function TurnPanel(props: {
     if (action.open) props.reveal();
   };
   return (
-    <View
-      style={{
-        marginVertical: 8,
-        gap: 8,
-        padding: 8,
-        backgroundColor: C.surface,
-        borderWidth: 1,
-        borderColor: C.line,
-        borderRadius: 12,
-      }}
-    >
+    <View style={panelStyle}>
       <Button
         accessibilityLabel="Process group"
         disabled={props.group().rowIds.length === 0}
