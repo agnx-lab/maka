@@ -1,0 +1,860 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { cleanup, signal } from 'nsh';
+import { host } from 'maka/host';
+import type {
+  CatalogMutationResult,
+  ConnectionVersionBasis,
+  CredentialStatus,
+  CredentialVersionBasis,
+  ModelOverride,
+  SettingsConnectionDetail,
+  SettingsConnectionSummary,
+  SettingsProvider,
+  SettingsProviderSummary,
+  ThinkingLevel,
+} from '../../../../packages/plugin-sdk/src/generated/runtime';
+
+type Detail = Extract<SettingsConnectionDetail, { kind: 'ready' }>;
+export type ConnectionEditor = {
+  instance: number;
+  baseline: Detail | null;
+  provider: SettingsProvider;
+  name: string;
+  slug: string;
+  baseUrl: string;
+  enabled: boolean;
+  overlay: string;
+  apiKey: string;
+};
+export type ConnectionAction = { editor: number; revision: number | null };
+export type ModelAction = ConnectionAction & { modelId: string; originalId: string | null };
+export type RemovalAction = ConnectionAction & {
+  kind: 'connection' | 'key' | 'model';
+  modelId: string | null;
+};
+export type ModelEditor = {
+  originalId: string | null;
+  id: string;
+  label: string;
+  thinkingLevels: ThinkingLevel[] | null;
+  defaultThinkingLevel: ThinkingLevel | null;
+};
+export type SettingsPage = 'connections' | 'providers' | 'connection' | 'models' | 'model';
+export const thinkingLevels: ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+];
+const pretty = (value: unknown) => JSON.stringify(value ?? null, null, 2);
+const basis = (detail: Detail): ConnectionVersionBasis => ({
+  connectionId: detail.target.connectionId,
+  revision: detail.target.revision,
+});
+const credentialBasis = (status: CredentialStatus | null): CredentialVersionBasis | null =>
+  status?.configured && status.credentialId !== null && status.revision !== null
+    ? { locator: status.locator, credentialId: status.credentialId, revision: status.revision }
+    : null;
+function rejection(value: any): Error {
+  if (
+    value?.kind === 'connection_stale' ||
+    value?.kind === 'revision_conflict' ||
+    value?.kind === 'superseded'
+  )
+    return new Error('This connection changed elsewhere. Reload it before saving again.');
+  return new Error(
+    `The Host rejected this action (${value?.reason ?? value?.kind ?? 'unknown result'}).`,
+  );
+}
+function overlay(text: string): Record<string, unknown> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('Advanced request JSON must be valid JSON.');
+  }
+  if (value !== null && (typeof value !== 'object' || Array.isArray(value)))
+    throw new Error('Advanced request JSON must be an object or null.');
+  return value as Record<string, unknown> | null;
+}
+
+export function createModelSettings(changed: () => void) {
+  const page = signal<SettingsPage>('connections');
+  const connections = signal<SettingsConnectionSummary[]>([]);
+  const providers = signal<SettingsProviderSummary[]>([]);
+  const revision = signal<number | null>(null);
+  const defaultTarget = signal<{ connectionId: string; modelId: string } | null>(null);
+  const next = signal<number | null>(null);
+  const providerNext = signal<number | null>(null);
+  const editor = signal<ConnectionEditor | null>(null);
+  const model = signal<ModelEditor | null>(null);
+  const credential = signal<CredentialStatus | null>(null);
+  const loading = signal(false);
+  const busy = signal(false);
+  const error = signal('');
+  const notice = signal('');
+  const pending = signal<any[]>([]);
+  const pendingKnown = signal(false);
+  const confirmation = signal<'connection' | 'key' | 'model' | null>(null);
+  let alive = true;
+  let read = 0;
+  let editorInstance = 0;
+  cleanup(() => {
+    alive = false;
+    read += 1;
+    editor.set(null);
+  });
+  const report = (reason: unknown) => {
+    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
+  };
+  const action = (): ConnectionAction => ({
+    editor: editor()!.instance,
+    revision: editor()!.baseline?.target.revision ?? null,
+  });
+  const current = (request: ConnectionAction) =>
+    alive &&
+    editor()?.instance === request.editor &&
+    (editor()?.baseline?.target.revision ?? null) === request.revision;
+  const modelAction = (): ModelAction => ({
+    ...action(),
+    modelId: model()!.id,
+    originalId: model()!.originalId,
+  });
+  const currentModel = (request: ModelAction) =>
+    current(request) &&
+    model()?.id === request.modelId &&
+    model()?.originalId === request.originalId;
+  const cancelRead = () => {
+    read += 1;
+    loading.set(false);
+  };
+  const refreshPending = async () => {
+    try {
+      const rows = await host.pendingSettings();
+      if (alive) {
+        pending.set(rows);
+        pendingKnown.set(true);
+      }
+    } catch (reason) {
+      if (alive) pendingKnown.set(false);
+      throw reason;
+    }
+  };
+  const mutate = async (
+    endpoint: 'settings' | 'setup',
+    method: string,
+    input: unknown,
+    secret: string | null = null,
+  ) => {
+    // The native journal is the admission authority across windows and launches.
+    const result = await host.settingsMutation(endpoint, method, input, secret);
+    const receipt = result.reply?.receipt;
+    if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
+      throw new Error(
+        'The result is unknown. Recover the original action before making another change.',
+      );
+    return receipt.outcome.value;
+  };
+  const run = async (operation: () => Promise<void>) => {
+    if (!alive || busy() || !pendingKnown() || pending().length) return;
+    busy.set(true);
+    error.set('');
+    notice.set('');
+    try {
+      await operation();
+    } catch (reason) {
+      report(reason);
+    } finally {
+      await refreshPending().catch(report);
+      if (alive) busy.set(false);
+    }
+  };
+  const loadConnections = async (more = false) => {
+    if (!alive || loading() || (more && next() === null)) return;
+    const generation = ++read;
+    const extent = more ? connections().length + 16 : Math.max(16, connections().length);
+    loading.set(true);
+    error.set('');
+    try {
+      let rows = more ? connections() : [];
+      let cursor = more ? next() : null;
+      let version = revision();
+      let restarted = false;
+      for (;;) {
+        const result = await host.query(
+          'settings',
+          'connections',
+          cursor === null
+            ? { kind: 'start' }
+            : { kind: 'continue', revision: version, offset: cursor },
+        );
+        if (!alive || generation !== read) return;
+        if (result.kind === 'changed') {
+          if (restarted)
+            throw new Error('The connection catalog keeps changing. Refresh to try again.');
+          restarted = true;
+          rows = [];
+          cursor = null;
+          version = null;
+          continue;
+        }
+        if (cursor !== null && result.next !== null && result.next <= cursor)
+          throw new Error('The connection catalog did not advance.');
+        rows = [...rows, ...result.connections];
+        cursor = result.next;
+        version = result.revision;
+        if (cursor !== null && rows.length < extent) continue;
+        connections.set(rows);
+        revision.set(version);
+        next.set(cursor);
+        defaultTarget.set(result.defaultTarget);
+        break;
+      }
+    } catch (reason) {
+      if (generation === read) report(reason);
+    } finally {
+      if (alive && generation === read) loading.set(false);
+    }
+  };
+  const loadProviders = async (more = false) => {
+    if (!alive || loading() || (more && providerNext() === null)) return;
+    const generation = ++read;
+    loading.set(true);
+    error.set('');
+    try {
+      const result = await host.query('settings', 'providers', {
+        offset: more ? providerNext() : 0,
+      });
+      if (!alive || generation !== read) return;
+      providers.set(more ? [...providers(), ...result.providers] : result.providers);
+      providerNext.set(result.next);
+    } catch (reason) {
+      if (generation === read) report(reason);
+    } finally {
+      if (alive && generation === read) loading.set(false);
+    }
+  };
+  const newConnection = () => {
+    if (busy()) return;
+    editor.set(null);
+    model.set(null);
+    error.set('');
+    notice.set('');
+    confirmation.set(null);
+    cancelRead();
+    page.set('providers');
+    void loadProviders();
+  };
+  const chooseProvider = async (identity: SettingsProviderSummary['identity']) => {
+    if (busy() || loading() || page() !== 'providers') return;
+    const generation = ++read;
+    loading.set(true);
+    error.set('');
+    try {
+      const provider: SettingsProvider = await host.query('authentication', 'provider', identity);
+      if (!alive || generation !== read) return;
+      if (
+        !provider.descriptor.anonymous &&
+        !provider.descriptor.authentication.some(
+          (method) => method.id === 'api-key' && !method.interactive,
+        )
+      )
+        throw new Error(
+          'This provider requires interactive sign-in. Use an OpenAI-compatible API-key provider here.',
+        );
+      const configuration = provider.descriptor.configurationDefaults as Record<
+        string,
+        unknown
+      > | null;
+      const slug =
+        provider.identity.name
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'connection';
+      editor.set({
+        instance: ++editorInstance,
+        baseline: null,
+        provider,
+        name: provider.descriptor.label,
+        slug,
+        enabled: true,
+        overlay: 'null',
+        apiKey: '',
+        baseUrl: typeof configuration?.baseUrl === 'string' ? configuration.baseUrl : '',
+      });
+      credential.set(null);
+      page.set('connection');
+    } catch (reason) {
+      if (generation === read) report(reason);
+    } finally {
+      if (alive && generation === read) loading.set(false);
+    }
+  };
+  const readDetail = async (target: ConnectionVersionBasis, afterCredential = false) => {
+    let detail: SettingsConnectionDetail = await host.query('settings', 'connection', {
+      ...target,
+      includeEditingFacts: true,
+    });
+    if (
+      afterCredential &&
+      detail.kind === 'stale' &&
+      detail.actual?.connectionId === target.connectionId
+    ) {
+      detail = await host.query('settings', 'connection', {
+        ...detail.actual,
+        includeEditingFacts: true,
+      });
+    }
+    if (detail.kind !== 'ready') throw rejection({ kind: 'connection_stale' });
+    if (!detail.editing)
+      throw new Error('Editable connection facts are unavailable. Editing is disabled.');
+    return detail;
+  };
+  const readCredential = async (detail: Detail) => {
+    const result = await host.query('settings', 'credentialStatus', {
+      locator: { scope: 'connection', connectionId: detail.target.connectionId, kind: 'provider' },
+    });
+    if (result.kind !== 'status') throw new Error('This connection is no longer available.');
+    return result.status as CredentialStatus;
+  };
+  const openConnection = async (target: ConnectionVersionBasis) => {
+    if (busy() || loading()) return;
+    const generation = ++read;
+    loading.set(true);
+    error.set('');
+    notice.set('');
+    editor.set(null);
+    model.set(null);
+    page.set('connections');
+    try {
+      const detail = await readDetail(target);
+      const [provider, status] = await Promise.all([
+        host.query('authentication', 'provider', detail.target.provider),
+        readCredential(detail),
+      ]);
+      if (!alive || generation !== read) return;
+      editor.set({
+        instance: ++editorInstance,
+        baseline: detail,
+        provider,
+        name: detail.name,
+        slug: detail.target.slug,
+        enabled: detail.enabled,
+        baseUrl:
+          typeof detail.target.configuration.baseUrl === 'string'
+            ? detail.target.configuration.baseUrl
+            : '',
+        overlay: pretty(detail.editing!.requestBodyOverlay),
+        apiKey: '',
+      });
+      credential.set(status);
+      model.set(null);
+      confirmation.set(null);
+      page.set('connection');
+    } catch (reason) {
+      if (generation === read) report(reason);
+    } finally {
+      if (alive && generation === read) loading.set(false);
+    }
+  };
+  const edit = (field: 'name' | 'slug' | 'baseUrl' | 'overlay' | 'apiKey', text: string) => {
+    const current = editor();
+    if (!current || busy()) return;
+    editor.set({ ...current, [field]: text });
+  };
+  const configuration = (form: ConnectionEditor) => {
+    const value = {
+      ...(form.baseline?.target.configuration ??
+        (form.provider.descriptor.configurationDefaults as Record<string, unknown>)),
+    };
+    if ('baseUrl' in value || form.baseUrl) value.baseUrl = form.baseUrl;
+    return value;
+  };
+  const dirty = () => {
+    const form = editor();
+    if (!form?.baseline) return !!form;
+    try {
+      return (
+        !!form.apiKey ||
+        form.name !== form.baseline.name ||
+        form.enabled !== form.baseline.enabled ||
+        JSON.stringify(configuration(form)) !==
+          JSON.stringify(form.baseline.target.configuration) ||
+        JSON.stringify(overlay(form.overlay)) !==
+          JSON.stringify(form.baseline.editing!.requestBodyOverlay)
+      );
+    } catch {
+      return true;
+    }
+  };
+  const adopt = async (
+    target: ConnectionVersionBasis,
+    captured: number,
+    key: 'unchanged' | 'saved' | 'refresh' = 'refresh',
+  ) => {
+    changed();
+    let detail: Detail;
+    try {
+      detail = await readDetail(target, key === 'saved');
+    } catch (reason) {
+      if (alive && editor()?.instance === captured) {
+        editor.set(null);
+        model.set(null);
+        page.set('connections');
+        notice.set(
+          'The change was committed. Its editable snapshot could not be reopened; no further changes can be saved here.',
+        );
+      }
+      throw reason;
+    }
+    if (!alive || editor()?.instance !== captured) return null;
+    // Advance the basis before the independent credential stage. A key failure
+    // must retry this existing connection, never create another one.
+    editor.set({
+      ...editor()!,
+      baseline: detail,
+      name: detail.name,
+      slug: detail.target.slug,
+      enabled: detail.enabled,
+      overlay: pretty(detail.editing!.requestBodyOverlay),
+      baseUrl:
+        typeof detail.target.configuration.baseUrl === 'string'
+          ? detail.target.configuration.baseUrl
+          : '',
+    });
+    if (key !== 'unchanged') {
+      const status = await readCredential(detail);
+      if (!alive || editor()?.instance !== captured) return null;
+      credential.set(status);
+    }
+    return detail;
+  };
+  const saveConnection = (request: ConnectionAction) => {
+    if (!current(request)) return;
+    return run(async () => {
+      const form = editor();
+      if (!form) return;
+      if (!form.name.trim()) throw new Error('Enter a connection name.');
+      const body = overlay(form.overlay);
+      const config = configuration(form);
+      let result: CatalogMutationResult | null = null;
+      const original = form.baseline;
+      const expectedCredential = credentialBasis(credential());
+      if (!original) {
+        if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(form.slug))
+          throw new Error(
+            'Use lowercase letters, numbers, dashes or underscores for the connection ID.',
+          );
+        if (revision() === null)
+          throw new Error('Refresh the connection catalog before creating a connection.');
+        result = await mutate('settings', 'create', {
+          expectedCatalogRevision: revision(),
+          connection: {
+            slug: form.slug,
+            name: form.name,
+            provider: form.provider.identity,
+            configuration: config,
+            enabled: form.enabled,
+            enabledModelIds: [],
+            ...(body === null ? {} : { requestBodyOverlay: body }),
+          },
+        });
+      } else {
+        const changes: Record<string, unknown> = {};
+        if (form.name !== original.name) changes.name = form.name;
+        if (form.enabled !== original.enabled) changes.enabled = form.enabled;
+        if (JSON.stringify(config) !== JSON.stringify(original.target.configuration)) {
+          changes.configuration = config;
+          // A connection endpoint change resets discovery in Host. Preserve the
+          // explicit per-model choices from the exact editing baseline.
+          changes.modelOverrides = original.editing!.modelOverrides;
+        }
+        if (JSON.stringify(body) !== JSON.stringify(original.editing!.requestBodyOverlay))
+          changes.requestBodyOverlay = body;
+        if (Object.keys(changes).length)
+          result = await mutate('settings', 'update', { expected: basis(original), changes });
+      }
+      let detail = original;
+      if (result) {
+        if (result.kind !== 'committed' || !result.connection) throw rejection(result);
+        detail = await adopt(
+          result.connection,
+          form.instance,
+          form.apiKey ? 'unchanged' : 'refresh',
+        );
+        if (!detail) return;
+        notice.set('Connection saved.');
+      }
+      if (form.apiKey) {
+        if (!alive || editor()?.instance !== form.instance) return;
+        if (!detail) throw new Error('Save the connection before saving its API key.');
+        if (alive) notice.set('Connection saved; saving API key…');
+        const saved = await mutate(
+          'settings',
+          'saveCredential',
+          {
+            expected: detail.target,
+            expectedCredential,
+          },
+          form.apiKey,
+        );
+        if (saved.kind !== 'saved') throw rejection(saved);
+        if (!alive || editor()?.instance !== form.instance) return;
+        editor.set({ ...editor()!, apiKey: '' });
+        // Reauthentication advances the connection revision independently.
+        // Read the actual new basis; never guess a revision or reuse the old one.
+        if (!(await adopt(basis(detail), form.instance, 'saved'))) return;
+        notice.set('Connection and API key saved.');
+        changed();
+      } else if (alive && !result) notice.set('No connection changes.');
+      await loadConnections();
+    });
+  };
+  const toggleEnabled = (request: ConnectionAction & { enabled: boolean }) => {
+    const form = editor();
+    if (current(request) && form && !busy()) editor.set({ ...form, enabled: request.enabled });
+  };
+  const discover = (request: ConnectionAction) => {
+    if (!current(request)) return;
+    return run(async () => {
+      const form = editor();
+      if (!form?.baseline || dirty())
+        throw new Error('Save the connection and API key before fetching models.');
+      const result = await mutate('setup', 'discoverModels', form.baseline.target);
+      if (result.kind !== 'ready') throw rejection(result);
+      await adopt(result.connection, form.instance);
+      await loadConnections();
+      if (alive) notice.set('Models fetched and enabled.');
+    });
+  };
+  const editModel = (request: ConnectionAction & { id: string | null }) => {
+    if (!current(request)) return;
+    const id = request.id;
+    const form = editor();
+    if (busy() || !form?.baseline?.editing) return;
+    if (dirty()) {
+      error.set('Save or discard the connection changes before editing models.');
+      return;
+    }
+    const raw = id ? form.baseline.editing.modelOverrides?.[id] : undefined;
+    model.set({
+      originalId: id,
+      id: id ?? '',
+      label: raw?.displayName ?? '',
+      thinkingLevels: raw?.thinkingLevels ? [...raw.thinkingLevels] : null,
+      defaultThinkingLevel: raw?.defaultThinkingLevel ?? null,
+    });
+    confirmation.set(null);
+    page.set('model');
+    error.set('');
+    notice.set('');
+  };
+  const changeModel = (change: Partial<ModelEditor>) => {
+    const current = model();
+    if (current && !busy()) model.set({ ...current, ...change });
+  };
+  const toggleThinking = (request: ModelAction & { level: ThinkingLevel }) => {
+    if (!currentModel(request)) return;
+    const level = request.level;
+    const current = model();
+    if (!current || busy()) return;
+    const levels = (current.thinkingLevels ?? []).includes(level)
+      ? current.thinkingLevels!.filter((value) => value !== level)
+      : [...(current.thinkingLevels ?? []), level];
+    changeModel({
+      thinkingLevels: levels,
+      defaultThinkingLevel:
+        current.defaultThinkingLevel && levels.includes(current.defaultThinkingLevel)
+          ? current.defaultThinkingLevel
+          : null,
+    });
+  };
+  const useProviderThinking = (request: ModelAction) => {
+    if (currentModel(request)) changeModel({ thinkingLevels: null, defaultThinkingLevel: null });
+  };
+  const defaultThinking = (request: ModelAction & { level: ThinkingLevel | null }) => {
+    if (
+      currentModel(request) &&
+      (request.level === null || model()?.thinkingLevels?.includes(request.level))
+    )
+      changeModel({ defaultThinkingLevel: request.level });
+  };
+  const showModels = (request: ConnectionAction) => {
+    if (current(request) && !busy() && !dirty() && editor()?.baseline) {
+      page.set('models');
+      error.set('');
+    }
+  };
+  const saveModel = (request: ModelAction) => {
+    if (!currentModel(request)) return;
+    return run(async () => {
+      const form = editor(),
+        current = model();
+      if (!form?.baseline?.editing || !current) return;
+      if (dirty()) throw new Error('Save or discard the connection changes before editing models.');
+      const id = current.id.trim();
+      if (!id) throw new Error('Enter the exact model ID accepted by the provider.');
+      const facts = form.baseline.editing;
+      if (current.originalId === null && facts.enabledModelIds.includes(id))
+        throw new Error('That model is already enabled.');
+      const overrides = { ...(facts.modelOverrides ?? {}) };
+      const value: ModelOverride = { ...(overrides[id] ?? {}) };
+      if (current.label) value.displayName = current.label;
+      else delete value.displayName;
+      if (current.thinkingLevels === null) delete value.thinkingLevels;
+      else value.thinkingLevels = current.thinkingLevels;
+      if (current.defaultThinkingLevel) value.defaultThinkingLevel = current.defaultThinkingLevel;
+      else delete value.defaultThinkingLevel;
+      overrides[id] = value;
+      const result = await mutate('settings', 'update', {
+        expected: basis(form.baseline),
+        changes: {
+          enabledModelIds: facts.enabledModelIds.includes(id)
+            ? facts.enabledModelIds
+            : [...facts.enabledModelIds, id],
+          modelOverrides: overrides,
+        },
+      });
+      if (result.kind !== 'committed' || !result.connection) throw rejection(result);
+      await adopt(result.connection, form.instance);
+      await loadConnections();
+      if (alive) {
+        model.set(null);
+        page.set('models');
+        notice.set('Model saved.');
+      }
+    });
+  };
+  const setDefault = (request: ConnectionAction & { id: string | null }) => {
+    if (!current(request)) return;
+    const id = request.id;
+    return run(async () => {
+      const form = editor();
+      if (!form?.baseline || revision() === null) return;
+      const result = await mutate('settings', 'setDefault', {
+        expectedCatalogRevision: revision(),
+        target:
+          id === null ? null : { connectionId: form.baseline.target.connectionId, modelId: id },
+      });
+      if (result.kind !== 'committed') throw rejection(result);
+      await loadConnections();
+      changed();
+      if (alive) notice.set(id ? 'Default model saved.' : 'Default model cleared.');
+    });
+  };
+  const confirm = (request: RemovalAction) => {
+    if (
+      current(request) &&
+      !busy() &&
+      (request.kind !== 'model' || model()?.originalId === request.modelId)
+    )
+      confirmation.set(request.kind);
+  };
+  const removalAction = (): RemovalAction => ({
+    ...action(),
+    kind: confirmation()!,
+    modelId: model()?.originalId ?? null,
+  });
+  const remove = (request: RemovalAction) => {
+    if (
+      !current(request) ||
+      confirmation() !== request.kind ||
+      (request.kind === 'model' && model()?.originalId !== request.modelId)
+    )
+      return;
+    return run(async () => {
+      const form = editor();
+      if (!form?.baseline) return;
+      const kind = confirmation();
+      confirmation.set(null);
+      if (kind === 'connection') {
+        const result = await mutate('settings', 'remove', { expected: basis(form.baseline) });
+        if (result.kind !== 'committed') throw rejection(result);
+        if (alive) {
+          editor.set(null);
+          model.set(null);
+          page.set('connections');
+          notice.set('Connection removed.');
+        }
+      } else if (kind === 'key') {
+        const expected = credentialBasis(credential());
+        if (!expected) return;
+        const result = await mutate('settings', 'deleteCredential', {
+          expected,
+          expectedConnection: form.baseline.target,
+        });
+        if (result.kind !== 'committed') throw rejection(result);
+        if (alive) {
+          credential.set(result.status);
+          notice.set('API key removed.');
+        }
+      } else if (kind === 'model') {
+        const current = model();
+        if (!current?.originalId) return;
+        const facts = form.baseline.editing!;
+        const overrides = { ...(facts.modelOverrides ?? {}) };
+        delete overrides[current.originalId];
+        const result = await mutate('settings', 'update', {
+          expected: basis(form.baseline),
+          changes: {
+            enabledModelIds: facts.enabledModelIds.filter(
+              (id: string) => id !== current.originalId,
+            ),
+            modelOverrides: overrides,
+          },
+        });
+        if (result.kind !== 'committed' || !result.connection) throw rejection(result);
+        await adopt(result.connection, form.instance);
+        if (alive) {
+          model.set(null);
+          page.set('models');
+          notice.set('Model removed from this connection.');
+        }
+      }
+      await loadConnections();
+      changed();
+    });
+  };
+  const recover = () => {
+    if (busy()) return;
+    busy.set(true);
+    error.set('');
+    void (async () => {
+      try {
+        for (const original of await host.pendingSettings()) {
+          if (!original.reference) continue;
+          const reply = await host.recoverSetting(original.id);
+          const receipt = reply?.receipt;
+          if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
+            throw new Error(
+              'The original result is still unknown. Keep its receipt and retry recovery.',
+            );
+          const value = receipt.outcome.value;
+          if (!['committed', 'saved', 'ready'].includes(value?.kind)) throw rejection(value);
+        }
+        if (!alive) return;
+        editor.set(null);
+        model.set(null);
+        page.set('connections');
+        await loadConnections();
+        if (alive) {
+          notice.set('Original action receipts checked. Reopen the connection to continue.');
+          changed();
+        }
+      } catch (reason) {
+        report(reason);
+      } finally {
+        await refreshPending().catch(report);
+        if (alive) busy.set(false);
+      }
+    })();
+  };
+  const abandon = (id: string) => {
+    if (busy()) return;
+    busy.set(true);
+    error.set('');
+    void (async () => {
+      try {
+        await host.abandonSetting(id);
+      } catch (reason) {
+        report(reason);
+      } finally {
+        await refreshPending().catch(report);
+        if (alive) busy.set(false);
+      }
+    })();
+  };
+  const back = () => {
+    if (busy()) return false;
+    if (confirmation()) {
+      confirmation.set(null);
+      return false;
+    }
+    if (page() === 'model') {
+      model.set(null);
+      page.set('models');
+      return false;
+    }
+    if (page() === 'models') {
+      page.set('connection');
+      return false;
+    }
+    if (page() !== 'connections') {
+      cancelRead();
+      editor.set(null);
+      confirmation.set(null);
+      page.set('connections');
+      void loadConnections();
+      return false;
+    }
+    return true;
+  };
+  void refreshPending().catch(report);
+  void loadConnections();
+  return {
+    page,
+    connections,
+    providers,
+    revision,
+    defaultTarget,
+    editor,
+    model,
+    credential,
+    loading,
+    busy,
+    error,
+    notice,
+    pending,
+    pendingKnown,
+    confirmation,
+    dirty,
+    action,
+    modelAction,
+    removalAction,
+    loadConnections,
+    loadProviders,
+    newConnection,
+    chooseProvider,
+    openConnection,
+    edit,
+    saveConnection,
+    toggleEnabled,
+    discover,
+    editModel,
+    changeModel,
+    toggleThinking,
+    useProviderThinking,
+    defaultThinking,
+    showModels,
+    saveModel,
+    setDefault,
+    confirm,
+    remove,
+    recover,
+    abandon,
+    back,
+  };
+}
+export type ModelSettingsOwner = ReturnType<typeof createModelSettings>;

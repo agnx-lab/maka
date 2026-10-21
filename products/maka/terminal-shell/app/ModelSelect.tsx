@@ -48,6 +48,7 @@ export function ModelSelect(props: {
   current(): boolean;
   close(instance: number): boolean;
   select(backend: ModelBackend): Promise<void>;
+  manage(): void;
 }) {
   const owner = props.owner;
   const pane = signal<Pane>(owner.backend() ? 'root' : 'models');
@@ -456,6 +457,13 @@ export function ModelSelect(props: {
             <Text style={{ color: C.accent }}>Retry</Text>
           </Button>
         </If>
+        <Button
+          disabled={pending()}
+          accessibilityLabel="Manage connections and models"
+          onPress={inputAction(props.manage, null)}
+        >
+          <Text style={{ color: C.accent }}>Manage connections & models</Text>
+        </Button>
         <If when={error()}>
           <Text style={{ color: C.danger }}>{error()}</Text>
           <If when={pane() === 'models'}>

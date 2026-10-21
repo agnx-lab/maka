@@ -30,6 +30,7 @@ import { Palette } from './Palette';
 import type { PaletteEntry } from './Palette';
 import { WorkspacePicker } from './WorkspacePicker';
 import { ModelSelect } from './ModelSelect';
+import { ModelSettings } from './ModelSettings';
 import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
 import type { ImagePreview } from './ToolImage';
@@ -41,7 +42,7 @@ import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 
 type Overlay = { instance: number } & (
-  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions'; sessionId: string | null }
+  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings'; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
 );
 type CommandContext = { instance: number; sessionId: string | null };
@@ -141,7 +142,7 @@ function App() {
     kind,
     sessionId,
   }: {
-    kind: 'commands' | 'workspaces' | 'models' | 'sessions';
+    kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
     sessionId: string | null;
   }) => {
     if (!alive || selected() !== sessionId) return;
@@ -154,8 +155,7 @@ function App() {
       return;
     }
     if (kind === 'models' && sessionId === null) {
-      status.set('Open or create a conversation before choosing its model.');
-      return;
+      kind = 'settings';
     }
     status.set('');
     browserFocus.set(kind === 'sessions');
@@ -226,6 +226,9 @@ function App() {
   const commandModels = (context: CommandContext) => {
     if (closeCommand(context)) open({ kind: 'models', sessionId: context.sessionId });
   };
+  const commandSettings = (context: CommandContext) => {
+    if (closeCommand(context)) open({ kind: 'settings', sessionId: context.sessionId });
+  };
   const commandFiles = (context: CommandContext) => {
     if (closeCommand(context) && context.sessionId)
       resources.openFiles({ sessionId: context.sessionId });
@@ -269,6 +272,12 @@ function App() {
       detail: 'Choose the model for this conversation',
       hint: 'Ctrl+G',
       run: inputAction(commandModels, context),
+    },
+    {
+      id: 'settings',
+      title: 'Connections & models',
+      detail: 'Add connections, API keys and models',
+      run: inputAction(commandSettings, context),
     },
     ...(context.sessionId
       ? [
@@ -486,6 +495,7 @@ function App() {
           commands={({ sessionId }) => open({ kind: 'commands', sessionId })}
           models={({ sessionId }) => open({ kind: 'models', sessionId })}
           chooseWorkspace={inputAction(open, { kind: 'workspaces', sessionId: null })}
+          settings={inputAction(open, { kind: 'settings', sessionId: selected() })}
         />
       </Workbench>
       <If
@@ -574,6 +584,21 @@ function App() {
                 </View>
               </Dialog>
             );
+          if (current.kind === 'settings')
+            return (
+              <ModelSettings
+                close={() => closeOverlay(current.instance)}
+                changed={() => {
+                  const owner = handle();
+                  if (
+                    alive &&
+                    selected() === current.sessionId &&
+                    owner?.sessionId === current.sessionId
+                  )
+                    void owner.refreshModel().catch(report);
+                }}
+              />
+            );
           if (current.kind === 'models')
             return (
               <Each<ConversationHandle>
@@ -592,6 +617,14 @@ function App() {
                         handle() === owner
                       }
                       close={closeOverlay}
+                      manage={() => {
+                        if (
+                          selected() === owner.sessionId &&
+                          handle() === owner &&
+                          closeOverlay(current.instance)
+                        )
+                          open({ kind: 'settings', sessionId: owner.sessionId });
+                      }}
                       select={(backend) => chooseModel(owner, current.instance, backend)}
                     />
                   );

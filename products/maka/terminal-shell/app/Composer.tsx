@@ -65,6 +65,7 @@ export function Composer(props: {
   commands(target: { sessionId: string | null }): void;
   models(target: { sessionId: string | null }): void;
   chooseWorkspace(): void;
+  settings(): void;
 }) {
   const width = signal(windowSize().width);
   const hero = () => props.session() === null || props.session()!.empty();
@@ -108,6 +109,15 @@ export function Composer(props: {
               <Text style={{ color: C.accent }}>▸ Choose workspace ▾</Text>
             </Button>
           </If>
+          <Button
+            accessibilityLabel="Connections & models"
+            onPress={props.settings}
+            style={{ alignSelf: 'flex-start', paddingHorizontal: 8 }}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.line }}
+          >
+            <Text style={{ color: C.accent }}>Connections & models</Text>
+          </Button>
           <If when={props.session()?.workspace()}>
             <Text numberOfLines={1} style={{ color: C.muted }}>
               Workspace · {props.session()?.workspace().split('/').filter(Boolean).at(-1)}

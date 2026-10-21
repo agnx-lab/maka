@@ -1,0 +1,128 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { inputAction, Scroll, Text, View } from 'nsh';
+import { Button } from 'nsh/base';
+import { thinkingLevels, type ModelSettingsOwner } from './settings';
+import { SettingsField } from './SettingsField';
+import { C } from './ui';
+
+export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
+  const owner = props.settings;
+  const model = () => owner.model()!;
+  const disabled = () => owner.busy() || !owner.pendingKnown() || owner.pending().length > 0;
+  return (
+    <Scroll style={{ flex: 1 }}>
+      <View style={{ padding: 8, gap: 12 }}>
+        <SettingsField
+          label="Model ID"
+          value={model().id}
+          readonly={model().originalId !== null}
+          disabled={disabled()}
+          change={(id) => owner.changeModel({ id })}
+          hint="The exact API model ID, including its provider prefix when required."
+        />
+        <SettingsField
+          label="Model display name"
+          value={model().label}
+          disabled={disabled()}
+          change={(label) => owner.changeModel({ label })}
+          hint="Optional. Empty uses the provider’s name."
+        />
+        <Text style={{ color: C.text }}>Supported reasoning efforts</Text>
+        <Button
+          disabled={disabled()}
+          selected={model().thinkingLevels === null}
+          onPress={inputAction(owner.useProviderThinking, owner.modelAction())}
+        >
+          <Text style={{ color: C.accent }}>Use provider defaults</Text>
+        </Button>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+          <Each of={thinkingLevels} key={(level) => level}>
+            {(level) => (
+              <Button
+                disabled={disabled()}
+                selected={model().thinkingLevels?.includes(level()) ?? false}
+                accessibilityLabel={`Support effort ${level()}`}
+                onPress={inputAction(owner.toggleThinking, {
+                  ...owner.modelAction(),
+                  level: level(),
+                })}
+              >
+                <Text
+                  style={{ color: model().thinkingLevels?.includes(level()) ? C.accent : C.muted }}
+                >
+                  {level()}
+                </Text>
+              </Button>
+            )}
+          </Each>
+        </View>
+        <Text style={{ color: C.muted }}>
+          Declare only the efforts this model supports. The session picker uses the Host’s resolved
+          capabilities.
+        </Text>
+        <Text style={{ color: C.text }}>Connection default reasoning effort</Text>
+        <Button
+          disabled={disabled()}
+          selected={model().defaultThinkingLevel === null}
+          onPress={inputAction(owner.defaultThinking, { ...owner.modelAction(), level: null })}
+        >
+          <Text style={{ color: C.accent }}>Provider default</Text>
+        </Button>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+          <Each of={model().thinkingLevels ?? []} key={(level) => level}>
+            {(level) => (
+              <Button
+                disabled={disabled()}
+                selected={model().defaultThinkingLevel === level()}
+                accessibilityLabel={`Default effort ${level()}`}
+                onPress={inputAction(owner.defaultThinking, {
+                  ...owner.modelAction(),
+                  level: level(),
+                })}
+              >
+                <Text style={{ color: C.accent }}>{level()}</Text>
+              </Button>
+            )}
+          </Each>
+        </View>
+        <Button
+          disabled={disabled()}
+          accessibilityLabel="Save model"
+          onPress={inputAction(owner.saveModel, owner.modelAction())}
+        >
+          <Text style={{ color: C.accent }}>{owner.busy() ? 'Saving…' : 'Save model'}</Text>
+        </Button>
+        <If when={model().originalId !== null}>
+          <Button
+            disabled={disabled()}
+            onPress={inputAction(owner.confirm, {
+              ...owner.action(),
+              kind: 'model',
+              modelId: model().originalId,
+            })}
+          >
+            <Text style={{ color: C.danger }}>Remove model</Text>
+          </Button>
+        </If>
+      </View>
+    </Scroll>
+  );
+}
