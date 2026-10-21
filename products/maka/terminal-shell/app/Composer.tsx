@@ -80,8 +80,9 @@ export function Composer(props: {
 }) {
   const width = signal(windowSize().width);
   const hero = () => props.session() === null || props.session()!.empty();
-  const blocked = () => props.session()?.blockedReason() ?? 'Choose a workspace to begin.';
+  const blocked = () => props.session()?.blockedReason() ?? '';
   const cannotSend = () =>
+    props.session() === null ||
     !!blocked() ||
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
   let unbind = () => {};
@@ -115,44 +116,57 @@ export function Composer(props: {
         flex: hero() ? 1 : 0,
         justifyContent: 'center',
         width: '100%',
-        maxWidth: 800,
+        maxWidth: 768,
         alignSelf: 'center',
         paddingHorizontal: 16,
       }}
     >
       <If when={hero()}>
-        <View style={{ gap: 16, paddingVertical: 16 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <If when={windowSize().height >= 336}>
-              <Image src={logo} resizeMode="contain" style={{ width: 32, height: 32 }} />
-            </If>
-            <Text style={{ color: C.text, fontWeight: '700' }}>Make something remarkable.</Text>
-          </View>
-          <If when={props.session() === null}>
-            <Button
-              accessibilityLabel="Choose composer workspace"
-              onPress={props.chooseWorkspace}
-              style={{ alignSelf: 'flex-start', paddingHorizontal: 8, backgroundColor: C.surface }}
-              hoverStyle={{ backgroundColor: C.raised }}
-              focusStyle={{ backgroundColor: C.line }}
-            >
-              <Text style={{ color: C.accent }}>▸ Choose workspace ▾</Text>
-            </Button>
-          </If>
-          <Button
-            accessibilityLabel="Connections & models"
-            onPress={props.settings}
-            style={{ alignSelf: 'flex-start', paddingHorizontal: 8 }}
-            hoverStyle={{ backgroundColor: C.raised }}
-            focusStyle={{ backgroundColor: C.line }}
+        <View style={{ gap: 24, paddingBottom: 8 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+              paddingVertical: 16,
+            }}
           >
-            <Text style={{ color: C.accent }}>Connections & models</Text>
-          </Button>
-          <If when={props.session()?.workspace()}>
-            <Text numberOfLines={1} style={{ color: C.muted }}>
-              Workspace · {props.session()?.workspace().split('/').filter(Boolean).at(-1)}
+            <If when={windowSize().height >= 336}>
+              <Image src={logo} resizeMode="contain" style={{ width: 40, height: 40 }} />
+            </If>
+            <Text style={{ color: C.text, fontSize: 24, lineHeight: 32, fontWeight: '600' }}>
+              Make something remarkable.
             </Text>
-          </If>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <If when={props.session() === null}>
+              <Button
+                accessibilityLabel="Choose composer workspace"
+                onPress={props.chooseWorkspace}
+                style={{ paddingHorizontal: 8, paddingVertical: 8, borderRadius: 8 }}
+                hoverStyle={{ backgroundColor: C.surface }}
+                focusStyle={{ backgroundColor: C.raised }}
+              >
+                <Text style={{ color: C.text }}>▸ Choose workspace ▾</Text>
+              </Button>
+            </If>
+            <If when={props.session()?.workspace()}>
+              <Text numberOfLines={1} style={{ color: C.secondary, flexShrink: 1 }}>
+                Workspace · {props.session()?.workspace().split('/').filter(Boolean).at(-1)}
+              </Text>
+            </If>
+            <Button
+              accessibilityLabel="Connections & models"
+              onPress={props.settings}
+              style={{ paddingHorizontal: 8, paddingVertical: 8, borderRadius: 8 }}
+              hoverStyle={{ backgroundColor: C.surface }}
+              focusStyle={{ backgroundColor: C.raised }}
+            >
+              <Text style={{ color: C.secondary }}>Connections & models</Text>
+            </Button>
+          </View>
         </View>
       </If>
       <If when={props.session()?.error()}>
@@ -207,6 +221,7 @@ export function Composer(props: {
           paddingHorizontal: 16,
           paddingVertical: 16,
           gap: 16,
+          minHeight: hero() ? 112 : undefined,
         }}
       >
         <Each
@@ -235,7 +250,7 @@ export function Composer(props: {
                   onSubmit={owner?.submit}
                   placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
                   style={{
-                    minHeight: 16,
+                    minHeight: hero() ? 32 : 16,
                     maxHeight: 80,
                     color: C.text,
                     placeholderColor: C.muted,
@@ -258,22 +273,26 @@ export function Composer(props: {
             <Text style={{ color: C.secondary }}>+</Text>
           </Button>
           <Text style={{ color: C.secondary }}>{props.session()?.permissions()}</Text>
-          <Button
-            disabled={props.session() === null}
-            accessibilityLabel="Choose model and effort"
-            onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
-            style={{ flex: 1, alignItems: 'flex-end' }}
-            hoverStyle={{ backgroundColor: C.line }}
-            focusStyle={{ backgroundColor: C.line }}
-            activeStyle={{ backgroundColor: C.surface }}
-          >
-            <Text
-              numberOfLines={1}
-              style={{ color: props.session()?.backend() ? C.secondary : C.warning }}
+          <If when={props.session() !== null}>
+            <Button
+              accessibilityLabel="Choose model and effort"
+              onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
+              style={{ flex: 1, alignItems: 'flex-end' }}
+              hoverStyle={{ backgroundColor: C.line }}
+              focusStyle={{ backgroundColor: C.line }}
+              activeStyle={{ backgroundColor: C.surface }}
             >
-              {modelLabel()} ▾
-            </Text>
-          </Button>
+              <Text
+                numberOfLines={1}
+                style={{ color: props.session()?.backend() ? C.secondary : C.warning }}
+              >
+                {modelLabel()} ▾
+              </Text>
+            </Button>
+          </If>
+          <If when={props.session() === null}>
+            <View style={{ flex: 1 }} />
+          </If>
           <If when={props.session()?.invocation() != null}>
             <Button
               disabled={props.session()!.stopping()}
@@ -313,12 +332,14 @@ export function Composer(props: {
           </Button>
         </View>
       </View>
-      <Text style={{ color: blocked() ? C.warning : C.muted }}>
-        {blocked() ||
-          (width() < 720
-            ? 'Enter sends · Shift+Enter newline · Ctrl+P commands'
-            : 'Enter sends · Shift+Enter newline · Ctrl+P commands · Ctrl+Q exits')}
-      </Text>
+      <If when={props.session() !== null}>
+        <Text style={{ color: blocked() ? C.warning : C.muted }}>
+          {blocked() ||
+            (width() < 720
+              ? 'Enter sends · Shift+Enter newline · Ctrl+P commands'
+              : 'Enter sends · Shift+Enter newline · Ctrl+P commands · Ctrl+Q exits')}
+        </Text>
+      </If>
       <If when={props.session()?.metrics()}>
         <Text numberOfLines={1} style={{ color: C.muted }}>
           {props.session()?.metrics()}

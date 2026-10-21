@@ -31,6 +31,8 @@ import {
 } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
+import { Image } from 'nsh/image';
+import logo from './assets/maka.png';
 import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
 import { C } from './ui';
@@ -49,6 +51,7 @@ export type WorkspaceBrowserProps = {
   selectSession(id: string, expectedSessionId: string | null): Promise<void>;
   create(workspace: BrowserWorkspace, expectedSessionId: string | null): Promise<void>;
   newConversation(expectedSessionId: string | null): void;
+  settings(expectedSessionId: string | null): void;
   changeSession(action: SessionAction, expectedSessionId: string | null): Promise<void>;
   docked?: boolean;
   resize?(columns: number): void;
@@ -228,10 +231,44 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         removeEscape();
         removeEscape = keymap.bind('escape', escape, { when: 'always', within: node });
       }}
-      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 8, gap: 16 }}
+      style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 8, gap: 8 }}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-        <Text style={{ color: C.accent, fontWeight: '700' }}>Sessions</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
+        <Image src={logo} resizeMode="contain" style={{ width: 24, height: 24 }} />
+        <Text style={{ color: C.text, fontSize: 20, lineHeight: 24, fontWeight: '600' }}>Maka</Text>
+      </View>
+      <Button
+        accessibilityLabel="New conversation"
+        disabled={props.switching()}
+        onPress={inputAction(props.newConversation, props.selected())}
+        style={{
+          backgroundColor: C.line,
+          paddingHorizontal: 8,
+          paddingVertical: 8,
+          alignItems: 'center',
+          borderRadius: 8,
+        }}
+        hoverStyle={{ backgroundColor: C.raised }}
+        focusStyle={{ backgroundColor: C.accent }}
+      >
+        <Text style={{ color: C.text }}>+ New conversation</Text>
+      </Button>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text style={{ color: C.muted, flex: 1 }}>Workspaces</Text>
+        <If when={props.docked}>
+          <Button
+            onPress={props.resize ? inputAction(props.resize, -2) : undefined}
+            accessibilityLabel="Narrower session browser"
+          >
+            <Text style={{ color: C.muted }}>‹</Text>
+          </Button>
+          <Button
+            onPress={props.resize ? inputAction(props.resize, 2) : undefined}
+            accessibilityLabel="Wider session browser"
+          >
+            <Text style={{ color: C.muted }}>›</Text>
+          </Button>
+        </If>
         <Button onPress={inputAction(props.close, null)} accessibilityLabel="Close session browser">
           <Text style={{ color: C.muted }}>{props.docked ? 'Hide' : 'Close · Esc'}</Text>
         </Button>
@@ -239,7 +276,9 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
       <Button
         accessibilityLabel="Choose workspace scope"
         onPress={inputAction(toggleScopes, null)}
-        style={{ backgroundColor: C.raised, paddingHorizontal: 8 }}
+        style={{ paddingHorizontal: 8, paddingVertical: 8, borderRadius: 8 }}
+        hoverStyle={{ backgroundColor: C.raised }}
+        focusStyle={{ backgroundColor: C.line }}
       >
         <Text numberOfLines={1} style={{ color: C.text }}>
           {scopeLabel()} ▾
@@ -282,12 +321,12 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           height: 32,
         }}
       />
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Button selected={browser.filter() === 'all'} accessibilityLabel="Show active conversations" onPress={inputAction(chooseFilter, 'all')}>
-          <Text style={{ color: browser.filter() === 'all' ? C.accent : C.muted }}>Active</Text>
+          <Text style={{ color: browser.filter() === 'all' ? C.text : C.muted }}>Active</Text>
         </Button>
         <Button selected={browser.filter() === 'archived'} accessibilityLabel="Show archived conversations" onPress={inputAction(chooseFilter, 'archived')}>
-          <Text style={{ color: browser.filter() === 'archived' ? C.accent : C.muted }}>Archived</Text>
+          <Text style={{ color: browser.filter() === 'archived' ? C.text : C.muted }}>Archived</Text>
         </Button>
       </View>
       <List
@@ -296,6 +335,15 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         }}
         each={rowIds()}
         estimatedItemSize={32}
+        empty={() => (
+          <View style={{ height: viewportHeight(), alignItems: 'center', justifyContent: 'center' }}>
+            <If when={!browser.loading() && !browser.error() && !browser.projectError()}>
+              <Text style={{ color: C.muted }}>
+                {browser.titleQuery() ? 'No matching conversations.' : 'No conversations yet.'}
+              </Text>
+            </If>
+          </View>
+        )}
         onLayout={(frame) => viewportHeight.set(frame.height)}
         onEndReached={() => {
           if (!choosingWorkspace()) void browser.loadMore();
@@ -413,9 +461,6 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
           <Text style={{ color: C.accent }}>Return to draft</Text>
         </Button>
       </If>
-      <If when={!browser.loading() && !browser.error() && !rowIds().length}>
-        <Text style={{ color: C.muted }}>No matching conversations.</Text>
-      </If>
       <If when={browser.error() || browser.projectError()}>
         <Text selectable style={{ color: C.danger }}>
           {browser.error() || browser.projectError()}
@@ -425,38 +470,14 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
         </Button>
       </If>
       <Button
-        disabled={props.switching()}
-        onPress={inputAction(props.newConversation, props.selected())}
+        accessibilityLabel="Open settings"
+        onPress={inputAction(props.settings, props.selected())}
+        style={{ paddingHorizontal: 8, paddingVertical: 8, borderRadius: 8 }}
+        hoverStyle={{ backgroundColor: C.raised }}
+        focusStyle={{ backgroundColor: C.line }}
       >
-        <Text style={{ color: C.text }}>
-          {props.selected() ? '+ New in current workspace' : '+ New conversation'}
-        </Text>
+        <Text style={{ color: C.secondary }}>Settings</Text>
       </Button>
-      <If when={props.docked}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Button
-            onPress={props.resize ? inputAction(props.resize, -2) : undefined}
-            accessibilityLabel="Narrower session browser"
-          >
-            <Text style={{ color: C.muted }}>‹ Narrower</Text>
-          </Button>
-          <Button
-            onPress={props.resize ? inputAction(props.resize, 2) : undefined}
-            accessibilityLabel="Wider session browser"
-          >
-            <Text style={{ color: C.muted }}>Wider ›</Text>
-          </Button>
-        </View>
-      </If>
-      <Text numberOfLines={1} style={{ color: C.muted }}>
-        Titles · match case
-      </Text>
-      <Text numberOfLines={1} style={{ color: C.muted }}>
-        Enter selects · Esc closes
-      </Text>
-      <Text numberOfLines={1} style={{ color: C.muted }}>
-        Ctrl+Enter actions · Tab moves
-      </Text>
       <Each of={actions() ? [actions()!] : []} key={(target) => target}>
         {(item) => {
           const target = item();

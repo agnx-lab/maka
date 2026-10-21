@@ -485,6 +485,7 @@ function App() {
     changeSession: changeBrowsedSession,
     create,
     newConversation,
+    settings: (sessionId) => open({ kind: 'settings', sessionId }),
   };
   let wasDocked = canDockBrowser();
   effect(() => {
@@ -522,7 +523,7 @@ function App() {
         <If when={selected() === null}>
           <View>
             <Header
-              title="Your terminal, amplified."
+              title=""
               commands={inputAction(open, { kind: 'commands', sessionId: null })}
               browse={inputAction(open, { kind: 'sessions', sessionId: null })}
             />
