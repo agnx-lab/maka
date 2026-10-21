@@ -34,8 +34,9 @@ import {
   type ScopedHost,
 } from './host';
 import { C, Header, captionTextStyle, controlStyle } from './ui';
-import { acceptedSend, historyMetadata, mergeChunks, replayStartCursor } from './history';
+import { acceptedSend, mergeChunks, replayStartCursor, updateHistoryMetadata } from './history';
 import type { Row, Position, Subscription } from './history';
+import { thinkingSummary } from './thinkingSummary';
 import type { ComposerSession, SendAction } from './Composer';
 import { sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
@@ -248,14 +249,14 @@ export function Conversation(props: ConversationProps) {
     if (!latest) return { kind: 'working', detail: '' };
     if (latest.part.field === 'body')
       return { kind: 'response', detail: '', rowId: stableRowId(latest.row) };
-    const paragraph = latest.row.text
-      .split(/\r?\n[\t ]*\r?\n/)
-      .findLast((paragraph) => paragraph.trim() !== '');
     return {
       kind: 'thinking',
       rowId: stableRowId(latest.row),
-      detail: (paragraph ?? '').replaceAll('**', '').replace(/\s+/g, ' ').trim(),
+      detail: thinkingSummary(latest.row.text),
     };
+  }, {
+    equals: (left, right) =>
+      left.kind === right.kind && left.detail === right.detail && left.rowId === right.rowId,
   });
   let previousGroups: ProcessEntry[] = [];
   const projection = computed(() => {
@@ -428,10 +429,14 @@ export function Conversation(props: ConversationProps) {
     batch(() => {
       rows.set(mergeChunks(rows(), chunks, older, through));
       const canonical = canonicalRows().byMessage;
-      live.set(live().filter((row) => !canonical.has(`${row.messageId}/${row.field}`)));
-      pendingMessages.set(
-        pendingMessages().filter((row) => !canonical.has(`${row.messageId}/${row.field}`)),
+      const currentLive = live();
+      const nextLive = currentLive.filter((row) => !canonical.has(`${row.messageId}/${row.field}`));
+      if (nextLive.length !== currentLive.length) live.set(nextLive);
+      const currentPending = pendingMessages();
+      const nextPending = currentPending.filter(
+        (row) => !canonical.has(`${row.messageId}/${row.field}`),
       );
+      if (nextPending.length !== currentPending.length) pendingMessages.set(nextPending);
     });
     hydrateAttachmentMetadata();
   };
@@ -446,20 +451,7 @@ export function Conversation(props: ConversationProps) {
     followAgain = true;
   };
   const publishMetadata = (chunks: any[], through: number) => {
-    const metadata = new Map(
-      chunks.map((chunk) => [
-        `${chunk.position.sourceSequence}/${chunk.position.itemIndex}/${chunk.field}`,
-        chunk,
-      ]),
-    );
-    rows.set(
-      rows().map((row) => {
-        const chunk = metadata.get(row.key);
-        return chunk && through >= (row.metadataThrough ?? 0)
-          ? { ...row, ...historyMetadata(chunk, through, row) }
-          : row;
-      }),
-    );
+    rows.set(updateHistoryMetadata(rows(), chunks, through));
     if (!rows().some((row) => row.role === 'user' && row.attachments === undefined))
       attachmentMetadataFailed.set(false);
     hydrateAttachmentMetadata();
@@ -614,7 +606,9 @@ export function Conversation(props: ConversationProps) {
           if (page.after === null) break;
           position = { kind: 'after', cursor: page.after };
         }
-        live.set(live().filter((row) => row.closedAt === null || row.closedAt! > fence));
+        const currentLive = live();
+        const nextLive = currentLive.filter((row) => row.closedAt === null || row.closedAt! > fence);
+        if (nextLive.length !== currentLive.length) live.set(nextLive);
         const refresh = refreshFrom;
         refreshFrom = null;
         if (refresh !== null) {

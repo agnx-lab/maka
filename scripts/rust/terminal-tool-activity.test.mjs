@@ -24,7 +24,76 @@ import {
   latestToolActivity,
 } from '../../products/maka/terminal-shell/app/toolActivity.ts';
 
-import { replayStartCursor } from '../../products/maka/terminal-shell/app/history.ts';
+import {
+  mergeChunks,
+  replayStartCursor,
+  updateHistoryMetadata,
+} from '../../products/maka/terminal-shell/app/history.ts';
+import { thinkingSummary } from '../../products/maka/terminal-shell/app/thinkingSummary.ts';
+
+test('thinking summary retains the last nonempty paragraph and its Unicode text', () => {
+  for (const [source, expected] of [
+    ['', ''],
+    [' \r\n\t\u2003', ''],
+    ['**first**\nline', 'first line'],
+    ['old\n\n**最新**\n 行\r\n \t', '最新 行'],
+    ['old\r\n\t \r\n**最新**\r\n\t\r\n \t', '最新'],
+    ['old\n\n**\n\n', ''],
+    ['old\n\r \nnew', 'old new'],
+    ['earlier\n\n\n **tail**\n\n\n', 'tail'],
+    ['earlier\n\n'.repeat(20000) + '**尾 e\u0301**\nline', '尾 e\u0301 line'],
+  ]) {
+    assert.equal(thinkingSummary(source), expected);
+  }
+});
+
+test('unchanged history pages retain rows while fragments and fenced metadata still advance', () => {
+  const first = {
+    position: { sourceSequence: 10, itemIndex: 0 },
+    messageId: 'message', turnId: 'turn', timestamp: 100,
+    field: 'body', role: 'user', offset: 0, text: '界', totalBytes: 7,
+  };
+  const initial = mergeChunks([], [first], false, 20);
+  assert.equal(initial[0].text, '界');
+  assert.strictEqual(mergeChunks(initial, [], false, 99), initial);
+  assert.strictEqual(mergeChunks(initial, [structuredClone(first)], false, 20), initial);
+  assert.strictEqual(mergeChunks(initial, [{ ...first, text: 'old' }], true, 19), initial);
+
+  const extended = mergeChunks(initial, [{ ...first, offset: 3, text: '🙂' }], false, 21);
+  assert.equal(extended[0].text, '界🙂');
+  assert.deepEqual(extended[0].fragments, [{ offset: 0, text: '界' }, { offset: 3, text: '🙂' }]);
+  assert.equal(extended[0].metadataThrough, 21);
+  const refreshed = {
+    ...first,
+    text: 'metadata pages must not replace loaded text',
+    attachments: [{ name: 'notes.txt', mimeType: 'text/plain', bytes: 12, kind: 'doc' }],
+  };
+  const reply = {
+    ...first, position: { sourceSequence: 11, itemIndex: 0 },
+    messageId: 'reply', role: 'assistant', text: 'reply', totalBytes: 5,
+  };
+  const withReply = mergeChunks(extended, [reply], false, 21);
+  const completed = {
+    ...reply,
+    timing: { startedAt: 100, finished: { at: 200, outcome: 'completed' } },
+    model: { kind: 'native', requestedModelId: 'requested', reportedModelId: 'reported' },
+    finalOutput: true,
+  };
+  const updated = updateHistoryMetadata(withReply, [refreshed, completed], 22);
+  assert.equal(updated[0].text, '界🙂');
+  assert.strictEqual(updated[0].fragments, extended[0].fragments);
+  assert.deepEqual(updated[0].attachments, [{ name: 'notes.txt', mimeType: 'text/plain', bytes: 12, kind: 'doc' }]);
+  assert.deepEqual(updated[1].timing, { startedAt: 100, finished: { at: 200, outcome: 'completed' } });
+  assert.deepEqual(updated[1].model, { kind: 'native', requestedModelId: 'requested', reportedModelId: 'reported' });
+  assert.equal(updated[1].finalOutput, true);
+  assert.equal(updated[0].metadataThrough, 22);
+  assert.strictEqual(updateHistoryMetadata(updated, [], 99), updated);
+  assert.strictEqual(updateHistoryMetadata(updated, structuredClone([refreshed, completed]), 22), updated);
+  assert.strictEqual(updateHistoryMetadata(updated, [{ ...first, attachments: [] }], 21), updated);
+  const advanced = updateHistoryMetadata(updated, [refreshed, completed], 23);
+  assert.equal(advanced[0].metadataThrough, 23);
+  assert.equal(advanced[0].text, '界🙂');
+});
 
 test('complete active tool identities survive 129 starts, updates and exact terminal removal', () => {
   let active = [];

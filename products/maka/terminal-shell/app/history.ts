@@ -102,11 +102,40 @@ export function historyMetadata(chunk: any, through: number, previous?: Row) {
   };
 }
 
+export function updateHistoryMetadata(rows: Row[], chunks: any[], through: number): Row[] {
+  if (chunks.length === 0) return rows;
+  const metadata = new Map(
+    chunks.map((chunk) => [
+      `${chunk.position.sourceSequence}/${chunk.position.itemIndex}/${chunk.field}`,
+      chunk,
+    ]),
+  );
+  let updated = rows;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const chunk = metadata.get(row.key);
+    if (!chunk || through < (row.metadataThrough ?? 0)) continue;
+    const next = historyMetadata(chunk, through, row);
+    // Metadata is Host JSON. Compare its complete projection so new fields are
+    // not silently ignored by a display-specific list of equality checks.
+    if (
+      row.metadataThrough === through &&
+      JSON.stringify(historyMetadata(row, through, row)) === JSON.stringify(next)
+    )
+      continue;
+    if (updated === rows) updated = rows.slice();
+    updated[index] = { ...row, ...next };
+  }
+  return updated;
+}
+
 // These are the Desktop transcript's position/fragment rules, independent of
 // either renderer. History cursors use byte offsets; JS never derives them
 // from UTF-16 string lengths.
 export function mergeChunks(rows: Row[], chunks: any[], older = false, through = 0): Row[] {
+  if (chunks.length === 0) return rows;
   const merged = new Map(rows.map((row) => [row.key, row]));
+  let changed = false;
   for (const chunk of chunks) {
     const key = `${chunk.position.sourceSequence}/${chunk.position.itemIndex}/${chunk.field}`;
     const previous = merged.get(key);
@@ -119,7 +148,7 @@ export function mergeChunks(rows: Row[], chunks: any[], older = false, through =
           ]
         : [...(previous?.fragments ?? []).filter((part) => part.offset !== chunk.offset), fresh]
     ).sort((a, b) => a.offset - b.offset);
-    merged.set(key, {
+    const next = {
       key,
       messageId: chunk.messageId,
       turnId: chunk.turnId,
@@ -132,8 +161,16 @@ export function mergeChunks(rows: Row[], chunks: any[], older = false, through =
       role: chunk.field === 'thinking' ? 'thinking' : chunk.role,
       fragments,
       text: fragments.map((part) => part.text).join(''),
-    });
+    };
+    if (
+      previous?.metadataThrough === next.metadataThrough &&
+      JSON.stringify(previous) === JSON.stringify(next)
+    )
+      continue;
+    merged.set(key, next);
+    changed = true;
   }
+  if (!changed) return rows;
   return [...merged.values()].sort(
     (a, b) =>
       a.position!.sourceSequence - b.position!.sourceSequence ||
