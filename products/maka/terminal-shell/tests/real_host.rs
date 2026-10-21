@@ -439,9 +439,9 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_input(&mut view, "Display name", "界面草稿用户").await;
         assert_input(&mut view, "Assistant tone", "请简明作答").await;
         activate(&mut view, "Save this preference").await;
-        wait_view(&mut view, |screen| screen.contains("Preferences changed elsewhere.")).await;
-        assert_input(&mut view, "Display name", "界面草稿用户").await;
-        assert_input(&mut view, "Assistant tone", "请简明作答").await;
+        wait_view(&mut view, |screen| screen.contains("Preferences changed elsewhere.") && screen.contains("界面草稿用户") && screen.contains("请简明作答")).await;
+        let save = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Save this preference").expect("the stale preference editor lost its actual Save button");
+        assert!(save.state.disabled, "a stale preference draft must require explicit discard before another save");
         let conflicted = client.query("settings", "assistantPreferences", json!({})).await.unwrap();
         assert_eq!(conflicted["revision"], saved_network["revision"]);
         assert_eq!(conflicted["displayName"], original_preferences["displayName"]);
