@@ -1,0 +1,207 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { inputAction, Text, View } from 'nsh';
+import { Button } from 'nsh/base';
+import { List } from 'nsh/list';
+import type { ModelSettingsOwner } from './settings';
+import { ConnectionForm } from './ConnectionForm';
+import { ConnectionModel } from './ConnectionModel';
+import { C } from './ui';
+
+export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
+  const owner = props.owner;
+  const disabled = () =>
+    owner.busy() || owner.loading() || !owner.pendingKnown() || owner.pending().length > 0;
+  const models = () => owner.editor()?.baseline?.editing?.enabledModelIds ?? [];
+  return (
+    <View style={{ flex: 1, gap: 8 }}>
+      <If when={owner.confirmation()}>
+        <View style={{ gap: 16, padding: 16, backgroundColor: C.background }}>
+          <Text style={{ color: C.text }}>
+            {owner.confirmation() === 'connection'
+              ? 'Delete this connection, its saved API key and model settings? Existing conversations keep their saved selection.'
+              : owner.confirmation() === 'key'
+                ? 'Remove the stored API key? This connection may stop working.'
+                : 'Remove this model from the connection?'}
+          </Text>
+          <Button
+            disabled={disabled()}
+            accessibilityLabel="Confirm removal"
+            onPress={inputAction(owner.remove, owner.removalAction())}
+          >
+            <Text style={{ color: C.danger }}>Confirm removal</Text>
+          </Button>
+          <Button
+            disabled={owner.busy()}
+            onPress={inputAction(owner.cancelRemoval, owner.removalAction())}
+          >
+            <Text style={{ color: C.muted }}>Cancel</Text>
+          </Button>
+        </View>
+      </If>
+      <If when={!owner.confirmation()}>
+        <If when={owner.page() === 'connections'}>
+          <View style={{ flexDirection: 'row', gap: 16 }}>
+            <Button
+              disabled={disabled()}
+              accessibilityLabel="Add connection"
+              onPress={inputAction(owner.newConnection, null)}
+            >
+              <Text style={{ color: C.accent }}>Add connection</Text>
+            </Button>
+            <Button
+              disabled={owner.loading() || owner.busy()}
+              onPress={inputAction(owner.loadConnections, false)}
+            >
+              <Text style={{ color: C.muted }}>Refresh connections</Text>
+            </Button>
+          </View>
+          <If when={!owner.loading() && !owner.connections().length}>
+            <Text style={{ color: C.muted }}>
+              Add your first connection, then fetch or add a model.
+            </Text>
+          </If>
+          <List
+            each={owner.connections()}
+            keyExtractor={(item) => item.basis.connectionId}
+            estimatedItemSize={64}
+            onEndReached={() => {
+              if (!owner.error()) void owner.loadConnections(true);
+            }}
+            style={{ flex: 1 }}
+          >
+            {(item) => (
+              <Button
+                disabled={disabled() || !item().editable}
+                accessibilityLabel={`Edit connection ${item().name}`}
+                onPress={inputAction(owner.openConnection, item().basis)}
+                style={{ height: 64, padding: 8, backgroundColor: C.background }}
+                focusStyle={{ backgroundColor: C.raised }}
+                hoverStyle={{ backgroundColor: C.raised }}
+              >
+                <Text numberOfLines={1} style={{ color: C.text }}>
+                  {item().name}
+                </Text>
+                <Text numberOfLines={1} style={{ color: C.muted }}>
+                  {item().enabled ? 'Enabled' : 'Disabled'} · {item().enabledModelCount} models
+                </Text>
+              </Button>
+            )}
+          </List>
+        </If>
+        <If when={owner.page() === 'providers'}>
+          <Text style={{ color: C.muted }}>Choose the API provider for this connection.</Text>
+          <List
+            each={owner.providers()}
+            keyExtractor={(item) => JSON.stringify(item.identity)}
+            estimatedItemSize={48}
+            onEndReached={() => {
+              if (!owner.error()) void owner.loadProviders(true);
+            }}
+            style={{ flex: 1 }}
+          >
+            {(item) => (
+              <Button
+                disabled={disabled()}
+                accessibilityLabel={`Connect ${item().label}`}
+                onPress={inputAction(owner.chooseProvider, item().identity)}
+                style={{ height: 48, padding: 8, backgroundColor: C.background }}
+                focusStyle={{ backgroundColor: C.raised }}
+                hoverStyle={{ backgroundColor: C.raised }}
+              >
+                <Text numberOfLines={1} style={{ color: C.text }}>
+                  {item().label}
+                </Text>
+              </Button>
+            )}
+          </List>
+        </If>
+        <If when={owner.page() === 'connection' && owner.editor()}>
+          <ConnectionForm settings={owner} />
+        </If>
+        <If when={owner.page() === 'model' && owner.editor() && owner.model()}>
+          <ConnectionModel settings={owner} />
+        </If>
+        <If when={owner.page() === 'models' && owner.editor()}>
+          <Button
+            disabled={disabled()}
+            accessibilityLabel="Add model manually"
+            onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
+          >
+            <Text style={{ color: C.accent }}>Add model manually</Text>
+          </Button>
+          <List
+            each={models()}
+            keyExtractor={(id) => id}
+            estimatedItemSize={64}
+            style={{ flex: 1 }}
+          >
+            {(id) => (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  height: 64,
+                  padding: 8,
+                }}
+              >
+                <Button
+                  disabled={disabled()}
+                  style={{ flex: 1 }}
+                  accessibilityLabel={`Edit model ${id()}`}
+                  onPress={inputAction(owner.editModel, { ...owner.action(), id: id() })}
+                >
+                  <Text numberOfLines={1} style={{ color: C.text }}>
+                    {owner.editor()?.baseline?.editing?.modelOverrides?.[id()]?.displayName ?? id()}
+                  </Text>
+                  <Text numberOfLines={1} style={{ color: C.muted }}>
+                    {id()}
+                  </Text>
+                </Button>
+                <Button
+                  disabled={disabled() || !owner.editor()?.enabled}
+                  accessibilityLabel={`Set default ${id()}`}
+                  selected={
+                    owner.defaultTarget()?.connectionId ===
+                      owner.editor()?.baseline?.target.connectionId &&
+                    owner.defaultTarget()?.modelId === id()
+                  }
+                  onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
+                >
+                  <Text style={{ color: C.accent }}>
+                    {owner.defaultTarget()?.connectionId ===
+                      owner.editor()?.baseline?.target.connectionId &&
+                    owner.defaultTarget()?.modelId === id()
+                      ? '✓ Default'
+                      : 'Set default'}
+                  </Text>
+                </Button>
+              </View>
+            )}
+          </List>
+        </If>
+      </If>
+      <If when={owner.loading()}>
+        <Text style={{ color: C.muted }}>Loading settings…</Text>
+      </If>
+    </View>
+  );
+}

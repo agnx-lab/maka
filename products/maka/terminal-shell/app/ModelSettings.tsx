@@ -17,37 +17,100 @@
  * under the License.
  */
 
-import { inputAction, Text, View } from 'nsh';
+import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
-import { List } from 'nsh/list';
+import { createSettingsOperations } from './settingsOperations';
 import { createModelSettings } from './settings';
-import { ConnectionForm } from './ConnectionForm';
-import { ConnectionModel } from './ConnectionModel';
+import { createGeneralSettings } from './generalSettings';
+import { createNetworkSettings } from './networkSettings';
+import { ConnectionSettings } from './ConnectionSettings';
+import { GeneralSettings } from './GeneralSettings';
+import { NetworkSettings } from './NetworkSettings';
 import { C } from './ui';
 
+type Section = 'general' | 'connections' | 'network';
+type BackAction = { section: Section; identity: string };
+const sections: { id: Section; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'connections', label: 'Connections & models' },
+  { id: 'network', label: 'Network' },
+];
+
+// One native Dialog owns focus restoration. Forms keep their own canonical
+// snapshot and unsaved edits; all writes share the original native journal.
 export function ModelSettings(props: { close(): void; changed(): void }) {
-  const owner = createModelSettings(props.changed);
-  const disabled = () =>
-    owner.busy() || owner.loading() || !owner.pendingKnown() || owner.pending().length > 0;
-  const back = () => {
-    if (owner.back()) props.close();
+  const section = signal<Section>('connections');
+  const operations = createSettingsOperations();
+  const connections = createModelSettings(
+    props.changed,
+    operations,
+    () => section() === 'connections',
+  );
+  const general = createGeneralSettings(operations, () => section() === 'general');
+  const network = createNetworkSettings(operations, () => section() === 'network');
+  const pages = { connections, general, network };
+  let alive = true;
+  cleanup(() => {
+    alive = false;
+  });
+  const choose = (request: { from: Section; to: Section }) => {
+    if (!alive || operations.busy() || section() !== request.from || request.from === request.to)
+      return;
+    pages[request.from].deactivate();
+    if (!operations.pending().length) {
+      operations.error.set('');
+      operations.notice.set('');
+    }
+    section.set(request.to);
+    pages[request.to].activate();
   };
-  const models = () => owner.editor()?.baseline?.editing?.enabledModelIds ?? [];
-  const title = () =>
-    ({
-      connections: 'Connections & models',
-      providers: 'Add connection',
-      connection: 'Connection settings',
-      models: 'Connection models',
-      model: 'Model settings',
-    })[owner.page()];
+  const backAction = (): BackAction => ({
+    section: section(),
+    identity: pages[section()].navigation(),
+  });
+  const back = (request: BackAction) => {
+    if (
+      !alive ||
+      operations.busy() ||
+      section() !== request.section ||
+      pages[request.section].navigation() !== request.identity
+    )
+      return;
+    if (pages[request.section].back()) props.close();
+  };
+  const cancel = (request: BackAction) => () => back(request);
+  const recover = () =>
+    operations.recover((method) => {
+      if (method === 'updateAssistantPreferences') general.reset();
+      else if (method === 'updateNetwork') network.reset();
+      else {
+        connections.reset();
+        props.changed();
+      }
+    });
+  const title = () => {
+    const current = section();
+    return current === 'connections'
+      ? {
+          connections: 'Connections & models',
+          providers: 'Add connection',
+          connection: 'Connection settings',
+          models: 'Connection models',
+          model: 'Model settings',
+        }[connections.page()]
+      : pages[current].title();
+  };
+  const nested = () =>
+    section() === 'connections'
+      ? connections.page() !== 'connections' || !!connections.confirmation()
+      : section() === 'general' && general.title() !== 'General settings';
   return (
     <Dialog
       animation="none"
       closeOnEscape={false}
       closeOnBackdropPress={false}
       closeOnSwipe={false}
-      onCancel={back}
+      onCancel={cancel(backAction())}
       style={{
         flex: 1,
         justifyContent: 'center',
@@ -72,213 +135,78 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text style={{ flex: 1, color: C.accent, fontWeight: '700' }}>{title()}</Text>
           <Button
-            disabled={owner.busy()}
-            accessibilityLabel="Back from connection settings"
-            onPress={inputAction(back, null)}
+            disabled={operations.busy()}
+            accessibilityLabel={
+              section() === 'connections'
+                ? 'Back from connection settings'
+                : `Back from ${section()} settings`
+            }
+            onPress={inputAction(back, backAction())}
           >
-            <Text style={{ color: C.muted }}>
-              {owner.page() === 'connections' ? 'Close · Esc' : 'Back · Esc'}
-            </Text>
+            <Text style={{ color: C.muted }}>{nested() ? 'Back · Esc' : 'Close · Esc'}</Text>
           </Button>
         </View>
-        <If when={owner.error()}>
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <Each of={sections} key={(item) => item.id}>
+            {(item) => (
+              <Button
+                disabled={operations.busy()}
+                selected={section() === item().id}
+                accessibilityLabel={`Settings section ${item().label}`}
+                onPress={inputAction(choose, { from: section(), to: item().id })}
+              >
+                <Text style={{ color: section() === item().id ? C.accent : C.muted }}>
+                  {item().label}
+                </Text>
+              </Button>
+            )}
+          </Each>
+        </View>
+        <If when={operations.error()}>
           <Text selectable style={{ color: C.danger }}>
-            {owner.error()}
+            {operations.error()}
           </Text>
         </If>
-        <If when={owner.notice()}>
-          <Text style={{ color: C.muted }}>{owner.notice()}</Text>
+        <If when={operations.notice()}>
+          <Text style={{ color: C.muted }}>{operations.notice()}</Text>
         </If>
-        <If when={!owner.pendingKnown() || owner.pending().length > 0}>
+        <If when={!operations.pendingKnown() || operations.pending().length > 0}>
           <View style={{ gap: 4 }}>
             <Text style={{ color: C.warning }}>
               Earlier settings actions must be resolved before another change.
             </Text>
             <Button
-              disabled={owner.busy()}
+              disabled={operations.busy()}
               accessibilityLabel="Recover settings actions"
-              onPress={inputAction(owner.recover, null)}
+              onPress={inputAction(recover, null)}
             >
               <Text style={{ color: C.accent }}>
-                {owner.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
+                {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
               </Text>
             </Button>
-            <Each of={owner.pending().filter((item) => !item.reference)} key={(item) => item.id}>
+            <Each
+              of={operations.pending().filter((item) => !item.reference)}
+              key={(item) => item.id}
+            >
               {(item) => (
-                <Button disabled={owner.busy()} onPress={inputAction(owner.abandon, item().id)}>
+                <Button
+                  disabled={operations.busy()}
+                  onPress={inputAction(operations.abandon, item().id)}
+                >
                   <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
                 </Button>
               )}
             </Each>
           </View>
         </If>
-        <If when={owner.confirmation()}>
-          <View style={{ gap: 16, padding: 16, backgroundColor: C.background }}>
-            <Text style={{ color: C.text }}>
-              {owner.confirmation() === 'connection'
-                ? 'Delete this connection, its saved API key and model settings? Existing conversations keep their saved selection.'
-                : owner.confirmation() === 'key'
-                  ? 'Remove the stored API key? This connection may stop working.'
-                  : 'Remove this model from the connection?'}
-            </Text>
-            <Button
-              disabled={disabled()}
-              accessibilityLabel="Confirm removal"
-              onPress={inputAction(owner.remove, owner.removalAction())}
-            >
-              <Text style={{ color: C.danger }}>Confirm removal</Text>
-            </Button>
-            <Button disabled={owner.busy()} onPress={inputAction(back, null)}>
-              <Text style={{ color: C.muted }}>Cancel</Text>
-            </Button>
-          </View>
+        <If when={section() === 'connections'}>
+          <ConnectionSettings owner={connections} />
         </If>
-        <If when={!owner.confirmation()}>
-          <If when={owner.page() === 'connections'}>
-            <View style={{ flexDirection: 'row', gap: 16 }}>
-              <Button
-                disabled={disabled()}
-                accessibilityLabel="Add connection"
-                onPress={inputAction(owner.newConnection, null)}
-              >
-                <Text style={{ color: C.accent }}>Add connection</Text>
-              </Button>
-              <Button
-                disabled={owner.loading() || owner.busy()}
-                onPress={inputAction(owner.loadConnections, false)}
-              >
-                <Text style={{ color: C.muted }}>Refresh connections</Text>
-              </Button>
-            </View>
-            <If when={!owner.loading() && !owner.connections().length}>
-              <Text style={{ color: C.muted }}>
-                Add your first connection, then fetch or add a model.
-              </Text>
-            </If>
-            <List
-              each={owner.connections()}
-              keyExtractor={(item) => item.basis.connectionId}
-              estimatedItemSize={64}
-              onEndReached={() => {
-                if (!owner.error()) void owner.loadConnections(true);
-              }}
-              style={{ flex: 1 }}
-            >
-              {(item) => (
-                <Button
-                  disabled={disabled() || !item().editable}
-                  accessibilityLabel={`Edit connection ${item().name}`}
-                  onPress={inputAction(owner.openConnection, item().basis)}
-                  style={{ height: 64, padding: 8, backgroundColor: C.background }}
-                  focusStyle={{ backgroundColor: C.raised }}
-                  hoverStyle={{ backgroundColor: C.raised }}
-                >
-                  <Text numberOfLines={1} style={{ color: C.text }}>
-                    {item().name}
-                  </Text>
-                  <Text numberOfLines={1} style={{ color: C.muted }}>
-                    {item().enabled ? 'Enabled' : 'Disabled'} · {item().enabledModelCount} models
-                  </Text>
-                </Button>
-              )}
-            </List>
-          </If>
-          <If when={owner.page() === 'providers'}>
-            <Text style={{ color: C.muted }}>Choose the API provider for this connection.</Text>
-            <List
-              each={owner.providers()}
-              keyExtractor={(item) => JSON.stringify(item.identity)}
-              estimatedItemSize={48}
-              onEndReached={() => {
-                if (!owner.error()) void owner.loadProviders(true);
-              }}
-              style={{ flex: 1 }}
-            >
-              {(item) => (
-                <Button
-                  disabled={disabled()}
-                  accessibilityLabel={`Connect ${item().label}`}
-                  onPress={inputAction(owner.chooseProvider, item().identity)}
-                  style={{ height: 48, padding: 8, backgroundColor: C.background }}
-                  focusStyle={{ backgroundColor: C.raised }}
-                  hoverStyle={{ backgroundColor: C.raised }}
-                >
-                  <Text numberOfLines={1} style={{ color: C.text }}>
-                    {item().label}
-                  </Text>
-                </Button>
-              )}
-            </List>
-          </If>
-          <If when={owner.page() === 'connection' && owner.editor()}>
-            <ConnectionForm settings={owner} />
-          </If>
-          <If when={owner.page() === 'model' && owner.editor() && owner.model()}>
-            <ConnectionModel settings={owner} />
-          </If>
-          <If when={owner.page() === 'models' && owner.editor()}>
-            <Button
-              disabled={disabled()}
-              accessibilityLabel="Add model manually"
-              onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
-            >
-              <Text style={{ color: C.accent }}>Add model manually</Text>
-            </Button>
-            <List
-              each={models()}
-              keyExtractor={(id) => id}
-              estimatedItemSize={64}
-              style={{ flex: 1 }}
-            >
-              {(id) => (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 8,
-                    height: 64,
-                    padding: 8,
-                  }}
-                >
-                  <Button
-                    disabled={disabled()}
-                    style={{ flex: 1 }}
-                    accessibilityLabel={`Edit model ${id()}`}
-                    onPress={inputAction(owner.editModel, { ...owner.action(), id: id() })}
-                  >
-                    <Text numberOfLines={1} style={{ color: C.text }}>
-                      {owner.editor()?.baseline?.editing?.modelOverrides?.[id()]?.displayName ??
-                        id()}
-                    </Text>
-                    <Text numberOfLines={1} style={{ color: C.muted }}>
-                      {id()}
-                    </Text>
-                  </Button>
-                  <Button
-                    disabled={disabled() || !owner.editor()?.enabled}
-                    accessibilityLabel={`Set default ${id()}`}
-                    selected={
-                      owner.defaultTarget()?.connectionId ===
-                        owner.editor()?.baseline?.target.connectionId &&
-                      owner.defaultTarget()?.modelId === id()
-                    }
-                    onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
-                  >
-                    <Text style={{ color: C.accent }}>
-                      {owner.defaultTarget()?.connectionId ===
-                        owner.editor()?.baseline?.target.connectionId &&
-                      owner.defaultTarget()?.modelId === id()
-                        ? '✓ Default'
-                        : 'Set default'}
-                    </Text>
-                  </Button>
-                </View>
-              )}
-            </List>
-          </If>
+        <If when={section() === 'general'}>
+          <GeneralSettings owner={general} />
         </If>
-        <If when={owner.loading()}>
-          <Text style={{ color: C.muted }}>Loading settings…</Text>
+        <If when={section() === 'network'}>
+          <NetworkSettings owner={network} />
         </If>
       </View>
     </Dialog>

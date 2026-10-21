@@ -23,7 +23,6 @@ import type {
   CatalogMutationResult,
   ConnectionVersionBasis,
   CredentialStatus,
-  CredentialVersionBasis,
   ModelOverride,
   SettingsConnectionDetail,
   SettingsConnectionSummary,
@@ -31,6 +30,12 @@ import type {
   SettingsProviderSummary,
   ThinkingLevel,
 } from '../../../../packages/plugin-sdk/src/generated/runtime';
+
+import {
+  credentialBasis,
+  settingsRejection as rejection,
+  type SettingsOperations,
+} from './settingsOperations';
 
 type Detail = Extract<SettingsConnectionDetail, { kind: 'ready' }>;
 export type ConnectionEditor = {
@@ -73,28 +78,6 @@ const basis = (detail: Detail): ConnectionVersionBasis => ({
   connectionId: detail.target.connectionId,
   revision: detail.target.revision,
 });
-const credentialBasis = (status: CredentialStatus | null): CredentialVersionBasis | null =>
-  status?.configured && status.credentialId !== null && status.revision !== null
-    ? { locator: status.locator, credentialId: status.credentialId, revision: status.revision }
-    : null;
-function rejection(value: any): Error {
-  if (
-    value?.kind === 'connection_stale' ||
-    value?.kind === 'revision_conflict' ||
-    value?.kind === 'superseded' ||
-    value?.kind === 'credential_stale' ||
-    value?.reason === 'credential_changed' ||
-    value?.reason === 'connection_changed'
-  )
-    return new Error('This connection changed elsewhere. Reload it before saving again.');
-  if (value?.kind === 'connection_exists')
-    return new Error('That connection ID is already in use. Choose another ID.');
-  if (value?.kind === 'invalid_default_target')
-    return new Error('Enable the connection and model before making it the default.');
-  return new Error(
-    `The Host rejected this action (${value?.reason ?? value?.kind ?? 'unknown result'}).`,
-  );
-}
 function overlay(text: string): Record<string, unknown> | null {
   let value: unknown;
   try {
@@ -107,7 +90,12 @@ function overlay(text: string): Record<string, unknown> | null {
   return value as Record<string, unknown> | null;
 }
 
-export function createModelSettings(changed: () => void) {
+export function createModelSettings(
+  changed: () => void,
+  operations: SettingsOperations,
+  active: () => boolean,
+) {
+  const { busy, error, notice, pending, pendingKnown, report, mutate, run } = operations;
   const page = signal<SettingsPage>('connections');
   const connections = signal<SettingsConnectionSummary[]>([]);
   const providers = signal<SettingsProviderSummary[]>([]);
@@ -119,11 +107,6 @@ export function createModelSettings(changed: () => void) {
   const model = signal<ModelEditor | null>(null);
   const credential = signal<CredentialStatus | null>(null);
   const loading = signal(false);
-  const busy = signal(false);
-  const error = signal('');
-  const notice = signal('');
-  const pending = signal<any[]>([]);
-  const pendingKnown = signal(false);
   const confirmation = signal<'connection' | 'key' | 'model' | null>(null);
   let alive = true;
   let read = 0;
@@ -133,15 +116,13 @@ export function createModelSettings(changed: () => void) {
     read += 1;
     editor.set(null);
   });
-  const report = (reason: unknown) => {
-    if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
-  };
   const action = (): ConnectionAction => ({
     editor: editor()!.instance,
     revision: editor()!.baseline?.target.revision ?? null,
   });
   const current = (request: ConnectionAction) =>
     alive &&
+    active() &&
     editor()?.instance === request.editor &&
     (editor()?.baseline?.target.revision ?? null) === request.revision;
   const modelAction = (): ModelAction => ({
@@ -157,49 +138,8 @@ export function createModelSettings(changed: () => void) {
     read += 1;
     loading.set(false);
   };
-  const refreshPending = async () => {
-    try {
-      const rows = await host.pendingSettings();
-      if (alive) {
-        pending.set(rows);
-        pendingKnown.set(true);
-      }
-    } catch (reason) {
-      if (alive) pendingKnown.set(false);
-      throw reason;
-    }
-  };
-  const mutate = async (
-    endpoint: 'settings' | 'setup',
-    method: string,
-    input: unknown,
-    secret: string | null = null,
-  ) => {
-    // The native journal is the admission authority across windows and launches.
-    const result = await host.settingsMutation(endpoint, method, input, secret);
-    const receipt = result.reply?.receipt;
-    if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
-      throw new Error(
-        'The result is unknown. Recover the original action before making another change.',
-      );
-    return receipt.outcome.value;
-  };
-  const run = async (operation: () => Promise<void>) => {
-    if (!alive || busy() || !pendingKnown() || pending().length) return;
-    busy.set(true);
-    error.set('');
-    notice.set('');
-    try {
-      await operation();
-    } catch (reason) {
-      report(reason);
-    } finally {
-      await refreshPending().catch(report);
-      if (alive) busy.set(false);
-    }
-  };
   const loadConnections = async (more = false) => {
-    if (!alive || loading() || (more && next() === null)) return;
+    if (!alive || !active() || loading() || (more && next() === null)) return;
     const generation = ++read;
     const extent = more ? connections().length + 16 : Math.max(16, connections().length);
     loading.set(true);
@@ -217,7 +157,7 @@ export function createModelSettings(changed: () => void) {
             ? { kind: 'start' }
             : { kind: 'continue', revision: version, offset: cursor },
         );
-        if (!alive || generation !== read) return;
+        if (!alive || !active() || generation !== read) return;
         if (result.kind === 'changed') {
           if (restarted)
             throw new Error('The connection catalog keeps changing. Refresh to try again.');
@@ -246,7 +186,7 @@ export function createModelSettings(changed: () => void) {
     }
   };
   const loadProviders = async (more = false) => {
-    if (!alive || loading() || (more && providerNext() === null)) return;
+    if (!alive || !active() || loading() || (more && providerNext() === null)) return;
     const generation = ++read;
     loading.set(true);
     error.set('');
@@ -254,7 +194,7 @@ export function createModelSettings(changed: () => void) {
       const result = await host.query('settings', 'providers', {
         offset: more ? providerNext() : 0,
       });
-      if (!alive || generation !== read) return;
+      if (!alive || !active() || generation !== read) return;
       providers.set(more ? [...providers(), ...result.providers] : result.providers);
       providerNext.set(result.next);
     } catch (reason) {
@@ -275,13 +215,13 @@ export function createModelSettings(changed: () => void) {
     void loadProviders();
   };
   const chooseProvider = async (identity: SettingsProviderSummary['identity']) => {
-    if (busy() || loading() || page() !== 'providers') return;
+    if (!active() || busy() || loading() || page() !== 'providers') return;
     const generation = ++read;
     loading.set(true);
     error.set('');
     try {
       const provider: SettingsProvider = await host.query('authentication', 'provider', identity);
-      if (!alive || generation !== read) return;
+      if (!alive || !active() || generation !== read) return;
       if (
         !provider.descriptor.anonymous &&
         !provider.descriptor.authentication.some(
@@ -347,7 +287,7 @@ export function createModelSettings(changed: () => void) {
     return result.status as CredentialStatus;
   };
   const openConnection = async (target: ConnectionVersionBasis) => {
-    if (busy() || loading()) return;
+    if (!active() || busy() || loading()) return;
     const generation = ++read;
     loading.set(true);
     error.set('');
@@ -361,7 +301,7 @@ export function createModelSettings(changed: () => void) {
         host.query('authentication', 'provider', detail.target.provider),
         readCredential(detail),
       ]);
-      if (!alive || generation !== read) return;
+      if (!alive || !active() || generation !== read) return;
       editor.set({
         instance: ++editorInstance,
         baseline: detail,
@@ -748,55 +688,6 @@ export function createModelSettings(changed: () => void) {
       changed();
     });
   };
-  const recover = () => {
-    if (busy()) return;
-    busy.set(true);
-    error.set('');
-    void (async () => {
-      try {
-        for (const original of await host.pendingSettings()) {
-          if (!original.reference) continue;
-          const reply = await host.recoverSetting(original.id);
-          const receipt = reply?.receipt;
-          if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
-            throw new Error(
-              'The original result is still unknown. Keep its receipt and retry recovery.',
-            );
-          const value = receipt.outcome.value;
-          if (!['committed', 'saved', 'ready'].includes(value?.kind)) throw rejection(value);
-        }
-        if (!alive) return;
-        editor.set(null);
-        model.set(null);
-        page.set('connections');
-        await loadConnections();
-        if (alive) {
-          notice.set('Original action receipts checked. Reopen the connection to continue.');
-          changed();
-        }
-      } catch (reason) {
-        report(reason);
-      } finally {
-        await refreshPending().catch(report);
-        if (alive) busy.set(false);
-      }
-    })();
-  };
-  const abandon = (id: string) => {
-    if (busy()) return;
-    busy.set(true);
-    error.set('');
-    void (async () => {
-      try {
-        await host.abandonSetting(id);
-      } catch (reason) {
-        report(reason);
-      } finally {
-        await refreshPending().catch(report);
-        if (alive) busy.set(false);
-      }
-    })();
-  };
   const back = () => {
     if (busy()) return false;
     if (confirmation()) {
@@ -822,8 +713,23 @@ export function createModelSettings(changed: () => void) {
     }
     return true;
   };
-  void refreshPending().catch(report);
-  void loadConnections();
+  const deactivate = () => {
+    cancelRead();
+    if (editor()) editor.set({ ...editor()!, instance: ++editorInstance });
+  };
+  const activate = () => {
+    if (page() === 'connections') void loadConnections();
+    else if (page() === 'providers') void loadProviders();
+  };
+  const reset = () => {
+    cancelRead();
+    editor.set(null);
+    model.set(null);
+    confirmation.set(null);
+    page.set('connections');
+    if (active()) void loadConnections();
+  };
+  if (active()) activate();
   return {
     page,
     connections,
@@ -863,8 +769,27 @@ export function createModelSettings(changed: () => void) {
     setDefault,
     confirm,
     remove,
-    recover,
-    abandon,
+    cancelRemoval(request: RemovalAction) {
+      if (
+        current(request) &&
+        !busy() &&
+        confirmation() === request.kind &&
+        (request.kind !== 'model' || model()?.originalId === request.modelId)
+      )
+        confirmation.set(null);
+    },
+    navigation: () =>
+      JSON.stringify([
+        page(),
+        editor()?.instance,
+        editor()?.baseline?.target.revision,
+        model()?.originalId,
+        model()?.id,
+        confirmation(),
+      ]),
+    activate,
+    deactivate,
+    reset,
     back,
   };
 }
