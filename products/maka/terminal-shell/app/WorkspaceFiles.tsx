@@ -145,6 +145,8 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
               }}
               accessibilityLabel="Workspace files"
               style={{ flex: 1, minHeight: 32 }}
+              empty={<DirectoryStatus model={model} />}
+              footer={model.entries().length ? <DirectoryStatus model={model} /> : undefined}
             >
               {(entry) => (
                 <Button
@@ -196,33 +198,49 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
           );
         }}
       </Each>
-      <If when={model.loading() || (model.busy() && model.entries().length === 0)}>
-        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
-          Loading files…
-        </Text>
-      </If>
-      <If when={model.busy() && !model.loading() && model.entries().length > 0}>
-        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
-          Updating files…
-        </Text>
-      </If>
-      <If when={!model.sessionId()}>
-        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
-          Select a conversation to browse its workspace.
-        </Text>
-      </If>
-      <If
-        when={model.sessionId() && !model.busy() && !model.error() && model.entries().length === 0}
-      >
-        <Text style={{ ...bodyTextStyle, color: C.muted, paddingHorizontal: 8 }}>
-          This directory is empty.
-        </Text>
-      </If>
-      <If when={model.error()}>
-        <Text selectable style={{ ...bodyTextStyle, color: C.danger, paddingHorizontal: 8 }}>
-          {model.error()}
-        </Text>
-      </If>
     </View>
+  );
+}
+
+function DirectoryStatus(props: { model: WorkspaceFilesModel }) {
+  const model = props.model;
+  const message = () => {
+    if (model.error()) return model.error();
+    if (!model.sessionId()) return 'Select a conversation to browse its workspace.';
+    if (model.loading() || (model.busy() && !model.entries().length)) return 'Loading files…';
+    if (model.busy()) return 'Updating files…';
+    return model.entries().length ? '' : 'This directory is empty.';
+  };
+  return (
+    <If when={message()}>
+      <View style={{ padding: 8, gap: 8, alignItems: 'flex-start' }}>
+        <Text
+          selectable={!!model.error()}
+          style={{ ...bodyTextStyle, color: model.error() ? C.danger : C.muted }}
+        >
+          {message()}
+        </Text>
+        <If when={model.error()}>
+          <Button
+            accessibilityLabel="Retry workspace files"
+            disabled={!model.active() || model.busy()}
+            onPress={inputAction(model.refresh, null)}
+            style={{
+              ...controlStyle,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              backgroundColor: C.surface,
+            }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
+          >
+            <Icon name="refresh" color={C.secondary} />
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry</Text>
+          </Button>
+        </If>
+      </View>
+    </If>
   );
 }

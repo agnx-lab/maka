@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Image } from 'nsh/image';
 import { List } from 'nsh/list';
@@ -227,6 +227,11 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
 export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: OpenImageViewer }) {
   const model = props.model;
   const view = () => captured(model.state());
+  const readable = () => {
+    const value = view();
+    return value?.kind === 'image' || (value?.kind === 'text' && value.bytes > 0);
+  };
+  const emptyHeight = signal(0);
   const version = () => {
     const value = view();
     return value && 'version' in value ? value.version : '';
@@ -235,6 +240,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
     const value = model.state();
     return value.kind === 'error' ? value.message : '';
   };
+  const failed = () => model.state().kind === 'error';
   const notice = () => {
     const value = view();
     switch (value?.kind) {
@@ -251,6 +257,12 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
       default:
         return '';
     }
+  };
+  const emptyMessage = () => {
+    if (failed()) return error();
+    if (model.state().kind === 'loading') return 'Reading current file…';
+    if (model.state().kind === 'idle') return 'File preview is inactive.';
+    return notice();
   };
   return (
     <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
@@ -275,39 +287,76 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
           <Icon name="refresh" color={C.secondary} />
         </Button>
       </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        <Text style={{ ...captionTextStyle, color: C.muted }}>
-          Current file · Captured contents
-        </Text>
-        <If when={version()}>
-          <Text
-            selectable
-            numberOfLines={1}
-            style={{ ...captionTextStyle, maxWidth: '100%', color: C.muted }}
-          >
-            Captured version {version()}
+      <If when={view()}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            Current file · Captured contents
           </Text>
-        </If>
-      </View>
-      <If when={model.stale()}>
-        <Text style={{ ...bodyTextStyle, color: C.warning }}>
-          The workspace may have changed. Refresh for current contents.
-        </Text>
+          <If when={version()}>
+            <Text
+              selectable
+              numberOfLines={1}
+              style={{ ...captionTextStyle, maxWidth: '100%', color: C.muted }}
+            >
+              Captured version {version()}
+            </Text>
+          </If>
+        </View>
       </If>
-      <If when={model.state().kind === 'idle' || model.state().kind === 'loading'}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>
-          {model.state().kind === 'loading' ? 'Reading current file…' : 'File preview is inactive.'}
-        </Text>
+      <If when={!readable()}>
+        <Scroll
+          accessibilityLabel="File preview status"
+          onLayout={(frame) => emptyHeight.set(frame.size.height)}
+          style={{ flex: 1, minHeight: 0 }}
+        >
+          <View
+            style={{
+              minHeight: emptyHeight(),
+              padding: 16,
+              gap: 16,
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <View
+              pointerEvents="none"
+              accessibilityElementsHidden
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                backgroundColor: C.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Icon name="file" color={C.muted} />
+            </View>
+            <Text
+              selectable={failed()}
+              style={{
+                ...bodyTextStyle,
+                width: '100%',
+                color: failed() ? C.danger : C.secondary,
+                textAlign: 'center',
+              }}
+            >
+              {emptyMessage()}
+            </Text>
+            <If when={model.stale()}>
+              <Text
+                style={{ ...bodyTextStyle, width: '100%', color: C.warning, textAlign: 'center' }}
+              >
+                The workspace may have changed. Refresh for current contents.
+              </Text>
+            </If>
+            <If when={failed() || view()?.kind === 'changed'}>
+              <RetryCurrentFile model={model} />
+            </If>
+          </View>
+        </Scroll>
       </If>
-      <If when={error()}>
-        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
-          {error()}
-        </Text>
-      </If>
-      <If when={notice()}>
-        <Text style={{ ...bodyTextStyle, color: C.muted }}>{notice()}</Text>
-      </If>
-      <Each of={view() ? [view()!] : []} key={(value) => value}>
+      <Each of={readable() ? [view()!] : []} key={(value) => value}>
         {(value) => {
           const snapshot = value();
           if (snapshot.kind === 'text') return <FileRows model={model} view={snapshot} />;
@@ -319,6 +368,53 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
         }}
       </Each>
     </View>
+  );
+}
+
+function RetryCurrentFile(props: { model: CurrentFileModel }) {
+  return (
+    <Button
+      accessibilityLabel="Retry current file"
+      disabled={props.model.state().kind === 'loading'}
+      onPress={inputAction(props.model.refresh, null)}
+      style={{
+        ...controlStyle,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: C.surface,
+      }}
+      hoverStyle={controlHoverStyle}
+      focusStyle={controlFocusStyle}
+      disabledStyle={controlDisabledStyle}
+    >
+      <Icon name="refresh" color={C.secondary} />
+      <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry</Text>
+    </Button>
+  );
+}
+
+function CapturedFileStatus(props: { model: CurrentFileModel }) {
+  const model = props.model;
+  return (
+    <If when={model.stale() || model.state().kind === 'loading' || model.state().kind === 'error'}>
+      <View style={{ padding: 8, gap: 8, alignItems: 'flex-start' }}>
+        <If when={model.stale()}>
+          <Text style={{ ...bodyTextStyle, color: C.warning }}>
+            The workspace may have changed. Refresh for current contents.
+          </Text>
+        </If>
+        <If when={model.state().kind === 'loading'}>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>Reading current file…</Text>
+        </If>
+        <If when={model.state().kind === 'error'}>
+          <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
+            {(model.state() as Extract<FileState, { kind: 'error' }>).message}
+          </Text>
+          <RetryCurrentFile model={model} />
+        </If>
+      </View>
+    </If>
   );
 }
 
@@ -339,6 +435,7 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
       }}
       accessibilityLabel="Captured file text"
       style={{ flex: 1, minHeight: 0, backgroundColor: C.surface }}
+      header={<CapturedFileStatus model={props.model} />}
     >
       {(row) => (
         <View
@@ -383,57 +480,67 @@ function FileImage(props: {
 }) {
   const error = signal('');
   const dimensions = signal<{ width: number; height: number } | null>(null);
+  const viewportHeight = signal(0);
+  const footerHeight = signal(0);
   let mounted = true;
   cleanup(() => {
     mounted = false;
   });
   return (
-    <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
-      <Image
-        src={props.view.uri}
-        resizeMode="contain"
-        onLoad={(value) => {
-          if (mounted) dimensions.set(value);
-        }}
-        onError={(reason) => {
-          if (mounted) error.set(reason.message);
-        }}
-        accessibilityLabel="Captured workspace image"
-        style={{ flex: 1, minHeight: 0, width: '100%' }}
-      />
-      <If when={dimensions()}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
-            {dimensions()!.width} × {dimensions()!.height} · Captured image
-          </Text>
-          <ImageViewerButton
-            open={props.openImageViewer}
-            image={{ uri: props.view.uri, ...dimensions()!, title: props.model.target.title }}
-          />
-        </View>
-      </If>
-      <If when={error()}>
-        <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
-          {error()}
-        </Text>
-        <Button
-          disabled={props.model.state().kind === 'loading'}
-          onPress={inputAction(props.model.refresh, null)}
-          style={{
-            ...controlStyle,
-            alignSelf: 'flex-start',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
+    <Scroll
+      onLayout={(frame) => viewportHeight.set(frame.size.height)}
+      style={{ flex: 1, minHeight: 0 }}
+    >
+      <CapturedFileStatus model={props.model} />
+      <View style={{ height: Math.max(0, viewportHeight() - footerHeight() - 8), marginBottom: 8 }}>
+        <Image
+          src={props.view.uri}
+          resizeMode="contain"
+          onLoad={(value) => {
+            if (mounted) dimensions.set(value);
           }}
-          hoverStyle={controlHoverStyle}
-          focusStyle={controlFocusStyle}
-          disabledStyle={controlDisabledStyle}
-        >
-          <Icon name="refresh" color={C.secondary} />
-          <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry image</Text>
-        </Button>
-      </If>
-    </View>
+          onError={(reason) => {
+            if (mounted) error.set(reason.message);
+          }}
+          accessibilityLabel="Captured workspace image"
+          style={{ flex: 1, minHeight: 0, width: '100%' }}
+        />
+      </View>
+      <View onLayout={(frame) => footerHeight.set(frame.size.height)} style={{ gap: 8 }}>
+        <If when={dimensions()}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ ...captionTextStyle, flex: 1, color: C.muted }}>
+              {dimensions()!.width} × {dimensions()!.height} · Captured image
+            </Text>
+            <ImageViewerButton
+              open={props.openImageViewer}
+              image={{ uri: props.view.uri, ...dimensions()!, title: props.model.target.title }}
+            />
+          </View>
+        </If>
+        <If when={error()}>
+          <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
+            {error()}
+          </Text>
+          <Button
+            disabled={props.model.state().kind === 'loading'}
+            onPress={inputAction(props.model.refresh, null)}
+            style={{
+              ...controlStyle,
+              alignSelf: 'flex-start',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+            }}
+            hoverStyle={controlHoverStyle}
+            focusStyle={controlFocusStyle}
+            disabledStyle={controlDisabledStyle}
+          >
+            <Icon name="refresh" color={C.secondary} />
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>Retry image</Text>
+          </Button>
+        </If>
+      </View>
+    </Scroll>
   );
 }
