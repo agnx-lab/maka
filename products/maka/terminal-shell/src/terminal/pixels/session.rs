@@ -32,7 +32,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use termina::Event;
+use termina::{Event, event::KeyEventKind};
 
 pub(super) fn spawn(
     config: EngineConfig,
@@ -332,12 +332,7 @@ fn run(
                                     let disposition = source.borrow().dispatch(&snapshot, &event);
                                     let admitted = match disposition {
                                         InputDisposition::Handled => true,
-                                        InputDisposition::Rejected => commit_text(
-                                            &platform,
-                                            &source.borrow(),
-                                            &snapshot,
-                                            &event,
-                                        )?,
+                                        InputDisposition::Rejected => false,
                                         InputDisposition::ExactFallback => {
                                             (exact_ready
                                                 && input.geometry == current_geometry
@@ -356,6 +351,20 @@ fn run(
                                     refresh |= admitted;
                                     if admitted {
                                         release_pending = false;
+                                    }
+                                    if admitted
+                                        && matches!(&input.event, Event::Key(key) if key.kind == KeyEventKind::Press)
+                                        && let PlatformInput::KeyDown(key) = &event
+                                    {
+                                        // This terminal does not negotiate physical key releases.
+                                        // Press is one complete stroke; preserve explicit Repeat
+                                        // and clean up only the original native source/load.
+                                        source.borrow().dispatch(
+                                            &snapshot,
+                                            &PlatformInput::KeyUp(gpui::KeyUpEvent {
+                                                keystroke: key.keystroke.clone(),
+                                            }),
+                                        );
                                     }
                                     if admitted
                                         && matches!(
