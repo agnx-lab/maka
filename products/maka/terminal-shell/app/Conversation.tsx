@@ -22,6 +22,7 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { AnimatedValue } from 'nsh/animated';
+import { platform } from 'nsh/device';
 import {
   host,
   loadDraft,
@@ -32,7 +33,8 @@ import {
   abandonSend,
   type ScopedHost,
 } from './host';
-import { C, Header, controlStyle } from './ui';
+import { C, Header, captionTextStyle, controlStyle } from './ui';
+import { Icon } from './Icon';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
 import type { Row, Position, Subscription } from './history';
 import type { ComposerSession, SendAction } from './Composer';
@@ -1494,8 +1496,13 @@ export function Conversation(props: ConversationProps) {
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
       <If when={attachmentMetadataFailed()}>
-        <Button onPress={inputAction(retryAttachmentMetadata, sessionId)}>
-          <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
+        <Button
+          onPress={inputAction(retryAttachmentMetadata, sessionId)}
+          style={{ ...controlStyle, alignSelf: 'flex-start' }}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
+        >
+          <Text style={{ ...captionTextStyle, color: C.accent }}>Retry attachment metadata</Text>
         </Button>
       </If>
       <Header
@@ -1513,12 +1520,14 @@ export function Conversation(props: ConversationProps) {
           accessibilityLabel={ready() ? 'Reconnect updates' : 'Retry loading conversation'}
           onPress={inputAction(retryTranscript, sessionId)}
           style={{
+            ...controlStyle,
             alignSelf: 'flex-start',
-            paddingHorizontal: 16,
             backgroundColor: C.raised,
           }}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.line }}
         >
-          <Text style={{ color: C.accent }}>
+          <Text style={{ ...captionTextStyle, color: C.accent }}>
             {ready() ? 'Reconnect updates' : 'Retry loading conversation'}
           </Text>
         </Button>
@@ -1760,14 +1769,27 @@ export function Conversation(props: ConversationProps) {
         </View>
         <If when={interactions().entries.length > 0}>
           <Button
+            accessibilityLabel={`! Your input is needed · Open request (${interactions().entries.length})`}
             onPress={inputAction(props.interaction, {
               sessionId,
               requestId: interactions().entries[0].requestId,
             })}
-            style={{ padding: 8, backgroundColor: C.surface }}
+            style={{
+              ...controlStyle,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              backgroundColor: C.surface,
+            }}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.line }}
           >
-            <Text style={{ color: C.warning }}>
-              ! Your input is needed · Open request ({interactions().entries.length})
+            <If when={!platform.isTerminal}>
+              <Icon name="shield" color={C.warning} />
+            </If>
+            <Text style={{ ...captionTextStyle, color: C.warning }}>
+              {platform.isTerminal ? '! ' : ''}Your input is needed · Open request (
+              {interactions().entries.length})
             </Text>
           </Button>
         </If>

@@ -82,10 +82,8 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
+          <Text style={{ ...captionTextStyle, color: C.text, flex: 1 }}>Connection enabled</Text>
           <ChoiceIndicator kind="switch" checked={form().enabled} disabled={disabled()} />
-          <Text style={{ ...captionTextStyle, color: C.text }}>
-            {form().enabled ? 'Enabled' : 'Disabled'}
-          </Text>
         </Button>
         <If
           when={form().provider.descriptor.authentication.some(

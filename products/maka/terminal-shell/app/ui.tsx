@@ -79,24 +79,32 @@ export function Header(props: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        height: compact() ? 32 : 48,
+        height: !platform.isTerminal && !props.title && !props.status ? 32 : compact() ? 32 : 48,
         gap: 8,
-        borderBottomWidth: 1,
+        borderBottomWidth: !platform.isTerminal && !props.title && !props.status ? 0 : 1,
         borderBottomColor: C.line,
       }}
     >
       <Button
         onPress={props.commands}
         accessibilityLabel="Open commands"
-        style={controlStyle}
+        tooltip="Search commands · Ctrl+P"
+        style={{
+          ...controlStyle,
+          ...(platform.isTerminal
+            ? {}
+            : { width: 32, paddingHorizontal: 8, alignItems: 'center' as const }),
+        }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
         activeStyle={{ backgroundColor: C.line }}
       >
-        <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ color: C.secondary, fontSize: 13 }}>Commands</Text>
-          <Text style={{ color: C.muted, fontSize: 11 }}>Ctrl+P</Text>
-        </View>
+        <If when={platform.isTerminal} else={<Icon name="search" color={C.secondary} />}>
+          <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: C.secondary, fontSize: 13 }}>Commands</Text>
+            <Text style={{ color: C.muted, fontSize: 11 }}>Ctrl+P</Text>
+          </View>
+        </If>
       </Button>
       <If when={props.browse}>
         <Button
@@ -121,7 +129,7 @@ export function Header(props: {
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ color: C.secondary }}>Files</Text>
+          <Text style={{ ...captionTextStyle, color: C.secondary }}>Files</Text>
         </Button>
       </If>
       <If when={width() >= 880 && props.workspace}>
@@ -129,10 +137,24 @@ export function Header(props: {
           {props.workspace?.split('/').filter(Boolean).at(-1)}
         </Text>
       </If>
-      <Text style={{ color: props.active ? C.accent : C.muted, fontSize: 12 }}>
-        {props.active ? '● ' : ''}
-        {props.status || ''}
-      </Text>
+      <If
+        when={platform.isTerminal}
+        else={
+          <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <If when={props.active}>
+              <Icon name="unread" color={C.accent} />
+            </If>
+            <Text style={{ ...captionTextStyle, color: props.active ? C.accent : C.muted }}>
+              {props.status || ''}
+            </Text>
+          </View>
+        }
+      >
+        <Text style={{ color: props.active ? C.accent : C.muted, fontSize: 12 }}>
+          {props.active ? '● ' : ''}
+          {props.status || ''}
+        </Text>
+      </If>
     </View>
   );
 }
