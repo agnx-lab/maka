@@ -65,7 +65,14 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
           const exit = settled ? createToolSource(props.reference, props.sessionId, props.through, ['value', 'exitCode']) : null;
           const code = () => exit?.json();
           const failed = () => ['failed', 'timed_out', 'orphaned'].includes(phase) || (typeof code() === 'number' && code() !== 0);
-          const label = () => phase === 'cancelled' ? 'Stopped' : phase === 'completed' ? code() === 0 ? 'OK' : 'Completed' : phase === 'starting' ? 'Preparing' : phase === 'running' ? 'Running' : phase === 'orphaned' ? 'Unknown' : phase === 'failed' || phase === 'timed_out' ? 'Error' : 'Recorded';
+          const label = () => {
+            if (phase === 'cancelled') return 'Stopped';
+            if (phase === 'orphaned') return 'Unknown';
+            if (failed()) return 'Error';
+            if (phase === 'completed') return code() === 0 ? 'OK' : 'Completed';
+            if (phase === 'starting') return 'Preparing';
+            return phase === 'running' ? 'Running' : 'Recorded';
+          };
           return <Text style={{ color: phase === 'cancelled' ? C.warning : failed() ? C.danger : C.muted }}>{label()}{typeof code() === 'number' ? ` · Exit ${code()}` : ''}</Text>;
         }}
       </Each>
