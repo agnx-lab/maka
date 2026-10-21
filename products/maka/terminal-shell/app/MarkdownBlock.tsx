@@ -241,7 +241,6 @@ function CodeBlock(props: { block: () => MarkdownBlock }) {
         <Button
           accessibilityLabel="Copy code"
           tooltip={copied() ? 'Code copied' : 'Copy code'}
-          disabled={state().kind === 'copying'}
           onPress={action()}
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.line }}

@@ -155,7 +155,7 @@ export function MessageCopy(props: {
               ? 'Copy user message'
               : 'Copy message'
         }
-        disabled={busy() || target() === null}
+        disabled={target() === null}
         onPress={inputAction(copy, target())}
         style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
         hoverStyle={{ backgroundColor: C.surface }}
