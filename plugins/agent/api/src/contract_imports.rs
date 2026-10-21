@@ -34,7 +34,7 @@ pub enum ImportLocation {
     },
     OpenCode {
         directory: DirectorySelection,
-        #[schemars(length(min = 1, max = 255))]
+        #[schemars(length(min = 1))]
         database: String,
     },
 }
@@ -52,10 +52,10 @@ impl ImportLocation {
 #[schemars(rename = "AgentImportSource")]
 pub struct ImportSource {
     pub id: Uuid,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub name: String,
     pub location: ImportLocation,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -70,9 +70,9 @@ pub struct ImportSourceRef {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentImportEntryRef")]
 pub struct ImportEntryRef {
-    #[schemars(length(min = 1, max = 1024))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -88,7 +88,6 @@ pub struct ImportSelection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentImportQuery")]
 pub struct ImportQuery {
-    #[schemars(length(max = 1024))]
     pub text: String,
     pub include_archived: bool,
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<String>")]
@@ -218,7 +217,7 @@ pub enum ImportChange {
         revision: u64,
         #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<Uuid>")]
         id: Option<Uuid>,
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         name: String,
         location: ImportLocation,
     },
@@ -230,7 +229,7 @@ pub enum ImportChange {
     Copy {
         selection: ImportSelection,
         directory: DirectorySelection,
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         title: String,
     },
 }

@@ -66,11 +66,9 @@ pub struct Cursor {
 }
 impl Search {
     pub fn validate(&self) -> Result<(), crate::Error> {
-        if self.query.len() > 512
-            || self.query.chars().any(char::is_control)
+        if self.query.chars().any(char::is_control)
             || self.cursor.as_ref().is_some_and(|cursor| {
-                cursor.query.len() > 512
-                    || cursor.query.chars().any(char::is_control)
+                cursor.query.chars().any(char::is_control)
                     || cursor.revision > (1 << 53) - 1
                     || cursor.offset > (1 << 53) - 1
             })
@@ -145,17 +143,6 @@ pub enum Outcome {
         #[serde(default)]
         recoverable: bool,
     },
-}
-impl Outcome {
-    pub fn validate(&self) -> Result<(), Error> {
-        let size = serde_json::to_vec(self)
-            .map_err(|error| Error::Invalid(error.to_string()))?
-            .len();
-        if size > 1024 * 1024 {
-            return Err(Error::Invalid("executor result exceeds 1 MiB".into()));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -80,7 +80,7 @@ impl Connect {
         // Silent or incompatible input cannot start a Host or reserve its executor.
         let mut input = wire::Reader::new(input);
         let mut opening: Opening =
-            tokio::time::timeout(Duration::from_secs(5), input.read_bounded(4096)).await??;
+            tokio::time::timeout(Duration::from_secs(5), input.read()).await??;
         if opening.version != VERSION {
             return Err("unsupported public application Host protocol".into());
         }

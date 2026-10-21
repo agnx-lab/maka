@@ -20,7 +20,7 @@
 use crate::failed;
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkMatch};
 use maka_agent_facts::tools::ToolError;
-use std::{io, path::Path, time::Instant};
+use std::{io, path::Path};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Regex(grep_regex::RegexMatcher);
@@ -38,18 +38,12 @@ impl Regex {
         bytes: &[u8],
         label: Option<&Path>,
         cancellation: &CancellationToken,
-        deadline: Instant,
         output: &mut Vec<String>,
-        output_bytes: &mut usize,
-    ) -> Result<bool, ToolError> {
+    ) -> Result<(), ToolError> {
         let mut sink = Lines {
             cancellation,
-            deadline,
             label,
             output,
-            output_bytes,
-            count: 0,
-            complete: true,
         };
         SearcherBuilder::new()
             .line_number(true)
@@ -57,31 +51,19 @@ impl Regex {
             .build()
             .search_slice(&self.0, bytes, &mut sink)
             .map_err(|e| failed(e.to_string()))?;
-        Ok(sink.complete)
+        Ok(())
     }
 }
 struct Lines<'a> {
     cancellation: &'a CancellationToken,
-    deadline: Instant,
     label: Option<&'a Path>,
     output: &'a mut Vec<String>,
-    output_bytes: &'a mut usize,
-    count: usize,
-    complete: bool,
 }
 impl Sink for Lines<'_> {
     type Error = io::Error;
     fn matched(&mut self, _: &Searcher, matched: &SinkMatch<'_>) -> Result<bool, Self::Error> {
         if self.cancellation.is_cancelled() {
             return Err(io::Error::other("Grep cancelled"));
-        }
-        if Instant::now() >= self.deadline {
-            return Err(io::Error::other("Grep timed out"));
-        }
-        // One lookahead match distinguishes an exact cap from omitted results.
-        if self.count == 50 || self.output.len() == 200 {
-            self.complete = false;
-            return Ok(false);
         }
         let line = matched
             .bytes()
@@ -100,12 +82,7 @@ impl Sink for Lines<'_> {
             ),
             None => format!("{number}:{line}"),
         };
-        *self.output_bytes += serde_json::to_string(&rendered)?.len() + 1;
-        if *self.output_bytes > 1024 * 1024 - 32 {
-            return Err(io::Error::other("Grep result exceeds byte limit"));
-        }
         self.output.push(rendered);
-        self.count += 1;
         Ok(true)
     }
 }

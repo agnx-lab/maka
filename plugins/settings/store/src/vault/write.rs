@@ -17,8 +17,8 @@
  * under the License.
  */
 
-use super::{status, status_basis};
-use crate::{ConfigError, Result, catalog};
+use super::status;
+use crate::{Result, catalog};
 use maka_agent_facts::configuration::CredentialLocator;
 use maka_agent_facts::configuration::CredentialState;
 use sqlx::SqliteConnection;
@@ -46,7 +46,6 @@ pub(crate) async fn write_secret(
     now: u64,
 ) -> Result<()> {
     let previous = status(tx, locator).await?;
-    let actual = status_basis(&previous);
     let (credential_id, previous_revision) = match previous.state {
         CredentialState::Absent => (Uuid::new_v4().to_string(), 0),
         CredentialState::Configured {
@@ -55,28 +54,11 @@ pub(crate) async fn write_secret(
             ..
         } => (credential_id, revision),
     };
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM credentials")
-        .fetch_one(&mut *tx)
-        .await?;
-    if actual.is_none() && count >= 2048 {
-        return Err(ConfigError::Invalid(
-            "credential vault exceeds 2048 entries".into(),
-        ));
-    }
     let revision = catalog::next_revision(previous_revision)?;
     let locator = serde_json::to_string(locator)?;
     sqlx::query("INSERT INTO credentials VALUES(?, ?, ?, ?, ?)
         ON CONFLICT(locator) DO UPDATE SET revision = excluded.revision, secret = excluded.secret, updated_at = excluded.updated_at")
         .bind(locator).bind(credential_id).bind(revision as i64).bind(secret).bind(now as i64)
         .execute(&mut *tx).await?;
-    let bytes: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(length(CAST(secret AS BLOB)) + length(locator) + 128), 0) FROM credentials",
-    ).fetch_one(&mut *tx).await?;
-    let bytes = crate::database::unsigned(bytes)?;
-    if bytes > 2 * 1024 * 1024 {
-        return Err(ConfigError::Invalid(
-            "credential vault exceeds 2 MiB".into(),
-        ));
-    }
     Ok(())
 }

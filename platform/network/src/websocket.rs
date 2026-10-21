@@ -35,6 +35,7 @@ pub type Socket = WebSocketStream<reqwest::Upgraded>;
 /// HTTP upgrade uses the same proxy/auth/TLS routing as ordinary requests.
 /// Cancellation drops the handshake future; no response.create is sent here.
 pub async fn connect_websocket(
+    policy: &crate::Policy,
     client: reqwest::ClientBuilder,
     url: &str,
     mut headers: HeaderMap,
@@ -43,19 +44,28 @@ pub async fn connect_websocket(
     let key = generate_key();
     headers.remove(header::CONTENT_LENGTH);
     headers.remove(header::HOST);
-    headers.insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
-    headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
-    headers.insert(
-        header::SEC_WEBSOCKET_VERSION,
-        HeaderValue::from_static("13"),
-    );
-    headers.insert(
-        header::SEC_WEBSOCKET_KEY,
-        HeaderValue::from_str(&key).unwrap(),
-    );
-    // Compression/subprotocols are not negotiated by this transport.
     headers.remove(header::SEC_WEBSOCKET_EXTENSIONS);
     headers.remove(header::SEC_WEBSOCKET_PROTOCOL);
+    headers
+        .try_insert(header::CONNECTION, HeaderValue::from_static("Upgrade"))
+        .map_err(|_| Error::InvalidHeaders)?;
+    headers
+        .try_insert(header::UPGRADE, HeaderValue::from_static("websocket"))
+        .map_err(|_| Error::InvalidHeaders)?;
+    headers
+        .try_insert(
+            header::SEC_WEBSOCKET_VERSION,
+            HeaderValue::from_static("13"),
+        )
+        .map_err(|_| Error::InvalidHeaders)?;
+    headers
+        .try_insert(
+            header::SEC_WEBSOCKET_KEY,
+            HeaderValue::from_str(&key).map_err(|_| Error::InvalidHeaders)?,
+        )
+        .map_err(|_| Error::InvalidHeaders)?;
+    let target = reqwest::Url::parse(url).map_err(|_| Error::InvalidHeaders)?;
+    policy.check_request_headers(&target, &headers, false, false)?;
     let response = client
         .redirect(reqwest::redirect::Policy::none())
         .http1_only()

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded decorative morphing strokes. Geometry is supplied by the product.
+//! Decorative morphing strokes sampled on a bounded native grid.
 use crate::scene::terminal::Color;
 use maka_plugin_core::contract::{Contract, Interface, Transport};
 use schemars::JsonSchema;
@@ -27,11 +27,10 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MorphShape {
-    #[schemars(length(min = 1, max = 32))]
+    #[schemars(length(min = 1))]
     pub paths: Vec<Vec<[f32; 2]>>,
     #[schemars(range(min = 0.01, max = 0.2))]
     pub radius: f32,
-    #[schemars(length(max = 32))]
     pub miters: Vec<usize>,
     #[schemars(range(min = 32, max = 256))]
     pub columns: usize,
@@ -50,16 +49,13 @@ impl MorphMarkConfiguration {
             || !(1000..=60000).contains(&self.period)
             || self.shapes.iter().any(|s| {
                 s.paths.is_empty()
-                    || s.paths.len() > 32
                     || !(0.01..=0.2).contains(&s.radius)
                     || !(32..=256).contains(&s.columns)
                     || s.paths.iter().any(|p| {
                         p.len() < 2
-                            || p.len() > 128
                             || p.iter().flatten().any(|n| !n.is_finite() || n.abs() > 2.0)
                             || p.windows(2).any(|pair| pair[0] == pair[1])
                     })
-                    || s.miters.len() > 32
                     || s.miters
                         .iter()
                         .any(|i| s.paths.get(*i).is_none_or(|p| p.len() != 3))

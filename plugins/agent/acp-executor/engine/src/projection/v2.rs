@@ -187,9 +187,6 @@ impl Projection {
     fn user(&mut self, id: String) -> Result<(), Error> {
         identity(&id)?;
         if !self.users.contains(&id) {
-            if self.users.len() >= 1024 {
-                return Err(Error::Invalid("ACP turn exceeds 1024 user messages"));
-            }
             self.users.push(id);
         }
         Ok(())
@@ -245,7 +242,7 @@ impl Projection {
 }
 
 pub(crate) fn identity(id: &str) -> Result<(), Error> {
-    if id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control) {
+    if id.is_empty() || id.chars().any(char::is_control) {
         return Err(Error::Invalid("invalid ACP identity"));
     }
     Ok(())

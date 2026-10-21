@@ -371,3 +371,11 @@ https://github.com/helix-editor/termina at revision
 Original MIT and MPL license texts, the Crossterm and TermWiz MIT notices,
 finite source hashes and the bounded CSI input modifications are preserved in
 third-party/termina/{LICENSE-MIT,LICENSE-MPL,README.md,upstream.json,SOURCE.md}.
+
+gix-index long-path source (adapted, Apache License 2.0 OR MIT)
+
+third-party/gix-index contains gix-index 0.55.0 from
+https://github.com/GitoxideLabs/gitoxide at revision
+d2af4ed5532ea660fbd643e48d8925cd88de5ee0. Original license texts,
+finite source hashes and the version 2/3 pathname-padding correction are in
+third-party/gix-index/{LICENSE-APACHE,LICENSE-MIT,upstream.json,SOURCE.md}.

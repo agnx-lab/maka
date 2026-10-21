@@ -78,7 +78,7 @@ impl<'a> FromV8<'a> for Input {
         scope: &mut v8::PinScope<'a, 'i>,
         value: v8::Local<'a, v8::Value>,
     ) -> std::result::Result<Self, Self::Error> {
-        decode(scope, value, None).map(Self)
+        decode(scope, value).map(Self)
     }
 }
 
@@ -101,8 +101,7 @@ async fn op_maka_request(
             .bytes
             .clone()
             .try_acquire_many_owned(
-                u32::try_from(size.max(1))
-                    .map_err(|_| JsErrorBox::generic("request operation input budget exhausted"))?,
+                super::input_charge(size).map_err(|e| JsErrorBox::generic(e.to_string()))?,
             )
             .map_err(|_| JsErrorBox::generic("request operation input budget exhausted"))?
     };

@@ -22,8 +22,6 @@
 pub mod query;
 
 use serde::{Deserialize, Serialize};
-pub const MAX_BYTES: usize = 64 * 1024 * 1024;
-pub const MAX_ROWS: usize = 250_000;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,13 +55,6 @@ pub struct Table {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Cell>>,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Limit {
-    Rows,
-    Bytes,
-    Work,
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -77,36 +68,25 @@ pub enum Error {
     NotFound,
     #[error("invalid database read: {0}")]
     Invalid(String),
-    #[error("database read limit exceeded: {0:?}")]
-    Limit(Limit),
     #[error("database read failed: {0}")]
     Unavailable(String),
 }
 impl Read {
     pub fn validate(&self) -> Result<(), Error> {
         if self.path.is_empty()
-            || self.path.len() > 32 * 1024
             || self.path.contains('\0')
             || !std::path::Path::new(&self.path).is_absolute()
             || self.queries.is_empty()
-            || self.queries.len() > 16
             || self.queries.iter().any(|query| {
                 query.sql.trim().is_empty()
                     || query.sql.contains('\0')
-                    || query.parameters.len() > 128
                     || query
                         .parameters
                         .iter()
                         .any(|value| matches!(value, Cell::Real(number) if !number.is_finite()))
             })
-            || serde_json::to_vec(self)
-                .map_err(|error| Error::Invalid(error.to_string()))?
-                .len()
-                > 128 * 1024
         {
-            return Err(Error::Invalid(
-                "invalid path, queries or input budget".into(),
-            ));
+            return Err(Error::Invalid("invalid path or queries".into()));
         }
         Ok(())
     }

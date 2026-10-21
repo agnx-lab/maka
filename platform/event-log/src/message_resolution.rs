@@ -53,7 +53,7 @@ impl EventLog {
     ) -> Result<Vec<MessageResolution>, StoreError> {
         self.validate_root()?;
         crate::sessions::validate_id(session)?;
-        if messages.len() > 64 || messages.iter().collect::<HashSet<_>>().len() != messages.len() {
+        if messages.iter().collect::<HashSet<_>>().len() != messages.len() {
             return Err(StoreError::InvalidTransition(
                 "invalid message query identities".into(),
             ));

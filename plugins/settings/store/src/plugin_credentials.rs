@@ -48,11 +48,6 @@ impl ConfigurationStore {
         self.transaction(TransactionMode::Immediate, move |tx| Box::pin(async move {
             let actual = read(tx, &namespace, &input.key).await?.map(|record| record.revision);
             if actual != input.expected_revision { return Ok(WriteResult::Conflict { actual }); }
-            if actual.is_none() {
-                let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_credentials WHERE package_id = ? AND scope_id = ?")
-                    .bind(namespace.package()).bind(String::from(namespace.scope().clone())).fetch_one(&mut *tx).await?;
-                if count >= 256 { return Err(invalid("plugin credential slot capacity exceeded")); }
-            }
             let revision = actual.unwrap_or(0) + 1;
             sqlx::query("INSERT INTO plugin_credentials (package_id, scope_id, key, revision, secret) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(package_id, scope_id, key) DO UPDATE SET revision = excluded.revision, secret = excluded.secret")

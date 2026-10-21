@@ -68,7 +68,6 @@ pub(super) fn to_v8<'a, 'i>(
 pub(super) fn decode<'a, 'i>(
     scope: &mut v8::PinScope<'a, 'i>,
     value: v8::Local<'a, v8::Value>,
-    limit: Option<usize>,
 ) -> Result<Value, JsErrorBox> {
     v8::tc_scope!(scope, scope);
     let value = if value.is_undefined() {
@@ -84,14 +83,6 @@ pub(super) fn decode<'a, 'i>(
                 .unwrap_or_else(|| "value is not JSON".into()),
         )
     })?;
-    if let Some(limit) = limit
-        && encoded.utf8_length(scope) > limit
-    {
-        return Err(JsErrorBox::generic(format!(
-            "JSON value exceeds {} MiB",
-            limit / (1024 * 1024)
-        )));
-    }
     let mut value = serde_json::from_str(&encoded.to_rust_string_lossy(scope))
         .map_err(|e| JsErrorBox::generic(e.to_string()))?;
     js_numbers(&mut value);

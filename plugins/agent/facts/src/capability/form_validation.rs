@@ -17,14 +17,8 @@
  * under the License.
  */
 
-use super::{
-    form::*,
-    form_decode::{ensure, invalid},
-    json::encoded_limit,
-};
-use serde_json::json;
+use super::{form::*, form_decode::ensure};
 type Result<T> = std::result::Result<T, &'static str>;
-use std::collections::BTreeMap;
 
 pub(super) fn default_value(spec: &FormFieldSpec) -> Option<FormValue> {
     match spec {
@@ -138,137 +132,99 @@ fn calendar(value: &str, time: bool) -> bool {
         && day <= days[(month - 1) as usize]
         && (!time || (n(3) <= 23 && n(4) <= 59 && n(5) <= 59 && n(6) <= 23 && n(7) <= 59))
 }
-pub(super) fn answer_budget(values: &BTreeMap<String, FormValue>) -> Result<()> {
-    encoded_limit(
-        &json!({"kind":"form","action":"accept","values":values}),
-        8192,
-    )?;
-    encoded_limit(
-        &json!({"kind":"form_answer","action":"accept","values":values,
-        "committedAt":9_007_199_254_740_991_u64}),
-        8192,
-    )
-}
+/// Check that required fields have a possible answer without constructing one.
+/// Declared lengths can be large; validation must not allocate that answer.
 pub(super) fn admit(input: &FormInput) -> Result<()> {
-    let witness = input
-        .fields
-        .iter()
-        .filter(|f| f.required)
-        .map(|f| {
-            // The source builds its witness with ordinary object assignment;
-            // __proto__ never becomes an own answer property there.
-            ensure(f.name != "__proto__")?;
-            let value = witness(&f.spec)?;
-            ensure(valid(&f.spec, &value))?;
-            Ok((f.name.clone(), value))
-        })
-        .collect::<Result<BTreeMap<_, _>>>()?;
-    answer_budget(&witness)?;
-    let envelope = input
-        .fields
-        .iter()
-        .map(|f| (f.name.clone(), envelope(&f.spec)))
-        .collect();
-    answer_budget(&envelope)
-}
-fn witness(spec: &FormFieldSpec) -> Result<FormValue> {
-    if let Some(value) = default_value(spec) {
-        return Ok(value);
+    for field in input.fields.iter().filter(|field| field.required) {
+        // Ordinary JavaScript object assignment cannot produce this own property.
+        ensure(field.name != "__proto__")?;
+        ensure(satisfiable(&field.spec))?;
     }
-    let value = match spec {
-        FormFieldSpec::String {
-            min_length, format, ..
-        } => {
-            let min = min_length.unwrap_or(0);
-            let value = match format {
-                Some(FormFormat::Email) => {
-                    format!("{}@b.co", "a".repeat(min.saturating_sub(5).max(1)))
-                }
-                Some(FormFormat::Uri) => {
-                    format!("https://a.co/{}", "a".repeat(min.saturating_sub(13)))
-                }
-                Some(FormFormat::Date) => "2000-01-01".into(),
-                Some(FormFormat::DateTime) => {
-                    if min <= 20 {
-                        "2000-01-01T00:00:00Z".into()
-                    } else {
-                        format!(
-                            "2000-01-01T00:00:00.{}Z",
-                            "0".repeat(min.saturating_sub(21).max(1))
-                        )
-                    }
-                }
-                None => "a".repeat(min),
-            };
-            FormValue::String(value)
-        }
-        FormFieldSpec::Number {
-            minimum, maximum, ..
-        }
-        | FormFieldSpec::Integer {
-            minimum, maximum, ..
-        } => {
-            let lower = minimum.unwrap_or(f64::NEG_INFINITY);
-            let upper = maximum.unwrap_or(f64::INFINITY);
-            let integer = matches!(spec, FormFieldSpec::Integer { .. });
-            FormValue::Number(if lower > 0.0 {
-                if integer { lower.ceil() } else { lower }
-            } else if upper < 0.0 {
-                if integer { upper.floor() } else { upper }
-            } else {
-                0.0
-            })
-        }
-        FormFieldSpec::Boolean { .. } => FormValue::Boolean(false),
-        FormFieldSpec::SingleSelect { options, .. } => {
-            FormValue::String(options.first().ok_or_else(invalid)?.value.clone())
-        }
-        FormFieldSpec::MultiSelect {
-            options, min_items, ..
-        } => FormValue::Strings(
-            options
-                .iter()
-                .take(min_items.unwrap_or(0))
-                .map(|o| o.value.clone())
-                .collect(),
-        ),
-    };
-    Ok(value)
+    Ok(())
 }
-fn envelope(spec: &FormFieldSpec) -> FormValue {
+fn satisfiable(spec: &FormFieldSpec) -> bool {
+    if let Some(value) = default_value(spec) {
+        return valid(spec, &value);
+    }
     match spec {
         FormFieldSpec::String {
-            max_length, format, ..
+            min_length,
+            max_length,
+            format,
+            ..
         } => {
-            let max = max_length.unwrap_or(2048).min(2048);
-            FormValue::String(match format {
-                Some(FormFormat::Date) => "0000-01-01".into(),
-                Some(FormFormat::DateTime) => "0".repeat(max),
-                _ => "\u{1}".repeat(max),
-            })
+            let min = min_length.unwrap_or(0);
+            let max = max_length.unwrap_or(usize::MAX);
+            match format {
+                Some(FormFormat::Date) => min <= 10 && max >= 10,
+                // A complete timestamp is 20 characters; fractional seconds
+                // add a dot and at least one digit, and can extend it freely.
+                Some(FormFormat::DateTime) => {
+                    max >= min.max(20) && (min <= 20 || max >= min.max(22))
+                }
+                Some(FormFormat::Email) => max >= min.max(5),
+                Some(FormFormat::Uri) => max >= min.max(2),
+                None => min <= max,
+            }
         }
-        FormFieldSpec::Number { .. } | FormFieldSpec::Integer { .. } => {
-            FormValue::Number(-f64::MAX)
+        FormFieldSpec::Integer {
+            minimum, maximum, ..
+        } => {
+            let lower = minimum
+                .unwrap_or(-9_007_199_254_740_991.0)
+                .max(-9_007_199_254_740_991.0)
+                .ceil();
+            let upper = maximum
+                .unwrap_or(9_007_199_254_740_991.0)
+                .min(9_007_199_254_740_991.0)
+                .floor();
+            lower <= upper
         }
-        FormFieldSpec::Boolean { .. } => FormValue::Boolean(false),
-        FormFieldSpec::SingleSelect { options, .. } => FormValue::String(
-            options
-                .iter()
-                .max_by_key(|o| serialized_string_size(&o.value))
-                .unwrap()
-                .value
-                .clone(),
-        ),
+        FormFieldSpec::Number { .. } | FormFieldSpec::Boolean { .. } => true,
+        FormFieldSpec::SingleSelect { options, .. } => !options.is_empty(),
         FormFieldSpec::MultiSelect {
-            options, max_items, ..
-        } => {
-            let mut values: Vec<_> = options.iter().map(|o| o.value.clone()).collect();
-            values.sort_by_key(|v| std::cmp::Reverse(serialized_string_size(v)));
-            values.truncate(max_items.unwrap_or(options.len()));
-            FormValue::Strings(values)
-        }
+            options, min_items, ..
+        } => min_items.unwrap_or(0) <= options.len(),
     }
 }
-fn serialized_string_size(value: &str) -> usize {
-    serde_json::to_string(value).unwrap().len()
+
+#[cfg(test)]
+mod tests {
+    use crate::capability::FormInput;
+    use serde_json::json;
+
+    #[test]
+    fn required_form_constraints_are_checked_without_allocating_declared_answers() {
+        let input = |field| {
+            json!({"message":"Complete request", "requester":{"name":"Tool"},
+            "fields":[field]})
+        };
+        let large: FormInput = serde_json::from_value(input(json!({
+            "kind":"string", "name":"answer", "label":"Answer", "required":true,
+            "minLength":9_007_199_254_740_991_u64
+        })))
+        .unwrap();
+        assert_eq!(large.fields.len(), 1);
+        for field in [
+            json!({"kind":"integer", "name":"n", "label":"N", "required":true,
+                "minimum":0.1,"maximum":0.9}),
+            json!({"kind":"string", "name":"day", "label":"Day", "required":true,
+                "format":"date", "maxLength":9}),
+            json!({"kind":"string", "name":"time", "label":"Time", "required":true,
+                "format":"date-time", "minLength":21,"maxLength":21}),
+            json!({"kind":"boolean", "name":"__proto__", "label":"Prototype", "required":true}),
+        ] {
+            assert!(serde_json::from_value::<FormInput>(input(field)).is_err());
+        }
+        let email: FormInput = serde_json::from_value(input(json!({
+            "kind":"string", "name":"email", "label":"Email", "required":true,
+            "format":"email", "minLength":5, "maxLength":5
+        })))
+        .unwrap();
+        let answer: crate::capability::FormResult = serde_json::from_value(json!({
+            "action":"accept", "values":{"email":"a@b.c"}
+        }))
+        .unwrap();
+        answer.validate_for_fields(&email.fields).unwrap();
+    }
 }

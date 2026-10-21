@@ -203,8 +203,8 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time() {
         },
     ] {
         let events = events(outcome.clone());
-        let mut view = InvocationView::new(1024).unwrap();
-        let mut replay = InvocationView::new(1024).unwrap();
+        let mut view = InvocationView::new();
+        let mut replay = InvocationView::new();
         let mut rows = Vec::new();
         let mut frozen = Vec::new();
         for (index, stored) in events.iter().enumerate() {
@@ -335,7 +335,7 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time() {
                 },
             };
             facts.insert(4, closed);
-            let mut view = InvocationView::new(1024).unwrap();
+            let mut view = InvocationView::new();
             for fact in facts {
                 for row in view.push(&fact).unwrap() {
                     if let Content::Assistant {
@@ -353,9 +353,9 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time() {
 }
 
 #[test]
-fn malformed_or_oversized_evidence_poison_the_view_instead_of_publishing_partial_success() {
+fn complete_text_is_retained_and_malformed_evidence_poisons_the_view() {
     let mut events = events(InvocationOutcome::Completed);
-    let mut view = InvocationView::new(1024).unwrap();
+    let mut view = InvocationView::new();
     for event in &events[..3] {
         view.push(event).unwrap();
     }
@@ -367,17 +367,10 @@ fn malformed_or_oversized_evidence_poison_the_view_instead_of_publishing_partial
         unreachable!()
     };
     *text = "x".repeat(1025);
-    assert!(matches!(
-        view.push(&events[3]),
-        Err(ProjectionError::TooLarge)
-    ));
-    assert!(view.overlay().is_empty(), "discard poisoned projection");
-    assert!(
-        view.push(events.last().unwrap()).is_err(),
-        "cannot seal after discarded evidence"
-    );
+    view.push(&events[3]).unwrap();
+    assert!(view.overlay().iter().any(|message| matches!(&message.content, Content::Assistant {text,..} if text == &"x".repeat(1025))),"complete observed delta must survive");
 
-    let mut view = InvocationView::new(1024).unwrap();
+    let mut view = InvocationView::new();
     view.push(&events[0]).unwrap();
     assert!(
         view.push(&events[0]).is_err(),
@@ -386,7 +379,7 @@ fn malformed_or_oversized_evidence_poison_the_view_instead_of_publishing_partial
     let mut oversized = events.remove(0);
     oversized.sequence = 9_007_199_254_740_992;
     assert!(matches!(
-        InvocationView::new(1024).unwrap().push(&oversized),
+        InvocationView::new().push(&oversized),
         Err(ProjectionError::OutOfRange)
     ));
 }
@@ -394,7 +387,7 @@ fn malformed_or_oversized_evidence_poison_the_view_instead_of_publishing_partial
 #[test]
 fn interrupted_request_without_output_has_a_durable_diagnostic_not_an_assistant_message() {
     let source = events(InvocationOutcome::Completed);
-    let mut view = InvocationView::new(4096).unwrap();
+    let mut view = InvocationView::new();
     view.push(&source[0]).unwrap();
     view.push(&source[1]).unwrap();
     let failed = StoredEvent {
@@ -479,7 +472,7 @@ fn annotated_openings_preserve_source_identity_and_unannotated_batches_stay_aggr
                 request_fingerprint: None,
             },
         };
-        let mut view = InvocationView::new(8192).unwrap();
+        let mut view = InvocationView::new();
         let rows = view.push(&opening).unwrap();
         assert_eq!(rows.len(), if annotated { 3 } else { 2 });
         if annotated {
@@ -549,7 +542,7 @@ fn project_tool_fanout(
     count: usize,
     item_acceptance: bool,
     with_usage: bool,
-    limit: usize,
+    _limit: usize,
 ) -> Vec<maka_presentation::Row> {
     use maka_agent_facts::model::{ModelFinishReason, ModelToolCall, ToolInput};
     use maka_agent_facts::tool_call::ToolCallIdentity;
@@ -565,7 +558,7 @@ fn project_tool_fanout(
     };
     *enabled = item_acceptance;
     let invocation = opening.event.invocation.clone();
-    let mut view = InvocationView::new(limit).unwrap();
+    let mut view = InvocationView::new();
     view.push(&opening).unwrap();
     view.push(&request).unwrap();
     let mut sequence = request.sequence;
@@ -720,10 +713,10 @@ fn item_accepted_fanout_projects_257_calls_with_distinct_original_positions() {
 }
 
 #[test]
-fn retained_text_metadata_is_bounded_after_start_delta_and_finish() {
+fn complete_text_metadata_survives_start_delta_and_finish() {
     for stage in ["identity", "start", "delta", "finish"] {
         let mut source = events(InvocationOutcome::Completed);
-        let mut view = InvocationView::new(4096).unwrap();
+        let mut view = InvocationView::new();
         for event in source.iter().take(2) {
             view.push(event).unwrap();
         }
@@ -764,8 +757,8 @@ fn retained_text_metadata_is_bounded_after_start_delta_and_finish() {
             view.push(event).unwrap();
         }
         assert!(
-            matches!(view.push(&source[index]), Err(ProjectionError::TooLarge)),
-            "{stage} metadata must fit the retained byte budget"
+            view.push(&source[index]).is_ok(),
+            "{stage} complete metadata must remain available"
         );
     }
 
@@ -773,7 +766,7 @@ fn retained_text_metadata_is_bounded_after_start_delta_and_finish() {
     // options still follow the original completion rather than a new equality rule.
     let mut source = events(InvocationOutcome::Completed);
     let invocation = source[0].event.invocation.clone();
-    let mut view = InvocationView::new(4096).unwrap();
+    let mut view = InvocationView::new();
     for event in source.iter().take(3) {
         view.push(event).unwrap();
     }
@@ -918,12 +911,12 @@ fn individually_fitting_calls_do_not_share_a_tool_payload_budget() {
 }
 
 #[test]
-fn one_oversized_tool_part_or_pending_record_still_poisons_the_view() {
+fn complete_tool_parts_and_pending_records_remain_available() {
     use maka_agent_facts::model::{ModelToolCall, ToolInput};
     use maka_agent_facts::tool_call::{ToolCallIdentity, ToolOrigin};
     for host_sdk in [false, true] {
         let mut source = events(InvocationOutcome::Completed);
-        let mut view = InvocationView::new(1024).unwrap();
+        let mut view = InvocationView::new();
         for event in source.iter().take(if host_sdk { 1 } else { 2 }) {
             view.push(event).unwrap();
         }
@@ -957,11 +950,10 @@ fn one_oversized_tool_part_or_pending_record_still_poisons_the_view() {
                 }),
             }
         };
-        assert!(matches!(
-            view.push(&source[2]),
-            Err(ProjectionError::TooLarge)
-        ));
-        assert!(view.overlay().is_empty());
-        assert!(view.push(source.last().unwrap()).is_err());
+        assert!(view.push(&source[2]).is_ok());
+        assert!(
+            view.push(&source[2]).is_err(),
+            "replayed evidence remains invalid"
+        );
     }
 }

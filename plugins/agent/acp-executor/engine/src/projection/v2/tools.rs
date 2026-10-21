@@ -29,9 +29,6 @@ impl Projection {
         identity(&id)?;
         let host_id = format!("{}:{}:{id}", self.invocation_id.len(), self.invocation_id);
         if !self.tools.contains_key(&id) {
-            if self.tools.len() >= 1024 {
-                return Err(Error::Invalid("ACP turn exceeds 1024 tools"));
-            }
             let name = match &update.name {
                 MaybeUndefined::Value(name) => name.as_str(),
                 _ => "ACP tool",
@@ -75,27 +72,11 @@ impl Projection {
         // Preserve all v2 patch fields (including explicit clears and new status
         // variants) in the observed snapshot; never coerce these through v1.
         let text = serde_json::to_string(&tool.snapshot)?;
-        if text.len() > 1024 * 1024 {
-            return Err(Error::Invalid("ACP tool content exceeds 1 MiB"));
-        }
         emit_text(&text, sink, |text| Output::ToolProgress {
             tool_call_id: host_id.clone(),
             text,
         })
         .await?;
-        if self
-            .tools
-            .values()
-            .map(|tool| {
-                serde_json::to_vec(&tool.snapshot)
-                    .map(|value| value.len())
-                    .unwrap_or(usize::MAX)
-            })
-            .sum::<usize>()
-            > 1024 * 1024
-        {
-            return Err(Error::Invalid("ACP tool snapshots exceed 1 MiB"));
-        }
         Ok(())
     }
 }

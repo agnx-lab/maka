@@ -50,16 +50,16 @@ pub fn entity_id(value: &str) -> ValidationResult {
     }
     Ok(())
 }
-pub fn text(value: &str, max: usize, nonempty: bool) -> ValidationResult {
-    if value.encode_utf16().count() > max || (nonempty && value.is_empty()) {
-        return Err("invalid string length".into());
+pub fn text(value: &str) -> ValidationResult {
+    if value.is_empty() {
+        return Err("empty string".into());
     }
     Ok(())
 }
 pub fn slug(value: &str) -> ValidationResult {
     let valid = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
     let b = value.as_bytes();
-    if !(2..=64).contains(&b.len())
+    if b.is_empty()
         || !valid(b[0])
         || !valid(b[b.len() - 1])
         || !b.iter().all(|c| valid(*c) || *c == b'-')
@@ -74,10 +74,9 @@ pub fn basis(value: &ConnectionVersionBasis) -> ValidationResult {
 }
 pub fn target(value: &ConnectionTarget) -> ValidationResult {
     entity_id(&value.connection_id)?;
-    text(&value.model_id, 512, true)
+    text(&value.model_id)
 }
 pub fn normalize_base_url(raw: &str) -> ValidationResult<String> {
-    text(raw, 2048, false)?;
     let raw = raw.trim();
     let parsed = url::Url::parse(raw).map_err(|_| "invalid connection base URL")?;
     if !["http", "https"].contains(&parsed.scheme())
@@ -88,19 +87,12 @@ pub fn normalize_base_url(raw: &str) -> ValidationResult<String> {
     {
         return Err("invalid connection base URL".into());
     }
-    let canonical = parsed.to_string();
-    if canonical.len() > 2048 {
-        return Err("connection base URL exceeds byte limit".into());
-    }
-    Ok(canonical)
+    Ok(parsed.to_string())
 }
 pub fn model_ids(values: &[String]) -> ValidationResult {
-    if values.len() > 512 {
-        return Err("too many enabled models".into());
-    }
     let mut seen = std::collections::BTreeSet::new();
     for value in values {
-        text(value, 512, true)?;
+        text(value)?;
         if !seen.insert(value) {
             return Err("duplicate enabled model".into());
         }
@@ -108,9 +100,6 @@ pub fn model_ids(values: &[String]) -> ValidationResult {
     Ok(())
 }
 pub fn profiles(values: &BTreeMap<String, ModelOverride>) -> ValidationResult {
-    if values.len() > 2048 {
-        return Err("too many model overrides".into());
-    }
     for (id, p) in values {
         model_override(id, p)?;
     }
@@ -118,9 +107,9 @@ pub fn profiles(values: &BTreeMap<String, ModelOverride>) -> ValidationResult {
 }
 
 pub fn model_override(id: &str, p: &ModelOverride) -> ValidationResult {
-    text(id, 512, true)?;
+    text(id)?;
     if let Some(adapter) = &p.adapter {
-        text(adapter, 256, true)?;
+        text(adapter)?;
         if adapter.chars().any(char::is_control) {
             return Err("invalid model adapter name".into());
         }
@@ -145,53 +134,32 @@ pub fn model_override(id: &str, p: &ModelOverride) -> ValidationResult {
     {
         revision(n, true)?;
     }
-    for value in [&p.display_name, &p.description, &p.knowledge_cutoff]
-        .into_iter()
-        .flatten()
-    {
-        text(value, 2048, false)?;
-    }
     Ok(())
 }
 pub fn overlay(value: &Value) -> ValidationResult {
-    if !value.is_object()
-        || serde_json::to_vec(value)
-            .map_err(|_| "invalid overlay")?
-            .len()
-            > 32768
-    {
-        return Err("invalid overlay object or size".into());
+    if !value.is_object() {
+        return Err("overlay must be an object".into());
     }
-    fn visit(value: &Value, depth: usize) -> ValidationResult {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
         match value {
-            Value::Object(o) => {
-                if depth > 16 {
-                    return Err("overlay nesting exceeds limit".into());
-                }
-                for (k, v) in o {
-                    if ["__proto__", "constructor", "prototype"].contains(&k.as_str()) {
+            Value::Object(object) => {
+                for (key, value) in object {
+                    if ["__proto__", "constructor", "prototype"].contains(&key.as_str()) {
                         return Err("unsafe overlay key".into());
                     }
-                    visit(v, depth + 1)?;
+                    pending.push(value);
                 }
             }
-            Value::Array(a) => {
-                if depth > 16 {
-                    return Err("overlay nesting exceeds limit".into());
-                }
-                for v in a {
-                    visit(v, depth + 1)?;
-                }
-            }
+            Value::Array(array) => pending.extend(array),
             _ => {}
         }
-        Ok(())
     }
-    visit(value, 1)
+    Ok(())
 }
 pub fn normalize_draft(value: &mut ConnectionCatalogEntryDraft) -> ValidationResult {
     slug(&value.slug)?;
-    text(&value.name, 256, false)?;
+
     model_ids(&value.enabled_model_ids)?;
     value.provider.validate()?;
     provider_configuration(&value.configuration)?;
@@ -210,9 +178,6 @@ pub fn normalize_draft(value: &mut ConnectionCatalogEntryDraft) -> ValidationRes
     Ok(())
 }
 pub fn normalize_update(value: &mut ConnectionCatalogEntryUpdate) -> ValidationResult {
-    if let Some(name) = &value.name {
-        text(name, 256, false)?;
-    }
     if let Some(ids) = &value.enabled_model_ids {
         model_ids(ids)?;
     }
@@ -237,12 +202,7 @@ pub fn normalize_update(value: &mut ConnectionCatalogEntryUpdate) -> ValidationR
 /// Stored structure is valid even while its provider is unavailable. Schema
 /// validation and one-time defaults belong to the admitted provider binding.
 pub fn provider_configuration(value: &Value) -> ValidationResult {
-    if !value.is_object()
-        || serde_json::to_vec(value)
-            .map_err(|_| "invalid provider configuration")?
-            .len()
-            > 64 * 1024
-    {
+    if !value.is_object() {
         return Err("invalid provider configuration".into());
     }
     Ok(())

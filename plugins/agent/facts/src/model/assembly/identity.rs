@@ -21,22 +21,14 @@ use super::StepBuilder;
 use super::{ModelError, invalid};
 use crate::model::ModelToolCall;
 
-// runtime-store/tool_calls bounds raw and canonical `step:call` identities.
-const TOOL_IDENTITY_MAX_BYTES: usize = 4096;
-// Epoch 141 Session tool_start requires a nonempty name of at most 256 bytes.
-const TOOL_NAME_MAX_BYTES: usize = 256;
-
 impl StepBuilder {
-    /// Bind acceptance to the durable step identity before consuming its stream.
-    /// Raw provider IDs remain unchanged; only their canonical operation size is checked.
+    /// Validate the durable step identity before consuming its stream.
+    /// Provider identities remain unchanged throughout acceptance.
     pub fn for_step(step_id: &str) -> Result<Self, ModelError> {
-        if step_id.is_empty() || step_id.len() > TOOL_IDENTITY_MAX_BYTES {
+        if step_id.is_empty() {
             return Err(invalid("invalid model step identity"));
         }
-        Ok(Self {
-            step_id_bytes: Some(step_id.len()),
-            ..Self::default()
-        })
+        Ok(Self::default())
     }
 
     pub(super) fn validate_call(&self, call: &ModelToolCall) -> Result<(), ModelError> {
@@ -44,15 +36,11 @@ impl StepBuilder {
     }
 
     pub(super) fn validate_tool_identity(&self, id: &str, name: &str) -> Result<(), ModelError> {
-        let max_id_bytes =
-            TOOL_IDENTITY_MAX_BYTES.saturating_sub(self.step_id_bytes.map_or(0, |bytes| bytes + 1));
-        if id.is_empty() || id.len() > max_id_bytes {
-            return Err(invalid(
-                "tool call identity exceeds durable operation bounds",
-            ));
+        if id.is_empty() {
+            return Err(invalid("tool call identity must be nonempty"));
         }
-        if name.is_empty() || name.len() > TOOL_NAME_MAX_BYTES {
-            return Err(invalid("tool name must contain 1 to 256 UTF-8 bytes"));
+        if name.is_empty() {
+            return Err(invalid("tool name must be nonempty"));
         }
         Ok(())
     }
@@ -83,39 +71,23 @@ mod tests {
     }
 
     #[test]
-    fn step_identity_budget_counts_bytes_without_underflow() {
-        for step in [String::new(), "x".repeat(4097)] {
-            assert!(StepBuilder::for_step(&step).is_err());
-        }
-        let mut builder = StepBuilder::for_step(&"x".repeat(4096)).unwrap();
-        assert!(
-            builder
-                .push(call("x".into(), "echo".into(), false))
-                .is_err()
-        );
-        let mut builder = StepBuilder::for_step("é").unwrap();
+    fn complete_step_and_tool_identities_and_names_preserve_original_values() {
+        assert!(StepBuilder::for_step("").is_err());
+        let mut builder = StepBuilder::for_step(&"step".repeat(1025)).unwrap();
         builder
-            .push(call("x".repeat(4093), "echo".into(), false))
+            .push(call("call".repeat(2049), "echo_name".repeat(40), false))
             .unwrap();
         builder.push(finish()).unwrap();
-        assert!(builder.finish().is_ok());
-        let mut builder = StepBuilder::default();
-        assert!(
-            builder
-                .push(call("x".repeat(4097), "echo".into(), false))
-                .is_err()
-        );
+        let step = builder.finish().unwrap();
+        let call = step.tool_calls().next().unwrap();
+        assert_eq!(call.id, "call".repeat(2049));
+        assert_eq!(call.name, "echo_name".repeat(40));
     }
 
     #[test]
     fn malformed_call_poisoning_prevents_completed_steps() {
         for provider in [false, true] {
-            for (id, name) in [
-                (String::new(), "echo".into()),
-                ("id".into(), String::new()),
-                ("x".repeat(4092), "echo".into()),
-                ("id".into(), "é".repeat(129)),
-            ] {
+            for (id, name) in [(String::new(), "echo".into()), ("id".into(), String::new())] {
                 let mut builder = StepBuilder::for_step("step").unwrap();
                 assert!(builder.push(call(id, name, provider)).is_err());
                 assert!(builder.push(finish()).is_err());

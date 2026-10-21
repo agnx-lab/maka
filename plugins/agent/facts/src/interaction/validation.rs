@@ -18,13 +18,12 @@
  */
 
 use super::*;
-use crate::capability::{FormInput, json::encoded_limit};
+use crate::capability::FormInput;
 
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub fn entity_id(value: &str) -> Result<(), &'static str> {
     if value.is_empty()
-        || value.len() > 128
         || !value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
@@ -47,8 +46,7 @@ impl GrantTarget {
         match (&self.capability, &self.scope) {
             (GrantCapability::Browser, GrantScope::BrowserOrigin { origin }) => {
                 let url = url::Url::parse(origin).map_err(|_| "Invalid browser origin")?;
-                if origin.encode_utf16().count() > 16_384
-                    || !matches!(url.scheme(), "http" | "https")
+                if !matches!(url.scheme(), "http" | "https")
                     || url.origin().ascii_serialization() != *origin
                 {
                     return Err("Browser scope must be a canonical HTTP origin");
@@ -82,14 +80,8 @@ impl InteractionRequest {
                 binding,
                 through,
             } => {
-                for (value, limit) in [
-                    (tool_use_id, 256),
-                    (tool_name, 128),
-                    (service, 4096),
-                    (method, 256),
-                    (binding, 256),
-                ] {
-                    if value.is_empty() || value.len() > limit {
+                for value in [tool_use_id, tool_name, service, method, binding] {
+                    if value.is_empty() {
                         return Err("Invalid service approval identity");
                     }
                 }
@@ -102,9 +94,7 @@ impl InteractionRequest {
                 base_revision,
                 request,
             } => {
-                if tool_use_id
-                    .as_ref()
-                    .is_some_and(|id| id.is_empty() || id.len() > 256)
+                if tool_use_id.as_ref().is_some_and(|id| id.is_empty())
                     || *base_revision > MAX_SAFE_INTEGER
                 {
                     return Err("Invalid permission request identity or revision");
@@ -115,7 +105,7 @@ impl InteractionRequest {
                 tool_use_id,
                 questions,
             } => {
-                if tool_use_id.is_empty() || tool_use_id.len() > 256 {
+                if tool_use_id.is_empty() {
                     return Err("Invalid interaction tool use identity");
                 }
                 question::validate_questions(questions)?;
@@ -126,7 +116,7 @@ impl InteractionRequest {
                 requester,
                 fields,
             } => {
-                if tool_use_id.is_empty() || tool_use_id.len() > 256 {
+                if tool_use_id.is_empty() {
                     return Err("Invalid interaction tool use identity");
                 }
                 FormInput {
@@ -142,7 +132,6 @@ impl InteractionRequest {
                 base_revision,
             } => {
                 if tool_use_id.is_empty()
-                    || tool_use_id.len() > 256
                     || base_revision.is_some_and(|revision| revision > MAX_SAFE_INTEGER)
                 {
                     return Err("Invalid interaction tool use identity");
@@ -150,7 +139,7 @@ impl InteractionRequest {
                 target.validate()?;
             }
         }
-        serialized_limit(self, 16 * 1024)
+        Ok(())
     }
 }
 
@@ -174,7 +163,7 @@ impl InteractionOutcome {
         if let Self::QuestionAnswer { answers, .. } = self {
             question::validate_answers(answers)?;
         }
-        serialized_limit(self, 8 * 1024)
+        Ok(())
     }
 
     pub fn validate_for_request(&self, request: &InteractionRequest) -> Result<(), &'static str> {
@@ -247,7 +236,7 @@ impl InteractionAnswer {
         if let Self::Question { answers } = self {
             question::validate_answers(answers)?;
         }
-        serialized_limit(self, 8 * 1024)
+        Ok(())
     }
     pub fn validate_for_request(&self, request: &InteractionRequest) -> Result<(), &'static str> {
         request.validate()?;
@@ -317,8 +306,4 @@ impl SessionGrant {
         }
         Ok(())
     }
-}
-
-fn serialized_limit(value: &impl Serialize, limit: usize) -> Result<(), &'static str> {
-    encoded_limit(value, limit)
 }

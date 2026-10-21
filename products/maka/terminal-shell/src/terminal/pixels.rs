@@ -58,7 +58,7 @@ pub(super) fn select(
             return Err(error.clone());
         }
         if let Some(flushed) = flushed {
-            state.graphics.flushed(flushed);
+            state.graphics.flushed();
             state.pixel_probe.flushed(flushed);
         }
         if let Some(decision) = state.pixel_probe.decision(Instant::now(), size) {

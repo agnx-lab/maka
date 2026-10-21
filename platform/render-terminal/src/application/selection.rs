@@ -383,10 +383,9 @@ impl SelectionScope {
             bytes = bytes
                 .checked_add(part.len())
                 .and_then(|bytes| bytes.checked_add(usize::from(i > a)))
-                .filter(|bytes| *bytes <= crate::terminal::MAX_CLIPBOARD_BYTES)
                 .ok_or_else(|| {
                     maka_ui_runtime::Error::Invalid(
-                        "source selection exceeds clipboard byte budget".into(),
+                        "source selection length is not representable".into(),
                     )
                 })?;
         }

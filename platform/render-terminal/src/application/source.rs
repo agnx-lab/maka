@@ -716,11 +716,6 @@ fn prepare_markdown(
 ) -> maka_ui_runtime::Result<maka_ui_runtime::PreparedScene> {
     let props: maka_ui_runtime::markdown::MarkdownProps = serde_json::from_value(props.clone())
         .map_err(|e| maka_ui_runtime::Error::Invalid(e.to_string()))?;
-    if props.source.len() > 65536 {
-        return Err(maka_ui_runtime::Error::Invalid(
-            "Markdown source byte budget".into(),
-        ));
-    }
     let document = Arc::new(
         crate::markdown::prepared::Document::markdown(
             &props.source,
@@ -729,11 +724,6 @@ fn prepare_markdown(
         )
         .map_err(|e| maka_ui_runtime::Error::Invalid(e.into()))?,
     );
-    if document.text().len() > 65536 {
-        return Err(maka_ui_runtime::Error::Invalid(
-            "Markdown readable text byte budget".into(),
-        ));
-    }
     let source = SourceTextProps {
         animate: props.animate,
         terminal: props.appearance.terminal.clone(),
@@ -777,11 +767,6 @@ fn prepare_diff(
         crate::markdown::prepared::Document::diff(&text, &rows, props.ascii, colors)
             .map_err(|e| maka_ui_runtime::Error::Invalid(e.into()))?,
     );
-    if document.text().len() > 65536 {
-        return Err(maka_ui_runtime::Error::Invalid(
-            "Diff readable text byte budget".into(),
-        ));
-    }
     let source = SourceTextProps {
         animate: false,
         terminal: props.appearance.terminal.clone(),
@@ -876,9 +861,6 @@ fn prepare_source(
 ) -> maka_ui_runtime::Result<maka_ui_runtime::PreparedScene> {
     let props: SourceTextProps = serde_json::from_value(props.clone())
         .map_err(|error| maka_ui_runtime::Error::Invalid(error.to_string()))?;
-    if props.source.len() > 65536 {
-        return Err(maka_ui_runtime::Error::Invalid("source byte budget".into()));
-    }
     maka_ui_runtime::PreparedScene::new(
         Recipe(props, None, true, RefCell::default()),
         BTreeMap::new(),

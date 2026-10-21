@@ -93,9 +93,8 @@ impl Output {
         if self.pending.is_some() {
             return Err("terminal frame still in flight".into());
         }
-        if bytes.len() > MAX_FRAME_BYTES {
-            return Err("terminal frame exceeds byte limit".into());
-        }
+        // Display producers enforce their own frame budget. This original
+        // write may also contain one complete encoded clipboard value.
         let (send, receive) = mpsc::sync_channel(1);
         let presentation =
             presentation.map(|(owner, epoch, snapshot)| (owner, epoch, Box::new(snapshot)));
@@ -213,10 +212,20 @@ mod tests {
             .input_snapshot()
     }
 
+    fn complete_clipboard_payload() -> Vec<u8> {
+        use base64::Engine as _;
+        let text = "界".repeat(2 * 1024 * 1024 + 1);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+        let payload = format!("\x1b]52;c;{encoded}\x07").into_bytes();
+        assert!(payload.len() > MAX_FRAME_BYTES);
+        payload
+    }
+
     struct GatedWriter {
         bytes: Arc<Mutex<Vec<u8>>>,
         gate: mpsc::Receiver<()>,
         entered: mpsc::SyncSender<()>,
+        first_write: bool,
     }
     impl Write for GatedWriter {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -225,9 +234,18 @@ mod tests {
                 self.gate
                     .recv()
                     .map_err(|_| io::Error::other("test gate closed"))?;
-                // Force write_all to resume the original partial frame.
-                self.bytes.lock().unwrap().push(bytes[0]);
-                Ok(1)
+                // Force one partial write, then resume the complete original
+                // buffer without a separate gate operation for every byte.
+                let count = if std::mem::take(&mut self.first_write) {
+                    1
+                } else {
+                    bytes.len()
+                };
+                self.bytes
+                    .lock()
+                    .unwrap()
+                    .extend_from_slice(&bytes[..count]);
+                Ok(count)
             } else {
                 Ok(0)
             }
@@ -311,13 +329,24 @@ mod tests {
             bytes: bytes.clone(),
             gate: receive,
             entered,
+            first_write: true,
         })
         .unwrap();
         let presentation = Presentation::default();
+        let original = complete_clipboard_payload();
         output
-            .submit(b"ABC".to_vec(), Some((presentation.clone(), 7, snapshot())))
+            .submit(
+                original.clone(),
+                Some((presentation.clone(), 7, snapshot())),
+            )
             .unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        gate.send(()).unwrap();
+        observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(
+            bytes.lock().unwrap().as_slice() == &original[..1],
+            "only the original prefix may be written while blocked"
+        );
         assert_eq!(
             presentation
                 .presented
@@ -328,14 +357,19 @@ mod tests {
         assert!(output.submit(b"replacement".to_vec(), None).is_err());
         let closed = output.close(b"!".to_vec()).unwrap();
         assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        for _ in 0..4 {
+        for _ in 0..2 {
             gate.send(()).unwrap();
         }
         closed
             .recv_timeout(Duration::from_secs(1))
             .unwrap()
             .unwrap();
-        assert_eq!(*bytes.lock().unwrap(), b"ABC!");
+        let mut expected = original;
+        expected.push(b'!');
+        assert!(
+            bytes.lock().unwrap().as_slice() == expected.as_slice(),
+            "the complete OSC52 must precede cleanup exactly once"
+        );
         // No driver poll observes either completion: the actual flush
         // publishes the frame before the final cleanup receipt arrives.
         assert_eq!(
@@ -348,20 +382,23 @@ mod tests {
 
     #[test]
     fn flush_failure_never_produces_a_success_receipt() {
-        struct Failed;
+        struct Failed(Arc<Mutex<Vec<u8>>>);
         impl Write for Failed {
             fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
                 Ok(bytes.len())
             }
             fn flush(&mut self) -> io::Result<()> {
                 Err(io::Error::other("flush failed"))
             }
         }
-        let mut output = Output::new(Failed).unwrap();
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut output = Output::new(Failed(bytes.clone())).unwrap();
         let presentation = Presentation::default();
+        let original = complete_clipboard_payload();
         output
             .submit(
-                b"frame".to_vec(),
+                original.clone(),
                 Some((presentation.clone(), 7, snapshot())),
             )
             .unwrap();
@@ -370,6 +407,11 @@ mod tests {
                 Ok(false) => thread::yield_now(),
                 Err(error) => {
                     assert_eq!(error, "flush failed");
+                    assert!(
+                        bytes.lock().unwrap().as_slice() == original.as_slice(),
+                        "flush failure must follow the complete original write"
+                    );
+                    assert!(output.take_flushed().is_none());
                     assert_eq!(
                         presentation
                             .presented

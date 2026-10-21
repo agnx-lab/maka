@@ -30,7 +30,6 @@ pub struct SourceTextProps {
     pub animate: bool,
     #[serde(default)]
     pub terminal: Option<crate::scene::terminal::Palette>,
-    #[schemars(length(max = 65536))]
     pub source: String,
     pub appearance: TextAppearance,
     pub selection: Color,

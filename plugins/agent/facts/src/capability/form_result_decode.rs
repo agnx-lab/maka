@@ -20,18 +20,11 @@
 use super::{
     form::*,
     form_decode::{ensure, invalid, number, record, shaped, strings, text},
-    form_validation as validation,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
 type Result<T> = std::result::Result<T, &'static str>;
 pub fn decode_form_result(value: &Value) -> Result<FormResult> {
-    decode(value, true)
-}
-pub(crate) fn decode_outcome_result(value: &Value) -> Result<FormResult> {
-    decode(value, false)
-}
-fn decode(value: &Value, reserve_outcome: bool) -> Result<FormResult> {
     let r = record(value, "form result")?;
     // Form records may carry an explicit form kind.
     if let Some(kind) = r.get("kind") {
@@ -41,13 +34,12 @@ fn decode(value: &Value, reserve_outcome: bool) -> Result<FormResult> {
         Some("accept") => {
             shaped(r, &["action", "values"], &["kind"])?;
             let values = record(&value["values"], "form values")?;
-            ensure(values.len() <= 32)?;
             let values = values
                 .iter()
                 .map(|(key, v)| {
-                    let key = text(&Value::String(key.clone()), 256, false)?;
+                    let key = text(&Value::String(key.clone()), false)?;
                     let value = match v {
-                        Value::String(_) => FormValue::String(text(v, 2048, true)?),
+                        Value::String(_) => FormValue::String(text(v, true)?),
                         Value::Number(_) => FormValue::Number(number(v)?),
                         Value::Bool(v) => FormValue::Boolean(*v),
                         _ => FormValue::Strings(strings(v)?),
@@ -55,9 +47,6 @@ fn decode(value: &Value, reserve_outcome: bool) -> Result<FormResult> {
                     Ok((key, value))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
-            if reserve_outcome {
-                validation::answer_budget(&values)?;
-            }
             Ok(FormResult::Accept { values })
         }
         Some(action @ ("decline" | "cancel")) => {

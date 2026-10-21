@@ -17,8 +17,8 @@
  * under the License.
  */
 
-use super::{MAX_ATTACHMENT_BYTES, active};
-use std::{io::Read, path::PathBuf, time::Duration};
+use super::active;
+use std::{io::Read, path::PathBuf};
 use tokio_util::sync::CancellationToken;
 
 pub(super) async fn read(
@@ -30,9 +30,7 @@ pub(super) async fn read(
     let result = tokio::select! {
         biased;
         _ = cancel.cancelled() => Err("Prompt cancelled".into()),
-        result = tokio::time::timeout(Duration::from_secs(30), tokio::task::spawn_blocking(move || read_file(path, worker_cancel))) => {
-            result.map_err(|_| "Resource read timed out")??
-        }
+        result = tokio::task::spawn_blocking(move || read_file(path, worker_cancel)) => result?,
     };
     drop(worker_guard);
     result
@@ -43,16 +41,13 @@ fn read_file(path: PathBuf, cancel: CancellationToken) -> Result<Vec<u8>, crate:
     if !path.is_absolute()
         || path
             .to_str()
-            .is_none_or(|s| s.len() > 4096 || s.chars().any(char::is_control))
+            .is_none_or(|s| s.chars().any(char::is_control))
     {
         return Err("Invalid local resource path".into());
     }
     let before = std::fs::symlink_metadata(&path)?;
     if !before.is_file() {
         return Err("Resource must be a regular file, not a symlink".into());
-    }
-    if before.len() > MAX_ATTACHMENT_BYTES {
-        return Err("Resource exceeds byte limit".into());
     }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -68,7 +63,7 @@ fn read_file(path: PathBuf, cancel: CancellationToken) -> Result<Vec<u8>, crate:
     }
     let mut file = options.open(&path)?;
     let opened = file.metadata()?;
-    if !opened.is_file() || opened.len() > MAX_ATTACHMENT_BYTES {
+    if !opened.is_file() {
         return Err("Invalid local resource file".into());
     }
     #[cfg(windows)]
@@ -78,22 +73,24 @@ fn read_file(path: PathBuf, cancel: CancellationToken) -> Result<Vec<u8>, crate:
             return Err("Resource is a reparse point".into());
         }
     }
-    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    let mut bytes = Vec::new();
     let mut buffer = [0; 64 * 1024];
-    loop {
+    let mut remaining = opened.len();
+    while remaining > 0 {
         active(&cancel)?;
-        let count = file.read(&mut buffer)?;
+        let chunk = usize::try_from(remaining.min(buffer.len() as u64))?;
+        let count = file.read(&mut buffer[..chunk])?;
         if count == 0 {
-            break;
+            return Err("Resource changed while reading".into());
         }
-        if bytes.len() + count > MAX_ATTACHMENT_BYTES as usize {
-            return Err("Resource exceeds byte limit".into());
-        }
+        remaining -= u64::try_from(count)?;
+        bytes.try_reserve(count)?;
         bytes.extend_from_slice(&buffer[..count]);
     }
+    active(&cancel)?;
     let after = file.metadata()?;
     if after.len() != opened.len()
-        || bytes.len() as u64 != opened.len()
+        || u64::try_from(bytes.len())? != opened.len()
         || after.modified().ok() != opened.modified().ok()
     {
         return Err("Resource changed while reading".into());

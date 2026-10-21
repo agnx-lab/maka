@@ -36,9 +36,9 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TerminalViewProps {
     /// Changed when the selected canonical resource changes, including read-only views.
-    #[schemars(length(min = 1, max = 1024))]
+    #[schemars(length(min = 1))]
     pub source: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub accessibility_label: String,
     pub output: Option<ShellOutput>,
     pub controller: Option<Uuid>,
@@ -46,7 +46,7 @@ pub struct TerminalViewProps {
     pub appearance: TextAppearance,
     pub background: Color,
     pub caret: Color,
-    #[schemars(range(min = 1, max = 100))]
+    #[schemars(range(min = 1))]
     pub rows: u16,
     #[schemars(range(min = -1, max = 32767))]
     pub tab_index: i16,

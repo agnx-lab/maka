@@ -153,15 +153,6 @@ export function createBrowsing(): Browsing {
       error.set('');
       if (clear) sessions.set([]);
     });
-    if ([...read.titleQuery].length > 128) {
-      batch(() => {
-        sessions.set([]);
-        error.set('Use at most 128 characters in a title search.');
-        loading.set(false);
-      });
-      read.ready();
-      return firstPage;
-    }
     void (async () => {
       const opened: Subscription = await host.subscribe('agent', 'catalog', {
         filter: read.filter,

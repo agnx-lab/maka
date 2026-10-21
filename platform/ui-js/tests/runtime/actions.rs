@@ -780,27 +780,6 @@ fn actual_native_query_preserves_exact_integer_while_javascript_fails_without_re
         close_all(&mut app, &[mount]);
     }
 }
-#[test]
-fn actual_snapshot_byte_budget_rejects_before_business_admission() {
-    let timer = timer();
-    let (mut app, root, _) = application(false, &timer);
-    app.dispatch(&root, 0, "read", Value::Null).unwrap();
-    let bytes = "x".repeat(64 * 1024 * 1024 + 1);
-    app.capture_actions(&root, |_| {
-        Ok(NativeCapture::Resource(Arc::new(Text(bytes.clone()))))
-    })
-    .unwrap();
-    assert!(app.start_task(&root).unwrap().is_none());
-    assert_eq!(app.accepted_action_count(), 0);
-    app.deliver_action_results(&root, |_, _, _| Ok(false))
-        .unwrap();
-    assert_eq!(
-        app.frame(&root).unwrap().state["outcome"]["status"],
-        "not_accepted"
-    );
-    close_all(&mut app, &[root]);
-}
-
 type RemoteFixture = (
     Input,
     Vec<maka_packages::Package>,
@@ -1265,7 +1244,7 @@ fn completed_undelivered_witnesses_count_toward_the_same_capture_budget() {
         results[1]["outcome"]["reason"]
             .as_str()
             .unwrap()
-            .contains("64 MiB")
+            .contains("resource window is busy")
     );
     let next = guarded_request(&mut app, &root, "B", 32 * 1024 * 1024);
     app.finish_task(next.id, timer.block_on(next.future))
@@ -1511,4 +1490,159 @@ fn live_remote_epoch_update_preserves_original_query_source_and_waits_for_accept
     timer
         .block_on(Arc::try_unwrap(store).ok().unwrap().close())
         .unwrap();
+}
+
+#[test]
+fn complete_oversized_action_holds_resource_window_until_original_settlement() {
+    let timer = timer();
+    let (mut app, first, _) = application(false, &timer);
+    let competing = app.mount_launch(json!({})).unwrap();
+    let after_release = app.mount_launch(json!({})).unwrap();
+    app.dispatch(&first, 0, "read", Value::Null).unwrap();
+    let snapshot: Arc<dyn ReadResource> =
+        Arc::new(Text(format!("Start{}", "x".repeat(64 * 1024 * 1024))));
+    let weak = Arc::downgrade(&snapshot);
+    let captured = app
+        .capture_actions(&first, |_| Ok(NativeCapture::Resource(snapshot.clone())))
+        .unwrap();
+    drop(snapshot);
+    let work = app.start_task(&first).unwrap();
+    app.dispatch(&competing, 0, "read", Value::Null).unwrap();
+    let competing_captured = app
+        .capture_actions(&competing, |_| {
+            Ok(NativeCapture::Resource(Arc::new(Text("Start".into()))))
+        })
+        .unwrap();
+    let competing_rejected = app.start_task(&competing).unwrap().is_none();
+    app.deliver_action_results(&competing, |_, _, _| Ok(false))
+        .unwrap();
+    let competing_status = app.frame(&competing).unwrap().state["outcome"]["status"].clone();
+    let retained_before_settlement = weak.upgrade().is_some();
+    let completed = if let Some(work) = work {
+        let done = timer.block_on(work.future);
+        let succeeded = matches!(&done, TaskCompletion::Query(completion) if completion.result.as_ref().is_ok_and(|value| value["text"] == "Start"));
+        app.finish_task(work.id, done).unwrap();
+        succeeded
+    } else {
+        false
+    };
+    app.deliver_action_results(&first, |_, _, _| Ok(false))
+        .unwrap();
+    let released = weak.upgrade().is_none();
+    app.dispatch(&after_release, 0, "read", Value::Null)
+        .unwrap();
+    let recaptured = app
+        .capture_actions(&after_release, |_| {
+            Ok(NativeCapture::Resource(Arc::new(Text("Start".into()))))
+        })
+        .unwrap();
+    let work = app.start_task(&after_release).unwrap();
+    let read_after_release = if let Some(work) = work {
+        let done = timer.block_on(work.future);
+        let succeeded = matches!(&done, TaskCompletion::Query(completion) if completion.result.as_ref().is_ok_and(|value| value["text"] == "Start"));
+        app.finish_task(work.id, done).unwrap();
+        succeeded
+    } else {
+        false
+    };
+    app.deliver_action_results(&after_release, |_, _, _| Ok(false))
+        .unwrap();
+    close_all(&mut app, &[first, competing, after_release]);
+    assert_eq!(
+        captured, 1,
+        "one complete oversized native resource must be admitted"
+    );
+    assert!(
+        retained_before_settlement && completed,
+        "the original query must retain and read its admitted resource"
+    );
+    assert_eq!(competing_captured, 0);
+    assert!(competing_rejected);
+    assert_eq!(competing_status, "not_accepted");
+    assert!(
+        released,
+        "original resource must release after acknowledged settlement"
+    );
+    assert_eq!(recaptured, 1);
+    assert!(read_after_release);
+}
+
+#[test]
+fn one_complete_component_frame_keeps_seventeen_original_action_keys_and_sources() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let timer = timer();
+    let (mut input, mut packages, native, _) = fixture(false);
+    let index = packages
+        .iter()
+        .position(|package| package.manifest().id == "dynamic.app")
+        .unwrap();
+    let original = packages.remove(index);
+    let old = "out.actions.push({key:'read_done',binding:'reader',member:0,method:'read',input:{start:event.event?.start??0,end:event.event?.end??5},resources:{text:{child:'editor',method:'snapshot',input:event.event?.capture??{kind:'current'}}}});return out;";
+    let source = std::str::from_utf8(original.file("index.mjs").unwrap()).unwrap();
+    assert!(source.contains(old));
+    let source = source.replace(old, "for(let index=0;index<17;index++)out.actions.push({key:'read_done_'+index,binding:'reader',member:0,method:'read',input:{start:index,end:index+1},resources:{text:{child:'editor',method:'snapshot',input:{kind:'current'}}}});return out;")
+        .replace("if(event.kind==='action')next.outcome=event.event;", "if(event.kind==='action')next.results=[...(state.results??[]),{key:event.key,outcome:event.event}];");
+    let package = support::package(
+        "dynamic.app",
+        original
+            .manifest()
+            .application
+            .as_ref()
+            .unwrap()
+            .declaration()
+            .clone(),
+        Some(source),
+    );
+    input.instances.get_mut("app").unwrap().package = package.application_ref().into();
+    packages.push(package);
+    let mut app = Application::new(
+        &input,
+        packages,
+        timer.handle().clone(),
+        maka_ui_js::execution(Default::default()),
+        native,
+        Default::default(),
+    )
+    .unwrap();
+    let root = app.mount_launch(json!({})).unwrap();
+    let completed = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
+        app.dispatch(&root, 0, "read", Value::Null)
+            .map_err(|error| error.to_string())?;
+        let text = "ABCDEFGHIJKLMNOPQ";
+        let snapshot: Arc<dyn ReadResource> = Arc::new(Text(text.into()));
+        let weak = Arc::downgrade(&snapshot);
+        let captured = app
+            .capture_actions(&root, |target| {
+                assert_eq!(target.method(), "snapshot");
+                Ok(NativeCapture::Resource(snapshot.clone()))
+            })
+            .map_err(|error| error.to_string())?;
+        drop(snapshot);
+        assert_eq!(captured, 17);
+        let mut completed = 0;
+        while let Some(task) = app.start_task(&root).map_err(|error| error.to_string())? {
+            let completion = timer.block_on(task.future);
+            app.finish_task(task.id, completion)
+                .map_err(|error| error.to_string())?;
+            completed += 1;
+        }
+        assert_eq!(completed, 17);
+        app.deliver_action_results(&root, |_, _, _| Ok(false))
+            .map_err(|error| error.to_string())?;
+        let expected: Vec<_> = text.chars().enumerate().map(|(index, character)| json!({"key":format!("read_done_{index}"),"outcome":{"status":"succeeded","value":{"text":character.to_string(),"metadata":{"revision":3,"bytes":17}}}})).collect();
+        assert_eq!(app.frame(&root).unwrap().state["results"], json!(expected));
+        assert!(
+            weak.upgrade().is_none(),
+            "all original resource custody must release after settlement"
+        );
+        assert_eq!(app.accepted_action_count(), 0);
+        Ok(())
+    }));
+    close_all(&mut app, &[root]);
+    let result = completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(
+        result.is_ok(),
+        "complete original component action frame failed: {}",
+        result.err().unwrap_or_default()
+    );
 }

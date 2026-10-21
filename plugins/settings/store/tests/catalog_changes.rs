@@ -409,3 +409,57 @@ async fn partial_updates_preserve_large_original_rows_and_merge_only_after_exact
     );
     store.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn large_provider_configuration_survives_reopen_and_exact_partial_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let namespaces = RootNamespaces {
+        ownership: temp.path().join("owners"),
+        control: temp.path().join("control"),
+    };
+    let owner = Arc::new(RootOwner::create(&root, &namespaces).unwrap());
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let configuration = json!({"baseUrl":"https://relay.example/v1", "routingNotes":"route: east\n".repeat(12_000)});
+    let input = serde_json::from_value(json!({
+        "expectedCatalogRevision":0,
+        "connection":{"slug":"large-provider", "name":"Original routing", "provider":{"packageId":"external","entryId":"api","scope":"profile","name":"api"},
+        "configuration":configuration,"enabled":true,"enabledModelIds":["model-final"]}
+    })).unwrap();
+    let basis = committed_basis(store.create_connection(input).await.unwrap());
+    store.close().await.unwrap();
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    let original = store.catalog().await.unwrap().connections.remove(0);
+    assert_eq!(original.configuration, configuration);
+    let current = committed_basis(
+        store
+            .update_connection(UpdateCatalogConnectionInput {
+                expected: basis.clone(),
+                changes: serde_json::from_value(json!({"name":"Reviewed routing"})).unwrap(),
+            })
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        store.catalog().await.unwrap().connections[0].configuration,
+        configuration
+    );
+    assert_eq!(
+        store
+            .update_connection(UpdateCatalogConnectionInput {
+                expected: basis.clone(),
+                changes: serde_json::from_value(json!({"enabled":false})).unwrap(),
+            })
+            .await
+            .unwrap(),
+        CatalogMutationResult::ConnectionStale {
+            expected: basis,
+            actual: Some(current)
+        }
+    );
+    let saved = store.catalog().await.unwrap().connections.remove(0);
+    assert_eq!(saved.configuration, configuration);
+    assert_eq!(saved.name, "Reviewed routing");
+    assert!(saved.enabled);
+    store.close().await.unwrap();
+}

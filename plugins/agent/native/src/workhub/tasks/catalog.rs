@@ -23,7 +23,6 @@ use maka_capabilities::storage::Scan;
 use maka_event_log::EventLog;
 
 const MAX_TIME: u64 = (1 << 53) - 1;
-const CURSOR_BYTES: usize = 4096;
 
 pub(super) struct Catalog<'a> {
     pub(super) store: &'a EventLog,
@@ -132,14 +131,11 @@ impl Catalog<'_> {
             || !crate::owner::owns_session(self.prefix, &batch.source.session_id)
             || batch.accepted_at > MAX_TIME
             || batch.tasks.is_empty()
-            || batch.tasks.len() > 32
             || batch.tasks.iter().any(|(id, summary)| {
                 id.len() != 67
                     || !id.starts_with("wt_")
                     || !is_digest(&id[3..])
                     || summary.worker.is_empty()
-                    || summary.worker.len() > 256
-                    || summary.title.len() > 256
             })
         {
             return Err("workhub_task_catalog_invalid".into());
@@ -212,9 +208,6 @@ impl Catalog<'_> {
         let mut entries = vec![];
         let mut position = None;
         if let Some(after) = after {
-            if after.len() > CURSOR_BYTES {
-                return Err("workhub_task_cursor_invalid".into());
-            }
             let cursor: Cursor = serde_json::from_slice(
                 &hex::decode(after).map_err(|_| "workhub_task_cursor_invalid")?,
             )
@@ -315,9 +308,6 @@ impl Catalog<'_> {
             })
             .map_err(|_| "workhub_encoding_failed")?;
             let token = hex::encode(bytes);
-            if token.len() > CURSOR_BYTES {
-                return Err("workhub_task_cursor_invalid".into());
-            }
             Some(token)
         } else {
             None

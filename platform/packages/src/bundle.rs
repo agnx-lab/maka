@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{MAX_FILE_BYTES, MAX_FILES, MAX_PACKAGE_BYTES, Package};
+use super::Package;
 use crate::Error;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -40,30 +40,17 @@ struct BundleFile {
 
 impl Package {
     pub fn from_bundle(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() > MAX_PACKAGE_BYTES * 2 {
-            return Err(Error::Invalid("encoded bundle exceeds 32 MiB".into()));
-        }
         let bundle: Bundle = serde_json::from_slice(bytes)
             .map_err(|error| Error::Invalid(format!("bundle: {error}")))?;
-        if bundle.schema_version != 1 || bundle.files.len() > MAX_FILES {
-            return Err(Error::Invalid(
-                "unsupported bundle schema or file count".into(),
-            ));
+        if bundle.schema_version != 1 {
+            return Err(Error::Invalid("unsupported bundle schema".into()));
         }
         let mut files = BTreeMap::new();
-        let mut total = 0;
         for file in bundle.files {
             super::validate_path(&file.path)?;
-            if file.content.len() > MAX_FILE_BYTES.div_ceil(3) * 4 {
-                return Err(Error::Invalid("encoded bundle file exceeds limit".into()));
-            }
             let bytes = STANDARD
                 .decode(file.content)
                 .map_err(|_| Error::Invalid("invalid bundle base64".into()))?;
-            total += bytes.len();
-            if bytes.len() > MAX_FILE_BYTES || total > MAX_PACKAGE_BYTES {
-                return Err(Error::Invalid("bundle exceeds byte limits".into()));
-            }
             if files.insert(file.path, bytes).is_some() {
                 return Err(Error::Invalid(
                     "bundle contains duplicate file paths".into(),

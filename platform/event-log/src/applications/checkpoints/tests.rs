@@ -351,19 +351,22 @@ async fn admission_rejection_and_invalid_headers_release_original_read_ownership
         )
         .await
         .unwrap();
-    assert!(
-        checkpoints
-            .write(
-                "metadata",
-                None,
-                "v1",
-                &Value::Null,
-                &json!("\n".repeat(MAX_METADATA / 2)),
-                vec![]
-            )
-            .await
-            .is_err()
-    );
+    let complete_metadata = json!("\n".repeat(40 * 1024));
+    checkpoints
+        .write(
+            "metadata",
+            None,
+            "v1",
+            &Value::Null,
+            &complete_metadata,
+            vec![],
+        )
+        .await
+        .unwrap();
+    let (metadata_record, metadata_charge) =
+        checkpoints.read("metadata", Ok).await.unwrap().unwrap();
+    assert_eq!(metadata_record.metadata, complete_metadata);
+    assert_eq!(metadata_charge, 2 + 4 + complete_metadata.to_string().len());
     let requested = Arc::new(AtomicUsize::new(0));
     let request = requested.clone();
     let rejected = checkpoints
@@ -372,7 +375,7 @@ async fn admission_rejection_and_invalid_headers_release_original_read_ownership
             Err(invalid("test allocation admission rejected"))
         })
         .await;
-    assert_eq!(requested.load(Ordering::SeqCst), body.len());
+    assert_eq!(requested.load(Ordering::SeqCst), body.len() + 10);
     assert!(
         rejected
             .err()
@@ -389,27 +392,27 @@ async fn admission_rejection_and_invalid_headers_release_original_read_ownership
         .unwrap()
         .unwrap();
     assert_eq!(loaded.0.content, body);
-    assert_eq!(live.load(Ordering::SeqCst), body.len());
+    assert_eq!(live.load(Ordering::SeqCst), body.len() + 10);
     drop(loaded);
     assert_eq!(live.load(Ordering::SeqCst), 0);
 
-    // Invalid bounded headers are still rejected after successful admission,
+    // Malformed headers are still rejected after successful admission,
     // and each error returns the original allocation token.
     for (query, value, diagnostic) in [
         (
             "UPDATE application_ui_checkpoints SET format=?, data_source_json='null', metadata_json='null', revision=1 WHERE key='draft'",
-            "x".repeat(129),
+            String::new(),
             "invalid UI checkpoint format",
         ),
         (
             "UPDATE application_ui_checkpoints SET format='v1', data_source_json=?, metadata_json='null', revision=1 WHERE key='draft'",
-            json!("x".repeat(MAX_SOURCE)).to_string(),
-            "UI checkpoint source exceeds budget",
+            "{".into(),
+            "invalid UI checkpoint source",
         ),
         (
             "UPDATE application_ui_checkpoints SET format='v1', data_source_json='null', metadata_json=?, revision=1 WHERE key='draft'",
-            json!("x".repeat(MAX_METADATA)).to_string(),
-            "UI checkpoint metadata exceeds budget",
+            "{".into(),
+            "invalid UI checkpoint metadata",
         ),
         (
             "UPDATE application_ui_checkpoints SET format='v1', data_source_json='null', metadata_json='null', revision=? WHERE key='draft'",
@@ -421,7 +424,19 @@ async fn admission_rejection_and_invalid_headers_release_original_read_ownership
             .connection
             .run(move |connection| {
                 Box::pin(async move {
-                    sqlx::query(query).bind(value).execute(connection).await?;
+                    // This fixture deliberately corrupts stored headers. Keep normal
+                    // SQL constraints enabled for the subsequent public read.
+                    sqlx::query("PRAGMA ignore_check_constraints=ON")
+                        .execute(&mut *connection)
+                        .await?;
+                    let updated = sqlx::query(query)
+                        .bind(value)
+                        .execute(&mut *connection)
+                        .await;
+                    sqlx::query("PRAGMA ignore_check_constraints=OFF")
+                        .execute(&mut *connection)
+                        .await?;
+                    updated?;
                     Ok(())
                 })
             })
@@ -506,14 +521,14 @@ async fn admission_and_payload_share_original_snapshot_during_a_real_concurrent_
 
     assert_eq!(original_revision, 1);
     assert!(original_bytes_match);
-    assert_eq!(original_charge, original.len());
-    assert_eq!(original_live, original.len());
+    assert_eq!(original_charge, original.len() + 10);
+    assert_eq!(original_live, original.len() + 10);
     assert_eq!(released, 0);
     assert_eq!(next.0.revision, 2);
     assert_eq!(next.0.content, replacement);
-    assert_eq!(next.1, next.0.content.len());
+    assert_eq!(next.1, next.0.content.len() + 10);
     assert_eq!(revision, 3);
     assert_eq!(empty.0.revision, 3);
     assert!(empty.0.content.is_empty());
-    assert_eq!(empty.1, 0);
+    assert_eq!(empty.1, 10);
 }

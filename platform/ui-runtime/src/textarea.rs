@@ -43,7 +43,7 @@ pub struct TextareaProps {
     pub inline_tokens: Vec<String>,
     #[serde(default)]
     pub menu: Option<TextareaMenu>,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub accessibility_label: String,
     pub read_only: bool,
     pub disabled: bool,
@@ -67,7 +67,6 @@ pub struct TextareaProps {
     #[serde(default)]
     pub initial_text: String,
     #[serde(default)]
-    #[schemars(length(max = 512))]
     pub placeholder: String,
     #[serde(default)]
     /// None issues no new command; an accepted command remains pending until
@@ -84,8 +83,8 @@ pub struct TextareaProps {
 }
 
 fn inline_tokens_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    serde_json::json!({"type":"array","maxItems":4096,"items":{
-        "type":"string","minLength":1,"maxLength":512,"pattern":r"^\S+$"
+    serde_json::json!({"type":"array","items":{
+        "type":"string","minLength":1,"pattern":r"^\S+$"
     }})
     .try_into()
     .expect("inline token schema")
@@ -128,7 +127,7 @@ pub fn inline_token_ranges(text: &str, literals: &[String]) -> Vec<std::ops::Ran
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FilePastePolicy {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub context: String,
     /// Clipboard text remains available when file attachments are disabled.
     pub allow_files: bool,
@@ -136,7 +135,7 @@ pub struct FilePastePolicy {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FilePasteObservation {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub context: String,
     pub selection: FileObservation,
     /// Includes the currently reading, ready or failed item.
@@ -210,19 +209,19 @@ pub struct TextareaMenu {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TextareaMenuLabels {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub title: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub undo: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub redo: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub cut: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub copy: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub paste: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub select_all: String,
 }
 /// Product-selected native submit gesture. PrimaryEnter uses the platform
@@ -238,7 +237,7 @@ pub enum SubmitKey {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditorNavigation {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub owner: String,
     #[schemars(range(max = 9007199254740991u64))]
     pub based_on: u64,
@@ -369,13 +368,9 @@ pub fn reduce(
         ));
     }
     output.frame.state["persistence"] = identity;
-    if output.frame.view.inline_tokens.len() > 4096
-        || output.frame.view.inline_tokens.iter().any(|literal| {
-            literal.is_empty()
-                || literal.len() > 512
-                || literal.chars().any(|c| c.is_whitespace() || c.is_control())
-        })
-    {
+    if output.frame.view.inline_tokens.iter().any(|literal| {
+        literal.is_empty() || literal.chars().any(|c| c.is_whitespace() || c.is_control())
+    }) {
         return Err(crate::Error::Invalid(
             "invalid inline token literals".into(),
         ));
@@ -475,6 +470,26 @@ pub fn native() -> maka_plugin_core::package::NativeDefinition {
 #[cfg(test)]
 mod inline_token_tests {
     use super::*;
+
+    #[test]
+    fn complete_inline_catalog_matches_the_exact_long_tail_literal() {
+        let mut literals: Vec<_> = (0..4096)
+            .map(|index| format!("/skill:item-{index}"))
+            .collect();
+        let tail = format!("/skill:{}", "技能".repeat(100));
+        assert!(tail.len() > 512);
+        literals.push(tail.clone());
+        let prefix = "普通 /skill:missing ";
+        let text = format!("{prefix}{tail} {tail}-extra");
+        assert_eq!(
+            inline_token_ranges(&text, &literals),
+            vec![prefix.len()..prefix.len() + tail.len()]
+        );
+        assert_eq!(
+            &text[inline_token_ranges(&text, &literals)[0].clone()],
+            tail
+        );
+    }
 
     #[test]
     fn inline_literals_match_whole_unicode_words_only() {

@@ -762,16 +762,15 @@ fn horizontal_extension_moves_original_graphemes_across_clipped_participants() {
 }
 
 #[test]
-fn aggregate_copy_rejects_separator_overflow_without_writing_or_losing_selection() {
+fn aggregate_copy_preserves_complete_separators_and_selection() {
     let (_runtime, mut presenter, _) = native(vec![
         source("one", &"a".repeat(32768)),
         source("two", &"b".repeat(32768)),
     ]);
     draw(&mut presenter, 20, 2);
     all(&mut presenter);
-    let mut bytes = Vec::new();
-    assert!(presenter.copy(&mut bytes).is_err());
-    assert!(bytes.is_empty());
+    let expected = format!("{}\n{}", "a".repeat(32768), "b".repeat(32768));
+    assert_eq!(copied(&mut presenter).unwrap(), expected.as_bytes());
     assert!(
         state(&presenter)
             .reading
@@ -786,10 +785,9 @@ fn aggregate_copy_rejects_separator_overflow_without_writing_or_losing_selection
             KeyModifiers::SHIFT,
         )))
         .unwrap();
-    assert!(presenter.copy(&mut bytes).unwrap());
     assert_eq!(
-        STANDARD.decode(&bytes[7..bytes.len() - 1]).unwrap().len(),
-        65536
+        copied(&mut presenter).unwrap(),
+        &expected.as_bytes()[..expected.len() - 1]
     );
     close(&mut presenter);
 }

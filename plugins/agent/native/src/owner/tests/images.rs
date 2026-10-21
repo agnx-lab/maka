@@ -256,9 +256,21 @@ async fn user_attachment_images_use_uploaded_identity_and_canonical_user_rows() 
         let other = f.create("Unrelated image previews").await;
         let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQNE5uAAACKAEoAfdvjgAAAABJRU5ErkJggg==";
         let bytes = STANDARD.decode(encoded).unwrap();
-        let image = attachments::upload(&f, &session, "image.png", &bytes, Uuid::new_v4())
-            .await
-            .unwrap();
+        let image_name = format!("{}.png", "metadata".repeat(2400));
+        // The original upload metadata is independent of the selected file's OS name.
+        let selected = f._dir.path().join("image.png");
+        std::fs::write(&selected, &bytes).unwrap();
+        let resource = maka_ui_runtime::file::read_selected(
+            &selected,
+            &maka_ui_runtime::budget::NativeBudget::default(),
+        ).unwrap();
+        let image = f.mutation_with(
+            2, "uploadAttachment",
+            json!({"sessionId":session,"name":image_name,"bytes":bytes.len(),"digest":content_digest(&bytes)}),
+            Uuid::new_v4(),
+            BTreeMap::from([("file".into(), resource as Arc<dyn maka_capabilities::call::ReadResource>)]),
+        ).await.unwrap();
+        assert!(image["attachment"]["name"] == json!(format!("{}.png", "metadata".repeat(2400))), "original upload name metadata changed");
         let image_id = image["attachment"]["id"].as_str().unwrap();
         let text = attachments::upload(&f, &session, "notes.txt", b"notes\n", Uuid::new_v4())
             .await
@@ -303,7 +315,7 @@ async fn user_attachment_images_use_uploaded_identity_and_canonical_user_rows() 
             .await.unwrap();
         let rows = history["chunks"].as_array().unwrap();
         let user = rows.iter().find(|row| row["role"] == "user").unwrap();
-        assert_eq!(user["attachments"][1], json!({"name":"image.png","mimeType":"image/png","bytes":70,"kind":"image"}));
+        assert_eq!(user["attachments"][1], json!({"name":format!("{}.png", "metadata".repeat(2400)),"mimeType":"image/png","bytes":70,"kind":"image"}));
         let source = json!({"kind":"history","through":through,"position":user["position"],"attachmentIndex":1});
         let read = json!({"sessionId":session,"source":source,"offset":0});
         assert_eq!(f.query("attachmentImage", read.clone()).await.unwrap(), expected(source.clone()));

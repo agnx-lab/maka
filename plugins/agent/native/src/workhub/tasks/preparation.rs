@@ -21,7 +21,6 @@ use super::*;
 use contract::{PreparationStage, PreparationState};
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::attachment::AttachmentRef;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_host_runtime::application::NativeRequest;
 
@@ -49,12 +48,10 @@ pub(super) enum Target {
 impl Target {
     pub(super) fn validate(&self) -> Result<(), String> {
         match self {
-            Self::Existing { session_id } if session_id.is_empty() || session_id.len() > 128 => {
+            Self::Existing { session_id } if session_id.is_empty() => {
                 Err("workhub_target_invalid".into())
             }
-            Self::New { title, .. }
-                if title.trim().is_empty() || title.encode_utf16().count() > 128 =>
-            {
+            Self::New { title, .. } if title.trim().is_empty() => {
                 Err("workhub_title_invalid".into())
             }
             _ => Ok(()),
@@ -78,7 +75,6 @@ pub(super) struct Delivery {
 impl Delivery {
     fn validate(&self, assignment: &Assignment) -> Result<(), String> {
         if self.session_id.is_empty()
-            || self.session_id.len() > 128
             || self.attachments.len() != assignment.attachments.len()
             || self
                 .attachments
@@ -113,10 +109,7 @@ impl Hub {
             else {
                 return Err("workhub_attachment_invalid".into());
             };
-            if session_id != &source.session_id
-                || attachment.bytes > MAX_ATTACHMENT_BYTES
-                || !seen.insert(relative_path)
-            {
+            if session_id != &source.session_id || !seen.insert(relative_path) {
                 return Err("workhub_attachment_invalid".into());
             }
             let record = self
@@ -164,7 +157,7 @@ impl Hub {
         else {
             return Err("workhub_attachment_invalid".into());
         };
-        if !self.agent.0.owns(session_id) || transfer.source.bytes > MAX_ATTACHMENT_BYTES {
+        if !self.agent.0.owns(session_id) {
             return Err("workhub_attachment_invalid".into());
         }
         let source = transfer.source.clone();
@@ -466,9 +459,6 @@ fn directory(directory: &Value) -> Result<Value, String> {
         "selection":directory["selection"],
     }))
 }
-fn model_fits(value: &Value) -> bool {
-    value.to_string().encode_utf16().count() <= 7000
-}
 pub(super) fn directory_page(page: Value) -> Result<Value, String> {
     if page["kind"] == "roots" {
         let roots = page["roots"]
@@ -478,11 +468,7 @@ pub(super) fn directory_page(page: Value) -> Result<Value, String> {
             .map(directory)
             .collect::<Result<Vec<_>, _>>()?;
         let value = serde_json::json!({"kind":"roots","roots":roots});
-        return if model_fits(&value) {
-            Ok(value)
-        } else {
-            Err("workhub_directory_too_large".into())
-        };
+        return Ok(value);
     }
     if page["kind"] != "children" {
         return Err("workhub_directory_invalid".into());
@@ -490,25 +476,17 @@ pub(super) fn directory_page(page: Value) -> Result<Value, String> {
     let rows = page["children"]
         .as_array()
         .ok_or("workhub_directory_invalid")?;
-    let mut count = rows.len().min(4);
-    loop {
-        let children = rows[..count]
-            .iter()
-            .map(directory)
-            .collect::<Result<Vec<_>, _>>()?;
-        let after = if count < rows.len() || !page["after"].is_null() {
-            rows.get(count.saturating_sub(1))
-                .map(|row| row["name"].clone())
-        } else {
-            None
-        };
-        let value = serde_json::json!({"kind":"children","children":children,"after":after});
-        if model_fits(&value) {
-            return Ok(value);
-        }
-        if count <= 1 {
-            return Err("workhub_directory_too_large".into());
-        }
-        count -= 1;
-    }
+    let count = rows.len().min(4);
+    let children = rows[..count]
+        .iter()
+        .map(directory)
+        .collect::<Result<Vec<_>, _>>()?;
+    let after = if count < rows.len() || !page["after"].is_null() {
+        rows.get(count.saturating_sub(1))
+            .map(|row| row["name"].clone())
+    } else {
+        None
+    };
+    let value = serde_json::json!({"kind":"children","children":children,"after":after});
+    Ok(value)
 }

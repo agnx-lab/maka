@@ -74,8 +74,8 @@ async fn permission_receipts_preserve_partial_scope_and_revoke_by_boundary_revis
         },
         ..request(id)
     };
-    let mut oversized = make_request("unanswerable");
-    let InteractionRequest::Permissions { request, .. } = &mut oversized.request else {
+    let mut complete = make_request("complete_receipt");
+    let InteractionRequest::Permissions { request, .. } = &mut complete.request else {
         unreachable!()
     };
     request.permissions.filesystem = (0..32)
@@ -86,10 +86,35 @@ async fn permission_receipts_preserve_partial_scope_and_revoke_by_boundary_revis
             )
         })
         .collect();
+    let complete_permissions = request.permissions.clone();
+    // Keep this accepted receipt separate from the three scope-grant oracles below.
+    let InteractionRequest::Permissions { tool_use_id, .. } = &mut complete.request else {
+        unreachable!()
+    };
+    *tool_use_id = Some("complete-tool".into());
+    assert!(log.establish_interaction(&complete).await.unwrap().matches);
+    let complete_outcome = InteractionOutcome::PermissionsDecision {
+        decision: grant::Decision::Allow {
+            permissions: complete_permissions,
+            scope: grant::Scope::Once,
+        },
+        committed_at: 19,
+    };
     assert!(
-        log.establish_interaction(&oversized).await.is_err(),
-        "a request must leave room for its complete approval receipt"
+        log.commit_interaction_outcome("complete_receipt", complete_outcome.clone())
+            .await
+            .unwrap()
+            .matches
     );
+    assert!(
+        log.commit_interaction_outcome("complete_receipt", complete_outcome.clone())
+            .await
+            .unwrap()
+            .matches
+    );
+    let complete_record = log.interaction("complete_receipt").await.unwrap().unwrap();
+    assert_eq!(complete_record.request, complete.request);
+    assert_eq!(complete_record.outcome, Some(complete_outcome));
     for (id, scope) in [
         ("once", grant::Scope::Once),
         ("turn_grant", grant::Scope::Turn),
@@ -178,6 +203,10 @@ async fn permission_receipts_preserve_partial_scope_and_revoke_by_boundary_revis
         .unwrap();
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        log.interaction("complete_receipt").await.unwrap().unwrap(),
+        complete_record
+    );
     assert_eq!(log.close_abandoned_interactions(30).await.unwrap(), 1);
     assert_eq!(
         log.permission_grants(&invocation, Some("tool-use"), 4)

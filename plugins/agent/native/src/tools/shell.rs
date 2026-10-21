@@ -26,7 +26,6 @@ pub(super) fn schema(mut input: Value, titles: bool) -> Value {
     if titles {
         input["properties"]["title"] = serde_json::json!({
             "type": "string",
-            "maxLength": 256,
             "description": "Short, user-facing description of what this command does, in the user's language. Describe the action, not an assumed result."
         });
     }
@@ -73,7 +72,7 @@ impl RequestBinding for Binding {
 mod tests {
     use super::*;
     #[test]
-    fn command_labels_are_bounded_display_text_with_command_fallback() {
+    fn command_labels_preserve_complete_sanitized_text_with_command_fallback() {
         assert_eq!(title(&serde_json::json!({"command":"printf actual", "title":"  检查\n构建\u{202e}\u{0000}  "})).unwrap().fallback, "检查 构建");
         assert_eq!(
             title(&serde_json::json!({"command":"printf actual", "title":"  \n "}))
@@ -91,7 +90,25 @@ mod tests {
             title(&serde_json::json!({"command":"printf actual", "title":"界".repeat(100)}))
                 .unwrap()
                 .fallback,
-            "界".repeat(85)
+            "界".repeat(100)
         );
+        assert_eq!(
+            title(
+                &serde_json::json!({"command":"  printf\nactual\u{202e}\u{0000}  ", "title":" \n "})
+            )
+            .unwrap()
+            .fallback,
+            "printf actual"
+        );
+        assert!(
+            title(&serde_json::json!({"command":"\u{0000}\u{202e}", "title":" \n "})).is_none()
+        );
+        let original = serde_json::json!({"properties":{}});
+        assert!(
+            schema(original.clone(), true)["properties"]["title"]
+                .get("maxLength")
+                .is_none()
+        );
+        assert!(schema(original, false)["properties"].get("title").is_none());
     }
 }

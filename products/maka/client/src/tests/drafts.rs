@@ -18,10 +18,10 @@
  */
 use super::*;
 
-// A legal Windows Unicode filename can exceed 512 UTF-8 bytes. Match the
-// original Host schema's 512-character bound, including the saved draft CAS.
+// Synthetic selected-resource metadata exercises the complete upload/draft path.
+// No filesystem filename or OS limit is inferred from this display label.
 fn selected_name() -> String {
-    format!("{}.txt", "附".repeat(200))
+    format!("{}-original-selected.txt", "附".repeat(600))
 }
 struct SelectedFile;
 impl maka_capabilities::call::ReadResource for SelectedFile {
@@ -105,6 +105,17 @@ async fn original_upload_receipts_and_complete_attachment_drafts_survive_restart
                 .collect::<Vec<_>>(),
             [upload.id()]
         );
+        let Some(Receipt::Recorded {
+            outcome: OperationOutcome::Returned { value },
+            ..
+        }) = &originals[0].receipt
+        else {
+            panic!("original uploaded receipt must survive client reopen");
+        };
+        assert_eq!(value["attachment"]["name"], selected_name());
+        assert_eq!(value["attachment"]["bytes"], 21);
+        assert_eq!(value["attachment"]["id"], "original-upload");
+
         let attachment = DraftAttachment {
             id: "original-upload".into(),
             name: selected_name(),

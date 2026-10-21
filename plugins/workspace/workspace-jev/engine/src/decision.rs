@@ -56,15 +56,11 @@ fn structured(v: &Value) -> bool {
 }
 impl Evaluation {
     pub fn validate(&self) -> Result<(), Error> {
-        if !structured(&self.state)
-            || self.questions.is_empty()
-            || self.questions.len() > 64
-            || serde_json::to_vec(self).map_err(|_| Error::Input)?.len() > 32768
-        {
+        if !structured(&self.state) || self.questions.is_empty() {
             return Err(Error::Input);
         }
         for (id, question) in &self.questions {
-            if id.is_empty() || id.len() > 128 {
+            if id.is_empty() {
                 return Err(Error::Input);
             }
             let valid = match question {
@@ -84,17 +80,17 @@ impl Evaluation {
                     criteria,
                 } => {
                     structured(instructions)
-                        && (1..=255).contains(&criteria.len())
-                        && criteria.iter().all(|(k, v)| {
-                            !k.is_empty() && k.len() <= 128 && (v.is_null() || structured(v))
-                        })
+                        && !criteria.is_empty()
+                        && criteria
+                            .iter()
+                            .all(|(k, v)| !k.is_empty() && (v.is_null() || structured(v)))
                 }
                 Question::Score {
                     instructions,
                     criteria,
                 } => {
                     structured(instructions)
-                        && (2..=10).contains(&criteria.len())
+                        && criteria.len() >= 2
                         && criteria.iter().all(structured)
                 }
             };
@@ -141,7 +137,7 @@ pub enum Answer {
 }
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Jev request exceeds the supported evaluation contract")]
+    #[error("Jev request is outside the evaluation contract")]
     Input,
     #[error("Jev is disabled or its endpoint credential is not configured")]
     Unavailable,
@@ -155,7 +151,7 @@ pub enum Error {
     Network,
     #[error("Jev returned HTTP {0}")]
     Status(u16),
-    #[error("Jev returned an invalid or oversized response")]
+    #[error("Jev returned an invalid response")]
     Response,
     #[error("Jev resource settlement is unconfirmed")]
     Settlement,
@@ -257,9 +253,6 @@ impl Jev {
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.body.next().await.map_err(network)? {
-                if chunk.len() > 65536 - bytes.len() {
-                    return Err(Error::Response);
-                }
                 bytes.extend_from_slice(&chunk);
             }
             decode(&bytes, input)
@@ -280,7 +273,6 @@ fn network(e: http::Error) -> Error {
 fn decode(bytes: &[u8], input: &Evaluation) -> Result<EvaluationResult, Error> {
     let result: EvaluationResult = serde_json::from_slice(bytes).map_err(|_| Error::Response)?;
     if result.model.is_empty()
-        || result.model.len() > 256
         || result.answers.len() != input.questions.len()
         || result.usage.input_tokens >= (1 << 53)
         || result.usage.output_tokens >= (1 << 53)

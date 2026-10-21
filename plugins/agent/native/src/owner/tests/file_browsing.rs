@@ -182,12 +182,10 @@ async fn read_file_serves_bounded_current_text_and_images_under_original_session
             vec![b'a'; 2 * 1024 * 1024 + 1],
         )
         .unwrap();
-        assert_eq!(
-            read_file(&f, json!({"sessionId":session,"path":path("long-text")}))
-                .await
-                .unwrap(),
-            vec![json!({"kind":"too_large","bytes":2097153,"limit":2097152})]
-        );
+        let long = read_file(&f, json!({"sessionId":session,"path":path("long-text")}))
+            .await
+            .unwrap();
+        assert_eq!(preview_bytes(&long), vec![b'a'; 2 * 1024 * 1024 + 1]);
         std::fs::File::create(f.workspace.join("oversize"))
             .unwrap()
             .set_len(16 * 1024 * 1024 + 1)
@@ -196,7 +194,7 @@ async fn read_file_serves_bounded_current_text_and_images_under_original_session
             read_file(&f, json!({"sessionId":session,"path":path("oversize")}))
                 .await
                 .unwrap(),
-            vec![json!({"kind":"too_large","bytes":16777217,"limit":16777216})]
+            vec![json!({"kind":"binary","bytes":16777217})]
         );
         #[cfg(unix)]
         {

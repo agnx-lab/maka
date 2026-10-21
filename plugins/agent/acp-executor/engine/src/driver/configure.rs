@@ -89,7 +89,7 @@ impl Driver<'_> {
                 acp::SessionConfigOptionValue::value_id(value.to_owned()),
             );
             let response: acp::SetSessionConfigOptionResponse = self
-                .rpc(&mut live.connection, input, Duration::from_secs(30))
+                .rpc(&mut live.connection, input, Some(Duration::from_secs(30)))
                 .await?;
             live.options = response.config_options;
         }

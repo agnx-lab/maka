@@ -207,6 +207,10 @@ impl Pty {
                 assert_eq!(reply.matches("\x1b[?6c").count(), 1);
                 reply = reply.replace("\x1b[?6c", "\x1b[?62;1;4;22c");
                 sixel.attributes = true;
+            } else if sixel.attributes {
+                // Post-resize pairs are sent explicitly by the test. Do not let
+                // Screen's automatic negative DA1 win their first-reply slot.
+                reply = reply.replace("\x1b[?6c", "");
             }
             if !sixel.cells && self.output.windows(5).any(|bytes| bytes == b"\x1b[16t") {
                 reply.push_str("\x1b[6;17;9t");

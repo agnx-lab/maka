@@ -92,7 +92,7 @@ async fn compact_attempts_preserve_visible_history_read_markers_and_rebuild() {
         let db = Connection::open(&path).unwrap();
         let old_rows = transcript(&db);
         let compact = identity(mode);
-        let mut view = InvocationView::new(1).unwrap();
+        let mut view = InvocationView::new();
         hidden(
             &log,
             &mut view,

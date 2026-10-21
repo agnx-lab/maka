@@ -175,10 +175,6 @@ function review(state: State, props: CredentialProps, actions: Action[]) {
 function save(state: State, props: CredentialProps, actions: Action[]) {
   if (!canSave(state, props)) return;
   const captured = state.observation!;
-  if (captured.snapshot.text.bytes > 65536) {
-    state.notice = 'keyTooLarge';
-    return;
-  }
   state.setup = 'idle';
   state.current = { kind: 'save', captured, reference: null };
   state.notice = null;

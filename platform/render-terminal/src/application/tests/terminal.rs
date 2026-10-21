@@ -119,6 +119,61 @@ fn copy_button_requires_original_physical_activation_and_successful_dispatch() {
     p.shutdown_settled().unwrap();
 }
 #[test]
+fn complete_large_copy_uses_the_original_physical_action_and_exact_osc52_bytes() {
+    use base64::Engine;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let scene = Rc::new(RefCell::new(
+        json!({"kind":"button","key":"copy","label":"Copy","copy_text":"initial"}),
+    ));
+    let (_runtime, mut p) = layout::native(
+        layout::View::ChangingScene(scene.clone()),
+        Rc::new(Cell::new(true)),
+    );
+    let text = format!("COPY START\n{}COPY END", "保留😀z\n".repeat(8_000));
+    assert!(text.len() > 65_536);
+    let completed = catch_unwind(AssertUnwindSafe(|| -> Result<Vec<u8>, String> {
+        draw(&mut p, 40, 4);
+        scene.borrow_mut()["copy_text"] = json!(text);
+        let revision = p
+            .application
+            .frame(&p.root)
+            .map_err(|e| e.to_string())?
+            .revision;
+        p.application
+            .dispatch(&p.root, revision, "copy", json!({"kind":"click"}))
+            .map_err(|e| e.to_string())?;
+        let mut copied = Vec::new();
+        assert!(!p.flush_clipboard(&mut copied).map_err(|e| e.to_string())?);
+        draw(&mut p, 40, 4);
+        p.input_settled(key(KeyCode::Enter))
+            .map_err(|e| e.to_string())?;
+        assert!(p.flush_clipboard(&mut copied).map_err(|e| e.to_string())?);
+        assert!(!p.flush_clipboard(&mut copied).map_err(|e| e.to_string())?);
+        Ok(copied)
+    }));
+    p.surface_closed(&p.surface(), Ok(())).unwrap();
+    p.shutdown_settled().unwrap();
+    let captured = completed.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(
+        captured.is_ok(),
+        "complete native copy failed: {}",
+        captured
+            .as_ref()
+            .err()
+            .map(String::as_str)
+            .unwrap_or_default()
+    );
+    let expected = format!(
+        "\x1b]52;c;{}\x07",
+        base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+    );
+    assert!(
+        captured.unwrap() == expected.as_bytes(),
+        "complete original clipboard bytes changed"
+    );
+}
+
+#[test]
 fn terminal_native_focus_owns_control_c_tab_escape_and_returns_with_original_release_key() {
     let (_runtime, mut p, scene) = fixture();
     settle(&mut p);

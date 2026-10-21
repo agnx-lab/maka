@@ -249,10 +249,11 @@ async fn authentication_receipts_bind_inputs_and_survive_reopen_without_publishi
 }
 
 #[tokio::test]
-async fn repeated_authentication_retains_only_the_latest_256_receipts() {
+async fn repeated_authentication_retains_original_receipts_across_restart() {
     let temp = tempfile::tempdir().unwrap();
     let store = open(temp.path(), true).await;
-    let ticket = prepare(&store, create("initial")).await;
+    let original = create("initial");
+    let ticket = prepare(&store, original.clone()).await;
     ticket
         .complete(credential("initial-grant"), 1)
         .await
@@ -290,13 +291,13 @@ async fn repeated_authentication_retains_only_the_latest_256_receipts() {
         ));
         last = Some(input);
     }
-    assert!(
-        store
-            .oauth_login_receipt("retained-0".into())
-            .await
-            .unwrap()
-            .is_none()
-    );
+    let first = store
+        .oauth_login_receipt("retained-0".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.connection.connection_id, id);
+    assert_eq!(first.phase, maka_agent_facts::oauth::Phase::Authenticated);
     assert!(
         store
             .oauth_login_receipt("retained-1".into())
@@ -310,14 +311,20 @@ async fn repeated_authentication_retains_only_the_latest_256_receipts() {
         .await
         .unwrap();
     assert_eq!(
-        count, 257,
-        "bounded completed receipts never evict an unresolved grant"
+        count, 260,
+        "completed receipts and unresolved grant identities remain durable"
     );
     db.close().await.unwrap();
     drop(ticket);
     store.shutdown().await.unwrap();
     drop(store);
     let store = open(temp.path(), false).await;
+    let LoginPreparation::Finished(saved) = store.prepare_oauth_login(original).await.unwrap()
+    else {
+        panic!("original completed login receipt was lost");
+    };
+    assert_eq!(saved.connection.connection_id, id);
+    assert_eq!(saved.phase, maka_agent_facts::oauth::Phase::Authenticated);
     assert!(
         matches!(
             store.prepare_oauth_login(uncertain).await.unwrap(),

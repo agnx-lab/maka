@@ -56,6 +56,26 @@ impl Handler for Probe {
         Box::pin(async move {
             calls.fetch_add(1, Ordering::SeqCst);
             let resource = &context.attachments()["text"];
+            if input == "soft-hold" {
+                let mut verified = 0;
+                for offset in (0..resource.bytes()).step_by(RESOURCE_CHUNK_LIMIT) {
+                    let end = (offset + RESOURCE_CHUNK_LIMIT).min(resource.bytes());
+                    let chunk = resource.read(offset..end)?;
+                    if chunk.len() != end - offset
+                        || chunk
+                            .iter()
+                            .enumerate()
+                            .any(|(index, byte)| *byte != ((offset + index) % 251) as u8)
+                    {
+                        return Err("original large resource bytes changed".into());
+                    }
+                    verified += chunk.len();
+                }
+                let snapshot = json!({"verified":verified,"metadata":resource.metadata()});
+                started.add_permits(1);
+                permit(&release).await;
+                return Ok(json!(serde_json::to_string(&snapshot).unwrap()));
+            }
             if input == "whole" {
                 let empty_valid = resource.read(0..0)?.is_empty();
                 let split_rejected = resource.read(1..2).is_err();
@@ -69,6 +89,14 @@ impl Handler for Probe {
                     "emptyValid":empty_valid, "splitRejected":split_rejected,
                     "emptySplitRejected":empty_split_rejected, "outsideRejected":outside_rejected,
                     "text":text,
+                })).unwrap()));
+            }
+            if let Some(text) = input
+                .as_str()
+                .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte == b'i'))
+            {
+                return Ok(json!(serde_json::to_string(&json!({
+                    "metadata":resource.metadata(), "length":resource.bytes(), "inputBytes":text.len(),
                 })).unwrap()));
             }
             let snapshot = json!({"metadata":resource.metadata(), "length":resource.bytes(), "encoding":resource.encoding(),
@@ -182,6 +210,143 @@ impl Fixture {
 }
 fn observation(value: Value) -> Value {
     serde_json::from_str(value.as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn soft_packed_large_resource_keeps_exact_bytes_busy_release_and_foreign_capture() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let f = Fixture::new(MethodMode::Query).await;
+        let other = Fixture::new(MethodMode::Query).await;
+        let length = 64 * 1024 * 1024 + 73;
+        let metadata = json!({"owner":"original large resource","revision":117});
+        let (source, mut capture) =
+            f.capture(length as u64, metadata.clone(), ResourceEncoding::Bytes);
+        for offset in (0..length).step_by(RESOURCE_CHUNK_LIMIT) {
+            let end = (offset + RESOURCE_CHUNK_LIMIT).min(length);
+            let chunk: Vec<u8> = (offset..end).map(|index| (index % 251) as u8).collect();
+            capture.write("text", offset as u64, &chunk).unwrap();
+        }
+        let accepted = f
+            .client
+            .start(
+                f.binding.clone(),
+                "echo".into(),
+                json!("soft-hold"),
+                source.clone(),
+                capture.finish().unwrap(),
+            )
+            .await
+            .unwrap();
+        permit(&f.started).await;
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        let denied = scope(&f.issuer, true);
+        assert!(
+            f.client
+                .capture_resources(
+                    denied.clone(),
+                    descriptors(1, json!(null), ResourceEncoding::Bytes),
+                )
+                .err()
+                .unwrap()
+                .contains("attachment budget")
+        );
+        denied.finish().await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 1);
+        f.release.add_permits(1);
+        let completion = accepted.completion().await;
+        completion.cleanup.unwrap();
+        let value = observation(completion.result.unwrap());
+        assert_eq!(value, json!({"verified":length,"metadata":metadata}));
+        source.finish().await.unwrap();
+
+        let (source, mut capture) = f.capture(1, json!(null), ResourceEncoding::Bytes);
+        capture.write("text", 0, b"x").unwrap();
+        let completion = f
+            .client
+            .start(
+                f.binding.clone(),
+                "echo".into(),
+                json!("inspect"),
+                source.clone(),
+                capture.finish().unwrap(),
+            )
+            .await
+            .unwrap()
+            .completion()
+            .await;
+        completion.cleanup.unwrap();
+        assert_eq!(
+            observation(completion.result.unwrap())["first"],
+            json!([120])
+        );
+        source.finish().await.unwrap();
+
+        let (source, mut capture) = f.capture(1, json!(null), ResourceEncoding::Bytes);
+        capture.write("text", 0, b"x").unwrap();
+        let error = other
+            .client
+            .start(
+                other.binding.clone(),
+                "echo".into(),
+                json!("inspect"),
+                source.clone(),
+                capture.finish().unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(error.contains("another Application"));
+        source.finish().await.unwrap();
+        assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(other.calls.load(Ordering::SeqCst), 0);
+        f.app.shutdown().await.unwrap();
+        other.app.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn soft_packed_descriptors_and_json_share_one_combined_input_charge() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let f = Fixture::new(MethodMode::Query).await;
+        for (metadata_bytes, input_bytes) in [
+            (1024 * 1024 + 37, 32 * 1024 * 1024 + 19),
+            (32 * 1024 * 1024 + 37, 7),
+        ] {
+            let metadata = json!("m".repeat(metadata_bytes));
+            let (source, capture) = f.capture(0, metadata.clone(), ResourceEncoding::Bytes);
+            let completion = f
+                .client
+                .start(
+                    f.binding.clone(),
+                    "echo".into(),
+                    json!("i".repeat(input_bytes)),
+                    source.clone(),
+                    capture.finish().unwrap(),
+                )
+                .await
+                .unwrap()
+                .completion()
+                .await;
+            completion.cleanup.unwrap();
+            let value = observation(completion.result.unwrap());
+            assert!(
+                value["metadata"] == metadata,
+                "original complete metadata changed"
+            );
+            assert_eq!(value["length"], 0);
+            assert_eq!(value["inputBytes"], input_bytes);
+            source.finish().await.unwrap();
+            let (probe, capture) = f.capture(0, json!(null), ResourceEncoding::Bytes);
+            drop(capture);
+            probe.finish().await.unwrap();
+        }
+        assert_eq!(f.calls.load(Ordering::SeqCst), 2);
+        f.app.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -390,16 +555,6 @@ async fn malformed_descriptors_chunks_and_incomplete_snapshots_never_dispatch_ef
         let f = Fixture::new(MethodMode::Query).await;
         let mut invalid = Vec::new();
         invalid.push(descriptors(u64::MAX, json!(null), ResourceEncoding::Bytes));
-        invalid.push(descriptors(
-            64 * 1024 * 1024 + 1,
-            json!(null),
-            ResourceEncoding::Bytes,
-        ));
-        invalid.push(descriptors(
-            0,
-            json!("x".repeat(1024 * 1024)),
-            ResourceEncoding::Bytes,
-        ));
         let mut wrong = descriptors(0, json!(null), ResourceEncoding::Bytes);
         wrong.get_mut("text").unwrap().resource.version = 0;
         invalid.push(wrong);
@@ -407,8 +562,7 @@ async fn malformed_descriptors_chunks_and_incomplete_snapshots_never_dispatch_ef
             .pop_first()
             .unwrap()
             .1;
-        invalid.push(BTreeMap::from([("x".repeat(129), wrong.clone())]));
-        invalid.push((0..17).map(|i| (format!("s{i}"), wrong.clone())).collect());
+        invalid.push(BTreeMap::from([("".into(), wrong)]));
         for descriptor in invalid {
             let source = scope(&f.issuer, true);
             assert!(
@@ -666,4 +820,48 @@ async fn final_owner_rejects_metadata_growth_beyond_the_original_json_reservatio
     })
     .await
     .unwrap();
+}
+
+struct GrowingPayload(AtomicUsize);
+impl ReadResource for GrowingPayload {
+    fn resource_type(&self) -> ResourceType {
+        ResourceType {
+            name: "example.Bytes".into(),
+            version: 1,
+        }
+    }
+    fn bytes(&self) -> usize {
+        64 * 1024 * 1024 + 1 + self.0.fetch_add(1, Ordering::SeqCst)
+    }
+    fn metadata(&self) -> Value {
+        Value::Null
+    }
+    fn read(&self, _: std::ops::Range<usize>) -> Result<Vec<u8>> {
+        panic!("changed payload must not reach the effect")
+    }
+}
+#[tokio::test]
+async fn soft_packed_owner_rejects_actual_payload_growth_even_when_charge_is_unchanged() {
+    let f = Fixture::new(MethodMode::Query).await;
+    let source = scope(&f.issuer, true);
+    let resource: Arc<dyn ReadResource> = Arc::new(GrowingPayload(AtomicUsize::new(0)));
+    let error = f
+        .client
+        .start(
+            f.binding.clone(),
+            "echo".into(),
+            json!("inspect"),
+            source.clone(),
+            Attachments::from([("text".into(), resource)]).into(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert!(error.contains("descriptor changed"));
+    source.finish().await.unwrap();
+    assert_eq!(f.calls.load(Ordering::SeqCst), 0);
+    let (probe, capture) = f.capture(1, json!(null), ResourceEncoding::Bytes);
+    drop(capture);
+    probe.finish().await.unwrap();
+    f.app.shutdown().await.unwrap();
 }

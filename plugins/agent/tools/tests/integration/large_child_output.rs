@@ -54,7 +54,7 @@ impl ToolExecutor for LargeOutput {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn large_child_value_is_consumable_while_cell_emission_remains_bounded() {
+async fn large_child_value_is_consumable_and_complete_cell_emission_remains_durable() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
     let log = Arc::new(EventLog::open(&path).await.unwrap());
@@ -82,12 +82,12 @@ async fn large_child_value_is_consumable_while_cell_emission_remains_bounded() {
         (
             "consumed",
             "const value = await tools.read({}); let sum = 0; for (let i = 0; i < value.text.length; i++) sum += value.text.charCodeAt(i); text({length: value.text.length, codePointSum: sum});",
-            "{\"length\":1048576,\"codePointSum\":125829120}",
+            "{\"length\":1048576,\"codePointSum\":125829120}".to_owned(),
         ),
         (
-            "emission-caught",
-            "const value = await tools.read({}); try { text(value); } catch (error) { text(error.message); }",
-            "cell output limit exceeded",
+            "complete-emission",
+            "const value = await tools.read({}); text(value);",
+            serde_json::to_string(&effect.value).unwrap(),
         ),
     ] {
         let invocation = support::invocation(id);
@@ -110,10 +110,12 @@ async fn large_child_value_is_consumable_while_cell_emission_remains_bounded() {
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(result["result"]["ok"], true, "{result}");
-        assert_eq!(
-            result["content"],
-            json!([{"kind":"text","text":expected_text}])
+        assert_eq!(result["result"]["ok"], true);
+        assert_eq!(result["content"].as_array().unwrap().len(), 1);
+        assert_eq!(result["content"][0]["kind"], "text");
+        assert!(
+            result["content"][0]["text"].as_str() == Some(expected_text.as_str()),
+            "complete cell emission must match the independently expected JSON bytes"
         );
         // Both cases share this ledger; each retains the complete child value.
         let prefix = log.prefix(32, 2 * 1024 * 1024 + 64 * 1024).await.unwrap();

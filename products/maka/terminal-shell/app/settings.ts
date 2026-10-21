@@ -37,7 +37,7 @@ import {
   settingsRejection as rejection,
   type SettingsOperations,
 } from './settingsOperations';
-import { createConnectionLogin, type LoginAction } from './connectionLogin';
+import { createConnectionLogin, type LoginAction } from './connectionLogin.ts';
 
 type Detail = Extract<SettingsConnectionDetail, { kind: 'ready' }>;
 export type ConnectionEditor = {

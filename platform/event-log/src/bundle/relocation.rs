@@ -43,12 +43,13 @@ impl Positions {
 
     pub async fn read(staged: &mut SqliteConnection, offset: u64) -> Result<Self, StoreError> {
         let rows: Vec<i64> = sqlx::query_scalar(
-            "SELECT source_sequence FROM frames WHERE kind='event' ORDER BY source_sequence LIMIT 100001",
-        ).fetch_all(staged).await?;
-        if rows.len() > super::format::MAX_EVENTS
-            || offset
-                .checked_add(rows.len() as u64)
-                .is_none_or(|n| n >= i64::MAX as u64)
+            "SELECT source_sequence FROM frames WHERE kind='event' ORDER BY source_sequence",
+        )
+        .fetch_all(staged)
+        .await?;
+        if offset
+            .checked_add(rows.len() as u64)
+            .is_none_or(|n| n >= i64::MAX as u64)
         {
             return Err(StoreError::PrefixTooLarge);
         }

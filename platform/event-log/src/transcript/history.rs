@@ -71,9 +71,10 @@ impl EventLog {
     /// Exact ascending UTF-8 windows over immutable derived text. The byte and
     /// fragment budgets apply to the whole window, never to a silently clipped
     /// message. Before reads a prefix ending exclusively at its cursor; After
-    /// starts inclusively. `max_json_bytes` bounds the complete serialized page,
-    /// including metadata and empty projection boundaries. An indivisible first
-    /// fragment that exceeds it returns an error. Cursor positions grant no access.
+    /// starts inclusively. `max_json_bytes` targets the complete serialized page,
+    /// including metadata and empty projection boundaries. The first complete
+    /// fragment advances even when its metadata exceeds this target; subsequent
+    /// fragments are packed within it. Cursor positions grant no access.
     #[allow(clippy::too_many_arguments)]
     pub async fn history_text(
         &self,
@@ -274,11 +275,7 @@ impl EventLog {
                         _ => return Err(invalid("invalid history text role")),
                     };
                     let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
-                        let Some(tool) = tool_metadata(&mut tx, &session, locator, through_sql, max_json_bytes).await? else {
-                            if left.is_none() { return Err(invalid("history fragment exceeds JSON window budget")); }
-                            break 'rows;
-                        };
-                        Some(tool)
+                        Some(tool_metadata(&mut tx, &session, locator, through_sql).await?)
                     } else { None };
                     let timing = super::timing::read(&mut tx, &session, &row.turn, through_sql).await?;
                     let compaction = if role == Role::Compaction {
@@ -315,9 +312,8 @@ impl EventLog {
                     let envelope = Page::Ready { through, chunks: Vec::new(), before, after };
                     let fits = serde_json::to_vec(&envelope)?.len() + chunks_json_bytes
                         + chunks.len().saturating_sub(1) <= max_json_bytes;
-                    if !fits {
+                    if !fits && chunks.len() > usize::from(emit) {
                         if emit { chunks.pop(); }
-                        if left.is_none() { return Err(invalid("history fragment exceeds JSON window budget")); }
                         break 'rows;
                     }
                     bytes += text.len();

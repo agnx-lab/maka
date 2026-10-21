@@ -26,7 +26,6 @@ pub const WRITE_NAME: &str = "Write";
 pub const WRITE_DESCRIPTION: &str = "Write complete UTF-8 content to a regular file within the Session's write roots. Parent directories must exist. Symlinks and parent (..) components are unsupported. Preserves existing inode and mode; not an atomic replacement.";
 pub const EDIT_NAME: &str = "Edit";
 pub const EDIT_DESCRIPTION: &str = "Replace one unique span in an existing UTF-8 regular file, trying exact, line-trimmed, whitespace-normalized, then escape-normalized matching. Ambiguous matches are rejected; new_string is written literally without reindentation. Fuzzy matching requires at least 5 trimmed UTF-16 units, text without NUL, and a proportionate span. Symlinks and parent (..) components are unsupported. Preserves existing inode and mode; not an atomic replacement.";
-pub(crate) const MAX_PATH: usize = 4096;
 
 pub fn write_schema() -> Value {
     schemars::schema_for!(WriteInput).into()
@@ -39,7 +38,7 @@ pub fn edit_schema() -> Value {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WriteInput {
-    #[schemars(length(min = 1, max = MAX_PATH))]
+    #[schemars(length(min = 1))]
     path: String,
     content: String,
 }
@@ -47,7 +46,7 @@ pub(crate) struct WriteInput {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditInput {
-    #[schemars(length(min = 1, max = MAX_PATH))]
+    #[schemars(length(min = 1))]
     path: String,
     #[schemars(length(min = 1))]
     old_string: String,
@@ -80,7 +79,7 @@ impl Mutation {
             return Err(failed("Edit requires nonempty, different old_string"));
         }
         let path = mutation.path();
-        if path.is_empty() || path.len() > MAX_PATH || path.contains("://") || path.contains('\0') {
+        if path.is_empty() || path.contains("://") || path.contains('\0') {
             return Err(failed("mutation requires a valid filesystem path"));
         }
         Ok(mutation)
@@ -106,6 +105,7 @@ impl Mutation {
         self,
         file: Option<&mut cap_std::fs::File>,
         output_path: &str,
+        cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<(String, Value), ToolError> {
         match self {
             Self::Write(input) => {
@@ -114,13 +114,13 @@ impl Mutation {
                 // Capture under the mutation lock, through the same held file
                 // that will be written. A preview must not require read access
                 // or turn a large/binary overwrite into a failed operation.
-                if let Some(before) = write_preview(file, &input.content)? {
+                if let Some(before) = write_preview(file, &input.content, cancellation)? {
                     result["previousContent"] = before.into();
                 }
                 Ok((input.content, result))
             }
             Self::Edit(input) => {
-                let source = read_source(file)?;
+                let source = read_source(file, cancellation)?;
                 crate::edit_match::replace(
                     &source,
                     &input.old_string,
@@ -129,7 +129,7 @@ impl Mutation {
                 )
             }
             Self::PatchUpdate { chunks, .. } => {
-                let source = read_source(file)?;
+                let source = read_source(file, cancellation)?;
                 let content = apply_patch::apply_update(&source, &chunks)
                     .map_err(|e| failed(e.to_string()))?;
                 Ok((content, json!({"status":"completed"})))
@@ -138,51 +138,65 @@ impl Mutation {
     }
 }
 
+// Capture only the initial held-file extent. Appends cannot prolong preparation.
+// Callers must restore the write position before handling any read outcome.
+fn read_extent(
+    file: &mut cap_std::fs::File,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<Vec<u8>, ToolError> {
+    use std::io::Read;
+    crate::write::check_cancelled(cancellation)?;
+    let extent = file.metadata().map_err(|e| failed(e.to_string()))?.len();
+    let mut reader = (&mut *file).take(extent);
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 8192];
+    while reader.limit() != 0 {
+        crate::write::check_cancelled(cancellation)?;
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|e| failed(e.to_string()))?;
+        if count == 0 {
+            return Err(failed("mutation source changed within its captured extent"));
+        }
+        bytes
+            .try_reserve(count)
+            .map_err(|e| failed(e.to_string()))?;
+        bytes.extend_from_slice(&buffer[..count]);
+    }
+    crate::write::check_cancelled(cancellation)?;
+    Ok(bytes)
+}
 fn write_preview(
     file: Option<&mut cap_std::fs::File>,
     after: &str,
+    cancellation: &tokio_util::sync::CancellationToken,
 ) -> Result<Option<String>, ToolError> {
-    use std::io::{Read, Seek, SeekFrom};
-    const LIMIT: usize = 8 * 1024;
-    if after.len() > LIMIT || after.contains('\0') {
+    if after.contains('\0') {
         return Ok(None);
     }
     let Some(file) = file else {
         return Ok(Some(String::new()));
     };
-    let available = LIMIT - after.len();
-    if file
-        .metadata()
-        .ok()
-        .is_none_or(|metadata| metadata.len() > available as u64)
-    {
-        return Ok(None);
-    }
-    let mut bytes = Vec::new();
-    let read = (&mut *file)
-        .take(available as u64 + 1)
-        .read_to_end(&mut bytes);
-    // Even a failed read may advance the offset; restore it before any write.
+    use std::io::{Seek, SeekFrom};
+    let read = read_extent(file, cancellation);
     file.seek(SeekFrom::Start(0))
-        .map_err(|error| failed(error.to_string()))?;
-    if read.is_err() || bytes.len() > available {
-        return Ok(None);
-    }
-    Ok(String::from_utf8(bytes)
+        .map_err(|e| failed(e.to_string()))?;
+    crate::write::check_cancelled(cancellation)?;
+    Ok(read
         .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
         .filter(|text| !text.contains('\0')))
 }
-
-fn read_source(file: Option<&mut cap_std::fs::File>) -> Result<String, ToolError> {
-    use std::io::{Read, Seek, SeekFrom};
+fn read_source(
+    file: Option<&mut cap_std::fs::File>,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<String, ToolError> {
     let file = file.ok_or_else(|| failed("mutation requires an existing file"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| failed(e.to_string()))?;
-    let source = String::from_utf8(bytes).map_err(|_| failed("mutation requires UTF-8 text"))?;
+    use std::io::{Seek, SeekFrom};
+    let read = read_extent(file, cancellation);
     file.seek(SeekFrom::Start(0))
         .map_err(|e| failed(e.to_string()))?;
-    Ok(source)
+    String::from_utf8(read?).map_err(|_| failed("mutation requires UTF-8 text"))
 }
 
 #[cfg(test)]
@@ -199,10 +213,34 @@ mod tests {
             std::fs::OpenOptions::new().write(true).open(&path).unwrap(),
         );
         let (content, result) = Mutation::complete_write("write-only".into(), "new".into())
-            .prepare(Some(&mut file), "write-only")
+            .prepare(
+                Some(&mut file),
+                "write-only",
+                &tokio_util::sync::CancellationToken::new(),
+            )
             .unwrap();
         assert!(result.get("previousContent").is_none());
         file.write_all(content.as_bytes()).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    }
+    #[test]
+    fn cancelled_previous_capture_restores_original_write_offset_and_bytes() {
+        use std::io::{Seek, SeekFrom};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("original");
+        std::fs::write(&path, b"original bytes").unwrap();
+        let mut file = cap_std::fs::File::from_std(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap(),
+        );
+        file.seek(SeekFrom::Start(4)).unwrap();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        cancellation.cancel();
+        assert!(write_preview(Some(&mut file), "new", &cancellation).is_err());
+        assert_eq!(file.stream_position().unwrap(), 0);
+        assert_eq!(std::fs::read(&path).unwrap(), b"original bytes");
     }
 }

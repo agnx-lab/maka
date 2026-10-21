@@ -70,7 +70,8 @@ impl Tab {
         }
         // Only exact descendants announced on this bound page socket are
         // admitted. Popups, workers and unrelated target inventories never do.
-        for _ in 0..16 {
+        let mut attached = std::collections::HashSet::new();
+        loop {
             let mut attach = Vec::new();
             while let Ok(event) = self.frames.events.as_mut().unwrap().try_recv() {
                 let parent_known = event.session_id.is_none()
@@ -139,6 +140,9 @@ impl Tab {
                 break;
             }
             for session in attach {
+                if !attached.insert(session.clone()) {
+                    return Err(failed("iframe attachment did not settle"));
+                }
                 if !self
                     .frames
                     .children
@@ -185,9 +189,6 @@ impl Tab {
                 frames.retain(|old| old.id != frame.id);
                 frames.push(frame);
             }
-        }
-        if frames.len() > 64 {
-            return Err(failed("frame observation limit reached"));
         }
         Ok(frames)
     }
@@ -240,7 +241,11 @@ impl Tab {
             .frame
             .clone()
             .ok_or_else(|| failed("element frame was not proven"))?;
-        for _ in 0..64 {
+        let mut ancestors = std::collections::HashSet::new();
+        loop {
+            if !ancestors.insert(frame.id.clone()) {
+                return Err(failed("cyclic iframe ancestry"));
+            }
             let Some(parent) = frame.parent.as_ref() else {
                 return Ok(point);
             };
@@ -296,7 +301,6 @@ impl Tab {
             }
             frame = parent;
         }
-        Err(failed("iframe ancestry limit reached"))
     }
 }
 
@@ -305,18 +309,19 @@ fn collect_frames(
     session: Option<&str>,
     frames: &mut Vec<Frame>,
 ) -> Result<(), ToolError> {
-    let raw = &tree["frame"];
-    if let (Some(id), Some(loader)) = (raw["id"].as_str(), raw["loaderId"].as_str()) {
-        frames.push(Frame {
-            id: id.into(),
-            loader: loader.into(),
-            session: session.map(str::to_owned),
-            parent: raw["parentId"].as_str().map(str::to_owned),
-        });
-    }
-    if let Some(children) = tree["childFrames"].as_array() {
-        for child in children {
-            collect_frames(child, session, frames)?;
+    let mut pending = vec![tree];
+    while let Some(tree) = pending.pop() {
+        let raw = &tree["frame"];
+        if let (Some(id), Some(loader)) = (raw["id"].as_str(), raw["loaderId"].as_str()) {
+            frames.push(Frame {
+                id: id.into(),
+                loader: loader.into(),
+                session: session.map(str::to_owned),
+                parent: raw["parentId"].as_str().map(str::to_owned),
+            });
+        }
+        if let Some(children) = tree["childFrames"].as_array() {
+            pending.extend(children.iter().rev());
         }
     }
     Ok(())

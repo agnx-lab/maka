@@ -34,7 +34,7 @@ pub use preparation::*;
 #[schemars(rename = "SkillLibraryConfiguration")]
 pub struct Configuration {
     /// Explicit user root; only its standard .maka/skills and .agents/skills collections are scanned.
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub home: Option<String>,
     /// Explicit ceilings for a request's selected project. An observation grants no access.
     #[serde(default)]
@@ -54,23 +54,21 @@ pub struct Configuration {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SkillLibrarySource")]
 pub struct Source {
-    #[schemars(regex(pattern = "^[a-z0-9][a-z0-9_-]{0,63}$"))]
+    #[schemars(regex(pattern = "^[a-z0-9][a-z0-9_-]*$"))]
     pub id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub label: String,
     /// Absolute directory containing skill directories. Captured at activation.
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: String,
 }
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SkillLibraryCursor")]
 pub struct Cursor {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub revision: String,
-    #[schemars(length(max = 256))]
     pub query: String,
-    #[schemars(range(max = 16384))]
     pub offset: usize,
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -78,7 +76,6 @@ pub struct Cursor {
 #[schemars(rename = "SkillLibraryList")]
 pub struct List {
     pub workspace: Option<maka_agent_api::contract::Workspace>,
-    #[schemars(length(max = 256))]
     pub query: String,
     pub cursor: Option<Cursor>,
 }
@@ -125,12 +122,11 @@ pub enum Page {
 #[schemars(rename = "SkillLibraryRead")]
 pub struct Read {
     pub workspace: Option<maka_agent_api::contract::Workspace>,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub reference: String,
     /// Complete catalog revision from the list/read response.
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub revision: String,
-    #[schemars(range(max = 16777216))]
     pub offset: usize,
 }
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -162,7 +158,7 @@ pub enum Document {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "SkillLibraryImportSource")]
 pub struct ImportSource {
-    #[schemars(range(min = 1, max = 1048576))]
+    #[schemars(range(min = 1))]
     pub bytes: usize,
     #[schemars(length(min = 71, max = 71))]
     pub digest: String,
@@ -182,9 +178,9 @@ pub enum ChangeKind {
 pub struct Change {
     pub workspace: Option<maka_agent_api::contract::Workspace>,
     pub kind: ChangeKind,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub reference: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub revision: String,
 }
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
@@ -229,7 +225,7 @@ pub enum ChangeResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "SkillLibrarySetPreference")]
 pub struct SetPreference {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub reference: String,
     #[schemars(range(max = 9007199254740991_u64))]
     pub revision: u64,

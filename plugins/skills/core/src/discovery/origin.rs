@@ -25,8 +25,6 @@ use maka_agent_facts::artifact::content_digest;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-const MAX_LOCK_BYTES: u64 = 64 * 1024;
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Origin {
     pub lock_sha256: Option<String>,
@@ -54,7 +52,6 @@ pub enum OriginFailure {
     InvalidHash,
     UnsafePath,
     ReadFailed,
-    TooLarge,
 }
 
 #[derive(Deserialize)]
@@ -84,38 +81,24 @@ pub(super) fn read(
     directory: &std::path::Path,
     id: &str,
     cancellation: &CancellationToken,
-) -> Result<(Origin, usize), ReadError> {
-    let invalid = |reason| {
-        (
-            Origin {
-                lock_sha256: None,
-                status: OriginStatus::Invalid(reason),
-            },
-            0,
-        )
+) -> Result<Origin, ReadError> {
+    let invalid = |reason| Origin {
+        lock_sha256: None,
+        status: OriginStatus::Invalid(reason),
     };
-    let bytes = match read_view(
-        reader,
-        &directory.join("skill.lock.json"),
-        MAX_LOCK_BYTES as usize,
-        cancellation,
-    ) {
+    let bytes = match read_view(reader, &directory.join("skill.lock.json"), cancellation) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => {
-            return Ok((
-                Origin {
-                    lock_sha256: None,
-                    status: OriginStatus::Missing,
-                },
-                0,
-            ));
+            return Ok(Origin {
+                lock_sha256: None,
+                status: OriginStatus::Missing,
+            });
         }
         Err(ReadError::Cancelled) => return Err(ReadError::Cancelled),
         Err(ReadError::Failure(reason)) => {
             return Ok(invalid(match reason {
                 DiscoveryFailure::BlockedPath => OriginFailure::UnsafePath,
                 DiscoveryFailure::ReadFailed => OriginFailure::ReadFailed,
-                DiscoveryFailure::SourceTooLarge => OriginFailure::TooLarge,
             }));
         }
     };
@@ -124,7 +107,7 @@ pub(super) fn read(
         lock_sha256: Some(content_digest(&bytes)),
         status,
     };
-    Ok((origin, bytes.len()))
+    Ok(origin)
 }
 
 fn parse(bytes: &[u8], id: &str) -> Result<OriginStatus, OriginFailure> {

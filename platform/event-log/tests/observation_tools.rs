@@ -154,10 +154,13 @@ async fn tool_delivery_excludes_payloads_and_preserves_factual_order_time_and_fe
         log.prefix(128, 1024 * 1024).await,
         Err(StoreError::PrefixTooLarge)
     ));
-    assert!(matches!(
-        log.session_stream_events("session", 0, fence, 8, 1).await,
-        Err(StoreError::PrefixTooLarge)
-    ));
+    let soft = log
+        .session_stream_events("session", 0, fence, 8, 1)
+        .await
+        .unwrap();
+    assert_eq!(soft.events.len(), 1);
+    assert_eq!(soft.events[0].sequence, sequences[0]);
+    assert_eq!(soft.next_after, Some(sequences[0]));
     let old = log
         .session_stream_events("session", 0, sequences[1], 8, 4096)
         .await

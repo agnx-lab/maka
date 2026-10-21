@@ -95,28 +95,23 @@ impl Hub {
     }
     pub(super) async fn save_presets(&self, input: Presets) -> std::result::Result<Result, String> {
         let mut ids = std::collections::BTreeSet::new();
-        if input.entries.len() > 64
-            || input.entries.iter().any(|p| {
-                p.id.is_empty()
-                    || p.id.len() > 128
-                    || !ids.insert(&p.id)
-                    || !p
-                        .id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
-                    || p.name.trim().is_empty()
-                    || p.name.len() > 512
-                    || p.description.len() > 16000
-                    || !self.tasks.workers.contains_key(&p.worker)
-                    || p.tools.iter().any(|s| s.is_empty() || s.len() > 128)
-                    || p.tools
-                        .iter()
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .len()
-                        != p.tools.len()
-                    || maka_agent_facts::configuration::validation::target(&p.model).is_err()
-            })
-        {
+        if input.entries.iter().any(|p| {
+            p.id.is_empty()
+                || !ids.insert(&p.id)
+                || !p
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+                || p.name.trim().is_empty()
+                || !self.tasks.workers.contains_key(&p.worker)
+                || p.tools.iter().any(|s| s.is_empty())
+                || p.tools
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != p.tools.len()
+                || maka_agent_facts::configuration::validation::target(&p.model).is_err()
+        }) {
             return Ok(Result::Invalid);
         }
         let committed = self

@@ -36,39 +36,29 @@ pub enum DiffKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiffRow {
     /// Half-open UTF-8 byte range in source. Rows are ordered and disjoint.
-    #[schemars(range(max = 65536))]
     pub start: u32,
-    #[schemars(range(max = 65536))]
     pub end: u32,
     pub kind: DiffKind,
-    #[schemars(length(max = 128))]
     pub language: Option<String>,
 }
-/// Complete bounded comparisons and structured patches reuse native parsers.
+/// Complete comparisons and structured patches reuse native parsers.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DiffContent {
     Annotated {
-        #[schemars(length(max = 65536))]
         source: String,
-        #[schemars(length(max = 8192))]
         rows: Vec<DiffRow>,
     },
-    /// Combined inputs must be <= 8192 UTF-8 bytes and <= 256 lines, without NUL.
+    /// Comparisons use complete UTF-8 text without NUL.
     Comparison {
-        #[schemars(length(max = 8192))]
         before: String,
-        #[schemars(length(max = 8192))]
         after: String,
-        #[schemars(length(max = 128))]
         language: Option<String>,
     },
     /// Invalid, binary or oversized patches display literally, without diff gutters.
     Patch {
-        #[schemars(length(max = 65536))]
         source: String,
         operation: DiffPatch,
-        #[schemars(length(max = 128))]
         language: Option<String>,
     },
 }

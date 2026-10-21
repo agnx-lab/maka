@@ -28,9 +28,9 @@ pub mod setup;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentServiceExecutor")]
 pub struct ServiceExecutor {
-    #[schemars(regex(pattern = "^[a-zA-Z][a-zA-Z0-9._:-]{0,127}$"))]
+    #[schemars(regex(pattern = "^[a-zA-Z][a-zA-Z0-9._:-]*$"))]
     pub name: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub import: String,
     /// Exact member of the explicitly bound import, never a discovery index.
     #[serde(default)]
@@ -42,7 +42,7 @@ pub struct ServiceExecutor {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentExecutorSelection")]
 pub struct Selection {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub executor: String,
     pub settings: maka_agent_facts::executor::Settings,
 }
@@ -58,13 +58,11 @@ pub struct Execute {
     )]
     pub language: maka_agent_facts::language::Language,
     pub invocation: maka_agent_facts::event::Invocation,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub conversation_key: String,
-    #[schemars(length(max = 65536))]
     pub message: String,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub cwd: String,
-    #[schemars(length(max = 65536))]
     pub instructions: Option<String>,
     pub settings: maka_agent_facts::executor::Settings,
 }
@@ -123,6 +121,34 @@ mod tests {
             let mut expected = original.clone();
             expected["language"] = tag.into();
             assert_eq!(serde_json::to_value(&input).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn executor_contract_preserves_complete_fields_beyond_former_schema_bounds() {
+        let original = serde_json::json!({
+            "invocation":{"session_id":"session","turn_id":"turn","run_id":"run","invocation_id":"invocation"},
+            "conversationKey":format!("conversation-{}-final", "route".repeat(100)),
+            "message":format!("{}USER_FINAL_MARKER", "Original user message 原文\n".repeat(5_000)),
+            "cwd":format!("/workspace/{}/final", "nested/".repeat(700)),
+            "instructions":format!("{}INSTRUCTIONS_FINAL_MARKER", "External execution instructions\n".repeat(3_000)),
+            "settings":{}
+        });
+        let Contract {
+            interface: Interface::Service { methods },
+            ..
+        } = contract()
+        else {
+            panic!("executor service contract");
+        };
+        let validator = jsonschema::validator_for(&methods["execute"].input).unwrap();
+        assert!(validator.is_valid(&original));
+        let input: Execute = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(serde_json::to_value(input).unwrap(), original);
+        for field in ["conversationKey", "cwd"] {
+            let mut invalid = original.clone();
+            invalid[field] = serde_json::json!("");
+            assert!(!validator.is_valid(&invalid));
         }
     }
 }

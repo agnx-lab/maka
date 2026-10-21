@@ -106,7 +106,6 @@ impl Proxy {
         route: Policy,
         listener: impl std::future::Future<Output = io::Result<TcpListener>> + Send + 'static,
     ) -> io::Result<Self> {
-        network.validate().map_err(io::Error::other)?;
         let cancellation = CancellationToken::new();
         let stopped = cancellation.clone();
         let client = route

@@ -26,3 +26,5 @@
 语言是 Root 共享的单一偏好，使用现有策略 revision 更新。`assistantPreferences` 同时返回保存的选择和解析后的 `en`、`zh-CN` 或 `zh-TW`。未设置时遵循产品配置的 locale；显式 `auto` 遵循原生启动语言，显式语言则覆盖两者。激活配置接受 `zh-Hant-HK` 等 locale 标签，在使用前统一解析。
 
 [源码](src/lib.rs) · [Cargo 配置](Cargo.toml)
+
+Settings 完整保留配置、标签、搜索输入和认证资源。分页目标约束每次连续切片，不限制完整目录；单个较大项目仍能完整返回并推进游标。Host 负责实际资源准入和结算，Settings 保留领域语法、CAS 和凭据权威。

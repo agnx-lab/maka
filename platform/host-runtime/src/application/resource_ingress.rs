@@ -26,8 +26,20 @@ use maka_plugin_core::contract::ResourceType;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-const RESOURCE_LIMIT: usize = 64 * 1024 * 1024;
-const DESCRIPTOR_LIMIT: usize = 1024 * 1024;
+pub(super) const INPUT_WINDOW: usize = 32 * 1024 * 1024;
+pub(super) const RESOURCE_WINDOW: usize = 64 * 1024 * 1024;
+
+// Packing targets limit concurrent retained work, not a single value's extent.
+pub(super) fn charge(size: usize, window: usize) -> u32 {
+    u32::try_from(size.min(window)).expect("packing window fits u32")
+}
+pub(super) fn input_charge(input: usize, descriptors: usize) -> Result<u32> {
+    let size = input
+        .max(1)
+        .checked_add(descriptors)
+        .ok_or("Host input length overflow")?;
+    Ok(charge(size, INPUT_WINDOW))
+}
 pub const RESOURCE_CHUNK_LIMIT: usize = 64 * 1024;
 
 /// Inert observations; metadata and nominal types never grant access.
@@ -74,6 +86,7 @@ pub(super) struct Reserved {
     pub(super) attachments: Attachments,
     pub(super) bytes: OwnedSemaphorePermit,
     pub(super) resources: OwnedSemaphorePermit,
+    pub(super) admitted: AttachmentSize,
     group: Arc<Resources>,
     pub(super) parent: Option<Ticket>,
 }
@@ -88,13 +101,13 @@ pub struct ResourceCapture {
     receiving: BTreeMap<String, Receiving>,
     bytes: OwnedSemaphorePermit,
     resources: OwnedSemaphorePermit,
+    admitted: AttachmentSize,
     scope: Scope,
     commands: mpsc::UnboundedSender<Command>,
     parent: Option<Ticket>,
 }
 impl Client {
     /// Reserve the original JSON and payload budgets before allocation.
-    /// The trusted ingress must already bound the decoded descriptor envelope.
     /// Original request Scope custody covers partial reception and frozen input.
     pub fn capture_resources(
         &self,
@@ -129,9 +142,6 @@ impl Dispatch {
         if self.commands.is_closed() || scope.cancellation.is_cancelled() {
             return Err("Host resource reception is closed".into());
         }
-        if descriptors.len() > 16 {
-            return Err("maximum 16 resource slots".into());
-        }
         let mut size = 0usize;
         for (slot, descriptor) in &descriptors {
             check_slot(slot)?;
@@ -140,29 +150,28 @@ impl Dispatch {
                 usize::try_from(descriptor.length).map_err(|_| "invalid resource length")?;
             size = size
                 .checked_add(length)
-                .filter(|&n| n <= RESOURCE_LIMIT)
-                .ok_or("Host attachments exceed 64 MiB")?;
+                .ok_or("Host attachment length overflow")?;
         }
         let descriptor_size = if descriptors.is_empty() {
             0
         } else {
-            check_json_limit(&descriptors, DESCRIPTOR_LIMIT)?
+            json_size(&descriptors)?
         };
         // Ticket first; every subsequent local drop releases physical custody first.
         let parent = scope.resources.reserve().map_err(|e| e.to_string())?;
         let bytes = self
             .bytes
             .clone()
-            .try_acquire_many_owned(descriptor_size.max(1) as u32)
+            .try_acquire_many_owned(charge(descriptor_size.max(1), INPUT_WINDOW))
             .map_err(|_| "Host descriptor budget exhausted")?;
         let resources = self
             .resources
             .clone()
-            .try_acquire_many_owned(size as u32)
+            .try_acquire_many_owned(charge(size, RESOURCE_WINDOW))
             .map_err(|_| "Host attachment budget exhausted")?;
         let mut receiving = BTreeMap::new();
         for (name, descriptor) in descriptors {
-            let length = usize::try_from(descriptor.length).expect("bounded resource length");
+            let length = usize::try_from(descriptor.length).expect("checked resource length");
             let mut buffer = Vec::new();
             buffer
                 .try_reserve_exact(length)
@@ -179,6 +188,10 @@ impl Dispatch {
         }
         Ok(ResourceCapture {
             receiving,
+            admitted: AttachmentSize {
+                payload: size,
+                descriptors: descriptor_size,
+            },
             bytes,
             resources,
             scope,
@@ -232,6 +245,7 @@ impl ResourceCapture {
             receiving,
             bytes,
             resources,
+            admitted,
             scope,
             parent,
             ..
@@ -250,6 +264,7 @@ impl ResourceCapture {
             attachments,
             bytes,
             resources,
+            admitted,
             group: scope.resources.clone(),
             parent,
         }))))
@@ -287,19 +302,17 @@ impl ReadResource for Frozen {
     }
 }
 fn check_slot(slot: &str) -> Result<()> {
-    if slot.is_empty() || slot.len() > 128 {
+    if slot.is_empty() {
         return Err("invalid resource slot".into());
     }
     Ok(())
 }
+#[derive(Clone, Copy)]
 pub(super) struct AttachmentSize {
     pub(super) payload: usize,
     pub(super) descriptors: usize,
 }
 pub(super) fn attachment_size(attachments: &Attachments) -> Result<AttachmentSize> {
-    if attachments.len() > 16 {
-        return Err("maximum 16 resource slots".into());
-    }
     let mut payload = 0usize;
     // Include map braces, separators and the actual encoded keys.
     let mut descriptors = if attachments.is_empty() { 0 } else { 2usize };
@@ -310,23 +323,23 @@ pub(super) fn attachment_size(attachments: &Attachments) -> Result<AttachmentSiz
         let length = resource.bytes();
         payload = payload
             .checked_add(length)
-            .filter(|&n| n <= RESOURCE_LIMIT)
-            .ok_or("Host attachments exceed 64 MiB")?;
+            .ok_or("Host attachment length overflow")?;
         let descriptor = ResourceDescriptor {
             encoding: resource.encoding(),
             resource: nominal,
-            length: length as u64,
+            length: u64::try_from(length).map_err(|_| "invalid resource length")?,
             metadata: resource.metadata(),
         };
-        descriptors = descriptors
-            .checked_add(
-                check_json_limit(slot, DESCRIPTOR_LIMIT)?
-                    + 1
-                    + usize::from(index != 0)
-                    + check_json_limit(&descriptor, DESCRIPTOR_LIMIT)?,
-            )
-            .filter(|&n| n <= DESCRIPTOR_LIMIT)
-            .ok_or("Host resource descriptors exceed 1 MiB")?;
+        for size in [
+            json_size(slot)?,
+            1,
+            usize::from(index != 0),
+            json_size(&descriptor)?,
+        ] {
+            descriptors = descriptors
+                .checked_add(size)
+                .ok_or("Host descriptor length overflow")?;
+        }
     }
     Ok(AttachmentSize {
         payload,
@@ -351,13 +364,16 @@ impl Dispatch {
                 if parent.is_some() {
                     return Err("captured resources already own a request ticket".into());
                 }
+                let combined = input_charge(input_size, reserved.admitted.descriptors)?;
+                let held = u32::try_from(reserved.bytes.num_permits())
+                    .map_err(|_| "invalid captured input reservation")?;
+                let additional = combined
+                    .checked_sub(held)
+                    .ok_or("invalid captured input reservation")?;
                 let input = self
                     .bytes
                     .clone()
-                    .try_acquire_many_owned(
-                        u32::try_from(input_size.max(1))
-                            .map_err(|_| "Host input budget exhausted")?,
-                    )
+                    .try_acquire_many_owned(additional)
                     .map_err(|_| "Host input budget exhausted")?;
                 reserved.bytes.merge(input);
                 Ok(*reserved)
@@ -377,11 +393,7 @@ impl Dispatch {
                         return Err(error);
                     }
                 };
-                let bytes_needed = input_size
-                    .max(1)
-                    .checked_add(size.descriptors)
-                    .and_then(|size| u32::try_from(size).ok())
-                    .ok_or("Host input budget exhausted")?;
+                let bytes_needed = input_charge(input_size, size.descriptors)?;
                 let bytes = self
                     .bytes
                     .clone()
@@ -390,13 +402,14 @@ impl Dispatch {
                 let resources = self
                     .resources
                     .clone()
-                    .try_acquire_many_owned(size.payload as u32)
+                    .try_acquire_many_owned(charge(size.payload, RESOURCE_WINDOW))
                     .map_err(|_| "Host attachment budget exhausted")?;
                 let (attachments, parent) = custody;
                 Ok(Reserved {
                     attachments,
                     bytes,
                     resources,
+                    admitted: size,
                     group: scope.resources.clone(),
                     parent,
                 })

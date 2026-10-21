@@ -27,7 +27,6 @@ export const configurations = {
       path: {
         type: ['string', 'null'],
         minLength: 1,
-        maxLength: 4096,
       },
     },
     additionalProperties: false,
@@ -76,7 +75,6 @@ export const configurations = {
               },
             },
             minItems: 1,
-            maxItems: 32,
           },
           radius: {
             type: 'number',
@@ -91,7 +89,6 @@ export const configurations = {
               format: 'uint',
               minimum: 0,
             },
-            maxItems: 32,
           },
           columns: {
             type: 'integer',
@@ -222,7 +219,6 @@ export const configurations = {
           'Explicit Library import for immutable skill input preparation and metadata.\nThis does not select model tools or confer a service grant.',
         type: ['string', 'null'],
         minLength: 1,
-        maxLength: 256,
         default: null,
       },
       permissions: {
@@ -264,7 +260,6 @@ export const configurations = {
             description: 'Select this home for global instructions and explicit AGENTS.md editing.',
             type: ['string', 'null'],
             minLength: 1,
-            maxLength: 4096,
             default: null,
           },
         },
@@ -275,12 +270,11 @@ export const configurations = {
         properties: {
           name: {
             type: 'string',
-            pattern: '^[a-zA-Z][a-zA-Z0-9._:-]{0,127}$',
+            pattern: '^[a-zA-Z][a-zA-Z0-9._:-]*$',
           },
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           member: {
             description: 'Exact member of the explicitly bound import, never a discovery index.',
@@ -310,7 +304,6 @@ export const configurations = {
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           member: {
             type: 'integer',
@@ -373,7 +366,6 @@ export const configurations = {
               'Explicit versioned renderer key, frozen with the call; never inferred from its name.',
             type: ['string', 'null'],
             minLength: 1,
-            maxLength: 128,
             default: null,
           },
           title: {
@@ -402,22 +394,18 @@ export const configurations = {
           name: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           description: {
             type: 'string',
             minLength: 1,
-            maxLength: 4096,
           },
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           method: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
         },
         additionalProperties: false,
@@ -537,7 +525,6 @@ export const configurations = {
             items: {
               $ref: '#/$defs/Rule',
             },
-            maxItems: 32,
           },
           network: {
             $ref: '#/$defs/Network',
@@ -591,7 +578,6 @@ export const configurations = {
                     items: {
                       $ref: '#/$defs/Destination',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -638,7 +624,6 @@ export const configurations = {
           type: 'string',
         },
         description: 'Exactly selected imports of Agent services. Native grants are independent.',
-        maxItems: 8,
         uniqueItems: true,
       },
     },
@@ -726,7 +711,6 @@ export const configurations = {
             description:
               'Explicit Library import for immutable skill input preparation and metadata.\nThis does not select model tools or confer a service grant.',
             minLength: 1,
-            maxLength: 256,
             default: null,
           },
           permissions: {
@@ -768,7 +752,6 @@ export const configurations = {
             type: ['string', 'null'],
             description: 'Select this home for global instructions and explicit AGENTS.md editing.',
             minLength: 1,
-            maxLength: 4096,
             default: null,
           },
         },
@@ -779,12 +762,11 @@ export const configurations = {
         properties: {
           name: {
             type: 'string',
-            pattern: '^[a-zA-Z][a-zA-Z0-9._:-]{0,127}$',
+            pattern: '^[a-zA-Z][a-zA-Z0-9._:-]*$',
           },
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           member: {
             type: 'integer',
@@ -814,7 +796,6 @@ export const configurations = {
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           member: {
             type: 'integer',
@@ -877,7 +858,6 @@ export const configurations = {
             description:
               'Explicit versioned renderer key, frozen with the call; never inferred from its name.',
             minLength: 1,
-            maxLength: 128,
             default: null,
           },
           title: {
@@ -906,22 +886,18 @@ export const configurations = {
           name: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           description: {
             type: 'string',
             minLength: 1,
-            maxLength: 4096,
           },
           import: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
           method: {
             type: 'string',
             minLength: 1,
-            maxLength: 256,
           },
         },
         required: ['result', 'confirmation', 'name', 'description', 'import', 'method'],
@@ -986,7 +962,6 @@ export const configurations = {
         description:
           'Explicit user root; only its standard .maka/skills and .agents/skills collections are scanned.',
         minLength: 1,
-        maxLength: 4096,
       },
       projectRoots: {
         type: 'array',
@@ -1044,18 +1019,16 @@ export const configurations = {
         properties: {
           id: {
             type: 'string',
-            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$',
+            pattern: '^[a-z0-9][a-z0-9_-]*$',
           },
           label: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           path: {
             type: 'string',
             description: 'Absolute directory containing skill directories. Captured at activation.',
             minLength: 1,
-            maxLength: 4096,
           },
         },
         required: ['id', 'label', 'path'],
@@ -1124,14 +1097,12 @@ export const configurations = {
             items: {
               $ref: '#/$defs/Rule',
             },
-            maxItems: 512,
           },
           denyGlobs: {
             type: 'array',
             items: {
               type: 'string',
             },
-            maxItems: 128,
           },
         },
         required: ['default', 'rules', 'denyGlobs'],
@@ -1183,7 +1154,6 @@ export const configurations = {
                     items: {
                       $ref: '#/$defs/Destination',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -1292,14 +1262,12 @@ export const configurations = {
             items: {
               $ref: '#/$defs/Rule',
             },
-            maxItems: 512,
           },
           denyGlobs: {
             type: 'array',
             items: {
               type: 'string',
             },
-            maxItems: 128,
           },
         },
         required: ['default', 'rules', 'denyGlobs'],
@@ -1351,7 +1319,6 @@ export const configurations = {
                     items: {
                       $ref: '#/$defs/Destination',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -1470,7 +1437,6 @@ export const configurations = {
                     items: {
                       $ref: '#/$defs/Destination',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -1534,7 +1500,6 @@ export const configurations = {
                     items: {
                       $ref: '#/$defs/Destination',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,

@@ -152,12 +152,7 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
     };
     let limits = CellLimits::default();
     let mut source = String::new();
-    std::io::stdin()
-        .take(limits.max_source_bytes as u64 + 1)
-        .read_to_string(&mut source)?;
-    if source.len() > limits.max_source_bytes {
-        return Err("code source exceeds 64 KiB".into());
-    }
+    std::io::stdin().read_to_string(&mut source)?;
     let id = || Uuid::new_v4().to_string();
     let invocation = Invocation {
         session_id: id(),
@@ -211,7 +206,6 @@ pub(super) async fn run(args: Args) -> Result<(), maka_host_runtime::HostError> 
     });
     let context = CellContext::new(
         CellStore::default(),
-        engine.limits().max_value_bytes,
         tools
             .names()
             .into_iter()

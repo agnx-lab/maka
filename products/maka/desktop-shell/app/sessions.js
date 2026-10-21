@@ -48,7 +48,6 @@ import { t, onLanguageChange } from './locale.js';
 const LIST = { filter: 'all', position: { kind: 'start' } };
 const RETRY_MS = 2000;
 /** Pages read after the subscribed first one; the Host pages at most 32 sessions in id order. */
-const MAX_PAGES = 32;
 
 export class SessionCatalog {
   /**
@@ -159,7 +158,11 @@ export class SessionCatalog {
     const rest = [];
     let after = page.after;
     try {
-      for (let count = 0; after !== null && count < MAX_PAGES; count += 1) {
+      const seen = new Set();
+      while (after !== null) {
+        const cursor = JSON.stringify(after);
+        if (seen.has(cursor)) throw new Error('session catalog cursor did not advance');
+        seen.add(cursor);
         const next = await query('agent', 'list', {
           filter: LIST.filter,
           position: { kind: 'after', revision: page.revision, cursor: after },
@@ -191,7 +194,6 @@ export function needsYou(session) {
 }
 
 /** The longest title the Host takes, in characters (`agent.metadata`). */
-const MAX_TITLE = 128;
 
 /**
  * Renames `session` (`agent.metadata`) with its labels kept and nothing else
@@ -263,8 +265,7 @@ const FORK_REJECTED = {
  */
 export function forkTitle(title) {
   const suffix = t('forkSuffix');
-  const room = MAX_TITLE - [...suffix].length;
-  return [...title].slice(0, room).join('').trimEnd() + suffix;
+  return title.trimEnd() + suffix;
 }
 
 /**
@@ -359,7 +360,6 @@ export class SidebarState {
      */
     this.renaming = null;
     /** Whether the name being edited is longer than the Host takes. */
-    this.tooLong = false;
     /** id -> `{ title, revision }` of a rename the catalog has not brought yet. */
     this.titles = new Map();
     /**
@@ -378,13 +378,6 @@ export class SidebarState {
     this.name.on('blur', () => this.commitRename(false));
     this.name.on('focus', () => {
       if (this.renaming !== null) this.renaming.focused = true;
-    });
-    this.name.on('change', () => {
-      const tooLong = [...this.name.value().trim()].length > MAX_TITLE;
-      if (tooLong !== this.tooLong) {
-        this.tooLong = tooLong;
-        this.changed();
-      }
     });
     /** On the row around the field: what the keyboard is moved from to reach it (focusField). */
     this.renameFocus = cx.focus_handle();
@@ -472,7 +465,6 @@ export class SidebarState {
     const original = this.title(session);
     const renaming = { session, original, saving: false, title: null, focused: false };
     this.renaming = renaming;
-    this.tooLong = false;
     this.name.set_value(original);
     log(`sessions: renaming ${session.id}`);
     this.changed();
@@ -511,11 +503,6 @@ export class SidebarState {
       this.endRename(fromKeyboard);
       return;
     }
-    if ([...title].length > MAX_TITLE) {
-      this.tooLong = true;
-      this.changed();
-      return;
-    }
     renaming.saving = true;
     renaming.title = title;
     this.changed();
@@ -541,7 +528,6 @@ export class SidebarState {
   /** Ends editing; `focusRoot` when the keyboard was in the field, so the shortcuts work again. */
   endRename(focusRoot) {
     this.renaming = null;
-    this.tooLong = false;
     this.changed();
     if (focusRoot) this.hooks.focusRoot();
   }
@@ -972,9 +958,6 @@ function renameRow(ui, cx) {
           if (event.key === 'escape') ui.cancelRename();
         })
         .child(field),
-    )
-    .when(ui.tooLong, (el) =>
-      el.child(text(t('taskNameTooLong'), 'small', m.destructive).pl(8).pb(4)),
     );
 }
 

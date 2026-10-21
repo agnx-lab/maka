@@ -24,3 +24,5 @@
 Persists the Root's connection catalog, credentials, model catalog and preferences. `ConfigurationStore` uses an existing owned Root. Connection observations and credential revisions are separate, so clients can inspect configuration without receiving secrets. These records control execution and do not belong in model conversation history.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)
+
+Connection, model and credential records preserve complete supported values without application byte or item quotas. Physical admission and operation settlement belong to the Host. Queries return continuation slices; a complete first item may exceed the page packing target. Revisions, exact identities, canonical structure and durable OAuth completion receipts remain authoritative.

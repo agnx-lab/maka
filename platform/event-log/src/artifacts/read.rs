@@ -149,7 +149,7 @@ impl EventLog {
     ) -> Result<Option<ArtifactChunk>, StoreError> {
         self.validate_root()?;
         ids(session_id, Some(artifact_id))?;
-        if limit == 0 || limit as u64 > MAX_ATTACHMENT_BYTES || offset > 9_007_199_254_740_991 {
+        if limit == 0 || offset > 9_007_199_254_740_991 {
             return Err(invalid("Invalid artifact read bounds"));
         }
         let (session, artifact) = (session_id.to_owned(), artifact_id.to_owned());
@@ -199,7 +199,7 @@ async fn lookup(
 ) -> Result<Option<Row>, StoreError> {
     let row: Option<(i64, i64, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT rowid, length(payload),
-         CASE WHEN length(CAST(record_json AS BLOB)) <= 16384 THEN record_json END,
+         record_json,
          CASE WHEN length(CAST(content_sha256 AS BLOB)) = 71 THEN content_sha256 END
          FROM artifacts WHERE session_id = ?1 AND id = ?2
          AND (?3 IS NULL OR json_extract(record_json, '$.turnId') = ?3)",
@@ -210,7 +210,7 @@ async fn lookup(
     .fetch_optional(connection)
     .await?;
     row.map(|(rowid, total, raw, digest)| {
-        let raw = raw.ok_or_else(|| invalid("Stored artifact metadata exceeds limit"))?;
+        let raw = raw.ok_or_else(|| invalid("Stored artifact metadata is missing"))?;
         digest.ok_or_else(|| invalid("Stored artifact digest exceeds limit"))?;
         let record = decode(&raw, session, artifact)?;
         if u64::try_from(total).ok() != Some(record.size_bytes) {

@@ -25,11 +25,7 @@ fn budgeted_stream() -> (ModelStream, Arc<Semaphore>) {
     let budget = Arc::new(Semaphore::new(16 * 1024));
     let (sender, receiver) = mpsc::channel(4);
     let (activity, _) = tokio::sync::watch::channel(tokio::time::Instant::now());
-    let events = ChannelEvents {
-        total: std::sync::atomic::AtomicU32::new(0),
-        sender,
-        activity,
-    };
+    let events = ChannelEvents { sender, activity };
     let cancellation = CancellationToken::new();
     let producer_cancel = cancellation.clone();
     let producer_budget = budget.clone();

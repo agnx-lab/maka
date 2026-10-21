@@ -50,7 +50,7 @@ async fn selection_is_created_once_and_finishing_only_discards_preparation() {
 }
 
 #[tokio::test]
-async fn launcher_requires_root_and_bounds_stored_configuration_before_reading() {
+async fn launcher_requires_root_and_preserves_complete_configuration_with_typed_storage() {
     let directory = tempfile::tempdir().unwrap();
     let unowned = EventLog::open(&directory.path().join("unowned.sqlite"))
         .await
@@ -84,21 +84,32 @@ async fn launcher_requires_root_and_bounds_stored_configuration_before_reading()
                 .is_err()
         );
     }
-    assert!(
-        store
-            .begin_application_launch(Launch {
-                deployment: Uuid::new_v4(),
-                configuration: json!({"large":"x".repeat(MAX_CONFIGURATION)}),
-                pending: Some(vec![1])
+    let deployment = Uuid::new_v4();
+    let configuration = json!({"large":"x".repeat(1024 * 1024 + 1)});
+    store
+        .begin_application_launch(Launch {
+            deployment,
+            configuration: configuration.clone(),
+            pending: Some(vec![1]),
+        })
+        .await
+        .unwrap();
+    let stored = store.application_launch().await.unwrap().unwrap();
+    assert_eq!(stored.deployment, deployment);
+    assert_eq!(stored.configuration, configuration);
+    assert_eq!(stored.pending, Some(vec![1]));
+    store
+        .connection
+        .run(|connection| {
+            Box::pin(async move {
+                sqlx::query("UPDATE application_launch SET deployment='invalid-uuid'")
+                    .execute(connection)
+                    .await?;
+                Ok(())
             })
-            .await
-            .is_err()
-    );
-    store.connection.run(|connection| Box::pin(async move {
-        sqlx::query("INSERT INTO application_launch (singleton,deployment,configuration,pending) VALUES (1,?,json_object('large',printf('%.*c',1048576,'x')),NULL)")
-            .bind(Uuid::new_v4().to_string()).execute(connection).await?;
-        Ok(())
-    })).await.unwrap();
+        })
+        .await
+        .unwrap();
     assert!(store.application_launch().await.is_err());
     store.close().await.unwrap();
 }

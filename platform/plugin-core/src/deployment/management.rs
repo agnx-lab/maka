@@ -48,7 +48,6 @@ pub struct PackageInstall {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PackageUrlInstall {
     pub expected_revision: u64,
-    #[schemars(length(min = 1, max = 8192))]
     pub url: String,
     /// Optional SHA-256 of the downloaded bundle bytes, from a trusted publisher.
     #[serde(default)]
@@ -74,9 +73,7 @@ pub struct DeploymentReplace {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeploymentDocument {
     pub input: Input,
-    #[schemars(length(max = 128))]
     pub remote_exports: Vec<RemoteObservation>,
-    #[schemars(length(max = 128))]
     pub packages: Vec<PackageRef>,
 }
 
@@ -211,7 +208,6 @@ pub enum ManagementResult<T> {
     Rejected {
         reason: ManagementRejection,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[schemars(length(max = 512))]
         diagnostic: Option<String>,
     },
 }

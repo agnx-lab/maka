@@ -105,7 +105,7 @@ pub(super) fn home(
     path: &str,
     policy: Arc<maka_sandbox::filesystem::Compiled>,
 ) -> Result<Vec<CapturedSource>, String> {
-    if path.len() > 4096 || !Path::new(path).is_absolute() {
+    if !Path::new(path).is_absolute() {
         return Err("skills_configuration_invalid".into());
     }
     let root = ReadRoot::capture(path)

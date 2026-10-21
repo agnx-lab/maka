@@ -333,7 +333,6 @@ export function ModelSelect(props: {
               void loadModels(true);
             }}
             placeholder="Search models…"
-            maxLength={256}
             style={{
               placeholderColor: C.muted,
               color: C.text,

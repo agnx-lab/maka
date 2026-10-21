@@ -22,7 +22,6 @@ use crate::client::Client;
 use agent_client_protocol::schema::v2 as acp;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use maka_agent_facts::artifact;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 
@@ -66,7 +65,7 @@ pub async fn prepare(
             Source::Bytes(bytes) => bytes,
             Source::File(path) => io::read(path, cancel).await?,
         };
-        if bytes.is_empty() || bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        if bytes.is_empty() {
             return Err("Invalid attachment byte length".into());
         }
         prepared.push(Prepared {
@@ -160,55 +159,58 @@ fn validate(blocks: Vec<acp::ContentBlock>) -> Result<(Message, Vec<Pending>), c
             }
             _ => return Err("Unsupported prompt content type".into()),
         };
-        if pending.len() > 8 {
-            return Err("Too many attachments".into());
-        }
         if let Some(text) = text {
             text_bytes = text_bytes
-                .saturating_add(text.len())
-                .saturating_add(if parts.is_empty() { 0 } else { 2 });
-            if text_bytes > 48 * 1024 {
-                return Err("Prompt text exceeds byte limit".into());
-            }
+                .checked_add(text.len())
+                .and_then(|bytes| bytes.checked_add(if parts.is_empty() { 0 } else { 2 }))
+                .ok_or("Prompt text size is not representable")?;
             parts.push(text);
         }
     }
     for item in &mut pending {
-        metadata(&item.name, 512)?;
+        metadata(&item.name)?;
         item.name = artifact::normalize_name(&item.name);
         if let Some(mime) = &item.mime {
-            metadata(mime, 256)?;
+            metadata(mime)?;
         }
+    }
+    let mut text = String::new();
+    text.try_reserve(text_bytes)?;
+    for (index, part) in parts.into_iter().enumerate() {
+        if index > 0 {
+            text.push_str("\n\n");
+        }
+        text.push_str(&part);
     }
     Ok((
         Message {
-            text: parts.join("\n\n"),
+            text,
             attachments: vec![],
         },
         pending,
     ))
 }
 
-fn metadata(value: &str, max: usize) -> Result<(), crate::Error> {
-    if value.is_empty() || value.len() > max || value.bytes().any(|b| b < 32 || b == 127) {
+fn metadata(value: &str) -> Result<(), crate::Error> {
+    if value.is_empty() || value.bytes().any(|b| b < 32 || b == 127) {
         return Err("Invalid attachment metadata".into());
     }
     Ok(())
 }
 fn resource_uri(value: &str) -> Result<url::Url, crate::Error> {
-    if value.len() > 4096 || value.chars().any(char::is_control) {
+    if value.chars().any(char::is_control) {
         return Err("Invalid resource URI".into());
     }
     Ok(url::Url::parse(value).map_err(|_| "Invalid resource URI")?)
 }
 fn decode(value: &str) -> Result<Vec<u8>, crate::Error> {
-    if value.len() > (MAX_ATTACHMENT_BYTES as usize).div_ceil(3) * 4 {
-        return Err("Attachment exceeds byte limit".into());
-    }
-    let bytes = STANDARD.decode(value)?;
-    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err("Attachment exceeds byte limit".into());
-    }
+    let capacity = (value.len() / 4)
+        .checked_mul(3)
+        .and_then(|bytes| bytes.checked_add(3))
+        .ok_or("Attachment size is not representable")?;
+    let mut bytes = Vec::new();
+    bytes.try_reserve(capacity)?;
+    STANDARD.decode_vec(value, &mut bytes)?;
     Ok(bytes)
 }
 fn active(cancel: &CancellationToken) -> Result<(), crate::Error> {
@@ -239,8 +241,14 @@ mod tests {
         assert!(files.is_empty());
     }
     #[test]
-    fn rejects_bad_payloads_and_limits_before_io() {
-        assert!(validate(vec!["x".repeat(48 * 1024 + 1).into()]).is_err());
+    fn complete_context_preserves_validation_before_io() {
+        assert_eq!(
+            validate(vec!["x".repeat(48 * 1024 + 1).into()])
+                .unwrap()
+                .0
+                .text,
+            "x".repeat(48 * 1024 + 1)
+        );
         assert!(
             validate(vec![block(
                 serde_json::json!({"type":"image", "data":"!", "mimeType":"image/png"})
@@ -250,7 +258,7 @@ mod tests {
         let link = block(
             serde_json::json!({"type":"resource_link", "uri":"file:///missing", "name":"file"}),
         );
-        assert!(validate(vec![link; 9]).is_err());
+        assert_eq!(validate(vec![link; 9]).unwrap().1.len(), 9);
         assert!(validate(vec![block(serde_json::json!({"type":"resource_link", "uri":"file:///tmp/a?query", "name":"file"}))]).is_err());
     }
 }

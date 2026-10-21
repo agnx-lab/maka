@@ -110,7 +110,7 @@ enum Input {
     },
     RoutePreset {
         #[serde(default)]
-        #[schemars(length(max = 16), extend("uniqueItems" = true))]
+        #[schemars(extend("uniqueItems" = true))]
         dependencies: Vec<String>,
         preset: String,
         title: String,
@@ -161,7 +161,7 @@ enum Input {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Route {
     #[serde(default)]
-    #[schemars(length(max = 16), extend("uniqueItems" = true))]
+    #[schemars(extend("uniqueItems" = true))]
     dependencies: Vec<String>,
     worker: String,
     target: Target,
@@ -222,13 +222,9 @@ pub(super) fn prepare(
     context: &NativeContext,
     value: Value,
 ) -> Result<(Value, Tasks, Vec<ToolRegistration>, Link), String> {
-    if serde_json::to_vec(&value)
-        .map_err(|_| "workhub_configuration_invalid")?
-        .len()
-        > 128 * 1024
-        || !jsonschema::validator_for(&configuration_schema())
-            .expect("WorkHub schema")
-            .is_valid(&value)
+    if !jsonschema::validator_for(&configuration_schema())
+        .expect("WorkHub schema")
+        .is_valid(&value)
     {
         return Err("workhub_configuration_invalid".into());
     }
@@ -656,13 +652,8 @@ impl Hub {
                     .map_err(|_| "workhub_store_unavailable")?
                     .is_none()
                 {
-                    let Some((assignment, title)) =
-                        self.prepare_assignment(&context, &id, route, None).await?
-                    else {
-                        return Ok(
-                            serde_json::json!({"kind":"rejected","reason":"input_too_large"}),
-                        );
-                    };
+                    let (assignment, title) =
+                        self.prepare_assignment(&context, &id, route, None).await?;
                     if cancellation.is_cancelled() {
                         return Err("workhub_cancelled".into());
                     }
@@ -707,7 +698,7 @@ impl Hub {
         id: &str,
         route: Route,
         graph: Option<graph::TaskSource>,
-    ) -> Result<Option<(Assignment, String)>, String> {
+    ) -> Result<(Assignment, String), String> {
         let Route {
             dependencies,
             worker,
@@ -741,10 +732,7 @@ impl Hub {
                 return Err("workhub_dependency_source_invalid".into());
             }
         }
-        if note.trim().is_empty()
-            || (graph.is_none() && note.len() > 16 * 1024)
-            || (graph.is_some() && (note.chars().count() > 60_000 || note.contains('\0')))
-        {
+        if note.trim().is_empty() || note.contains('\0') {
             return Err("workhub_route_invalid".into());
         }
         let (delivery, mut input) = match (model, executor) {
@@ -793,7 +781,7 @@ impl Hub {
             }
         };
         input["message"] = serde_json::json!(message);
-        Ok(Some((
+        Ok((
             Assignment {
                 graph,
                 dependencies,
@@ -810,7 +798,7 @@ impl Hub {
                 attachments,
             },
             title,
-        )))
+        ))
     }
     async fn wait_task(
         &self,

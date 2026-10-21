@@ -23,8 +23,6 @@ use crate::fields::{
 use serde::Serialize;
 use std::borrow::Cow;
 
-const MAX_FRONTMATTER_BYTES: usize = 256 * 1024;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillDocument {
     pub manifest: Manifest,
@@ -81,13 +79,6 @@ pub fn parse(text: &str) -> Result<SkillDocument, Box<InvalidDocument>> {
     result.body = normalized[body_start..]
         .trim_matches(fields::whitespace)
         .into();
-    if frontmatter.len() > MAX_FRONTMATTER_BYTES {
-        return fail(
-            result,
-            MalformedFrontmatter,
-            "SKILL.md frontmatter exceeds the parsing byte limit.",
-        );
-    }
     // Arbitrary YAML exists only at this boundary; all runtime-facing fields below are typed.
     let Some(raw) = crate::yaml::parse(frontmatter) else {
         return fail(
@@ -239,9 +230,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bounded_yaml_rejects_expansion_and_depth_without_truncating_instructions() {
+    fn yaml_preserves_large_metadata_and_body_but_rejects_aliases() {
         for header in [
-            format!("name: {}", "x".repeat(MAX_FRONTMATTER_BYTES)),
+            format!("name: {}\ndescription: b", "x".repeat(256 * 1024)),
             format!(
                 "name: a\ndescription: b\nignored: {}0{}",
                 "[".repeat(64),
@@ -251,12 +242,14 @@ mod tests {
                 "name: a\ndescription: b\nignored: [{}]",
                 "0,".repeat(32_768)
             ),
-            "name: &name a\ndescription: *name".into(),
         ] {
-            let rejected = parse(&format!("---\n{header}\n---\nbody")).unwrap_err();
-            assert_eq!(rejected.issues[0].code, MalformedFrontmatter);
-            assert_eq!(rejected.body, "body");
+            let parsed = parse(&format!("---\n{header}\n---\nbody")).unwrap();
+            assert_eq!(parsed.body, "body");
+            assert_eq!(parsed.manifest.description, "b");
         }
+        let rejected = parse("---\nname: &name a\ndescription: *name\n---\nbody").unwrap_err();
+        assert_eq!(rejected.issues[0].code, MalformedFrontmatter);
+        assert_eq!(rejected.body, "body");
         let body = "😀".repeat(100_000);
         let parsed = parse(&format!("---\nname: a\ndescription: b\n---\n{body}")).unwrap();
         assert_eq!(parsed.body, body);

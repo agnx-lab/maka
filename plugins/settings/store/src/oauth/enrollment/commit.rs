@@ -62,11 +62,6 @@ impl PreparedLogin {
                     if receipt::read(tx, &ticket.input.attempt_id).await?.is_some() {
                         return Ok(false);
                     }
-                    if receipt::pending_count(tx).await? >= 256 {
-                        return Err(ConfigError::Invalid(
-                            "unresolved login capacity is exhausted".into(),
-                        ));
-                    }
                     let attempt = ticket.input.attempt_id.clone();
                     let mut receipt = LoginReceipt::new(ticket.input, ticket.identity)?;
                     receipt.phase = Phase::Exchanging;
@@ -140,7 +135,6 @@ impl PreparedLogin {
                         Some(before) => actual != Some(before),
                         None => {
                             actual.is_some()
-                                || catalog.connections.len() >= 1024
                                 || catalog.connections.iter().any(|row| row.slug == after.slug)
                         }
                     };

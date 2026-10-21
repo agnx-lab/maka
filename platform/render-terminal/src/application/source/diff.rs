@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Bounded display preparation from the original TUI change projection.
+//! Complete display preparation from the original TUI change projection.
 use crate::markdown::{
     diff::{Kind, Row},
     syntax,
@@ -29,11 +29,8 @@ use std::time::Duration;
 fn invalid(message: &str) -> maka_ui_runtime::Error {
     maka_ui_runtime::Error::Invalid(message.into())
 }
-fn language(hint: &Option<String>) -> maka_ui_runtime::Result<Option<&'static str>> {
-    if hint.as_ref().is_some_and(|s| s.len() > 128) {
-        return Err(invalid("Diff language byte budget"));
-    }
-    Ok(hint.as_deref().and_then(syntax::language))
+fn language(hint: &Option<String>) -> Option<&'static str> {
+    hint.as_deref().and_then(syntax::language)
 }
 fn bounded(source: &str) -> bool {
     source.len() <= 8192 && source.lines().count() <= 256 && !source.contains('\0')
@@ -64,9 +61,6 @@ pub(super) fn prepare(content: &DiffContent) -> maka_ui_runtime::Result<(String,
             source,
             rows: annotations,
         } => {
-            if source.len() > 65536 || annotations.len() > 8192 {
-                return Err(invalid("Diff source or row budget"));
-            }
             let mut end = 0;
             for row in annotations {
                 let range = row.start as usize..row.end as usize;
@@ -85,7 +79,7 @@ pub(super) fn prepare(content: &DiffContent) -> maka_ui_runtime::Result<(String,
                         DiffKind::Context => Kind::Context,
                         DiffKind::Content => Kind::Content,
                     },
-                    language: language(&row.language)?,
+                    language: language(&row.language),
                 });
             }
             text.push_str(source);
@@ -95,14 +89,10 @@ pub(super) fn prepare(content: &DiffContent) -> maka_ui_runtime::Result<(String,
             after,
             language: hint,
         } => {
-            if !bounded(before)
-                || !bounded(after)
-                || before.len() + after.len() > 8192
-                || before.lines().count() + after.lines().count() > 256
-            {
-                return Err(invalid("Diff comparison byte or line budget"));
+            if before.contains('\0') || after.contains('\0') {
+                return Err(invalid("Diff comparison requires text without NUL"));
             }
-            let language = language(hint)?;
+            let language = language(hint);
             // At the deadline similar may produce a coarser valid diff.
             let diff = TextDiff::configure()
                 .timeout(Duration::from_millis(2))
@@ -121,10 +111,7 @@ pub(super) fn prepare(content: &DiffContent) -> maka_ui_runtime::Result<(String,
             operation,
             language: hint,
         } => {
-            if source.len() > 65536 {
-                return Err(invalid("Diff patch source byte budget"));
-            }
-            let language = language(hint)?;
+            let language = language(hint);
             // Validate the whole operation before emitting any colored rows.
             // This never applies a patch or looks up a local file.
             match operation {
@@ -190,22 +177,72 @@ mod tests {
         }
     }
     #[test]
-    fn comparisons_bound_combined_bytes_lines_and_binary_inputs() {
+    fn complete_comparisons_and_annotations_preserve_text_and_invalid_ranges() {
         for (before, after) in [
             ("x".repeat(4096), "y".repeat(4097)),
             ("中".repeat(1500), "😀".repeat(1000)),
             ("x\n".repeat(128), "y\n".repeat(129)),
-            ("binary\0".into(), "new".into()),
         ] {
-            assert!(
-                prepare(&DiffContent::Comparison {
+            let (text, rows) = prepare(&DiffContent::Comparison {
+                before: before.clone(),
+                after: after.clone(),
+                language: Some("unknown-language".repeat(20)),
+            })
+            .unwrap();
+            assert_eq!(
+                text,
+                format!(
+                    "{}{}{}{}",
                     before,
+                    if before.ends_with('\n') { "" } else { "\n" },
                     after,
-                    language: None
-                })
-                .is_err()
+                    if after.ends_with('\n') { "" } else { "\n" }
+                )
             );
+            assert!(rows.iter().all(|row| row.language.is_none()));
         }
+        assert!(
+            prepare(&DiffContent::Comparison {
+                before: "binary\0".into(),
+                after: "new".into(),
+                language: None
+            })
+            .is_err()
+        );
+        let source = "x".repeat(70000);
+        let rows = (0..8193)
+            .map(|index| maka_ui_runtime::diff::DiffRow {
+                start: index,
+                end: index + 1,
+                kind: DiffKind::Content,
+                language: None,
+            })
+            .chain(std::iter::once(maka_ui_runtime::diff::DiffRow {
+                start: 69999,
+                end: 70000,
+                kind: DiffKind::Content,
+                language: None,
+            }))
+            .collect();
+        let (text, rows) = prepare(&DiffContent::Annotated {
+            source: source.clone(),
+            rows,
+        })
+        .unwrap();
+        assert_eq!(text, source);
+        assert_eq!(rows.len(), 8194);
+        assert!(
+            prepare(&DiffContent::Annotated {
+                source: "😀".into(),
+                rows: vec![maka_ui_runtime::diff::DiffRow {
+                    start: 1,
+                    end: 2,
+                    kind: DiffKind::Content,
+                    language: None
+                }]
+            })
+            .is_err()
+        );
         let (text, rows) = prepare(&DiffContent::Comparison {
             before: String::new(),
             after: String::new(),
@@ -213,14 +250,6 @@ mod tests {
         })
         .unwrap();
         assert!(text.is_empty() && rows.is_empty());
-        assert!(
-            prepare(&DiffContent::Comparison {
-                before: "x".repeat(4096),
-                after: "y".repeat(4096),
-                language: None,
-            })
-            .is_ok()
-        );
     }
     #[test]
     fn native_patch_grammar_preserves_prefix_literals_and_empty_creation() {
@@ -277,13 +306,14 @@ mod tests {
                 assert!(rows.is_empty());
             }
         }
-        assert!(
-            prepare(&DiffContent::Patch {
-                source: "界".repeat(21846),
-                operation: DiffPatch::Create,
-                language: None
-            })
-            .is_err()
-        );
+        let source = "界".repeat(21846);
+        let (text, rows) = prepare(&DiffContent::Patch {
+            source: source.clone(),
+            operation: DiffPatch::Create,
+            language: None,
+        })
+        .unwrap();
+        assert_eq!(text, source);
+        assert!(rows.is_empty());
     }
 }

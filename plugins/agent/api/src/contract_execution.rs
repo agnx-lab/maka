@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentWorkRead")]
 pub struct WorkRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub target: WorkTarget,
     pub cursor: Option<AnswerCursor>,
@@ -40,11 +40,11 @@ pub struct WorkRead {
 #[schemars(rename = "AgentWorkTarget")]
 pub enum WorkTarget {
     Invocation {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         invocation_id: String,
     },
     Message {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         message_id: String,
     },
 }
@@ -52,7 +52,7 @@ pub enum WorkTarget {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentAnswerCursor")]
 pub struct AnswerCursor {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub invocation_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub offset: u64,
@@ -90,9 +90,9 @@ pub enum Work {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentExecutionRead")]
 pub struct ExecutionRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub invocation_id: String,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -100,7 +100,7 @@ pub struct ExecutionRead {
 #[schemars(rename = "AgentPatchRead")]
 pub struct PatchRead {
     pub execution: ExecutionRead,
-    #[schemars(range(max = 52_428_800u64))]
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub offset: u64,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -172,9 +172,9 @@ pub enum ExecutionState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentResume")]
 pub struct Resume {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub source_invocation_id: String,
     /// Exact Run-local count returned by execution.
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]

@@ -260,19 +260,23 @@ async fn paginated_inventories_preserve_metadata_and_reject_cycles_or_incomplete
     let oversized = Script::new([
         json!({"models":vec![json!({"name":"duplicate","endpoints":["chat"]});2049]}),
     ]);
-    assert!(
-        matches!(
-            cohere
-                .discover(input(&cohere, "https://relay.test/v2"), oversized.context())
-                .await,
-            Err(Error::Invalid(_))
-        ),
-        "raw page limits apply even when deduplication would shrink the result"
+    let models = cohere
+        .discover(input(&cohere, "https://relay.test/v2"), oversized.context())
+        .await
+        .unwrap();
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["duplicate"]
     );
 
     let cloudflare = binding("cloudflare-workers-ai");
     let script = Script::new([
         json!({"success":true,"result":[{"name":"@cf/future"}]}),
+        json!({"success":true,"result":[{"name":"@cf/future"}]}),
+        json!({"success":true,"result":[{"name":"@cf/later"}]}),
         json!({"success":true,"result":[]}),
     ]);
     let models = cloudflare
@@ -282,11 +286,14 @@ async fn paginated_inventories_preserve_metadata_and_reject_cycles_or_incomplete
         )
         .await
         .unwrap();
-    assert_eq!(models[0].id, "@cf/future");
     assert_eq!(
-        script.requests.lock().unwrap()[1].url,
-        "https://relay.test/accounts/account/ai/models/search?per_page=50&task=Text+Generation&page=2"
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["@cf/future", "@cf/later"]
     );
+    assert_eq!(script.requests.lock().unwrap().iter().map(|request| request.url.clone()).collect::<Vec<_>>(), (1..=4).map(|page| format!("https://relay.test/accounts/account/ai/models/search?per_page=50&task=Text+Generation&page={page}")).collect::<Vec<_>>());
     let invalid = Script::new([json!({"success":true})]);
     assert!(matches!(
         cloudflare

@@ -27,7 +27,6 @@ use std::io;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspacePath {
-    #[schemars(length(max = 5464))]
     pub bytes_base64: String,
 }
 impl WorkspacePath {
@@ -42,12 +41,8 @@ impl WorkspacePath {
         self.bytes().map(|_| ())
     }
     pub(crate) fn bytes(&self) -> io::Result<Vec<u8>> {
-        if self.bytes_base64.len() > 5464 {
-            return Err(invalid());
-        }
         let bytes = STANDARD.decode(&self.bytes_base64).map_err(|_| invalid())?;
         if bytes.is_empty()
-            || bytes.len() > 4096
             || bytes.contains(&0)
             || bytes
                 .split(|b| *b == b'/')

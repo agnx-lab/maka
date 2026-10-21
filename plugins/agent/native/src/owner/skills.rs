@@ -109,9 +109,6 @@ impl Owner {
         parent: &Scope,
     ) -> Result<SkillCandidates, String> {
         let session = self.session(&input.session_id).await?;
-        if input.query.len() > 16384 || input.query.chars().count() > 4096 {
-            return Err("agent_skill_query_invalid".into());
-        }
         let Some(library) = &self.skills else {
             return Ok(SkillCandidates::default());
         };
@@ -305,8 +302,7 @@ impl Owner {
             .invocation
             .validate()
             .map_err(|_| "agent_skill_preparation_invalid")?;
-        if record.metadata_prompt.len() > 18_000
-            || !maka_agent_facts::archive::valid_projection_digest(&record.revision)
+        if !maka_agent_facts::archive::valid_projection_digest(&record.revision)
             || required_tools.iter().any(|tool| !tools.contains(tool))
         {
             return Err("agent_skill_preparation_invalid".into());

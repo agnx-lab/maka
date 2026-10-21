@@ -129,7 +129,7 @@ function capture(state: State): Action[] {
   if (!selection || state.capture || state.prefill !== null || state.command || !observation)
     return [];
   const basis = observation.snapshot.text;
-  if (observation.snapshot.marked || basis.bytes > 512) {
+  if (observation.snapshot.marked) {
     state.error = true;
     return [];
   }

@@ -33,6 +33,7 @@ fn terminal_shell_preserves_arguments_stdio_cwd_pid_and_exit_status() {
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
     let cwd = directory.path().join("工作 目录");
     std::fs::create_dir(&cwd).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
     for args in [
         vec![],
         vec!["--help"],

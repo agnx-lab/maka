@@ -20,8 +20,6 @@
 use crate::{Error, filesystem::compile_glob};
 use regex_syntax::hir::{Class, Hir, HirKind, Repetition};
 
-const MAX_REGEX_BYTES: usize = 64 * 1024;
-
 /// Both kernel filters derive from the same glob parser used by Host checks.
 /// Ancestors are prefixes before a separator in any matching path; protecting
 /// only a glob's literal prefix would leave rename escapes under alternatives.
@@ -30,7 +28,6 @@ pub(super) fn compile(pattern: &str) -> Result<(String, Option<String>), Error> 
     let tree = regex_syntax::ParserBuilder::new()
         .utf8(false)
         .dot_matches_new_line(true)
-        .nest_limit(64)
         .build()
         .parse(glob.regex())
         .map_err(|error| Error::Invalid(error.to_string()))?;
@@ -117,9 +114,6 @@ fn render(tree: &Hir) -> Result<String, Error> {
                         continue;
                     };
                     literals.push(escape(character));
-                    if literals.len() > 1024 {
-                        return Err(Error::TooComplex);
-                    }
                 }
             }
             format!("({})", literals.join("|"))
@@ -157,9 +151,6 @@ fn render(tree: &Hir) -> Result<String, Error> {
             let mut result = String::new();
             for part in parts {
                 result.push_str(&render(part)?);
-                if result.len() > MAX_REGEX_BYTES {
-                    return Err(Error::TooComplex);
-                }
             }
             result
         }
@@ -185,9 +176,6 @@ fn render(tree: &Hir) -> Result<String, Error> {
             format!("({}){count}", render(&repetition.sub)?)
         }
     };
-    if rendered.len() > MAX_REGEX_BYTES {
-        return Err(Error::TooComplex);
-    }
     Ok(rendered)
 }
 

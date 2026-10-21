@@ -61,14 +61,16 @@ fn read(directory: &Dir, agents: bool) -> Vec<WorkspaceInstruction> {
         let Ok(file) = directory.open_with(name.name(), &options) else {
             continue;
         };
-        if !file
-            .metadata()
-            .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= 1024 * 1024)
-        {
+        let Ok(metadata) = file.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
             continue;
         }
+        let length = metadata.len();
         let mut bytes = Vec::new();
-        if file.take(1024 * 1024 + 1).read_to_end(&mut bytes).is_ok() && bytes.len() <= 1024 * 1024
+        if (&file).take(length).read_to_end(&mut bytes).is_ok()
+            && u64::try_from(bytes.len()).ok() == Some(length)
         {
             sources.push((name, String::from_utf8_lossy(&bytes).into_owned()));
         }

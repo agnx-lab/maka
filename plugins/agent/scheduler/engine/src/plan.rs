@@ -81,7 +81,7 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         }
     }
     pub fn validate(&self) -> Result<(), Error> {
-        crate::task::text(&self.task.id, 160)?;
+        crate::task::text(&self.task.id)?;
         if self
             .task
             .id
@@ -102,7 +102,6 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         .validate_fields()?;
         if self.task.created_at < 0
             || self.task.updated_at < self.task.created_at
-            || self.task.runs.len() > 20
             || (self.task.status == Status::Active && self.task.next_fire_at.is_none())
         {
             return Err(invalid("invalid persisted task state"));
@@ -110,12 +109,9 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         // Wall time can move backward after creation; the frozen trigger keeps
         // its actual scheduled time, independent of monotonic task metadata.
         if let Some(fire) = &self.pending {
-            crate::task::text(&fire.id, 256)?;
+            crate::task::text(&fire.id)?;
             fire.effect.validate()?;
-            if fire.task_id != self.task.id
-                || fire.scheduled_at < 0
-                || fire.intent.body().chars().count() > 8000
-            {
+            if fire.task_id != self.task.id || fire.scheduled_at < 0 {
                 return Err(invalid("invalid persisted trigger"));
             }
         }
@@ -129,16 +125,16 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
         timezone: String,
         now: i64,
     ) -> Result<Self, Error> {
-        crate::task::text(&id, 160)?;
+        crate::task::text(&id)?;
         if let Creator::Agent { session_id } = &creator {
-            crate::task::text(session_id, 160)?;
+            crate::task::text(session_id)?;
         }
         input.validate(now)?;
         let zone = TimeZone::get(&timezone)?;
         let next = input
             .schedule
             .next_after(now, &zone)?
-            .ok_or_else(|| invalid("schedule has no trigger within one year"))?;
+            .ok_or_else(|| invalid("schedule has no remaining trigger"))?;
         if input.expires_at.is_some_and(|expires| next >= expires) {
             return Err(invalid("schedule first fires after expiry"));
         }
@@ -232,7 +228,7 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
             .pending
             .as_ref()
             .ok_or_else(|| invalid("no pending trigger"))?;
-        if run.id != fire.id || run.at < fire.scheduled_at || run.message.chars().count() > 1024 {
+        if run.id != fire.id || run.at < fire.scheduled_at {
             return Err(invalid("run does not settle the pending trigger"));
         }
         let paused = self.task.status == Status::Paused;
@@ -245,8 +241,6 @@ impl<E: TaskEffect, A: Clone> TaskPlan<E, A> {
             .ok_or_else(|| invalid("fire count exhausted"))?;
         self.task.last_error = (run.outcome != Outcome::Ok).then(|| run.message.clone());
         self.task.runs.insert(0, run);
-        self.task.runs.truncate(20);
-        self.task.bound_history()?;
         self.pending = None;
         self.advance(self.task.updated_at)?;
         if paused && self.task.status == Status::Active {

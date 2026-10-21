@@ -31,13 +31,12 @@ pub(super) enum Segment {
 
 pub(super) fn compile(pattern: &str) -> Result<Vec<Segment>, ToolError> {
     if pattern.is_empty()
-        || pattern.len() > 4096
         || pattern.contains('\0')
         || Path::new(pattern).is_absolute()
         || pattern.split('/').any(|part| part == "..")
     {
         return Err(failed(
-            "Glob requires a bounded relative pattern without parent traversal; select the search directory with cwd",
+            "Glob requires a relative pattern without parent traversal; select the search directory with cwd",
         ));
     }
     if pattern.contains(['{', '}', '\\'])
@@ -68,9 +67,6 @@ pub(super) fn compile(pattern: &str) -> Result<Vec<Segment>, ToolError> {
     }
     if !segments.is_empty() && pattern.ends_with('/') {
         segments.push(Segment::Directory);
-    }
-    if segments.len() > 128 {
-        return Err(failed("Glob pattern exceeds path depth limit"));
     }
     Ok(segments)
 }

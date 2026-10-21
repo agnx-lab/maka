@@ -82,7 +82,7 @@ pub(super) async fn build(
             {
                 if ordinal < hit.position.saturating_sub(span.0) {
                     passages[index].has_more_before = true;
-                } else if ordinal > hit.position + span.1 {
+                } else if ordinal > hit.position.saturating_add(span.1) {
                     passages[index].has_more_after = true;
                 } else {
                     let anchor = ordinal == hit.position;
@@ -130,9 +130,9 @@ pub(super) async fn build(
                     .iter()
                     .map(|a| a.text_bytes() + 128)
                     .sum::<usize>();
-            if size <= budget {
+            if index == anchor || size <= budget {
                 keep.insert(index);
-                budget -= size;
+                budget = budget.saturating_sub(size);
             } else {
                 passage.truncated = true;
                 if index < anchor {
@@ -157,7 +157,7 @@ pub(super) async fn build(
 }
 fn excerpt(message: &Chunk, text: &str, anchor: bool, requested: usize) -> PassageMessage {
     let offset = text.floor_char_boundary(requested.min(text.len()));
-    let end = text.floor_char_boundary((offset + 4 * 1024).min(text.len()));
+    let end = text.floor_char_boundary(offset.saturating_add(4 * 1024).min(text.len()));
     PassageMessage {
         message_id: message.message_id.clone(),
         role: message.role,

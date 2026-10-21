@@ -31,7 +31,6 @@ use maka_ui_runtime::reading::{
 };
 use std::{ops::Range, rc::Rc, sync::Arc};
 
-const LIMIT: usize = 4096;
 #[derive(Clone)]
 pub(super) struct Active {
     document: DocumentWeak,
@@ -82,17 +81,22 @@ impl Paint {
     }
 }
 pub(super) fn documents(slots: &Slots<'_>) -> maka_ui_runtime::Result<(Vec<Entry>, Vec<Mount>)> {
-    fn visit(
-        slots: &Slots<'_>,
-        mount: &Mount,
-        path: &mut Vec<String>,
-        result: &mut Vec<Entry>,
-        dependencies: &mut Vec<Mount>,
-    ) -> maka_ui_runtime::Result<()> {
-        if path.len() > 32 {
-            return Ok(());
+    let mut result = Vec::new();
+    let mut dependencies = Vec::new();
+    let mut pending = vec![(slots.parent.clone(), Vec::<String>::new(), false)];
+    let mut active = std::collections::BTreeSet::new();
+    while let Some((mount, path, leaving)) = pending.pop() {
+        if leaving {
+            active.remove(&mount.id());
+            continue;
+        }
+        if !active.insert(mount.id()) {
+            return Err(maka_ui_runtime::Error::Invalid(
+                "cyclic native reading mount".into(),
+            ));
         }
         dependencies.push(mount.clone());
+        pending.push((mount.clone(), path.clone(), true));
         if let Some(owner) = slots.presenter.resources.owners.get(&mount.id()) {
             if let Some(owner) = owner.state.downcast_ref::<source::Owner>() {
                 let doc = owner.document.borrow();
@@ -100,10 +104,10 @@ pub(super) fn documents(slots: &Slots<'_>) -> maka_ui_runtime::Result<(Vec<Entry
                     result.push(Entry {
                         document: Rc::downgrade(&owner.document),
                         source: doc.source.clone(),
-                        path: path.clone(),
+                        path,
                     });
                 }
-                return Ok(());
+                continue;
             }
             if !path.is_empty()
                 && owner
@@ -111,31 +115,31 @@ pub(super) fn documents(slots: &Slots<'_>) -> maka_ui_runtime::Result<(Vec<Entry
                     .downcast_ref::<SceneState>()
                     .is_some_and(|state| state.reading.is_some())
             {
-                return Ok(());
+                continue;
             }
         }
-        for child in slots.presenter.application.frame(mount)?.view.slots() {
+        for child in slots
+            .presenter
+            .application
+            .frame(&mount)?
+            .view
+            .slots()
+            .iter()
+            .rev()
+        {
+            let mut path = path.clone();
             path.push(child.key.clone());
-            visit(
-                slots,
-                slots.presenter.application.child_mount(mount, &child.key)?,
+            pending.push((
+                slots
+                    .presenter
+                    .application
+                    .child_mount(&mount, &child.key)?
+                    .clone(),
                 path,
-                result,
-                dependencies,
-            )?;
-            path.pop();
+                false,
+            ));
         }
-        Ok(())
     }
-    let mut result = Vec::new();
-    let mut dependencies = Vec::new();
-    visit(
-        slots,
-        slots.parent,
-        &mut Vec::new(),
-        &mut result,
-        &mut dependencies,
-    )?;
     Ok((result, dependencies))
 }
 impl State {
@@ -166,14 +170,10 @@ impl State {
             _ => None,
         };
         let mut hits = Vec::new();
-        let mut limited = false;
+        let limited = false;
         if !next.query.is_empty() {
-            'entries: for (entry, doc) in entries.iter().enumerate() {
+            for (entry, doc) in entries.iter().enumerate() {
                 for (offset, _) in doc.source.match_indices(&next.query) {
-                    if hits.len() == LIMIT {
-                        limited = true;
-                        break 'entries;
-                    }
                     hits.push(Hit {
                         entry,
                         range: offset..offset + next.query.len(),

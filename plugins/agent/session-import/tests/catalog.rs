@@ -209,9 +209,13 @@ async fn catalog_paging_preserves_scope_archive_and_exact_wire_continuation() {
 
     // A wire page may stop before its item limit. Its next key must refer to the
     // last delivered row, not the last scanned or the first undelivered row.
-    let cwd = format!("/{}", "w".repeat(4094));
+    let cwd = format!("/{}", "w".repeat(54_000));
     for index in 0..20 {
-        let id = format!("large-{index}");
+        let id = if index == 0 {
+            format!("large-0-{}", "x".repeat(129))
+        } else {
+            format!("large-{index}")
+        };
         write(
             directory.path(),
             &format!("sessions/rollout-{id}.jsonl"),
@@ -234,9 +238,10 @@ async fn catalog_paging_preserves_scope_archive_and_exact_wire_continuation() {
         )
         .await
         .unwrap();
-        assert!(serde_json::to_vec(&page).unwrap().len() <= 48 * 1024);
+        assert!(serde_json::to_vec(&page).unwrap().len() <= 48 * 1024 || page.entries.len() == 1);
         assert!(!page.entries.is_empty());
         for entry in page.entries {
+            assert_eq!(entry.cwd.as_deref(), Some(cwd.as_str()));
             assert!(seen.insert(entry.id));
         }
         cursor = page.next;
@@ -245,6 +250,7 @@ async fn catalog_paging_preserves_scope_archive_and_exact_wire_continuation() {
         }
     }
     assert_eq!(seen.len(), 20);
+    assert!(seen.contains(&format!("large-0-{}", "x".repeat(129))));
     owner.finish().await.unwrap();
 }
 

@@ -116,9 +116,10 @@ async fn nested_ancestry_drain_and_replay_preserve_unknown_operations() {
     )
     .await
     .unwrap();
+    let child_call = "x".repeat(4097);
     let child = event(
         "one",
-        dispatch("child", "child-call", nested("parent", "parent-call")),
+        dispatch("child", &child_call, nested("parent", "parent-call")),
     );
     let commits = log.subscribe_commits();
     for bad in [
@@ -139,10 +140,6 @@ async fn nested_ancestry_drain_and_replay_preserve_unknown_operations() {
             ),
         ),
         event("one", dispatch("empty", "", ToolOrigin::Standalone)),
-        event(
-            "one",
-            dispatch("oversized", &"x".repeat(4097), ToolOrigin::Standalone),
-        ),
     ] {
         assert!(
             log.append(&EventWrite::plain((bad).clone()).unwrap())
@@ -174,7 +171,7 @@ async fn nested_ancestry_drain_and_replay_preserve_unknown_operations() {
             &EventWrite::plain(
                 (event(
                     "one",
-                    dispatch("duplicate", "child-call", nested("parent", "parent-call"))
+                    dispatch("duplicate", &child_call, nested("parent", "parent-call"))
                 ))
                 .clone()
             )

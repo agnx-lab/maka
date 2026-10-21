@@ -326,29 +326,47 @@ impl Directory {
 
 fn read(root: &Dir, input: ReadFile, cancellation: &CancellationToken) -> Result<FilePage, Error> {
     path(&input.path)?;
-    if input.limit == 0 || input.limit > CHUNK || input.offset > MAX_OFFSET {
+    if input.limit == 0 || input.offset > MAX_OFFSET {
         return Err(Error::Invalid("invalid read range".into()));
     }
 
     let (parent, name) = parent(root, &input.path)?;
     let mut file = parent.open_with(name, options().read(true))?;
-    if !file.metadata()?.is_file() {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(Error::Invalid("expected a regular file".into()));
     }
     file.seek(SeekFrom::Start(input.offset))?;
+    let remaining = metadata.len().saturating_sub(input.offset);
+    let extent = remaining.min(u64::try_from(input.limit).unwrap_or(u64::MAX));
+    let mut reader = file.take(extent);
     let mut bytes = Vec::new();
-    let mut file = file.take(input.limit as u64 + 1);
     let mut buffer = [0_u8; 16 * 1024];
-    loop {
+    while reader.limit() != 0 {
         check(cancellation)?;
-        let count = file.read(&mut buffer)?;
+        let count = reader.read(&mut buffer)?;
         if count == 0 {
-            break;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "file changed within its captured read extent",
+            )
+            .into());
         }
+        bytes.try_reserve(count).map_err(std::io::Error::other)?;
         bytes.extend_from_slice(&buffer[..count]);
     }
-    let next_offset = (bytes.len() > input.limit).then_some(input.offset + input.limit as u64);
-    bytes.truncate(input.limit);
+    check(cancellation)?;
+    let next_offset = if remaining > extent {
+        Some(
+            input
+                .offset
+                .checked_add(extent)
+                .filter(|offset| *offset <= MAX_OFFSET)
+                .ok_or_else(|| Error::Invalid("read offset cannot be represented".into()))?,
+        )
+    } else {
+        None
+    };
     Ok(FilePage { bytes, next_offset })
 }
 
@@ -413,10 +431,7 @@ fn list(
     if !input.path.is_empty() {
         path(&input.path)?;
     }
-    if input.limit == 0
-        || input.limit > 1024
-        || input.after.as_ref().is_some_and(|s| s.len() > 4096)
-    {
+    if input.limit == 0 || input.limit > 1024 {
         return Err(Error::Invalid("invalid directory page limit".into()));
     }
 
@@ -583,7 +598,6 @@ pub fn validate_path(value: &str) -> Result<(), Error> {
 
 fn path(value: &str) -> Result<(), Error> {
     if value.is_empty()
-        || value.len() > 4096
         || value.chars().any(char::is_control)
         || value.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])
         || value

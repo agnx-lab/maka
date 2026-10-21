@@ -126,8 +126,7 @@ export function canSave(state: State, props: ConnectionFormProps) {
         !f.failed &&
         !f.command &&
         !!f.observation &&
-        !f.observation.snapshot.marked &&
-        f.observation.snapshot.text.bytes <= 65536
+        !f.observation.snapshot.marked
       );
     })
   );
@@ -205,22 +204,15 @@ export function utf8Bytes(value: string) {
 }
 
 export function json(text: string, nullable = false) {
-  // Public input must fit inside the native JSON callback envelope as well as
-  // its domain schema. Count containers bottom-up before constructing actions.
-  const depths = new WeakMap<object, number>();
-  const value: unknown = JSON.parse(text, (_, value: unknown) => {
-    if (typeof value === 'number' && !Number.isFinite(value))
+  const value: unknown = JSON.parse(text);
+  const pending: unknown[] = [value];
+  while (pending.length) {
+    const item = pending.pop();
+    if (typeof item === 'number' && !Number.isFinite(item))
       throw new Error('finite number required');
-    if (value && typeof value === 'object') {
-      let depth = 1;
-      for (const child of Object.values(value))
-        if (child && typeof child === 'object')
-          depth = Math.max(depth, 1 + (depths.get(child) ?? 0));
-      if (depth > 64) throw new Error('JSON input exceeds editor nesting limit');
-      depths.set(value, depth);
-    }
-    return value;
-  });
+    if (item && typeof item === 'object')
+      for (const child of Object.values(item)) pending.push(child);
+  }
   if ((!nullable || value !== null) && !isObject(value)) throw new Error('object required');
   return value as Record<string, unknown> | null;
 }
@@ -231,7 +223,7 @@ export function mutate(state: State, actions: Action[], validation: SettingsVali
   try {
     const changes: ConnectionCatalogEntryUpdate = {};
     if (values.name !== undefined) {
-      if (!values.name.length || values.name.length > 256) throw new Error('name');
+      if (!values.name.length) throw new Error('name');
       if (!state.baseline || values.name !== state.baseline.name) changes.name = values.name;
     }
     let cfg: Record<string, unknown> | undefined;
@@ -251,7 +243,7 @@ export function mutate(state: State, actions: Action[], validation: SettingsVali
         .split(/\r?\n/u)
         .map((id) => id.trim())
         .filter(Boolean);
-      if (ids.length > 256 || new Set(ids).size !== ids.length) throw new Error('models');
+      if (new Set(ids).size !== ids.length) throw new Error('models');
       changes.enabledModelIds = ids;
     }
     if (values.overrides !== undefined)
@@ -261,11 +253,7 @@ export function mutate(state: State, actions: Action[], validation: SettingsVali
       ) as ConnectionCatalogEntryUpdate['modelOverrides'];
     if (values.overlay !== undefined) changes.requestBodyOverlay = json(values.overlay, true);
     if (!state.baseline) {
-      if (
-        !values.slug ||
-        !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(values.slug) ||
-        values.slug.length > 64
-      )
+      if (!values.slug || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(values.slug))
         throw new Error('slug');
       const input = {
         expectedCatalogRevision: state.catalogRevision,

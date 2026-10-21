@@ -95,7 +95,7 @@ async fn seed(log: &EventLog) -> (u64, Vec<fixtures::Row>) {
     assert_eq!(through, 10);
     // Independent full canonical replay: no boundary selector or prefix algorithm.
     let canonical = log.prefix(64, 1_000_000).await.unwrap();
-    let mut view = maka_presentation::InvocationView::new(8 * 1024 * 1024).unwrap();
+    let mut view = maka_presentation::InvocationView::new();
     let mut expected = Vec::new();
     for fact in &canonical.events {
         let resolved = if matches!(

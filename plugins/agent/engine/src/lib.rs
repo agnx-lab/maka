@@ -396,10 +396,7 @@ impl Engine {
         claim: Option<continuation::PreparedClaim>,
         cancellation: CancellationToken,
     ) -> Result<RunningInvocation, RunError> {
-        if input
-            .main_output_limit
-            .is_some_and(|limit| limit == 0 || limit > 10_000_000_000)
-        {
+        if input.main_output_limit.is_some_and(|limit| limit == 0) {
             return Err(RunError::InvalidInput("invalid Main output limit".into()));
         }
         if let Some(context) = &input.context {
@@ -459,7 +456,6 @@ impl Engine {
             _ => {}
         }
         if !std::path::Path::new(&input.configuration.cwd).is_absolute()
-            || input.configuration.cwd.len() > 4096
             || input.configuration.cwd.contains('\0')
             || input
                 .configuration

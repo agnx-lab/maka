@@ -431,9 +431,6 @@ impl Repository {
         if header.control.closed() {
             return Err(Error::Closed);
         }
-        if header.work_count + update.add_work.len() > 1024 {
-            return Err(invalid("graph epoch exceeds 1024 work items"));
-        }
         header.control.schedule_revision += 1;
         header.control.finished = update.finish.is_some();
         header.work_count += update.add_work.len();

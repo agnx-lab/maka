@@ -166,14 +166,6 @@ async fn filesystem(view: &ReadDirectory, query: Query) -> Result<Page, Error> {
                 .map_err(|_| Error::Invalid("invalid Codex catalog cursor"))
         })
         .transpose()?;
-    // The shared page budget reserves its small envelope, including this tag.
-    if serde_json::to_vec(&result)
-        .map_err(|_| Error::Invalid("invalid catalog page"))?
-        .len()
-        > super::PAGE_BYTES
-    {
-        return Err(Error::Invalid("catalog page exceeds wire budget"));
-    }
     Ok(result)
 }
 
@@ -399,7 +391,7 @@ fn entry(row: Vec<Cell>, root: &Path, selected_root: &Path) -> Result<Option<(Ke
 }
 
 fn relative_path(root: &Path, path: &str, id: &str) -> Option<String> {
-    if path.len() > 32 * 1024 || path.chars().any(char::is_control) {
+    if path.chars().any(char::is_control) {
         return None;
     }
     let path = dunce::simplified(Path::new(path));

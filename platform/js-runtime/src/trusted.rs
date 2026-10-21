@@ -19,7 +19,6 @@
 
 //! One lazily started, trusted model isolate per Host. Network waits are
 //! multiplexed; generated Code Mode JavaScript never enters it.
-mod budget;
 mod engine;
 mod http;
 mod lifetime;

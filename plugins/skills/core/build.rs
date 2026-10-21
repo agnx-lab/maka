@@ -229,24 +229,6 @@ fn main() {
                 PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("authoring-source-index.md");
             fs::write(&index_path, index).unwrap();
             files.insert("references/source-index.md".into(), index_path);
-            assert!(
-                files.len() <= 256,
-                "authoring resources exceed runtime resource limit"
-            );
-            assert!(
-                files
-                    .values()
-                    .all(|path| fs::metadata(path).unwrap().len() <= 1024 * 1024),
-                "authoring resource exceeds file limit"
-            );
-            assert!(
-                files
-                    .values()
-                    .map(|path| fs::metadata(path).unwrap().len())
-                    .sum::<u64>()
-                    <= 16 * 1024 * 1024,
-                "authoring resources exceed byte budget"
-            );
         }
         let document = declared_file(&root, "SKILL.md");
         source.push_str(&format!(

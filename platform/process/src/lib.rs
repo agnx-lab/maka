@@ -55,8 +55,6 @@ use tokio_util::sync::CancellationToken;
 pub const SHELL_NAME: &str = "Shell";
 pub const SHELL_DESCRIPTION: &str = "Execute a command with the authorized filesystem and network access. Returns bounded stdout/stderr tails.";
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
-const MAX_TIMEOUT_MS: u64 = 600_000;
-const MAX_COMMAND_BYTES: usize = 65_536;
 
 /// Bounded observations, not durable resource facts. Started precedes output.
 #[derive(Debug)]
@@ -85,13 +83,13 @@ pub fn shell_schema() -> Value {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Input {
-    #[schemars(length(min = 1, max = MAX_COMMAND_BYTES))]
+    #[schemars(length(min = 1))]
     command: String,
     /// Load the shell's login profile. Set false to skip it.
     #[serde(default = "default_login")]
     login: bool,
     #[serde(default = "default_timeout")]
-    #[schemars(range(min = 1, max = MAX_TIMEOUT_MS))]
+    #[schemars(range(min = 1))]
     timeout_ms: u64,
 }
 fn default_timeout() -> u64 {
@@ -286,7 +284,7 @@ impl Command {
         timeout_ms: Option<u64>,
         cancellation: CancellationToken,
     ) -> Result<ObservedProcess, ToolError> {
-        if timeout_ms.is_some_and(|ms| !(1..=86_400_000).contains(&ms)) {
+        if timeout_ms.is_some_and(|ms| validate_timeout(ms).is_err()) {
             return Err(failed("invalid background shell command or timeout"));
         }
         let (observer, events) = tokio::sync::mpsc::channel(8);
@@ -314,9 +312,9 @@ impl ToolExecutor for ShellExecutor {
             }
             let input: Input = serde_json::from_value(input).map_err(|e| failed(e.to_string()))?;
             validate_command(&input.command)?;
-            if !(1..=MAX_TIMEOUT_MS).contains(&input.timeout_ms) {
+            if validate_timeout(input.timeout_ms).is_err() {
                 return Err(failed(
-                    "Shell requires a nonempty bounded command and timeout_ms in 1..=600000",
+                    "Shell requires a nonempty command and positive timeout_ms",
                 ));
             }
             let cancellation = cancellation.child_token();
@@ -354,9 +352,23 @@ fn launch_error(error: std::io::Error) -> ToolError {
 }
 
 pub fn validate_command(command: &str) -> Result<(), ToolError> {
-    if command.trim().is_empty() || command.len() > MAX_COMMAND_BYTES || command.contains('\0') {
+    if command.trim().is_empty() || command.contains('\0') {
         return Err(failed(
             "Shell requires a nonempty command of at most 64 KiB without NUL",
+        ));
+    }
+    Ok(())
+}
+
+/// Validate only the native clock representation of a requested deadline.
+pub fn validate_timeout(ms: u64) -> Result<(), ToolError> {
+    if ms == 0
+        || std::time::Instant::now()
+            .checked_add(std::time::Duration::from_millis(ms))
+            .is_none()
+    {
+        return Err(failed(
+            "shell timeout is not a positive representable duration",
         ));
     }
     Ok(())

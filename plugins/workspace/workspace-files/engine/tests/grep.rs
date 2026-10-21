@@ -44,7 +44,7 @@ async fn grep(
 }
 
 #[tokio::test]
-async fn slice_search_matches_ripgrep_regex_lines_ignore_precedence_and_caps() {
+async fn slice_search_matches_ripgrep_regex_lines_and_complete_ignore_scope() {
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.path().canonicalize().unwrap();
     for directory in [".git/info", "src", "ignored", ".hidden"] {
@@ -134,13 +134,7 @@ async fn slice_search_matches_ripgrep_regex_lines_ignore_precedence_and_caps() {
             std::path::PathBuf::from(target.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
         let mut args = json!({"pattern":pattern, "path":target});
         let mut command = Command::new("rg");
-        command.args([
-            "--no-config",
-            "-n",
-            "--no-heading",
-            "--max-count=50",
-            "--color=never",
-        ]);
+        command.args(["--no-config", "-n", "--no-heading", "--color=never"]);
         if let Some(glob) = glob {
             args["glob"] = json!(glob);
             command.args(["--glob", glob]);
@@ -178,8 +172,8 @@ async fn slice_search_matches_ripgrep_regex_lines_ignore_precedence_and_caps() {
     }
     let result = grep(&executor, json!({"pattern":"CAP"})).await.unwrap();
     let matches = result["matches"].as_array().unwrap();
-    assert_eq!(matches.len(), 200);
-    assert_eq!(result["complete"], false);
+    assert_eq!(matches.len(), 360);
+    assert_eq!(result["complete"], true);
     assert!(matches.iter().all(|m| {
         let line: usize = m
             .as_str()
@@ -189,7 +183,7 @@ async fn slice_search_matches_ripgrep_regex_lines_ignore_precedence_and_caps() {
             .unwrap()
             .parse()
             .unwrap();
-        line <= 50
+        line <= 60
     }));
 }
 
@@ -231,10 +225,11 @@ async fn grep_preserves_capability_and_reports_regex_resource_and_cancellation_f
         vec![b'x'; 10 * 1024 * 1024 + 1],
     )
     .unwrap();
-    assert!(
+    assert_eq!(
         grep(&executor, json!({"pattern":"absent","path":"large"}))
             .await
-            .is_err()
+            .unwrap(),
+        json!({"matches":[],"complete":true})
     );
     let token = CancellationToken::new();
     token.cancel();

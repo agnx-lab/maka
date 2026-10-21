@@ -219,16 +219,13 @@ async fn read(connection: &mut SqliteConnection, session: &str) -> Result<Remova
         ) SELECT f.id, f.family, f.archived, f.family=(SELECT family FROM root) AS removes
           FROM families f JOIN dependents d ON f.id=d.id
           WHERE f.copy_state<>'preparing' OR f.id=?1
-          ORDER BY removes DESC, f.id LIMIT 4097",
+          ORDER BY removes DESC, f.id",
     )
     .bind(session)
     .fetch_all(connection)
     .await?;
     if rows.is_empty() {
         return Err(StoreError::SessionNotFound);
-    }
-    if rows.len() > 4096 {
-        return Err(StoreError::PrefixTooLarge);
     }
     let mut plan = RemovalPlan {
         remove: Vec::new(),

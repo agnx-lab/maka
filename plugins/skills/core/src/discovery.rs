@@ -26,15 +26,13 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 pub(crate) mod origin;
-mod source;
+pub(crate) mod source;
 mod sources;
 pub use origin::{Origin, OriginFailure, OriginStatus};
 pub use sources::{
     BundledSource, SourceCatalog, SourceCatalogError, governance_catalog, safe_source_id,
     source_catalog,
 };
-const MAX_ENTRIES: usize = 16_384;
-const MAX_CONTENT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Source {
@@ -134,7 +132,6 @@ pub struct RejectedSkill {
 pub enum DiscoveryFailure {
     BlockedPath,
     ReadFailed,
-    SourceTooLarge,
 }
 
 #[derive(Debug, Clone)]
@@ -149,7 +146,6 @@ pub struct DiscoveryDiagnostic {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanError {
     Cancelled,
-    LimitExceeded,
     Unavailable,
 }
 
@@ -157,7 +153,6 @@ impl std::fmt::Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Cancelled => "skill discovery cancelled",
-            Self::LimitExceeded => "skill discovery exceeds inventory limits",
             Self::Unavailable => "skill discovery worker is unavailable",
         })
     }
@@ -191,7 +186,7 @@ async fn scan_with_origins(
     Ok(query)
 }
 
-/// Bounded blocking I/O; callers must join it before releasing execution ownership.
+/// Owned blocking I/O; callers must join it before releasing execution ownership.
 /// Preferences and capability gating are applied later, against this same snapshot.
 pub async fn scan(
     sources: &[Source],
@@ -226,9 +221,6 @@ async fn scan_impl(
     let mut state = Scan {
         snapshot: DiscoverySnapshot::default(),
         query: query.as_ref().map(|_| QuerySnapshot::default()),
-        remaining_entries: MAX_ENTRIES,
-        remaining_bytes: MAX_CONTENT_BYTES,
-        resource_budget: Default::default(),
     };
     for (precedence, source) in sources.iter().enumerate() {
         check_cancelled(cancellation)?;
@@ -250,11 +242,6 @@ async fn scan_impl(
     if bundled {
         for source in sources::bundled().map_err(|_| ScanError::Unavailable)? {
             check_cancelled(cancellation)?;
-            if state.remaining_entries == 0 || source.content.len() > state.remaining_bytes {
-                return Err(ScanError::LimitExceeded);
-            }
-            state.remaining_entries -= 1;
-            state.remaining_bytes -= source.content.len();
             let root = PathBuf::from("bundled");
             state.snapshot.inventory.push(DiscoveredSkill {
                 location: SkillLocation {
@@ -269,7 +256,7 @@ async fn scan_impl(
                 document: source.document,
                 content_sha256: source.content_sha256,
                 shadowed_by: None,
-                resources: source.resources.capture(&mut state.resource_budget)?,
+                resources: source.resources.capture(),
             });
         }
     }
@@ -283,9 +270,6 @@ async fn scan_impl(
 struct Scan {
     snapshot: DiscoverySnapshot,
     query: Option<QuerySnapshot>,
-    remaining_entries: usize,
-    remaining_bytes: usize,
-    resource_budget: crate::resources::Budget,
 }
 impl Scan {
     fn source(
@@ -295,13 +279,7 @@ impl Scan {
         precedence: usize,
         cancellation: &CancellationToken,
     ) -> Result<(), ScanError> {
-        let Self {
-            snapshot,
-            query,
-            remaining_entries,
-            remaining_bytes,
-            resource_budget,
-        } = self;
+        let Self { snapshot, query } = self;
         let mut captured = match source::Captured::open(source, reader) {
             Ok(captured) => captured,
             Err(reason) => {
@@ -314,7 +292,7 @@ impl Scan {
                 return Ok(());
             }
         };
-        let entries = match captured.entries(remaining_entries, cancellation) {
+        let entries = match captured.entries(cancellation) {
             Ok(entries) => entries,
             Err(source::EntriesError::Scan(error)) => return Err(error),
             Err(source::EntriesError::Read(reason)) => {
@@ -354,20 +332,12 @@ impl Scan {
                     }
                 };
             let location = source.location(id.into(), precedence);
-            let source::SkillRead::Document {
-                bytes,
-                origin,
-                origin_bytes,
-            } = read
-            else {
+            let source::SkillRead::Document { bytes, origin } = read else {
                 if publication && let Some(query) = query.as_mut() {
                     query.empty.push(location);
                 }
                 continue;
             };
-            *remaining_bytes = remaining_bytes
-                .checked_sub(bytes.len() + origin_bytes)
-                .ok_or(ScanError::LimitExceeded)?;
             if let Some(origin) = origin
                 && let Some(query) = query.as_mut()
             {
@@ -384,7 +354,6 @@ impl Scan {
                         crate::Resources::capture(
                             reader,
                             &source.directory.join(&name),
-                            resource_budget,
                             cancellation,
                         )?
                     } else {

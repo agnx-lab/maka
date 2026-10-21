@@ -60,12 +60,32 @@ impl Value {
         }
     }
 }
+// Unknown metadata can contain arbitrarily nested containers. Retire their
+// children iteratively as well, so parsing does not merely defer recursion to drop.
+impl Drop for Value {
+    fn drop(&mut self) {
+        fn children(value: &mut Value, pending: &mut Vec<Value>) {
+            match value {
+                Value::Array(items) => pending.append(items),
+                Value::Object(entries) => pending.extend(std::mem::take(entries).into_values()),
+                _ => {}
+            }
+        }
+        let mut pending = Vec::new();
+        children(self, &mut pending);
+        while let Some(mut value) = pending.pop() {
+            children(&mut value, &mut pending);
+        }
+    }
+}
+
 impl Index<&str> for Value {
     type Output = Self;
     fn index(&self, key: &str) -> &Self {
+        static NULL: Value = Value::Null;
         self.as_hash()
             .and_then(|entries| entries.get(key))
-            .unwrap_or(&Value::Null)
+            .unwrap_or(&NULL)
     }
 }
 
@@ -82,7 +102,7 @@ pub(crate) fn parse(text: &str) -> Option<Value> {
     let mut stack = Vec::new();
     let mut root = None;
     let mut documents = 0;
-    for _ in 0..32_768 {
+    loop {
         let (event, _) = parser.next_token().ok()?;
         let value = match event {
             Event::Alias(_) => return None,
@@ -95,17 +115,11 @@ pub(crate) fn parse(text: &str) -> Option<Value> {
             }
             Event::SequenceStart(_, tag) => {
                 container_tag(tag, "seq")?;
-                if stack.len() >= 32 {
-                    return None;
-                }
                 stack.push(Container::Sequence(Vec::new()));
                 continue;
             }
             Event::MappingStart(_, tag) => {
                 container_tag(tag, "map")?;
-                if stack.len() >= 32 {
-                    return None;
-                }
                 stack.push(Container::Mapping {
                     entries: BTreeMap::new(),
                     key: None,
@@ -136,9 +150,7 @@ pub(crate) fn parse(text: &str) -> Option<Value> {
                         return None;
                     }
                 } else {
-                    let Value::String(value) = value else {
-                        return None;
-                    };
+                    let value = value.as_str()?.to_owned();
                     *key = Some(value);
                 }
             }
@@ -149,7 +161,6 @@ pub(crate) fn parse(text: &str) -> Option<Value> {
             }
         }
     }
-    None
 }
 
 fn container_tag(tag: Option<Tag>, expected: &str) -> Option<()> {

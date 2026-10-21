@@ -119,3 +119,120 @@ async fn concurrent_plugin_owners_initialize_one_fresh_configuration_database() 
         reopened.close().await.unwrap();
     }
 }
+
+#[test]
+fn complete_configuration_migration_preserves_original_rows_and_authority_constraints() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(include_str!("../migrations/0001_configuration.sql"))
+        .unwrap();
+    db.execute_batch(include_str!("../migrations/0002_shell_titles.sql"))
+        .unwrap();
+    db.execute_batch(
+        "INSERT INTO pricing_overrides VALUES('provider:model', X'0102', '{\"modelKey\":\"provider:model\"}');
+         INSERT INTO runtime_policy VALUES(1, '{\"revision\":7}');
+         INSERT INTO plugin_credentials VALUES('example','profile','key',7,NULL);
+         INSERT INTO plugin_authorizations VALUES('original','example','profile','operation','{\"original\":true}',1);
+         INSERT INTO oauth_login_receipts VALUES(42,'original','{}','method','digest','{\"phase\":\"authenticated\"}','{}');
+         UPDATE sqlite_sequence SET seq=500 WHERE name='oauth_login_receipts';",
+    ).unwrap();
+    let access =
+        serde_json::json!({"credentialId":"access-original","credentialHash":"a".repeat(64)})
+            .to_string();
+    db.execute(
+        "INSERT INTO access_credentials(document) VALUES(?)",
+        [&access],
+    )
+    .unwrap();
+    db.execute_batch(include_str!(
+        "../migrations/0003_complete_configuration.sql"
+    ))
+    .unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT document FROM access_credentials WHERE credential_id='access-original'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        access
+    );
+    assert_eq!(
+        db.query_row("SELECT document FROM runtime_policy", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        "{\"revision\":7}"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT record_json FROM pricing_overrides WHERE model_key='provider:model'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "{\"modelKey\":\"provider:model\"}"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT revision,secret FROM plugin_credentials",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+        )
+        .unwrap(),
+        (7, None)
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT document,revoked FROM plugin_authorizations WHERE id='original'",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        )
+        .unwrap(),
+        ("{\"original\":true}".into(), 1)
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT completion_order FROM oauth_login_receipts WHERE attempt_id='original'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        42
+    );
+    db.execute("INSERT INTO oauth_login_receipts(attempt_id,target,method,request_fingerprint,phase,connection) VALUES('next','{}','method','digest','{}','{}')",[]).unwrap();
+    assert_eq!(db.last_insert_rowid(), 501);
+    let large = serde_json::json!({"routingNotes":"route: east\n".repeat(12_000)}).to_string();
+    for query in [
+        "UPDATE pricing_overrides SET record_json=?",
+        "UPDATE runtime_policy SET document=?",
+        "UPDATE plugin_authorizations SET document=?",
+    ] {
+        db.execute(query, [&large]).unwrap();
+    }
+    db.execute("UPDATE plugin_credentials SET secret=?", [&large])
+        .unwrap();
+    let large_access = serde_json::json!({"credentialId":"access-large","credentialHash":"b".repeat(64),"grants":vec!["read";150_000]}).to_string();
+    db.execute(
+        "INSERT INTO access_credentials(document) VALUES(?)",
+        [&large_access],
+    )
+    .unwrap();
+    assert!(
+        db.execute(
+            "INSERT INTO access_credentials(document) VALUES(?)",
+            [&large_access]
+        )
+        .is_err()
+    );
+    assert!(
+        db.execute("UPDATE plugin_credentials SET revision=0", [])
+            .is_err()
+    );
+    assert!(
+        db.execute("UPDATE plugin_authorizations SET revoked=2", [])
+            .is_err()
+    );
+    assert!(
+        db.execute("UPDATE runtime_policy SET document='invalid-json'", [])
+            .is_err()
+    );
+}

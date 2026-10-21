@@ -1220,11 +1220,6 @@ export const tui_theme_file_unreadable: Message = [
   '无法读取主题文件，请使用普通文件的绝对路径。当前配色未变。',
   '無法讀取主題檔案，請使用一般檔案的絕對路徑。目前配色未變。',
 ];
-export const tui_theme_file_large: Message = [
-  'Theme exceeds 16 KiB. Current colors are unchanged.',
-  '主题文件超过 16 KiB，当前配色未变。',
-  '主題檔案超過 16 KiB，目前配色未變。',
-];
 export const tui_theme_file_version: Message = [
   'Unsupported theme version; use version 1. Current colors are unchanged.',
   '不支持此主题版本，请使用 version 1。当前配色未变。',

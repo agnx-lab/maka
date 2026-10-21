@@ -60,16 +60,9 @@ impl Output {
             Self::ToolStart {
                 tool_call_id,
                 name,
-                input,
+                input: _,
             } => {
-                opaque(name, 256)?;
-                if serde_json::to_vec(input)
-                    .map_err(|_| "invalid executor tool input")?
-                    .len()
-                    > 64 * 1024
-                {
-                    return Err("executor tool input exceeds 64 KiB");
-                }
+                opaque(name)?;
                 (Some(tool_call_id), None)
             }
             Self::ToolProgress { tool_call_id, text }
@@ -78,17 +71,17 @@ impl Output {
             } => (Some(tool_call_id), Some(text)),
         };
         if let Some(id) = id {
-            opaque(id, 1024)?;
+            opaque(id)?;
         }
-        if text.is_some_and(|text| text.len() > 64 * 1024 || text.contains('\0')) {
-            return Err("invalid executor text or chunk exceeds 64 KiB");
+        if text.is_some_and(|text| text.contains('\0')) {
+            return Err("invalid executor text");
         }
         Ok(())
     }
 }
 
-fn opaque(value: &str, limit: usize) -> Result<(), &'static str> {
-    if value.is_empty() || value.len() > limit || value.chars().any(char::is_control) {
+fn opaque(value: &str) -> Result<(), &'static str> {
+    if value.is_empty() || value.chars().any(char::is_control) {
         return Err("invalid executor activity identity");
     }
     Ok(())

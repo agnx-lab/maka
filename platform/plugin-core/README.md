@@ -25,4 +25,6 @@ Defines package declarations, contracts, compositions and the shared plugin life
 
 The kernel has no Agent policy or native layout vocabulary. A binding selects an export that satisfies an import; the receiving Host still checks permission when a call arrives.
 
+Composition expansion, forwarding and dependency validation use iterative traversal with exact cycle checks. Repeated package templates remain valid when finite overrides terminate expansion; binding cardinality follows the declared import contract. Instance identities retain every nonzero source UUID.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

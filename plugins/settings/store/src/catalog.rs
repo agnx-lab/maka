@@ -52,11 +52,6 @@ impl ConfigurationStore {
                         slug: input.connection.slug,
                     });
                 }
-                if current.connections.len() >= 1024 {
-                    return Err(ConfigError::Invalid(
-                        "connection catalog exceeds 1024 entries".into(),
-                    ));
-                }
                 let draft = input.connection;
                 let row = ConnectionCatalogEntry {
                     connection_id: Uuid::new_v4().to_string(),
@@ -146,7 +141,6 @@ pub(crate) async fn read(tx: &mut SqliteConnection) -> Result<ConnectionCatalogS
     .fetch_one(&mut *tx)
     .await?;
     let revision = crate::database::unsigned(revision)?;
-    check_size(tx).await?;
     let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM connections ORDER BY rowid")
         .fetch_all(&mut *tx)
         .await?;
@@ -190,7 +184,7 @@ pub(crate) async fn write_entry(
         ON CONFLICT(connection_id) DO UPDATE SET revision = excluded.revision, document = excluded.document")
         .bind(&row.connection_id).bind(&row.slug).bind(row.revision as i64)
         .bind(serde_json::to_string(row)?).execute(&mut *tx).await?;
-    check_size(tx).await
+    Ok(())
 }
 
 pub(crate) async fn advance(
@@ -215,20 +209,4 @@ pub(crate) fn next_revision(previous: u64) -> Result<u64> {
         .checked_add(1)
         .filter(|value| *value <= 9_007_199_254_740_991)
         .ok_or_else(|| ConfigError::Invalid("configuration revision exhausted".into()))
-}
-
-async fn check_size(connection: &mut SqliteConnection) -> Result<()> {
-    let (count, bytes): (i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*), COALESCE(SUM(length(CAST(document AS BLOB))), 0) FROM connections",
-    )
-    .fetch_one(connection)
-    .await?;
-    let count = crate::database::unsigned(count)?;
-    let bytes = crate::database::unsigned(bytes)?;
-    if count > 1024 || bytes > 4 * 1024 * 1024 {
-        return Err(ConfigError::Invalid(
-            "connection catalog exceeds storage bounds".into(),
-        ));
-    }
-    Ok(())
 }

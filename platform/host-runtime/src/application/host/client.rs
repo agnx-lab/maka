@@ -101,7 +101,7 @@ impl Client {
             }
             _ => None,
         };
-        wire::write_bounded(
+        wire::write(
             &mut anchor,
             &Opening {
                 client_instance: None,
@@ -109,7 +109,6 @@ impl Client {
                 epoch,
                 request,
             },
-            512 * 1024,
         )
         .await?;
         let mut anchor = wire::Reader::new(anchor);
@@ -260,9 +259,6 @@ impl Client {
         }
         if consumers.is_empty() != captured.is_none() {
             return Err("approval requires its captured endpoints".into());
-        }
-        if retain.len() > 256 {
-            return Err("maximum 256 retained source approvals".into());
         }
         if let Some(catalogue) = captured {
             catalogue.validate()?;

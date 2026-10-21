@@ -21,7 +21,7 @@
 // transcript with a field, the count, Previous and Next, Match case, Match
 // whole word, and Close. The Host's `agent.search` scans the conversation's
 // history at a fixed fence in batches of at most 16 matches, oldest first;
-// the bar asks for batch after batch in the background, up to MAX_MATCHES,
+// the bar asks for batch after batch in the background, through every source-bound page,
 // and the count grows as they come. A match is a row (and a field of it),
 // not each place in it. Once the scan ends the newest match is selected;
 // Enter goes to the next, newer match and Shift+Enter to the one before,
@@ -54,21 +54,9 @@ import { t, onLanguageChange } from './locale.js';
 /** How long the bar waits after the field last changed before it scans. */
 const PAUSE_MS = 250;
 /** The most matches one scan collects; the count then says "1000+". */
-const MAX_MATCHES = 1000;
 /** The longest query the Host takes, in UTF-8 bytes. */
-const MAX_QUERY_BYTES = 512;
 /** How long to wait before asking again while the Host prepares the scan, and how often. */
 const PREPARING_MS = 100;
-const PREPARING_TRIES = 100;
-
-function utf8Length(value) {
-  let size = 0;
-  for (const point of value) {
-    const code = point.codePointAt(0);
-    size += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
-  }
-  return size;
-}
 
 /** The tint of the selected match's row, lighter than the marks in it (MATCH_FILL). */
 export const FOUND_ROW = { light: '#FFCE2F1F', dark: '#FFCE2F14' };
@@ -155,7 +143,6 @@ export class Find {
     /** The selected match's index in `scan.matches`, or -1. */
     this.index = -1;
     /** The most matches a scan collects (a driver lowers it), and the Host calls made. */
-    this.max = MAX_MATCHES;
     this.stats = { calls: 0 };
   }
 
@@ -244,9 +231,8 @@ export class Find {
     if (this.transcript !== null) this.transcript.found = null;
     const transcript = this.transcript;
     const query = this.field.value();
-    const tooLong = utf8Length(query) > MAX_QUERY_BYTES;
-    if (!this.open || transcript === null || query === '' || tooLong) {
-      this.scan = tooLong ? { serial, query, tooLong: true, matches: [], done: true } : null;
+    if (!this.open || transcript === null || query === '') {
+      this.scan = null;
       this.hooks.changed();
       return;
     }
@@ -286,7 +272,7 @@ export class Find {
   /** Asks for batch after batch of `scan` until the Host says it ended, the cap, or a newer scan. */
   async run(scan, transcript, cx) {
     let after = null;
-    let preparing = 0;
+    const cursors = new Set();
     const started = Date.now();
     for (;;) {
       this.stats.calls += 1;
@@ -301,21 +287,15 @@ export class Find {
       });
       if (scan.serial !== this.serial) return;
       if (page.kind === 'preparing') {
-        preparing += 1;
-        if (preparing > PREPARING_TRIES) throw new Error(t('findNotReady'));
         await cx.sleep(PREPARING_MS);
         if (scan.serial !== this.serial) return;
         continue;
       }
-      const room = this.max - scan.matches.length;
-      scan.matches = [...scan.matches, ...page.matches.slice(0, room)];
-      if (
-        page.matches.length > room ||
-        (scan.matches.length === this.max && page.nextAfter !== null)
-      ) {
-        scan.capped = true;
-      }
-      if (scan.capped || page.nextAfter === null) break;
+      scan.matches = [...scan.matches, ...page.matches];
+      if (page.nextAfter === null) break;
+      const cursor = JSON.stringify(page.nextAfter);
+      if (cursors.has(cursor)) throw new Error('find cursor did not advance');
+      cursors.add(cursor);
       after = page.nextAfter;
       this.hooks.changed();
     }
@@ -367,7 +347,6 @@ export class Find {
   count() {
     const scan = this.scan;
     if (scan === null) return null;
-    if (scan.tooLong) return t('findTooLong');
     if (scan.failed !== null) return t('findError');
     const found = scan.matches.length;
     if (scan.done && found === 0) return t('findNoResults');

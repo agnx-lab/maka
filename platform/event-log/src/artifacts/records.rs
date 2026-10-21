@@ -17,7 +17,6 @@
  * under the License.
  */
 
-use super::MAX_RECORD_BYTES;
 use crate::StoreError;
 use maka_agent_facts::artifact::Artifact;
 use maka_agent_facts::artifact::content_digest;
@@ -56,9 +55,6 @@ pub(super) fn decode(
     session_id: &str,
     artifact_id: &str,
 ) -> Result<Artifact, StoreError> {
-    if raw.len() > MAX_RECORD_BYTES {
-        return Err(invalid("Stored artifact exceeds metadata limit"));
-    }
     let artifact: Artifact = serde_json::from_str(raw)?;
     artifact.validate().map_err(invalid)?;
     if artifact.session_id != session_id || artifact.id != artifact_id {
@@ -73,7 +69,7 @@ pub(super) async fn read_record(
     artifact_id: &str,
 ) -> Result<Option<(Artifact, String)>, StoreError> {
     let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT CASE WHEN length(CAST(record_json AS BLOB)) <= 16384 THEN record_json END,
+        "SELECT record_json,
          CASE WHEN length(CAST(content_sha256 AS BLOB)) = 71 THEN content_sha256 END
          FROM artifacts WHERE session_id = ? AND id = ?",
     )
@@ -82,7 +78,7 @@ pub(super) async fn read_record(
     .fetch_optional(connection)
     .await?;
     row.map(|(raw, digest)| {
-        let raw = raw.ok_or_else(|| invalid("Stored artifact metadata exceeds limit"))?;
+        let raw = raw.ok_or_else(|| invalid("Stored artifact metadata is missing"))?;
         let digest = digest.ok_or_else(|| invalid("Stored artifact digest exceeds limit"))?;
         Ok((decode(&raw, session_id, artifact_id)?, digest))
     })

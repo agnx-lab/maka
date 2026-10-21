@@ -144,18 +144,12 @@ impl Recall {
             });
         }
         self.check(call).await.map_err(|e| e.to_string())?;
-        let mut page = RecallPage {
+        let page = RecallPage {
             titles: title_matches,
             passages,
             complete: catalog_complete && found.searched_every_session,
             gaps: found.gaps,
         };
-        while serde_json::to_vec(&page).map_err(|e| e.to_string())?.len() > 48 * 1024 {
-            page.complete = false;
-            if page.passages.pop().is_none() && page.titles.pop().is_none() {
-                page.gaps.pop();
-            }
-        }
         Ok(page)
     }
     pub fn tools(self: &Arc<Self>) -> Vec<ToolRegistration> {
@@ -341,7 +335,7 @@ impl ToolPreparer for Recall {
                         if let Input::Material(material) = input {
                             return recall.material(call.clone(), material).await;
                         }
-                        let mut found = match input {
+                        let found = match input {
                             Input::Search(query) => {
                                 search::search(recall.clone(), call, &query).await?
                             }
@@ -349,14 +343,6 @@ impl ToolPreparer for Recall {
                             Input::Material(_) => unreachable!(),
                         };
                         recall.check(call).await?;
-                        if found.render().len() > 96 * 1024 {
-                            found.gaps.push(
-                                "The 96 KiB response budget omitted lower-ranked passages.".into(),
-                            );
-                            while found.render().len() > 96 * 1024 && !found.passages.is_empty() {
-                                found.passages.pop();
-                            }
-                        }
                         let text = found.render();
                         Ok(ToolSuccess::projected(
                             ToolOutput::Json(serde_json::to_value(found).map_err(failed)?),

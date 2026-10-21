@@ -25,14 +25,7 @@ use serde_json::Value;
 mod directory;
 pub use directory::{Directories, Directory};
 
-pub const MAX_KEY_BYTES: usize = 1024;
-pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
-pub const MAX_MUTATIONS: usize = 128;
-pub const MAX_BATCH_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_PAGE_BYTES: usize = 2 * 1024 * 1024;
-/// Data budget plus escaped keys, revisions and request/response envelopes.
-pub const MAX_BATCH_WIRE_BYTES: usize =
-    MAX_BATCH_BYTES + MAX_MUTATIONS * (2 * MAX_KEY_BYTES + 128) + 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Namespace {
@@ -140,19 +133,12 @@ impl Mutation {
         {
             return Err(Error::Invalid("invalid plugin data revision".into()));
         }
-        if serde_json::to_vec(&self.data)
-            .map_err(|error| Error::Invalid(error.to_string()))?
-            .len()
-            > MAX_VALUE_BYTES
-        {
-            return Err(Error::Invalid("plugin data value exceeds 1 MiB".into()));
-        }
         Ok(())
     }
 }
 
 pub fn validate_key(key: &str) -> Result<(), Error> {
-    if key.is_empty() || key.len() > MAX_KEY_BYTES || key.chars().any(char::is_control) {
+    if key.is_empty() || key.chars().any(char::is_control) {
         return Err(Error::Invalid("invalid plugin storage key".into()));
     }
     Ok(())
@@ -179,7 +165,7 @@ pub trait Store: Send + Sync {
         &self,
         key: String,
     ) -> futures_util::future::BoxFuture<'_, Result<Option<Record>, StoreError>>;
-    /// Atomic CAS of up to 128 values, 1 MiB per value and 16 MiB total data.
+    /// Atomic CAS of the complete selected mutation set.
     fn batch(
         &self,
         mutations: Vec<Mutation>,

@@ -358,10 +358,7 @@ pub(super) fn key(operation: &str) -> Result<String, Error> {
 }
 pub(super) fn validate(request: &Request) -> Result<(), Error> {
     for id in [&request.operation_id, &request.assignment_id] {
-        if id.is_empty()
-            || id.len() > 256
-            || id.chars().any(|c| c.is_control() || c.is_whitespace())
-        {
+        if id.is_empty() || id.chars().any(|c| c.is_control() || c.is_whitespace()) {
             return Err(invalid("invalid control identity"));
         }
     }

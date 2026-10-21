@@ -277,10 +277,33 @@ async fn diagnostic_pages_preserve_sources_fences_and_operational_copy_scope() {
             .await,
         Err(StoreError::InvalidTransition(_))
     ));
-    assert!(matches!(
-        log.diagnostics_page("session", None, None, 32, 1).await,
-        Err(StoreError::PrefixTooLarge)
-    ));
+    let all = log
+        .diagnostics_page("session", None, None, 32, 48 * 1024)
+        .await
+        .unwrap();
+    let mut before = None;
+    let mut complete = Vec::new();
+    loop {
+        let page = log
+            .diagnostics_page("session", Some(all.through), before, 32, 1)
+            .await
+            .unwrap();
+        assert_eq!(page.through, all.through);
+        assert_eq!(
+            page.entries.len(),
+            1,
+            "a complete oversized first record must make progress"
+        );
+        complete.extend(page.entries);
+        match page.next_before {
+            Some(next) => {
+                assert!(before.is_none_or(|old| next < old));
+                before = Some(next);
+            }
+            None => break,
+        }
+    }
+    assert_eq!(complete, all.entries);
     let timestamp = newest.entries[0].recorded_at;
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();

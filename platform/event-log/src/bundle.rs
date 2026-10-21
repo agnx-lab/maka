@@ -41,14 +41,10 @@ pub use export::BundleSummary;
 pub use reader::inspect;
 pub use stage::StagedBundle;
 
-const MAX_SESSIONS: usize = 4096;
-
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
     #[error("the confirmed Session subtree changed")]
     CandidateSetStale,
-    #[error("Session subtree exceeds {MAX_SESSIONS} Sessions")]
-    TooManySessions,
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -119,8 +115,7 @@ async fn inventory(
     let mut seen = HashSet::from([root.to_owned()]);
     let mut frontier = vec![root.to_owned()];
     while !frontier.is_empty() {
-        // A recursive CTE LIMIT does not bound a high-fanout expansion's queue.
-        // UNION ALL streams at most three rows per identity (one per parent edge).
+        // Deduplicate all parent-edge kinds before expanding the next frontier.
         let children: Vec<(String, i64)> = sqlx::query_as(
             "SELECT live.id,live.revision FROM session_history_copies c
                JOIN session_control live ON live.id=c.session_id
@@ -142,20 +137,16 @@ async fn inventory(
                AND live.id NOT IN (SELECT value FROM json_each(?2))
                AND NOT EXISTS(SELECT 1 FROM session_retirements
                  WHERE session_id=live.id AND remove_session=1)
-             LIMIT ?3",
+",
         )
         .bind(serde_json::to_string(&frontier).map_err(StoreError::from)?)
         .bind(serde_json::to_string(&seen).map_err(StoreError::from)?)
-        .bind(((MAX_SESSIONS - rows.len() + 1) * 3) as i64)
         .fetch_all(&mut *connection)
         .await
         .map_err(StoreError::from)?;
         frontier.clear();
         for (id, revision) in children {
             if seen.insert(id.clone()) {
-                if rows.len() == MAX_SESSIONS {
-                    return Err(BundleError::TooManySessions);
-                }
                 frontier.push(id.clone());
                 rows.push((id, revision));
             }

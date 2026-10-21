@@ -42,7 +42,7 @@ impl ConfigurationStore {
     ) -> Result<ConnectionTestPreparation> {
         validation::entity_id(&input.connection_id).map_err(ConfigError::Invalid)?;
         if let Some(id) = &input.model_id {
-            validation::text(id, 512, true).map_err(ConfigError::Invalid)?;
+            validation::text(id).map_err(ConfigError::Invalid)?;
         }
         let store = Arc::clone(self);
         self.transaction(TransactionMode::Deferred, move |tx| {
@@ -109,7 +109,7 @@ impl PreparedConnectionTest {
     /// Both success and failure are durable connection-test observations.
     pub async fn complete(self, test: ConnectionTestProjection) -> Result<ConnectionTestRunResult> {
         let summary = summary(&test);
-        validation::text(&summary.checked_at, 128, true).map_err(ConfigError::Invalid)?;
+        validation::text(&summary.checked_at).map_err(ConfigError::Invalid)?;
         let material = self.material;
         self.store
             .transaction(TransactionMode::Immediate, move |tx| {

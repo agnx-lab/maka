@@ -368,39 +368,52 @@ async fn dispatch_requires_original_source_and_settlement_requires_original_clai
             .await
             .is_err()
     );
-    assert!(
+    let outcome = OperationOutcome::Unknown {
+        diagnostic: "original diagnostic 中\n".repeat(4000),
+    };
+    let settled = store
+        .finish_operation(&claim, outcome.clone(), OperationCleanup::Confirmed)
+        .await
+        .unwrap();
+    assert_eq!(settled.outcome, outcome);
+    assert_eq!(
         store
-            .finish_operation(
-                &claim,
-                OperationOutcome::Unknown {
-                    diagnostic: "x".repeat(MAX_DIAGNOSTIC + 1)
-                },
-                OperationCleanup::Confirmed
-            )
+            .operation_observation(&settled.reference)
             .await
-            .is_err()
+            .unwrap()
+            .unwrap(),
+        settled
     );
     other.close().await.unwrap();
     store.close().await.unwrap();
 }
 #[tokio::test]
-async fn stored_cleanup_bounds_precede_materialization() {
+async fn stored_cleanup_requires_the_declared_typed_fields() {
     let (_dir, store) = store().await;
     let original = request(&store).await;
     let reference = original.reference().unwrap();
     store.dispatch_operation(original).await.unwrap();
-    store.connection.run(move |conn| Box::pin(async move {
-        sqlx::query("UPDATE application_operations SET cleanup_json=json_object('huge', printf('%.*c', 4194304, 'x'))")
-            .execute(conn).await?;
-        Ok(())
-    })).await.unwrap();
+    store
+        .connection
+        .run(move |conn| {
+            Box::pin(async move {
+                sqlx::query(
+                    "UPDATE application_operations SET cleanup_json=json_object('kind','failed')",
+                )
+                .execute(conn)
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
     assert!(
         store
             .operation_observation(&reference)
             .await
             .unwrap_err()
             .to_string()
-            .contains("exceeds limit")
+            .contains("missing field `diagnostic`")
     );
     store.close().await.unwrap();
 }

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{MAX_TEXT_BYTES, evidence};
+use super::evidence;
 use crate::{EventLog, StoreError};
 use maka_agent_facts::event::Invocation;
 use maka_presentation::{Content, InvocationView, Message, ProjectionError};
@@ -33,7 +33,7 @@ pub(crate) async fn interrupted_messages(
     let through_sql = i64::try_from(through).map_err(|_| ProjectionError::OutOfRange)?;
     let selected =
         super::evidence::selected(connection, invocation, step, through_sql, true).await?;
-    let mut view = InvocationView::new(super::MAX_TEXT_BYTES)?;
+    let mut view = InvocationView::new();
     let mut ids = Vec::new();
     for sequence in selected {
         let fact = evidence::fact(connection, sequence).await?;
@@ -95,7 +95,7 @@ impl EventLog {
                         return Ok(Vec::new());
                     }
                     let step = evidence::pending_step(&mut tx, id, fence).await?;
-                    let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
+                    let mut view = InvocationView::new();
                     let selected =
                         evidence::selected(&mut tx, id, step.as_deref(), fence, false).await?;
                     for sequence in selected {

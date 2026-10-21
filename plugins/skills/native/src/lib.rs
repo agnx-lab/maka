@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Ordinary skill library service, reusing the original bounded discovery/parser.
+//! Ordinary skill library service, reusing the original capability-scoped discovery/parser.
 //! Files are data; neither references nor declared tools authorize execution.
 use maka_skills_api::contract;
 mod management;
@@ -137,7 +137,6 @@ impl Library {
         let mut sources = Vec::new();
         for source in configuration.sources {
             if source.id.is_empty()
-                || source.id.len() > 64
                 || !source
                     .id
                     .bytes()
@@ -145,8 +144,6 @@ impl Library {
                 || !source.id.as_bytes()[0].is_ascii_alphanumeric()
                 || !ids.insert(source.id.clone())
                 || source.label.trim().is_empty()
-                || source.label.len() > 128
-                || source.path.len() > 4096
                 || !std::path::Path::new(&source.path).is_absolute()
             {
                 return Err("skills_configuration_invalid".into());
@@ -299,7 +296,6 @@ impl Library {
             .chain(imported_diagnostics)
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .take(32)
             .collect();
         let revision = maka_agent_facts::artifact::content_digest(
             &serde_json::to_vec(&(
@@ -353,8 +349,6 @@ fn entry(
     shadowed_by: Option<String>,
     issues: &[maka_skills::Issue],
 ) -> Entry {
-    let short_name = bound(name, 256);
-    let short_description = bound(description, 2048);
     Entry {
         bundled: reference.starts_with("bundled:"),
         installed: reference.starts_with("installed:"),
@@ -362,26 +356,16 @@ fn entry(
         preference: Default::default(),
         reference: reference.into(),
         source: source.into(),
-        metadata_truncated: short_name != name
-            || short_description != description
-            || issues.len() > 4
-            || issues.iter().take(4).any(|issue| issue.message.len() > 256),
-        name: short_name,
-        description: short_description,
+        name: name.into(),
+        description: description.into(),
         valid,
         shadowed_by,
-        issues: issues
-            .iter()
-            .take(4)
-            .map(|issue| bound(&issue.message, 256))
-            .collect(),
+        metadata_truncated: false,
+        issues: issues.iter().map(|issue| issue.message.clone()).collect(),
     }
 }
 impl Snapshot {
     fn list(self, input: List) -> Result<Page, String> {
-        if input.query.len() > 1024 || input.query.chars().count() > 256 {
-            return Err("skills_query_invalid".into());
-        }
         let query = input.query.to_lowercase();
         let filtered: Vec<_> = self
             .entries
@@ -428,13 +412,10 @@ impl Snapshot {
                 after: after(entries.len()),
                 diagnostics: self.diagnostics.clone(),
             };
-            if !maka_workspace_support::fits(&page) {
+            if entries.len() > 1 && !maka_workspace_support::fits(&page) {
                 entries.pop();
                 break;
             }
-        }
-        if offset < filtered.len() && entries.is_empty() {
-            return Err("skills_page_too_large".into());
         }
         let after = after(entries.len());
         Ok(Page::Page {
@@ -486,8 +467,6 @@ impl Snapshot {
 }
 fn encode(value: impl Serialize) -> Result<Value, String> {
     let value = serde_json::to_value(value).map_err(|_| "skills_encoding_failed")?;
-    maka_plugin_core::json::check_delivery(&value, maka_workspace_support::PAGE_BYTES)
-        .map_err(|_| "skills_page_too_large")?;
     Ok(value)
 }
 impl Handler for Library {

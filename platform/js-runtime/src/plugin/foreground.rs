@@ -108,8 +108,8 @@ impl Foreground {
 
     pub fn load(&mut self, name: &str, source: &str) -> Result<ForegroundModule> {
         self.ready()?;
-        if name.is_empty() || name.len() > 1024 || source.len() > 8 * 1024 * 1024 {
-            return Err(failed("foreground module exceeds name/source limits"));
+        if name.is_empty() {
+            return Err(failed("foreground module name is empty"));
         }
         let id = self
             .next_module
@@ -146,10 +146,7 @@ impl Foreground {
         if !Rc::ptr_eq(&module.domain, &self.domain) || !self.modules.contains_key(&module.id) {
             return Err(failed("foreground module is retired or from another realm"));
         }
-        if path.is_empty()
-            || path.len() > 32
-            || path.iter().any(|part| part.is_empty() || part.len() > 128)
-        {
+        if path.is_empty() || path.iter().any(|part| part.is_empty()) {
             return Err(failed("invalid foreground export path"));
         }
         self.budget.enter();
@@ -175,22 +172,15 @@ impl Foreground {
         if !Rc::ptr_eq(&module.domain, &self.domain) || !self.modules.contains_key(&module.id) {
             return Err(failed("foreground module is retired or from another realm"));
         }
-        if namespace.len() > 32
-            || namespace
-                .iter()
-                .any(|part| part.is_empty() || part.len() > 128)
+        if namespace.iter().any(|part| part.is_empty())
             || methods.is_empty()
-            || methods.len() > 64
-            || methods
-                .iter()
-                .any(|part| part.is_empty() || part.len() > 128)
+            || methods.iter().any(|part| part.is_empty())
             || methods
                 .iter()
                 .copied()
                 .collect::<std::collections::BTreeSet<_>>()
                 .len()
                 != methods.len()
-            || self.callbacks.len() >= 1024
         {
             return Err(failed(
                 "invalid or excessive foreground callback registration",

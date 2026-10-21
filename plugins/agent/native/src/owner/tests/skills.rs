@@ -293,8 +293,10 @@ async fn skill_candidates_filter_actual_tools_and_reject_foreign_sessions() {
         f.query("skillCandidates", input.clone()).await.unwrap()["skills"],
         json!([])
     );
-    input["query"] = json!("x".repeat(4097));
-    assert!(f.query("skillCandidates", input.clone()).await.is_err());
+    input["query"] = json!("visible ".repeat(600));
+    let long_query = f.query("skillCandidates", input.clone()).await.unwrap();
+    assert_eq!(long_query["skills"][0]["invocation"], "/skill:visible");
+    assert_eq!(long_query["skills"].as_array().unwrap().len(), 1);
     input["query"] = json!("");
     input["backend"]["model"]["connectionId"] = json!("missing");
     assert_eq!(

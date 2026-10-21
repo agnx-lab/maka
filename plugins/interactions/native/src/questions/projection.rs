@@ -38,11 +38,11 @@ pub(super) fn project_question_request(
     }))?;
     if let InteractionRequest::Question { questions, .. } = &mut request {
         for question in questions {
-            question.question = project(&question.question, 1024)?;
+            question.question = project(&question.question);
             for option in &mut question.options {
-                option.label = project(&option.label, 256)?;
+                option.label = project(&option.label);
                 if let Some(description) = &mut option.description {
-                    *description = project(description, 512)?;
+                    *description = project(description);
                 }
             }
         }
@@ -51,7 +51,7 @@ pub(super) fn project_question_request(
     Ok(request)
 }
 
-fn project(value: &str, limit: usize) -> Result<String> {
+fn project(value: &str) -> String {
     let mut result = String::new();
     for c in value.chars() {
         if matches!(c as u32, 0..=31 | 127..=159 | 0x61c | 0x200e..=0x200f | 0x2028..=0x202e | 0x2066..=0x2069)
@@ -61,10 +61,7 @@ fn project(value: &str, limit: usize) -> Result<String> {
             result.push(c);
         }
     }
-    if result.len() > limit {
-        return Err("Projected display text exceeds byte limit");
-    }
-    Ok(result)
+    result
 }
 
 #[cfg(test)]

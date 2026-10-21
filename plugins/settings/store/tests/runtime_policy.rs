@@ -302,7 +302,7 @@ async fn corrupt_rows_and_revision_exhaustion_never_become_defaults_or_conflicts
         "not json".to_owned(),
         "{}".to_owned(),
         invalid.to_string(),
-        " ".repeat(MAX_POLICY_SNAPSHOT_BYTES + 1),
+        " ".repeat(50_000),
     ] {
         db.execute(
             "INSERT OR REPLACE INTO runtime_policy(singleton, document) VALUES(1, ?)",

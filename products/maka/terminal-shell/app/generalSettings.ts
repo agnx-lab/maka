@@ -269,12 +269,6 @@ export function createGeneralSettings(operations: SettingsOperations, active: ()
       const form = editor();
       if (!form || !current(request) || disabled() || !dirty()) return;
       if (form.kind === 'personalization') {
-        if ([...form.displayName].length > 256 || [...form.assistantTone].length > 4096) {
-          operations.report(
-            new Error('Use at most 256 characters for your name and 4096 for tone.'),
-          );
-          return;
-        }
         return mutate(
           request,
           {

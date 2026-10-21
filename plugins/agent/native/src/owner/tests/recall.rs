@@ -133,8 +133,8 @@ async fn recall_native_model_tools_expand_exclude_active_turn_and_retain_materia
         let started = f.mutation(2,"send",json!({"sessionId":target,"message":"café current turn must be excluded","model":f.selection().await}),Uuid::new_v4()).await.unwrap();
         assert_eq!(started["kind"],"started");
         for (name,input,previous) in [
-            ("Recall",json!({"terms":["café"]}), None),
-            ("RecallMore",json!({"session_id":source,"anchor_message_id":anchor}), Some("original café answer")),
+            ("Recall",json!({"terms":["café","second","third","fourth","fifth","sixth","seventh","eighth","ninth"],"question":"original question ".repeat(40),"limit":26}), None),
+            ("RecallMore",json!({"session_id":source,"anchor_message_id":anchor,"before":9,"after":9}), Some("original café answer")),
             ("RecallMaterial",json!({"session_id":source,"artifact_id":artifact}), Some("A later exchange")),
             ("RecallMaterial",json!({"session_id":source,"artifact_id":image}), Some("historical attachment contents")),
         ] {

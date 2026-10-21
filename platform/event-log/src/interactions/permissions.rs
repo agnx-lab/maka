@@ -92,7 +92,7 @@ impl EventLog {
         ] {
             entity_id(id).map_err(invalid)?;
         }
-        if tool_use_id.is_some_and(|id| id.is_empty() || id.len() > 256)
+        if tool_use_id.is_some_and(|id| id.is_empty())
             || base_revision > maka_agent_facts::interaction::MAX_SAFE_INTEGER
         {
             return Err(invalid("invalid permission observation identity"));
@@ -118,12 +118,9 @@ impl EventLog {
                                OR (json_extract(outcome.outcome_json, '$.decision.scope') = 'once'
                                    AND json_extract(request.record_json, '$.runId') = ?
                                    AND json_extract(request.record_json, '$.request.toolUseId') = ?))))
-                 ORDER BY request.created_at, request.request_id LIMIT 513",
+                 ORDER BY request.created_at, request.request_id",
             ).bind(&invocation.session_id).bind(base_revision as i64).bind(&invocation.turn_id)
                 .bind(&invocation.run_id).bind(&tool_use_id).fetch_all(&mut *tx).await?;
-            if ids.len() > 512 {
-                return Err(invalid("permission grant projection exceeds policy capacity"));
-            }
             let mut grants = Vec::with_capacity(ids.len());
             for id in ids {
                 let record = read(&mut tx, &id).await?.ok_or_else(|| invalid("permission outcome disappeared"))?;
@@ -171,7 +168,7 @@ pub(crate) async fn close_previous_boundary(
                 .map_err(invalid)?;
             sqlx::query("INSERT INTO interaction_outcomes VALUES (?, ?)")
                 .bind(&record.request_id)
-                .bind(super::records::encode(&closure, 8 * 1024)?)
+                .bind(super::records::encode(&closure)?)
                 .execute(&mut *connection)
                 .await?;
             closed += 1;

@@ -55,6 +55,54 @@ impl Policy {
         }
     }
 
+    /// Check the finite header fields owned by our configured HTTP stack.
+    /// This is conservative physical representation admission, without changing
+    /// caller values, default precedence or proxy authentication behavior.
+    pub fn check_request_headers(
+        &self,
+        url: &Url,
+        headers: &reqwest::header::HeaderMap,
+        has_body: bool,
+        follows_redirects: bool,
+    ) -> Result<(), Error> {
+        use reqwest::header::{
+            ACCEPT, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_LENGTH, HOST, HeaderValue,
+            PROXY_AUTHORIZATION, REFERER, TRANSFER_ENCODING,
+        };
+        let mut fields = vec![ACCEPT, ACCEPT_ENCODING, HOST];
+        if has_body {
+            fields.extend([TRANSFER_ENCODING, CONTENT_LENGTH]);
+        }
+        if follows_redirects {
+            fields.push(REFERER);
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            fields.push(AUTHORIZATION);
+        }
+        if url.scheme() == "http"
+            && self
+                .proxy_for(url.scheme(), url.host_str().unwrap_or_default())
+                .is_some_and(|proxy| {
+                    matches!(proxy.scheme(), "http" | "https")
+                        && (!proxy.username().is_empty() || proxy.password().is_some())
+                })
+        {
+            fields.push(PROXY_AUTHORIZATION);
+        }
+        let mut complete = headers.clone();
+        for field in fields {
+            if !complete.contains_key(&field) {
+                complete
+                    .try_insert(field, HeaderValue::from_static(""))
+                    .map_err(|_| Error::InvalidHeaders)?;
+            }
+        }
+        // Pinned HeaderMap::entry reserves before lookup, including occupied
+        // entries used by reqwest defaults, decompression and HTTP/1 Host.
+        complete.try_reserve(1).map_err(|_| Error::InvalidHeaders)?;
+        Ok(())
+    }
+
     /// Host routing: an enabled manual proxy wins; otherwise capture the Host's
     /// environment. Credentials stay in this immutable, non-serializable value.
     pub fn from_host_settings(
@@ -189,6 +237,51 @@ fn bypasses(host: &str, patterns: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_request_fields_are_checked_without_changing_header_precedence() {
+        use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+        let policy = Policy::default();
+        let url = Url::parse("https://example.com/").unwrap();
+        let headers = HeaderMap::from_iter([(
+            reqwest::header::ACCEPT,
+            HeaderValue::from_static("application/custom"),
+        )]);
+        let original = headers.clone();
+        policy
+            .check_request_headers(&url, &headers, true, true)
+            .unwrap();
+        assert_eq!(headers, original);
+        assert_eq!(headers[reqwest::header::ACCEPT], "application/custom");
+        let mut full = HeaderMap::new();
+        for field in [
+            "accept",
+            "accept-encoding",
+            "host",
+            "transfer-encoding",
+            "content-length",
+            "referer",
+            "authorization",
+        ] {
+            full.try_insert(field, HeaderValue::from_static("kept"))
+                .unwrap();
+        }
+        for index in 0..32_768 {
+            if full
+                .try_insert(
+                    HeaderName::from_bytes(format!("x-field-{index}").as_bytes()).unwrap(),
+                    HeaderValue::from_static("kept"),
+                )
+                .is_err()
+            {
+                break;
+            }
+        }
+        assert!(matches!(
+            policy.check_request_headers(&url, &full, true, true),
+            Err(Error::InvalidHeaders)
+        ));
+    }
+
     #[test]
     fn bypass_patterns_do_not_expand_destination_authority() {
         let cases = [

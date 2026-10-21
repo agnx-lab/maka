@@ -80,33 +80,6 @@ export function appendLive(
     previous.invocationId === invocationId &&
     previous.stepId === part.stepId &&
     previous.field === field;
-  const ids = new Set(state.live.map((fragment) => fragment.messageId));
-  let remaining = 16000 - state.live.reduce((total, fragment) => total + fragment.text.length, 0);
-  // Thinking shares the existing prefix budget but leaves room for an answer
-  // before atomic providers publish either field. Never evict a displayed prefix.
-  if (field === 'thinking') {
-    const thinking = state.live.filter((fragment) => fragment.field === 'thinking');
-    const thinkingIds = new Set(thinking.map((fragment) => fragment.messageId));
-    if (
-      (!adjacent && thinking.length >= 32) ||
-      (!thinkingIds.has(messageId) && thinkingIds.size >= 8)
-    )
-      return;
-    remaining = Math.min(
-      remaining,
-      8000 - thinking.reduce((total, fragment) => total + fragment.text.length, 0),
-    );
-  }
-  // A truncated surrogate can leave one unused code unit; keep the prefix closed.
-  if (
-    remaining <= 1 ||
-    (!adjacent && state.live.length >= 64) ||
-    (!ids.has(messageId) && ids.size >= 16)
-  )
-    return;
-  text = text.slice(0, remaining);
-  const last = text.charCodeAt(text.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) text = text.slice(0, -1);
   if (text && adjacent) {
     previous.text += text;
     previous.sequence = sequence;

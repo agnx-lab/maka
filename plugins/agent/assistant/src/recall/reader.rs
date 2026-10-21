@@ -34,6 +34,7 @@ pub(super) struct Reader {
     chunks: VecDeque<Chunk>,
     done: bool,
     assembling: Option<Chunk>,
+    cursors: std::collections::BTreeSet<String>,
 }
 impl Reader {
     pub fn new(
@@ -54,6 +55,7 @@ impl Reader {
             chunks: VecDeque::new(),
             done: false,
             assembling: None,
+            cursors: std::collections::BTreeSet::new(),
         }
     }
     pub fn through(&self) -> Option<u64> {
@@ -66,10 +68,13 @@ impl Reader {
                 return Err(failed("Recall cancelled"));
             }
             if let Some(chunk) = self.chunks.pop_front() {
-                if chunk.total_bytes > 64 * 1024 * 1024 {
-                    return Err(failed(
-                        "History message exceeds Recall's 64 MiB processing capacity",
-                    ));
+                if chunk
+                    .offset
+                    .checked_add(chunk.text.len() as u64)
+                    .is_none_or(|end| end > chunk.total_bytes)
+                    || (chunk.text.is_empty() && chunk.offset < chunk.total_bytes)
+                {
+                    return Err(failed("History chunk did not advance"));
                 }
                 if let Some(current) = &mut self.assembling {
                     if current.position != chunk.position
@@ -110,9 +115,17 @@ impl Reader {
                 .read(self.call.clone(), self.input.clone())
                 .await
                 .map_err(failed)?;
+            if self.input.through.is_some_and(|fence| fence != through) {
+                return Err(failed("History fence changed"));
+            }
             self.input.through = Some(through);
             if let Some(cursor) = after {
-                self.input.position = Position::After { cursor };
+                let next = Position::After { cursor };
+                let identity = serde_json::to_string(&next).map_err(failed)?;
+                if next == self.input.position || !self.cursors.insert(identity) {
+                    return Err(failed("History continuation did not advance"));
+                }
+                self.input.position = next;
             }
             self.done = after.is_none();
             self.chunks = chunks.into();
@@ -132,27 +145,37 @@ pub(super) async fn sessions(
         ..Default::default()
     };
     let mut all = Vec::new();
-    let mut total = 0;
+    let mut seen = std::collections::BTreeSet::new();
     loop {
+        if call.cancellation.is_cancelled() {
+            return Err(failed("Recall cancelled"));
+        }
         let page = history
             .list(call.clone(), input.clone())
             .await
             .map_err(failed)?;
+        if input
+            .revision
+            .as_ref()
+            .is_some_and(|revision| revision != &page.revision)
+        {
+            return Err(failed("Recall catalog revision changed"));
+        }
         for session in page.entries {
             if selected.is_none_or(|id| id == session.id) {
-                total += 1;
                 all.push(session);
             }
         }
-        // Retain the same recent-Session ceiling as TS, without holding the full catalog.
-        all.sort_by(|a, b| {
-            b.last_message_at
-                .cmp(&a.last_message_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        all.truncate(200);
         if page.next_cursor.is_none() {
-            return Ok((all, total <= 200));
+            all.sort_by(|a, b| {
+                b.last_message_at
+                    .cmp(&a.last_message_at)
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+            return Ok((all, true));
+        }
+        if !seen.insert(page.next_cursor.clone().expect("continuation exists")) {
+            return Err(failed("Recall catalog continuation repeated"));
         }
         input.revision = Some(page.revision);
         input.cursor = page.next_cursor;

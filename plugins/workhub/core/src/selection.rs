@@ -63,14 +63,14 @@ impl crate::Manager {
         text: String,
         language: Language,
     ) -> Result<Selection, Error> {
-        if !(2..=16).contains(&references.len())
+        if references.len() < 2
             || references
                 .iter()
                 .collect::<std::collections::BTreeSet<_>>()
                 .len()
                 != references.len()
         {
-            return Err(invalid("Select 2–16 distinct candidates"));
+            return Err(invalid("Select at least 2 distinct candidates"));
         }
         let candidates = self
             .assignments

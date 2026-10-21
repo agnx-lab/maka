@@ -34,7 +34,7 @@ async fn entries(store: &ConfigurationStore) -> (u64, Vec<Entry>) {
     let mut all = Vec::new();
     loop {
         let page = store.query_pricing(query).await.unwrap();
-        assert!(serde_json::to_vec(&page).unwrap().len() <= 48 * 1024);
+        let page_bytes = serde_json::to_vec(&page).unwrap().len();
         let Page::Page {
             revision,
             offset,
@@ -46,6 +46,10 @@ async fn entries(store: &ConfigurationStore) -> (u64, Vec<Entry>) {
         };
         assert_eq!(offset, all.len() as u64);
         assert!(entries.len() <= 128);
+        assert!(page_bytes <= 48 * 1024 || entries.len() == 1);
+        if let Some(next) = next_offset {
+            assert!(next > offset);
+        }
         all.extend(entries);
         match next_offset {
             Some(offset) => query = Query::Continue { revision, offset },
@@ -255,5 +259,60 @@ async fn pricing_cas_pages_and_quotes_survive_reopen_and_bundled_rate_replacemen
         }
     ));
     assert_eq!(quote(&store, "fixture:\u{e000}").await.0, 5);
+    store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn pricing_pages_preserve_one_large_record_and_continue_after_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = Arc::new(
+        RootOwner::create(
+            &temp.path().join("root"),
+            &RootNamespaces {
+                ownership: temp.path().join("owners"),
+                control: temp.path().join("control"),
+            },
+        )
+        .unwrap(),
+    );
+    let store = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let pricing = Pricing {
+        model_key: format!("example:{}", "route-model-".repeat(12_000)),
+        input_usd_per_million: 1.25,
+        output_usd_per_million: 3.5,
+        cache_read_usd_per_million: None,
+        cache_write_usd_per_million: None,
+    };
+    assert_eq!(
+        store
+            .update_pricing(Update {
+                expected_revision: 0,
+                mutation: Mutation::Upsert {
+                    pricing: pricing.clone()
+                }
+            })
+            .await
+            .unwrap(),
+        Updated::Committed { revision: 1 }
+    );
+    store.close().await.unwrap();
+    let store = ConfigurationStore::for_root(owner).await.unwrap();
+    assert_eq!(
+        quote(&store, &pricing.model_key).await,
+        (1, Some(pricing.clone()))
+    );
+    let (revision, rows) = entries(&store).await;
+    assert_eq!(revision, 1);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| price(row).model_key == pricing.model_key)
+            .map(price)
+            .collect::<Vec<_>>(),
+        vec![&pricing]
+    );
+    assert!(
+        rows.iter()
+            .any(|row| price(row).model_key != pricing.model_key)
+    );
     store.close().await.unwrap();
 }

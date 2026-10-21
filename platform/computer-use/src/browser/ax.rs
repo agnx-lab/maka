@@ -44,7 +44,6 @@ impl Projection {
         }
         let nodes: HashMap<&str, &Value> = nodes
             .iter()
-            .take(2000)
             .filter_map(|node| Some((node["nodeId"].as_str()?, node)))
             .collect();
         let mut walk = Walk {
@@ -90,102 +89,105 @@ impl<'a> Walk<'a> {
         &mut self,
         id: &'a str,
         depth: usize,
-        parent_name: &str,
+        parent_name: &'a str,
         language: Language,
     ) -> Result<(), ToolError> {
-        if depth > 60 || !self.seen.insert(id) {
-            return Ok(());
-        }
-        let Some(node) = self.nodes.get(id).copied() else {
-            return Ok(());
-        };
-        let role = node["role"]["value"].as_str().unwrap_or("unknown");
-        if role == "InlineTextBox" {
-            return Ok(());
-        }
-        let name = node["name"]["value"].as_str().unwrap_or("");
-        let content = &node["value"]["value"];
-        let transparent = node["ignored"] == true
-            || (matches!(role, "generic" | "none" | "LabelText")
-                && name.is_empty()
-                && node["actions"].as_array().is_none_or(Vec::is_empty))
-            || (role == "StaticText" && !name.is_empty() && name == parent_name);
-        let mut child_depth = depth;
-        if !transparent {
-            let scope = node["makaFrame"]
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let loader = node["makaFrame"]
-                .get("loader")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let identity = node["backendDOMNodeId"]
-                .as_u64()
-                .map(|id| format!("{scope}:{loader}:dom:{id}"))
-                .unwrap_or_else(|| format!("ax:{id}"));
-            let index = if let Some(index) = self.projection.indices.get(&identity) {
-                *index
-            } else {
-                let index = self.projection.next;
-                self.projection.next = index
-                    .checked_add(1)
-                    .filter(|next| *next <= 9_007_199_254_740_991)
-                    .ok_or_else(|| {
-                        failed(match language {
-                            Language::En => "accessibility index limit reached; reset Cua",
-                            Language::ZhCn => "无障碍索引数已达上限；请重置 Cua",
-                            Language::ZhTw => "輔助使用索引數已達上限；請重設 Cua",
-                        })
-                    })?;
-                self.projection.indices.insert(identity.clone(), index);
-                index
+        let mut pending = vec![(id, depth, parent_name)];
+        while let Some((id, depth, parent_name)) = pending.pop() {
+            if !self.seen.insert(id) {
+                continue;
+            }
+            let Some(node) = self.nodes.get(id).copied() else {
+                continue;
             };
-            self.retained.insert(identity);
-            if let Some(backend) = node["backendDOMNodeId"].as_u64() {
-                self.refs.insert(
-                    index,
-                    ElementRef {
-                        backend,
-                        frame: serde_json::from_value(node["makaFrame"].clone()).ok(),
-                    },
-                );
+            let role = node["role"]["value"].as_str().unwrap_or("unknown");
+            if role == "InlineTextBox" {
+                continue;
             }
-            let mut row = format!("{}{index} {role} {}", "  ".repeat(depth), json!(name));
-            if !content.is_null() && content != "" {
-                row.push_str(&format!(" value={content}"));
-            }
-            if let Some(actions) = node
-                .get("actions")
-                .filter(|value| value.as_array().is_some_and(|actions| !actions.is_empty()))
-            {
-                row.push_str(&format!(" actions={actions}"));
-            }
-            if let Some(properties) = node["properties"].as_array() {
-                for property in properties {
-                    let key = property["name"].as_str().unwrap_or("");
-                    let value = &property["value"]["value"];
-                    match key {
-                        "disabled" | "focused" | "readonly" | "required" | "busy"
-                            if value == true =>
-                        {
-                            row.push_str(&format!(" [{key}]"));
+            let name = node["name"]["value"].as_str().unwrap_or("");
+            let content = &node["value"]["value"];
+            let transparent = node["ignored"] == true
+                || (matches!(role, "generic" | "none" | "LabelText")
+                    && name.is_empty()
+                    && node["actions"].as_array().is_none_or(Vec::is_empty))
+                || (role == "StaticText" && !name.is_empty() && name == parent_name);
+            let mut child_depth = depth;
+            if !transparent {
+                let scope = node["makaFrame"]
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let loader = node["makaFrame"]
+                    .get("loader")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let identity = node["backendDOMNodeId"]
+                    .as_u64()
+                    .map(|id| format!("{scope}:{loader}:dom:{id}"))
+                    .unwrap_or_else(|| format!("ax:{id}"));
+                let index = if let Some(index) = self.projection.indices.get(&identity) {
+                    *index
+                } else {
+                    let index = self.projection.next;
+                    self.projection.next = index
+                        .checked_add(1)
+                        .filter(|next| *next <= 9_007_199_254_740_991)
+                        .ok_or_else(|| {
+                            failed(match language {
+                                Language::En => "accessibility index limit reached; reset Cua",
+                                Language::ZhCn => "无障碍索引数已达上限；请重置 Cua",
+                                Language::ZhTw => "輔助使用索引數已達上限；請重設 Cua",
+                            })
+                        })?;
+                    self.projection.indices.insert(identity.clone(), index);
+                    index
+                };
+                self.retained.insert(identity);
+                if let Some(backend) = node["backendDOMNodeId"].as_u64() {
+                    self.refs.insert(
+                        index,
+                        ElementRef {
+                            backend,
+                            frame: serde_json::from_value(node["makaFrame"].clone()).ok(),
+                        },
+                    );
+                }
+                let mut row = format!("{}{index} {role} {}", "  ".repeat(depth), json!(name));
+                if !content.is_null() && content != "" {
+                    row.push_str(&format!(" value={content}"));
+                }
+                if let Some(actions) = node
+                    .get("actions")
+                    .filter(|value| value.as_array().is_some_and(|actions| !actions.is_empty()))
+                {
+                    row.push_str(&format!(" actions={actions}"));
+                }
+                if let Some(properties) = node["properties"].as_array() {
+                    for property in properties {
+                        let key = property["name"].as_str().unwrap_or("");
+                        let value = &property["value"]["value"];
+                        match key {
+                            "disabled" | "focused" | "readonly" | "required" | "busy"
+                                if value == true =>
+                            {
+                                row.push_str(&format!(" [{key}]"));
+                            }
+                            "checked" | "selected" | "expanded" if !value.is_null() => {
+                                row.push_str(&format!(" [{key}={value}]"));
+                            }
+                            _ => {}
                         }
-                        "checked" | "selected" | "expanded" if !value.is_null() => {
-                            row.push_str(&format!(" [{key}={value}]"));
-                        }
-                        _ => {}
                     }
                 }
+                self.rows.push(row);
+                child_depth += 1;
             }
-            self.rows.push(row);
-            child_depth += 1;
-        }
-        let child_name = if transparent { parent_name } else { name };
-        if let Some(children) = node["childIds"].as_array() {
-            for child in children {
-                if let Some(child) = child.as_str() {
-                    self.visit(child, child_depth, child_name, language)?;
+            let child_name = if transparent { parent_name } else { name };
+            if let Some(children) = node["childIds"].as_array() {
+                for child in children.iter().rev() {
+                    if let Some(child) = child.as_str() {
+                        pending.push((child, child_depth, child_name));
+                    }
                 }
             }
         }
@@ -195,6 +197,30 @@ impl<'a> Walk<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn complete_deep_accessibility_tree_keeps_original_descendant_indices() {
+        let nodes=(0..70).map(|index| {
+            let mut node=json!({"nodeId":index.to_string(),"backendDOMNodeId":index+1,"role":{"value":"button"},"name":{"value":format!("Node {index}")}});
+            if index>0 {node["parentId"]=json!((index-1).to_string());}
+            if index<69 {node["childIds"]=json!([(index+1).to_string()]);}
+            node
+        }).collect::<Vec<_>>();
+        let mut projection = Projection::default();
+        let (state, refs) = projection.render("original", &nodes, Language::En).unwrap();
+        assert_eq!(refs.len(), 70);
+        assert!(
+            state.ends_with("button \"Node 69\""),
+            "complete deepest descendant must remain visible"
+        );
+        let index = *refs
+            .iter()
+            .find(|(_, value)| value.backend == 70)
+            .unwrap()
+            .0;
+        let (_, again) = projection.render("original", &nodes, Language::En).unwrap();
+        assert_eq!(again[&index].backend, 70);
+    }
+
     use super::*;
 
     #[test]

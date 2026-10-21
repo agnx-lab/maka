@@ -52,8 +52,7 @@ export function questionEditor<N extends Node>(
       draft.selection === 'text' &&
       draft.observation &&
       !draft.observation.snapshot.marked &&
-      draft.observation.snapshot.text.bytes > 0 &&
-      draft.observation.snapshot.text.bytes <= 2048
+      draft.observation.snapshot.text.bytes > 0
     )
       return { kind: 'text', observation: draft.observation };
     return null;

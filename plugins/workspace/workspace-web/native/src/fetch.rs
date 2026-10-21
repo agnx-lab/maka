@@ -19,15 +19,10 @@
 
 use maka_capabilities::call;
 use maka_capabilities::http;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use url::{Host, Url};
 
 mod document;
-
-/// Limit decoded HTTP bytes before constructing a DOM.
-const BODY_LIMIT: usize = 5 * 1024 * 1024;
-const REDIRECT_LIMIT: usize = 10;
-const DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -37,16 +32,12 @@ pub enum Error {
     Metadata,
     #[error("WebFetch was cancelled")]
     Cancelled,
-    #[error("WebFetch exceeded its 30 second deadline")]
-    Timeout,
-    #[error("WebFetch exceeded 10 redirects")]
+    #[error("WebFetch redirect contains a cycle")]
     Redirects,
     #[error("WebFetch redirect has no valid Location")]
     Location,
     #[error("WebFetch failed with HTTP {0}")]
     Status(u16),
-    #[error("WebFetch response exceeds 5 MiB")]
-    TooLarge,
     #[error("WebFetch cannot extract this content type: {0}")]
     ContentType(String),
     #[error("WebFetch returned no readable content")]
@@ -78,8 +69,7 @@ impl Fetcher {
         let result = tokio::select! {
             biased;
             _ = scope.cancellation.cancelled() => Err(Error::Cancelled),
-            result = tokio::time::timeout(DEADLINE, self.follow(&scope, url)) =>
-                result.unwrap_or(Err(Error::Timeout)),
+            result = self.follow(&scope, url) => result,
         };
         // Cancel and settle even when the future is dropped during response headers.
         // Unconfirmed cleanup takes precedence over an ordinary fetch failure.
@@ -88,7 +78,11 @@ impl Fetcher {
     }
 
     async fn follow(&self, scope: &call::Scope, mut url: Url) -> Result<Page, Error> {
-        for redirect in 0..=REDIRECT_LIMIT {
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if !visited.insert(url.to_string()) {
+                return Err(Error::Redirects);
+            }
             let response = self.http.request(scope.clone(), http::Request {
                 url: url.to_string(),
                 method: http::Method::Get,
@@ -105,9 +99,6 @@ impl Fetcher {
             let result = async {
                 let final_url = final_url?;
                 if matches!(status, 301 | 302 | 303 | 307 | 308) {
-                    if redirect == REDIRECT_LIMIT {
-                        return Err(Error::Redirects);
-                    }
                     let location = header(&response.head, "location").ok_or(Error::Location)?;
                     let target = final_url.join(location).map_err(|_| Error::Location)?;
                     return Ok(Fetched::Redirect(checked_url(target.as_str())?));
@@ -121,9 +112,6 @@ impl Fetcher {
                 let media = document::media_type(&content_type)?;
                 let mut bytes = Vec::new();
                 while let Some(chunk) = response.body.next().await? {
-                    if chunk.len() > BODY_LIMIT - bytes.len() {
-                        return Err(Error::TooLarge);
-                    }
                     bytes.extend_from_slice(&chunk);
                 }
                 Ok(Fetched::Content {
@@ -148,7 +136,6 @@ impl Fetcher {
                 }
             }
         }
-        Err(Error::Redirects)
     }
 }
 
@@ -173,9 +160,6 @@ fn header<'a>(head: &'a http::Head, name: &str) -> Option<&'a str> {
 /// Local documentation servers are allowed. This is a metadata denylist, not a
 /// claim of DNS-rebinding protection or a replacement for Host network policy.
 pub(crate) fn checked_url(input: &str) -> Result<Url, Error> {
-    if input.len() > 8192 {
-        return Err(Error::Url("URL exceeds 8192 bytes".into()));
-    }
     let mut url = Url::parse(input).map_err(|error| Error::Url(error.to_string()))?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host().is_none()

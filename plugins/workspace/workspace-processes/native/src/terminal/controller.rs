@@ -202,10 +202,8 @@ impl Processes {
         {
             return Err(failed("Invalid terminal control"));
         }
-        if !input.actions.is_empty()
-            && encoded_actions_byte_len(&input.actions).map_err(failed)? > 32 * 1024
-        {
-            return Err(failed("Terminal input exceeds 32 KiB"));
+        if !input.actions.is_empty() {
+            encoded_actions_byte_len(&input.actions).map_err(failed)?;
         }
         let handle = {
             let state = self.controllers.lock().unwrap();

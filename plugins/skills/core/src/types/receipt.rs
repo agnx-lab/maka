@@ -17,17 +17,13 @@
  * under the License.
  */
 
-use super::{SkillFailureReason, SkillInvocationMode, SkillScope, SkillSource, TooManyRequests};
+use super::{SkillFailureReason, SkillInvocationMode, SkillScope, SkillSource};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error, ser::SerializeMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillInvocationReceipt {
     Loaded(SkillLoadedReceipt),
     Failed(SkillFailedReceipt),
-    /// Request overflow can only describe an explicit, failed invocation.
-    Overflow {
-        request_limit: u64,
-    },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillLoadedReceipt {
@@ -51,7 +47,7 @@ impl Serialize for SkillInvocationReceipt {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(match self {
             Self::Loaded(_) => 9,
-            Self::Failed(_) | Self::Overflow { .. } => 4,
+            Self::Failed(_) => 4,
         }))?;
         match self {
             Self::Loaded(r) => {
@@ -70,12 +66,6 @@ impl Serialize for SkillInvocationReceipt {
                 map.serialize_entry("request", &r.request)?;
                 map.serialize_entry("success", &false)?;
                 map.serialize_entry("reason", &r.reason)?;
-            }
-            Self::Overflow { request_limit } => {
-                map.serialize_entry("invocation", &SkillInvocationMode::Explicit)?;
-                map.serialize_entry("success", &false)?;
-                map.serialize_entry("reason", &TooManyRequests::TooManyRequests)?;
-                map.serialize_entry("requestLimit", request_limit)?;
             }
         }
         map.end()
@@ -105,13 +95,6 @@ enum WireReceipt {
         success: bool,
         reason: SkillFailureReason,
     },
-    Overflow {
-        invocation: SkillInvocationMode,
-        success: bool,
-        reason: TooManyRequests,
-        #[serde(rename = "requestLimit")]
-        request_limit: u64,
-    },
 }
 
 impl schemars::JsonSchema for SkillInvocationReceipt {
@@ -127,7 +110,6 @@ impl schemars::JsonSchema for SkillInvocationReceipt {
         for (index, variant) in variants.iter_mut().enumerate() {
             variant["properties"]["success"] = serde_json::json!({"const": index == 0});
         }
-        variants[2]["properties"]["invocation"] = serde_json::json!({"const":"explicit"});
         schema
     }
 }
@@ -165,12 +147,6 @@ impl<'de> Deserialize<'de> for SkillInvocationReceipt {
                 request,
                 reason,
             })),
-            WireReceipt::Overflow {
-                invocation: SkillInvocationMode::Explicit,
-                success: false,
-                reason: TooManyRequests::TooManyRequests,
-                request_limit,
-            } => Ok(Self::Overflow { request_limit }),
             _ => Err(D::Error::custom("contradictory skill receipt outcome")),
         }
     }

@@ -54,11 +54,7 @@ pub enum Error {
 }
 
 pub fn identity(value: &str) -> Result<(), Error> {
-    if value.is_empty()
-        || value.len() > 256
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
+    if value.is_empty() || value.trim() != value || value.chars().any(char::is_control) {
         return Err(Error::Invalid("invalid identity".into()));
     }
     Ok(())
@@ -78,7 +74,7 @@ macro_rules! id {
             schemars::JsonSchema,
         )]
         #[serde(try_from = "String", into = "String")]
-        #[schemars(with = "String", extend("minLength" = 1, "maxLength" = 256))]
+        #[schemars(with = "String", extend("minLength" = 1))]
         pub struct $ty(String);
 
         impl $ty {

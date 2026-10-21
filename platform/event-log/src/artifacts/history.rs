@@ -201,9 +201,6 @@ async fn retain_one(
     artifact.created_at = now;
     artifact.validate().map_err(invalid)?;
     let metadata = serde_json::to_string(&artifact)?;
-    if metadata.len() > super::MAX_RECORD_BYTES {
-        return Err(StoreError::ArtifactConflict);
-    }
     let copied = sqlx::query(
         "INSERT INTO artifacts (session_id, id, created_at, record_json, content_sha256, payload, canonical_at)
          SELECT ?3, ?4, ?5, ?6, content_sha256, payload, canonical_at FROM artifacts

@@ -28,10 +28,6 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-// The Linux 1.2.1 server expands to 920 MB; bound extraction without buffering it.
-const MAX_FILE: u64 = 1024 * 1024 * 1024;
-const MAX_EXPANDED: u64 = 1536 * 1024 * 1024;
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Receipt {
@@ -98,7 +94,6 @@ pub(super) fn publish(
         return Err(Error::Integrity);
     }
     let mut files = BTreeMap::new();
-    let mut expanded = 0_u64;
     for index in 0..zip.len() {
         control.check(retiring)?;
         let mut source = zip.by_index(index).map_err(|_| Error::Integrity)?;
@@ -107,17 +102,10 @@ pub(super) fn publish(
         if ![release.server, release.helper].contains(&name.as_str())
             || files.contains_key(&name)
             || source.is_dir()
-            || source.size() > MAX_FILE
             || source
                 .unix_mode()
                 .is_some_and(|mode| mode & 0o170000 != 0 && mode & 0o170000 != 0o100000)
         {
-            return Err(Error::Integrity);
-        }
-        expanded = expanded
-            .checked_add(source.size())
-            .ok_or(Error::Integrity)?;
-        if expanded > MAX_EXPANDED {
             return Err(Error::Integrity);
         }
         let mut target = create(&output, &name)?;
@@ -146,7 +134,14 @@ pub(super) fn publish(
     // digest of bytes received directly from the authorized HTTPS response.
     let mut download = zip.into_inner();
     download.seek(SeekFrom::Start(0))?;
-    if copy(&mut download, None, control, retiring, super::MAX_ARCHIVE)? != receipt.archive_sha256 {
+    if copy(
+        &mut download,
+        None,
+        control,
+        retiring,
+        receipt.archive_bytes,
+    )? != receipt.archive_sha256
+    {
         return Err(Error::Integrity);
     }
     verify(&output, release, &receipt, control, retiring)?;
@@ -177,7 +172,6 @@ fn verify(
         || receipt.source != release.url
         || receipt.files.len() != 2
         || receipt.archive_bytes == 0
-        || receipt.archive_bytes > super::MAX_ARCHIVE
         || !digest(&receipt.archive_sha256)
         || release
             .pinned
@@ -191,10 +185,8 @@ fn verify(
             return Err(Error::Integrity);
         }
         let mut file = dir.open(name)?;
-        if file.metadata()?.len() > MAX_FILE {
-            return Err(Error::Integrity);
-        }
-        let actual = copy(&mut file, None, control, retiring, MAX_FILE)?;
+        let file_bytes = file.metadata()?.len();
+        let actual = copy(&mut file, None, control, retiring, file_bytes)?;
         if receipt.files.get(name) != Some(&actual) {
             return Err(Error::Integrity);
         }
@@ -227,7 +219,7 @@ fn copy(
     mut target: Option<&mut File>,
     control: &Control,
     retiring: &CancellationToken,
-    limit: u64,
+    expected_bytes: u64,
 ) -> Result<String, Error> {
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; 65536];
@@ -239,13 +231,16 @@ fn copy(
             break;
         }
         bytes += count as u64;
-        if bytes > limit {
+        if bytes > expected_bytes {
             return Err(Error::Integrity);
         }
         hash.update(&buffer[..count]);
         if let Some(target) = target.as_mut() {
             target.write_all(&buffer[..count])?;
         }
+    }
+    if bytes != expected_bytes {
+        return Err(Error::Integrity);
     }
     Ok(hex::encode(hash.finalize()))
 }
@@ -291,7 +286,7 @@ fn sync_directory(dir: &Dir) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Cursor, time::Duration};
+    use std::io::Cursor;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
     fn archive(dir: &Dir, staging: &str, names: &[&str]) -> (u64, String) {
@@ -320,7 +315,6 @@ mod tests {
         let release = Release::for_platform("linux", "x86_64").unwrap();
         let control = Control {
             cancellation: CancellationToken::new(),
-            deadline: tokio::time::Instant::now() + Duration::from_secs(30),
         };
         let retiring = CancellationToken::new();
         let names = [release.server, release.helper];
@@ -369,7 +363,6 @@ mod tests {
         let release = Release::for_platform("linux", "x86_64").unwrap();
         let control = Control {
             cancellation: CancellationToken::new(),
-            deadline: tokio::time::Instant::now() + Duration::from_secs(30),
         };
         let (bytes, hash) = archive(&dir, "bad", &[release.server, "../../escaped"]);
         assert!(matches!(

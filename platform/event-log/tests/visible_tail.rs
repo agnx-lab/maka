@@ -110,7 +110,7 @@ async fn visible_ids_match_presentation_for_accepted_and_partial_parts_across_ca
             .await
             .unwrap();
         let db = Connection::open(&path).unwrap();
-        let mut view = InvocationView::new(1024 * 1024).unwrap();
+        let mut view = InvocationView::new();
         let mut ids = Vec::new();
         assert!(projected(&db).is_empty());
         append(

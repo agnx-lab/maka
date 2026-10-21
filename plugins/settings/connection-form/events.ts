@@ -149,7 +149,6 @@ export function handleEvent<N extends Node>(
           provider.identity.name
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
-            .slice(0, 48)
             .replace(/^-|-$/g, '') || 'connection';
         let slug = base;
         for (let suffix = 2; props.existingSlugs?.includes(slug); suffix++)

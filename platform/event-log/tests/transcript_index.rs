@@ -518,19 +518,34 @@ async fn terminal_without_model_interruption_seals_only_committed_partial_eviden
 }
 
 #[tokio::test]
-async fn optional_projection_failures_preserve_canonical_admission() {
+async fn complete_projection_and_malformed_source_preserve_canonical_admission() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("log.sqlite");
     let log = EventLog::open(&path).await.unwrap();
-    partial(&log, "a", &"x".repeat(16 * 1024 * 1024)).await;
+    let expected = "x".repeat(16 * 1024 * 1024);
+    let (id, _) = partial(&log, "a", &expected).await;
     let through = interrupt(&log, "a").await;
     let db = Connection::open(&path).unwrap();
-    assert!(matches!(
-        crate::transcript_cache::materialize_all_rows(&log, "a", through).await,
-        Err(StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
-    ));
-
-    assert!(rows(&db, "a").is_empty());
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
+    let original = rows(&db, "a");
+    assert_eq!(original.len(), 3);
+    let assistant: Value = serde_json::from_slice(&original[2].1).unwrap();
+    assert_eq!(assistant["id"], id);
+    assert!(
+        assistant["text"].as_str() == Some(expected.as_str()),
+        "complete assistant text must survive projection"
+    );
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
+    crate::transcript_cache::materialize_all_rows(&log, "a", through)
+        .await
+        .unwrap();
+    assert!(
+        rows(&db, "a") == original,
+        "cold rebuild must preserve full rows, digests and positions"
+    );
     log.append(&event("b", opening())).await.unwrap();
     let through = log
         .append(&event(
@@ -552,6 +567,7 @@ async fn optional_projection_failures_preserve_canonical_admission() {
     ));
 
     assert!(rows(&db, "b").is_empty());
+    log.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -825,7 +841,6 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
                         offset: text.len() as u64,
                     },
                     4,
-                    65536,
                 )
                 .await
                 .unwrap();
@@ -853,8 +868,7 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
                 SourceField::Arguments,
                 None,
                 SourcePosition::Start,
-                8192,
-                65536
+                8192
             )
             .await
             .is_err()
@@ -871,8 +885,7 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
             SourceField::Arguments,
             None,
             SourcePosition::Start,
-            8192,
-            65536
+            8192
         )
         .await
         .is_err()
@@ -968,7 +981,6 @@ async fn completion_fanout_positions_preserve_usage_fences_sources_and_cold_rebu
                 None,
                 SourcePosition::Start,
                 8192,
-                65536,
             )
             .await
             .unwrap();

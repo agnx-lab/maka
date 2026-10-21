@@ -30,10 +30,6 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 pub(super) const MAGIC: &[u8] = b"MAKA-SESSION\0\x02";
-pub(super) const MAX_FRAME: usize = 18 * 1024 * 1024;
-pub(super) const MAX_BYTES: u64 = 1024 * 1024 * 1024;
-pub(super) const MAX_EVENTS: usize = 100_000;
-pub(super) const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const CHUNK: usize = 64 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -159,34 +155,26 @@ impl<W: AsyncWrite + Unpin> Writer<W> {
     }
 
     pub async fn record(&mut self, record: &Record) -> Result<(), StoreError> {
-        if self.frames >= 1_000_000 {
-            return Err(StoreError::PrefixTooLarge);
-        }
         let bytes = serde_json::to_vec(record)?;
-        if bytes.len() > MAX_FRAME {
-            return Err(StoreError::PrefixTooLarge);
-        }
-        self.bytes(&(bytes.len() as u32).to_be_bytes()).await?;
+        let length = u32::try_from(bytes.len()).map_err(|_| {
+            StoreError::InvalidTransition("bundle frame length is not representable".into())
+        })?;
+        self.bytes(&length.to_be_bytes()).await?;
         self.bytes(&bytes).await?;
-        self.frames += 1;
+        self.frames = self
+            .frames
+            .checked_add(1)
+            .ok_or(StoreError::PrefixTooLarge)?;
         Ok(())
     }
 
     pub async fn bytes(&mut self, bytes: &[u8]) -> Result<(), StoreError> {
-        if bytes.len() as u64 > MAX_BYTES.saturating_sub(self.bytes) {
-            return Err(StoreError::PrefixTooLarge);
-        }
-        // A stalled destination cannot hold a WAL snapshot or Host shutdown forever.
-        tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            self.output.write_all(bytes),
-        )
-        .await
-        .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::TimedOut, "bundle destination stalled")
-        })??;
+        write_progress(&mut self.output, bytes).await?;
         self.digest.update(bytes);
-        self.bytes += bytes.len() as u64;
+        self.bytes = self
+            .bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or(StoreError::PrefixTooLarge)?;
         Ok(())
     }
 
@@ -204,4 +192,27 @@ impl<W: AsyncWrite + Unpin> Writer<W> {
             })??;
         Ok((self.output, self.bytes, digest))
     }
+}
+
+/// Bound stalled I/O while allowing a complete frame/blob to keep progressing.
+pub(super) async fn write_progress<W: AsyncWrite + Unpin>(
+    output: &mut W,
+    mut bytes: &[u8],
+) -> Result<(), StoreError> {
+    while !bytes.is_empty() {
+        let written = tokio::time::timeout(std::time::Duration::from_secs(30), output.write(bytes))
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "bundle destination stalled")
+            })??;
+        if written == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "bundle destination stopped accepting bytes",
+            )
+            .into());
+        }
+        bytes = &bytes[written..];
+    }
+    Ok(())
 }

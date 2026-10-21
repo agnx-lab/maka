@@ -65,7 +65,7 @@ fn malformed_arguments_display_exact_raw_and_cannot_alias_a_parsed_dispatch() {
         title: None,
         presentation: None,
     });
-    let mut view = InvocationView::new(16_384).unwrap();
+    let mut view = InvocationView::new();
     let events = stored(forged);
     for event in &events[..events.len() - 1] {
         view.push(event).unwrap();
@@ -81,7 +81,7 @@ fn malformed_arguments_display_exact_raw_and_cannot_alias_a_parsed_dispatch() {
             message: "arguments are not valid JSON".into(),
         },
     });
-    let mut view = InvocationView::new(16_384).unwrap();
+    let mut view = InvocationView::new();
     let rows: Vec<_> = stored(facts)
         .iter()
         .flat_map(|event| view.push(event).unwrap())
@@ -161,8 +161,8 @@ fn accepted_tools_replay_with_distinct_ids_parentage_rejections() {
         },
     });
     let events = stored(facts);
-    let mut view = InvocationView::new(16_384).unwrap();
-    let mut replay = InvocationView::new(16_384).unwrap();
+    let mut view = InvocationView::new();
+    let mut replay = InvocationView::new();
     let mut rows = Vec::new();
     for stored in &events {
         let raw = match &stored.event.fact {

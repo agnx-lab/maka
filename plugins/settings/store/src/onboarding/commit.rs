@@ -28,7 +28,7 @@ impl PreparedOnboarding {
         now: u64,
     ) -> Result<OnboardingSaveResult> {
         validation::revision(now, false).map_err(ConfigError::Invalid)?;
-        if models.is_empty() || models.len() > 2048 {
+        if models.is_empty() {
             return Ok(OnboardingSaveResult::Rejected {
                 reason: OnboardingRejection::ModelUnavailable,
             });
@@ -78,9 +78,6 @@ impl PreparedOnboarding {
                         }
                         if previous.is_some() {
                             return Ok(reject(R::Superseded));
-                        }
-                        if catalog.connections.len() >= 1024 {
-                            return Ok(reject(R::CatalogFull));
                         }
                     }
                     if material.credentials_changed(tx).await?

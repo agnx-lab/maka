@@ -39,13 +39,11 @@ pub(super) enum CallState {
 }
 pub(crate) struct Tools {
     pub(super) pending: HashMap<String, Pending>,
-    pub(super) limit: usize,
 }
 impl Tools {
-    pub fn new(limit: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             pending: HashMap::new(),
-            limit,
         }
     }
     pub(super) fn insert(
@@ -81,12 +79,6 @@ impl Tools {
         }
         let metadata =
             ToolMetadata::from_origin(&identity.origin, &event.invocation.invocation_id)?;
-        let bytes = serde_json::to_vec(&(operation, &identity, name, &input))
-            .map_err(|_| ProjectionError::TooLarge)?
-            .len();
-        if bytes > self.limit {
-            return Err(ProjectionError::TooLarge);
-        }
         self.pending.insert(
             operation.into(),
             Pending {

@@ -302,9 +302,6 @@ async fn synchronize_version(
                 selected.insert(package.application_ref(), package);
             }
         }
-        if selected.len() > 128 {
-            return Err("updated product exceeds the prepared package budget".into());
-        }
         if apply {
             let preparation = launch::Preparation {
                 product: Some(Baseline {

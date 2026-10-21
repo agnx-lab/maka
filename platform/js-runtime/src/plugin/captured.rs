@@ -87,16 +87,14 @@ impl Captured {
         }
         let module = &self.0.module;
         module.ready().await?;
-        let size = json::encoded_size(&args, usize::MAX).map_err(failed)?;
+        let size = json::encoded_size(&(method, &args), usize::MAX).map_err(failed)?;
         let bytes = module
             .0
             .vm
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(
-                u32::try_from(size.max(1)).map_err(|_| failed("VM input budget exhausted"))?,
-            )
+            .try_acquire_many_owned(super::input_charge(size)?)
             .map_err(|_| failed("VM input budget exhausted"))?;
         let (reply, result) = oneshot::channel();
         module
@@ -125,11 +123,9 @@ impl Module {
     /// never redirects this registration. Last handle drop releases its globals.
     pub async fn capture(&self, namespace: Vec<String>, methods: Vec<String>) -> Result<Captured> {
         self.ready().await?;
-        if namespace.len() > 32
-            || namespace.iter().any(|s| s.is_empty() || s.len() > 128)
+        if namespace.iter().any(|s| s.is_empty())
             || methods.is_empty()
-            || methods.len() > 64
-            || methods.iter().any(|s| s.is_empty() || s.len() > 128)
+            || methods.iter().any(|s| s.is_empty())
             || methods.iter().collect::<BTreeSet<_>>().len() != methods.len()
         {
             return Err(failed("invalid worker callback registration"));
@@ -141,9 +137,7 @@ impl Module {
             .0
             .bytes
             .clone()
-            .try_acquire_many_owned(
-                u32::try_from(size.max(1)).map_err(|_| failed("VM input budget exhausted"))?,
-            )
+            .try_acquire_many_owned(super::input_charge(size)?)
             .map_err(|_| failed("VM input budget exhausted"))?;
         let (reply, result) = oneshot::channel();
         self.0

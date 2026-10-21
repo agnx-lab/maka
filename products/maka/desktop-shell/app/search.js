@@ -56,8 +56,6 @@ const PAUSE_MS = 250;
 /** Results asked for, the Host's most: title matches first, passages fill the rest. */
 const LIMIT = 25;
 /** The most words one search takes, and the most characters in a word (recall/types.rs). */
-const MAX_TERMS = 8;
-const MAX_TERM_CHARS = 500;
 /** How much of a passage a row shows, in characters, and how much of that comes before the first match. */
 const EXCERPT_CHARS = 220;
 const BEFORE_MATCH = 60;
@@ -129,7 +127,6 @@ export class Search {
     /** Why the last search failed, `{ words, message }`, or null. */
     this.failure = null;
     /** Whether the field holds more words, or a longer word, than the Host takes. */
-    this.invalid = false;
     /** The key of the result Up and Down moved to, or null. */
     this.cursor = null;
     /** The key of the item at the top of the results while they last showed, or null. */
@@ -187,7 +184,6 @@ export class Search {
     this.serial += 1;
     this.pending = null;
     this.failure = null;
-    this.invalid = false;
     if (terms.length === 0) {
       this.answer = null;
       this.top = null;
@@ -260,9 +256,7 @@ export class Search {
     const serial = ++this.serial;
     this.failure = null;
     this.cursor = null;
-    this.invalid =
-      terms.length > MAX_TERMS || terms.some((term) => [...term].length > MAX_TERM_CHARS);
-    this.pending = this.invalid || terms.length === 0 ? null : { serial, words, terms };
+    this.pending = terms.length === 0 ? null : { serial, words, terms };
     this.hooks.changed();
     if (this.pending === null) return;
     this.cx.spawn(async (cx) => {
@@ -348,14 +342,13 @@ export class Search {
     const answer = this.answer;
     if (answer === null) return null;
     if (this.pending !== null) return answer;
-    if (this.invalid || this.failure !== null) return null;
+    if (this.failure !== null) return null;
     return sameTerms(termsOf(this.words), answer.terms) ? answer : null;
   }
 
   /** The line under the field, or null: the hint, what the page is doing, or what is wrong with the words. */
   status() {
     if (termsOf(this.words).length === 0) return t('searchHint');
-    if (this.invalid) return t('searchTooManyWords');
     if (this.pending !== null) return t('searching');
     if (this.shown()?.complete === false) return t('searchPartial');
     return null;

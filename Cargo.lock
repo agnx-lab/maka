@@ -5374,8 +5374,6 @@ dependencies = [
 [[package]]
 name = "gix-index"
 version = "0.55.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "632e16cb48b0e88a747e106924cb2765194105d8070a7a961b0d080ed806c632"
 dependencies = [
  "bitflags 2.13.2",
  "bstr",
@@ -6316,7 +6314,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-wgpu"
 version = "0.1.10"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -7717,7 +7715,7 @@ checksum = "ae293c039020f9ec10710af98d29ce6aa2051486638b49c9a6409f3b4a9e98ad"
 [[package]]
 name = "icy_sixel"
 version = "0.5.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "quantette",
  "thiserror 2.0.20",
@@ -10961,7 +10959,7 @@ dependencies = [
 [[package]]
 name = "nsh-base"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "html5ever 0.27.0",
  "log",
@@ -10978,7 +10976,7 @@ dependencies = [
 [[package]]
 name = "nsh-bundler"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "anyhow",
  "dunce",
@@ -11003,7 +11001,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "cap-std",
  "flate2",
@@ -11026,7 +11024,7 @@ dependencies = [
 [[package]]
 name = "nsh-engine"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -11044,7 +11042,7 @@ dependencies = [
 [[package]]
 name = "nsh-gpui-terminal"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11061,7 +11059,7 @@ dependencies = [
 [[package]]
 name = "nsh-js"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -11082,7 +11080,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -11094,7 +11092,7 @@ dependencies = [
 [[package]]
 name = "nsh-package"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -11109,7 +11107,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-gpui"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11141,7 +11139,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tui"
 version = "0.1.1"
-source = "git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10"
+source = "git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",

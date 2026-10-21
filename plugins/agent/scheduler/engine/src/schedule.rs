@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use crate::{Error, MAX_DELAY_MS, cron::Cron, invalid};
+use crate::{Error, cron::Cron, invalid};
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 
@@ -61,8 +61,8 @@ impl Schedule {
                 every_seconds,
                 start_at,
             } => {
-                if !(10..=366 * 86_400).contains(every_seconds) {
-                    return Err(invalid("interval must be between 10 seconds and one year"));
+                if *every_seconds == 0 {
+                    return Err(invalid("interval must be positive"));
                 }
                 *start_at
             }
@@ -79,15 +79,12 @@ impl Schedule {
         Ok(())
     }
 
-    /// Strictly after the supplied instant, bounded to the following year.
+    /// Strictly after the supplied instant within the representable calendar.
     /// The plan's owner supplies its persisted timezone, never a mutable ambient
     /// timezone on each tick. Missed-fire policy is separate from this calculation.
     pub fn next_after(&self, after: i64, zone: &TimeZone) -> Result<Option<i64>, Error> {
         self.validate()?;
         timestamp(after)?;
-        let through = after
-            .checked_add(MAX_DELAY_MS)
-            .ok_or_else(|| invalid("time overflow"))?;
         let next = match self {
             Self::Once { run_at } => Some(*run_at),
             Self::Interval {
@@ -98,7 +95,9 @@ impl Schedule {
                 if *start_at > after {
                     Some(*start_at)
                 } else {
-                    start_at.checked_add(((after - start_at) / step + 1) * step)
+                    ((after - start_at) / step + 1)
+                        .checked_mul(step)
+                        .and_then(|elapsed| start_at.checked_add(elapsed))
                 }
             }
             Self::Calendar {
@@ -114,12 +113,12 @@ impl Schedule {
             Self::Cron {
                 expression,
                 start_at,
-            } => Cron::parse(expression)?.next(after, *start_at, through, zone)?,
+            } => Cron::parse(expression)?.next(after, *start_at, zone)?,
         };
-        Ok(next.filter(|next| *next > after && *next <= through))
+        Ok(next.filter(|next| *next > after && timestamp(*next).is_ok()))
     }
 }
-fn timestamp(milliseconds: i64) -> Result<Timestamp, Error> {
+pub(crate) fn timestamp(milliseconds: i64) -> Result<Timestamp, Error> {
     if milliseconds < 0 {
         return Err(invalid("timestamp must not be negative"));
     }
@@ -134,18 +133,28 @@ fn calendar(
     let anchor = timestamp(anchor)?.to_zoned(zone.clone());
     let current = timestamp(after)?.to_zoned(zone.clone());
     let date = current.date();
-    for offset in 0..=12 {
+    let mut offset = 0;
+    loop {
         let candidate = match recurrence {
-            Recurrence::Daily => date.checked_add(offset.days())?,
+            Recurrence::Daily => match date.checked_add(offset.days()) {
+                Ok(date) => date,
+                Err(_) => return Ok(None),
+            },
             Recurrence::Weekly => {
                 let days = (anchor.weekday().to_monday_zero_offset()
                     - date.weekday().to_monday_zero_offset())
                 .rem_euclid(7);
-                date.checked_add((i64::from(days) + offset * 7).days())?
+                match date.checked_add((i64::from(days) + offset * 7).days()) {
+                    Ok(date) => date,
+                    Err(_) => return Ok(None),
+                }
             }
             Recurrence::Monthly => {
                 let month =
-                    Date::new(date.year(), date.month(), 1)?.checked_add(offset.months())?;
+                    match Date::new(date.year(), date.month(), 1)?.checked_add(offset.months()) {
+                        Ok(month) => month,
+                        Err(_) => return Ok(None),
+                    };
                 Date::new(
                     month.year(),
                     month.month(),
@@ -163,8 +172,8 @@ fn calendar(
         if at > after {
             return Ok(Some(at));
         }
+        offset += 1;
     }
-    Ok(None)
 }
 
 #[cfg(test)]
@@ -226,6 +235,21 @@ mod tests {
             assert!(cron(invalid).validate().is_err(), "{invalid}");
         }
     }
+    #[test]
+    fn sparse_cron_preserves_next_leap_day_beyond_one_year() {
+        let schedule = Schedule::Cron {
+            expression: "0 0 29 2 *".into(),
+            start_at: ms("2025-01-01T00:00:00Z"),
+        };
+        schedule.validate().unwrap();
+        assert_eq!(
+            schedule
+                .next_after(ms("2025-03-01T00:00:00Z"), &TimeZone::UTC)
+                .unwrap(),
+            Some(ms("2028-02-29T00:00:00Z"))
+        );
+    }
+
     #[test]
     fn calendar_keeps_anchor_after_month_clamping_and_dst_without_interval_drift() {
         let ny = TimeZone::get("America/New_York").unwrap();

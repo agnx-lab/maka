@@ -99,7 +99,7 @@ fn retain_clipboard(queue: &mut VecDeque<Vec<u8>>, bytes: Vec<u8>) -> Result<(),
     if bytes.is_empty() {
         return Ok(());
     }
-    if queue.len() >= 16 || queue.iter().map(Vec::len).sum::<usize>() + bytes.len() > 1024 * 1024 {
+    if queue.len() >= 16 {
         return Err("terminal clipboard output queue full".into());
     }
     queue.push_back(bytes);

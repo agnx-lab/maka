@@ -232,8 +232,7 @@ async fn import_is_retryable_history_not_an_execution_and_survives_copy_and_rest
         .events
         .iter()
         .flat_map(|event| {
-            maka_presentation::InvocationView::new(1024 * 1024)
-                .unwrap()
+            maka_presentation::InvocationView::new()
                 .push(event)
                 .unwrap()
         })

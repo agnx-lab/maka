@@ -60,8 +60,6 @@ pub enum Error {
     Storage(#[from] maka_capabilities::storage::StoreError),
 }
 
-pub const MAX_DELAY_MS: i64 = 366 * 24 * 60 * 60 * 1000;
-
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }

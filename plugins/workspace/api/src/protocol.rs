@@ -31,10 +31,9 @@ pub const CHUNK_BYTES: usize = 8192;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "ProtocolProcessLaunch")]
 pub struct Launch {
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub executable: String,
     #[serde(default)]
-    #[schemars(length(max = 256))]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
@@ -44,15 +43,14 @@ pub struct Launch {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "ProtocolProcessRun")]
 pub struct Run {
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub executable: String,
     #[serde(default)]
-    #[schemars(length(max = 256))]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     pub additional_permissions: Option<maka_sandbox::grant::Permissions>,
-    #[schemars(length(min = 1, max = 2048))]
+    #[schemars(length(min = 1))]
     pub justification: Option<String>,
 }
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -61,7 +59,7 @@ pub struct Run {
 pub struct Input {
     pub id: Uuid,
     pub additional_permissions: Option<maka_sandbox::grant::Permissions>,
-    #[schemars(length(min = 1, max = 2048))]
+    #[schemars(length(min = 1))]
     pub justification: Option<String>,
     /// Null closes stdin. Empty data is a successful zero-byte write.
     #[schemars(length(max = CHUNK_BYTES))]

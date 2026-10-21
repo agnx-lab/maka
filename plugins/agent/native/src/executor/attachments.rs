@@ -20,7 +20,6 @@
 //! Copies only the original invocation's immutable uploads into its request budget.
 use maka_agent_facts::artifact::ArtifactSource;
 use maka_agent_facts::attachment::AttachmentRef;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_capabilities::call::ResourceEncoding;
 use maka_event_log::{EventLog, artifacts::ArtifactReadScope};
@@ -55,10 +54,7 @@ pub(super) async fn capture(
         else {
             return Err("executor_attachment_invalid".into());
         };
-        if session_id != session
-            || attachment.bytes > MAX_ATTACHMENT_BYTES
-            || !seen.insert(relative_path.clone())
-        {
+        if session_id != session || !seen.insert(relative_path.clone()) {
             return Err("executor_attachment_invalid".into());
         }
         let record = store

@@ -96,7 +96,7 @@ impl DraftKey {
     ) -> Result<Self> {
         if [session, editor]
             .iter()
-            .any(|name| name.is_empty() || name.len() > 256 || name.chars().any(char::is_control))
+            .any(|name| name.is_empty() || name.chars().any(char::is_control))
         {
             return Err("invalid draft session or editor identity".into());
         }
@@ -258,22 +258,14 @@ impl Journal {
         expected: Option<u64>,
         edit: DraftEdit,
     ) -> Result<Draft> {
-        if edit.text.len() > 1024 * 1024
-            || expected.is_some_and(|revision| revision == 0 || revision >= 9_007_199_254_740_991)
-            || edit.settled_uploads.len() > 128
-        {
-            return Err("draft text or revision exceeds its limit".into());
+        if expected.is_some_and(|revision| revision == 0 || revision >= 9_007_199_254_740_991) {
+            return Err("invalid draft revision".into());
         }
         let attachments = serde_json::to_string(&edit.attachments).map_err(error)?;
-        if attachments.len() > 64 * 1024
-            || edit.attachments.iter().any(|attachment| {
-                attachment.id.is_empty()
-                    || attachment.id.len() > 128
-                    || attachment.name.is_empty()
-                    || attachment.name.chars().count() > 512
-                    || attachment.mime_type.len() > 128
-                    || attachment.bytes > 50 * 1024 * 1024
-            })
+        if edit
+            .attachments
+            .iter()
+            .any(|attachment| attachment.id.is_empty() || attachment.name.is_empty())
             || edit
                 .attachments
                 .iter()
@@ -448,7 +440,7 @@ impl Journal {
         host: &DeploymentRef,
         key: &DraftKey,
     ) -> Result<Vec<Operation>> {
-        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.draft')='object' AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.draft')='object' AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(serde_json::to_string(key).map_err(error)?).fetch_all(&self.0).await.map_err(error)?;
         rows.into_iter().map(decode_operation).collect()
@@ -458,7 +450,7 @@ impl Journal {
         host: &DeploymentRef,
         key: &DraftKey,
     ) -> Result<Vec<Operation>> {
-        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.upload')='object' AND upload_adopted=0 AND abandoned=0 ORDER BY rowid LIMIT 128")
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner=? AND json_type(context,'$.upload')='object' AND upload_adopted=0 AND abandoned=0 ORDER BY rowid")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(serde_json::to_string(key).map_err(error)?).fetch_all(&self.0).await.map_err(error)?;
         let operations = rows
@@ -472,7 +464,7 @@ impl Journal {
     }
     pub(crate) async fn pending_controls(&self, host: &DeploymentRef) -> Result<Vec<Operation>> {
         let correlation = serde_json::json!({"kind": CONTROL_KIND}).to_string();
-        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner IS NULL AND json_extract(context,'$.endpoint')='agent' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?)) AND json_type(context,'$.correlation')='object' AND CASE json_extract(context,'$.method') WHEN 'stop' THEN json_type(context,'$.correlation.invocationId')='text' AND length(CAST(json_extract(context,'$.correlation.invocationId') AS BLOB)) BETWEEN 1 AND 128 AND json_extract(json_remove(context,'$.correlation.invocationId'),'$.correlation')=? WHEN 'respond' THEN json_type(context,'$.correlation.requestId')='text' AND length(CAST(json_extract(context,'$.correlation.requestId') AS BLOB)) BETWEEN 1 AND 128 AND json_extract(json_remove(context,'$.correlation.requestId'),'$.correlation')=? WHEN 'metadata' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND json_extract(json_remove(context,'$.correlation.expectedRevision'),'$.correlation')=? WHEN 'changeSession' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND json_extract(context,'$.correlation.action') IN ('archive','restore','remove') AND json_extract(json_remove(context,'$.correlation.expectedRevision','$.correlation.action'),'$.correlation')=? WHEN 'fork' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND (json_type(context,'$.correlation.turnId')='null' OR (json_type(context,'$.correlation.turnId')='text' AND length(CAST(json_extract(context,'$.correlation.turnId') AS BLOB)) BETWEEN 1 AND 128)) AND json_extract(json_remove(context,'$.correlation.expectedRevision','$.correlation.turnId'),'$.correlation')=? ELSE json_extract(context,'$.correlation')=? END AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128")
+        let rows = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND draft_owner IS NULL AND json_extract(context,'$.endpoint')='agent' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?)) AND json_type(context,'$.correlation')='object' AND CASE json_extract(context,'$.method') WHEN 'stop' THEN json_type(context,'$.correlation.invocationId')='text' AND length(CAST(json_extract(context,'$.correlation.invocationId') AS BLOB)) > 0 AND json_extract(json_remove(context,'$.correlation.invocationId'),'$.correlation')=? WHEN 'respond' THEN json_type(context,'$.correlation.requestId')='text' AND length(CAST(json_extract(context,'$.correlation.requestId') AS BLOB)) > 0 AND json_extract(json_remove(context,'$.correlation.requestId'),'$.correlation')=? WHEN 'metadata' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND json_extract(json_remove(context,'$.correlation.expectedRevision'),'$.correlation')=? WHEN 'changeSession' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND json_extract(context,'$.correlation.action') IN ('archive','restore','remove') AND json_extract(json_remove(context,'$.correlation.expectedRevision','$.correlation.action'),'$.correlation')=? WHEN 'fork' THEN json_type(context,'$.correlation.expectedRevision')='integer' AND json_extract(context,'$.correlation.expectedRevision') BETWEEN 1 AND 9007199254740991 AND (json_type(context,'$.correlation.turnId')='null' OR (json_type(context,'$.correlation.turnId')='text' AND length(CAST(json_extract(context,'$.correlation.turnId') AS BLOB)) > 0)) AND json_extract(json_remove(context,'$.correlation.expectedRevision','$.correlation.turnId'),'$.correlation')=? ELSE json_extract(context,'$.correlation')=? END AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC")
             .bind(&host.state_domain).bind(host.deployment.to_string())
             .bind(serde_json::to_string(&CONTROL_METHODS).map_err(error)?)
             .bind(&correlation).bind(&correlation).bind(&correlation)
@@ -484,7 +476,7 @@ impl Journal {
         let rows = sqlx::query(concat!(
             "SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND ",
             settings_owner_sql!(),
-            " AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128"
+            " AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC"
         ))
             .bind(&host.state_domain)
             .bind(host.deployment.to_string())
@@ -561,11 +553,11 @@ fn encode_operation(operation: &Operation) -> Result<String> {
         || operation
             .session_id
             .as_ref()
-            .is_some_and(|id| id.is_empty() || id.len() > 256)
+            .is_some_and(|id| id.is_empty())
     {
         return Err("invalid client operation identity".into());
     }
-    maka_plugin_core::json::check_delivery(&operation.correlation, 32 * 1024)?;
+    maka_plugin_core::json::exact_numbers(&operation.correlation)?;
     serde_json::to_string(operation).map_err(error)
 }
 fn decode_operation(row: SqliteRow) -> Result<Operation> {

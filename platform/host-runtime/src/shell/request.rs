@@ -24,12 +24,12 @@ use serde::Deserialize;
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Execute {
-    #[schemars(length(min = 1, max = 65536))]
+    #[schemars(length(min = 1))]
     pub command: String,
     /// Load the shell's login profile. Set false to skip it.
     #[serde(default = "default_login")]
     pub login: bool,
-    #[schemars(range(min = 1, max = 86_400_000))]
+    #[schemars(range(min = 1))]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
     pub run_in_background: bool,
@@ -56,16 +56,11 @@ impl Execute {
         if input.pty && !input.run_in_background {
             return Err(failed("PTY mode requires run_in_background=true".into()));
         }
-        if input.timeout_ms.is_some_and(|value| {
-            value == 0
-                || value
-                    > if input.run_in_background {
-                        86_400_000
-                    } else {
-                        600_000
-                    }
-        }) {
-            return Err(failed("Shell timeout must be 1..=600000 ms for foreground or 1..=86400000 ms for background".into()));
+        if input
+            .timeout_ms
+            .is_some_and(|ms| maka_process::validate_timeout(ms).is_err())
+        {
+            return Err(failed("Shell timeout must be positive".into()));
         }
         if input.additional_permissions.is_some() != input.justification.is_some() {
             return Err(failed(

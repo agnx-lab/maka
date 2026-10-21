@@ -17,9 +17,7 @@
  * under the License.
  */
 
-use super::{
-    ArchiveIdentity, MAX_ARCHIVE_REF_CHARS, hash, identity_string, valid_projection_digest,
-};
+use super::{ArchiveIdentity, hash, identity_string, valid_projection_digest};
 const SHORT_PREFIX: &str = "archive:";
 const EVENT_PREFIX: &str = "maka://runtime/tool-results/";
 
@@ -29,9 +27,6 @@ pub struct ToolResultAddress(String);
 
 impl ToolResultAddress {
     pub fn parse(path: &str) -> Result<Self, &'static str> {
-        if path.len() > MAX_ARCHIVE_REF_CHARS {
-            return Err("tool result address exceeds limit");
-        }
         if path.starts_with(SHORT_PREFIX) {
             return ArchiveIdentity::parse_short_ref(path).map(Self);
         }
@@ -65,9 +60,6 @@ impl ArchiveIdentity {
     }
 
     pub fn parse_short_ref(resource: &str) -> Result<String, &'static str> {
-        if resource.len() > MAX_ARCHIVE_REF_CHARS {
-            return Err("archive reference exceeds limit");
-        }
         let encoded = resource
             .strip_prefix(SHORT_PREFIX)
             .ok_or("unsupported archive reference")?;

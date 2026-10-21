@@ -165,11 +165,26 @@ async fn history_search_preserves_empty_batches_and_exact_cursors_with_original_
             ("through", json!(through + 1)),
             ("after", json!({"sourceSequence":through + 1,"itemIndex":0})),
             ("query", json!("")),
-            ("query", json!("界".repeat(171))),
         ] {
             let mut invalid = request.clone(); invalid[key] = value;
             assert!(fixture.query("search", invalid).await.is_err(), "{key}");
         }
+        let mut long_input = request.clone();
+        long_input["query"] = json!("界".repeat(171));
+        let mut long_positions = Vec::new();
+        let mut long_ended = false;
+        for _ in 0..32 {
+            let page = fixture.query("search", long_input.clone()).await.unwrap();
+            assert_eq!(page["kind"], "ready");
+            assert_eq!(page["through"], through);
+            long_positions.extend(page["matches"].as_array().unwrap().iter().map(|item| item["position"].clone()));
+            let Some(after) = serde_json::from_value::<Option<maka_agent_ports::session::history::RowPosition>>(page["nextAfter"].clone()).unwrap() else { long_ended = true; break; };
+            assert!(long_input["after"].is_null() || after > serde_json::from_value(long_input["after"].clone()).unwrap());
+            assert!(after.source_sequence <= through);
+            long_input["after"] = json!(after);
+        }
+        assert!(long_ended);
+        assert_eq!(long_positions, matches.iter().map(|item| item["position"].clone()).collect::<Vec<_>>());
         let denied = fixture.app.client().start(
             fixture.binding(2).await, "search".into(), request,
             scope(&fixture.issuer, false), Attachments::new().into(),

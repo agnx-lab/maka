@@ -29,25 +29,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-pub const MAX_FILE_BYTES: usize = maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES as usize;
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FilePickerProps {
     pub appearance: crate::appearance::InputAppearance,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub label: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub path_label: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub browse_label: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub parent_label: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub empty_label: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub truncated_label: String,
-    #[schemars(length(max = 512))]
     pub placeholder: String,
     pub disabled: bool,
     #[schemars(range(min = -1, max = 32767))]
@@ -56,7 +53,6 @@ pub struct FilePickerProps {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileDescriptor {
-    #[schemars(length(max = 512))]
     pub name: String,
     pub bytes: usize,
     #[schemars(length(min = 71, max = 71))]
@@ -98,7 +94,7 @@ impl From<crate::budget::BudgetExhausted> for FileError {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileObservation {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub owner: String,
     pub revision: u64,
     pub phase: FilePhase,
@@ -108,14 +104,14 @@ pub struct FileObservation {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileCapture {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub owner: String,
     pub revision: u64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileChoose {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub request: String,
 }
 /// Committed mechanical intent; only a renderer's matching private gesture can act.

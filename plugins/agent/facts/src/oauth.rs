@@ -110,7 +110,6 @@ impl LoginRecovery {
 fn validate_attempt(id: &str, target: &Target) -> Result<(), String> {
     target.validate_create_identity()?;
     if id.is_empty()
-        || id.len() > 128
         || !id
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
@@ -140,13 +139,12 @@ impl Target {
             provider,
             configuration,
             slug,
-            name,
+            ..
         } = self
         {
             provider.validate()?;
             validation::provider_configuration(configuration)?;
             validation::slug(slug)?;
-            validation::text(name, 256, false)?;
         } else if let Self::Existing {
             expected,
             configuration,

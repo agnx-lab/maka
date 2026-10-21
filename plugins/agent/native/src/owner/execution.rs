@@ -92,15 +92,12 @@ impl Owner {
             return Ok(Work::Changed);
         }
         let answer = observed.answer.map(|answer| {
-            // A WorkHub tool response includes this page and its original receipt.
-            // Bound worst-case JSON escaping below the existing model text budget.
-            let end = answer.text.floor_char_boundary(answer.text.len().min(768));
-            let complete = answer.complete && end == answer.text.len();
+            let length = answer.text.len();
             AnswerPage {
-                text: answer.text[..end].into(),
-                next: (!complete).then(|| AnswerCursor {
+                text: answer.text,
+                next: (!answer.complete).then(|| AnswerCursor {
                     invocation_id: boundary.invocation.invocation_id.clone(),
-                    offset: offset + end as u64,
+                    offset: offset + length as u64,
                 }),
             }
         });

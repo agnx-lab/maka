@@ -28,13 +28,6 @@ use serde_json::Value;
 
 pub(crate) fn encode(value: impl Serialize) -> Result<Value, String> {
     let value = serde_json::to_value(value).map_err(|_| "settings_output_invalid")?;
-    if serde_json::to_vec(&value)
-        .map_err(|_| "settings_output_invalid")?
-        .len()
-        > 128 * 1024
-    {
-        return Err("settings_output_budget".into());
-    }
     Ok(value)
 }
 pub(crate) fn definition(identity: &Identity) -> Result<Definition, String> {
@@ -177,10 +170,7 @@ pub(crate) fn providers(input: Value) -> Result<Value, String> {
             .len()
             + usize::from(!providers.is_empty());
         let bytes = provider_bytes + row_bytes + envelope_bytes;
-        if bytes > 128 * 1024 {
-            if providers.is_empty() {
-                return Err("settings_output_budget".into());
-            }
+        if !providers.is_empty() && bytes > 128 * 1024 {
             next = Some(offset);
             break;
         }

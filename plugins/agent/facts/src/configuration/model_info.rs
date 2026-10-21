@@ -173,7 +173,7 @@ impl ModelInfo {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        validation::text(&self.id, 512, true)?;
+        validation::text(&self.id)?;
         if let Some(levels) = &self.thinking_levels {
             for (index, level) in levels.iter().enumerate() {
                 if levels[..index].contains(level) {
@@ -188,16 +188,6 @@ impl ModelInfo {
                 .is_some_and(|levels| levels.contains(&level))
         }) {
             return Err("model default thinking level is not advertised".into());
-        }
-        for (value, max) in [
-            (self.display_name.as_deref(), 512),
-            (self.description.as_deref(), 2048),
-            (self.knowledge_cutoff.as_deref(), 2048),
-            (self.last_updated.as_deref(), 2048),
-        ] {
-            if let Some(value) = value {
-                validation::text(value, max, false)?;
-            }
         }
         for value in [
             self.context_window,

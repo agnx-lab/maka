@@ -43,14 +43,8 @@ impl Write {
         if self
             .expected_revision
             .is_some_and(|value| value == 0 || value >= (1 << 53) - 1)
-            || self
-                .secret
-                .as_ref()
-                .is_some_and(|value| value.len() > 64 * 1024)
         {
-            return Err(crate::Error::Invalid(
-                "credential revision or value exceeds its limit".into(),
-            ));
+            return Err(crate::Error::Invalid("invalid credential revision".into()));
         }
         Ok(())
     }

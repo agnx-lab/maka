@@ -43,11 +43,6 @@ impl CopyAttachment {
         };
         name(session_id)?;
         name(relative_path)?;
-        if self.attachment.bytes > maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES
-            || self.attachment.text_bytes() > 32 * 1024
-        {
-            return Err(Error::Invalid("attachment exceeds transfer budget".into()));
-        }
         Ok(())
     }
 }

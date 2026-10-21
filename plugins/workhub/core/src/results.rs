@@ -164,8 +164,8 @@ fn content(
     state: &MessageState,
     language: Language,
 ) -> maka_agent_facts::input::MessageInput {
-    // Byte-bounded excerpts leave room for JSON escaping and provenance within
-    // the public execution API's 64 KiB input limit. Truncation is explicit.
+    // Notification previews retain the original assignment and answer cursor
+    // for complete inspection. Truncation is explicit.
     let mut state = state.clone();
     if let MessageState::Delivered {
         answer: Some(answer),

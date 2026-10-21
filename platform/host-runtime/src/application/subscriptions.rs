@@ -85,7 +85,6 @@ struct Shared {
     sender: Mutex<Option<mpsc::Sender<Value>>>,
     closed: CancellationToken,
     stop: CancellationToken,
-    pending: Arc<Semaphore>,
     output: Arc<jsonschema::Validator>,
 }
 #[derive(Clone)]
@@ -98,27 +97,15 @@ impl Emitter {
     }
 
     pub(super) fn emit(&self, value: Value) -> BoxFuture<'static, Result<()>> {
-        // Reserve before validation, including unpolled futures.
-        let reserved = self
-            .0
-            .pending
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| "Host subscription pending emit capacity exhausted".to_string())
-            .and_then(|permit| {
-                if self.0.closed.is_cancelled() || self.0.stop.is_cancelled() {
-                    return Err("Host subscription is closed".into());
-                }
-                self.0.output.validate(&value).map_err(|e| e.to_string())?;
-                Ok(permit)
-            });
-        let pending = match reserved {
-            Ok(permit) => permit,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
+        if self.0.closed.is_cancelled() || self.0.stop.is_cancelled() {
+            return Box::pin(async { Err("Host subscription is closed".into()) });
+        }
+        if let Err(error) = self.0.output.validate(&value) {
+            let error = error.to_string();
+            return Box::pin(async move { Err(error) });
+        }
         let shared = self.0.clone();
         Box::pin(async move {
-            let _pending = pending;
             // Do not give an unpolled future a sender that could keep EOF open.
             let sender = shared
                 .sender
@@ -165,7 +152,6 @@ pub(super) fn items(
         sender: Mutex::new(Some(sender)),
         closed: CancellationToken::new(),
         stop,
-        pending: Arc::new(Semaphore::new(ITEMS)),
         output,
     });
     (

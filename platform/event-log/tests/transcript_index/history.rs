@@ -524,7 +524,6 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                                 None,
                                 SourcePosition::Start,
                                 8192,
-                                64 * 1024,
                             )
                             .await
                             .unwrap();
@@ -557,8 +556,7 @@ async fn tool_metadata_preserves_empty_calls_and_non_text_results_through_frozen
                                             field,
                                             None,
                                             SourcePosition::Start,
-                                            8192,
-                                            64 * 1024
+                                            8192
                                         )
                                         .await
                                         .is_err()
@@ -758,12 +756,26 @@ async fn oversized_tool_metadata_returns_accepted_window_without_consuming_its_b
         } else {
             Position::After { cursor }
         };
-        assert!(
-            log.history_text("budget", through, position, false, 8192, 8, 1024)
-                .await
-                .is_err(),
-            "indivisible first tool metadata must fail without being consumed"
+        let Page::Ready {
+            chunks: soft,
+            before: soft_before,
+            after: soft_after,
+            ..
+        } = log
+            .history_text("budget", through, position, false, 8192, 8, 1024)
+            .await
+            .unwrap();
+        assert_eq!(soft.len(), 1);
+        assert_eq!(soft[0].role, Role::ToolCall);
+        assert_eq!(
+            soft[0].tool.as_ref().unwrap().call.as_ref().unwrap().name,
+            "name".repeat(1024)
         );
+        assert!(if reverse {
+            soft_before.is_some()
+        } else {
+            soft_after.is_some()
+        });
         let Page::Ready { chunks, .. } = log
             .history_text("budget", through, position, false, 8192, 1, 64 * 1024)
             .await
@@ -1536,7 +1548,6 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
                                     }
                                 },
                                 budget,
-                                64 * 1024,
                             )
                             .await
                             .unwrap();
@@ -1894,7 +1905,6 @@ async fn thinking_windows_preserve_field_order_bytes_and_explicit_body_only_read
             None,
             maka_agent_ports::session::history::SourcePosition::Start,
             8192,
-            64 * 1024,
         )
         .await
         .unwrap();
@@ -2027,7 +2037,6 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
                             offset: chunk.offset,
                         },
                         chunk.text.len().max(4),
-                        8192,
                     )
                     .await
                     .unwrap();
@@ -2097,7 +2106,7 @@ async fn failed_turn_and_retry_diagnostics_are_visible_with_exact_sources_and_fe
 }
 
 #[tokio::test]
-async fn notification_origin_survives_every_history_and_source_fragment_within_json_budgets() {
+async fn notification_origin_survives_every_history_and_bounded_source_fragment() {
     use maka_agent_facts::input::DeliveredMessage;
     use maka_agent_facts::message::RootSourceMessage;
     use maka_agent_facts::message::{MessageDisposition, MessageOrigin, Placement};
@@ -2207,7 +2216,6 @@ async fn notification_origin_survives_every_history_and_source_fragment_within_j
                 None,
                 SourcePosition::After { offset },
                 256,
-                1536,
             )
             .await
             .unwrap();
@@ -2231,41 +2239,40 @@ async fn notification_origin_survives_every_history_and_source_fragment_within_j
             None,
             SourcePosition::Start,
             1024,
-            4096,
         )
         .await
         .unwrap();
-    let exact_budget = serde_json::to_vec(&source).unwrap().len();
-    assert!(exact_budget > 1024);
-    assert!(
-        log.history_source(
+    // Complete provenance and escaping may exceed the body-byte target.
+    // The single source chunk still obeys its UTF-8 body boundary.
+    assert!(serde_json::to_vec(&source).unwrap().len() > 1024);
+    assert_eq!(source.origin.as_ref(), Some(&origin));
+    assert_eq!(source.position, sequence);
+    assert_eq!(source.offset, 0);
+    assert_eq!(source.total_bytes, text.len() as u64);
+    let end = text.floor_char_boundary(1024);
+    assert_eq!(source.text, text[..end]);
+    assert!(end > 0 && end < text.len());
+    let continued = log
+        .history_source(
             "notice",
             through,
             sequence,
             SourceField::Body,
             None,
-            SourcePosition::Start,
+            SourcePosition::After { offset: end as u64 },
             1024,
-            exact_budget - 1
         )
         .await
-        .is_err()
-    );
+        .unwrap();
+    assert_eq!(continued.origin.as_ref(), Some(&origin));
+    assert_eq!(continued.position, sequence);
+    assert_eq!(continued.timestamp, source.timestamp);
+    assert_eq!(continued.fields, source.fields);
+    assert_eq!(continued.offset, end as u64);
+    assert_eq!(continued.total_bytes, source.total_bytes);
     assert_eq!(
-        log.history_source(
-            "notice",
-            through,
-            sequence,
-            SourceField::Body,
-            None,
-            SourcePosition::Start,
-            1024,
-            exact_budget
-        )
-        .await
-        .unwrap()
-        .origin,
-        Some(origin)
+        continued.text,
+        text[end..text.floor_char_boundary(end + 1024)]
     );
     log.close().await.unwrap();
 }
@@ -2480,7 +2487,6 @@ async fn response_models_follow_exact_steps_fences_and_retained_copied_history()
                                 offset: chunk.offset,
                             },
                             19,
-                            4096,
                         )
                         .await
                         .unwrap();

@@ -72,9 +72,6 @@ pub struct Snapshot {
 }
 impl Configuration {
     pub fn validate(&self) -> Result<(), Error> {
-        if self.sources.len() > 16 {
-            return Err(Error::Invalid("at most 16 import sources are allowed"));
-        }
         let mut seen = BTreeSet::new();
         for source in &self.sources {
             if !seen.insert(source.id) {
@@ -82,34 +79,19 @@ impl Configuration {
             }
             source.validate()?;
         }
-        if serde_json::to_vec(self)
-            .map_err(|_| Error::Invalid("invalid source configuration"))?
-            .len()
-            > 48 * 1024
-        {
-            return Err(Error::Invalid(
-                "source configuration exceeds its page budget",
-            ));
-        }
         Ok(())
     }
 }
 impl Source {
     pub fn validate(&self) -> Result<(), Error> {
-        if self.name.trim().is_empty()
-            || self.name.chars().count() > 256
-            || self.name.chars().any(char::is_control)
-        {
+        if self.name.trim().is_empty() || self.name.chars().any(char::is_control) {
             return Err(Error::Invalid("invalid import source name"));
         }
         let path = match &self.location {
             Location::Codex { root } | Location::ClaudeCode { root } => root,
             Location::OpenCode { database } => database,
         };
-        if path.len() > 32 * 1024
-            || path.chars().any(char::is_control)
-            || !Path::new(path).is_absolute()
-        {
+        if path.chars().any(char::is_control) || !Path::new(path).is_absolute() {
             return Err(Error::Invalid(
                 "import source requires an absolute Host path",
             ));

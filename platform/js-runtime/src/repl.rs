@@ -24,7 +24,7 @@
 use crate::{
     CellAbort, CellContext, CellDiagnostic, CellDiagnosticKind, CellLimits, CellResult,
     bridge::{Admission, ToolScope, maka_code},
-    result::bounded,
+    result::complete,
 };
 use deno_core::{
     InspectorMsg, InspectorMsgKind, InspectorSessionKind, JsRuntime, JsRuntimeInspector,
@@ -171,11 +171,14 @@ async fn serve(
             let _ = request.reply.send(Err(CellAbort::Cancelled));
             continue;
         }
-        if request.source.len() > limits.max_source_bytes || request.timeout.is_zero() {
-            let _ = request.reply.send(Ok(bounded(
-                Err(CellDiagnostic::limit("invalid REPL source size or timeout")),
+        if request.timeout.is_zero()
+            || std::time::Instant::now()
+                .checked_add(request.timeout)
+                .is_none()
+        {
+            let _ = request.reply.send(Ok(complete(
+                Err(CellDiagnostic::limit("invalid REPL timeout")),
                 vec![],
-                limits.max_value_bytes,
             )));
             continue;
         }
@@ -186,7 +189,6 @@ async fn serve(
             cancellation: request.cancellation.child_token(),
             tasks: TaskTracker::new(),
             host: host.clone(),
-            limits: limits.clone(),
             admission: Mutex::new(Admission::default()),
         });
         runtime.op_state().borrow_mut().put(scope.clone());
@@ -264,10 +266,9 @@ async fn serve(
         } else if request.cancellation.is_cancelled() || stopped.is_cancelled() {
             Err(CellAbort::Cancelled)
         } else {
-            Ok(bounded(
+            Ok(complete(
                 result,
                 scope.admission.lock().unwrap().calls.clone(),
-                limits.max_value_bytes,
             ))
         };
         // Publish terminal state before waking the observer. The Session still

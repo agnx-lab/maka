@@ -55,10 +55,7 @@ import {
 import { t, tn, onLanguageChange } from './locale.js';
 
 /** The most presets the Host keeps (`workhub.savePresets`). */
-const MAX_ENTRIES = 64;
 /** The longest name and description the Host takes, in characters. */
-const MAX_NAME = 128;
-const MAX_DESCRIPTION = 4000;
 
 /**
  * The tool profiles, as the TUI offers them: id, the message key, and the
@@ -173,7 +170,7 @@ export class Subagents {
 
   /** Opens a new preset for the worker, with the first `agent-N` id no entry uses. */
   create() {
-    if (!this.ready() || this.snapshot.entries.length >= MAX_ENTRIES) return;
+    if (!this.ready()) return;
     this.open(
       {
         isolatedWorkspace: false,
@@ -270,11 +267,7 @@ export class Subagents {
     if (this.draft === null) return null;
     const name = this.name.value().trim();
     if (name === '') return t('subagentNameMissing');
-    if ([...name].length > MAX_NAME) return t('subagentNameTooLong');
     if (this.draft.model === null) return t('subagentChooseModel');
-    if ([...this.description.value().trim()].length > MAX_DESCRIPTION) {
-      return t('subagentDescriptionTooLong');
-    }
     return null;
   }
 
@@ -428,9 +421,8 @@ async function offeredModels() {
  */
 export function subagentsActions(subagents, cx) {
   if (subagents.draft !== null) return null;
-  const full = (subagents.snapshot?.entries.length ?? 0) >= MAX_ENTRIES;
-  return button('subagent-new', t('subagentsNew'), true, !subagents.ready() || full, cx).on_click(
-    () => subagents.create(),
+  return button('subagent-new', t('subagentsNew'), true, !subagents.ready(), cx).on_click(() =>
+    subagents.create(),
   );
 }
 

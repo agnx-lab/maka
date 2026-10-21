@@ -143,6 +143,7 @@ async fn child() {
         "OK"
     );
     let mut ws = connect_websocket(
+        &policy,
         policy.client_builder(),
         "http://models.maka.invalid/ws",
         Default::default(),

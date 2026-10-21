@@ -33,10 +33,21 @@ async fn form_answers_survive_reopen_without_grants_and_match_semantically() {
     log.create_session("session", "create", &json!({}), 1)
         .await
         .unwrap();
+    let authored_text = "Complete authored response. ".repeat(160);
+    let mut fields = vec![json!({"kind":"number","name":"n","label":"N","required":true})];
+    let mut values = serde_json::Map::from_iter([("n".into(), json!(1.0))]);
+    for index in 0..40 {
+        let name = format!("field_{index}");
+        fields.push(
+            json!({"kind":"string","name":name,"label":format!("Field {index}"),
+            "required":true,"maxLength":6000}),
+        );
+        values.insert(name, json!(authored_text));
+    }
     let record: InteractionRecord = serde_json::from_value(json!({
         "sessionId":"session","turnId":"turn","runId":"run","requestId":"form","createdAt":2,
-        "request":{"kind":"form","toolUseId":"tool","message":"Line\n","requester":{"name":"Tool"},
-        "fields":[{"kind":"number","name":"n","label":"N","required":true}]},"outcome":null
+        "request":{"kind":"form","toolUseId":"tool","message":authored_text,"requester":{"name":"Tool"},
+        "fields":fields},"outcome":null
     }))
     .unwrap();
     assert!(log.establish_interaction(&record).await.unwrap().matches);
@@ -73,8 +84,7 @@ async fn form_answers_survive_reopen_without_grants_and_match_semantically() {
             .is_none()
     );
     let answer: InteractionAnswer =
-        serde_json::from_value(json!({"kind":"form","action":"accept","values":{"n":1.0}}))
-            .unwrap();
+        serde_json::from_value(json!({"kind":"form","action":"accept","values":values})).unwrap();
     let outcome = answer.clone().into_outcome(3);
     let committed = log
         .commit_interaction_outcome("form", outcome.clone())

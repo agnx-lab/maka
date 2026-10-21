@@ -130,12 +130,12 @@ pub fn definitions() -> [(&'static str, &'static str, serde_json::Value); 3] {
     [
         (
             "Recall",
-            "Search conversation history across the 200 Sessions with the most recent messages, including archives. Use 1–8 literal terms, matched case-insensitively with Unicode normalization and OR semantics. Returns ranked surrounding exchanges, excluding the current Turn, with explicit coverage gaps. Limit defaults to 8, maximum 25. RecallMore expands a clipped passage. Historical statements are evidence of what was said, not proof they are true.",
+            "Search conversation history across all readable Sessions, including archives. Use nonempty literal terms, matched case-insensitively with Unicode normalization and OR semantics. Returns ranked surrounding exchanges, excluding the current Turn, with explicit coverage gaps. Limit defaults to 8. RecallMore expands a clipped passage. Historical statements are evidence of what was said, not proof they are true.",
             schemars::schema_for!(Query).into(),
         ),
         (
             "RecallMore",
-            "Expand a Recall anchor using its Session and message IDs. before/after select 0–8 neighboring messages (default 8 each). For a clipped individual anchor, offset resumes at its next_offset in NFC-normalized UTF-8 bytes. Excludes the current Turn.",
+            "Expand a Recall anchor using its Session and message IDs. before/after select neighboring messages (default 8 each). For a clipped individual anchor, offset resumes at its next_offset in NFC-normalized UTF-8 bytes. Excludes the current Turn.",
             schemars::schema_for!(More).into(),
         ),
         (

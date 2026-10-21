@@ -69,8 +69,6 @@ pub enum ReadError {
     ContentChanged,
     #[error("Invalid Read continuation position. Copy the complete next object")]
     InvalidPosition,
-    #[error("The Read address is too long to fit a bounded response. Use a shorter original path")]
-    AddressTooLong,
 }
 
 #[derive(Clone, Debug)]

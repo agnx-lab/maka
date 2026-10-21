@@ -159,7 +159,7 @@ async fn interrupted_streaming_tool_ancestry_and_later_model_step_replay_exactly
     // A full canonical forward replay has the interruption and is valid.
     // Compare original position, exact bytes, digest and size, not only count.
     let prefix = log.prefix(16, 16_384).await.unwrap();
-    let mut view = maka_presentation::InvocationView::new(8 * 1024 * 1024).unwrap();
+    let mut view = maka_presentation::InvocationView::new();
     let expected: Vec<fixtures::Row> = prefix
         .events
         .iter()

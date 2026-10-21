@@ -137,7 +137,7 @@ pub(super) async fn project(
          AND invocation_id = ?2 AND json_extract(event_json, '$.fact.step_id') = ?3
          AND kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') = 'part_started'
-         AND sequence < ?4 ORDER BY sequence LIMIT 129",
+         AND sequence < ?4 ORDER BY sequence",
     )
     .bind(session)
     .bind(invocation)
@@ -145,11 +145,6 @@ pub(super) async fn project(
     .bind(boundary)
     .fetch_all(&mut *connection)
     .await?;
-    if starts.len() > 128 {
-        return Err(StoreError::InvalidTransition(
-            "catalog partial exceeds 128 text parts".into(),
-        ));
-    }
     for (ordinal, row) in starts.into_iter().enumerate() {
         let start: i64 = row.try_get(0)?;
         let timestamp: i64 = row.try_get(1)?;

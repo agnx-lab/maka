@@ -21,7 +21,7 @@ import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { ProxyProtocol } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { SettingsField } from './SettingsField';
-import type { NetworkSettingsOwner } from './networkSettings';
+import type { NetworkSettingsOwner } from './networkSettings.ts';
 import { C } from './ui';
 
 export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {

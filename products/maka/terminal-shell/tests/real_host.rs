@@ -630,7 +630,49 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         assert_eq!(created["workspace"], original["workspace"]);
         assert_eq!(created["workspace"]["path"], fixture.directory.path().join("workspace").canonicalize().unwrap().to_str().unwrap());
         wait_view(&mut view, |screen| screen.contains("Search models…")).await;
-        view.handle_event(Event::Paste("model-alt".into()));
+        let model_query = format!("{}fixture-model-alt", "model-alt ".repeat(30));
+        view.handle_event(Event::Paste(model_query.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(model_query.as_str()));
+        wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
+        let missing_model_tail = format!("{}fixture-model-alX", "model-alt ".repeat(30));
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(missing_model_tail.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(missing_model_tail.as_str()));
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                view.poll().unwrap();
+                support::tick(&mut view);
+                assert!(view.last_error().is_none(), "model-query view failed: {:?}", view.last_error());
+                let screen = view.snapshot();
+                let viewport = view.surface().viewport();
+                // Virtualized list cells retain their old accessibility labels
+                // while parked offscreen. Reject an old choice only when its
+                // positive-area frame actually intersects the viewport.
+                let original_choice_visible = view.accessibility_snapshot().iter().any(|node| {
+                    let frame = node.frame;
+                    node.label == "Use fixture-model-alt · NSH fixture"
+                        && frame.size.width.0 > 0.0
+                        && frame.size.height.0 > 0.0
+                        && frame.origin.x.0 < viewport.width.0
+                        && frame.origin.y.0 < viewport.height.0
+                        && frame.origin.x.0 + frame.size.width.0 > 0.0
+                        && frame.origin.y.0 + frame.size.height.0 > 0.0
+                });
+                let original_query = view.surface().input_context().and_then(|input| input.text.clone());
+                if original_query.as_deref() == Some(missing_model_tail.as_str())
+                    && screen.contains("0 models")
+                    && !screen.contains("Loading…")
+                    && !original_choice_visible
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the complete negative query did not settle without a visible old model choice");
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(model_query));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Close · Esc") && !screen.contains("Back · Esc")).await;
@@ -869,6 +911,37 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::evidence_cells("workbench-stopped-clears-tool-input", &view);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
         assert_eq!(client.load_draft("agent", &fixture.session, EDITOR).await.unwrap().unwrap().text, "Draft A stays in its own conversation");
+
+        // The native search callback must deliver the complete original query
+        // to the Host subscription, including a distinguishing final character.
+        let long_query = format!("{}終", "界".repeat(257));
+        let long_title = format!("LONG_QUERY_MATCH {long_query}");
+        let long_created = support::mutate(&client, "create", json!({
+            "title":long_title,"automaticTitle":false,"labels":[],
+            "workspace":{"kind":"session","sessionId":fixture.session}
+        })).await;
+        assert_eq!(long_created["kind"], "created");
+        assert_eq!(long_created["session"]["title"], long_title);
+        shortcut(&mut view, 'o');
+        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("Hide")).await;
+        wait_focused_input(&mut view, "Search session titles").await;
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(long_query.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(long_query.as_str()));
+        wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.label == format!("Open conversation {long_title}")));
+        let missing_tail = format!("{}異", "界".repeat(257));
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Paste(missing_tail.clone()));
+        support::tick(&mut view);
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(missing_tail.as_str()));
+        wait_view(&mut view, |screen| screen.contains("No matching conversations.") && !screen.contains("LONG_QUERY_MATCH") && !screen.contains("Loading…")).await;
+        shortcut(&mut view, 'a');
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| screen.contains("LONG_QUERY_MATCH") && !screen.contains("No matching conversations.") && !screen.contains("Loading…")).await;
+        support::click_button(&mut view, "Close session browser").await;
+        wait_view(&mut view, |screen| !screen.contains("No matching conversations.") && screen.contains("Enter sends") && !screen.contains("Hide")).await;
 
         // The target belongs to the Host's second matching page. Physical
         // wheel scrolling must obtain it without a manual continuation action.
@@ -1323,9 +1396,10 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             );
             // These phases are flat or folded. Exclude the fixed checklist's
             // NATIVE_TODO labels so the pointer always hits transcript content.
-            let text = screen
+            let (row, line, text) = screen
                 .lines()
-                .find_map(|line| {
+                .enumerate()
+                .find_map(|(row, line)| {
                     [
                         "History ",
                         "NATIVE_THINK_SOURCE_",
@@ -1340,10 +1414,39 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                     ]
                     .into_iter()
                     .find(|marker| line.contains(*marker))
+                    .map(|text| (row, line, text))
                 })
                 .expect("the viewport must contain painted fixture transcript text");
-            support::scroll_text(view, text, MouseEventKind::ScrollUp);
+            let column = line[..line.find(text).unwrap()].chars().count();
+            view.handle_event(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: column as u16,
+                row: row as u16,
+                modifiers: KeyModifiers::NONE,
+            }));
             tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+    fn wheel_seeded_history_viewport_up(view: &mut AppView, screen: &str) {
+        let mut painted = screen
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains("History "));
+        let (row, line) = painted
+            .next()
+            .expect("the painted fixture history must remain visible");
+        let last_row = painted.last().map_or(row, |(row, _)| row);
+        // Native wheel detents move three terminal rows. Observe again after
+        // at most one painted viewport on this flat fixture's outer List.
+        let detents = ((last_row - row + 1) / 3).max(1);
+        let column = line[..line.find("History ").unwrap()].chars().count() as u16;
+        for _ in 0..detents {
+            view.handle_event(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column,
+                row: row as u16,
+                modifiers: KeyModifiers::NONE,
+            }));
         }
     }
     tokio::time::timeout(Duration::from_secs(120), async {
@@ -1361,11 +1464,12 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(view.surface().input_context().is_some(), "the history wheel must start with composer focus, so a missed pointer cannot scroll the focused List");
         // Wheel events over the conversation cross the actual history page boundary.
         let scrolling = std::time::Instant::now();
+        let mut screen = history;
         loop {
-            support::scroll_text(&mut view, "History ", MouseEventKind::ScrollUp);
+            wheel_seeded_history_viewport_up(&mut view, &screen);
             view.poll().unwrap();
             support::tick(&mut view);
-            let screen = view.snapshot();
+            screen = view.snapshot();
             if screen.contains("History 00 paragraph") {
                 assert!(!screen.contains("Load earlier messages"));
                 evidence("history-automatically-prepended", &screen);
@@ -1903,7 +2007,8 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         })).await;
         assert_eq!(sent["kind"], "started");
         let mut request = fixture.next_request().await;
-        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
+        let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler 中文😀\n".repeat(60_000));
+        assert!(source.len() > 1024 * 1024);
         request.delta(&source).await;
         let over_budget = wait_view(&mut view, |screen| screen.contains("Long response shown as original source.") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("[Source]")).await;
         evidence("rich-response-over-formatting-budget", &over_budget);
@@ -1931,13 +2036,22 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy message").await;
-        let too_large = wait_view(&mut view, |screen| screen.contains("64 KiB")).await;
-        assert!(!view.drain_service_output().any(|effect| matches!(effect, ServiceOutput::Clipboard(_))), "an oversized original body must not copy its loaded tail or a truncated prefix");
-        evidence("rich-response-copy-rejects-oversized-source", &too_large);
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+        // Observe either actual completion or the original admission refusal,
+        // then close the real owners before the desired-success assertion.
+        let copied_state = wait_view(&mut view, |screen| screen.contains("Sent to terminal clipboard") || screen.contains("64 KiB")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        let requests = fixture.request_count.load(Ordering::SeqCst);
+        evidence("rich-response-copies-complete-large-source", &copied_state);
         drop(view);
         bindings.close().await.unwrap();
         fixture.finish().await;
+        assert_eq!(clipboard.len(), 1, "one original copy must emit one complete clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert!(copied == &source, "copy must retain the entire original, not the loaded tail");
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("one complete original OSC 52 command");
+        assert!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap() == source.as_bytes(), "OSC 52 changed original UTF-8 bytes");
+        assert_eq!(requests, 2);
     }).await.expect("real Host rich response workflow timed out");
 }
 

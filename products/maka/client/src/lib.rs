@@ -92,7 +92,7 @@ fn control_correlation(method: &str, input: &Value) -> Result<Value> {
         let target = input
             .get(key)
             .and_then(Value::as_str)
-            .filter(|target| !target.is_empty() && target.len() <= 128)
+            .filter(|target| !target.is_empty())
             .ok_or("agent control requires a valid invocationId or requestId")?;
         correlation[key] = Value::String(target.to_owned());
     }
@@ -114,12 +114,7 @@ fn control_correlation(method: &str, input: &Value) -> Result<Value> {
         if method == "fork" {
             let turn = input
                 .get("turnId")
-                .filter(|turn| {
-                    turn.is_null()
-                        || turn
-                            .as_str()
-                            .is_some_and(|turn| !turn.is_empty() && turn.len() <= 128)
-                })
+                .filter(|turn| turn.is_null() || turn.as_str().is_some_and(|turn| !turn.is_empty()))
                 .ok_or("agent fork control requires an original turnId")?;
             correlation["turnId"] = turn.clone();
         }
@@ -409,13 +404,13 @@ impl Client {
                             let bytes = secret.bytes();
                             secret.resource_type() == text_resource_type()
                                 && secret.encoding() == ResourceEncoding::Utf8
-                                && (1..=10240).contains(&bytes)
+                                && bytes > 0
                                 && secret.read(0..bytes).is_ok_and(|value| {
                                     value.len() == bytes && std::str::from_utf8(&value).is_ok()
                                 })
                         })
                     {
-                        return Err("settings network credential requires one UTF-8 secret resource within 10 KiB".into());
+                        return Err("settings network credential requires one nonempty UTF-8 secret resource".into());
                     }
                 }
                 Some("keep" | "delete") if resources.is_empty() => {}
@@ -455,13 +450,14 @@ impl Client {
         let metadata = resource.metadata();
         let name = metadata["name"]
             .as_str()
-            .filter(|name| !name.is_empty() && name.chars().count() <= 512)
+            .filter(|name| !name.is_empty())
             .ok_or("invalid selected filename")?
             .to_owned();
         let bytes = metadata["bytes"]
             .as_u64()
-            .filter(|bytes| *bytes <= 50 * 1024 * 1024 && *bytes as usize == resource.bytes())
-            .ok_or("invalid selected file size")? as usize;
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .filter(|bytes| *bytes == resource.bytes())
+            .ok_or("invalid selected file size")?;
         let digest = metadata["digest"]
             .as_str()
             .filter(|digest| {

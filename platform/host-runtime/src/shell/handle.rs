@@ -170,7 +170,7 @@ impl ShellHandle {
         actions: Vec<InputAction>,
         size: Option<TerminalSize>,
     ) -> Result<WriteReceipt, ControlError> {
-        // Bound memory before waiting for queue capacity. Encode again on the
+        // Validate before waiting for queue capacity. Encode again on the
         // worker using the current screen cut; this preflight grants no effect.
         let record = self
             .latest()
@@ -189,18 +189,15 @@ impl ShellHandle {
         self.write_raw(String::new(), Some(size)).await.map(|_| ())
     }
 
-    /// Raw terminal input includes ESC/C0. The client boundary separately limits
-    /// it to 32 KiB; the model WriteStdin contract permits 64 KiB. Resize and input
-    /// are one serialized command, validated before either can perform an effect.
+    /// Raw terminal input includes ESC/C0. Resize and complete input are one
+    /// serialized command, validated before either can perform an effect.
     pub async fn write_raw(
         &self,
         input: String,
         size: Option<TerminalSize>,
     ) -> Result<WriteReceipt, ControlError> {
-        if input.len() > 64 * 1024 || (input.is_empty() && size.is_none()) {
-            return Err(ControlError::rejected(
-                "PTY input is empty or exceeds 64 KiB",
-            ));
+        if input.is_empty() && size.is_none() {
+            return Err(ControlError::rejected("PTY input is empty"));
         }
         self.control(Input::Raw(input), size, CancellationToken::new())
             .await

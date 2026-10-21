@@ -30,8 +30,8 @@ fn invalid(message: &str) -> StoreError {
 }
 
 fn identity(value: &str) -> Result<(), StoreError> {
-    if value.is_empty() || value.len() > 4096 {
-        return Err(invalid("tool identity must contain 1 to 4096 UTF-8 bytes"));
+    if value.is_empty() {
+        return Err(invalid("tool identity must be nonempty"));
     }
     Ok(())
 }
@@ -105,11 +105,7 @@ pub(crate) async fn validate(
             model_text,
         } => {
             identity(operation_id)?;
-            if text.trim().is_empty()
-                || text.len() > 128 * 1024
-                || model_text.trim().is_empty()
-                || model_text.len() > 128 * 1024
-            {
+            if text.trim().is_empty() || model_text.trim().is_empty() {
                 return Err(invalid("invalid Code Mode notification"));
             }
             let live: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events d

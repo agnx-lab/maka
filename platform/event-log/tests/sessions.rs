@@ -422,16 +422,28 @@ async fn owned_catalog_filters_before_paging_and_binds_literal_query_and_scope_t
             Err(StoreError::RevisionConflict { .. })
         ));
     }
-    assert!(
-        log.catalog_revision(owned(CatalogSelection::All, &"界".repeat(128)), filter)
-            .await
-            .is_ok()
-    );
-    assert!(
-        log.catalog_revision(owned(CatalogSelection::All, &"界".repeat(129)), filter)
-            .await
-            .is_err()
-    );
+    let shorter = log
+        .catalog_revision(owned(CatalogSelection::All, &"界".repeat(128)), filter)
+        .await
+        .unwrap();
+    let long_scope = owned(CatalogSelection::All, &"界".repeat(129));
+    let long_revision = log
+        .catalog_revision(long_scope.clone(), filter)
+        .await
+        .unwrap();
+    assert_ne!(shorter, long_revision);
+    let long_page = log
+        .scoped_sessions::<Value>(
+            long_scope,
+            Some(&long_revision),
+            SessionPosition::Start,
+            filter,
+        )
+        .await
+        .unwrap();
+    assert_eq!(long_page.revision, long_revision);
+    assert!(long_page.sessions.is_empty());
+    assert!(long_page.next_cursor.is_none());
     log.close().await.unwrap();
 }
 
@@ -578,10 +590,17 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
             .await
             .is_err()
     );
-    assert!(
-        log.create_session("large", "large", &"x".repeat(65536), 1)
+    let configuration = "x".repeat(65536);
+    log.create_session("large", "large", &configuration, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        log.get_session::<String>("large")
             .await
-            .is_err()
+            .unwrap()
+            .unwrap()
+            .configuration,
+        configuration
     );
     assert!(
         log.create_session("time", "time", &json!({}), u64::MAX)
@@ -594,4 +613,18 @@ async fn lifecycle_obeys_canonical_invocation_seal_and_validates_bounds() {
             .await
             .is_err()
     );
+    log.close().await.unwrap();
+    let reopened = EventLog::open(&directory.path().join("events.sqlite"))
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened
+            .get_session::<String>("large")
+            .await
+            .unwrap()
+            .unwrap()
+            .configuration,
+        configuration
+    );
+    reopened.close().await.unwrap();
 }

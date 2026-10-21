@@ -20,10 +20,7 @@
 use super::invalid;
 use crate::{
     StoreError,
-    bundle::{
-        MAX_SESSIONS,
-        format::{Copy, Record},
-    },
+    bundle::format::{Copy, Record},
 };
 use maka_agent_facts::session::CopyPurpose;
 use maka_agent_facts::session::CopyState;
@@ -48,9 +45,6 @@ impl Copies {
             let Some((number, json)) = row else {
                 break;
             };
-            if copies.len() == MAX_SESSIONS {
-                return Err(StoreError::PrefixTooLarge);
-            }
             let Record::Copy(mut copy) = serde_json::from_str(&json)? else {
                 unreachable!()
             };

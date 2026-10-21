@@ -32,7 +32,6 @@ pub struct SkillToolRequest<T> {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "SkillModelSearch")]
 pub struct ModelSearch {
-    #[schemars(length(max = 4096))]
     pub query: String,
     #[schemars(range(min = 1, max = 8))]
     pub limit: Option<usize>,
@@ -43,10 +42,10 @@ pub struct ModelSearch {
 #[schemars(rename = "SkillModelLoad")]
 pub struct ModelLoad {
     /// Exact ref from search, or a skill id/name resolved before eligibility checks.
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub name: String,
     /// Catalog revision from search or a previous load/resource response.
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub revision: String,
     /// UTF-8 resource path relative to this skill, or its exact continuation.
     pub resource: Option<maka_agent_facts::read::ReadInput>,

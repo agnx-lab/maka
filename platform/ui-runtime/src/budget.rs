@@ -101,6 +101,30 @@ impl NativeBudget {
         let u = self.0.lock().unwrap();
         (u.encoded, u.pixels, u.jobs)
     }
+
+    /// Reserve currently available capacity before an opaque native getter allocates.
+    pub fn reserve_remaining(&self, kind: Kind) -> Result<Permit, BudgetExhausted> {
+        let mut usage = self.0.lock().expect("native budget lock");
+        let (used, limit) = match kind {
+            Kind::Encoded => (usage.encoded, usage.limits.encoded_bytes),
+            Kind::Pixels => (usage.pixels, usage.limits.pixel_bytes),
+            Kind::Job => (usage.jobs, usage.limits.worker_jobs),
+        };
+        let bytes = limit
+            .checked_sub(used)
+            .filter(|bytes| *bytes > 0)
+            .ok_or(BudgetExhausted)?;
+        match kind {
+            Kind::Encoded => usage.encoded = limit,
+            Kind::Pixels => usage.pixels = limit,
+            Kind::Job => usage.jobs = limit,
+        }
+        Ok(Permit {
+            budget: self.clone(),
+            kind,
+            bytes,
+        })
+    }
 }
 impl Drop for Permit {
     fn drop(&mut self) {
@@ -117,6 +141,10 @@ impl Drop for Permit {
 }
 
 impl Permit {
+    pub fn capacity(&self) -> usize {
+        self.bytes
+    }
+
     /// Return unused capacity after a native API reports its actual allocation.
     pub fn shrink_to(&mut self, bytes: usize) {
         assert!(

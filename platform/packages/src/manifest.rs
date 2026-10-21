@@ -59,32 +59,13 @@ impl Manifest {
                 validate_path(module)?;
             }
         }
-        if self.display_name.len() > 512
-            || self.description.len() > 4096
-            || self.localizations.len() > 32
-            || self.display_name.len()
-                + self.description.len()
-                + self
-                    .localizations
-                    .iter()
-                    .map(|(locale, copy)| {
-                        locale.len() + copy.display_name.len() + copy.description.len()
-                    })
-                    .sum::<usize>()
-                > 8192
-            || self.localizations.iter().any(|(locale, copy)| {
-                locale.is_empty()
-                    || locale.len() > 64
-                    || !locale
-                        .bytes()
-                        .all(|c| c.is_ascii_alphanumeric() || c == b'-')
-                    || copy.display_name.len() > 512
-                    || copy.description.len() > 4096
-            })
-        {
-            return Err(Error::Invalid(
-                "package description exceeds its limit".into(),
-            ));
+        if self.localizations.keys().any(|locale| {
+            locale.is_empty()
+                || !locale
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        }) {
+            return Err(Error::Invalid("invalid package locale".into()));
         }
         Ok(())
     }

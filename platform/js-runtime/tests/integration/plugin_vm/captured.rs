@@ -306,22 +306,22 @@ impl RequestBridge for CountInput {
     }
 }
 #[tokio::test]
-async fn native_bridge_checks_json_and_input_capacity_before_dispatch() {
+async fn native_bridge_checks_json_and_admits_complete_large_input() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let vm = Vm::scoped(Limits::default()).unwrap();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let module = vm.load("input-json.mjs".into(), r#"
             export const service = { async read(mode, context) {
                 const input = mode==='bigint' ? {nested:[9007199254740993n]} : {text:'x'.repeat(32*1024*1024)};
-                try { await context.invoke(input); return false; }
-                catch(error) { return error.message.includes(mode==='bigint'?'BigInt':'input budget'); }
+                try { const result=await context.invoke(input); return mode==='large' && result.text.length===32*1024*1024; }
+                catch(error) { return mode==='bigint' && error.message.includes('BigInt'); }
             }};
         "#.into()).unwrap();
         let callbacks = capture_result(&module).await.unwrap();
         for mode in ["bigint", "large"] {
             assert_eq!(callbacks.call_with_context("read", vec![json!(mode)], Arc::new(CountInput(calls.clone()))).await.unwrap(), json!(true));
         }
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(!vm.is_terminated());
         module.close().await.unwrap();
         vm.shutdown().await;

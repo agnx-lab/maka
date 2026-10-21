@@ -209,11 +209,7 @@ impl Pricing {
 
 /// Model keys are exact identities, not normalized provider or model names.
 pub fn validate_key(key: &str) -> Result<(), &'static str> {
-    if key.is_empty()
-        || key.trim() != key
-        || key.encode_utf16().count() > 128
-        || key.chars().any(char::is_control)
-    {
+    if key.is_empty() || key.trim() != key || key.chars().any(char::is_control) {
         return Err("invalid pricing model key");
     }
     Ok(())

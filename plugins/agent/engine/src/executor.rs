@@ -101,12 +101,7 @@ impl Engine {
                     invocation.clone(),
                     cancellation.clone(),
                 ));
-                let mut settlement = call.execute(output.clone(), cancellation.clone()).await;
-                if let Ok(value) = &settlement.result
-                    && let Err(error) = value.validate()
-                {
-                    settlement.result = Err(error);
-                }
+                let settlement = call.execute(output.clone(), cancellation.clone()).await;
                 if matches!(&settlement.result, Err(Error::CleanupUnconfirmed)) {
                     crate::cleanup::unconfirmed();
                 }

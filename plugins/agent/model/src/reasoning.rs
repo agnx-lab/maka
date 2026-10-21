@@ -42,9 +42,6 @@ fn summary(options: &Value, text: &str, contract: PlaintextResponses) -> Option<
         || state.profile != contract.profile()
         || state.item_id.is_empty()
         || state.item_id.bytes().any(|byte| byte.is_ascii_control())
-        || state.item_id.encode_utf16().count() > 512
-        || state.summary_part_lengths.len() > 128
-        || text.encode_utf16().count() > 10_000_000
     {
         return None;
     }
@@ -52,9 +49,6 @@ fn summary(options: &Value, text: &str, contract: PlaintextResponses) -> Option<
     let mut remaining = text;
     let mut parts = Vec::with_capacity(state.summary_part_lengths.len());
     for length in &state.summary_part_lengths {
-        if *length > 10_000_000 {
-            return None;
-        }
         let mut units = 0;
         let mut bytes = 0;
         for ch in remaining.chars() {

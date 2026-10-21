@@ -21,13 +21,13 @@ import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { createSettingsOperations } from './settingsOperations';
 import { createModelSettings } from './settings';
-import { createGeneralSettings } from './generalSettings';
-import { createNetworkSettings } from './networkSettings';
+import { createGeneralSettings } from './generalSettings.ts';
+import { createNetworkSettings } from './networkSettings.ts';
 import { ConnectionSettings } from './ConnectionSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { NetworkSettings } from './NetworkSettings';
 import { PluginSettings } from './PluginSettings';
-import { createPluginSettings } from './pluginSettings';
+import { createPluginSettings } from './pluginSettings.ts';
 import { C } from './ui';
 
 type Section = 'general' | 'connections' | 'network' | 'plugins';
@@ -109,7 +109,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   const nested = () =>
     section() === 'connections'
       ? connections.page() !== 'connections' || !!connections.confirmation()
-      : section() === 'general' ? general.title() !== 'General settings'
+      : section() === 'general'
+        ? general.title() !== 'General settings'
         : section() === 'plugins' && plugins.selected() !== null;
   return (
     <Dialog

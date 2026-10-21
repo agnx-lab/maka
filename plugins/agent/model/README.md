@@ -23,4 +23,6 @@
 
 Builds model requests and streams responses through provider adapters. `ModelExecutor` manages requests, `Conversation` builds conversation input, and `reasoning` handles reasoning configuration. Provider credentials arrive through `AuthResolver`; the caller supplies authorized network and accounting context.
 
+Canonical response items and text remain complete across HTTP, SSE, WebSocket and durable reconstruction. Chunking and bounded channels apply backpressure without a separate whole-response quota. Disposable continuation caches may be evicted; canonical history remains the recovery source. Request token selection, provider protocol validation and owned idle/cancellation cleanup stay separate from content retention.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

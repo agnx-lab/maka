@@ -41,9 +41,7 @@ pub enum LoginRejection {
     ConnectionNotFound,
     ConnectionChanged,
     CredentialChanged,
-    CatalogFull,
     SlugTaken,
-    AttemptsFull,
 }
 
 #[derive(Debug, PartialEq)]
@@ -90,9 +88,6 @@ impl ConfigurationStore {
                         P::Rejected(R::AttemptConflict)
                     });
                 }
-                if receipt::pending_count(tx).await? >= 256 {
-                    return Ok(P::Rejected(R::AttemptsFull));
-                }
                 let catalog = catalog::read(tx).await?;
                 let (before, mut after) = match &input.target {
                     Target::Create {
@@ -103,9 +98,6 @@ impl ConfigurationStore {
                     } => {
                         if catalog.connections.iter().any(|row| row.slug == *slug) {
                             return Ok(P::Rejected(R::SlugTaken));
-                        }
-                        if catalog.connections.len() >= 1024 {
-                            return Ok(P::Rejected(R::CatalogFull));
                         }
                         (
                             None,
@@ -215,9 +207,9 @@ impl PreparedLogin {
     /// Publish discovered facts with login, preserving existing user choices.
     pub fn discovered_models(&mut self, models: Vec<ModelInfo>, now: u64) -> Result<()> {
         validation::revision(now, false).map_err(ConfigError::Invalid)?;
-        if models.is_empty() || models.len() > 2048 {
+        if models.is_empty() {
             return Err(ConfigError::Invalid(
-                "discovery requires 1..2048 models".into(),
+                "discovery requires at least one model".into(),
             ));
         }
         for model in &models {

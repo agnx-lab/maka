@@ -90,7 +90,7 @@ impl EventLog {
     /// Select an owning service's logical identity namespace in the same SQL
     /// snapshot as its locations and aliases. The prefix is data, not a grant.
     pub async fn projects_with_identity_prefix(&self, prefix: &str) -> Result<Vec<ProjectRecord>> {
-        validate_text(prefix, 128)?;
+        validate_text(prefix)?;
         self.project_catalog(Some(prefix.to_owned())).await
     }
 
@@ -241,9 +241,9 @@ async fn read(connection: &mut SqliteConnection, id: &str) -> Result<Option<Proj
 }
 
 fn validate_registration(registration: &ProjectRegistration) -> Result<()> {
-    validate_text(&registration.identity, 4103)?;
+    validate_text(&registration.identity)?;
     validate_name(&registration.name)?;
-    validate_text(&registration.path, 4096)
+    validate_text(&registration.path)
 }
 
 fn validate_id(id: &str) -> Result<()> {
@@ -251,15 +251,15 @@ fn validate_id(id: &str) -> Result<()> {
 }
 
 fn validate_name(name: &str) -> Result<()> {
-    validate_text(name, 16 * 1024)?;
+    validate_text(name)?;
     if name.trim().is_empty() {
         return Err(invalid("empty project name"));
     }
     Ok(())
 }
 
-fn validate_text(text: &str, limit: usize) -> Result<()> {
-    if text.is_empty() || text.len() > limit || text.contains('\0') {
+fn validate_text(text: &str) -> Result<()> {
+    if text.is_empty() || text.contains('\0') {
         return Err(invalid("invalid project text"));
     }
     Ok(())

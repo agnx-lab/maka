@@ -33,7 +33,7 @@ import {
   type ScopedHost,
 } from './host';
 import { C, Header } from './ui';
-import { acceptedSend, historyMetadata, mergeChunks } from './history';
+import { acceptedSend, historyMetadata, mergeChunks, replayStartCursor } from './history';
 import type { Row, Position, Subscription } from './history';
 import type { ComposerSession, SendAction } from './Composer';
 import { sameRoute } from './modelSelection';
@@ -157,7 +157,12 @@ export function Conversation(props: ConversationProps) {
   const turnState = (id: string) => {
     let state = turnStates.get(id);
     if (!state) {
-      state = { expanded: signal<{ open: boolean; answerKey: string | undefined } | null>(null) };
+      state = {
+        expanded: signal<{
+          open: boolean;
+          answerKey: string | undefined;
+        } | null>(null),
+      };
       turnStates.set(id, state);
     }
     return state;
@@ -292,7 +297,11 @@ export function Conversation(props: ConversationProps) {
         turnOutcome(turn) !== null
       ) {
         summaries.add(turn.turnId);
-        result.push({ kind: 'summary', key: `turn/${turn.turnId}`, turnId: turn.turnId });
+        result.push({
+          kind: 'summary',
+          key: `turn/${turn.turnId}`,
+          turnId: turn.turnId,
+        });
       }
       if (entry.kind === 'process') {
         if (!turn || !turnExpanded(turn)) continue;
@@ -301,7 +310,11 @@ export function Conversation(props: ConversationProps) {
           // Flat members are native outer List seats, preserving virtualization.
           for (const rowId of entry.rowIds) result.push({ kind: 'row', key: rowId, rowId });
           if (entry.members.some((member) => member.kind === 'activity'))
-            result.push({ kind: 'activity', key: `activity/${entry.key}`, group: entry });
+            result.push({
+              kind: 'activity',
+              key: `activity/${entry.key}`,
+              group: entry,
+            });
         }
       } else if (row) {
         if (entry.processTurnId && turn && !turnExpanded(turn)) continue;
@@ -318,7 +331,11 @@ export function Conversation(props: ConversationProps) {
     }
     for (const row of pendingMessages()) {
       if (row.placement === 'queued' && reading() === 'chat')
-        result.push({ kind: 'row', key: stableRowId(row), rowId: stableRowId(row) });
+        result.push({
+          kind: 'row',
+          key: stableRowId(row),
+          rowId: stableRowId(row),
+        });
     }
     return result;
   });
@@ -609,7 +626,11 @@ export function Conversation(props: ConversationProps) {
           const metadataFence = latestKnown;
           // Completion changes metadata on earlier multipart output as well.
           // Never merge these newly budgeted fragments into already loaded text.
-          let cursor: any = { kind: 'row', position: refresh.position, field: refresh.field };
+          let cursor: any = {
+            kind: 'row',
+            position: refresh.position,
+            field: refresh.field,
+          };
           try {
             for (;;) {
               const page = await history(metadataFence, cursor);
@@ -801,11 +822,7 @@ export function Conversation(props: ConversationProps) {
         field: part.textKind === 'thinking' ? 'thinking' : 'body',
       })),
     );
-    const after = Math.min(
-      observed.through,
-      ...observed.parts.map((part: any) => part.startSequence - 1),
-      ...observed.toolSeeds.map((tool: any) => tool.startSequence - 1),
-    );
+    const after = replayStartCursor(observed.through, observed.parts, observed.toolSeeds);
     const stream = await host.subscribe('agent', 'watch', { sessionId, after });
     if (!alive) {
       await stream.close();
@@ -847,7 +864,9 @@ export function Conversation(props: ConversationProps) {
         batch(() => deliver(page));
       }
     } catch (reason) {
-      failure = { reason: readFailure?.stream === stream ? readFailure.reason : reason };
+      failure = {
+        reason: readFailure?.stream === stream ? readFailure.reason : reason,
+      };
       throw failure.reason;
     } finally {
       if (alive) transcriptStatus.set('closing');
@@ -1085,12 +1104,19 @@ export function Conversation(props: ConversationProps) {
     const value = backendIdentity(backend());
     return value === null ? null : JSON.stringify([value.connectionId, value.modelId]);
   });
-  const modelProjection = signal<{ route: string | null; details: ModelDetails }>({
+  const modelProjection = signal<{
+    route: string | null;
+    details: ModelDetails;
+  }>({
     route: null,
     details: { kind: 'unavailable', message: 'Choose a model.' },
   });
   let modelGeneration = 0;
-  let modelRead: { route: string; generation: number; task: Promise<void> } | null = null;
+  let modelRead: {
+    route: string;
+    generation: number;
+    task: Promise<void>;
+  } | null = null;
   const modelDetails = (): ModelDetails => {
     const value = modelProjection();
     return value.route === modelRoute() ? value.details : { kind: 'loading' };
@@ -1125,7 +1151,10 @@ export function Conversation(props: ConversationProps) {
           details:
             result.kind === 'ready' && sameRoute(captured, result.choice.selection)
               ? { kind: 'ready', choice: result.choice }
-              : { kind: 'unavailable', message: `Model unavailable: ${captured.modelId}.` },
+              : {
+                  kind: 'unavailable',
+                  message: `Model unavailable: ${captured.modelId}.`,
+                },
         });
       } catch (reason) {
         if (current())
@@ -1158,7 +1187,10 @@ export function Conversation(props: ConversationProps) {
     if (!alive) return null;
     if (resolved.kind !== 'ready')
       throw new Error(`Model unavailable: ${backend.modelId}. Press Ctrl+G to choose another.`);
-    return { model: resolved.choice.selection, thinkingLevel: backend.thinkingLevel ?? null };
+    return {
+      model: resolved.choice.selection,
+      thinkingLevel: backend.thinkingLevel ?? null,
+    };
   };
 
   const settleReply = (
@@ -1455,7 +1487,10 @@ export function Conversation(props: ConversationProps) {
       }
       const turn = projection().turns.get(group.turnId);
       if (!turn) return;
-      turnState(turn.turnId).expanded.set({ open: true, answerKey: turn.answerKey });
+      turnState(turn.turnId).expanded.set({
+        open: true,
+        answerKey: turn.answerKey,
+      });
       const state = groupState(group.key);
       if (!state.open()) {
         innerReader.set(group.closed ? group.key : null);
@@ -1530,7 +1565,13 @@ export function Conversation(props: ConversationProps) {
   );
 
   return (
-    <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
+    <View
+      style={{
+        flex: ownHandle.empty() ? 0 : 1,
+        minHeight: 0,
+        backgroundColor: C.background,
+      }}
+    >
       <If when={attachmentMetadataFailed()}>
         <Button onPress={retryAttachmentMetadata}>
           <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
@@ -1575,7 +1616,10 @@ export function Conversation(props: ConversationProps) {
         <Button
           role="tab"
           selected={reading() === 'chat'}
-          onPress={inputAction(chooseReading, { owner: sessionId, mode: 'chat' })}
+          onPress={inputAction(chooseReading, {
+            owner: sessionId,
+            mode: 'chat',
+          })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
           activeStyle={{ backgroundColor: C.line }}
@@ -1592,7 +1636,10 @@ export function Conversation(props: ConversationProps) {
         <Button
           role="tab"
           selected={reading() === 'trajectory'}
-          onPress={inputAction(chooseReading, { owner: sessionId, mode: 'trajectory' })}
+          onPress={inputAction(chooseReading, {
+            owner: sessionId,
+            mode: 'trajectory',
+          })}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
           activeStyle={{ backgroundColor: C.line }}
@@ -1704,7 +1751,11 @@ export function Conversation(props: ConversationProps) {
                               ? toolActivitySummary(
                                   props.presentation.policy().liveProcessDetail
                                     ? current
-                                    : { ...current, title: undefined, detail: '' },
+                                    : {
+                                        ...current,
+                                        title: undefined,
+                                        detail: '',
+                                      },
                                 )
                               : 'Working…';
                           }}

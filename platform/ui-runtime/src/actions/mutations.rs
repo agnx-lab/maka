@@ -62,9 +62,7 @@ impl Session {
     fn failure(&self, reason: String) -> ActionOutcome {
         match self.reference.get() {
             Some(reference) => unavailable(reference.clone(), self.caller.clone(), reason),
-            None => ActionOutcome::NotAccepted {
-                reason: bounded_reason(reason),
-            },
+            None => ActionOutcome::NotAccepted { reason },
         }
     }
 }
@@ -358,7 +356,6 @@ impl<V: ?Sized + 'static> Application<V> {
         if !matches!(preparing.phase, Phase::Closing) {
             return Err(Error::Invalid("preparation is not closing".into()));
         }
-        let cleanup = cleanup.map_err(bounded_reason);
         let failure = cleanup.as_ref().err().cloned();
         preparing.phase = Phase::Failed;
         if let Some(outcome) = preparing.outcome.take() {
@@ -433,7 +430,7 @@ impl<V: ?Sized + 'static> Application<V> {
             ));
         }
         if let Err(error) = valid {
-            self.fail_update(id, bounded_reason(error.to_string()));
+            self.fail_update(id, error.to_string());
         }
         let flow = &mut self
             .actions
@@ -524,7 +521,7 @@ impl<V: ?Sized + 'static> Application<V> {
                 )),
             }
         };
-        let cleanup = completion.cleanup.map_err(bounded_reason);
+        let cleanup = completion.cleanup;
         let failure = cleanup.as_ref().err().cloned();
         self.runtime.settle(&running.execution, cleanup)?;
         self.actions.outcomes.push_back(Outcome {
@@ -549,9 +546,7 @@ impl<V: ?Sized + 'static> Application<V> {
     }
 
     fn interrupt_task(&mut self, id: Uuid, reason: String) -> Result<()> {
-        let reason = bounded_reason(format!(
-            "executor interrupted; cleanup unconfirmed: {reason}"
-        ));
+        let reason = format!("executor interrupted; cleanup unconfirmed: {reason}");
         if let Some(preparing) = self.actions.preparing.get_mut(&id) {
             if matches!(preparing.phase, Phase::Failed) {
                 return Err(Error::Invalid("preparation already failed".into()));

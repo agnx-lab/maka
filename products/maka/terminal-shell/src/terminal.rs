@@ -197,8 +197,8 @@ fn drive(
             }
         }
         if output.poll()? {
-            if setup && let Some(flushed) = output.take_flushed() {
-                state.lock().unwrap().graphics.flushed(flushed);
+            if setup && output.take_flushed().is_some() {
+                state.lock().unwrap().graphics.flushed();
             }
             setup = false;
             if let Some(completed) = pending.take() {
@@ -233,7 +233,7 @@ fn drive(
         }
         if !setup && !busy && pending.is_none() {
             let mut inbox = state.lock().unwrap();
-            let image_protocol = inbox.graphics.take_ready(Instant::now());
+            let image_protocol = inbox.graphics.take_ready();
             let resize = inbox.resize.take();
             let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
             let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
@@ -298,7 +298,7 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                                 return;
                             }
                         };
-                        inbox.graphics.observe(&event, Instant::now());
+                        inbox.graphics.observe(&event);
                         #[cfg(target_os = "linux")]
                         {
                             inbox.pixel_probe.observe(&event, Instant::now());

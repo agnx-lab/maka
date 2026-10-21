@@ -116,14 +116,13 @@ async fn scheduler_reminder_survives_lost_host_reply_restart_snooze_and_delete_w
  {
     tokio::time::timeout(Duration::from_secs(45), async {
         let mut f = fixture("http://127.0.0.1:1/v1").await;
-        let mut oversized = task(json!({"kind":"reminder"}));
-        oversized["task"]["title"] = json!("😀".repeat(120));
-        oversized["task"]["intentBody"] = json!("😀".repeat(8000));
+        let mut invalid = task(json!({"kind":"reminder"}));
+        invalid["task"]["title"] = json!("   ");
         let rejected = f
             .mutation(
                 2,
                 "schedule",
-                json!({"kind":"create","input":oversized}),
+                json!({"kind":"create","input":invalid}),
                 Uuid::new_v4(),
             )
             .await
@@ -132,7 +131,10 @@ async fn scheduler_reminder_survives_lost_host_reply_restart_snooze_and_delete_w
             rejected["kind"], "rejected",
             "known validation failure must return a durable result, never strand caller recovery"
         );
-        assert_eq!(rejected["reason"], "scheduler_task_too_large");
+        assert_eq!(
+            rejected["reason"],
+            "invalid scheduled task: empty or invalid task field"
+        );
         let input = json!({"kind":"create","input":task(json!({"kind":"reminder"}))});
         let client = f.app.client();
         let prepared = client

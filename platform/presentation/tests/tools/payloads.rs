@@ -38,7 +38,7 @@ fn boundary(output: &ToolOutput) -> (InvocationView, StoredEvent) {
     });
     let mut events = stored(facts);
     let result = events.pop().unwrap();
-    let mut view = InvocationView::new(1024).unwrap();
+    let mut view = InvocationView::new();
     for event in events {
         view.push(&event).unwrap();
     }
@@ -57,7 +57,7 @@ fn successful_boundary_requires_raw_and_other_facts_reject_it() {
         view.push_with_tool_output(&event, Some(&raw)).is_err(),
         "invalid input poisons the projection"
     );
-    let mut view = InvocationView::new(1024).unwrap();
+    let mut view = InvocationView::new();
     let opening = stored(vec![opening()]).remove(0);
     assert!(matches!(
         view.push_with_tool_output(&opening, Some(&raw)),
@@ -66,24 +66,16 @@ fn successful_boundary_requires_raw_and_other_facts_reject_it() {
 }
 
 #[test]
-fn raw_results_have_a_separate_budget_including_complete_row_metadata() {
-    let raw = ToolOutput::Text(String::new());
+fn raw_results_preserve_complete_content_and_row_metadata() {
+    let text = "x".repeat(16 * 1024 * 1024 + 1);
+    let raw = ToolOutput::Text(text.clone());
     let (mut view, event) = boundary(&raw);
     let row = view
         .push_with_tool_output(&event, Some(&raw))
         .unwrap()
         .remove(0);
-    let overhead = serde_json::to_vec(&row.message).unwrap().len();
-    let limit = 16 * 1024 * 1024;
-    for (extra, succeeds) in [(0, true), (1, false)] {
-        let raw = ToolOutput::Text("x".repeat(limit - overhead + extra));
-        let (mut view, event) = boundary(&raw);
-        let result = view.push_with_tool_output(&event, Some(&raw));
-        if succeeds {
-            let message = &result.unwrap().remove(0).message;
-            assert_eq!(serde_json::to_vec(message).unwrap().len(), limit);
-        } else {
-            assert!(matches!(result, Err(ProjectionError::TooLarge)));
-        }
-    }
+    assert!(
+        matches!(&row.message.content,maka_presentation::Content::ToolResult {content:maka_presentation::ToolContent::Text {text:actual},..} if actual == &text),
+        "complete raw result changed"
+    );
 }

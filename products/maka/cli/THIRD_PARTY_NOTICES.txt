@@ -16699,7 +16699,6 @@ https://crates.io/api/v1/crates/gix-glob/0.27.1/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-hash/0.26.2/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-hashtable/0.16.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-ignore/0.22.1/download :: LICENSE-APACHE
-https://crates.io/api/v1/crates/gix-index/0.55.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-lock/24.0.0/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-macros/0.1.6/download :: LICENSE-APACHE
 https://crates.io/api/v1/crates/gix-note/0.1.1/download :: LICENSE-APACHE
@@ -16768,6 +16767,7 @@ https://crates.io/api/v1/crates/wgpu-types/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu/29.0.4/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/wgpu/30.0.1/download :: LICENSE.APACHE
 https://crates.io/api/v1/crates/widestring/1.2.1/download :: LICENSE-APACHE
+https://github.com/GitoxideLabs/gitoxide#d2af4ed5532ea660fbd643e48d8925cd88de5ee0 (adapted; third-party/gix-index) :: LICENSE-APACHE
 https://github.com/image-rs/image-webp#08b57d473c90148dd4b37a075df365afc3dfcc2b (adapted; third-party/image-webp) :: LICENSE-APACHE
 
 Apache License
@@ -19046,7 +19046,6 @@ https://crates.io/api/v1/crates/gix-glob/0.27.1/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-hash/0.26.2/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-hashtable/0.16.0/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-ignore/0.22.1/download :: LICENSE-MIT
-https://crates.io/api/v1/crates/gix-index/0.55.0/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-lock/24.0.0/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-macros/0.1.6/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-note/0.1.1/download :: LICENSE-MIT
@@ -19078,6 +19077,7 @@ https://crates.io/api/v1/crates/gix-worktree-stream/0.36.1/download :: LICENSE-M
 https://crates.io/api/v1/crates/gix-worktree/0.56.0/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix-zlib/0.1.0/download :: LICENSE-MIT
 https://crates.io/api/v1/crates/gix/0.87.1/download :: LICENSE-MIT
+https://github.com/GitoxideLabs/gitoxide#d2af4ed5532ea660fbd643e48d8925cd88de5ee0 (adapted; third-party/gix-index) :: LICENSE-MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19731,7 +19731,7 @@ gpui-fast-windows@0.1.10 (Apache-2.0)
 gpui-fast@0.1.10 (Apache-2.0); authors declared by package: Nathan Sobo <nathan@zed.dev>
 gpui-pre-scheduler@0.3.9 (Apache-2.0)
 
-git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10 :: LICENSE
+git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-apple/0.1.10/download :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-macros/0.1.10/download :: LICENSE
 https://crates.io/api/v1/crates/gpui-fast-platform/0.1.10/download :: LICENSE
@@ -19956,7 +19956,7 @@ Apache License
 
 gpui-fast-wgpu@0.1.10 (Apache-2.0); authors declared by package: Longbridge
 
-git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10 :: test-assets/IBMPlexSans-license.txt
+git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e :: test-assets/IBMPlexSans-license.txt
 
 Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
 
@@ -22464,7 +22464,7 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 
 icy_sixel@0.5.1 (MIT OR Apache-2.0); authors declared by package: Mike Krüger <mkrueger@posteo.de>
 
-git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10 :: LICENSE-APACHE
+git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e :: LICENSE-APACHE
 
 Apache License
                            Version 2.0, January 2004
@@ -22672,7 +22672,7 @@ Apache License
 
 icy_sixel@0.5.1 (MIT OR Apache-2.0); authors declared by package: Mike Krüger <mkrueger@posteo.de>
 
-git+https://github.com/M4n5ter/nsh?rev=f987cd86eec545581064ae88d44a3e3578430f10#f987cd86eec545581064ae88d44a3e3578430f10 :: LICENSE-MIT
+git+https://github.com/M4n5ter/nsh?rev=9508a9e65862b7616228be8394ca16867c45df1e#9508a9e65862b7616228be8394ca16867c45df1e :: LICENSE-MIT
 
 MIT License
 
@@ -27889,7 +27889,7 @@ nsh-package@0.1.1 (Apache-2.0)
 nsh-platform-gpui@0.1.1 (Apache-2.0)
 nsh-platform-tui@0.1.1 (Apache-2.0)
 
-https://raw.githubusercontent.com/M4n5ter/nsh/f987cd86eec545581064ae88d44a3e3578430f10/LICENSE-APACHE
+https://raw.githubusercontent.com/M4n5ter/nsh/9508a9e65862b7616228be8394ca16867c45df1e/LICENSE-APACHE
 
 Copyright 2026 Longbridge <https://longbridge.com>
 

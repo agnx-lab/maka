@@ -88,7 +88,7 @@ impl RootTemplate {
         name(&self.model.connection_id)?;
         name(&self.model.connection_slug)?;
         name(&self.model.model)?;
-        if self.cwd.is_empty() || self.cwd.len() > 32 * 1024 || self.cwd.contains('\0') {
+        if self.cwd.is_empty() || self.cwd.contains('\0') {
             return Err(Error::Invalid("invalid root Session workspace".into()));
         }
         match &self.workspace {

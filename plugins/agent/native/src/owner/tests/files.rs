@@ -371,7 +371,9 @@ async fn native_code_mode_mutations_admit_large_utf8_inputs_and_preserve_origina
         }
         for (index, input) in inputs.iter().enumerate() {
             let expected_value = match method {
-                "write" => json!({"kind":"file_write","path":target,"bytes":source.len()}),
+                "write" => {
+                    json!({"kind":"file_write","path":target,"bytes":source.len(),"previousContent":""})
+                }
                 "edit" => json!({"ok":true,"path":target,"replacements":1,"matchedVia":"exact",
                     "startLine":if index == 0 { 1 } else { 32_769 },
                     "endLine":if index == 0 { 1 } else { 32_769 }}),
@@ -392,7 +394,7 @@ async fn native_code_mode_mutations_admit_large_utf8_inputs_and_preserve_origina
             let marker = format!("K98 {method} {index} confirmed");
             let result_check = match method {
                 "write" => format!(
-                    "result.value.kind !== 'file_write' || result.value.bytes !== {}",
+                    "result.value.kind !== 'file_write' || result.value.bytes !== {} || result.value.previousContent !== ''",
                     source.len()
                 ),
                 "edit" => {

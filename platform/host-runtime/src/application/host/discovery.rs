@@ -30,7 +30,6 @@ use std::{
 };
 use uuid::Uuid;
 
-const LIMIT: u64 = 16 * 1024;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Discovery {
@@ -79,7 +78,6 @@ pub fn read_with_namespaces(root: &Path, namespaces: &RootNamespaces) -> io::Res
         || discovery.root_id != root.root_id()
         || discovery.host_epoch.is_nil()
         || !discovery.endpoint.is_absolute()
-        || discovery.endpoint.as_os_str().len() > 2048
     {
         return Err(io::Error::other(
             "Host discovery does not match the native Root or protocol",
@@ -99,7 +97,7 @@ pub fn read_with_namespaces(root: &Path, namespaces: &RootNamespaces) -> io::Res
 }
 fn read_record(path: &Path) -> io::Result<Vec<u8>> {
     let before = path.symlink_metadata()?;
-    if !before.is_file() || before.len() > LIMIT {
+    if !before.is_file() {
         return Err(io::Error::other("invalid Host discovery record"));
     }
     #[cfg(unix)]
@@ -116,10 +114,10 @@ fn read_record(path: &Path) -> io::Result<Vec<u8>> {
         return Err(io::Error::other("Host discovery is not a regular file"));
     }
     let mut bytes = Vec::new();
-    file.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    let mut file = file;
+    file.read_to_end(&mut bytes)?;
     let after = path.symlink_metadata()?;
     if !after.is_file()
-        || bytes.len() as u64 > LIMIT
         || before.len() != bytes.len() as u64
         || before.len() != after.len()
         || before.modified()? != after.modified()?
@@ -142,11 +140,7 @@ impl Host {
         websocket: Option<std::net::SocketAddr>,
     ) -> io::Result<Registration> {
         self.root.validate_current()?;
-        if !endpoint.is_absolute()
-            || endpoint
-                .to_str()
-                .is_none_or(|value| value.encode_utf16().count() > 512)
-        {
+        if !endpoint.is_absolute() || endpoint.to_str().is_none() {
             return Err(io::Error::other("invalid Host discovery endpoint"));
         }
         if self.status().closing {

@@ -816,12 +816,6 @@ impl<V: ?Sized + 'static> Application<V> {
             unreachable!()
         };
         let result = result.and_then(|output| {
-            if output.actions.len() > 16
-                || output.subscriptions.len() > 16
-                || output.cancel.len() > 16
-            {
-                return Err(Error::Invalid("component action limit".into()));
-            }
             for event in &output.events {
                 events
                     .get(&event.name)
@@ -998,9 +992,6 @@ fn service_export<V: ?Sized>(
     };
     let mut compiled = BTreeMap::new();
     for (name, method) in methods {
-        if method.resources.len() > 16 {
-            return Err(Error::Invalid("maximum 16 resource slots".into()));
-        }
         compiled.insert(
             name.clone(),
             ServiceMethod {

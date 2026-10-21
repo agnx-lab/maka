@@ -40,16 +40,25 @@ fn publication_projects_but_canonical_reads_preserve_and_collisions_fail() {
     let collision = json!([{"question":"Choose","options":[{"label":"\n"},{"label":"\\u{A}"}]}]);
     assert!(project_question_request("tool", &collision).is_err());
     let expansion = json!([{"question":"\n".repeat(1024),"options":[{"label":"A"},{"label":"B"}]}]);
-    assert!(project_question_request("tool", &expansion).is_err());
+    assert_eq!(
+        serde_json::to_value(project_question_request("tool", &expansion).unwrap()).unwrap()["questions"]
+            [0]["question"],
+        "\\u{A}".repeat(1024)
+    );
     let null =
         json!([{"question":"Choose","options":[{"label":"A","description":null},{"label":"B"}]}]);
     assert!(project_question_request("tool", &null).is_err());
 }
 
 #[test]
-fn answers_bind_count_not_labels_and_public_construction_cannot_bypass_bounds() {
+fn answers_bind_count_not_labels_and_public_construction_preserves_semantics() {
     let request = project_question_request("tool", &questions()).unwrap();
-    for answer in [None, Some("free text".into()), Some(" ".into())] {
+    for answer in [
+        None,
+        Some("free text".into()),
+        Some(" ".into()),
+        Some("😀".repeat(513)),
+    ] {
         let answer = InteractionAnswer::Question {
             answers: vec![answer],
         };
@@ -65,12 +74,7 @@ fn answers_bind_count_not_labels_and_public_construction_cannot_bypass_bounds() 
             })
         );
     }
-    for answers in [
-        vec![],
-        vec![Some(String::new())],
-        vec![None, None],
-        vec![Some("😀".repeat(513))],
-    ] {
+    for answers in [vec![], vec![Some(String::new())], vec![None, None]] {
         let answer = InteractionAnswer::Question { answers };
         assert!(answer.validate_for_request(&request).is_err());
         assert!(
@@ -96,10 +100,16 @@ fn answers_bind_count_not_labels_and_public_construction_cannot_bypass_bounds() 
 }
 
 #[test]
-fn question_answer_budget_does_not_reserve_outcome_timestamp() {
+fn complete_question_answer_survives_outcome_timestamp() {
     let answer = InteractionAnswer::Question {
         answers: vec![Some("\n".repeat(1355)); 3],
     };
     answer.validate().unwrap();
-    assert!(answer.into_outcome(MAX_SAFE_INTEGER).validate().is_err());
+    let outcome = answer.into_outcome(MAX_SAFE_INTEGER);
+    outcome.validate().unwrap();
+    assert_eq!(outcome.committed_at(), MAX_SAFE_INTEGER);
+    assert_eq!(
+        serde_json::to_value(outcome).unwrap()["answers"],
+        json!(vec![Some("\n".repeat(1355)); 3])
+    );
 }

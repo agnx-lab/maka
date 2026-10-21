@@ -51,15 +51,15 @@ fn count(value: &Value, _: &str) -> Result<u64> {
         .ok_or_else(invalid)?;
     Ok(n as u64)
 }
-pub(super) fn text(value: &Value, max: usize, empty: bool) -> Result<String> {
+pub(super) fn text(value: &Value, empty: bool) -> Result<String> {
     value
         .as_str()
-        .filter(|s| (empty || !s.is_empty()) && s.len() <= max)
+        .filter(|s| empty || !s.is_empty())
         .map(str::to_owned)
         .ok_or_else(invalid)
 }
-fn optional_text(value: &Value, key: &str, max: usize) -> Result<Option<String>> {
-    value.get(key).map(|v| text(v, max, true)).transpose()
+fn optional_text(value: &Value, key: &str) -> Result<Option<String>> {
+    value.get(key).map(|v| text(v, true)).transpose()
 }
 pub(super) fn number(value: &Value) -> Result<f64> {
     value
@@ -77,35 +77,32 @@ fn optional_count(value: &Value, key: &str, max: usize) -> Result<Option<usize>>
         .map(|v| {
             let n = count(v, key)?;
             ensure(n <= max as u64)?;
-            Ok(n as usize)
+            usize::try_from(n).map_err(|_| invalid())
         })
         .transpose()
 }
 fn boolean(value: &Value) -> Result<bool> {
     value.as_bool().ok_or_else(invalid)
 }
-fn array(value: &Value, max: usize) -> Result<&Vec<Value>> {
-    value
-        .as_array()
-        .filter(|a| a.len() <= max)
-        .ok_or_else(invalid)
+fn array(value: &Value) -> Result<&Vec<Value>> {
+    value.as_array().ok_or_else(invalid)
 }
 pub(super) fn strings(value: &Value) -> Result<Vec<String>> {
-    let values = array(value, 64)?
+    let values = array(value)?
         .iter()
-        .map(|v| text(v, 2048, true))
+        .map(|v| text(v, true))
         .collect::<Result<Vec<_>>>()?;
     ensure(values.iter().collect::<HashSet<_>>().len() == values.len())?;
     Ok(values)
 }
 fn options(value: &Value) -> Result<Vec<FormOption>> {
-    let options = array(value, 64)?
+    let options = array(value)?
         .iter()
         .map(|v| {
             exact(record(v, "form option")?, &["value", "label"])?;
             Ok(FormOption {
-                value: text(&v["value"], 2048, true)?,
-                label: text(&v["label"], 256, false)?,
+                value: text(&v["value"], true)?,
+                label: text(&v["label"], false)?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -136,8 +133,8 @@ pub(super) fn field(value: &Value) -> Result<FormField> {
                 &required,
                 &["description", "default", "minLength", "maxLength", "format"],
             )?;
-            let min_length = optional_count(value, "minLength", 2048)?;
-            let max_length = optional_count(value, "maxLength", 2048)?;
+            let min_length = optional_count(value, "minLength", usize::MAX)?;
+            let max_length = optional_count(value, "maxLength", usize::MAX)?;
             ensure(!matches!((min_length,max_length), (Some(a),Some(b)) if a>b))?;
             let format = value
                 .get("format")
@@ -150,7 +147,7 @@ pub(super) fn field(value: &Value) -> Result<FormField> {
                 })
                 .transpose()?;
             FormFieldSpec::String {
-                default: optional_text(value, "default", 2048)?,
+                default: optional_text(value, "default")?,
                 min_length,
                 max_length,
                 format,
@@ -198,7 +195,7 @@ pub(super) fn field(value: &Value) -> Result<FormField> {
             if kind == "single_select" {
                 FormFieldSpec::SingleSelect {
                     options,
-                    default: optional_text(value, "default", 2048)?,
+                    default: optional_text(value, "default")?,
                 }
             } else {
                 let min_items = optional_count(value, "minItems", options.len())?;
@@ -215,10 +212,10 @@ pub(super) fn field(value: &Value) -> Result<FormField> {
         _ => return Err(invalid()),
     };
     let field = FormField {
-        name: text(&value["name"], 256, false)?,
-        label: text(&value["label"], 256, false)?,
+        name: text(&value["name"], false)?,
+        label: text(&value["label"], false)?,
         required: boolean(&value["required"])?,
-        description: optional_text(value, "description", 512)?,
+        description: optional_text(value, "description")?,
         spec,
     };
     if let Some(default) = validation::default_value(&field.spec) {
@@ -233,16 +230,16 @@ pub fn decode_input(value: &Value) -> Result<FormInput> {
     )?;
     let requester = &value["requester"];
     shaped(record(requester, "form requester")?, &["name"], &["source"])?;
-    let fields = array(&value["fields"], 32)?
+    let fields = array(&value["fields"])?
         .iter()
         .map(field)
         .collect::<Result<Vec<_>>>()?;
     ensure(fields.iter().map(|f| &f.name).collect::<HashSet<_>>().len() == fields.len())?;
     let input = FormInput {
-        message: text(&value["message"], 2048, false)?,
+        message: text(&value["message"], false)?,
         requester: FormRequester {
-            name: text(&requester["name"], 256, false)?,
-            source: optional_text(requester, "source", 512)?,
+            name: text(&requester["name"], false)?,
+            source: optional_text(requester, "source")?,
         },
         fields,
     };

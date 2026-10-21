@@ -18,7 +18,7 @@
  */
 
 //! Original operation facts. Receipts never authorize a callback or a replay.
-use super::{encode, invalid};
+use super::invalid;
 use crate::{EventLog, StoreError, root::RootOwner};
 use maka_capabilities::call::Identity;
 use maka_plugin_core::{
@@ -36,8 +36,6 @@ use sha2::{Digest, Sha256};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::sync::Arc;
 use uuid::Uuid;
-
-const MAX_DIAGNOSTIC: usize = 64 * 1024;
 
 /// Trusted embedding supplies these facts after its private admission check.
 /// This data is not an execution grant and contains no serialized evidence.
@@ -197,12 +195,11 @@ impl OperationRequest {
 
 impl OperationRequest<RecoveryContract> {
     fn stored_reference(&self) -> Result<RecoveryRef, StoreError> {
-        if self.consumer.0.is_empty()
-            || self.consumer.0.len() > 64
-            || self.consumer.0.iter().any(Uuid::is_nil)
-            || self.capture.is_some_and(|id| id.is_nil())
-        {
-            return Err(invalid("invalid operation consumer or capture"));
+        self.consumer
+            .validate()
+            .map_err(|error| invalid(error.to_string()))?;
+        if self.capture.is_some_and(|id| id.is_nil()) {
+            return Err(invalid("invalid operation capture"));
         }
         let mut canonical = serde_json::to_value(self)?;
         canonical
@@ -263,22 +260,16 @@ fn validate_settlement(
             "operation settlement must report result knowledge and real cleanup",
         ));
     }
-    if matches!(outcome, OperationOutcome::Unknown { diagnostic } if diagnostic.len() > MAX_DIAGNOSTIC)
-        || matches!(cleanup, OperationCleanup::Failed { diagnostic } if diagnostic.len() > MAX_DIAGNOSTIC)
-    {
-        return Err(invalid("operation diagnostic exceeds 64 KiB"));
-    }
-    encode(cleanup, MAX_DIAGNOSTIC + 128)?;
     Ok(())
 }
 async fn read(
     connection: &mut SqliteConnection,
     reference: &RecoveryRef,
 ) -> Result<Option<Record>, StoreError> {
-    let namespace = encode(&reference.namespace, 4096)?;
+    let namespace = serde_json::to_string(&reference.namespace)?;
     let Some(row) = sqlx::query(
         "SELECT source_revision, contract_digest, request_json, outcome_json,
-        CASE WHEN length(CAST(cleanup_json AS BLOB)) <= 65664 THEN cleanup_json END AS cleanup_json
+        cleanup_json
         FROM application_operations WHERE deployment=? AND namespace=? AND operation=?",
     )
     .bind(reference.source.deployment.to_string())
@@ -293,10 +284,8 @@ async fn read(
         serde_json::from_str(&row.try_get::<String, _>("request_json")?)?;
     let outcome: OperationOutcome =
         serde_json::from_str(&row.try_get::<String, _>("outcome_json")?)?;
-    let cleanup: OperationCleanup = serde_json::from_str(
-        &row.try_get::<Option<String>, _>("cleanup_json")?
-            .ok_or_else(|| invalid("stored operation cleanup exceeds limit"))?,
-    )?;
+    let cleanup: OperationCleanup =
+        serde_json::from_str(&row.try_get::<String, _>("cleanup_json")?)?;
     let expected = request.stored_reference()?;
     if expected != *reference
         || row.try_get::<String, _>("contract_digest")? != reference.contract.digest
@@ -377,15 +366,12 @@ impl EventLog {
                         .await?;
                     sqlx::query("INSERT INTO application_operations (deployment, namespace, operation, source_revision, request_json, outcome_json, cleanup_json, contract_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(reference.source.deployment.to_string())
-                        .bind(encode(&reference.namespace, 4096)?)
+                        .bind(serde_json::to_string(&reference.namespace)?)
                         .bind(reference.operation.to_string())
                         .bind(reference.source.revision as i64)
                         .bind(request_json)
                         .bind(serde_json::to_string(&OperationOutcome::Unresolved)?)
-                        .bind(encode(
-                            &OperationCleanup::Unconfirmed,
-                            MAX_DIAGNOSTIC + 128,
-                        )?)
+                        .bind(serde_json::to_string(&OperationCleanup::Unconfirmed)?)
                         .bind(&reference.contract.digest)
                         .execute(&mut *tx)
                         .await?;
@@ -420,8 +406,8 @@ impl EventLog {
                 if old != observation { return Err(StoreError::EventConflict); }
             } else {
                 sqlx::query("UPDATE application_operations SET outcome_json=?, cleanup_json=? WHERE deployment=? AND namespace=? AND operation=?")
-                    .bind(serde_json::to_string(&observation.outcome)?).bind(encode(&observation.cleanup, MAX_DIAGNOSTIC + 128)?)
-                    .bind(reference.source.deployment.to_string()).bind(encode(&reference.namespace, 4096)?)
+                    .bind(serde_json::to_string(&observation.outcome)?).bind(serde_json::to_string(&observation.cleanup)?)
+                    .bind(reference.source.deployment.to_string()).bind(serde_json::to_string(&reference.namespace)?)
                     .bind(reference.operation.to_string()).execute(&mut *tx).await?;
             }
             tx.commit().await.map_err(StoreError::CommitUnknown)?;

@@ -26,7 +26,6 @@ use maka_agent_facts::artifact::normalize_name;
 use maka_agent_facts::artifact::upload_artifact_id;
 use maka_agent_facts::attachment::AttachmentKind;
 use maka_agent_facts::attachment::AttachmentRef;
-use maka_agent_facts::attachment::MAX_ATTACHMENT_BYTES;
 use maka_agent_facts::attachment::StorageRef;
 use maka_agent_facts::attachment::sniff_binary_mime;
 use maka_capabilities::call::ReadResource;
@@ -181,10 +180,8 @@ fn read(
 ) -> Result<Vec<u8>, String> {
     if resource.resource_type() != maka_plugin_core::contract::binary_resource_type()
         || resource.encoding() != ResourceEncoding::Bytes
-        || input.bytes as u64 > MAX_ATTACHMENT_BYTES
         || resource.bytes() != input.bytes
         || input.name.is_empty()
-        || input.name.len() > 2048
         || input.name.chars().any(char::is_control)
     {
         return Err("agent_attachment_invalid".into());

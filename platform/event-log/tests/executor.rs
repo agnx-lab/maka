@@ -268,14 +268,13 @@ async fn external_output_is_durable_observation_not_native_dispatch_and_rebuilds
             None,
             maka_agent_ports::session::history::SourcePosition::After { offset: 6 },
             8192,
-            64 * 1024,
         )
         .await
         .unwrap();
     assert_eq!(source.text, "authoritative answer");
     assert!(source.model.is_none(), "executor ID is not an LLM model");
     let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
-    let mut view = maka_presentation::InvocationView::new(1024 * 1024).unwrap();
+    let mut view = maka_presentation::InvocationView::new();
     let mut rows = vec![];
     for record in &prefix.events {
         rows.extend(view.push(record).unwrap());

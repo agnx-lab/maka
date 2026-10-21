@@ -1550,7 +1550,9 @@ impl Presenter {
                         viewport,
                         ..
                     } => {
-                        let inset = (padding + u16::from(border.is_some())).saturating_mul(2);
+                        let inset = padding
+                            .saturating_add(u16::from(border.is_some()))
+                            .saturating_mul(2);
                         if *viewport {
                             (inset.min(width), u32::from(inset))
                         } else {

@@ -1104,6 +1104,7 @@ impl Owner {
                     scope,
                     attachments,
                     capture,
+                    admitted,
                     bytes,
                     resources,
                 } = *call;
@@ -1211,8 +1212,20 @@ impl Owner {
                                 .descriptors
                                 .checked_add(input_size)
                                 .ok_or("Host input budget exhausted")?;
-                            if size.payload != resources.num_permits()
-                                || bytes_needed > bytes.num_permits()
+                            let payload_charge = usize::try_from(resource_ingress::charge(
+                                size.payload,
+                                resource_ingress::RESOURCE_WINDOW,
+                            ))
+                            .map_err(|_| "invalid payload charge")?;
+                            let input_charge = usize::try_from(resource_ingress::charge(
+                                bytes_needed,
+                                resource_ingress::INPUT_WINDOW,
+                            ))
+                            .map_err(|_| "invalid input charge")?;
+                            if size.payload != admitted.payload
+                                || size.descriptors > admitted.descriptors
+                                || payload_charge != resources.num_permits()
+                                || input_charge > bytes.num_permits()
                             {
                                 return Err(
                                     "Host attachment descriptor changed before admission".into()
@@ -1293,6 +1306,7 @@ impl Owner {
                                     scope,
                                     attachments,
                                     capture,
+                                    admitted,
                                     bytes,
                                     resources,
                                     parent,
@@ -1329,6 +1343,7 @@ impl Owner {
                                 scope,
                                 attachments,
                                 capture,
+                                admitted,
                                 bytes,
                                 resources,
                             });

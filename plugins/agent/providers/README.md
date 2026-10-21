@@ -26,3 +26,5 @@ Supplies compiled model-provider definitions. `api` covers API-backed providers 
 API request options follow the resolved protocol, including provider aliases, model overrides and protocol alternates. Declared thinking choices use the same preparation policy for selectable metadata, main requests, automatic titles and recaps. An explicit Anthropic parallel-tool opt-out is encoded in the request. Native preparation diagnostics retain fixed local rejection reasons while keeping arbitrary provider error text private.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)
+
+Model discovery follows provider pagination to its terminal response and rejects repeated continuation tokens; numbered pages advance by their checked page position. Page sizes and concurrent account requests bound live work, not the full account/model inventory. Complete model metadata and authentication values remain intact; the Host owns transport admission and cleanup settlement. OAuth device authorization expiry and token refresh follow provider lifecycle semantics.

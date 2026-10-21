@@ -18,8 +18,7 @@
  */
 
 use super::{
-    MAX_CONFIGURATION_BYTES, MAX_SAFE_INTEGER, SessionRecord, advance_catalog, invalid, read,
-    validate_id, validate_time,
+    MAX_SAFE_INTEGER, SessionRecord, advance_catalog, invalid, read, validate_id, validate_time,
 };
 use crate::{EventLog, StoreError};
 use serde::{Serialize, de::DeserializeOwned};
@@ -188,9 +187,6 @@ impl EventLog {
                         return Ok(SessionMutation::Committed(record));
                     }
                     let configuration = serde_json::to_string(&record.configuration)?;
-                    if configuration.len() > MAX_CONFIGURATION_BYTES {
-                        return Err(invalid("session configuration exceeds 64 KiB"));
-                    }
                     // Metadata is not activity: neither timestamps nor runtime_events move.
                     if sqlx::query(
                         "UPDATE session_control SET configuration = ?, revision = revision + 1

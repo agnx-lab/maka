@@ -34,11 +34,11 @@ pub struct SelectionMenuProps {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionMenuLabels {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub title: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub copy: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub select_all: String,
 }
 pub fn selection_menu_contract() -> Contract {

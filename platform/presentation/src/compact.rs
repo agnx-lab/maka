@@ -177,7 +177,7 @@ mod tests {
     fn marker_appears_only_on_adoption_and_includes_retry_time() {
         for standalone in [false, true] {
             for adopted in [false, true] {
-                let mut view = InvocationView::new(1).unwrap();
+                let mut view = InvocationView::new();
                 push(
                     &mut view,
                     1,
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn concurrent_main_preserves_summary_timing_and_new_source_restarts_it() {
         for new_source in [false, true] {
-            let mut view = InvocationView::new(1024).unwrap();
+            let mut view = InvocationView::new();
             push(
                 &mut view,
                 1,

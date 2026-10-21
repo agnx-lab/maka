@@ -42,7 +42,6 @@ export const contracts = {
           },
           source: {
             type: 'string',
-            maxLength: 65536,
           },
           appearance: {
             $ref: '#/$defs/MarkdownAppearance',
@@ -296,7 +295,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -324,7 +322,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -342,7 +339,6 @@ export const contracts = {
           properties: {
             url: {
               type: 'string',
-              maxLength: 65536,
             },
           },
           additionalProperties: false,
@@ -365,12 +361,11 @@ export const contracts = {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
             title: 'MarkdownTextInput',
             description:
-              "Bounded source-to-readable-text conversion using the presenter's Markdown semantics.",
+              "Complete source-to-readable-text conversion using the presenter's Markdown semantics.",
             type: 'object',
             properties: {
               source: {
                 type: 'string',
-                maxLength: 65536,
               },
             },
             additionalProperties: false,
@@ -385,7 +380,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -394,17 +388,6 @@ export const contracts = {
                 },
                 additionalProperties: false,
                 required: ['kind', 'text'],
-              },
-              {
-                type: 'object',
-                properties: {
-                  kind: {
-                    type: 'string',
-                    const: 'too_large',
-                  },
-                },
-                required: ['kind'],
-                additionalProperties: false,
               },
             ],
           },
@@ -444,22 +427,19 @@ export const contracts = {
         required: ['content', 'appearance', 'ascii', 'disabled', 'focusOnPointer'],
         $defs: {
           DiffContent: {
-            description:
-              'Complete bounded comparisons and structured patches reuse native parsers.',
+            description: 'Complete comparisons and structured patches reuse native parsers.',
             oneOf: [
               {
                 type: 'object',
                 properties: {
                   source: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   rows: {
                     type: 'array',
                     items: {
                       $ref: '#/$defs/DiffRow',
                     },
-                    maxItems: 8192,
                   },
                   kind: {
                     type: 'string',
@@ -470,21 +450,17 @@ export const contracts = {
                 required: ['kind', 'source', 'rows'],
               },
               {
-                description:
-                  'Combined inputs must be <= 8192 UTF-8 bytes and <= 256 lines, without NUL.',
+                description: 'Comparisons use complete UTF-8 text without NUL.',
                 type: 'object',
                 properties: {
                   before: {
                     type: 'string',
-                    maxLength: 8192,
                   },
                   after: {
                     type: 'string',
-                    maxLength: 8192,
                   },
                   language: {
                     type: ['string', 'null'],
-                    maxLength: 128,
                   },
                   kind: {
                     type: 'string',
@@ -501,14 +477,12 @@ export const contracts = {
                 properties: {
                   source: {
                     type: 'string',
-                    maxLength: 65536,
                   },
                   operation: {
                     $ref: '#/$defs/DiffPatch',
                   },
                   language: {
                     type: ['string', 'null'],
-                    maxLength: 128,
                   },
                   kind: {
                     type: 'string',
@@ -528,20 +502,17 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint32',
                 minimum: 0,
-                maximum: 65536,
               },
               end: {
                 type: 'integer',
                 format: 'uint32',
                 minimum: 0,
-                maximum: 65536,
               },
               kind: {
                 $ref: '#/$defs/DiffKind',
               },
               language: {
                 type: ['string', 'null'],
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -743,7 +714,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -771,7 +741,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -802,36 +771,29 @@ export const contracts = {
           label: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           pathLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           browseLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           parentLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           emptyLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           truncatedLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           placeholder: {
             type: 'string',
-            maxLength: 512,
           },
           disabled: {
             type: 'boolean',
@@ -1080,7 +1042,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -1108,7 +1069,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -1158,7 +1118,6 @@ export const contracts = {
             owner: {
               type: 'string',
               minLength: 1,
-              maxLength: 128,
             },
             revision: {
               type: 'integer',
@@ -1201,7 +1160,6 @@ export const contracts = {
               properties: {
                 name: {
                   type: 'string',
-                  maxLength: 512,
                 },
                 bytes: {
                   type: 'integer',
@@ -1242,7 +1200,6 @@ export const contracts = {
               owner: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               revision: {
                 type: 'integer',
@@ -1292,7 +1249,6 @@ export const contracts = {
           },
           source: {
             type: 'string',
-            maxLength: 65536,
           },
           appearance: {
             $ref: '#/$defs/TextAppearance',
@@ -1464,7 +1420,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -1492,7 +1447,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -1521,12 +1475,10 @@ export const contracts = {
             description:
               'Changed when the selected canonical resource changes, including read-only views.',
             minLength: 1,
-            maxLength: 1024,
           },
           accessibilityLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           output: {
             anyOf: [
@@ -1565,7 +1517,7 @@ export const contracts = {
             type: 'integer',
             format: 'uint16',
             minimum: 1,
-            maximum: 100,
+            maximum: 65535,
           },
           tabIndex: {
             type: 'integer',
@@ -1756,7 +1708,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -1783,7 +1734,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             type: 'integer',
@@ -2141,7 +2091,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -2169,7 +2118,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -2214,17 +2162,14 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               copy: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               selectAll: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
             },
             additionalProperties: false,
@@ -2273,20 +2218,18 @@ export const contracts = {
             items: {
               $ref: '#/$defs/Row',
             },
-            maxItems: 64,
           },
           shortcuts: {
             type: 'array',
             items: {
               $ref: '#/$defs/Shortcut',
             },
-            maxItems: 32,
           },
           maxRows: {
             type: 'integer',
             format: 'uint16',
             minimum: 1,
-            maximum: 64,
+            maximum: 65535,
           },
           compactBelow: {
             description:
@@ -2471,18 +2414,15 @@ export const contracts = {
               key: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               text: {
                 type: 'string',
-                maxLength: 1024,
               },
               actions: {
                 type: 'array',
                 items: {
                   $ref: '#/$defs/RowAction',
                 },
-                maxItems: 8,
               },
             },
             additionalProperties: false,
@@ -2494,11 +2434,9 @@ export const contracts = {
               key: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               label: {
                 type: 'string',
-                maxLength: 64,
               },
               enabled: {
                 type: 'boolean',
@@ -2525,7 +2463,6 @@ export const contracts = {
               input: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               enabled: {
                 type: 'boolean',
@@ -2551,7 +2488,7 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint16',
                 minimum: 1,
-                maximum: 64,
+                maximum: 65535,
               },
             },
             additionalProperties: false,
@@ -2627,12 +2564,10 @@ export const contracts = {
           key: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           format: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           command: {
             anyOf: [
@@ -2782,7 +2717,6 @@ export const contracts = {
       schema: {
         type: 'string',
         minLength: 1,
-        maxLength: 128,
       },
     },
   },
@@ -2849,7 +2783,6 @@ export const contracts = {
                   },
                   text: {
                     type: 'string',
-                    maxLength: 16384,
                   },
                   kind: {
                     type: 'string',
@@ -2972,7 +2905,6 @@ export const contracts = {
                 'read_failed',
                 'write_failed',
                 'invalid_file',
-                'too_large',
                 'invalid_utf8',
                 'conflict',
                 'worker_failed',
@@ -3131,7 +3063,6 @@ export const contracts = {
                 properties: {
                   query: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   step: {
                     $ref: '#/$defs/FindStep',
@@ -3162,8 +3093,6 @@ export const contracts = {
                   rows: {
                     type: 'integer',
                     format: 'int32',
-                    minimum: -65536,
-                    maximum: 65536,
                   },
                   kind: {
                     type: 'string',
@@ -3184,7 +3113,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 32,
                   },
                   offset: {
                     type: 'integer',
@@ -3215,7 +3143,6 @@ export const contracts = {
                   key: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   kind: {
                     type: 'string',
@@ -3231,7 +3158,6 @@ export const contracts = {
                   key: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   kind: {
                     type: 'string',
@@ -3345,7 +3271,6 @@ export const contracts = {
               description:
                 'Direct content child containing the native selection focus. Renderers\nwithout this observation return null. This key conveys no read authority.',
               type: ['string', 'null'],
-              maxLength: 256,
             },
             pendingCommand: {
               type: ['integer', 'null'],
@@ -3398,7 +3323,6 @@ export const contracts = {
                   items: {
                     type: 'string',
                   },
-                  maxItems: 4096,
                 },
               },
               additionalProperties: false,
@@ -3456,7 +3380,6 @@ export const contracts = {
                   type: 'integer',
                   format: 'uint32',
                   minimum: 0,
-                  maximum: 4096,
                 },
                 limited: {
                   type: 'boolean',
@@ -3490,7 +3413,6 @@ export const contracts = {
                     type: 'string',
                   },
                   minItems: 1,
-                  maxItems: 32,
                 },
                 offset: {
                   type: 'integer',
@@ -3529,7 +3451,6 @@ export const contracts = {
         properties: {
           text: {
             type: 'string',
-            maxLength: 4096,
           },
           appearance: {
             $ref: '#/$defs/TextAppearance',
@@ -3584,7 +3505,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -3612,7 +3532,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -3699,11 +3618,9 @@ export const contracts = {
             description:
               'Exact whitespace-delimited literals rendered and edited as atomic inline tokens.',
             type: 'array',
-            maxItems: 4096,
             items: {
               type: 'string',
               minLength: 1,
-              maxLength: 512,
               pattern: '^\\S+$',
             },
             default: [],
@@ -3722,7 +3639,6 @@ export const contracts = {
           accessibilityLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           readOnly: {
             type: 'boolean',
@@ -3786,7 +3702,6 @@ export const contracts = {
           },
           placeholder: {
             type: 'string',
-            maxLength: 512,
             default: '',
           },
           command: {
@@ -4075,7 +3990,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -4103,7 +4017,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -4348,37 +4261,30 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               undo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               redo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               cut: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               copy: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               paste: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               selectAll: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
             },
             additionalProperties: false,
@@ -4430,7 +4336,6 @@ export const contracts = {
               owner: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               basedOn: {
                 type: 'integer',
@@ -4449,7 +4354,6 @@ export const contracts = {
                 description: 'Correlation with the original native editor, never a resource grant.',
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               sequence: {
                 type: 'integer',
@@ -4561,7 +4465,6 @@ export const contracts = {
               context: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               allowFiles: {
                 description: 'Clipboard text remains available when file attachments are disabled.',
@@ -4590,7 +4493,6 @@ export const contracts = {
               owner: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               revision: {
                 type: 'integer',
@@ -4628,12 +4530,10 @@ export const contracts = {
               key: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               format: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 96,
               },
               dataSource: true,
               metadata: true,
@@ -4665,7 +4565,6 @@ export const contracts = {
               owner: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               version: {
                 type: 'integer',
@@ -4996,7 +4895,6 @@ export const contracts = {
             context: {
               type: 'string',
               minLength: 1,
-              maxLength: 512,
             },
             selection: {
               $ref: '#/$defs/FileObservation',
@@ -5022,7 +4920,6 @@ export const contracts = {
                 owner: {
                   type: 'string',
                   minLength: 1,
-                  maxLength: 128,
                 },
                 revision: {
                   type: 'integer',
@@ -5065,7 +4962,6 @@ export const contracts = {
               properties: {
                 name: {
                   type: 'string',
-                  maxLength: 512,
                 },
                 bytes: {
                   type: 'integer',
@@ -5437,7 +5333,6 @@ export const contracts = {
               owner: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               revision: {
                 type: 'integer',
@@ -5478,7 +5373,6 @@ export const contracts = {
                   owner: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -5534,7 +5428,6 @@ export const contracts = {
           accessibilityLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           readOnly: {
             type: 'boolean',
@@ -5559,7 +5452,6 @@ export const contracts = {
             type: 'integer',
             format: 'uint32',
             minimum: 1,
-            maximum: 65536,
             default: 65536,
           },
           terminalPaste: {
@@ -5569,7 +5461,6 @@ export const contracts = {
           },
           placeholder: {
             type: 'string',
-            maxLength: 512,
             default: '',
           },
           command: {
@@ -5823,7 +5714,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -5851,7 +5741,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -5979,37 +5868,30 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               undo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               redo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               cut: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               copy: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               paste: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               selectAll: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
             },
             additionalProperties: false,
@@ -6026,7 +5908,6 @@ export const contracts = {
                 description: 'Correlation with the original native editor, never a resource grant.',
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               sequence: {
                 type: 'integer',
@@ -6141,7 +6022,6 @@ export const contracts = {
               text: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 65536,
               },
             },
             additionalProperties: false,
@@ -6356,7 +6236,6 @@ export const contracts = {
                   owner: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -6412,7 +6291,6 @@ export const contracts = {
           accessibilityLabel: {
             type: 'string',
             minLength: 1,
-            maxLength: 512,
           },
           readOnly: {
             type: 'boolean',
@@ -6437,7 +6315,6 @@ export const contracts = {
             type: 'integer',
             format: 'uint32',
             minimum: 1,
-            maximum: 65536,
             default: 65536,
           },
           terminalPaste: {
@@ -6447,7 +6324,6 @@ export const contracts = {
           },
           placeholder: {
             type: 'string',
-            maxLength: 512,
             default: '',
           },
           command: {
@@ -6701,7 +6577,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/FontFamily',
                 },
-                maxItems: 8,
               },
               size: {
                 type: 'number',
@@ -6729,7 +6604,6 @@ export const contracts = {
           FontFamily: {
             type: 'string',
             minLength: 1,
-            maxLength: 128,
           },
           Color: {
             description: 'Packed RGBA, including explicit alpha zero.',
@@ -6857,37 +6731,30 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               undo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               redo: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               cut: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               copy: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               paste: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               selectAll: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
             },
             additionalProperties: false,
@@ -6904,7 +6771,6 @@ export const contracts = {
                 description: 'Correlation with the original native editor, never a resource grant.',
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               sequence: {
                 type: 'integer',
@@ -7019,7 +6885,6 @@ export const contracts = {
               text: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 65536,
               },
             },
             additionalProperties: false,
@@ -7234,7 +7099,6 @@ export const contracts = {
                   owner: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -7279,7 +7143,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               source: {
                 $ref: '#/$defs/AgentAttachmentImageSource',
@@ -7302,7 +7165,6 @@ export const contracts = {
                       id: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -7415,7 +7277,6 @@ export const contracts = {
                       id: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -7500,7 +7361,6 @@ export const contracts = {
                 description:
                   'Literal, case-sensitive title substring; an empty query matches all titles.',
                 type: 'string',
-                maxLength: 128,
                 default: '',
               },
             },
@@ -7530,7 +7390,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -7549,7 +7408,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -7568,7 +7426,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -7616,7 +7473,6 @@ export const contracts = {
                       sessionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -7764,12 +7620,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -7785,12 +7639,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -7836,7 +7688,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -7940,7 +7791,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -8145,7 +7995,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -8220,7 +8069,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -8231,7 +8079,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -8484,7 +8331,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -8559,7 +8405,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -8570,7 +8415,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -8837,12 +8681,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -8858,12 +8700,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -8909,7 +8749,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -9013,7 +8852,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -9189,7 +9027,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               model: {
                 $ref: '#/$defs/ModelSelection',
@@ -9220,7 +9057,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -9231,7 +9067,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -9337,7 +9172,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -9616,14 +9450,12 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               labels: {
                 type: 'array',
                 items: {
                   type: 'string',
                 },
-                maxItems: 32,
               },
               workspace: {
                 $ref: '#/$defs/AgentWorkspaceSelection',
@@ -9685,7 +9517,6 @@ export const contracts = {
                       sessionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -9703,7 +9534,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -9874,12 +9704,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -9895,12 +9723,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -9946,7 +9772,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -10050,7 +9875,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -10130,7 +9954,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               position: {
                 $ref: '#/$defs/AgentDiagnosticPosition',
@@ -10549,7 +10372,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -10636,7 +10458,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -10666,7 +10487,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               expectedRevision: {
                 type: 'integer',
@@ -10689,7 +10509,6 @@ export const contracts = {
                       messageId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -10705,7 +10524,6 @@ export const contracts = {
                       messageId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -10721,7 +10539,6 @@ export const contracts = {
                       messageId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       message: {
                         type: 'string',
@@ -10847,7 +10664,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               message: {
                 type: 'string',
@@ -10865,7 +10681,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -11023,9 +10838,6 @@ export const contracts = {
                   {
                     $ref: '#/$defs/SkillRequestFailure',
                   },
-                  {
-                    $ref: '#/$defs/SkillOverflowFailure',
-                  },
                 ],
               },
               SkillRequestFailure: {
@@ -11050,25 +10862,6 @@ export const contracts = {
                   'host_incompatible',
                   'resolution_failed',
                 ],
-              },
-              SkillOverflowFailure: {
-                type: 'object',
-                properties: {
-                  reason: {
-                    $ref: '#/$defs/TooManyRequests',
-                  },
-                  requestLimit: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
-                },
-                additionalProperties: false,
-                required: ['reason', 'requestLimit'],
-              },
-              TooManyRequests: {
-                type: 'string',
-                enum: ['too_many_requests'],
               },
               SkillInvocationReceipt: {
                 description:
@@ -11137,27 +10930,6 @@ export const contracts = {
                     additionalProperties: false,
                     required: ['invocation', 'request', 'success', 'reason'],
                   },
-                  {
-                    type: 'object',
-                    properties: {
-                      invocation: {
-                        const: 'explicit',
-                      },
-                      success: {
-                        const: false,
-                      },
-                      reason: {
-                        $ref: '#/$defs/TooManyRequests',
-                      },
-                      requestLimit: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                    },
-                    additionalProperties: false,
-                    required: ['invocation', 'success', 'reason', 'requestLimit'],
-                  },
                 ],
               },
               SkillInvocationMode: {
@@ -11186,12 +10958,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               invocationId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -11283,7 +11053,6 @@ export const contracts = {
               executor: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               action: {
                 $ref: '#/$defs/ExecutorSetupAction',
@@ -11313,7 +11082,6 @@ export const contracts = {
                       methodId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 1024,
                       },
                       kind: {
                         type: 'string',
@@ -11347,7 +11115,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/ExecutorAuthenticationMethod',
                     },
-                    maxItems: 32,
                   },
                   kind: {
                     type: 'string',
@@ -11373,7 +11140,6 @@ export const contracts = {
                 properties: {
                   diagnostic: {
                     type: 'string',
-                    maxLength: 2048,
                   },
                   kind: {
                     type: 'string',
@@ -11394,15 +11160,12 @@ export const contracts = {
                 properties: {
                   title: {
                     type: ['string', 'null'],
-                    maxLength: 256,
                   },
                   name: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   version: {
                     type: 'string',
-                    maxLength: 256,
                   },
                 },
                 required: ['name', 'version'],
@@ -11414,16 +11177,13 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   description: {
                     type: ['string', 'null'],
-                    maxLength: 2048,
                   },
                   supported: {
                     type: 'boolean',
@@ -11441,7 +11201,6 @@ export const contracts = {
                 properties: {
                   url: {
                     type: 'string',
-                    maxLength: 8192,
                   },
                   kind: {
                     type: 'string',
@@ -11497,7 +11256,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               expectedRevision: {
                 type: 'integer',
@@ -11510,19 +11268,16 @@ export const contracts = {
                   'Include history through a complete logical Turn, or all current history when null.',
                 type: ['string', 'null'],
                 minLength: 1,
-                maxLength: 128,
               },
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               labels: {
                 type: 'array',
                 items: {
                   type: 'string',
                 },
-                maxItems: 32,
               },
             },
             additionalProperties: false,
@@ -11687,12 +11442,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -11708,12 +11461,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -11759,7 +11510,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -11863,7 +11613,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -12176,12 +11925,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -12197,12 +11944,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -12248,7 +11993,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -12352,7 +12096,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -12433,7 +12176,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -12444,7 +12186,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -12564,7 +12305,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -12649,7 +12389,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -12708,7 +12447,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -13133,7 +12871,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 type: ['integer', 'null'],
@@ -13697,7 +13434,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 32,
                   },
                   presentation: {
                     description:
@@ -13832,7 +13568,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 type: 'integer',
@@ -13874,7 +13609,6 @@ export const contracts = {
                   turnId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   position: {
                     $ref: '#/$defs/HistoryRowPosition',
@@ -13925,7 +13659,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 type: 'integer',
@@ -14038,7 +13771,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   location: {
                     $ref: '#/$defs/AgentImportLocation',
@@ -14084,7 +13816,6 @@ export const contracts = {
                   title: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   kind: {
                     type: 'string',
@@ -14135,7 +13866,6 @@ export const contracts = {
                       database: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 255,
                       },
                       kind: {
                         type: 'string',
@@ -14153,7 +13883,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -14209,12 +13938,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -14318,7 +14045,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   location: {
                     $ref: '#/$defs/AgentImportLocation',
@@ -14326,7 +14052,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -14371,7 +14096,6 @@ export const contracts = {
                       database: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 255,
                       },
                       kind: {
                         type: 'string',
@@ -14389,7 +14113,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -14509,12 +14232,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -14530,12 +14251,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -14581,7 +14300,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -14685,7 +14403,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14783,7 +14500,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -14870,7 +14586,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -14988,7 +14703,6 @@ export const contracts = {
                 properties: {
                   text: {
                     type: 'string',
-                    maxLength: 1024,
                   },
                   includeArchived: {
                     type: 'boolean',
@@ -15006,12 +14720,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -15160,7 +14872,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   location: {
                     $ref: '#/$defs/AgentImportLocation',
@@ -15168,7 +14879,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -15213,7 +14923,6 @@ export const contracts = {
                       database: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 255,
                       },
                       kind: {
                         type: 'string',
@@ -15231,7 +14940,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -15364,12 +15072,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -15505,12 +15211,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -15526,12 +15230,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -15577,7 +15279,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -15681,7 +15382,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -15747,12 +15447,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               requestId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -15988,7 +15686,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -16043,7 +15740,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -16081,7 +15777,6 @@ export const contracts = {
                   question: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   options: {
                     type: 'array',
@@ -16101,12 +15796,10 @@ export const contracts = {
                   label: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   description: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -16638,7 +16331,6 @@ export const contracts = {
                 description:
                   'Literal, case-sensitive title substring; an empty query matches all titles.',
                 type: 'string',
-                maxLength: 128,
                 default: '',
               },
             },
@@ -16668,7 +16360,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -16687,7 +16378,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -16706,7 +16396,6 @@ export const contracts = {
                       cursor: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -16754,7 +16443,6 @@ export const contracts = {
                       sessionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -16902,12 +16590,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -16923,12 +16609,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -16974,7 +16658,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -17078,7 +16761,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -17173,7 +16855,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -17240,7 +16921,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -17277,12 +16957,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               messageId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -17426,12 +17104,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -17447,12 +17123,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -17498,7 +17172,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -17602,7 +17275,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -17705,7 +17377,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               expectedRevision: {
                 type: 'integer',
@@ -17716,14 +17387,12 @@ export const contracts = {
               title: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               labels: {
                 type: 'array',
                 items: {
                   type: 'string',
                 },
-                maxItems: 32,
               },
             },
             additionalProperties: false,
@@ -17928,12 +17597,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -17949,12 +17616,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -18000,7 +17665,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -18104,7 +17768,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -18184,7 +17847,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -18358,12 +18020,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -18379,12 +18039,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -18430,7 +18088,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -18534,7 +18191,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -18701,7 +18357,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -18722,7 +18377,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/AgentInteractionSummary',
                 },
-                maxItems: 16,
               },
             },
             additionalProperties: false,
@@ -18894,7 +18548,6 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[A-Za-z0-9_-]+$',
                   },
                   title: {
@@ -19188,7 +18841,6 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[A-Za-z0-9_-]+$',
                   },
                   title: {
@@ -19540,7 +19192,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   kind: {
                     type: 'string',
@@ -19613,7 +19264,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -19719,7 +19369,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   archived: {
                     type: 'boolean',
@@ -19765,7 +19414,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -19849,7 +19497,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -19950,7 +19597,6 @@ export const contracts = {
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   archived: {
                     type: 'boolean',
@@ -19996,7 +19642,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -20036,12 +19681,10 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   project: {
                     anyOf: [
@@ -20071,7 +19714,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -20176,12 +19818,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               messageId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               expectedRevision: {
                 type: 'integer',
@@ -20285,7 +19925,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -20417,27 +20056,6 @@ export const contracts = {
                   {
                     type: 'object',
                     properties: {
-                      bytes: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                      limit: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                      kind: {
-                        type: 'string',
-                        const: 'too_large',
-                      },
-                    },
-                    additionalProperties: false,
-                    required: ['kind', 'bytes', 'limit'],
-                  },
-                  {
-                    type: 'object',
-                    properties: {
                       fileKind: {
                         $ref: '#/$defs/AgentFileKind',
                       },
@@ -20502,7 +20120,7 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint64',
                 minimum: 0,
-                maximum: 52428800,
+                maximum: 9007199254740991,
               },
             },
             additionalProperties: false,
@@ -20514,12 +20132,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -20612,26 +20228,21 @@ export const contracts = {
                 items: {
                   type: 'string',
                   minLength: 1,
-                  maxLength: 500,
                 },
                 minItems: 1,
-                maxItems: 8,
               },
               question: {
                 type: ['string', 'null'],
                 minLength: 1,
-                maxLength: 500,
               },
               limit: {
                 type: ['integer', 'null'],
                 format: 'uint',
                 minimum: 1,
-                maximum: 25,
               },
               session_id: {
                 type: ['string', 'null'],
                 minLength: 1,
-                maxLength: 256,
               },
               since: {
                 type: ['integer', 'null'],
@@ -20781,12 +20392,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -20802,12 +20411,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -20853,7 +20460,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -20957,7 +20563,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -21187,12 +20792,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               requestId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               answer: {
                 $ref: '#/$defs/InteractionAnswer',
@@ -21357,7 +20960,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -21412,7 +21014,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -21734,7 +21335,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -21789,7 +21389,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -21827,7 +21426,6 @@ export const contracts = {
                   question: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   options: {
                     type: 'array',
@@ -21847,12 +21445,10 @@ export const contracts = {
                   label: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   description: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -22375,12 +21971,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               sourceInvocationId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               sourceHighWater: {
                 description: 'Exact Run-local count returned by execution.',
@@ -22416,7 +22010,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -22427,7 +22020,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -22976,7 +22568,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -23051,7 +22642,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -23062,7 +22652,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -23791,7 +23380,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -23866,7 +23454,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -23877,7 +23464,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -24028,7 +23614,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 description: 'Original raw-event fence, shared with history reads.',
@@ -24049,11 +23634,9 @@ export const contracts = {
                 ],
               },
               query: {
-                description:
-                  'Literal query, additionally limited to 512 UTF-8 bytes; no normalization.',
+                description: 'Literal query; no normalization.',
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               caseSensitive: {
                 description:
@@ -24240,12 +23823,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -24291,7 +23872,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -24482,12 +24062,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 additionalProperties: false,
@@ -24503,12 +24081,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -24554,7 +24130,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -24658,7 +24233,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -24761,7 +24335,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               message: {
                 type: 'string',
@@ -24778,7 +24351,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -24789,7 +24361,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -24923,9 +24494,6 @@ export const contracts = {
                   {
                     $ref: '#/$defs/SkillRequestFailure',
                   },
-                  {
-                    $ref: '#/$defs/SkillOverflowFailure',
-                  },
                 ],
               },
               SkillRequestFailure: {
@@ -24950,25 +24518,6 @@ export const contracts = {
                   'host_incompatible',
                   'resolution_failed',
                 ],
-              },
-              SkillOverflowFailure: {
-                type: 'object',
-                properties: {
-                  reason: {
-                    $ref: '#/$defs/TooManyRequests',
-                  },
-                  requestLimit: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
-                },
-                additionalProperties: false,
-                required: ['reason', 'requestLimit'],
-              },
-              TooManyRequests: {
-                type: 'string',
-                enum: ['too_many_requests'],
               },
               SkillInvocationReceipt: {
                 description:
@@ -25037,27 +24586,6 @@ export const contracts = {
                     additionalProperties: false,
                     required: ['invocation', 'request', 'success', 'reason'],
                   },
-                  {
-                    type: 'object',
-                    properties: {
-                      invocation: {
-                        const: 'explicit',
-                      },
-                      success: {
-                        const: false,
-                      },
-                      reason: {
-                        $ref: '#/$defs/TooManyRequests',
-                      },
-                      requestLimit: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                    },
-                    additionalProperties: false,
-                    required: ['invocation', 'success', 'reason', 'requestLimit'],
-                  },
                 ],
               },
               SkillInvocationMode: {
@@ -25093,7 +24621,6 @@ export const contracts = {
               },
               query: {
                 type: 'string',
-                maxLength: 4096,
               },
             },
             additionalProperties: false,
@@ -25149,7 +24676,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -25160,7 +24686,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -25176,7 +24701,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -25257,12 +24781,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               invocationId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -25359,7 +24881,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 type: 'integer',
@@ -25380,7 +24901,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/HistorySourceSegment',
                 },
-                maxItems: 16,
                 default: null,
               },
               position: {
@@ -25412,7 +24932,6 @@ export const contracts = {
                       toolUseId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -25475,7 +24994,6 @@ export const contracts = {
                 anyOf: [
                   {
                     type: 'string',
-                    maxLength: 256,
                   },
                   {
                     type: 'integer',
@@ -25565,7 +25083,6 @@ export const contracts = {
                     description:
                       'Complete file-path evidence resolved on the Host for copying only.\nThis is display text, never a filesystem capability or open command.',
                     type: ['string', 'null'],
-                    maxLength: 4096,
                   },
                   kind: {
                     type: 'string',
@@ -25636,7 +25153,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/HistorySourceSegment',
                     },
-                    maxItems: 16,
                   },
                   format: {
                     $ref: '#/$defs/SourceFormat',
@@ -25808,7 +25324,6 @@ export const contracts = {
                 anyOf: [
                   {
                     type: 'string',
-                    maxLength: 256,
                   },
                   {
                     type: 'integer',
@@ -25863,7 +25378,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 32,
                   },
                   presentation: {
                     description:
@@ -25976,12 +25490,10 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               invocationId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -26011,7 +25523,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               through: {
                 type: 'integer',
@@ -26240,18 +25751,16 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               name: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               bytes: {
                 type: 'integer',
                 format: 'uint',
                 minimum: 0,
-                maximum: 52428800,
+                maximum: 9007199254740991,
               },
               digest: {
                 type: 'string',
@@ -26345,7 +25854,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               after: {
                 type: 'integer',
@@ -26900,7 +26408,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/AgentInteractionSummary',
                     },
-                    maxItems: 16,
                   },
                 },
                 additionalProperties: false,
@@ -27036,7 +26543,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -27089,7 +26595,6 @@ export const contracts = {
                 properties: {
                   bytesBase64: {
                     type: 'string',
-                    maxLength: 5464,
                   },
                 },
                 additionalProperties: false,
@@ -27448,7 +26953,6 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[A-Za-z0-9_-]+$',
                   },
                   title: {
@@ -28184,7 +27688,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -28259,7 +27762,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -28270,7 +27772,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -28421,7 +27922,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               target: {
                 $ref: '#/$defs/AgentWorkTarget',
@@ -28448,7 +27948,6 @@ export const contracts = {
                       invocationId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -28464,7 +27963,6 @@ export const contracts = {
                       messageId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -28482,7 +27980,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -28648,7 +28145,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -28692,20 +28188,16 @@ export const contracts = {
               conversationKey: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               message: {
                 type: 'string',
-                maxLength: 65536,
               },
               cwd: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               instructions: {
                 type: ['string', 'null'],
-                maxLength: 65536,
               },
               settings: {
                 $ref: '#/$defs/ExecutorSettings',
@@ -28939,7 +28431,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               expectedGraphId: {
                 anyOf: [
@@ -28962,7 +28453,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               WorkHubGraphAction: {
                 oneOf: [
@@ -29094,7 +28584,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphMode: {
                 type: 'string',
@@ -29617,7 +29106,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -29735,12 +29223,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['sessionId', 'turnId'],
@@ -29756,12 +29242,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -29809,7 +29293,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -29913,7 +29396,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -29991,7 +29473,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               graphId: {
                 anyOf: [
@@ -30021,12 +29502,10 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
             },
           },
@@ -30139,7 +29618,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphMode: {
                 type: 'string',
@@ -30190,7 +29668,6 @@ export const contracts = {
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphTarget: {
                 oneOf: [
@@ -30201,7 +29678,6 @@ export const contracts = {
                       agentId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30217,7 +29693,6 @@ export const contracts = {
                       presetId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30233,7 +29708,6 @@ export const contracts = {
                       executorId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30261,7 +29735,6 @@ export const contracts = {
               OperatorId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphWorkState: {
                 type: 'string',
@@ -30306,7 +29779,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               before: {
                 type: ['integer', 'null'],
@@ -30373,7 +29845,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphMode: {
                 type: 'string',
@@ -30593,7 +30064,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphMode: {
                 type: 'string',
@@ -30612,7 +30082,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               graphId: {
                 $ref: '#/$defs/GraphId',
@@ -30623,7 +30092,6 @@ export const contracts = {
               resultId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               offset: {
                 type: 'integer',
@@ -30639,12 +30107,10 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
             },
           },
@@ -30677,7 +30143,6 @@ export const contracts = {
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               AgentExecution: {
                 type: 'object',
@@ -30734,7 +30199,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               graphId: {
                 $ref: '#/$defs/GraphId',
@@ -30750,12 +30214,10 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
             },
           },
@@ -30795,7 +30257,6 @@ export const contracts = {
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphTarget: {
                 oneOf: [
@@ -30806,7 +30267,6 @@ export const contracts = {
                       agentId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30822,7 +30282,6 @@ export const contracts = {
                       presetId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30838,7 +30297,6 @@ export const contracts = {
                       executorId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -30866,7 +30324,6 @@ export const contracts = {
               OperatorId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               HistoricalInput: {
                 type: 'object',
@@ -30878,7 +30335,6 @@ export const contracts = {
                   resultId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                 },
                 required: ['sourceGraphId', 'resultId'],
@@ -30886,7 +30342,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
             },
           },
@@ -30913,7 +30368,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/WorkHubPreset',
                 },
-                maxItems: 64,
               },
             },
             required: ['revision', 'entries'],
@@ -30931,22 +30385,18 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[a-zA-Z0-9._:-]+$',
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   description: {
                     type: 'string',
-                    maxLength: 4000,
                   },
                   worker: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   tools: {
                     type: 'array',
@@ -31019,7 +30469,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -31102,7 +30551,6 @@ export const contracts = {
                   rootId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 64,
                   },
                   segments: {
                     type: 'array',
@@ -31220,12 +30668,10 @@ export const contracts = {
                   sessionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   turnId: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['sessionId', 'turnId'],
@@ -31241,12 +30687,10 @@ export const contracts = {
                       connectionId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       modelId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 512,
                       },
                       thinkingLevel: {
                         anyOf: [
@@ -31294,7 +30738,6 @@ export const contracts = {
                   executor: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   settings: {
                     $ref: '#/$defs/ExecutorSettings',
@@ -31398,7 +30841,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -31483,7 +30925,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/WorkHubPreset',
                 },
-                maxItems: 64,
               },
             },
             required: ['revision', 'entries'],
@@ -31501,22 +30942,18 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[a-zA-Z0-9._:-]+$',
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   description: {
                     type: 'string',
-                    maxLength: 4000,
                   },
                   worker: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   tools: {
                     type: 'array',
@@ -31624,7 +31061,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/WorkHubPreset',
                     },
-                    maxItems: 64,
                   },
                 },
                 required: ['revision', 'entries'],
@@ -31640,22 +31076,18 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                     pattern: '^[a-zA-Z0-9._:-]+$',
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   description: {
                     type: 'string',
-                    maxLength: 4000,
                   },
                   worker: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   tools: {
                     type: 'array',
@@ -31738,7 +31170,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -31760,7 +31191,6 @@ export const contracts = {
                 items: {
                   type: 'string',
                 },
-                maxItems: 16,
               },
               taskId: {
                 type: 'string',
@@ -31770,7 +31200,6 @@ export const contracts = {
               },
               title: {
                 type: 'string',
-                maxLength: 256,
               },
               acceptedAt: {
                 type: 'integer',
@@ -31802,7 +31231,6 @@ export const contracts = {
                         items: {
                           type: 'string',
                         },
-                        maxItems: 16,
                       },
                       kind: {
                         type: 'string',
@@ -32211,7 +31639,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -32274,7 +31701,6 @@ export const contracts = {
                   },
                   title: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   acceptedAt: {
                     type: 'integer',
@@ -32299,7 +31725,6 @@ export const contracts = {
               sessionId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
               graphId: {
                 anyOf: [
@@ -32329,12 +31754,10 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
             },
           },
@@ -32447,7 +31870,6 @@ export const contracts = {
               GraphId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphMode: {
                 type: 'string',
@@ -32498,7 +31920,6 @@ export const contracts = {
               WorkId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphTarget: {
                 oneOf: [
@@ -32509,7 +31930,6 @@ export const contracts = {
                       agentId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -32525,7 +31945,6 @@ export const contracts = {
                       presetId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -32541,7 +31960,6 @@ export const contracts = {
                       executorId: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 256,
                       },
                       kind: {
                         type: 'string',
@@ -32569,7 +31987,6 @@ export const contracts = {
               OperatorId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 256,
               },
               GraphWorkState: {
                 type: 'string',
@@ -32637,7 +32054,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -32659,7 +32075,6 @@ export const contracts = {
                 items: {
                   type: 'string',
                 },
-                maxItems: 16,
               },
               taskId: {
                 type: 'string',
@@ -32669,7 +32084,6 @@ export const contracts = {
               },
               title: {
                 type: 'string',
-                maxLength: 256,
               },
               acceptedAt: {
                 type: 'integer',
@@ -32701,7 +32115,6 @@ export const contracts = {
                         items: {
                           type: 'string',
                         },
-                        maxItems: 16,
                       },
                       kind: {
                         type: 'string',
@@ -33110,7 +32523,6 @@ export const contracts = {
                   invocationId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   offset: {
                     type: 'integer',
@@ -33173,7 +32585,6 @@ export const contracts = {
                   },
                   title: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   acceptedAt: {
                     type: 'integer',
@@ -33225,7 +32636,6 @@ export const contracts = {
                   question: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   options: {
                     type: 'array',
@@ -33245,12 +32655,10 @@ export const contracts = {
                   label: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   description: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 required: ['label'],
@@ -33359,14 +32767,12 @@ export const contracts = {
               message: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 2048,
               },
               fields: {
                 type: 'array',
                 items: {
                   $ref: '#/$defs/FormField',
                 },
-                maxItems: 32,
               },
             },
             required: ['message', 'fields'],
@@ -33729,12 +33135,10 @@ export const contracts = {
                   reference: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                   revision: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['kind', 'reference', 'revision'],
@@ -33763,7 +33167,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -33902,12 +33305,10 @@ export const contracts = {
                   reference: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                   revision: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['kind', 'reference', 'revision'],
@@ -33936,7 +33337,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -34046,7 +33446,6 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint',
                 minimum: 1,
-                maximum: 1048576,
               },
               digest: {
                 type: 'string',
@@ -34138,7 +33537,6 @@ export const contracts = {
               },
               query: {
                 type: 'string',
-                maxLength: 256,
               },
               cursor: {
                 anyOf: [
@@ -34179,7 +33577,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -34233,17 +33630,14 @@ export const contracts = {
                   revision: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   query: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   offset: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 16384,
                   },
                 },
                 required: ['revision', 'query', 'offset'],
@@ -34402,17 +33796,14 @@ export const contracts = {
                   revision: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   query: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   offset: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 16384,
                   },
                 },
                 required: ['revision', 'query', 'offset'],
@@ -34477,7 +33868,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -34533,14 +33923,12 @@ export const contracts = {
                     description:
                       'Exact ref from search, or a skill id/name resolved before eligibility checks.',
                     minLength: 1,
-                    maxLength: 512,
                   },
                   revision: {
                     type: 'string',
                     description:
                       'Catalog revision from search or a previous load/resource response.',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   resource: {
                     anyOf: [
@@ -34815,14 +34203,12 @@ export const contracts = {
                     description:
                       'Exact ref from search, or a skill id/name resolved before eligibility checks.',
                     minLength: 1,
-                    maxLength: 512,
                   },
                   revision: {
                     type: 'string',
                     description:
                       'Catalog revision from search or a previous load/resource response.',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   resource: {
                     anyOf: [
@@ -34934,27 +34320,6 @@ export const contracts = {
                     },
                     required: ['invocation', 'request', 'success', 'reason'],
                   },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      invocation: {
-                        const: 'explicit',
-                      },
-                      success: {
-                        const: false,
-                      },
-                      reason: {
-                        $ref: '#/$defs/TooManyRequests',
-                      },
-                      requestLimit: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                    },
-                    required: ['invocation', 'success', 'reason', 'requestLimit'],
-                  },
                 ],
                 description:
                   'Boolean wire discriminants are validated here, not retained as mutable\nbusiness fields beside a contradictory enum variant.',
@@ -34972,10 +34337,6 @@ export const contracts = {
                   'host_incompatible',
                   'resolution_failed',
                 ],
-              },
-              TooManyRequests: {
-                type: 'string',
-                enum: ['too_many_requests'],
               },
             },
           },
@@ -35037,7 +34398,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -35099,12 +34459,10 @@ export const contracts = {
                     description:
                       'Actual selected tools bound to this Library; these names grant no access.',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   searchTool: {
                     type: ['string', 'null'],
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['language', 'message'],
@@ -35219,9 +34577,6 @@ export const contracts = {
                   {
                     $ref: '#/$defs/SkillRequestFailure',
                   },
-                  {
-                    $ref: '#/$defs/SkillOverflowFailure',
-                  },
                 ],
               },
               SkillRequestFailure: {
@@ -35246,25 +34601,6 @@ export const contracts = {
                   'host_incompatible',
                   'resolution_failed',
                 ],
-              },
-              SkillOverflowFailure: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  reason: {
-                    $ref: '#/$defs/TooManyRequests',
-                  },
-                  requestLimit: {
-                    type: 'integer',
-                    format: 'uint64',
-                    minimum: 0,
-                  },
-                },
-                required: ['reason', 'requestLimit'],
-              },
-              TooManyRequests: {
-                type: 'string',
-                enum: ['too_many_requests'],
               },
               SkillInvocationReceipt: {
                 anyOf: [
@@ -35331,27 +34667,6 @@ export const contracts = {
                     },
                     required: ['invocation', 'request', 'success', 'reason'],
                   },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      invocation: {
-                        const: 'explicit',
-                      },
-                      success: {
-                        const: false,
-                      },
-                      reason: {
-                        $ref: '#/$defs/TooManyRequests',
-                      },
-                      requestLimit: {
-                        type: 'integer',
-                        format: 'uint64',
-                        minimum: 0,
-                      },
-                    },
-                    required: ['invocation', 'success', 'reason', 'requestLimit'],
-                  },
                 ],
                 description:
                   'Boolean wire discriminants are validated here, not retained as mutable\nbusiness fields beside a contradictory enum variant.',
@@ -35394,12 +34709,10 @@ export const contracts = {
               reference: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               revision: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 128,
               },
             },
             required: ['kind', 'reference', 'revision'],
@@ -35430,7 +34743,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -35591,12 +34903,10 @@ export const contracts = {
                   reference: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                   revision: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                 },
                 required: ['kind', 'reference', 'revision'],
@@ -35625,7 +34935,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -35699,19 +35008,16 @@ export const contracts = {
               reference: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               revision: {
                 type: 'string',
                 description: 'Complete catalog revision from the list/read response.',
                 minLength: 1,
-                maxLength: 128,
               },
               offset: {
                 type: 'integer',
                 format: 'uint',
                 minimum: 0,
-                maximum: 16777216,
               },
             },
             required: ['reference', 'revision', 'offset'],
@@ -35742,7 +35048,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -36013,7 +35318,6 @@ export const contracts = {
                   path: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 4096,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -36066,7 +35370,6 @@ export const contracts = {
                 properties: {
                   query: {
                     type: 'string',
-                    maxLength: 4096,
                   },
                   limit: {
                     type: ['integer', 'null'],
@@ -36185,7 +35488,6 @@ export const contracts = {
               reference: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 512,
               },
               revision: {
                 type: 'integer',
@@ -36717,7 +36019,6 @@ export const contracts = {
               callId: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               operation: {
                 $ref: '#/$defs/NativeOperation',
@@ -36736,7 +36037,6 @@ export const contracts = {
                       path: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 4096,
                       },
                       diff: {
                         type: 'string',
@@ -36755,7 +36055,6 @@ export const contracts = {
                       path: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 4096,
                       },
                       diff: {
                         type: 'string',
@@ -36774,7 +36073,6 @@ export const contracts = {
                       path: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 4096,
                       },
                       type: {
                         type: 'string',
@@ -36832,7 +36130,6 @@ export const contracts = {
               path: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               old_string: {
                 type: 'string',
@@ -36946,7 +36243,6 @@ export const contracts = {
             properties: {
               pattern: {
                 type: 'string',
-                maxLength: 8192,
               },
               path: {
                 type: 'string',
@@ -36954,7 +36250,6 @@ export const contracts = {
               },
               glob: {
                 type: 'string',
-                maxLength: 4096,
               },
             },
             required: ['pattern'],
@@ -37149,7 +36444,6 @@ export const contracts = {
               path: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               content: {
                 type: 'string',
@@ -37214,7 +36508,6 @@ export const contracts = {
               command: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 65536,
               },
               login: {
                 type: 'boolean',
@@ -37225,7 +36518,6 @@ export const contracts = {
                 type: ['integer', 'null'],
                 format: 'uint64',
                 minimum: 1,
-                maximum: 86400000,
               },
               run_in_background: {
                 type: 'boolean',
@@ -37267,7 +36559,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -37321,7 +36612,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -37556,7 +36846,6 @@ export const contracts = {
               },
               actions: {
                 type: ['array', 'null'],
-                maxItems: 64,
                 items: {
                   type: 'object',
                   additionalProperties: false,
@@ -37676,7 +36965,6 @@ export const contracts = {
               justification: {
                 type: ['string', 'null'],
                 minLength: 1,
-                maxLength: 2048,
               },
               bytes: {
                 type: ['array', 'null'],
@@ -37703,7 +36991,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -37757,7 +37044,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -37819,14 +37105,12 @@ export const contracts = {
               executable: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               args: {
                 type: 'array',
                 items: {
                   type: 'string',
                 },
-                maxItems: 256,
                 default: [],
               },
               env: {
@@ -37947,14 +37231,12 @@ export const contracts = {
               executable: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 4096,
               },
               args: {
                 type: 'array',
                 items: {
                   type: 'string',
                 },
-                maxItems: 256,
                 default: [],
               },
               env: {
@@ -37977,7 +37259,6 @@ export const contracts = {
               justification: {
                 type: ['string', 'null'],
                 minLength: 1,
-                maxLength: 2048,
               },
             },
             required: ['executable'],
@@ -37993,7 +37274,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/Rule',
                     },
-                    maxItems: 32,
                   },
                   network: {
                     $ref: '#/$defs/Network',
@@ -38047,7 +37327,6 @@ export const contracts = {
                             items: {
                               $ref: '#/$defs/Destination',
                             },
-                            maxItems: 128,
                           },
                         },
                         additionalProperties: false,
@@ -38210,7 +37489,6 @@ export const contracts = {
                   methodId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   kind: {
                     type: 'string',
@@ -38244,7 +37522,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/ExecutorAuthenticationMethod',
                     },
-                    maxItems: 32,
                   },
                   kind: {
                     type: 'string',
@@ -38270,7 +37547,6 @@ export const contracts = {
                 properties: {
                   diagnostic: {
                     type: 'string',
-                    maxLength: 2048,
                   },
                   kind: {
                     type: 'string',
@@ -38291,15 +37567,12 @@ export const contracts = {
                 properties: {
                   title: {
                     type: ['string', 'null'],
-                    maxLength: 256,
                   },
                   name: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   version: {
                     type: 'string',
-                    maxLength: 256,
                   },
                 },
                 required: ['name', 'version'],
@@ -38311,16 +37584,13 @@ export const contracts = {
                   id: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 1024,
                   },
                   name: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 256,
                   },
                   description: {
                     type: ['string', 'null'],
-                    maxLength: 2048,
                   },
                   supported: {
                     type: 'boolean',
@@ -38338,7 +37608,6 @@ export const contracts = {
                 properties: {
                   url: {
                     type: 'string',
-                    maxLength: 8192,
                   },
                   kind: {
                     type: 'string',
@@ -38738,7 +38007,6 @@ export const contracts = {
                 items: {
                   $ref: '#/$defs/RawAction',
                 },
-                maxItems: 64,
                 default: [],
               },
               size: {
@@ -42060,11 +41328,9 @@ export const contracts = {
               },
               displayName: {
                 type: 'string',
-                maxLength: 256,
               },
               assistantTone: {
                 type: 'string',
-                maxLength: 4096,
               },
               workspaceInstructions: {
                 type: 'boolean',
@@ -42119,7 +41385,7 @@ export const contracts = {
               },
               includeEditingFacts: {
                 description:
-                  'Opt in to the bounded editing projection; credential reads stay narrow.',
+                  'Opt in to the complete editing projection; credential reads stay narrow.',
                 type: 'boolean',
                 default: false,
               },
@@ -42250,7 +41516,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 512,
                   },
                   modelOverrides: {
                     type: ['object', 'null'],
@@ -42441,7 +41706,6 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 1024,
                   },
                   kind: {
                     type: 'string',
@@ -43515,7 +42779,6 @@ export const contracts = {
                 properties: {
                   query: {
                     type: 'string',
-                    maxLength: 256,
                     default: '',
                   },
                   kind: {
@@ -43553,19 +42816,16 @@ export const contracts = {
                 properties: {
                   query: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   connection: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 1024,
                   },
                   model: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -43659,11 +42919,9 @@ export const contracts = {
                   },
                   connectionName: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   label: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   thinkingLevels: {
                     type: 'array',
@@ -43765,7 +43023,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -43776,7 +43033,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -43847,19 +43103,16 @@ export const contracts = {
                 properties: {
                   query: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   connection: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 1024,
                   },
                   model: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
-                    maximum: 4096,
                   },
                 },
                 additionalProperties: false,
@@ -44208,7 +43461,6 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint',
                 minimum: 0,
-                maximum: 1024,
               },
             },
             additionalProperties: false,
@@ -44582,11 +43834,9 @@ export const contracts = {
                   },
                   connectionName: {
                     type: 'string',
-                    maxLength: 256,
                   },
                   label: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   thinkingLevels: {
                     type: 'array',
@@ -44688,7 +43938,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -44699,7 +43948,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -44927,7 +44175,6 @@ export const contracts = {
                   'attempt_conflict',
                   'connection_changed',
                   'credential_changed',
-                  'capacity',
                   'slug_taken',
                   'authentication',
                 ],
@@ -45563,11 +44810,9 @@ export const contracts = {
                     properties: {
                       displayName: {
                         type: 'string',
-                        maxLength: 256,
                       },
                       assistantTone: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -45711,7 +44956,6 @@ export const contracts = {
                   connectionId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 128,
                   },
                   revision: {
                     type: 'integer',
@@ -45722,7 +44966,6 @@ export const contracts = {
                   modelId: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 512,
                   },
                 },
                 additionalProperties: false,
@@ -47580,7 +46823,6 @@ export const contracts = {
               },
               method: {
                 type: 'string',
-                maxLength: 128,
               },
             },
             additionalProperties: false,
@@ -47734,7 +46976,6 @@ export const contracts = {
                   },
                   message: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   kind: {
                     type: 'string',
@@ -47794,7 +47035,6 @@ export const contracts = {
                   'attempt_conflict',
                   'connection_changed',
                   'credential_changed',
-                  'capacity',
                   'slug_taken',
                   'authentication',
                 ],
@@ -47812,11 +47052,9 @@ export const contracts = {
             properties: {
               url: {
                 type: 'string',
-                maxLength: 2048,
               },
               userCode: {
                 type: 'string',
-                maxLength: 1024,
               },
             },
             additionalProperties: false,
@@ -48532,7 +47770,6 @@ export const contracts = {
                   $ref: '#/$defs/SettingChange',
                 },
                 minItems: 1,
-                maxItems: 32,
               },
             },
             additionalProperties: false,
@@ -48556,7 +47793,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 16,
                   },
                   value: {
                     description:
@@ -48581,7 +47817,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -48596,7 +47831,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -48679,7 +47913,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -48850,7 +48083,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 16,
                   },
                   value: {
                     description:
@@ -48875,7 +48107,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -48890,7 +48121,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -49040,7 +48270,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -49248,7 +48477,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -49398,7 +48626,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -49486,8 +48713,6 @@ export const contracts = {
               },
               url: {
                 type: 'string',
-                minLength: 1,
-                maxLength: 8192,
               },
               sha256: {
                 description:
@@ -49543,7 +48768,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -49917,7 +49141,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 16,
                   },
                   value: {
                     description:
@@ -49942,7 +49165,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -49957,7 +49179,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -50075,7 +49296,6 @@ export const contracts = {
                   },
                   description: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   kind: {
                     $ref: '#/$defs/SettingKind',
@@ -50107,7 +49327,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/SettingValue',
                     },
-                    maxItems: 16,
                   },
                 },
                 additionalProperties: false,
@@ -50134,7 +49353,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -50149,7 +49367,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -51077,7 +50294,6 @@ export const contracts = {
                 items: {
                   type: 'string',
                 },
-                maxItems: 16,
               },
               after: {
                 type: ['string', 'null'],
@@ -51186,7 +50402,6 @@ export const contracts = {
                   },
                   description: {
                     type: 'string',
-                    maxLength: 512,
                   },
                   kind: {
                     $ref: '#/$defs/SettingKind',
@@ -51218,7 +50433,6 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/SettingValue',
                     },
-                    maxItems: 16,
                   },
                 },
                 additionalProperties: false,
@@ -51245,7 +50459,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -51260,7 +50473,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -51362,7 +50574,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -51457,14 +50668,12 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/RemoteObservation',
                     },
-                    maxItems: 128,
                   },
                   packages: {
                     type: 'array',
                     items: {
                       $ref: '#/$defs/PackageRef',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -52074,7 +51283,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -52200,7 +51408,6 @@ export const contracts = {
                   },
                   diagnostic: {
                     type: ['string', 'null'],
-                    maxLength: 512,
                   },
                   status: {
                     type: 'string',
@@ -52961,8 +52168,6 @@ export const contracts = {
                   },
                   url: {
                     type: 'string',
-                    minLength: 1,
-                    maxLength: 8192,
                   },
                   sha256: {
                     description:
@@ -53002,14 +52207,12 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/RemoteObservation',
                     },
-                    maxItems: 128,
                   },
                   packages: {
                     type: 'array',
                     items: {
                       $ref: '#/$defs/PackageRef',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -53657,7 +52860,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 16,
                   },
                   value: {
                     description:
@@ -53682,7 +52884,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -53697,7 +52898,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -53752,7 +52952,6 @@ export const contracts = {
                       $ref: '#/$defs/SettingChange',
                     },
                     minItems: 1,
-                    maxItems: 32,
                   },
                 },
                 additionalProperties: false,
@@ -54215,8 +53414,6 @@ export const contracts = {
                   },
                   url: {
                     type: 'string',
-                    minLength: 1,
-                    maxLength: 8192,
                   },
                   sha256: {
                     description:
@@ -54256,14 +53453,12 @@ export const contracts = {
                     items: {
                       $ref: '#/$defs/RemoteObservation',
                     },
-                    maxItems: 128,
                   },
                   packages: {
                     type: 'array',
                     items: {
                       $ref: '#/$defs/PackageRef',
                     },
-                    maxItems: 128,
                   },
                 },
                 additionalProperties: false,
@@ -54911,7 +54106,6 @@ export const contracts = {
                       type: 'string',
                     },
                     minItems: 1,
-                    maxItems: 16,
                   },
                   value: {
                     description:
@@ -54936,7 +54130,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 4096,
                       },
                       kind: {
                         type: 'string',
@@ -54951,7 +54144,6 @@ export const contracts = {
                     properties: {
                       text: {
                         type: 'string',
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -55006,7 +54198,6 @@ export const contracts = {
                       $ref: '#/$defs/SettingChange',
                     },
                     minItems: 1,
-                    maxItems: 32,
                   },
                 },
                 additionalProperties: false,
@@ -55530,7 +54721,6 @@ export const contracts = {
                   url: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 8192,
                   },
                 },
                 required: ['url'],
@@ -55580,7 +54770,6 @@ export const contracts = {
               url: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 8192,
               },
             },
             required: ['url'],
@@ -55990,13 +55179,12 @@ export const contracts = {
                   query: {
                     type: 'string',
                     minLength: 1,
-                    maxLength: 200,
                   },
                   limit: {
                     type: 'integer',
                     format: 'uint',
                     minimum: 1,
-                    maximum: 10,
+                    maximum: 20,
                     default: 5,
                   },
                 },
@@ -56146,7 +55334,6 @@ export const contracts = {
               url: {
                 type: 'string',
                 minLength: 1,
-                maxLength: 8192,
               },
               revision: {
                 type: ['integer', 'null'],
@@ -56184,7 +55371,6 @@ export const contracts = {
                       name: {
                         type: 'string',
                         minLength: 1,
-                        maxLength: 128,
                       },
                       kind: {
                         type: 'string',
@@ -56983,7 +56169,6 @@ export const contracts = {
             properties: {
               code: {
                 type: 'string',
-                maxLength: 65536,
               },
               timeout_ms: {
                 type: 'integer',
@@ -56991,13 +56176,11 @@ export const contracts = {
                 minimum: 1,
                 description:
                   'Wall-clock limit including asynchronous waits. Interrupted REPLs require reset.',
-                maximum: 120000,
                 default: 30000,
               },
               title: {
                 type: ['string', 'null'],
                 description: 'Short, user-facing description of this call, in the user’s language.',
-                maxLength: 256,
               },
             },
             required: ['code'],

@@ -278,14 +278,14 @@ fn copy_writer_failure_preserves_selection_and_application_owner() {
     close(&mut presenter);
 }
 #[test]
-fn full_byte_budget_copies_without_truncation_and_character_only_limit_is_rejected() {
-    let source = "中".repeat(21845) + "x";
-    let (_runtime, mut presenter, _) = native(&source);
-    draw(&mut presenter, 20, 4);
-    select_all(&mut presenter);
-    assert_eq!(copied(&mut presenter).unwrap(), source.as_bytes());
-    close(&mut presenter);
-    assert!(super::super::source::compile(&props(&"中".repeat(21846))).is_err());
+fn complete_multibyte_sources_copy_without_truncation() {
+    for source in ["中".repeat(21845) + "x", "中".repeat(21846) + "😀tail"] {
+        let (_runtime, mut presenter, _) = native(&source);
+        draw(&mut presenter, 20, 4);
+        select_all(&mut presenter);
+        assert_eq!(copied(&mut presenter).unwrap(), source.as_bytes());
+        close(&mut presenter);
+    }
 }
 
 #[test]

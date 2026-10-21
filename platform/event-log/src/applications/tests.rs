@@ -323,9 +323,9 @@ async fn corrupted_exact_bytes_cannot_be_loaded_or_silently_overwritten() {
 }
 
 #[tokio::test]
-async fn stored_text_and_payload_limits_precede_package_materialization() {
+async fn stored_package_paths_types_and_immutable_digests_are_checked() {
     for corruption in [
-        "UPDATE application_package_files SET path = printf('%.*c', 1048576, 'x') WHERE path='host.mjs'",
+        "UPDATE application_package_files SET path = '../escape' WHERE path='host.mjs'",
         "UPDATE application_package_files SET payload = zeroblob(8388609) WHERE path='host.mjs'",
         "UPDATE application_package_files SET payload = 'x' || char(0) || printf('%.*c', 8388609, 'z') WHERE path='host.mjs'",
     ] {
@@ -350,9 +350,9 @@ async fn stored_text_and_payload_limits_precede_package_materialization() {
         if corruption.contains("char(0)") {
             assert!(error.contains("payload must be a BLOB"), "{error}");
         } else if corruption.contains("zeroblob") {
-            assert!(error.contains("exceeds byte limits"), "{error}");
+            assert!(error.contains("digest mismatch"), "{error}");
         } else {
-            assert!(error.contains("stored package path"), "{error}");
+            assert!(error.contains("invalid package path"), "{error}");
         }
         store.close().await.unwrap();
     }
@@ -430,7 +430,7 @@ async fn application_packages_have_no_aggregate_byte_limit() {
         let package = package(
             &char::from(b'a' + index as u8)
                 .to_string()
-                .repeat(maka_packages::MAX_FILE_BYTES),
+                .repeat(8 * 1024 * 1024),
         );
         let mut node = selected(&package).instances.remove("view").unwrap();
         node.key = Uuid::from_u128(index + 1);

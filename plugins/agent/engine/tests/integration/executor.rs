@@ -82,6 +82,7 @@ impl Execution for NativeExecution {
 }
 
 struct Adapter {
+    answer: String,
     started: Arc<Semaphore>,
     retained: Arc<Mutex<Option<Context>>>,
 }
@@ -93,6 +94,7 @@ impl Provider for Adapter {
     ) -> BoxFuture<'static, Result<Outcome, Error>> {
         let started = self.started.clone();
         let retained = self.retained.clone();
+        let answer = self.answer.clone();
         Box::pin(async move {
             assert_eq!(request.settings.model.as_deref(), Some("executor-model"));
             assert_eq!(
@@ -116,9 +118,7 @@ impl Provider for Adapter {
             if request.content.text == "wait" {
                 context.cancellation.cancelled().await;
             }
-            Ok(Outcome::Completed {
-                text: "answer".into(),
-            })
+            Ok(Outcome::Completed { text: answer })
         })
     }
 }
@@ -134,7 +134,13 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
     let engine = context::engine(log.clone());
     let started = Arc::new(Semaphore::new(0));
     let retained = Arc::new(Mutex::new(None));
+    let answer = format!(
+        "{}COMPLETE_EXECUTOR_FINAL",
+        "External answer 原文\n".repeat(60_000)
+    );
+    let read_bytes = answer.len() + 1024 * 1024;
     let adapter = Arc::new(Adapter {
+        answer: answer.clone(),
         started: started.clone(),
         retained: retained.clone(),
     });
@@ -191,7 +197,7 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
         ));
     }
     engine.drain().await;
-    let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
+    let prefix = log.prefix(100, read_bytes).await.unwrap();
     for row in &prefix.events {
         if let Fact::ExecutorStarted { settings, .. } = &row.event.fact {
             assert_eq!(settings.model.as_deref(), Some("executor-model"));
@@ -208,6 +214,20 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
             .filter(|row| matches!(row.event.fact, Fact::ExecutorCompleted { .. }))
             .count(),
         1
+    );
+    let completed_text = prefix
+        .events
+        .iter()
+        .find_map(|row| match &row.event.fact {
+            Fact::ExecutorCompleted { text } if row.event.invocation.turn_id == "complete" => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .expect("completed external result must be persisted before releasing settlement");
+    assert!(
+        completed_text == &answer,
+        "completed external result lost original content"
     );
     assert!(
         prefix
@@ -227,7 +247,7 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
     )));
 
     let stream = log
-        .session_stream_events("session", 0, prefix.high_water, 64, 1024 * 1024)
+        .session_stream_events("session", 0, prefix.high_water, 64, read_bytes)
         .await
         .unwrap();
     assert!(stream.events.iter().any(|event| event.invocation.turn_id == "wait"
@@ -282,7 +302,7 @@ async fn external_backend_uses_canonical_admission_settlement_and_never_enters_m
             .unwrap(),
         0
     );
-    let recovered = log.prefix(100, 1024 * 1024).await.unwrap();
+    let recovered = log.prefix(100, read_bytes).await.unwrap();
     assert!(recovered.project_invocation("crashed").unfinished_executor);
     assert!(recovered.events.iter().any(|row| row.event.invocation == crashed
         && matches!(&row.event.fact, Fact::InvocationEnded { outcome: InvocationOutcome::Failed { class, .. } } if class == "outcome_unknown")));

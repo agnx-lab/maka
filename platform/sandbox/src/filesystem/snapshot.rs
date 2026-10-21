@@ -17,17 +17,13 @@
  * under the License.
  */
 
-use super::{Access, Compiled, MAX_RULES, Policy, Rule};
+use super::{Access, Compiled, Policy, Rule};
 use crate::{Error, path};
 use std::{
     collections::BTreeSet,
     fs, io,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
 };
-
-const MAX_SCANNED_ENTRIES: usize = 100_000;
-const SCAN_BUDGET: Duration = Duration::from_secs(5);
 
 impl Compiled {
     /// Materialize existing deny-glob matches for native mechanisms that cannot
@@ -77,8 +73,6 @@ impl Compiled {
                 roots.insert(root);
             }
         }
-        let started = Instant::now();
-        let mut visited = 0;
         let mut scanned = BTreeSet::new();
         let mut pending: Vec<_> = roots.into_iter().collect();
         while let Some(directory) = pending.pop() {
@@ -99,10 +93,6 @@ impl Compiled {
             }
             for entry in entries {
                 let entry = entry?;
-                visited += 1;
-                if visited > MAX_SCANNED_ENTRIES || started.elapsed() > SCAN_BUDGET {
-                    return Err(Error::TooComplex);
-                }
                 let candidate = entry.path();
                 path::validate(&candidate)?;
                 let kind = entry.file_type()?;
@@ -113,9 +103,6 @@ impl Compiled {
                     // Binding a symlink itself is not safe on either native
                     // backend. Mask its resolved target, including aliases.
                     denied.insert(materialized(&candidate)?);
-                    if denied.len() > MAX_RULES {
-                        return Err(Error::TooComplex);
-                    }
                 } else if kind.is_dir() {
                     pending.push(candidate);
                 }
@@ -213,7 +200,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn process_snapshot_denies_matching_link_targets_and_rejects_unbounded_scans() {
+    fn process_snapshot_denies_matching_link_targets_and_requires_a_literal_root() {
         let temp = tempfile::tempdir().unwrap();
         let root = materialized(temp.path()).unwrap();
         fs::write(root.join("actual"), "secret").unwrap();

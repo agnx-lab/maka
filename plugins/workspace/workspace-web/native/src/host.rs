@@ -83,7 +83,6 @@ impl Web {
             return Err("web_configuration_invalid".into());
         }
         let input: Configuration = serde_json::from_value(input).map_err(message)?;
-        input.network.validate().map_err(message)?;
         let persistence = context.persistence().ok_or("web_requires_persistence")?;
         let root = persistence.store().owned_root().map_err(message)?;
         let configuration = Arc::new(ConfigurationStore::for_root(root).await.map_err(message)?);
@@ -223,7 +222,7 @@ impl Handler for Service {
                             .attachments()
                             .get("secret")
                             .ok_or("web_key_required")?;
-                        if resource.bytes() == 0 || resource.bytes() > 64 * 1024 {
+                        if resource.bytes() == 0 {
                             return encode(Update::InvalidKey);
                         }
                         let bytes = resource.read(0..resource.bytes())?;
@@ -231,10 +230,7 @@ impl Handler for Service {
                             return encode(Update::InvalidKey);
                         };
                         let secret = secret.trim().to_owned();
-                        if secret.is_empty()
-                            || secret.len() > 4096
-                            || secret.chars().any(char::is_control)
-                        {
+                        if secret.is_empty() || secret.chars().any(char::is_control) {
                             return encode(Update::InvalidKey);
                         }
                         Some(secret)

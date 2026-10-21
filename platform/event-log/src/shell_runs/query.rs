@@ -121,7 +121,10 @@ impl EventLog {
                         }
                         hash.update(&bytes);
                         if total >= offset && !page_full {
-                            if resources.len() == 64 || page_bytes + bytes.len() + 1 > 52 * 1024 {
+                            if resources.len() == 64
+                                || (!resources.is_empty()
+                                    && page_bytes + bytes.len() + 1 > 52 * 1024)
+                            {
                                 page_full = true;
                             } else {
                                 page_bytes += bytes.len() + 1;
@@ -134,9 +137,6 @@ impl EventLog {
                     tx.rollback().await?;
                     hash.update(b"]");
                     let next = offset.saturating_add(resources.len() as u64);
-                    if offset < total && resources.is_empty() {
-                        return Err(super::invalid("shell projection cannot fit one page"));
-                    }
                     Ok(ShellResourcePage {
                         resources,
                         revision: format!("sha256:{}", hex::encode(hash.finalize())),

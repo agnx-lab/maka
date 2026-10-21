@@ -294,19 +294,23 @@ async fn tool_accounting_preserves_dispatch_truth_and_snapshot_without_private_b
         literal.total, 0,
         "search is a bound literal, not SQL or LIKE syntax"
     );
-    assert!(
-        log.usage_activity(
+    let complete_query = log
+        .usage_activity(
             query(),
             Selection {
                 search: "字".repeat(342),
                 ..Default::default()
             },
             0,
-            100
+            100,
         )
         .await
-        .is_err(),
-        "search limit counts UTF-8 bytes"
+        .unwrap();
+    assert_eq!(complete_query.through, literal.through);
+    assert_eq!(complete_query.total, 0);
+    assert!(
+        complete_query.attempts.is_empty(),
+        "the complete UTF-8 search is a valid literal with no match"
     );
     let old = log
         .usage_activity(fixed.clone(), Selection::default(), 0, 100)

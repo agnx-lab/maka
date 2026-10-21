@@ -728,3 +728,50 @@ async fn terminal_styled_display_survives_retirement_cancel_and_host_reopen_beyo
         processes::close(&f).await;
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn terminal_large_paste_is_one_original_envelope_receipt_and_controller_sequence() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let (_, f, session) = processes::fixture().await;
+        files::change(&f, &session, "danger_full_access", false, true).await;
+        let owner = caller();
+        let target = start(&f, &owner, &session).await;
+        let (lease, controller) = acquire(&f, &owner, &target).await;
+        let text = format!("{}\noriginal-tail", "中🙂".repeat(12_000));
+        let expected = format!("\x1b[200~{text}\x1b[201~{}", "X".repeat(64));
+        assert!(text.len() > 64 * 1024);
+        std::fs::write(f.workspace.join("paste-fixture.sh"), format!(
+            "stty raw -echo\nprintf '\\033[?2004h\\036PASTE_READY\\037'\ndd bs=1 count={} of=paste-original.bin 2>/dev/null\ndd bs=1 count=1 of=paste-next.bin 2>/dev/null\ndd bs=1 count=1 of=/dev/null 2>/dev/null\n", expected.len()
+        )).unwrap();
+        let mut watch = subscribe(&f, &owner, "watchOutput", output_request(&target, 0)).await;
+        let launched = mutation(&f, &owner, "control", command(&controller, 1, "exec /bin/sh ./paste-fixture.sh"), Uuid::new_v4()).await;
+        assert_eq!(launched["kind"], "completed", "{launched}");
+        let mut after = 0;
+        let mut output = Vec::new();
+        output_through(&mut watch, &mut after, &mut output, b"\x1ePASTE_READY\x1f", &json!({"cols":80,"rows":24})).await;
+        let mut actions = vec![json!({"type":"paste","text":text})];
+        actions.extend((0..64).map(|_| json!({"type":"text","text":"X"})));
+        let input = json!({"controller":controller,"sequence":2,"actions":actions});
+        let receipt = mutation(&f, &owner, "control", input.clone(), Uuid::new_v4()).await;
+        assert_eq!(receipt["kind"], "completed", "{receipt}");
+        assert_eq!(receipt["value"]["sequence"], 2);
+        assert_eq!(receipt["value"]["acceptedBytes"], expected.len());
+        wait_file(&f, "paste-original.bin", &expected).await;
+        assert!(std::fs::read(f.workspace.join("paste-original.bin")).unwrap() == expected.as_bytes(), "original paste bytes or single bracketed envelope changed");
+        let replay = mutation(&f, &owner, "control", input, Uuid::new_v4()).await;
+        assert_eq!(replay["value"], receipt["value"], "same controller sequence must return its original receipt");
+        let out_of_order = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":4,"actions":[{"type":"text","text":"wrong"}]}), Uuid::new_v4()).await;
+        assert_eq!(out_of_order["kind"], "failed");
+        watch.cancel();
+        watch.completion().await.cleanup.unwrap();
+        let next = mutation(&f, &owner, "control", json!({"controller":controller,"sequence":3,"actions":[{"type":"text","text":"N"}]}), Uuid::new_v4()).await;
+        assert_eq!(next["kind"], "completed", "{next}");
+        assert_eq!(next["value"]["acceptedBytes"], 1);
+        wait_file(&f, "paste-next.bin", "N").await;
+        assert!(std::fs::read(f.workspace.join("paste-original.bin")).unwrap() == expected.as_bytes(), "controller replay changed original bytes");
+        let stopped = mutation(&f, &owner, "stop", target, Uuid::new_v4()).await;
+        assert_eq!(stopped["kind"], "completed", "{stopped}");
+        lease.completion().await.cleanup.unwrap();
+        processes::close(&f).await;
+    }).await.unwrap();
+}

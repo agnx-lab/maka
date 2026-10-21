@@ -26,7 +26,6 @@ pub(crate) async fn evaluate(
     runtime: &mut JsRuntime,
     source: &str,
     names: &[String],
-    max_bytes: usize,
     metadata: &[ToolMetadata],
     module: bool,
 ) -> Result<Value, CellDiagnostic> {
@@ -115,7 +114,7 @@ pub(crate) async fn evaluate(
                 return result.found ? result.value : undefined;
             }},
             setTimeout: (callback, millis = 0) => {{
-                if (typeof callback !== "function" || !Number.isFinite(millis) || millis < 0 || millis > 86400000)
+                if (typeof callback !== "function" || !Number.isFinite(millis) || millis < 0)
                     throw new ErrorClass("invalid timer");
                 if (timers.size >= 128) throw new ErrorClass("timer limit exceeded");
                 const id = ++nextTimer;
@@ -220,8 +219,5 @@ pub(crate) async fn evaluate(
         Outcome::Success { json } => json,
         Outcome::Failure { error } => return Err(error),
     };
-    if json.len() > max_bytes {
-        return Err(CellDiagnostic::limit("result bytes"));
-    }
     serde_json::from_str(&json).map_err(|error| execution(error.to_string()))
 }

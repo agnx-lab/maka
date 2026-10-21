@@ -24,29 +24,12 @@ use maka_agent_facts::read::ReadPage;
 use maka_capabilities::filesystem::Reader;
 use maka_capabilities::filesystem::Symlinks;
 use maka_capabilities::filesystem::entries::Kind;
-use maka_capabilities::filesystem::entries::ReadFile;
 use std::{
     collections::BTreeMap,
     path::{Component, Path},
     sync::Arc,
 };
 use tokio_util::sync::CancellationToken;
-
-const MAX_FILE: usize = 1024 * 1024;
-const MAX_FILES: usize = 256;
-
-pub(crate) struct Budget {
-    bytes: usize,
-    entries: usize,
-}
-impl Default for Budget {
-    fn default() -> Self {
-        Self {
-            bytes: 16 * 1024 * 1024,
-            entries: 16_384,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 enum Resource {
@@ -61,37 +44,24 @@ pub struct Resources {
 }
 
 /// Build assets are immutable and carry no filesystem authority. Parse and hash
-/// them once, then apply each discovery's remaining shared budget independently.
+/// them once and share the complete immutable snapshot across discoveries.
 #[derive(Debug, Clone)]
 pub(crate) struct Embedded {
-    files: &'static [(&'static str, &'static [u8])],
     prepared: Resources,
 }
 impl Embedded {
     pub fn new(files: &'static [(&'static str, &'static [u8])]) -> Result<Self, ScanError> {
         Ok(Self {
-            files,
-            prepared: Resources::embedded(files, &mut Budget::default())?,
+            prepared: Resources::embedded(files)?,
         })
     }
-    pub fn capture(&self, budget: &mut Budget) -> Result<Resources, ScanError> {
-        Resources::capture_embedded(self.files, budget, |path, _| {
-            // A call never has more than the original default budget. Every
-            // resource it can reach therefore exists in this prepared prefix.
-            self.prepared
-                .files
-                .get(path)
-                .cloned()
-                .ok_or(ScanError::Unavailable)
-        })
+    pub fn capture(&self) -> Resources {
+        self.prepared.clone()
     }
 }
 impl Resources {
-    pub(crate) fn embedded(
-        files: &[(&str, &[u8])],
-        budget: &mut Budget,
-    ) -> Result<Self, ScanError> {
-        Self::capture_embedded(files, budget, |_, bytes| {
+    pub(crate) fn embedded(files: &[(&str, &[u8])]) -> Result<Self, ScanError> {
+        Self::capture_embedded(files, |_, bytes| {
             Ok(match std::str::from_utf8(bytes) {
                 Ok(content) => Resource::Text {
                     content: content.into(),
@@ -103,26 +73,14 @@ impl Resources {
     }
     fn capture_embedded(
         files: &[(&str, &[u8])],
-        budget: &mut Budget,
         mut resource: impl FnMut(&str, &[u8]) -> Result<Resource, ScanError>,
     ) -> Result<Self, ScanError> {
         let mut result = Self::default();
-        for (index, (path, bytes)) in files.iter().enumerate() {
-            if index == MAX_FILES || budget.entries == 0 || budget.bytes == 0 {
-                result.incomplete = true;
-                break;
-            }
-            budget.entries -= 1;
-            if !valid_path(path) || path.split('/').count() > 9 {
+        for (path, bytes) in files {
+            if !valid_path(path) {
                 return Err(ScanError::Unavailable);
             }
-            let limit = MAX_FILE.min(budget.bytes);
-            budget.bytes = budget.bytes.saturating_sub(bytes.len().min(limit));
-            let resource = if bytes.len() > limit {
-                Resource::Unavailable(DiscoveryFailure::SourceTooLarge)
-            } else {
-                resource(path, bytes)?
-            };
+            let resource = resource(path, bytes)?;
             if result.files.insert((*path).into(), resource).is_some() {
                 return Err(ScanError::Unavailable);
             }
@@ -132,7 +90,6 @@ impl Resources {
     pub(crate) fn capture(
         reader: &Reader<'_>,
         directory: &Path,
-        budget: &mut Budget,
         cancellation: &CancellationToken,
     ) -> Result<Self, ScanError> {
         let root = directory
@@ -146,8 +103,7 @@ impl Resources {
             .ok_or(ScanError::Unavailable)?
             .join("/");
         let mut result = Self::default();
-        let mut remaining = MAX_FILES;
-        result.walk(reader, &root, "", budget, &mut remaining, cancellation)?;
+        result.walk(reader, &root, cancellation)?;
         Ok(result)
     }
 
@@ -155,108 +111,75 @@ impl Resources {
         &mut self,
         reader: &Reader<'_>,
         root: &str,
-        relative: &str,
-        budget: &mut Budget,
-        remaining: &mut usize,
         cancellation: &CancellationToken,
     ) -> Result<(), ScanError> {
-        super::discovery::check_cancelled(cancellation)?;
-        if relative.split('/').count() > 8
-            || *remaining == 0
-            || budget.entries == 0
-            || budget.bytes == 0
-        {
-            self.incomplete = true;
-            return Ok(());
-        }
-        let path = if relative.is_empty() {
-            root.into()
-        } else {
-            format!("{root}/{relative}")
-        };
-        let mut entries = Vec::new();
-        let read = reader.visit_directory(&path, Symlinks::Reject, |entry| {
-            if budget.entries == 0 || *remaining == 0 {
-                return Err(maka_capabilities::filesystem::ReadError::ScanLimit {
-                    max: MAX_FILES as u64,
-                });
-            }
-            budget.entries -= 1;
-            *remaining -= 1;
-            if !entry.name.starts_with('.')
-                && entry.name != "SKILL.md"
-                && entry.name != "skill.lock.json"
-            {
-                entries.push(entry);
-            }
-            Ok(())
-        });
-        if matches!(read, Err(maka_capabilities::filesystem::ReadError::Retired)) {
-            return Err(ScanError::Cancelled);
-        }
-        if read.is_err() {
-            self.incomplete = true;
-        }
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
-        for entry in entries {
+        let mut pending = vec![String::new()];
+        while let Some(relative) = pending.pop() {
             super::discovery::check_cancelled(cancellation)?;
-            let relative = if relative.is_empty() {
-                entry.name
+            let path = if relative.is_empty() {
+                root.into()
             } else {
-                format!("{relative}/{}", entry.name)
+                format!("{root}/{relative}")
             };
-            if !valid_path(&relative) {
-                continue;
+            let mut entries = Vec::new();
+            let read = reader.visit_directory(&path, Symlinks::Reject, |entry| {
+                super::discovery::check_cancelled(cancellation)
+                    .map_err(|_| maka_capabilities::filesystem::ReadError::Retired)?;
+                if !entry.name.starts_with('.')
+                    && entry.name != "SKILL.md"
+                    && entry.name != "skill.lock.json"
+                {
+                    entries.push(entry);
+                }
+                Ok(())
+            });
+            if matches!(read, Err(maka_capabilities::filesystem::ReadError::Retired)) {
+                return Err(ScanError::Cancelled);
             }
-            match entry.kind {
-                Kind::Directory => {
-                    self.walk(reader, root, &relative, budget, remaining, cancellation)?
+            if read.is_err() {
+                self.incomplete = true;
+            }
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            for entry in entries {
+                super::discovery::check_cancelled(cancellation)?;
+                let relative = if relative.is_empty() {
+                    entry.name
+                } else {
+                    format!("{relative}/{}", entry.name)
+                };
+                if !valid_path(&relative) {
+                    continue;
                 }
-                Kind::Other => {
-                    self.files.insert(
-                        relative,
-                        Resource::Unavailable(DiscoveryFailure::BlockedPath),
-                    );
-                }
-                Kind::File => {
-                    let limit = MAX_FILE.min(budget.bytes);
-                    let resource = if limit == 0 {
-                        Resource::Unavailable(DiscoveryFailure::SourceTooLarge)
-                    } else {
-                        match reader.read(maka_capabilities::filesystem::ReadViewInput {
-                            file: ReadFile {
-                                path: format!("{root}/{relative}"),
-                                offset: 0,
-                                limit,
+                let resource = match entry.kind {
+                    Kind::Directory => {
+                        pending.push(relative);
+                        continue;
+                    }
+                    Kind::Other => Resource::Unavailable(DiscoveryFailure::BlockedPath),
+                    Kind::File => match super::discovery::source::read_view(
+                        reader,
+                        Path::new(&format!("{root}/{relative}")),
+                        cancellation,
+                    ) {
+                        Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                            Ok(content) => Resource::Text {
+                                hash: maka_agent_facts::artifact::content_digest(
+                                    content.as_bytes(),
+                                ),
+                                content: content.into(),
                             },
-                            symlinks: Symlinks::Reject,
-                        }) {
-                            Ok(page) => {
-                                budget.bytes = budget.bytes.saturating_sub(page.bytes.len());
-                                if page.next_offset.is_some() {
-                                    Resource::Unavailable(DiscoveryFailure::SourceTooLarge)
-                                } else {
-                                    match String::from_utf8(page.bytes) {
-                                        Ok(content) => Resource::Text {
-                                            hash: maka_agent_facts::artifact::content_digest(
-                                                content.as_bytes(),
-                                            ),
-                                            content: content.into(),
-                                        },
-                                        Err(_) => {
-                                            Resource::Unavailable(DiscoveryFailure::ReadFailed)
-                                        }
-                                    }
-                                }
-                            }
-                            Err(maka_capabilities::filesystem::ReadError::Retired) => {
-                                return Err(ScanError::Cancelled);
-                            }
                             Err(_) => Resource::Unavailable(DiscoveryFailure::ReadFailed),
+                        },
+                        Err(super::discovery::source::ReadError::Cancelled) => {
+                            return Err(ScanError::Cancelled);
                         }
-                    };
-                    self.files.insert(relative, resource);
-                }
+                        Err(super::discovery::source::ReadError::Failure(reason)) => {
+                            Resource::Unavailable(reason)
+                        }
+                        Ok(None) => Resource::Unavailable(DiscoveryFailure::ReadFailed),
+                    },
+                };
+                self.files.insert(relative, resource);
             }
         }
         Ok(())
@@ -274,7 +197,6 @@ impl Resources {
                             Resource::Text { hash, .. } => hash.as_str(),
                             Resource::Unavailable(DiscoveryFailure::BlockedPath) => "blocked",
                             Resource::Unavailable(DiscoveryFailure::ReadFailed) => "unreadable",
-                            Resource::Unavailable(DiscoveryFailure::SourceTooLarge) => "too_large",
                         },
                     )
                 })
@@ -309,9 +231,6 @@ impl Resources {
         }
         let content = match self.files.get(&path) {
             Some(Resource::Text { content, .. }) => content,
-            Some(Resource::Unavailable(DiscoveryFailure::SourceTooLarge)) => {
-                return Err("Skill resource exceeds the bounded text capture limit".into());
-            }
             Some(Resource::Unavailable(_)) => {
                 return Err(
                     "Skill resource was not a readable regular UTF-8 file at request capture"
@@ -343,7 +262,6 @@ impl Resources {
 
 fn valid_path(path: &str) -> bool {
     !path.is_empty()
-        && path.len() <= 1024
         && !path.contains(['\\', ':'])
         && !path.chars().any(char::is_control)
         && path
@@ -354,44 +272,8 @@ fn valid_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn prepared_embedded_resources_keep_request_budgets_independent() {
-        static FILES: &[(&str, &[u8])] = &[("one", b"abc"), ("two", b"de"), ("binary", &[255])];
-        let prepared = Embedded::new(FILES).unwrap();
-        for bytes in 0..=8 {
-            for entries in 0..=4 {
-                let mut direct_budget = Budget { bytes, entries };
-                let direct = Resources::embedded(FILES, &mut direct_budget).unwrap();
-                let mut cached_budget = Budget { bytes, entries };
-                let cached = prepared.capture(&mut cached_budget).unwrap();
-                assert_eq!(cached.fingerprint(), direct.fingerprint());
-                assert_eq!(
-                    (cached_budget.bytes, cached_budget.entries),
-                    (direct_budget.bytes, direct_budget.entries)
-                );
-            }
-        }
-        let first = prepared.capture(&mut Budget::default()).unwrap();
-        let second = prepared.capture(&mut Budget::default()).unwrap();
-        let Resource::Text { content: a, .. } = &first.files["one"] else {
-            panic!("text")
-        };
-        let Resource::Text { content: b, .. } = &second.files["one"] else {
-            panic!("text")
-        };
-        assert!(
-            Arc::ptr_eq(a, b),
-            "immutable bytes are shared across requests"
-        );
-        assert_eq!(a.as_ref(), "abc");
-        assert!(matches!(
-            second.files["binary"],
-            Resource::Unavailable(DiscoveryFailure::ReadFailed)
-        ));
-    }
-    #[test]
-    fn embedded_resources_enforce_paths_and_shared_capture_limits() {
+    fn embedded_resources_share_complete_originals_and_enforce_containment() {
         for path in [
             "../secret",
             "/secret",
@@ -400,47 +282,41 @@ mod tests {
             "a\\b",
             "a:b",
             "a/.hidden",
-            "a/b/c/d/e/f/g/h/i/j",
         ] {
-            assert!(Resources::embedded(&[(path, b"text")], &mut Budget::default()).is_err());
+            assert!(Resources::embedded(&[(path, b"text")]).is_err());
         }
-        assert!(
-            Resources::embedded(&[("same", b"a"), ("same", b"b")], &mut Budget::default()).is_err()
-        );
-        let mut budget = Budget {
-            bytes: 5,
-            entries: 3,
-        };
-        let resources = Resources::embedded(
-            &[
-                ("binary", &[255]),
-                ("large", b"oversized"),
-                ("absent", b"x"),
-            ],
-            &mut budget,
-        )
+        assert!(Resources::embedded(&[("same", b"a"), ("same", b"b")]).is_err());
+        let prepared = Embedded::new(&[
+            ("one", b"abc"),
+            ("binary", &[255]),
+            ("a/b/c/d/e/f/g/h/i/j", b"deep"),
+        ])
         .unwrap();
-        assert_eq!(budget.bytes, 0);
-        let read = |path: &str| {
-            resources.page(
+        let first = prepared.capture();
+        let second = prepared.capture();
+        let Resource::Text { content: a, .. } = &first.files["one"] else {
+            panic!("text")
+        };
+        let Resource::Text { content: b, .. } = &second.files["one"] else {
+            panic!("text")
+        };
+        assert!(Arc::ptr_eq(a, b));
+        assert_eq!(a.as_ref(), "abc");
+        assert!(matches!(
+            second.files["binary"],
+            Resource::Unavailable(DiscoveryFailure::ReadFailed)
+        ));
+        let (_, page) = second
+            .page(
                 "bundled:test",
                 &ReadInput {
-                    path: path.into(),
+                    path: "a/b/c/d/e/f/g/h/i/j".into(),
                     offset: None,
                     limit: None,
                 },
             )
-        };
-        assert!(read("binary").unwrap_err().contains("UTF-8"));
-        assert!(read("large").unwrap_err().contains("limit"));
-        assert!(read("absent").unwrap_err().contains("incomplete"));
-        let mut budget = Budget {
-            bytes: 10,
-            entries: 1,
-        };
-        let resources = Resources::embedded(&[("one", b"1"), ("two", b"2")], &mut budget).unwrap();
-        assert_eq!(budget.entries, 0);
-        assert!(resources.incomplete);
-        assert_eq!(resources.files.len(), 1);
+            .unwrap();
+        assert_eq!(page.content, "deep");
+        assert_eq!(page.next, None);
     }
 }

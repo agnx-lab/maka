@@ -111,11 +111,7 @@ fn result(v: &Value, outcome: bool) -> Result<FormResult> {
     let r = r.as_object_mut().ok_or("Invalid form object")?;
     r.remove("kind");
     r.remove("committedAt");
-    if outcome {
-        crate::capability::form_result_decode::decode_outcome_result(&Value::Object(r.clone()))
-    } else {
-        crate::capability::form_decode::decode_form_result(&Value::Object(r.clone()))
-    }
+    crate::capability::form_result_decode::decode_form_result(&Value::Object(r.clone()))
 }
 fn answer(v: &Value) -> Result<InteractionAnswer> {
     let value = match v["kind"].as_str() {

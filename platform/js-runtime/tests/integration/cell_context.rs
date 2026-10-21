@@ -42,7 +42,7 @@ struct Echo {
 async fn model_modules_match_globals_timers_explicit_output_and_import_boundaries() {
     let engine = CodeExecutor::new(CellLimits::default()).unwrap();
     let tools = Arc::new(Echo::default());
-    let context = CellContext::new(CellStore::default(), 4096, vec![]);
+    let context = CellContext::new(CellStore::default(), vec![]);
     let result = engine
         .execute_module(
             r#"
@@ -78,7 +78,7 @@ async fn model_modules_match_globals_timers_explicit_output_and_import_boundarie
         "import x from 'node:fs';",
         "await import('node:fs');",
     ] {
-        let context = CellContext::new(CellStore::default(), 4096, vec![]);
+        let context = CellContext::new(CellStore::default(), vec![]);
         let result = engine
             .execute_module(
                 source.into(),
@@ -117,7 +117,6 @@ async fn output_survives_errors_and_json_store_does_not_retain_heap() {
     let store = CellStore::default();
     let context = CellContext::new(
         store.clone(),
-        4096,
         vec![ToolMetadata {
             name: "echo".into(),
             description: "fixture".into(),
@@ -130,7 +129,7 @@ async fn output_survives_errors_and_json_store_does_not_retain_heap() {
     assert!(matches!(result, CellResult::Failure { .. }));
     assert!(matches!(&context.take_output()[0], CellOutput::Text { text } if text == "echo"));
     context.commit().unwrap();
-    let next = CellContext::new(store.clone(), 4096, vec![]);
+    let next = CellContext::new(store.clone(), vec![]);
     let result = engine
         .execute_with_context(
             "return [load('data'), typeof secret, load('missing') === undefined];".into(),
@@ -230,7 +229,7 @@ async fn fatal_failure_is_observable_before_other_accepted_work_finishes_cleanup
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         let tools = Arc::new(Faults { entered: Arc::new(Notify::new()), release: Arc::new(Notify::new()), later: AtomicUsize::new(0) });
         let engine = CodeExecutor::new(CellLimits::default()).unwrap();
-        let context = CellContext::new(CellStore::default(), 4096, vec![]);
+        let context = CellContext::new(CellStore::default(), vec![]);
         let worker_context = context.clone();
         let worker_tools = tools.clone();
         let mut worker = tokio::spawn(async move {

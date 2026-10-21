@@ -66,12 +66,23 @@ async fn projects_register_create_rename_archive_restore_and_relocate_original_s
     assert_eq!(created["session"]["workspace"]["projectId"], selected["id"]);
     assert!(fixture.workspace.join(MARKER_FILE).exists());
     let current = projects(&fixture).await["projects"][0]["reference"].clone();
+    let name = format!("Research 项目{}", "完整".repeat(9000));
     let renamed = change(
         &fixture,
-        json!({"kind":"rename","project":current,"name":"Research 项目"}),
+        json!({"kind":"rename","project":current,"name":name}),
     )
     .await;
-    assert_eq!(renamed["project"]["name"], "Research 项目");
+    assert_eq!(
+        renamed["project"]["name"],
+        format!("Research 项目{}", "完整".repeat(9000))
+    );
+    let listed = projects(&fixture).await;
+    assert_eq!(listed["projects"][0], renamed["project"]);
+    let directory = fixture
+        .query("projects", json!({"kind":"directory","selection":source}))
+        .await
+        .unwrap();
+    assert_eq!(directory["location"]["project"], renamed["project"]);
     assert_eq!(
         change(&fixture, json!({"kind":"archive","project":current})).await["kind"],
         "changed"

@@ -33,8 +33,8 @@ use deno_core::{JsRuntime, RuntimeOptions, v8};
 use evaluate::evaluate;
 use execution_budget::ExecutionBudget;
 use maka_agent_facts::tools::ToolExecutor;
+use result::complete;
 pub use result::{CellAbort, CellDiagnostic, CellDiagnosticKind, CellResult, ToolCall};
-use result::{bounded, diagnostic_fits};
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 use tokio::runtime::Handle;
@@ -44,10 +44,6 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 pub struct CellLimits {
     /// Cumulative synchronous VM execution, excluding asynchronous Host tool waits.
     pub timeout: Duration,
-    pub max_source_bytes: usize,
-    /// Maximum serialized cell envelope, including diagnostics and call summaries.
-    pub max_value_bytes: usize,
-    pub max_tool_calls: usize,
     /// V8 heap limit only; not an OS memory limit or a process sandbox.
     pub heap_bytes: usize,
 }
@@ -56,9 +52,6 @@ impl Default for CellLimits {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(30),
-            max_source_bytes: 64 * 1024,
-            max_value_bytes: 1024 * 1024,
-            max_tool_calls: 32,
             heap_bytes: 64 * 1024 * 1024,
         }
     }
@@ -74,9 +67,9 @@ pub struct CodeExecutor {
 impl CodeExecutor {
     pub fn new(limits: CellLimits) -> Result<Self, CellAbort> {
         if limits.timeout.is_zero()
-            || limits.max_source_bytes == 0
-            || !diagnostic_fits(&[], limits.max_value_bytes)
-            || limits.max_tool_calls == 0
+            || std::time::Instant::now()
+                .checked_add(limits.timeout)
+                .is_none()
             || limits.heap_bytes < 8 * 1024 * 1024
         {
             return Err(CellAbort::Internal("invalid cell limits".into()));
@@ -99,7 +92,7 @@ impl CodeExecutor {
                 description: String::new(),
             })
             .collect();
-        let context = CellContext::new(CellStore::default(), self.limits.max_value_bytes, metadata);
+        let context = CellContext::new(CellStore::default(), metadata);
         self.execute_with_context(source, tools, cancellation, context)
             .await
     }
@@ -141,13 +134,6 @@ impl CodeExecutor {
     ) -> Result<CellResult, CellAbort> {
         if cancellation.is_cancelled() {
             return Err(CellAbort::Cancelled);
-        }
-        if source.len() > self.limits.max_source_bytes {
-            return Ok(bounded(
-                Err(CellDiagnostic::limit("source bytes")),
-                vec![],
-                self.limits.max_value_bytes,
-            ));
         }
         let cancellation = cancellation.child_token();
         // Dropping the caller's future cancels the worker; it does not detach
@@ -209,7 +195,6 @@ async fn run_cell(
         cancellation: cancellation.child_token(),
         tasks: TaskTracker::new(),
         host: host.clone(),
-        limits: limits.clone(),
         admission: Mutex::new(Admission::default()),
     });
     let mut runtime = JsRuntime::try_new(RuntimeOptions {
@@ -267,7 +252,6 @@ async fn run_cell(
                &mut runtime,
                &source,
                &names,
-               limits.max_value_bytes,
                context.metadata(),
                module,
            ))
@@ -308,10 +292,9 @@ async fn run_cell(
         Some(StopReason::HeapLimit) => Err(CellDiagnostic::limit("JavaScript heap")),
         None => result,
     };
-    Ok(bounded(
+    Ok(complete(
         result,
         scope.admission.lock().unwrap().calls.clone(),
-        limits.max_value_bytes,
     ))
 }
 

@@ -83,8 +83,7 @@ impl EventLog {
                     let raw: String = sqlx::query_scalar(
                         "SELECT a.value FROM transcript_rows r, json_each(r.payload, '$.attachments') a
                          WHERE r.session_id = ?1 AND r.source_sequence = ?2 AND r.item_index = ?3
-                         AND json_extract(r.payload, '$.type') = 'user' AND a.key = ?4
-                         AND length(CAST(a.value AS BLOB)) <= 16384",
+                         AND json_extract(r.payload, '$.type') = 'user' AND a.key = ?4",
                     )
                     .bind(&session)
                     .bind(source_sequence)

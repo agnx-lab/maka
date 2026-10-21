@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 pub struct Configuration {
     pub agent: crate::Configuration,
     /// Exactly selected imports of Agent services. Native grants are independent.
-    #[schemars(length(max = 8), extend("uniqueItems" = true))]
+    #[schemars(extend("uniqueItems" = true))]
     pub workers: Vec<String>,
 }
 pub fn configuration_schema() -> serde_json::Value {
@@ -58,7 +58,6 @@ pub struct Tasks {
 pub struct TaskEntry {
     pub task_id: String,
     pub worker: String,
-    #[schemars(length(max = 256))]
     pub title: String,
     /// Frozen task acceptance time in Unix milliseconds.
     #[schemars(range(max = 9_007_199_254_740_991u64))]
@@ -77,11 +76,9 @@ pub struct TaskRead {
 #[schemars(rename = "WorkHubTask")]
 pub struct Task {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[schemars(length(max = 16))]
     pub dependencies: Vec<String>,
     pub task_id: String,
     pub worker: String,
-    #[schemars(length(max = 256))]
     pub title: String,
     /// Frozen task acceptance time in Unix milliseconds.
     #[schemars(range(max = 9_007_199_254_740_991u64))]
@@ -99,7 +96,6 @@ pub struct Task {
 #[schemars(rename = "WorkHubTaskStatus")]
 pub enum TaskStatus {
     Blocked {
-        #[schemars(length(max = 16))]
         dependencies: Vec<String>,
     },
     Cancelled,

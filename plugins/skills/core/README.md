@@ -25,6 +25,6 @@ Parses SKILL.md documents, discovers skill sources and prepares selected instruc
 
 Bundled skill and SDK files are enumerated in `build.rs`; adding one requires updating that inventory. Local caches are excluded. Source examples come from top-level TypeScript files in fixed directories.
 
-Immutable bundled documents and resource contents are prepared once and shared across discoveries. Each discovery still applies its own remaining entry and byte budgets. Filesystem sources are captured afresh under the current request capabilities.
+Immutable bundled documents and resource contents are prepared once and shared across discoveries. Discovery captures complete catalogs and contained resources; model metadata remains a preview with exact source references and pageable reads. Filesystem sources are captured afresh under the current request capabilities.
 
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

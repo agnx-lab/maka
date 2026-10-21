@@ -295,31 +295,20 @@ pub struct PermissionCommand {
 
 impl PermissionRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.reason.trim().is_empty() || self.reason.len() > 4096 || self.reason.contains('\0') {
-            return Err("Permission request requires a bounded reason");
+        if self.reason.trim().is_empty() || self.reason.contains('\0') {
+            return Err("Permission request requires a reason");
         }
         if let Some(command) = &self.command
             && (command.command.trim().is_empty()
                 || command.command.contains('\0')
-                || command.command.len() > 8192
                 || !std::path::Path::new(&command.cwd).is_absolute()
-                || command.cwd.contains('\0')
-                || command.cwd.len() > 4096)
+                || command.cwd.contains('\0'))
         {
             return Err("Invalid permission command description");
         }
         self.permissions
             .validate()
             .map_err(|_| "Invalid additional permissions")?;
-        // Never publish a prompt whose full approval cannot be committed. The
-        // longest scope and timestamp reserve the complete receipt envelope.
-        InteractionOutcome::PermissionsDecision {
-            decision: grant::Decision::Allow {
-                permissions: self.permissions.clone(),
-                scope: grant::Scope::Session,
-            },
-            committed_at: MAX_SAFE_INTEGER,
-        }
-        .validate()
+        Ok(())
     }
 }

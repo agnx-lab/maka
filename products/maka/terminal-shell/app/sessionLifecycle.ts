@@ -24,7 +24,8 @@ export type SessionAction =
   | { kind: 'rename' | 'fork'; session: AgentSession; title: string }
   | { kind: 'archive' | 'restore' | 'remove'; session: AgentSession };
 export type SessionActionResult =
-  { kind: 'updated' | 'forked'; session: AgentSession } | { kind: 'removed'; sessionId: string };
+  | { kind: 'updated' | 'forked'; session: AgentSession }
+  | { kind: 'removed'; sessionId: string };
 
 export class SessionRevisionConflict extends Error {
   constructor() {

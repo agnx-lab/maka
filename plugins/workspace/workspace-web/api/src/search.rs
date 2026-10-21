@@ -23,10 +23,11 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "WebQuery")]
 pub struct Query {
-    #[schemars(length(min = 1, max = 200))]
+    #[schemars(length(min = 1))]
     pub query: String,
     #[serde(default = "default_limit")]
-    #[schemars(range(min = 1, max = 10))]
+    // Tavily Search API supports max_results from 0 through 20.
+    #[schemars(range(min = 1, max = 20))]
     pub limit: usize,
 }
 fn default_limit() -> usize {
@@ -34,9 +35,7 @@ fn default_limit() -> usize {
 }
 impl Query {
     pub fn is_valid(&self) -> bool {
-        !self.query.trim().is_empty()
-            && self.query.chars().count() <= 200
-            && (1..=10).contains(&self.limit)
+        !self.query.trim().is_empty() && (1..=20).contains(&self.limit)
     }
 }
 

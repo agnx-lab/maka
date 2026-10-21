@@ -90,7 +90,7 @@ impl ControlError {
     }
 }
 
-/// Bounded native terminal payload; the caller supplies authorization before enqueue.
+/// Owned complete native terminal payload; the caller supplies authorization before enqueue.
 pub enum Input {
     Actions(Vec<InputAction>),
     Interactive(Vec<InputAction>),

@@ -33,8 +33,6 @@ use tokio_util::sync::CancellationToken;
 mod archive;
 
 const VERSION: &str = "1.2.1";
-const MAX_ARCHIVE: u64 = 512 * 1024 * 1024;
-const MAX_CHUNK: usize = 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -42,8 +40,6 @@ pub enum Error {
     Unsupported,
     #[error("Antigravity installation cancelled")]
     Cancelled,
-    #[error("Antigravity installation timed out")]
-    Timeout,
     #[error("Antigravity download failed")]
     Download,
     #[error("Antigravity distribution integrity check failed")]
@@ -139,15 +135,11 @@ impl Release {
 #[derive(Clone)]
 struct Control {
     cancellation: CancellationToken,
-    deadline: tokio::time::Instant,
 }
 impl Control {
     fn check(&self, retiring: &CancellationToken) -> Result<(), Error> {
         if self.cancellation.is_cancelled() || retiring.is_cancelled() {
             return Err(Error::Cancelled);
-        }
-        if tokio::time::Instant::now() >= self.deadline {
-            return Err(Error::Timeout);
         }
         Ok(())
     }
@@ -155,7 +147,7 @@ impl Control {
         tokio::select! {
             biased;
             _ = self.cancellation.cancelled() => Err(Error::Cancelled),
-            value = tokio::time::timeout_at(self.deadline, work) => value.map_err(|_| Error::Timeout),
+            value = work => Ok(value),
         }
     }
 }
@@ -172,7 +164,6 @@ pub async fn antigravity(
     let release = Release::current()?;
     let control = Control {
         cancellation: cancellation.clone(),
-        deadline: tokio::time::Instant::now() + Duration::from_secs(900),
     };
     let root = data.read_only().await?.location();
     let key = format!("install/{}", release.destination());
@@ -277,9 +268,6 @@ async fn install(
             bytes = bytes
                 .checked_add(chunk.len() as u64)
                 .ok_or(Error::Integrity)?;
-            if bytes > MAX_ARCHIVE || chunk.len() > MAX_CHUNK {
-                return Err(Error::Integrity);
-            }
             hash.update(&chunk);
             let path = format!("{staging}/download.zip");
             let control = control.clone();

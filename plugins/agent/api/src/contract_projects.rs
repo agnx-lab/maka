@@ -35,7 +35,7 @@ pub struct ProjectRef {
 #[schemars(rename = "AgentProject")]
 pub struct Project {
     pub reference: ProjectRef,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub name: String,
     pub archived: bool,
     pub available: bool,
@@ -72,9 +72,9 @@ pub enum ProjectsRead {
 #[schemars(rename = "AgentProjectLocation")]
 pub struct ProjectLocation {
     pub selection: DirectorySelection,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub name: String,
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<Project>")]
     pub project: Option<Project>,
@@ -110,7 +110,7 @@ pub enum ProjectChange {
     },
     Rename {
         project: ProjectRef,
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         name: String,
     },
     Archive {

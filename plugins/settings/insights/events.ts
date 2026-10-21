@@ -170,7 +170,6 @@ export function handleEvent<N extends Node>(
       if (
         !sameValue(chunk.metadata, r.captured.snapshot.text) ||
         !sameValue(state.search.observation?.snapshot.text, r.captured.snapshot.text) ||
-        new TextEncoder().encode(chunk.text).length > 1024 ||
         /[\u0000-\u001f\u007f]/.test(chunk.text)
       )
         state.notice = 'insights-search-invalid';
@@ -264,8 +263,7 @@ export function handleEvent<N extends Node>(
         state.search.ready &&
         !state.search.command &&
         state.search.observation &&
-        !state.search.observation.snapshot.marked &&
-        state.search.observation.snapshot.text.bytes <= 1024
+        !state.search.observation.snapshot.marked
       ) {
         const captured = state.search.observation;
         request(
@@ -362,8 +360,7 @@ export function handleEvent<N extends Node>(
               !state.fields[name].ready ||
               state.fields[name].command ||
               !state.fields[name].observation ||
-              state.fields[name].observation!.snapshot.marked ||
-              state.fields[name].observation!.snapshot.text.bytes > (name === 'model' ? 512 : 64),
+              state.fields[name].observation!.snapshot.marked,
           )
         )
           state.notice = 'insights-invalid';

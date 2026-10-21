@@ -94,7 +94,7 @@ fn find_counts_folded_and_clipped_sources_without_taking_selection_or_scroll() {
     close(&mut presenter);
 }
 #[test]
-fn highlights_complete_graphemes_and_caps_matches_without_copying_source() {
+fn highlights_complete_graphemes_and_counts_every_match() {
     let (_runtime, mut presenter, props) = native(vec![source("first", "é😀 é😀")]);
     command(
         &mut presenter,
@@ -119,8 +119,22 @@ fn highlights_complete_graphemes_and_caps_matches_without_copying_source() {
         json!({"kind":"find","query":"x","step":"first"}),
     );
     settle(&mut presenter, 12, 2);
-    assert_eq!(observation(&presenter)["find"]["count"], 4096);
-    assert_eq!(observation(&presenter)["find"]["limited"], true);
+    assert_eq!(observation(&presenter)["find"]["count"], 4097);
+    assert_eq!(observation(&presenter)["find"]["limited"], false);
+    command(
+        &mut presenter,
+        &props,
+        3,
+        json!({"kind":"find","query":"x","step":"previous"}),
+    );
+    settle(&mut presenter, 12, 2);
+    assert_eq!(observation(&presenter)["find"]["index"], 4097);
+    assert_eq!(
+        observation(&presenter)["find"]["active"],
+        json!({"path":["first"],"offset":4096})
+    );
+    all(&mut presenter);
+    assert_eq!(copied(&mut presenter).unwrap(), "x".repeat(4097).as_bytes());
     close(&mut presenter);
 }
 #[test]
@@ -192,16 +206,25 @@ fn reveal_rejects_folded_missing_and_non_boundary_bytes_and_user_scroll_cancels(
     close(&mut presenter);
 }
 #[test]
-fn find_rejects_utf8_byte_overflow_before_mounting() {
-    use maka_ui_runtime::{ComponentCall, NativeComponent};
-    let mut props = props(vec![]);
-    props["command"] =
-        json!({"sequence":1,"target":{"kind":"find","query":"中".repeat(171),"step":"first"}});
-    assert!(
-        super::super::super::reading::Component
-            .call(ComponentCall::Mount { props: &props }, &Default::default())
-            .is_err()
+fn find_preserves_complete_utf8_queries_and_original_selection() {
+    let query = "中".repeat(171);
+    let text = format!("before {query} after");
+    let (_runtime, mut presenter, props) = native(vec![source("first", &text)]);
+    settle(&mut presenter, 20, 3);
+    all(&mut presenter);
+    command(
+        &mut presenter,
+        &props,
+        1,
+        json!({"kind":"find","query":query,"step":"first"}),
     );
+    settle(&mut presenter, 20, 3);
+    assert_eq!(
+        observation(&presenter)["find"],
+        json!({"sequence":1,"count":1,"limited":false,"index":1,"active":{"path":["first"],"offset":7}})
+    );
+    assert_eq!(copied(&mut presenter).unwrap(), text.as_bytes());
+    close(&mut presenter);
 }
 
 #[test]

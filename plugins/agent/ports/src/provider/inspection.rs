@@ -73,14 +73,6 @@ impl Definition {
             &request.request_headers,
         )?;
         let models = self.implementation.discover(request, context).await?;
-        if models.len() > 2048
-            || serde_json::to_vec(&models)
-                .map_err(|_| Error::Invalid("invalid model inventory".into()))?
-                .len()
-                > 4 * 1024 * 1024
-        {
-            return Err(Error::Invalid("model inventory exceeds its bounds".into()));
-        }
         let mut seen = std::collections::HashSet::new();
         for model in &models {
             model.validate().map_err(Error::Invalid)?;

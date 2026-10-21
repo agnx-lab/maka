@@ -33,6 +33,8 @@ pub enum Error {
     InvalidProxy,
     #[error("network proxy authentication is not configured")]
     MissingCredentials,
+    #[error("outbound HTTP headers cannot be represented")]
+    InvalidHeaders,
     #[error("invalid WebSocket upgrade response")]
     InvalidUpgrade,
     #[error("outbound network request failed")]

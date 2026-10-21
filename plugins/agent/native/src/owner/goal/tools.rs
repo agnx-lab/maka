@@ -56,8 +56,8 @@ impl ToolPreparer for Goals {
             }
             let owner = owner.ok_or(ToolRejection::Unavailable)?;
             let report: Report = serde_json::from_value(input).map_err(invalid)?;
-            if report.note.trim().is_empty() || report.note.len() > 4096 {
-                return Err(invalid("Provide a checkpoint or evidence of 1–4096 bytes"));
+            if report.note.trim().is_empty() {
+                return Err(invalid("Provide a nonempty checkpoint or evidence"));
             }
             let observed = owner
                 .check_goal_invocation(&context)

@@ -47,25 +47,15 @@ impl Credentials {
     pub fn validate(&self) -> Result<(), String> {
         match self {
             Self::ApiKey(key) => {
-                if key.is_empty() || key.len() > 64 * 1024 || key.chars().any(char::is_control) {
+                if key.is_empty() || key.chars().any(char::is_control) {
                     return Err("invalid provider API key".into());
                 }
             }
             Self::RequestHeaders(headers) => {
-                if headers.len() > 32
-                    || headers
-                        .iter()
-                        .map(|(name, value)| name.len() + value.len())
-                        .sum::<usize>()
-                        > 64 * 1024
-                {
-                    return Err("provider authentication headers exceed their bounds".into());
-                }
                 let mut seen = std::collections::BTreeSet::new();
                 for (name, value) in headers {
                     let name_lower = name.to_ascii_lowercase();
                     if name.is_empty()
-                        || name.len() > 128
                         || !name.bytes().all(|c| {
                             c.is_ascii_alphanumeric() || b"!#$%&'*+.^_\x60|~-".contains(&c)
                         })

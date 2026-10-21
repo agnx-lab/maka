@@ -43,12 +43,10 @@ use std::{
     sync::mpsc,
 };
 
-pub const MAX_CLIPBOARD_BYTES: usize = 64 * 1024;
-
 /// OSC 52 is a write request, not confirmation that the terminal accepted it.
 /// Never queries clipboard contents or invokes an external clipboard process.
 pub fn copy(writer: &mut impl io::Write, text: &str) -> io::Result<()> {
-    if text.is_empty() || text.len() > MAX_CLIPBOARD_BYTES {
+    if text.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Invalid clipboard payload size",
@@ -145,9 +143,8 @@ impl Output {
         &self,
         bytes: Vec<u8>,
     ) -> io::Result<tokio::sync::oneshot::Receiver<io::Result<()>>> {
-        if bytes.len() > MAX_OUTPUT_BYTES {
-            return Err(io::Error::other("terminal output buffer byte limit"));
-        }
+        // Rendered frames already pass FrameWriter's display budget; a
+        // complete clipboard command uses this same original write owner.
         let (receipt, completion) = tokio::sync::oneshot::channel();
         self.0
             .try_send(WriteRequest { bytes, receipt })
@@ -362,7 +359,7 @@ pub(crate) mod tests {
         assert!(restore_checked(&mut Vec::new(), || Ok(())).is_ok());
     }
     #[test]
-    fn clipboard_only_writes_bounded_encoded_payloads_and_propagates_writer_failure() {
+    fn clipboard_writes_complete_encoded_payloads_and_propagates_writer_failure() {
         let input = "中文 e\u{301} 👩‍💻\n\x1b]52;c;hostile\x07";
         let mut output = vec![];
         copy(&mut output, input).unwrap();
@@ -373,12 +370,75 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(STANDARD.decode(encoded).unwrap(), input.as_bytes());
         assert!(!encoded.contains(&b'\x1b'));
-        for input in [String::new(), "x".repeat(MAX_CLIPBOARD_BYTES + 1)] {
+        {
+            let input = String::new();
             let mut output = vec![];
             assert!(copy(&mut output, &input).is_err());
             assert!(output.is_empty());
         }
-        assert!(copy(&mut io::sink(), &"x".repeat(MAX_CLIPBOARD_BYTES)).is_ok());
+        let input = "界".repeat(2 * 1024 * 1024 + 1);
+        let mut original = Vec::new();
+        copy(&mut original, &input).unwrap();
+        assert!(original.len() > MAX_OUTPUT_BYTES);
+        let encoded = original
+            .strip_prefix(b"\x1b]52;c;")
+            .unwrap()
+            .strip_suffix(b"\x07")
+            .unwrap();
+        assert!(
+            STANDARD.decode(encoded).unwrap().as_slice() == input.as_bytes(),
+            "OSC52 must encode the complete original UTF8 value"
+        );
+        let writer = SlowWriter::default();
+        writer.block();
+        let output = Output::with_writer(writer.clone()).unwrap();
+        let mut completion = output.submit(original.clone()).unwrap();
+        writer.wait_for_prefix();
+        assert!(
+            writer.bytes().as_slice() == &original[..2],
+            "the writer must retain the original partial command"
+        );
+        assert!(matches!(
+            completion.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        let mut cleanup = output.submit(b"!".to_vec()).unwrap();
+        assert!(output.submit(b"replacement".to_vec()).is_err());
+        assert!(matches!(
+            cleanup.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        writer.release();
+        completion.blocking_recv().unwrap().unwrap();
+        cleanup.blocking_recv().unwrap().unwrap();
+        let mut expected = original.clone();
+        expected.push(b'!');
+        assert!(
+            writer.bytes() == expected,
+            "the complete original OSC52 must precede cleanup exactly once"
+        );
+
+        struct FlushFailed(Arc<Mutex<Vec<u8>>>);
+        impl Write for FlushFailed {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::other("clipboard flush failed"))
+            }
+        }
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let output = Output::with_writer(FlushFailed(written.clone())).unwrap();
+        let completion = output.submit(original.clone()).unwrap();
+        assert_eq!(
+            completion.blocking_recv().unwrap().unwrap_err().to_string(),
+            "clipboard flush failed"
+        );
+        assert!(
+            written.lock().unwrap().as_slice() == original.as_slice(),
+            "the failed flush must retain the original complete bytes"
+        );
         assert!(copy(&mut &mut [0u8; 1][..], "text").is_err());
     }
 }

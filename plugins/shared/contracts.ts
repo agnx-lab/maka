@@ -56,8 +56,8 @@ export const object = (properties: Schema, required = Object.keys(properties)): 
   required,
   additionalProperties: false,
 });
-export const string = { type: 'string', maxLength: 512 };
-export const locale = { type: 'string', minLength: 1, maxLength: 128 };
+export const string = { type: 'string' };
+export const locale = { type: 'string', minLength: 1 };
 import { appearanceConfigurationSchema, type AppearanceConfiguration } from './terminal-theme.js';
 export interface Theme {
   configuration: AppearanceConfiguration;
@@ -163,7 +163,7 @@ export interface MessageCopyObservation {
   through: number;
   landing: number;
   field: SourceField;
-  status: 'loading' | 'ready' | 'too_large' | 'empty' | 'unavailable' | 'streaming';
+  status: 'loading' | 'ready' | 'empty' | 'unavailable' | 'streaming';
   source: string | null;
   message: string | null;
 }
@@ -425,7 +425,7 @@ const messageSchema = object(
     origin: native.agent.interface.methods.history.output.$defs.AgentHistoryChunk.properties.origin,
     model: native.agent.interface.methods.history.output.$defs.AgentHistoryChunk.properties.model,
     id: string,
-    contentKey: { type: 'string', minLength: 1, maxLength: 123, pattern: '^[A-Za-z0-9_-]+$' },
+    contentKey: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9_-]+$' },
     role: {
       enum: ['user', 'assistant', 'thinking', 'tool_call', 'tool_result', 'compaction', 'failure'],
     },
@@ -433,7 +433,7 @@ const messageSchema = object(
     timestamp: {
       anyOf: [{ type: 'integer', minimum: 0, maximum: 9007199254740991 }, { type: 'null' }],
     },
-    text: { type: 'string', maxLength: 24000 },
+    text: { type: 'string' },
     tool: { anyOf: [{ $ref: '#/$defs/HistoryTool' }, { type: 'null' }] },
     continued: { type: 'boolean' },
     image: { type: 'boolean' },
@@ -509,14 +509,13 @@ export const paletteContract = component(
     selectionDisabled: { type: 'boolean' },
     commands: {
       type: 'array',
-      maxItems: 128,
       items: object(
         {
-          id: { type: 'string', minLength: 1, maxLength: 120, pattern: '^[A-Za-z0-9:._-]+$' },
-          label: { type: 'string', minLength: 1, maxLength: 256 },
-          hint: { type: 'string', maxLength: 64 },
+          id: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9:._-]+$' },
+          label: { type: 'string', minLength: 1 },
+          hint: { type: 'string' },
           disabled: { type: 'boolean' },
-          copyText: { type: 'string', minLength: 1, maxLength: 65536 },
+          copyText: { type: 'string', minLength: 1 },
         },
         ['id', 'label', 'hint', 'disabled'],
       ),
@@ -524,7 +523,7 @@ export const paletteContract = component(
   }),
   {
     invoked: object({
-      id: { type: 'string', minLength: 1, maxLength: 120, pattern: '^[A-Za-z0-9:._-]+$' },
+      id: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9:._-]+$' },
     }),
     selected: withDefs({ $ref: '#/$defs/AgentSession' }),
     closed: object({}),
@@ -557,7 +556,7 @@ const pageProps = (properties: Schema, required = Object.keys(properties)): Sche
     required,
   );
 const pageChrome = object({
-  title: { type: 'string', maxLength: 512 },
+  title: { type: 'string' },
   backEnabled: { type: 'boolean' },
 });
 
@@ -597,8 +596,8 @@ export interface ApplicationPageProps extends ConnectionsProps {
   open: boolean;
 }
 export const appEntrySchema = object({
-  id: { type: 'string', minLength: 1, maxLength: 96, pattern: '^[A-Za-z0-9._-]+$' },
-  label: { type: 'string', minLength: 1, maxLength: 256 },
+  id: { type: 'string', minLength: 1, pattern: '^[A-Za-z0-9._-]+$' },
+  label: { type: 'string', minLength: 1 },
 });
 export const appsContract = component(
   'maka.product.Apps',
@@ -651,7 +650,7 @@ export const schedulerContract = component(
       anyOf: [
         object({
           sequence: { type: 'integer', minimum: 0 },
-          taskId: { type: 'string', maxLength: 160 },
+          taskId: { type: 'string' },
         }),
         { type: 'null' },
       ],
@@ -808,7 +807,7 @@ export const navigationContract = component(
     {
       theme: { $ref: '#/$defs/Theme' },
       locale,
-      sessions: { type: 'array', maxItems: 32, items: { $ref: '#/$defs/AgentSession' } },
+      sessions: { type: 'array', items: { $ref: '#/$defs/AgentSession' } },
       selected: { anyOf: [string, { type: 'null' }] },
       busy: { type: 'boolean' },
       loading: { type: 'boolean' },
@@ -850,7 +849,7 @@ export const imageViewerContract = component(
   }),
   { closed: object({}) },
 );
-const filePath = { anyOf: [{ type: 'string', minLength: 1, maxLength: 4096 }, { type: 'null' }] };
+const filePath = { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] };
 export const toolDetailsContract = component(
   'maka.agent.ToolDetails',
   object(
@@ -933,7 +932,7 @@ export const timelineContract = component(
             format: { $ref: '#/$defs/SourceFormat' },
             ready: { type: 'boolean' },
             key: string,
-            text: { type: 'string', maxLength: 8192 },
+            text: { type: 'string' },
             atStart: { type: 'boolean' },
             atEnd: { type: 'boolean' },
             loading: { type: 'boolean' },
@@ -1012,9 +1011,9 @@ export const timelineContract = component(
           through: { type: 'integer', minimum: 1 },
           landing: { type: 'integer', minimum: 0 },
           field: { $ref: '#/$defs/SourceField' },
-          status: { enum: ['loading', 'ready', 'too_large', 'empty', 'unavailable', 'streaming'] },
-          source: { anyOf: [{ type: 'string', maxLength: 65536 }, { type: 'null' }] },
-          message: { anyOf: [{ type: 'string', maxLength: 65536 }, { type: 'null' }] },
+          status: { enum: ['loading', 'ready', 'empty', 'unavailable', 'streaming'] },
+          source: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          message: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         }),
         { type: 'null' },
       ],
@@ -1199,7 +1198,6 @@ export const composerContract = component(
       approvalPending: { type: 'boolean' },
       commands: {
         type: 'array',
-        maxItems: 32,
         items: object({
           id: string,
           command: string,
@@ -1209,7 +1207,7 @@ export const composerContract = component(
       },
       backend: composerBackend,
       sendLabel: string,
-      context: { anyOf: [{ type: 'string', minLength: 1, maxLength: 512 }, { type: 'null' }] },
+      context: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
       dataSource: { anyOf: [{ $ref: '#/$defs/AgentDataSource' }, { type: 'null' }] },
       attachments: {
         type: 'array',
@@ -1249,7 +1247,7 @@ export const composerContract = component(
         context: string,
         dataSource: { $ref: '#/$defs/AgentDataSource' },
         key: string,
-        text: { type: 'string', maxLength: 24000 },
+        text: { type: 'string' },
         attachments: { type: 'array', items: string },
         status: { enum: ['pending', 'unknown', 'accepted', 'removed'] },
         messageId: { anyOf: [string, { type: 'null' }] },
@@ -1268,7 +1266,6 @@ export const composerContract = component(
     setup: object({ context: string }),
     readiness: withDefs({
       type: 'array',
-      maxItems: 32,
       items: object({
         context: string,
         dataSource: { $ref: '#/$defs/AgentDataSource' },
@@ -1279,7 +1276,6 @@ export const composerContract = component(
       object({
         files: {
           type: 'array',
-          maxItems: 64,
           items: object({
             ...native.agent.interface.methods.uploadAttachment.output.$defs.AgentAttachment
               .properties,

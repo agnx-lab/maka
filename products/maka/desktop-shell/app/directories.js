@@ -40,11 +40,6 @@ import {
 } from './theme.js';
 import { t } from './locale.js';
 
-/** Project pages read for the menu; the Host pages at most 16 projects. */
-const MAX_PROJECT_PAGES = 16;
-/** Children pages read for one folder while finding a chosen path. */
-const MAX_CHILD_PAGES = 64;
-
 export class Directories {
   /** @param {{ changed: () => void, report: (message: string) => void }} hooks */
   constructor(hooks) {
@@ -74,7 +69,11 @@ export class Directories {
 
   /** Makes `directory` where new tasks run, and closes the menu. */
   choose(directory) {
-    this.chosen = { name: directory.name, path: directory.path, selection: directory.selection };
+    this.chosen = {
+      name: directory.name,
+      path: directory.path,
+      selection: directory.selection,
+    };
     this.menuOpen = false;
     this.hooks.changed();
   }
@@ -139,7 +138,8 @@ export class Directories {
   /** The child of `directory` called `name`, reading its pages in order. */
   async child(directory, name) {
     let after = null;
-    for (let pages = 0; pages < MAX_CHILD_PAGES; pages += 1) {
+    const seen = new Set();
+    while (true) {
       const page = await query('agent', 'directories', {
         kind: 'children',
         selection: directory.selection,
@@ -149,23 +149,30 @@ export class Directories {
       if (found !== undefined) return found;
       after = page.after ?? null;
       if (after === null) break;
+      const key = JSON.stringify(after);
+      if (seen.has(key)) throw new Error('Directory cursor did not advance');
+      seen.add(key);
     }
     throw new Error(t('hostDoesNotList', { name, path: directory.path }));
   }
 
   /**
    * Reads every page of `agent.projects`. A page answered `changed` means
-   * the list moved between pages, so the read starts over once.
+   * the list moved between pages, so the read restarts against the new catalog.
    */
   async loadProjects() {
     const reading = ++this.projectReads;
     try {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      while (reading === this.projectReads) {
         const projects = [];
         let cursor = null;
         let changed = false;
-        for (let pages = 0; pages < MAX_PROJECT_PAGES; pages += 1) {
-          const page = await query('agent', 'projects', { kind: 'list', cursor });
+        const seen = new Set();
+        while (reading === this.projectReads) {
+          const page = await query('agent', 'projects', {
+            kind: 'list',
+            cursor,
+          });
           if (page.kind === 'changed') {
             changed = true;
             break;
@@ -174,6 +181,9 @@ export class Directories {
           projects.push(...page.projects);
           cursor = page.next ?? null;
           if (cursor === null) break;
+          const key = JSON.stringify(cursor);
+          if (seen.has(key)) throw new Error('Project cursor did not advance');
+          seen.add(key);
         }
         if (changed) continue;
         if (reading === this.projectReads) {
@@ -184,7 +194,6 @@ export class Directories {
         }
         return;
       }
-      throw new Error(t('listKeptChanging'));
     } catch (error) {
       if (reading === this.projectReads) {
         this.hooks.report(t('projectsFailed', { value: error.message }));

@@ -27,17 +27,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Permissions {
-    #[schemars(length(max = 32))]
     pub filesystem: Vec<filesystem::Rule>,
     pub network: Network,
 }
 
 impl Permissions {
     pub fn validate(&self) -> Result<(), Error> {
-        self.network.validate()?;
-        if self.filesystem.len() > 32 {
-            return Err(Error::TooComplex);
-        }
         if self
             .filesystem
             .iter()

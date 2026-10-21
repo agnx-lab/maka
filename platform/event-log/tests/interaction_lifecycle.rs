@@ -215,7 +215,7 @@ async fn run_closure_guards_every_terminal_and_restart_closes_even_sealed_runs()
 }
 
 #[tokio::test]
-async fn native_publication_checks_current_run_and_capacity_atomically() {
+async fn native_publication_checks_current_run_without_pending_quota() {
     use maka_agent_facts::event::Fact;
     use maka_agent_facts::event::Invocation;
     use maka_agent_facts::event::InvocationOutcome;
@@ -287,9 +287,10 @@ async fn native_publication_checks_current_run_and_capacity_atomically() {
         log.establish_run_interaction(&invocation, &last),
         log.establish_run_interaction(&invocation, &overflow),
     );
-    assert_ne!(a.is_ok(), b.is_ok());
-    assert_eq!(log.pending_interactions("session").await.unwrap().len(), 16);
-    let accepted = if a.is_ok() { &last } else { &overflow };
+    assert!(a.unwrap().matches);
+    assert!(b.unwrap().matches);
+    assert_eq!(log.pending_interactions("session").await.unwrap().len(), 17);
+    let accepted = &last;
     assert!(
         log.establish_run_interaction(&invocation, accepted)
             .await

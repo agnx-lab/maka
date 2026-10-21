@@ -53,9 +53,6 @@ impl Owner {
                             FileCapture::Absent => FileReadPart::Absent,
                             FileCapture::Changed => FileReadPart::Changed,
                             FileCapture::Binary { bytes } => FileReadPart::Binary { bytes },
-                            FileCapture::TooLarge { bytes, limit } => {
-                                FileReadPart::TooLarge { bytes, limit }
-                            }
                             FileCapture::Unsupported { file_kind } => {
                                 FileReadPart::Unsupported { file_kind }
                             }
@@ -122,7 +119,7 @@ impl Owner {
             return Err("agent_files_cancelled".into());
         }
         let value = serde_json::to_value(part).map_err(|_| "agent_files_output_unavailable")?;
-        maka_plugin_core::json::check_delivery(&value, 64 * 1024)
+        maka_plugin_core::json::exact_numbers(&value)
             .map_err(|_| "agent_files_output_unavailable")?;
         tokio::select! {
             biased;
@@ -430,7 +427,6 @@ fn file_failure(error: io::Error) -> String {
         "files_invalid_path" => "agent_files_invalid_path",
         "files_invalid_cursor" => "agent_files_invalid_cursor",
         "files_private" => "agent_files_private",
-        "files_too_large" => "agent_files_too_large",
         "files_changed" => "agent_files_changed",
         "files_cancelled" => "agent_files_cancelled",
         "files_watch_unavailable" => "agent_files_watch_unavailable",

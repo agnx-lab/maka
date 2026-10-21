@@ -117,7 +117,32 @@ async fn imports_original_codex_history_requires_preview_and_keeps_receipt_acros
     let mut fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let path = fixture.workspace.join("sessions/2026/rollout-source.jsonl");
     write_lines(&path, &codex_rows());
-    let source = saved_source(&fixture, "codex", 0).await;
+    let roots = fixture
+        .query("importDirectories", json!({"kind":"roots"}))
+        .await
+        .unwrap();
+    let saved = fixture
+        .mutation(
+            2,
+            "import",
+            json!({
+                "kind":"save_source", "revision":0, "id":null,
+                "name":"完整".repeat(9000),
+                "location":{"kind":"codex","directory":roots["roots"][0]["selection"]}
+            }),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved["kind"], "sources");
+    assert_eq!(saved["sources"][0]["name"], "完整".repeat(9000));
+    let source = json!({"id":saved["sources"][0]["id"],"revision":saved["revision"]});
+    let requery = fixture
+        .query("imports", json!({"kind":"sources"}))
+        .await
+        .unwrap();
+    assert_eq!(requery["revision"], saved["revision"]);
+    assert_eq!(requery["sources"], saved["sources"]);
     assert!(!fixture.workspace.join(MARKER_FILE).exists());
     let page = catalog(&fixture, &source).await;
     assert_eq!(page["entries"].as_array().unwrap().len(), 1, "{page}");
@@ -233,6 +258,9 @@ async fn imports_original_codex_history_requires_preview_and_keeps_receipt_acros
         .await
         .unwrap();
     assert_eq!(sources["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(sources["revision"], saved["revision"]);
+    assert_eq!(sources["sources"], saved["sources"]);
+    assert_eq!(sources["sources"][0]["name"], "完整".repeat(9000));
     let removed = fixture
         .mutation(
             2,

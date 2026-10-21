@@ -164,10 +164,10 @@ async fn fenced_bootstrap_and_bounded_catchup_survive_coalescing_and_reopen() {
         two.next_after.is_none(),
         "later commits cannot enter the old fence"
     );
-    assert!(
-        log.session_events("session", 0, 4, 1, 1).await.is_err(),
-        "oversized first fact cannot be silently skipped"
-    );
+    let soft = log.session_events("session", 0, 4, 1, 1).await.unwrap();
+    assert_eq!(soft.events.len(), 1);
+    assert_eq!(soft.events[0].event, opening);
+    assert_eq!(soft.next_after, Some(soft.events[0].sequence));
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
     let resumed = log
@@ -193,7 +193,7 @@ async fn fenced_bootstrap_and_bounded_catchup_survive_coalescing_and_reopen() {
 }
 
 #[tokio::test]
-async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
+async fn active_stream_seeds_preserve_complete_fenced_state_and_survive_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("streams.sqlite");
     let mut log = EventLog::open(&path).await.unwrap();
@@ -383,17 +383,44 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
         2,
         "closed part still awaits the request verdict"
     );
+    let mut expected = reopened.active_streams.clone();
+    let mut builder = maka_agent_facts::model::assembly::StepBuilder::for_step("current").unwrap();
     for index in 0..128 {
-        log.append(
-            &EventWrite::plain((start("current", &format!("extra-{index}"))).clone()).unwrap(),
-        )
-        .await
-        .unwrap();
+        let id = format!("extra-{index}");
+        builder
+            .push(ModelEvent::PartStarted {
+                id: id.clone(),
+                text_kind: TextKind::Thinking,
+                provider_options: None,
+            })
+            .unwrap();
+        let opening = start("current", &id);
+        let sequence = log
+            .append(&EventWrite::plain(opening.clone()).unwrap())
+            .await
+            .unwrap();
+        expected.push(maka_event_log::observation::AssistantStreamSeed {
+            start_sequence: sequence,
+            step_id: "current".into(),
+            part_id: id,
+            message_id: opening.id,
+            text_kind: TextKind::Thinking,
+        });
     }
-    assert!(matches!(
-        log.observe_session::<Value>("session").await,
-        Err(maka_event_log::StoreError::PrefixTooLarge)
-    ));
+    let complete = log.observe_session::<Value>("session").await;
+    log.close().await.unwrap();
+    log = EventLog::open(&path).await.unwrap();
+    let complete_reopened = log.observe_session::<Value>("session").await;
+    log.close().await.unwrap();
+    let complete = complete.unwrap().unwrap();
+    let complete_reopened = complete_reopened.unwrap().unwrap();
+    assert_eq!(complete.active_streams, expected);
+    assert_eq!(complete_reopened.active_streams, expected);
+    assert_eq!(
+        complete.through_sequence,
+        complete_reopened.through_sequence
+    );
+    log = EventLog::open(&path).await.unwrap();
     log.append(
         &EventWrite::plain(
             (event(Fact::ModelCompleted {
@@ -446,16 +473,15 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
 }
 
 #[tokio::test]
-async fn stream_seed_bytes_are_bounded_before_identity_hydration() {
+async fn stream_seed_identities_preserve_complete_original_bytes_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
-    let log = EventLog::open(&temp.path().join("seed-budget.sqlite"))
-        .await
-        .unwrap();
-    for (index, ids, allowed) in [
-        (0, vec!["😀".repeat(4096)], true),
-        (1, vec!["😀".repeat(16500)], false),
-        (2, vec!["a".repeat(33000), "b".repeat(33000)], false),
+    let path = temp.path().join("seed-identities.sqlite");
+    for (index, ids) in [
+        (0, vec!["😀".repeat(4096)]),
+        (1, vec!["😀".repeat(16500)]),
+        (2, vec!["a".repeat(33000), "b".repeat(33000)]),
     ] {
+        let log = EventLog::open(&path).await.unwrap();
         let session = format!("budget-{index}");
         let step = format!("current-{index}");
         log.create_session(&session, &format!("create-{index}"), &json!({}), 1)
@@ -501,33 +527,159 @@ async fn stream_seed_bytes_are_bounded_before_identity_hydration() {
         )
         .await
         .unwrap();
+        let mut builder = maka_agent_facts::model::assembly::StepBuilder::for_step(&step).unwrap();
+        let mut expected = Vec::new();
         for id in &ids {
-            log.append(
-                &EventWrite::plain(event(Fact::ModelObserved {
-                    step_id: step.clone(),
-                    event: ModelEvent::PartStarted {
-                        id: id.clone(),
-                        text_kind: TextKind::Text,
-                        provider_options: None,
-                    },
-                }))
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+            let start = ModelEvent::PartStarted {
+                id: id.clone(),
+                text_kind: TextKind::Text,
+                provider_options: None,
+            };
+            builder.push(start.clone()).unwrap();
+            let opening = event(Fact::ModelObserved {
+                step_id: step.clone(),
+                event: start,
+            });
+            let sequence = log
+                .append(&EventWrite::plain(opening.clone()).unwrap())
+                .await
+                .unwrap();
+            expected.push(maka_event_log::observation::AssistantStreamSeed {
+                start_sequence: sequence,
+                step_id: step.clone(),
+                part_id: id.clone(),
+                message_id: opening.id,
+                text_kind: TextKind::Text,
+            });
         }
         let observation = log.observe_session::<Value>(&session).await;
-        if allowed {
-            assert_eq!(
-                observation.unwrap().unwrap().active_streams.len(),
-                ids.len()
-            );
-        } else {
-            assert!(matches!(
-                observation,
-                Err(maka_event_log::StoreError::PrefixTooLarge)
-            ));
-        }
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        let reopened = log.observe_session::<Value>(&session).await;
+        log.append(
+            &EventWrite::plain(event(Fact::ModelInterrupted {
+                model_failure: None,
+                diagnostic: None,
+                step_id: step.clone(),
+                status: ModelInterruption::Cancelled,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let ended = log.observe_session::<Value>(&session).await;
+        log.close().await.unwrap();
+        let observation = observation.unwrap().unwrap();
+        let reopened = reopened.unwrap().unwrap();
+        assert_eq!(observation.active_streams, expected);
+        assert_eq!(reopened.active_streams, expected);
+        assert_eq!(observation.through_sequence, reopened.through_sequence);
+        assert!(ended.unwrap().unwrap().active_streams.is_empty());
     }
+}
+
+async fn complete_active_tool_replay_round_trip(ids: Vec<String>) {
+    use maka_agent_facts::model::assembly::StepBuilder;
+    use maka_event_log::observation::ToolStreamSeed;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("active-tools.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    let invocation = Invocation {
+        session_id: "session".into(),
+        turn_id: "turn".into(),
+        run_id: "run".into(),
+        invocation_id: "invocation".into(),
+    };
+    let event = |fact| EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap();
+    log.append(&event(Fact::InvocationOpened {
+        configuration: None,
+        input: maka_agent_facts::input::InvocationInput::Message {
+            source_messages: vec![],
+            content: "original".into(),
+            request_fingerprint: None,
+        },
+    }))
+    .await
+    .unwrap();
+    log.append(&event(Fact::ModelRequested {
+        context_breakdown: None,
+        item_acceptance: false,
+        purpose: maka_agent_facts::context::ModelPurpose::Main,
+        context: None,
+        checkpoint_event_id: None,
+        step_id: "step".into(),
+        model_id: "model".into(),
+        source_scope: LogScope::Root,
+        source_high_water: 0,
+        source_digest: "source".into(),
+        effective_source_digest: None,
+        input_digest: "input".into(),
+        route_identity: "route".into(),
+    }))
+    .await
+    .unwrap();
+    let mut builder = StepBuilder::for_step("step").unwrap();
+    let mut expected = Vec::new();
+    for id in ids {
+        let start = ModelEvent::ToolInputStarted {
+            id: id.clone(),
+            name: "echo".into(),
+            provider_executed: true,
+        };
+        builder.push(start.clone()).unwrap();
+        let sequence = log
+            .append(&event(Fact::ModelObserved {
+                step_id: "step".into(),
+                event: start,
+            }))
+            .await
+            .unwrap();
+        expected.push(ToolStreamSeed {
+            tool_use_id: maka_agent_facts::tool_call::tool_use_id(
+                "invocation",
+                &format!("step:{id}"),
+            ),
+            start_sequence: sequence,
+        });
+    }
+    let first = log.observe_session::<Value>("session").await;
     log.close().await.unwrap();
+    let log = EventLog::open(&path).await.unwrap();
+    let reopened = log.observe_session::<Value>("session").await;
+    log.append(&event(Fact::ModelInterrupted {
+        model_failure: None,
+        diagnostic: None,
+        step_id: "step".into(),
+        status: ModelInterruption::Cancelled,
+    }))
+    .await
+    .unwrap();
+    let ended = log.observe_session::<Value>("session").await;
+    log.close().await.unwrap();
+    let first = first.unwrap().unwrap();
+    let reopened = reopened.unwrap().unwrap();
+    assert_eq!(first.active_tools, expected);
+    assert_eq!(reopened.active_tools, expected);
+    assert_eq!(reopened.through_sequence, first.through_sequence);
+    assert_eq!(reopened.root_turn.unwrap().invocation, invocation);
+    assert_eq!(ended.unwrap().unwrap().active_tools.len(), 0);
+}
+
+#[tokio::test]
+async fn active_tool_replay_preserves_129_original_tiny_identities_after_reopen() {
+    complete_active_tool_replay_round_trip((0..129).map(|index| format!("call-{index}")).collect())
+        .await;
+}
+
+#[tokio::test]
+async fn active_tool_replay_preserves_complete_identity_bytes_beyond_64k() {
+    complete_active_tool_replay_round_trip(
+        (0..17)
+            .map(|index| format!("{index:02}-{}", "x".repeat(4000)))
+            .collect(),
+    )
+    .await;
 }

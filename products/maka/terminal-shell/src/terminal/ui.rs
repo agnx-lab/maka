@@ -22,8 +22,8 @@ use super::{
     input::{Input, Pointer},
     output::{FrameWriter, exceeded_budget},
 };
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
-use nsh_core::{Command, MountBatch, MountItem, ROOT_ID, platform::Environment};
+use crossterm::event::{Event, MouseButton, MouseEventKind};
+use nsh_core::{MountBatch, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
     CellMetrics, ImageProtocol, InputSnapshot, PressLease, ProtocolType, ServiceOutput,
@@ -35,7 +35,7 @@ use ratatui::{
     layout::Rect,
 };
 use std::{
-    io::{self, Write},
+    io,
     sync::{Arc, Mutex, mpsc},
     thread,
     time::Instant,
@@ -234,9 +234,22 @@ impl Session {
             let control = self.engine.control();
             control.resize(self.environment.window);
             control.set_environment(self.environment);
-            self.terminal
-                .resize(self.area)
-                .map_err(|error| error.to_string())?;
+            // The supplied area is authoritative. Ratatui's resize path queries
+            // the process TTY even for a Fixed viewport, but this backend only
+            // encodes into memory for the separate physical output owner.
+            let mut terminal = Terminal::with_options(
+                CrosstermBackend::new(FrameWriter::default()),
+                TerminalOptions {
+                    viewport: Viewport::Fixed(self.area),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            crossterm::queue!(
+                terminal.backend_mut().writer_mut(),
+                crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+            )
+            .map_err(|error| error.to_string())?;
+            self.terminal = terminal;
             changed = true;
         }
         if let Some(protocol) = command.image_protocol {
@@ -291,11 +304,6 @@ impl Session {
                 changed |= consumed != 0;
                 self.forward_events(true)?;
                 break;
-            }
-            if self.oversized_cut(&input.event) {
-                self.clipboard_failure();
-                changed = true;
-                continue;
             }
             if let (Event::Mouse(mouse), Some(lease)) = (&input.event, lease) {
                 if !matches!(
@@ -352,46 +360,6 @@ impl Session {
         self.dispatch_events(events, false, None).map(|_| ())
     }
 
-    fn oversized_cut(&self, event: &Event) -> bool {
-        let Event::Key(key) = event else { return false };
-        if key.kind == KeyEventKind::Release
-            || !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
-            || !matches!(key.code, KeyCode::Char('x' | 'X'))
-        {
-            return false;
-        }
-        let Some(context) = self.surface.input_context() else {
-            return false;
-        };
-        let Some(text) = context.text else {
-            return false;
-        };
-        let selected: Vec<_> = text
-            .encode_utf16()
-            .skip(context.selection.start as usize)
-            .take((context.selection.end - context.selection.start) as usize)
-            .collect();
-        // Native selections end at complete Unicode characters. Ask the
-        // actual transport encoder before the editor performs a cut.
-        ServiceOutput::Clipboard(String::from_utf16(&selected).expect("valid native selection"))
-            .terminal_sequence(false)
-            .is_empty()
-    }
-
-    fn clipboard_failure(&mut self) {
-        self.surface.apply(MountBatch {
-            items: vec![MountItem::Command {
-                id: ROOT_ID,
-                command: Command::Toast {
-                    text: "Copy failed: exceeds 64 KiB.".into(),
-                    long: true,
-                },
-            }],
-        });
-    }
-
     fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
         let events: Vec<_> = self.surface.drain_events().collect();
         self.dispatch_events(events, presented_input, None)
@@ -445,11 +413,7 @@ impl Session {
                 SurfaceEvent::Service(ServiceRequest::ClipboardWrite(text)) => {
                     let sequence = ServiceOutput::Clipboard(text)
                         .terminal_sequence(std::env::var_os("TMUX").is_some());
-                    if sequence.is_empty() {
-                        self.clipboard_failure();
-                    } else {
-                        self.effects.extend_from_slice(sequence.as_bytes());
-                    }
+                    self.effects.extend_from_slice(sequence.as_bytes());
                 }
                 SurfaceEvent::Service(ServiceRequest::ClipboardRead { id, has_only }) => {
                     self.surface.complete_clipboard(
@@ -511,10 +475,7 @@ impl Session {
             crossterm::terminal::EndSynchronizedUpdate
         )
         .map_err(|error| error.to_string())?;
-        let suffix_bytes = suffix
-            .len()
-            .checked_add(self.effects.len())
-            .ok_or("terminal frame exceeds byte limit")?;
+        let suffix_bytes = suffix.len();
         let writer = self.terminal.backend_mut().writer_mut();
         let prefix = writer.0.len();
         writer
@@ -551,15 +512,12 @@ impl Session {
             crossterm::terminal::EndSynchronizedUpdate
         )
         .map_err(|error| error.to_string())?;
-        self.terminal
-            .backend_mut()
-            .writer_mut()
-            .write_all(&self.effects)
-            .map_err(|error| error.to_string())?;
-        self.effects.clear();
         self.terminal.swap_buffers();
         Backend::flush(self.terminal.backend_mut()).map_err(|error| error.to_string())?;
-        let bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
+        let mut bytes = std::mem::take(&mut self.terminal.backend_mut().writer_mut().0);
+        // Display admission belongs to FrameWriter. The complete clipboard
+        // effect shares this immutable physical write and its flush receipt.
+        bytes.append(&mut self.effects);
         Ok(Frame {
             epoch: self.epoch,
             bytes: Some(bytes),
@@ -585,6 +543,7 @@ mod tests {
     };
     use nsh_core::{EventKind, EventPayload, MountItem, ROOT_ID, ViewKind};
     use nsh_engine::{App, Bundle, Limits};
+    use std::io::Write;
 
     fn config(source: &str) -> EngineConfig {
         let mut config = EngineConfig::new(App::Js(Bundle::source(source.to_owned())));
@@ -712,10 +671,10 @@ mod tests {
             "the real output frame must paint the image's Unicode fallback"
         );
 
-        // Calibrate the actual Unicode wire frame after a clear. The later
-        // effects fill exactly the remaining complete-frame budget, so native
-        // Sixel must fall back before committing Ratatui's previous buffer.
-        // These opaque marker bytes stay in FrameWriter; the test never writes stdout.
+        // Calibrate the actual Unicode wire frame after a clear. Fill the
+        // remaining display budget so Sixel must fall back before committing
+        // Ratatui's previous buffer. Clipboard effects remain outside it.
+        // These opaque marker bytes never reach real stdout.
         let prepare = |session: &mut Session| {
             // A fresh fixed terminal resets both diff buffers without calling
             // Terminal::clear, whose cursor query would read the real stdin.
@@ -816,13 +775,20 @@ mod tests {
             "fixture must force a real Sixel budget rejection"
         );
         let prefix = prepare(&mut session);
-        session.effects.resize(
-            super::super::output::MAX_FRAME_BYTES - plain_bytes.len() - 6,
-            b'e',
-        );
+        let fill = super::super::output::MAX_FRAME_BYTES - plain_bytes.len();
+        session
+            .terminal
+            .backend_mut()
+            .writer_mut()
+            .write_all(&vec![b'e'; fill])
+            .unwrap();
         session.effects.extend_from_slice(b"EFFECT");
         let frame = session.encode(true).unwrap().bytes.unwrap();
-        assert_eq!(frame.len(), super::super::output::MAX_FRAME_BYTES);
+        let display = frame
+            .strip_suffix(b"EFFECT")
+            .expect("one original clipboard effect follows the display");
+        assert_eq!(display.len(), super::super::output::MAX_FRAME_BYTES);
+        assert_eq!(frame.len(), display.len() + b"EFFECT".len());
         assert!(
             frame.starts_with(&prefix),
             "clear and preexisting output survive the rejected candidate"
@@ -1640,7 +1606,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_copy_and_cut_keep_the_draft_and_allow_later_editing() {
+    fn complete_copy_and_cut_preserve_original_bytes_and_later_editing() {
         let mut session = Session::new(config(
             r#"
             import { mount, signal } from "nsh";
@@ -1670,27 +1636,30 @@ mod tests {
         session
             .advance(command('a', KeyModifiers::CONTROL))
             .unwrap();
+        use base64::Engine as _;
+        let original = "x".repeat(65_535) + "😀";
+        let sequence = format!(
+            "\x1b]52;c;{}\x1b\\",
+            base64::engine::general_purpose::STANDARD.encode(&original)
+        );
+        let sequence = if std::env::var_os("TMUX").is_some() {
+            format!("\x1bPtmux;{}\x1b\\", sequence.replace('\x1b', "\x1b\x1b"))
+        } else {
+            sequence
+        };
         for key in ['c', 'x'] {
             let frame = session
                 .advance(command(key, KeyModifiers::CONTROL))
                 .unwrap();
             assert!(!frame.quit);
-            assert_eq!(
-                session.surface.input_context().unwrap().text,
-                Some("x".repeat(65_535) + "😀")
-            );
+            let expected = if key == 'c' { original.as_str() } else { "" };
+            assert!(session.surface.input_context().unwrap().text.as_deref() == Some(expected));
+            let bytes = frame.bytes.unwrap();
             assert!(
-                session
-                    .surface
-                    .snapshot()
-                    .contains("Copy failed: exceeds 64 KiB.")
-            );
-            assert!(
-                !frame
-                    .bytes
-                    .unwrap()
-                    .windows(4)
-                    .any(|bytes| bytes == b"\x1b]52")
+                bytes
+                    .windows(sequence.len())
+                    .any(|bytes| bytes == sequence.as_bytes()),
+                "copy/cut must retain one complete original OSC 52 payload"
             );
         }
         session.advance(command('z', KeyModifiers::NONE)).unwrap();

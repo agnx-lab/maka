@@ -43,7 +43,10 @@ import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser
 import { performSessionAction, type SessionAction } from './sessionLifecycle';
 
 type Overlay = { instance: number } & (
-  | { kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings'; sessionId: string | null }
+  | {
+      kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
+      sessionId: string | null;
+    }
   | { kind: 'interaction'; sessionId: string; requestId: string }
 );
 type CommandContext = { instance: number; sessionId: string | null };
@@ -217,7 +220,9 @@ function App() {
     const owner = handle();
     if (!alive || selected() !== sessionId || owner?.sessionId !== sessionId) return;
     if (!(await owner.flushDraft()))
-      throw new Error('The conversation was deleted, but its latest draft is not saved. Return to the draft to check its status.');
+      throw new Error(
+        'The conversation was deleted, but its latest draft is not saved. Return to the draft to check its status.',
+      );
     if (alive && selected() === sessionId && handle() === owner) {
       overlay.set(null);
       selected.set(null);
@@ -227,9 +232,14 @@ function App() {
     if (!alive || selected() !== origin || switching() || busy())
       throw new Error('This conversation action is no longer current.');
     const owner = handle();
-    if (action.kind === 'remove' && owner?.sessionId === action.session.id &&
-        !(await owner.flushDraft()))
-      throw new Error('The draft is not ready to save. Return to the conversation before deleting it.');
+    if (
+      action.kind === 'remove' &&
+      owner?.sessionId === action.session.id &&
+      !(await owner.flushDraft())
+    )
+      throw new Error(
+        'The draft is not ready to save. Return to the conversation before deleting it.',
+      );
     if (!alive || selected() !== origin || handle() !== owner)
       throw new Error('This conversation action is no longer current.');
     const result = await performSessionAction(control, action);
@@ -409,8 +419,11 @@ function App() {
           const reply = await host.recoverControl(original.id);
           if (!alive) return;
           const result = returned(reply);
-          if (original.method === 'changeSession' && result.kind === 'removed' &&
-              result.sessionId === original.sessionId)
+          if (
+            original.method === 'changeSession' &&
+            result.kind === 'removed' &&
+            result.sessionId === original.sessionId
+          )
             await removeSelected(result.sessionId);
           if (original.method === 'fork' && result.kind === 'forked')
             recoveredFork.set({ id: result.session.id, title: result.session.title });
@@ -563,7 +576,9 @@ function App() {
         />
       </Workbench>
       <If when={recoveredFork()}>
-        <Button onPress={inputAction(openRecoveredFork, { id: recoveredFork()!.id, origin: selected() })}>
+        <Button
+          onPress={inputAction(openRecoveredFork, { id: recoveredFork()!.id, origin: selected() })}
+        >
           <Text style={{ color: C.accent }}>Open recovered fork · {recoveredFork()!.title}</Text>
         </Button>
       </If>

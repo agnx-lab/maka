@@ -34,8 +34,7 @@ pub struct Method {
 impl Method {
     pub fn validate(&self) -> Result<(), Error> {
         crate::name(&self.id).map_err(|e| Error::Invalid(e.to_string()))?;
-        if self.label.trim().is_empty() || self.label.len() > 256 || !self.input_schema.is_object()
-        {
+        if self.label.trim().is_empty() || !self.input_schema.is_object() {
             return Err(Error::Invalid("invalid authentication method".into()));
         }
         Ok(())

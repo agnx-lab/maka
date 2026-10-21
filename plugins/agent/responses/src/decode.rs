@@ -32,9 +32,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 
-const MAX_ITEMS: usize = 128;
-const MAX_TEXT: usize = 10_000_000;
-
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 enum Event {
@@ -222,7 +219,6 @@ pub struct Decoder {
     open: BTreeMap<String, Part>,
     seen: HashSet<String>,
     items: BTreeMap<String, ObservedItem>,
-    text_bytes: usize,
     done: HashSet<String>,
     citations: HashSet<String>,
     response_id: Option<String>,
@@ -240,7 +236,6 @@ impl Decoder {
             open: BTreeMap::new(),
             seen: HashSet::new(),
             items: BTreeMap::new(),
-            text_bytes: 0,
             done: HashSet::new(),
             citations: HashSet::new(),
             response_id: None,
@@ -284,7 +279,7 @@ impl Decoder {
     }
     fn observe(&mut self, item: &Item, added: bool, out: &mut Vec<ModelEvent>) -> Result<()> {
         let (id, identity) = item.identity()?;
-        if id.is_empty() || id.len() > 2048 {
+        if id.is_empty() {
             return Err(Self::invalid("invalid Responses item identity"));
         }
         if let Some(previous) = self.items.get(id) {
@@ -294,15 +289,9 @@ impl Decoder {
                 ));
             }
         } else {
-            if self.items.len() >= MAX_ITEMS {
-                return Err(Self::invalid("Responses item count exceeds limit"));
-            }
             if let Identity::Function { call_id, name } | Identity::Custom { call_id, name } =
                 &identity
-                && (call_id.is_empty()
-                    || call_id.len() > 2048
-                    || name.is_empty()
-                    || name.len() > 256)
+                && (call_id.is_empty() || name.is_empty())
             {
                 return Err(Self::invalid("invalid Responses tool identity"));
             }
@@ -379,11 +368,7 @@ impl Decoder {
         }
     }
     fn start(&mut self, id: &str, kind: TextKind, out: &mut Vec<ModelEvent>) -> Result<()> {
-        if id.is_empty()
-            || id.len() > 2048
-            || self.seen.len() >= MAX_ITEMS
-            || !self.seen.insert(id.into())
-        {
+        if id.is_empty() || !self.seen.insert(id.into()) {
             return Err(Self::invalid("invalid or duplicate Responses output item"));
         }
         self.observed_output = true;
@@ -412,12 +397,11 @@ impl Decoder {
             .open
             .get_mut(&id)
             .ok_or_else(|| Self::invalid("Responses delta has no open item"))?;
-        if part.kind != kind || self.text_bytes.saturating_add(text.len()) > MAX_TEXT {
+        if part.kind != kind {
             return Err(Self::invalid(
                 "Responses delta has invalid kind or exceeds text bound",
             ));
         }
-        self.text_bytes += text.len();
         part.text.push_str(&text);
         out.push(ModelEvent::PartDelta {
             id,
@@ -441,7 +425,7 @@ impl Decoder {
             .open
             .get(&id)
             .ok_or_else(|| Self::invalid("Responses item was already finalized"))?;
-        if part.kind != kind || text.len() > MAX_TEXT || !text.starts_with(&part.text) {
+        if part.kind != kind || !text.starts_with(&part.text) {
             return Err(Self::invalid(
                 "final Responses item disagrees with streamed text",
             ));
@@ -470,9 +454,6 @@ impl Decoder {
         annotation: Annotation,
         out: &mut Vec<ModelEvent>,
     ) -> Result<()> {
-        if self.citations.len() >= 512 && !self.citations.contains(&id) {
-            return Err(Self::invalid("Responses citation count exceeds limit"));
-        }
         if let Annotation::Url {
             url,
             title,
@@ -536,7 +517,7 @@ impl Decoder {
                     }
                     _ => (summary, "summary_text"),
                 };
-                if parts.len() > MAX_ITEMS || parts.iter().any(|p| p.r#type != carrier) {
+                if parts.iter().any(|p| p.r#type != carrier) {
                     return Err(Self::invalid(
                         "invalid finalized Responses reasoning carrier",
                     ));
@@ -1245,10 +1226,10 @@ mod tests {
                 .is_err()
         );
         let mut decoder = Decoder::new(None, &[]);
-        for id in 0..MAX_ITEMS {
+        for id in 0..129 {
             decoder.push(json!({"type":"response.output_item.done","item":function(&id.to_string(), &format!("call-{id}"))})).unwrap();
         }
-        assert!(decoder.push(json!({"type":"response.output_item.done","item":function("overflow","call-overflow")})).is_err());
+        decoder.push(json!({"type":"response.output_item.done","item":function("additional","call-additional")})).unwrap();
         let mut decoder = Decoder::new(None, &[]);
         decoder
             .push(json!({"type":"response.output_item.added","item":function("pending","raw|1")}))

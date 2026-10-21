@@ -45,11 +45,9 @@ impl maka_scheduler::task::TaskEffect for ScheduledEffect {
     fn validate(&self) -> Result<(), maka_scheduler::Error> {
         match self {
             Self::Reminder => Ok(()),
-            Self::Session { target, model, .. } | Self::AgentRun { target, model, .. } => {
+            Self::Session { target, .. } | Self::AgentRun { target, .. } => {
                 if target.session_id.is_empty()
-                    || target.session_id.len() > 160
                     || target.boundary_revision > maka_agent_facts::interaction::MAX_SAFE_INTEGER
-                    || serde_json::to_vec(model).map_or(true, |v| v.len() > 4096)
                 {
                     Err(maka_scheduler::Error::Invalid(
                         "invalid scheduled execution target".into(),

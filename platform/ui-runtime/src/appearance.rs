@@ -27,13 +27,12 @@ use serde::{Deserialize, Serialize};
 pub struct Color(pub u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct FontFamily(#[schemars(length(min = 1, max = 128))] pub String);
+pub struct FontFamily(#[schemars(length(min = 1))] pub String);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FontAppearance {
     pub family: FontFamily,
-    #[schemars(length(max = 8))]
     pub fallbacks: Vec<FontFamily>,
     #[schemars(range(min = 6, max = 96))]
     pub size: f32,

@@ -154,7 +154,7 @@ async fn selected_boundary_does_not_hydrate_an_earlier_sibling_payload() {
 }
 
 #[tokio::test]
-async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() {
+async fn escaped_raw_and_complete_ui_row_survive_reopen_and_require_original_body() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -163,38 +163,73 @@ async fn escaped_raw_remains_durable_when_full_ui_row_exceeds_client_capacity() 
     let raw = json!({"kind":"text","text":"\u{0000}".repeat(3 * 1024 * 1024)});
     let write = success(&operation, raw.clone());
     let through = log.append(&write).await.unwrap();
-    assert!(matches!(
-        crate::transcript_cache::materialize_all_rows(&log, "session", through).await,
-        Err(maka_event_log::StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
-    ));
+    materialize_all(&log, through).await;
+    let db = Connection::open(&path).unwrap();
+    let projected: Vec<u8> = db
+        .query_row(
+            "SELECT payload FROM transcript_rows WHERE message_id = ?",
+            [&write.event().id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let row: Value = serde_json::from_slice(&projected).unwrap();
+    assert!(
+        row["content"]["value"] == raw,
+        "escaped raw must be projected completely"
+    );
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
     log.close().await.unwrap();
     let log = EventLog::open(&path).await.unwrap();
-    assert_eq!(
+    assert!(
         log.resolve_tool_result("session", &write.event().id)
             .await
             .unwrap()
-            .to_json(),
-        raw
+            .to_json()
+            == raw,
+        "reopened raw result must retain its complete original value"
     );
     assert!(log.prefix(100, 32 * 1024 * 1024).await.is_ok());
-    // The raw size commitment already exceeds the individual row capacity, so
-    // preparation rejects before hydration. Missing raw bytes still fail the
-    // raw resolver; capacity refusal does not certify payload integrity.
+    materialize_all(&log, through).await;
+    let rebuilt: Vec<u8> = db
+        .query_row(
+            "SELECT payload FROM transcript_rows WHERE message_id = ?",
+            [&write.event().id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        rebuilt == projected,
+        "reopened projection must retain exact escaped bytes"
+    );
+    // Remove the derived cache as well so the next read must hydrate original bytes.
     let db = Connection::open(&path).unwrap();
     db.execute(
         "DELETE FROM tool_result_payloads WHERE event_id = ?",
         [&write.event().id],
     )
     .unwrap();
-    assert!(matches!(
-        crate::transcript_cache::materialize_all_rows(&log, "session", through).await,
-        Err(maka_event_log::StoreError::InvalidTransition(message)) if message.contains("too_large") && message.contains(&format!("history source {through}:"))
-    ));
+    db.execute_batch("DELETE FROM transcript_text; DELETE FROM transcript_rows")
+        .unwrap();
+    let error = crate::transcript_cache::materialize_all_rows(&log, "session", through)
+        .await
+        .expect_err(
+            "missing original body must fail hydration despite formerly valid derived rows",
+        );
+    assert!(
+        matches!(
+            &error,
+            maka_event_log::StoreError::InvalidTransition(message)
+                if message == "missing or inconsistent durable tool payload"
+        ),
+        "unexpected hydration error: {error}"
+    );
     assert!(
         log.resolve_tool_result("session", &write.event().id)
             .await
             .is_err()
     );
+    log.close().await.unwrap();
 }
 
 #[tokio::test]

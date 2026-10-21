@@ -85,17 +85,8 @@ impl Client for Http {
                 || !url.username().is_empty()
                 || url.password().is_some()
                 || url.fragment().is_some()
-                || input.url.len() > 8192
-                || input.body.len() > 1024 * 1024
-                || input.headers.len() > 64
-                || input
-                    .headers
-                    .iter()
-                    .map(|(key, value)| key.len() + value.len())
-                    .sum::<usize>()
-                    > 64 * 1024
             {
-                return Err(invalid("invalid HTTP request or request limit exceeded"));
+                return Err(invalid("invalid HTTP request"));
             }
             let mut headers = HeaderMap::new();
             let destination = maka_sandbox::Destination::new(
@@ -118,12 +109,17 @@ impl Client for Http {
                 ) {
                     return Err(invalid("HTTP framing and proxy headers are owned by Host"));
                 }
-                headers.append(name, HeaderValue::from_str(&value).map_err(invalid)?);
+                headers
+                    .try_append(name, HeaderValue::from_str(&value).map_err(invalid)?)
+                    .map_err(invalid)?;
             }
             let policy = self
                 .authority
                 .policy(&call, &destination, url.origin().ascii_serialization())
                 .await?;
+            policy
+                .check_request_headers(&url, &headers, !input.body.is_empty(), false)
+                .map_err(invalid)?;
             let client = {
                 let mut cached = self.client.lock().await;
                 if cached

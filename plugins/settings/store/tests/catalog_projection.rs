@@ -150,3 +150,24 @@ fn revision_change_precedes_cursor_and_resolver_and_invalid_cursor_fails() {
         .is_err()
     );
 }
+
+#[test]
+fn oversized_catalog_item_keeps_complete_content_and_advances_cursor() {
+    let mut snapshot = snapshot();
+    let notes = "route-policy: east\n".repeat(12_000);
+    snapshot.connections[0].configuration["routingNotes"] = json!(notes);
+    let first = project(&snapshot, &ConnectionCatalogQueryInput::Start, resolve).unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first["items"][0]["configuration"]["routingNotes"], notes);
+    assert_eq!(
+        first["nextCursor"],
+        json!({"part":"enabled_model_id", "connectionIndex":0,"itemIndex":0})
+    );
+    let next = serde_json::from_value(
+        json!({"kind":"continue", "revision":7,"cursor":first["nextCursor"]}),
+    )
+    .unwrap();
+    let second = project(&snapshot, &next, resolve).unwrap();
+    assert_eq!(second["items"][0]["modelId"], "manual-0");
+    assert_ne!(second["nextCursor"], first["nextCursor"]);
+}

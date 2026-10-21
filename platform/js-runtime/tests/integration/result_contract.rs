@@ -17,55 +17,125 @@
  * under the License.
  */
 
-use maka_js_runtime::{
-    CellAbort, CellDiagnostic, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor,
-};
+use maka_js_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
 use serde_json::json;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn enforces_tool_call_and_serialized_value_limits() {
-    let engine = CodeExecutor::new(CellLimits {
-        max_tool_calls: 1,
-        max_value_bytes: 160,
-        ..Default::default()
-    })
-    .unwrap();
-    let result = engine
-        .execute(
-            "await tools.echo({}); return await tools.echo({});".into(),
-            Arc::new(Echo::default()),
-            CancellationToken::new(),
-        )
-        .await;
-    assert!(serde_json::to_vec(result.as_ref().unwrap()).unwrap().len() <= 160);
-    assert!(
-        matches!(result, Ok(CellResult::Failure { error: CellDiagnostic { kind: CellDiagnosticKind::LimitExceeded, message }, tool_calls }) if message.contains("admission limit") && tool_calls.len() == 1)
+async fn complete_source_runs_forty_ordered_effects_and_returns_complete_value() {
+    struct Ordered(std::sync::Mutex<Vec<serde_json::Value>>);
+    impl maka_agent_facts::tools::ToolExecutor for Ordered {
+        fn names(&self) -> Vec<String> {
+            vec!["echo".into()]
+        }
+        fn invoke(
+            &self,
+            _: String,
+            input: serde_json::Value,
+            _: CancellationToken,
+        ) -> maka_agent_facts::tools::ToolFuture {
+            self.0.lock().unwrap().push(input.clone());
+            Box::pin(async move { Ok(input) })
+        }
+    }
+    let literal = "保留😀z".repeat(8_000);
+    let source = format!(
+        "const original = {}; for(let index=0;index<40;index++) {{ const value=await tools.echo({{index,first:original.slice(0,5),last:original.slice(-5)}}); if(value.index!==index) throw Error('effect order'); }} return {{original,complete:'完整😀'.repeat(100000)}};",
+        serde_json::to_string(&literal).unwrap()
     );
-    let result = engine
-        .execute(
-            "return 'x'.repeat(300);".into(),
+    assert!(source.len() > 65_536);
+    let tools = Arc::new(Ordered(Default::default()));
+    let result = CodeExecutor::new(CellLimits::default())
+        .unwrap()
+        .execute(source, tools.clone(), CancellationToken::new())
+        .await;
+    // execute returns only after the isolate's original admitted work has drained.
+    let expected = (0..40)
+        .map(|index| json!({"index":index,"first":"保留😀z","last":"保留😀z"}))
+        .collect::<Vec<_>>();
+    let calls = tools.0.lock().unwrap().clone();
+    assert_eq!(
+        calls.len(),
+        40,
+        "complete source must admit every ordered effect"
+    );
+    assert_eq!(calls, expected);
+    let result = result.unwrap();
+    let CellResult::Success { value, tool_calls } = result else {
+        panic!("complete source must return success")
+    };
+    assert_eq!(
+        tool_calls
+            .iter()
+            .map(|call| (call.index, call.name.as_str()))
+            .collect::<Vec<_>>(),
+        (1..=40).map(|index| (index, "echo")).collect::<Vec<_>>()
+    );
+    assert!(
+        value["original"].as_str() == Some(literal.as_str()),
+        "complete literal source changed"
+    );
+    let complete = "完整😀".repeat(100_000);
+    assert!(serde_json::to_vec(&value).unwrap().len() > 1024 * 1024);
+    assert!(
+        value["complete"].as_str() == Some(complete.as_str()),
+        "complete returned value changed"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn complete_scratch_output_and_notifications_survive_cell_settlement() {
+    use maka_js_runtime::{CellContext, CellOutput, CellStore};
+    let store = CellStore::default();
+    let context = CellContext::new(store.clone(), vec![]);
+    let engine = CodeExecutor::new(CellLimits::default()).unwrap();
+    let result = engine.execute_with_context(
+        "const complete='保留😀z'.repeat(100000); store('original',complete); for(let index=0;index<70;index++) text(String(index)); text(complete); notify(complete); return complete;".into(),
+        Arc::new(Echo::default()), CancellationToken::new(), context.clone()
+    ).await.unwrap();
+    let committed = context.commit();
+    let output = context.take_output();
+    let notifications = context.take_notifications();
+    assert!(
+        matches!(result, CellResult::Success { .. }),
+        "full scratch/output must complete"
+    );
+    committed.unwrap();
+    let complete = "保留😀z".repeat(100_000);
+    assert_eq!(output.len(), 71, "all emitted entries must survive");
+    for (index, output) in output[..70].iter().enumerate() {
+        assert!(matches!(output,CellOutput::Text { text } if text == &index.to_string()));
+    }
+    assert!(
+        matches!(&output[70],CellOutput::Text {text} if text == &complete),
+        "complete output changed"
+    );
+    assert_eq!(notifications.len(), 1);
+    assert!(
+        notifications.front() == Some(&complete),
+        "complete notification changed"
+    );
+    let next = CellContext::new(store, vec![]);
+    let loaded = engine
+        .execute_with_context(
+            "return load('original');".into(),
             Arc::new(Echo::default()),
             CancellationToken::new(),
+            next,
         )
-        .await;
-    assert!(matches!(
-        result,
-        Ok(CellResult::Failure {
-            error: CellDiagnostic {
-                kind: CellDiagnosticKind::LimitExceeded,
-                ..
-            },
-            ..
-        })
-    ));
+        .await
+        .unwrap();
+    assert!(
+        matches!(loaded,CellResult::Success {value,..} if value.as_str() == Some(complete.as_str())),
+        "committed scratch must survive in the next cell"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_tool_roundtrips_large_utf8_values_with_a_small_cell_result() {
     let limits = CellLimits::default();
     let expected_input = json!({"text":"中文😀\n".repeat(200_000),"tag":"original-large-echo"});
-    assert!(serde_json::to_vec(&expected_input).unwrap().len() > limits.max_value_bytes);
+    assert!(serde_json::to_vec(&expected_input).unwrap().len() > 1024 * 1024);
     let engine = CodeExecutor::new(limits).unwrap();
     let result = engine.execute(
         "const text = '中文😀\\n'.repeat(200000); const result = await tools.echo({text,tag:'original-large-echo'}); if (result.text !== text || result.tag !== 'original-large-echo' || Object.keys(result).length !== 2) throw Error('original tool output changed'); return {units:result.text.length,tag:result.tag};".into(),
@@ -190,12 +260,8 @@ async fn ordinary_errors_are_catchable_but_fatal_errors_prevent_later_effects() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancellation_precedes_source_limit() {
-    let engine = CodeExecutor::new(CellLimits {
-        max_source_bytes: 1,
-        ..Default::default()
-    })
-    .unwrap();
+async fn cancellation_precedes_execution() {
+    let engine = CodeExecutor::new(CellLimits::default()).unwrap();
     let cancel = CancellationToken::new();
     cancel.cancel();
     assert!(matches!(
@@ -266,41 +332,36 @@ async fn exact_envelopes_and_structured_diagnostics() {
     }
 }
 #[test]
-fn rejects_budget_too_small_for_a_diagnostic() {
-    assert!(matches!(
+fn rejects_invalid_execution_resources() {
+    assert!(
         CodeExecutor::new(CellLimits {
-            max_value_bytes: 32,
+            timeout: std::time::Duration::ZERO,
             ..Default::default()
-        }),
-        Err(CellAbort::Internal(_))
-    ));
+        })
+        .is_err()
+    );
+    assert!(
+        CodeExecutor::new(CellLimits {
+            heap_bytes: 1,
+            ..Default::default()
+        })
+        .is_err()
+    );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn summary_and_large_error_fit_the_whole_envelope() {
-    let engine = CodeExecutor::new(CellLimits {
-        max_value_bytes: 120,
-        ..Default::default()
-    })
-    .unwrap();
-    for source in [
-        "await tools.echo({}); throw Error('x'.repeat(1000));",
-        "await tools.echo({}); throw Error('汉\\n\\u0001'.repeat(100000));",
-        "await tools.echo({}); return 'x'.repeat(90);",
-        "await tools.echo({}); await tools.echo({});",
-    ] {
-        let value = engine
-            .execute(
-                source.into(),
-                Arc::new(Echo::default()),
-                CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-        let encoded = serde_json::to_vec(&value).unwrap();
-        assert!(encoded.len() <= 120);
-        let CellResult::Failure { tool_calls, .. } = value else {
-            panic!("expected failure")
-        };
-        assert_eq!(tool_calls.len(), 1);
-    }
+async fn complete_diagnostics_keep_every_admitted_call() {
+    let engine = CodeExecutor::new(CellLimits::default()).unwrap();
+    let result=engine.execute("await tools.echo({}); await tools.echo({}); throw Error('汉\\n\\u0001'.repeat(100000));".into(),Arc::new(Echo::default()),CancellationToken::new()).await.unwrap();
+    let CellResult::Failure { error, tool_calls } = result else {
+        panic!("expected an actual JavaScript error")
+    };
+    assert_eq!(error.kind, CellDiagnosticKind::ExecutionError);
+    assert!(
+        error.message.ends_with(&"汉\n\u{1}".repeat(100000)),
+        "complete diagnostic suffix changed"
+    );
+    assert_eq!(
+        tool_calls.iter().map(|c| c.index).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }

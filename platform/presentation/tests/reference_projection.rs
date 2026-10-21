@@ -23,11 +23,11 @@ use maka_agent_facts::event::RuntimeEvent;
 use maka_agent_facts::event::StoredEvent;
 use maka_agent_facts::input::InvocationInput;
 use maka_agent_facts::input::MessageInput;
-use maka_presentation::{InvocationView, ProjectionError};
+use maka_presentation::InvocationView;
 use serde_json::json;
 
 #[test]
-fn reference_text_is_bounded_before_presentation_and_poison_does_not_publish_it() {
+fn complete_reference_text_survives_presentation() {
     let invocation = Invocation {
         session_id: "session".into(),
         turn_id: "turn".into(),
@@ -51,7 +51,7 @@ fn reference_text_is_bounded_before_presentation_and_poison_does_not_publish_it(
         ),
     ] {
         let mut input = json!({"text":"@file","display_text":null});
-        input[field] = references;
+        input[field] = references.clone();
         let input: MessageInput = serde_json::from_value(input).unwrap();
         let event = StoredEvent {
             sequence: 1,
@@ -67,15 +67,21 @@ fn reference_text_is_bounded_before_presentation_and_poison_does_not_publish_it(
                 },
             ),
         };
-        let mut view = InvocationView::new(128).unwrap();
-        assert!(
-            matches!(view.push(&event), Err(ProjectionError::TooLarge)),
-            "{field}"
+        let mut view = InvocationView::new();
+        let rows = view.push(&event).unwrap();
+        let content = serde_json::to_value(&rows[0].message.content).unwrap();
+        let output_field = match field {
+            "directory_references" => "directoryReferences",
+            "inline_references" => "inlineReferences",
+            other => other,
+        };
+        assert_eq!(
+            content[output_field], references,
+            "complete {field} changed"
         );
-        assert!(view.overlay().is_empty());
         assert!(
             view.push(&event).is_err(),
-            "cannot resume a poisoned projection"
+            "replayed evidence remains invalid"
         );
     }
 }

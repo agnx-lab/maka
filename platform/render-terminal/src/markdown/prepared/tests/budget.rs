@@ -20,63 +20,21 @@
 use super::*;
 
 #[test]
-fn oversized_graphemes_are_rejected_during_preparation_including_fence_labels() {
-    let allowed = format!("e{}", "\u{301}".repeat((MAX_GRAPHEME_BYTES - 1) / 2));
-    let document = Document::plain(&allowed).unwrap();
+fn complete_graphemes_survive_preparation_including_fence_labels() {
+    let text = format!("e{}", "\u{301}".repeat(9000));
+    let document = Document::plain(&text).unwrap();
     let mut cursor = document.cursor(10, 0..2);
-    assert!(cursor.minimum_work() <= 32_768);
     finish(&mut cursor);
-    assert_eq!(cursor.lines()[0].line.to_string(), allowed);
-    let mixed = Document::plain(&format!("{}{allowed}", "a".repeat(80_000))).unwrap();
-    let mut mixed = mixed.cursor(40, 0..3);
-    let progress = mixed.advance(mixed.minimum_work()).unwrap();
-    assert!(
-        progress.bytes > 10_000,
-        "one large later cluster must not reduce ordinary text to one grapheme per frame"
-    );
-    assert!(progress.work <= 32_768);
-    let oversized = format!("{allowed}\u{301}");
-    let error = Some("Transcript grapheme exceeds 16 KiB local capacity");
-    assert_eq!(Document::plain(&oversized).err(), error);
-    assert_eq!(
-        Document::markdown(
-            &format!("```{oversized}\n```"),
-            false,
-            crate::markdown::Palette::default()
-        )
-        .err(),
-        error
-    );
-    assert_eq!(
-        Document::markdown(
-            &format!("```\n{oversized}\n```"),
-            false,
-            crate::markdown::Palette::default()
-        )
-        .err(),
-        error
-    );
-    let entities = format!("e{}", "&#x301;".repeat(MAX_GRAPHEME_BYTES / 2));
-    assert_eq!(
-        Document::markdown(&entities, false, crate::markdown::Palette::default()).err(),
-        error
-    );
-    let rows = [diff::Row {
-        source: 0..oversized.len(),
-        kind: diff::Kind::Added,
-        language: None,
-    }];
-    assert_eq!(
-        Document::diff(
-            &oversized,
-            &rows,
-            false,
-            crate::markdown::Palette::default()
-        )
-        .err(),
-        error
-    );
+    assert_eq!(cursor.lines()[0].line.to_string(), text);
+    for source in [
+        format!("```{text}\n```"),
+        format!("```\n{text}\n```"),
+        format!("e{}", "&#x301;".repeat(9000)),
+    ] {
+        assert!(Document::markdown(&source, false, crate::markdown::Palette::default()).is_ok());
+    }
 }
+
 #[test]
 fn combining_word_lookahead_yields_by_bytes_without_changing_wraps() {
     let cluster = format!("e{}", "\u{301}".repeat(400));

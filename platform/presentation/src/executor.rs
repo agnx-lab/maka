@@ -27,12 +27,10 @@ pub(super) struct Execution {
     message: Message,
     pending: BTreeMap<String, String>,
     seen: BTreeSet<String>,
-    bytes: usize,
-    limit: usize,
     completed: bool,
 }
 impl Execution {
-    pub fn new(event: &RuntimeEvent, ts: u64, binding: &Binding, limit: usize) -> Self {
+    pub fn new(event: &RuntimeEvent, ts: u64, binding: &Binding) -> Self {
         Self {
             message: Message {
                 id: event.id.clone(),
@@ -49,8 +47,6 @@ impl Execution {
             },
             pending: BTreeMap::new(),
             seen: BTreeSet::new(),
-            bytes: 0,
-            limit,
             completed: false,
         }
     }
@@ -63,14 +59,6 @@ impl Execution {
         if self.completed {
             return Err(ProjectionError::Invalid("output after executor completion"));
         }
-        let size = serde_json::to_vec(output)
-            .map_err(|_| ProjectionError::TooLarge)?
-            .len();
-        self.bytes = self
-            .bytes
-            .checked_add(size)
-            .filter(|size| *size <= self.limit)
-            .ok_or(ProjectionError::TooLarge)?;
         let Content::Assistant { text, thinking, .. } = &mut self.message.content else {
             unreachable!()
         };
@@ -94,9 +82,6 @@ impl Execution {
                 name,
                 input,
             } => {
-                if self.pending.len() >= 128 || self.seen.len() >= 4096 {
-                    return Err(ProjectionError::TooLarge);
-                }
                 if !self.seen.insert(tool_call_id.clone()) {
                     return Err(ProjectionError::Invalid(
                         "executor reused a tool activity ID",
@@ -149,21 +134,9 @@ impl Execution {
         if self.completed {
             return Err(ProjectionError::Invalid("duplicate executor completion"));
         }
-        let Content::Assistant {
-            text: current,
-            thinking,
-            ..
-        } = &mut self.message.content
-        else {
+        let Content::Assistant { text: current, .. } = &mut self.message.content else {
             unreachable!()
         };
-        if text
-            .len()
-            .saturating_add(thinking.as_ref().map_or(0, |thinking| thinking.text.len()))
-            > self.limit
-        {
-            return Err(ProjectionError::TooLarge);
-        }
         *current = text.into();
         self.completed = true;
         let mut rows = self.close_tools(event, ts);

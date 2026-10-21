@@ -126,55 +126,57 @@ impl Directory {
         Ok(())
     }
     pub async fn entries(&self) -> Result<Vec<entries::Entry>, Error> {
-        let Output::List(page) = self
-            .invoke(Operation::List(entries::ListFiles {
-                path: self.prefix.clone(),
-                after: None,
-                limit: 1024,
-            }))
-            .await?
-        else {
-            return Err(Error::Invalid("Invalid directory output".into()));
-        };
-        if page.next_after.is_some() {
-            return Err(Error::Invalid("Skill directory exceeds entry limit".into()));
+        let mut after = None;
+        let mut entries = Vec::new();
+        loop {
+            let Output::List(page) = self
+                .invoke(Operation::List(entries::ListFiles {
+                    path: self.prefix.clone(),
+                    after: after.clone(),
+                    limit: 1024,
+                }))
+                .await?
+            else {
+                return Err(Error::Invalid("Invalid directory output".into()));
+            };
+            entries.extend(page.entries);
+            match page.next_after {
+                None => return Ok(entries),
+                Some(next) if after.as_ref().is_none_or(|previous| &next > previous) => {
+                    after = Some(next)
+                }
+                Some(_) => return Err(Error::Invalid("Directory page did not advance".into())),
+            }
         }
-        Ok(page.entries)
     }
-    pub async fn read(&self, name: &str, limit: usize) -> Result<(Vec<u8>, u32), Error> {
+    pub async fn read(&self, name: &str) -> Result<(Vec<u8>, u32), Error> {
         let path = self.path(name);
         let Output::Stat(metadata) = self.invoke(Operation::Stat { path: path.clone() }).await?
         else {
             return Err(Error::Invalid("Invalid metadata output".into()));
         };
-        if !matches!(metadata.kind, Kind::File) || metadata.size > limit as u64 {
+        if !matches!(metadata.kind, Kind::File) {
             return Err(Error::Invalid(
-                "Skill resource is not a bounded regular file".into(),
+                "Skill resource is not a regular file".into(),
             ));
         }
-        let mut bytes = Vec::new();
-        loop {
-            let Output::Read(page) = self
-                .invoke(Operation::Read(entries::ReadFile {
-                    path: path.clone(),
-                    offset: bytes.len() as u64,
-                    limit: (limit + 1 - bytes.len()).min(1024 * 1024),
-                }))
-                .await?
-            else {
-                return Err(Error::Invalid("Invalid file output".into()));
-            };
-            bytes.extend(page.bytes);
-            if bytes.len() > limit {
-                return Err(Error::Invalid(
-                    "Skill resource grew beyond its limit".into(),
-                ));
-            }
-            if page.next_offset.is_none() {
-                return Ok((bytes, metadata.mode));
-            }
+        // Read the complete initial prefix through one opened file object.
+        let Output::Read(page) = self
+            .invoke(Operation::Read(entries::ReadFile {
+                path,
+                offset: 0,
+                limit: usize::MAX,
+            }))
+            .await?
+        else {
+            return Err(Error::Invalid("Invalid file output".into()));
+        };
+        if page.next_offset.is_some() {
+            return Err(Error::Invalid("Incomplete Skill resource capture".into()));
         }
+        Ok((page.bytes, metadata.mode))
     }
+
     pub async fn write_new(&self, name: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
         let path = self.path(name);
         // Empty files still require a create-new operation.
@@ -204,16 +206,11 @@ impl Directory {
     }
     pub async fn remove_tree(&self, name: &str) -> Result<(), Error> {
         let mut stack = vec![(self.clone(), name.to_owned(), false)];
-        let mut remaining = 2048;
         while let Some((parent, name, visited)) = stack.pop() {
             if visited {
                 parent.remove(&name).await?;
                 continue;
             }
-            if remaining == 0 {
-                return Err(Error::Invalid("Skill garbage exceeds limits".into()));
-            }
-            remaining -= 1;
             let directory = parent.open(&name).await?;
             stack.push((parent, name, true));
             for entry in directory.entries().await? {

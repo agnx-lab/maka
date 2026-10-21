@@ -301,25 +301,40 @@ fn owned_startup_connects_concurrently_and_preserves_original_effect_and_last_cl
                 "Host discovery is stale, incompatible or not ready"
             );
 
-            // Individually valid field limits still permit an oversized encoded
-            // request. Live reuse must enforce bytes before selecting/spawning.
-            let mut oversized = request();
-            let mut endpoint = endpoints["business"].clone();
-            endpoint.grant.methods = (0..64)
-                .map(|index| format!("{index:03}{}", "x".repeat(253)))
+            // A complete valid startup request may exceed the old512KiB
+            // policy. Live reuse validates its original Root/deployment and
+            // retains the running Host's captured catalogue, without a helper
+            // or installing newly proposed aliases.
+            let mut complete = request();
+            complete.endpoints = (0..64)
+                .map(|index| {
+                    (
+                        format!("business-{index:03}-{}", "x".repeat(8192)),
+                        endpoints["business"].clone(),
+                    )
+                })
                 .collect();
-            oversized.endpoints = (0..64)
-                .map(|index| (format!("endpoint-{index}"), endpoint.clone()))
-                .collect();
-            oversized.validate().unwrap();
-            let error = startup::connect(&impossible_helper, oversized)
+            complete.validate().unwrap();
+            assert!(serde_json::to_vec(&complete).unwrap().len() > 512 * 1024);
+            let mut complete_client = startup::connect(&impossible_helper, complete)
                 .await
-                .err()
-                .expect("encoded request must be bounded before live reuse");
-            assert!(
-                error.contains("Application frame exceeds byte limit"),
-                "{error}"
+                .unwrap();
+            assert_eq!(
+                complete_client.epoch(),
+                second.epoch(),
+                "live reuse must not run a helper"
             );
+            assert_eq!(complete_client.source(), &source);
+            assert_eq!(
+                serde_json::to_value(complete_client.catalogue()).unwrap(),
+                serde_json::to_value(second.catalogue()).unwrap(),
+                "reuse must retain the original captured endpoint authority"
+            );
+            assert_eq!(
+                query(&complete_client, "business", "read", Value::Null).await,
+                json!({"effects":1})
+            );
+            complete_client.close().await.unwrap();
             assert_eq!(
                 query(&second, "business", "read", Value::Null).await,
                 json!({"effects":1})

@@ -31,15 +31,10 @@ pub struct AuthenticationInput {
 impl AuthenticationInput {
     pub fn validate(&self) -> Result<(), String> {
         if self.method.is_empty()
-            || self.method.len() > 256
             || self
                 .method
                 .chars()
                 .any(|c| c.is_whitespace() || c.is_control())
-            || serde_json::to_vec(&self.input)
-                .map_err(|_| "invalid authentication input")?
-                .len()
-                > 64 * 1024
         {
             return Err("invalid authentication input".into());
         }
@@ -58,10 +53,7 @@ pub struct Credential {
 
 impl Credential {
     pub fn validate(&self) -> Result<(), String> {
-        if self.secret.is_empty()
-            || self.secret.len() > 64 * 1024
-            || self.refresh_at.is_some_and(|v| v > 9_007_199_254_740_991)
-        {
+        if self.secret.is_empty() || self.refresh_at.is_some_and(|v| v > 9_007_199_254_740_991) {
             return Err("invalid provider credential envelope".into());
         }
         Ok(())
@@ -83,8 +75,7 @@ impl Identity {
     pub fn validate(&self) -> Result<(), String> {
         Scope::try_from(String::from(self.scope.clone()))?;
         for value in [&self.package_id, &self.entry_id] {
-            if value.len() > 128
-                || !value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+            if !value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
                 || value.split(['.', '_', ':', '-']).any(|part| {
                     part.is_empty()
                         || !part
@@ -96,7 +87,6 @@ impl Identity {
             }
         }
         if self.name.is_empty()
-            || self.name.len() > 256
             || self
                 .name
                 .chars()

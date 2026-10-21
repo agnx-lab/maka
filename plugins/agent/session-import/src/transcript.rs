@@ -88,7 +88,7 @@ impl Records {
 }
 
 pub(crate) fn identity(value: &str) -> Result<(), Error> {
-    if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
+    if value.is_empty() || value.chars().any(char::is_control) {
         Err(Error::Invalid("invalid source identity"))
     } else {
         Ok(())
@@ -96,9 +96,7 @@ pub(crate) fn identity(value: &str) -> Result<(), Error> {
 }
 
 pub(crate) fn source_cwd(value: Option<String>) -> Option<String> {
-    value.filter(|path| {
-        !path.is_empty() && path.len() <= 4096 && !path.chars().any(char::is_control)
-    })
+    value.filter(|path| !path.is_empty() && !path.chars().any(char::is_control))
 }
 
 pub(crate) fn title(text: &str) -> String {

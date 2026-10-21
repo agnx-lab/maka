@@ -122,7 +122,7 @@ struct ApiProvider {
 #[derive(Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Configuration {
-    #[schemars(length(min = 1, max = 2048))]
+    #[schemars(length(min = 1))]
     base_url: String,
 }
 impl Configuration {

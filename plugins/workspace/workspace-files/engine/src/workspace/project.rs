@@ -138,6 +138,6 @@ fn default_name(path: &Path, kind: &ProjectKind) -> io::Result<String> {
 pub fn host_path(path: &Path) -> io::Result<&str> {
     dunce::simplified(path)
         .to_str()
-        .filter(|p| !p.is_empty() && p.len() <= 4096)
-        .ok_or_else(|| invalid("project path is not bounded UTF-8"))
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| invalid("project path is not nonempty UTF-8"))
 }

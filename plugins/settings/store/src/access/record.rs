@@ -77,22 +77,20 @@ pub struct AccessChange<T> {
     /// Returned only after the enclosing transaction commits.
     pub revoked: Vec<String>,
 }
-const MAX_ACCESS_BYTES: usize = 512 * 1024;
 pub(super) fn invalid(message: &str) -> ConfigError {
     ConfigError::Invalid(message.into())
 }
 pub(super) fn valid_client(value: &str) -> bool {
-    !value.is_empty() && value.encode_utf16().count() <= 128
+    !value.is_empty()
 }
 fn valid_id(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 128
         && value
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c))
 }
 pub(super) fn validate(value: &AccessCredential) -> Result<()> {
-    let date = |s: &str| !s.is_empty() && s.len() <= 128;
+    let date = |s: &str| !s.is_empty();
     let state_valid = match &value.state {
         CredentialState::Active { client_instance_id } => {
             client_instance_id.as_deref().is_none_or(valid_client)
@@ -117,11 +115,7 @@ pub(super) fn validate(value: &AccessCredential) -> Result<()> {
             .credential_hash
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-        || value.grants.len() > 256
-        || value
-            .grants
-            .iter()
-            .any(|g| g.is_empty() || g.encode_utf16().count() > 128)
+        || value.grants.iter().any(|g| g.is_empty())
         || value
             .grants
             .iter()
@@ -141,14 +135,6 @@ pub(super) fn validate(value: &AccessCredential) -> Result<()> {
     Ok(())
 }
 pub(super) async fn load(tx: &mut SqliteConnection) -> Result<Vec<AccessCredential>> {
-    let bytes: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(length(CAST(document AS BLOB))), 0) FROM access_credentials",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if bytes > MAX_ACCESS_BYTES as i64 {
-        return Err(invalid("access credential capacity exceeded"));
-    }
     let documents: Vec<String> =
         sqlx::query_scalar("SELECT document FROM access_credentials ORDER BY credential_id")
             .fetch_all(tx)
@@ -162,7 +148,7 @@ pub(super) async fn load(tx: &mut SqliteConnection) -> Result<Vec<AccessCredenti
         })
         .collect()
 }
-/// Replaces the bounded private document set inside the caller's immediate transaction.
+/// Replaces the private document set inside the caller's immediate transaction.
 pub(super) async fn save(tx: &mut SqliteConnection, records: &[AccessCredential]) -> Result<()> {
     let documents: Vec<String> = records
         .iter()
@@ -171,9 +157,6 @@ pub(super) async fn save(tx: &mut SqliteConnection, records: &[AccessCredential]
             Ok(serde_json::to_string(c)?)
         })
         .collect::<Result<_>>()?;
-    if documents.iter().map(String::len).sum::<usize>() > MAX_ACCESS_BYTES {
-        return Err(invalid("access credential capacity exceeded"));
-    }
     sqlx::query("DELETE FROM access_credentials")
         .execute(&mut *tx)
         .await?;

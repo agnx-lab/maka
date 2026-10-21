@@ -71,9 +71,6 @@ impl Selection {
                 title_query,
             } => {
                 validate_id(id_prefix)?;
-                if title_query.chars().take(129).count() > 128 {
-                    return Err(invalid("catalog title query exceeds 128 characters"));
-                }
                 selection.prefix = Some(id_prefix.clone());
                 selection.title_query.clone_from(title_query);
                 match scope {

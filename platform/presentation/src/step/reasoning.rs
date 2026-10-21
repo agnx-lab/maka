@@ -35,15 +35,12 @@ pub(super) fn finalized(options: Option<&Value>) -> bool {
         return false;
     };
     state.version == 1
-        && safe_id(&state.profile, 128)
-        && safe_id(&state.item_id, 512)
-        && state.summary_part_lengths.len() <= 128
+        && safe_id(&state.profile)
+        && safe_id(&state.item_id)
         && state
             .summary_part_lengths
             .iter()
-            .try_fold(0u64, |sum, part| {
-                sum.checked_add(*part).filter(|total| *total <= 10_000_000)
-            })
+            .try_fold(0u64, |sum, part| sum.checked_add(*part))
             .is_some()
 }
 
@@ -60,9 +57,8 @@ fn nonempty(value: &Value) -> bool {
     value.as_str().is_some_and(|value| !value.is_empty())
 }
 
-fn safe_id(value: &str, limit: usize) -> bool {
+fn safe_id(value: &str) -> bool {
     !value.is_empty()
-        && value.encode_utf16().count() <= limit
         && !value
             .chars()
             .any(|character| character <= '\u{1f}' || character == '\u{7f}')

@@ -112,7 +112,7 @@ pub(crate) async fn update(
         (CredentialAction::Delete, None) => CredentialUpdate::Delete {},
         (CredentialAction::Replace, Some(resource)) => {
             let bytes = resource.bytes();
-            if bytes == 0 || bytes > 10240 {
+            if bytes == 0 {
                 return super::connections::encode(Updated::Rejected);
             }
             let Ok(secret) = resource

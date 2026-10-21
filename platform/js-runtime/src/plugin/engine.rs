@@ -245,7 +245,7 @@ pub(super) fn call_synchronous(
     args: &[Value],
 ) -> Result<Value> {
     let result = invoke(runtime, module, path, args)?;
-    value(runtime, result, None)
+    value(runtime, result)
 }
 
 /// Capture an actual receiver and all required functions before publishing a
@@ -292,7 +292,7 @@ pub(super) fn call_bound_synchronous(
     args: &[&Value],
 ) -> Result<Value> {
     let result = invoke_bound(runtime, callbacks, method, args.iter().copied(), None)?;
-    value(runtime, result, None)
+    value(runtime, result)
 }
 
 pub(super) fn call_bound(
@@ -360,18 +360,14 @@ fn invoke_bound<'a>(
     Ok(value)
 }
 
-pub(super) fn value(
-    runtime: &mut JsRuntime,
-    value: v8::Global<v8::Value>,
-    limit: Option<usize>,
-) -> Result<Value> {
+pub(super) fn value(runtime: &mut JsRuntime, value: v8::Global<v8::Value>) -> Result<Value> {
     deno_core::scope!(scope, runtime);
     v8::tc_scope!(scope, scope);
     let value = v8::Local::new(scope, value);
     if value.is_promise() {
         return Err(failed("foreground callbacks must return synchronously"));
     }
-    super::json::decode(scope, value, limit).map_err(failed)
+    super::json::decode(scope, value).map_err(failed)
 }
 
 /// Drain ready native V8 tasks and local JavaScript jobs, without waiting on

@@ -27,10 +27,7 @@ use crate::{
     editor::EditorSnapshot,
 };
 use maka_capabilities::call::Resources;
-use maka_event_log::{
-    EventLog,
-    applications::checkpoints::{Checkpoints, MAX_METADATA, MAX_SOURCE},
-};
+use maka_event_log::{EventLog, applications::checkpoints::Checkpoints};
 use maka_plugin_core::{composition::InstanceId, runtime::Mount};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,9 +68,9 @@ impl Scope {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditorPersistence {
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub key: String,
-    #[schemars(length(min = 1, max = 96))]
+    #[schemars(length(min = 1))]
     pub format: String,
     pub data_source: Value,
     pub metadata: Value,
@@ -86,7 +83,7 @@ pub struct EditorPersistence {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditorRestoration {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub owner: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991_u64))]
     pub version: u64,
@@ -122,21 +119,14 @@ pub fn observation_schema() -> Value {
 impl EditorPersistence {
     pub fn validate(&self) -> crate::Result<()> {
         if self.key.is_empty()
-            || self.key.len() > 512
             || self.key.chars().any(char::is_control)
             || self.format.is_empty()
-            || self.format.len() > 96
             || self.retry > (1 << 53) - 1
         {
             return Err(crate::Error::Invalid(
                 "invalid editor persistence identity".into(),
             ));
         }
-        maka_plugin_core::json::check_delivery(&self.data_source, MAX_SOURCE)
-            .map_err(|error| crate::Error::Invalid(error.to_string()))?;
-        // The internal native observation shares the same bounded metadata record.
-        maka_plugin_core::json::check_delivery(&self.metadata, MAX_METADATA - 2048)
-            .map_err(|error| crate::Error::Invalid(error.to_string()))?;
         Ok(())
     }
     fn same_identity(&self, other: &Self) -> bool {
@@ -158,7 +148,7 @@ pub struct Loaded {
     version: u64,
     saved: Saved,
     text: String,
-    _memory: Permit,
+    _memory: (Permit, Option<Permit>),
 }
 pub struct Restore {
     pub clear_text: bool,
@@ -351,14 +341,12 @@ impl EditorCheckpoint {
             return;
         }
         let result = (|| {
-            let bytes = serde_json::to_vec(&saved).map_err(|error| error.to_string())?;
-            if bytes.len() > MAX_METADATA {
-                return Err("editor checkpoint metadata exceeds 32 KiB".into());
-            }
+            let metadata_size = maka_plugin_core::json::encoded_size(&saved, usize::MAX)
+                .map_err(|error| error.to_string())?;
             let size = snapshot
                 .text
                 .bytes
-                .checked_add(bytes.len())
+                .checked_add(metadata_size)
                 .ok_or("editor checkpoint size overflow")?;
             let memory = self
                 .budget

@@ -49,7 +49,7 @@ impl Driver<'_> {
                     .rpc(
                         &mut connection,
                         acp::NewSessionRequest::new(&self.request.cwd),
-                        Duration::from_secs(30),
+                        Some(Duration::from_secs(30)),
                     )
                     .await?;
                 journal.record.v2_defaults = Some(result.config_options.clone());
@@ -67,7 +67,7 @@ impl Driver<'_> {
                     .rpc(
                         &mut connection,
                         acp::ResumeSessionRequest::new(session_id.clone(), &self.request.cwd),
-                        Duration::from_secs(30),
+                        Some(Duration::from_secs(30)),
                     )
                     .await;
                 self.replay = false;
@@ -123,13 +123,13 @@ impl Driver<'_> {
                 },
             )
             .await?;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15 * 60);
+        let deadline = None;
         let result = async {
             let accepted = self
                 .rpc(
                     &mut live.connection,
                     acp::PromptRequest::new(live.session_id.clone(), content),
-                    Duration::from_secs(15 * 60),
+                    None,
                 )
                 .await?;
             self.v2
@@ -249,7 +249,7 @@ impl Driver<'_> {
                 },
             );
             let response: acp::SetSessionConfigOptionResponse = self
-                .rpc(&mut live.connection, input, Duration::from_secs(30))
+                .rpc(&mut live.connection, input, Some(Duration::from_secs(30)))
                 .await?;
             live.v2_options = Some(response.config_options);
         }

@@ -40,10 +40,6 @@ pub use message::{
     Content, Hidden, Message, Thinking, ToolContent, ToolMetadata, TurnState, Visible,
 };
 
-/// Shared presentation budget for a complete serialized tool-result message.
-/// Durable raw payloads have a separate, larger budget.
-pub const MAX_TOOL_ROW_BYTES: usize = 16 * 1024 * 1024;
-
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectionError {
     #[error("invalid presentation fact: {0}")]
@@ -78,28 +74,27 @@ pub struct InvocationView {
     executor: Option<executor::Execution>,
     state: State,
     last_sequence: u64,
-    max_text_bytes: usize,
     tools: tools::Tools,
     summary_step: Option<String>,
     summary_start: Option<compact::SummaryStart>,
 }
 
-impl InvocationView {
-    /// Limits retained text state and each individual content record, not the
-    /// combined tool payloads of an already accepted model step.
-    pub fn new(max_text_bytes: usize) -> Result<Self, ProjectionError> {
-        if max_text_bytes == 0 {
-            return Err(ProjectionError::TooLarge);
-        }
-        Ok(Self {
+impl Default for InvocationView {
+    fn default() -> Self {
+        Self {
             executor: None,
             state: State::Vacant,
             last_sequence: 0,
-            max_text_bytes,
-            tools: tools::Tools::new(max_text_bytes),
+            tools: tools::Tools::new(),
             summary_step: None,
             summary_start: None,
-        })
+        }
+    }
+}
+
+impl InvocationView {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Input is one invocation's strictly ordered, committed facts, with gaps
@@ -160,7 +155,7 @@ impl InvocationView {
                 if !matches!(self.state, State::Vacant) {
                     return Err(ProjectionError::Invalid("import inside execution"));
                 }
-                messages.extend(import::project(event, record, ts, self.max_text_bytes)?);
+                messages.extend(import::project(event, record, ts)?);
                 self.state = State::Ended;
             }
             Fact::InvocationOpened { input, .. } => {
@@ -184,7 +179,6 @@ impl InvocationView {
                                 ts,
                                 &source.message.content,
                                 source.message.origin.as_ref(),
-                                self.max_text_bytes,
                             )?);
                         }
                     } else {
@@ -198,7 +192,6 @@ impl InvocationView {
                             ts,
                             content,
                             None,
-                            self.max_text_bytes,
                         )?);
                     }
                 } else if input.inherited_claim().is_none() {
@@ -229,12 +222,7 @@ impl InvocationView {
                         if step.is_some() || self.executor.is_some() {
                             return Err(ProjectionError::Invalid("overlapping execution backends"));
                         }
-                        self.executor = Some(executor::Execution::new(
-                            event,
-                            ts,
-                            binding,
-                            self.max_text_bytes,
-                        ));
+                        self.executor = Some(executor::Execution::new(event, ts, binding));
                     }
                     Fact::ExecutorObserved { output } => {
                         messages.extend(
@@ -266,7 +254,6 @@ impl InvocationView {
                             ts,
                             &message.content,
                             message.origin.as_ref(),
-                            self.max_text_bytes,
                         )?);
                     }
                     Fact::ModelRequested {
@@ -281,7 +268,6 @@ impl InvocationView {
                         *step = Some(Box::new(step::Step::new(
                             step_id.clone(),
                             model_id.clone(),
-                            self.max_text_bytes,
                             *item_acceptance,
                         )));
                     }

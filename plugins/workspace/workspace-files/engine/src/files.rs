@@ -363,14 +363,13 @@ impl Directory {
             } else {
                 None
             };
-            if serde_json::to_vec(&page).map_err(io::Error::other)?.len() <= MAX_PAGE_BYTES {
+            if page.entries.len() <= 1
+                || serde_json::to_vec(&page).map_err(io::Error::other)?.len() <= MAX_PAGE_BYTES
+            {
                 break;
             }
             page.entries.pop();
             more = true;
-            if page.entries.is_empty() {
-                return Err(error("files_too_large"));
-            }
         }
         interrupted(cancel)?;
         self.validate_inner()?;

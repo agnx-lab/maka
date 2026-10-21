@@ -656,3 +656,286 @@ async fn immutable_document_resource_over_two_mib_roundtrips_through_validated_p
     );
     fixture.store.shutdown().await.unwrap();
 }
+
+async fn k64_manager_call(manager: &Manager, method: &str, input: Value) -> Value {
+    let contract = deployment_manager_contract();
+    let Interface::Service { methods } = contract.interface else {
+        unreachable!()
+    };
+    let method_schema = &methods[method];
+    jsonschema::validator_for(&method_schema.input)
+        .unwrap()
+        .validate(&input)
+        .unwrap();
+    let context = context(Attachments::new());
+    let scope = context.scope.clone();
+    let result = manager.call(method.into(), input, context).await.unwrap();
+    scope.finish().await.unwrap();
+    assert!(scope.resources.is_idle());
+    jsonschema::validator_for(&method_schema.output)
+        .unwrap()
+        .validate(&result)
+        .unwrap();
+    result
+}
+
+#[tokio::test]
+async fn k64_complete_package_files_bytes_and_long_paths_roundtrip_through_management() {
+    let fixture = Fixture::new().await;
+    let mut files = package(vec![]).files().clone();
+    files.remove("图像.bin");
+    for index in 0..253 {
+        files.insert(format!("assets/{index:03}.bin"), vec![(index % 251) as u8]);
+    }
+    files.insert("large-a.bin".into(), vec![0x81; 8 * 1024 * 1024 + 1]);
+    files.insert("large-b.bin".into(), vec![0xfe; 8 * 1024 * 1024 + 1]);
+    let long_path = format!("{}last.bin", "original-segment/".repeat(33));
+    assert!(long_path.len() > 512);
+    files.insert(long_path.clone(), vec![0, 255, 128, 13, 10]);
+    assert_eq!(files.len(), 257);
+    let selected = Package::new(files).unwrap();
+    let document = DeploymentDocument {
+        input: input(&selected),
+        remote_exports: vec![],
+        packages: vec![selected.application_ref()],
+    };
+    let result = replace(&fixture.manager, 1, &document, Some(bundles(&[&selected]))).await;
+    assert_eq!(result["status"], "committed", "{result}");
+    let source: DeploymentRef = serde_json::from_value(result["value"].clone()).unwrap();
+    let loaded = fixture
+        .store
+        .load_application_at(&source)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.packages()[0].application_ref(),
+        selected.application_ref()
+    );
+    assert!(
+        loaded.packages()[0].files() == selected.files(),
+        "persisted original package bytes differ"
+    );
+    assert_eq!(
+        loaded.packages()[0].file(&long_path),
+        Some(&[0, 255, 128, 13, 10][..])
+    );
+    let (mut stream, scope) = export(
+        fixture.manager.clone(),
+        source.clone(),
+        selected.application_ref(),
+    );
+    let mut bytes = Vec::new();
+    while let Some(value) = stream.recv().await {
+        let PackageBundleExport::Chunk {
+            offset,
+            total_bytes,
+            text,
+        } = serde_json::from_value(value).unwrap()
+        else {
+            panic!("completion belongs to the final result")
+        };
+        assert_eq!(offset, bytes.len());
+        assert!(text.len() <= 16 * 1024);
+        bytes.extend_from_slice(text.as_bytes());
+        assert!(bytes.len() <= total_bytes);
+    }
+    let completion = stream.completion().await;
+    assert_eq!(completion.result.unwrap(), json!({"kind":"complete"}));
+    completion.cleanup.unwrap();
+    scope.finish().await.unwrap();
+    let restored = Package::from_bundle(&bytes).unwrap();
+    assert_eq!(restored.application_ref(), selected.application_ref());
+    assert!(
+        restored.files() == selected.files(),
+        "export/reimport changed original package bytes"
+    );
+    let target = fixture._directory.path().join("complete.maka-package.json");
+    selected.export_to(&target).unwrap();
+    assert!(Package::read_from(&target).unwrap().files() == selected.files());
+    assert!(
+        selected.export_to(&target).is_err(),
+        "export must not overwrite an existing publication"
+    );
+    let current = replace(
+        &fixture.manager,
+        2,
+        &DeploymentDocument {
+            input: fixture.input.clone(),
+            remote_exports: vec![],
+            packages: vec![],
+        },
+        None,
+    )
+    .await;
+    assert_eq!(current["status"], "committed");
+    let historical = fixture
+        .store
+        .load_application_at(&source)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        historical.packages()[0].files() == selected.files(),
+        "new head changed the original package"
+    );
+    fixture.store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn k64_settings_keep_large_singleton_all_options_deep_paths_and_atomic_edits() {
+    use maka_plugin_core::deployment::management::{InstanceSettingsPage, SettingValue};
+    let fixture = Fixture::new().await;
+    let options: Vec<String> = (0..17)
+        .map(|index| format!("{index:02}{}", "界".repeat(10_000)))
+        .collect();
+    let mut properties = serde_json::Map::new();
+    properties.insert("aChoice".into(), json!({"type":"string","enum":options,"title":"完整标题".repeat(80),"description":"完整说明".repeat(150)}));
+    for index in 0..33 {
+        properties.insert(format!("field{index:02}"), json!({"type":"string"}));
+    }
+    let mut nested_schema = json!({"type":"object","properties":{"leaf":{"type":"string"}},"additionalProperties":false});
+    let mut nested_value = json!({"leaf":"original leaf"});
+    for _ in 0..16 {
+        nested_schema = json!({"type":"object","properties":{"child":nested_schema},"additionalProperties":false});
+        nested_value = json!({"child":nested_value});
+    }
+    properties.insert("nested".into(), nested_schema);
+    let mut files = package(vec![]).files().clone();
+    let mut manifest: Value = serde_json::from_slice(&files["maka.extension.json"]).unwrap();
+    manifest["application"]["entries"]["host"]["configuration"] =
+        json!({"type":"object","properties":properties,"additionalProperties":false});
+    files.insert(
+        "maka.extension.json".into(),
+        serde_json::to_vec(&manifest).unwrap(),
+    );
+    let selected = Package::new(files).unwrap();
+    let mut original = input(&selected);
+    let values = &mut original
+        .instances
+        .get_mut("payload")
+        .unwrap()
+        .configuration
+        .values;
+    values.insert("aChoice".into(), json!(options[0]));
+    values.insert("nested".into(), nested_value);
+    for index in 0..33 {
+        values.insert(
+            format!("field{index:02}"),
+            json!(format!("original {index}")),
+        );
+    }
+    let source = fixture
+        .store
+        .commit_application(
+            fixture.source.deployment,
+            1,
+            original.clone(),
+            vec![],
+            vec![selected],
+        )
+        .await
+        .unwrap();
+    let instance = InstanceId(vec![Uuid::from_u128(1)]);
+    let mut after = None::<String>;
+    let mut fields = Vec::new();
+    loop {
+        let value = k64_manager_call(
+            &fixture.manager,
+            "readSettings",
+            json!({"source":source,"instance":instance,"path":[],"after":after}),
+        )
+        .await;
+        let page: InstanceSettingsPage = serde_json::from_value(value).unwrap();
+        assert!(!page.fields.is_empty());
+        if fields.is_empty() {
+            assert_eq!(
+                page.fields.len(),
+                1,
+                "oversized first field must make singleton progress"
+            );
+            assert_eq!(page.fields[0].key, "aChoice");
+            assert_eq!(
+                page.fields[0].options,
+                options
+                    .iter()
+                    .cloned()
+                    .map(|text| SettingValue::Text { text })
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(page.fields[0].label, "完整标题".repeat(80));
+            assert_eq!(page.fields[0].description, "完整说明".repeat(150));
+            assert_eq!(
+                page.fields[0].value,
+                Some(SettingValue::Text {
+                    text: options[0].clone()
+                })
+            );
+            assert!(serde_json::to_vec(&page.fields[0]).unwrap().len() > 448 * 1024);
+        }
+        let next = page.next.clone();
+        if let Some(next) = &next {
+            assert_eq!(Some(next), page.fields.last().map(|field| &field.key));
+            assert!(after.as_ref().is_none_or(|after| next > after));
+        }
+        fields.extend(page.fields);
+        match next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(fields.len(), 35);
+    let mut path = vec!["nested"; 1];
+    path.extend(std::iter::repeat_n("child", 16));
+    let deep = k64_manager_call(
+        &fixture.manager,
+        "readSettings",
+        json!({"source":source,"instance":instance,"path":path,"after":null}),
+    )
+    .await;
+    assert_eq!(deep["fields"][0]["key"], "leaf");
+    assert_eq!(deep["fields"][0]["editable"], true);
+    let long_text = "新值🙂".repeat(1100);
+    let changes: Vec<Value> = (0..33).map(|index| json!({"path":[format!("field{index:02}")],"value":{"kind":"text","text":long_text}})).collect();
+    let changed = k64_manager_call(
+        &fixture.manager,
+        "configure",
+        json!({"expectedRevision":2,"instance":instance,"changes":changes}),
+    )
+    .await;
+    assert_eq!(changed["status"], "committed");
+    assert_eq!(changed["value"]["revision"], 3);
+    let loaded = fixture
+        .store
+        .load_application(fixture.source.deployment)
+        .await
+        .unwrap()
+        .unwrap();
+    let actual = &loaded.source().input.instances["payload"];
+    for index in 0..33 {
+        assert_eq!(
+            actual.configuration.values[&format!("field{index:02}")],
+            long_text
+        );
+    }
+    assert_eq!(
+        actual.configuration.values["nested"],
+        original.instances["payload"].configuration.values["nested"]
+    );
+    assert_eq!(actual.package, original.instances["payload"].package);
+    let stale = k64_manager_call(
+        &fixture.manager,
+        "configure",
+        json!({"expectedRevision":2,"instance":instance,"changes":changes}),
+    )
+    .await;
+    assert_eq!(stale, json!({"status":"conflict","currentRevision":3}));
+    let frozen = fixture
+        .store
+        .load_application_at(&source)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(frozen.source().input, original);
+    fixture.store.shutdown().await.unwrap();
+}

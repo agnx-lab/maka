@@ -17,8 +17,7 @@
  * under the License.
  */
 
-use crate::result::diagnostic_fits;
-use crate::{CellContext, CellDiagnostic, CellDiagnosticKind, CellLimits, CellOutput, ToolCall};
+use crate::{CellContext, CellDiagnostic, CellDiagnosticKind, CellOutput, ToolCall};
 use deno_core::{OpState, op2};
 use maka_agent_facts::tools::ToolError;
 use maka_agent_facts::tools::ToolExecutor;
@@ -45,7 +44,6 @@ pub(crate) struct ToolScope {
     pub(crate) cancellation: CancellationToken,
     pub(crate) tasks: TaskTracker,
     pub(crate) host: Handle,
-    pub(crate) limits: CellLimits,
     pub(crate) admission: Mutex<Admission>,
 }
 
@@ -75,18 +73,12 @@ impl ToolScope {
                     "cell cancelled",
                 ));
             }
-            if admission.calls.len() >= self.limits.max_tool_calls {
-                return Err(CellDiagnostic::limit("tool admission limit exceeded"));
-            }
             let index = admission.calls.len() + 1;
             let mut reserved = admission.calls.clone();
             reserved.push(ToolCall {
                 index,
                 name: name.clone(),
             });
-            if !diagnostic_fits(&reserved, self.limits.max_value_bytes) {
-                return Err(CellDiagnostic::limit("tool summary byte limit exceeded"));
-            }
             admission.calls = reserved;
         }
         let (sender, receiver) = oneshot::channel();
@@ -196,7 +188,7 @@ fn op_maka_load(state: &mut OpState, #[string] key: String) -> serde_json::Value
 
 #[op2]
 async fn op_maka_sleep(#[number] millis: u64) {
-    tokio::time::sleep(std::time::Duration::from_millis(millis.min(86_400_000))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
 }
 
 #[derive(Default)]

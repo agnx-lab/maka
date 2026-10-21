@@ -22,8 +22,6 @@ use maka_agent_facts::read::ReadInput;
 use maka_agent_facts::read::ReadPage;
 use std::num::NonZeroUsize;
 
-const MAX_TEXT_BYTES: usize = 512 * 1024;
-
 pub(super) async fn text(
     input: acp::ReadTextFileRequest,
     context: &Context,
@@ -76,11 +74,6 @@ fn append(content: &mut String, page: &ReadPage) -> Result<(), CallbackError> {
     // continuation. partial_line also describes the start, so cannot identify this boundary.
     let separator = page.next.is_some()
         && page.returned_lines > page.content.bytes().filter(|byte| *byte == b'\n').count();
-    if content.len() + page.content.len() + usize::from(separator) > MAX_TEXT_BYTES {
-        return Err(CallbackError::host(
-            "Requested text exceeds the 512 KiB callback limit",
-        ));
-    }
     content.push_str(&page.content);
     if separator {
         content.push('\n');
@@ -117,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_oversize_instead_of_returning_truncated_success() {
+    fn complete_callback_reassembly_preserves_tail_beyond_half_mib() {
         let page = ReadInput {
             path: "/file".into(),
             offset: None,
@@ -127,8 +120,8 @@ mod tests {
         .unwrap()
         .page("last")
         .unwrap();
-        let mut content = "x".repeat(MAX_TEXT_BYTES - 2);
-        assert!(append(&mut content, &page).is_err());
-        assert_eq!(content.len(), MAX_TEXT_BYTES - 2);
+        let mut content = "x".repeat(512 * 1024 - 2);
+        append(&mut content, &page).unwrap();
+        assert_eq!(content, format!("{}last", "x".repeat(512 * 1024 - 2)));
     }
 }

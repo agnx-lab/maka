@@ -55,9 +55,6 @@ const PARKED = {
   safety_check_failed: 'resumeSafetyCheckFailed',
 };
 
-/** The most files one message carries (`agent.send` `attachments`). */
-const MAX_ATTACHMENTS = 8;
-
 /** Why the Host refused an upload (`AttachmentRejection`), in words. */
 const REJECTIONS = {
   invalid_file: 'attachmentInvalidFile',
@@ -165,12 +162,7 @@ export class Composer {
 
   /** Whether files can be attached to the draft for `transcript` now. */
   canAttach(transcript) {
-    return (
-      !this.sending &&
-      !this.choosing &&
-      transcript?.backend?.kind !== 'executor' &&
-      this.attachments(transcript).length < MAX_ATTACHMENTS
-    );
+    return !this.sending && !this.choosing && transcript?.backend?.kind !== 'executor';
   }
 
   /** Shows the open panel and attaches the files chosen to the draft for `transcript`. */
@@ -189,21 +181,14 @@ export class Composer {
   }
 
   /**
-   * Adds files `maka-files` registered to the draft for `transcript`, up to
-   * MAX_ATTACHMENTS in all; those past the limit are released. What was not
-   * attached is reported: files too large, unreadable, or past the limit.
+   * Adds files registered by the original native selection and reports unreadable files.
    */
   attach(transcript, files) {
     const attached = [...this.attachments(transcript)];
     const problems = [];
-    const over = [];
     for (const file of files) {
-      if (file.tooLarge) {
-        problems.push(t('attachmentTooLarge', { name: file.name }));
-      } else if (file.handle === undefined) {
+      if (file.handle === undefined) {
         problems.push(t('attachmentUnreadable', { name: file.name, value: file.error ?? '' }));
-      } else if (attached.length >= MAX_ATTACHMENTS) {
-        over.push(file.handle);
       } else {
         attached.push({
           handle: file.handle,
@@ -215,10 +200,6 @@ export class Composer {
           error: null,
         });
       }
-    }
-    if (over.length > 0) {
-      release(over);
-      problems.push(t('attachmentLimit', { limit: MAX_ATTACHMENTS }));
     }
     this.attached.set(transcript?.id ?? '', attached);
     log(`composer: ${attached.length} file(s) attached, ${problems.length} problem(s)`);

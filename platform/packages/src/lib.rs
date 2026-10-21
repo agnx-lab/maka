@@ -31,9 +31,6 @@ use std::{
     sync::Arc,
 };
 
-pub const MAX_FILES: usize = 256;
-pub const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_PACKAGE_BYTES: usize = 16 * 1024 * 1024;
 pub const MANIFEST_FILE: &str = "maka.extension.json";
 
 /// Validated immutable bytes. Retained instances keep their exact package alive.
@@ -46,19 +43,14 @@ pub struct Package {
 
 impl Package {
     pub fn new(files: BTreeMap<String, Vec<u8>>) -> Result<Self, Error> {
-        if files.is_empty() || files.len() > MAX_FILES {
-            return Err(Error::Invalid("package must contain 1..=256 files".into()));
+        if files.is_empty() {
+            return Err(Error::Invalid("package must contain files".into()));
         }
-        let mut total = 0;
         let mut paths = BTreeSet::new();
-        for (path, content) in &files {
+        for path in files.keys() {
             validate_path(path)?;
             if !paths.insert(path.to_lowercase()) {
                 return Err(Error::Invalid("package has case-colliding paths".into()));
-            }
-            total += content.len();
-            if content.len() > MAX_FILE_BYTES || total > MAX_PACKAGE_BYTES {
-                return Err(Error::Invalid("package exceeds byte limits".into()));
             }
         }
         for path in &paths {
@@ -219,9 +211,9 @@ mod tests {
     }
 
     #[test]
-    fn manifest_uses_the_package_file_budget() {
+    fn large_manifest_preserves_declarations_and_invalid_json_is_rejected() {
         // Multi-presentation applications carry complete nominal contracts.
-        // Their manifest has the same bounded byte budget as every other file.
+        // Their complete manifest survives the same immutable bundle round trip.
         let manifest = json!({
             "schemaVersion":1,"id":"large.application",
             "application":{"entries":{"host":{
@@ -237,9 +229,10 @@ mod tests {
             Package::from_bundle(&package.to_bundle()).unwrap().digest(),
             package.digest()
         );
-        let too_large = BTreeMap::from([(MANIFEST_FILE.into(), vec![b' '; MAX_FILE_BYTES + 1])]);
+        let invalid_json =
+            BTreeMap::from([(MANIFEST_FILE.into(), vec![b' '; 8 * 1024 * 1024 + 1])]);
         assert!(
-            matches!(Package::new(too_large), Err(Error::Invalid(reason)) if reason == "package exceeds byte limits")
+            matches!(Package::new(invalid_json), Err(Error::Invalid(reason)) if reason.starts_with("manifest:"))
         );
     }
 

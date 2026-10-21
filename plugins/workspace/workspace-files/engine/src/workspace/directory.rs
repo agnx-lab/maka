@@ -93,8 +93,8 @@ impl PublishedDirectory {
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
             };
-            // The wire format cannot address oversized or non-segment names.
-            if name.len() > 255 || name.contains(['/', '\\', '\0']) {
+            // The wire format addresses only UTF-8 single-segment names.
+            if name.contains(['/', '\\', '\0']) {
                 continue;
             }
             if self.contained(&directory.path.join(&name)).is_ok() {

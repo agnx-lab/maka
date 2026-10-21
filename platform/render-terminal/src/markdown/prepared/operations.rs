@@ -70,9 +70,6 @@ pub(in super::super) fn record(
     semantic: bool,
 ) -> Result<(), &'static str> {
     for grapheme in text.graphemes(true) {
-        if grapheme.len() > MAX_GRAPHEME_BYTES {
-            return Err("Transcript grapheme exceeds 16 KiB local capacity");
-        }
         if semantic {
             if matches!(grapheme, "\n" | "\r\n") {
                 writer.append_logical("\n");
@@ -111,9 +108,6 @@ pub(in super::super) fn record(
             style: writer.style,
             indent: writer.indent,
         }));
-    }
-    if writer.bytes > MAX_BYTES {
-        return Err("Prepared transcript exceeds local capacity");
     }
     Ok(())
 }

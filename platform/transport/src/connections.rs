@@ -85,29 +85,20 @@ impl Configuration {
         let mut bytes = Vec::new();
         std::fs::File::open(path)
             .map_err(|e| e.to_string())?
-            .take(1_048_577)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
-        if bytes.len() > 1_048_576 {
-            return Err("connections file exceeds 1 MiB".into());
-        }
         let configuration: Self = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         configuration.validate()?;
         Ok(configuration)
     }
     /// Check trusted launcher input without starting a Host or opening a Root.
     pub fn validate(&self) -> Result<()> {
-        if self.hosts.len() > 16 {
-            return Err("maximum 16 local Hosts".into());
-        }
         let mut names = BTreeSet::new();
         for host in &self.hosts {
             if host.name.is_empty()
-                || host.name.len() > 256
                 || !names.insert(&host.name)
                 || host.deployment.is_nil()
                 || host.endpoints.is_empty()
-                || host.endpoints.len() > 128
             {
                 return Err("invalid or duplicate local Host declaration".into());
             }
@@ -119,14 +110,11 @@ impl Configuration {
             {
                 return Err("invalid Host State Root identity".into());
             }
-            if host.native.len() > 128 {
-                return Err("maximum 128 native service grants".into());
-            }
             for grant in &host.native {
                 grant.validate()?;
             }
             for (name, endpoint) in &host.endpoints {
-                if name.is_empty() || name.len() > 256 {
+                if name.is_empty() {
                     return Err("invalid Host endpoint name".into());
                 }
                 endpoint.validate()?;

@@ -484,3 +484,40 @@ async fn provider_catalog_filters_before_count_pagination_and_digest() {
     );
     assert!(log.query_shell_catalog("session", "", 0).await.is_err());
 }
+
+#[tokio::test]
+async fn soft_first_shell_resource_keeps_complete_identity_and_offset() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("singleton.sqlite"))
+        .await
+        .unwrap();
+    log.create_session("session", "create", &json!({}), 1)
+        .await
+        .unwrap();
+    let identity = "original-turn-".repeat(6000);
+    let mut first = starting("a_first");
+    first.source_turn_id = identity.clone();
+    log.create_shell_run(first).await.unwrap();
+    log.create_shell_run(starting("b_second")).await.unwrap();
+    let page = log.query_shell_catalog("session", "a_", 0).await;
+    let all = log.query_shell_resources("session", None, 0).await;
+    let tail = log.query_shell_resources("session", None, 1).await;
+    let foreign = log.query_shell_resources("missing", None, 0).await;
+    log.close().await.unwrap();
+    let page = page.expect("first complete catalog resource must progress");
+    assert_eq!(page.resources.len(), 1);
+    assert!(page.resources[0].source_turn_id == identity);
+    assert_eq!(page.total, 1);
+    assert_eq!(page.next_offset, None);
+    let all = all.expect("first complete resource must progress");
+    assert_eq!(all.resources.len(), 1);
+    assert!(all.resources[0].source_turn_id == identity);
+    assert_eq!(all.total, 2);
+    assert_eq!(all.next_offset, Some(1));
+    let tail = tail.unwrap();
+    assert_eq!(tail.resources.len(), 1);
+    assert_eq!(tail.resources[0].source_turn_id, "turn");
+    assert_eq!(tail.revision, all.revision);
+    assert_eq!(tail.next_offset, None);
+    assert!(matches!(foreign, Err(StoreError::SessionNotFound)));
+}

@@ -27,10 +27,6 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-pub const MAX_TREE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_ENTRIES: usize = 256;
-
 #[derive(Clone)]
 pub struct Tree {
     entries: BTreeMap<String, Entry>,
@@ -62,17 +58,11 @@ impl Tree {
         cancellation: &CancellationToken,
     ) -> Result<Self, Error> {
         let mut result = Self::empty();
-        let mut budget = MAX_TREE_BYTES;
-        result
-            .collect(directory, "", &mut budget, cancellation)
-            .await?;
+        result.collect(directory, cancellation).await?;
         Ok(result)
     }
     pub fn insert(&mut self, path: &str, bytes: Vec<u8>) -> Result<(), Error> {
         validate(path)?;
-        if bytes.len() > MAX_FILE_BYTES {
-            return Err(Error::Invalid("Skill resource exceeds file limit".into()));
-        }
         let mut parent = Path::new(path).parent();
         while let Some(path) = parent.filter(|path| !path.as_os_str().is_empty()) {
             let name = path
@@ -98,16 +88,6 @@ impl Tree {
             Some(Entry::File { mode, .. }) => *mode,
             _ => 0o600,
         };
-        let old_size = self.bytes();
-        let replaced = match self.entries.get(path) {
-            Some(Entry::File { bytes, .. }) => bytes.len(),
-            _ => 0,
-        };
-        if self.entries.len() >= MAX_ENTRIES && !self.entries.contains_key(path)
-            || old_size - replaced + bytes.len() > MAX_TREE_BYTES
-        {
-            return Err(Error::Invalid("Skill resource tree exceeds limits".into()));
-        }
         self.entries
             .insert(path.into(), Entry::File { bytes, mode });
         Ok(())
@@ -128,7 +108,7 @@ impl Tree {
         }
         Ok(content_digest(&serde_json::to_vec(&manifest)?))
     }
-    /// Capture a complete bounded tree through an existing read capability.
+    /// Capture a complete tree through an existing read capability.
     pub async fn read_view(
         files: &maka_capabilities::filesystem::ReadDirectory,
         path: &str,
@@ -141,7 +121,6 @@ impl Tree {
                 use maka_capabilities::filesystem::entries::ReadFile;
                 let mut tree = Tree::empty();
                 let mut stack = vec![String::new()];
-                let mut budget = MAX_TREE_BYTES;
                 while let Some(prefix) = stack.pop() {
                     let directory = if prefix.is_empty() {
                         base.clone()
@@ -155,40 +134,28 @@ impl Tree {
                             format!("{prefix}/{}", entry.name)
                         };
                         validate(&path)?;
-                        if tree.entries.len() == MAX_ENTRIES {
-                            return Err(Error::Invalid("Too many Skill resources".into()));
-                        }
                         let value = match entry.kind {
                             Kind::Directory => {
                                 stack.push(path.clone());
                                 Entry::Directory
                             }
                             Kind::File => {
-                                let mut bytes = Vec::new();
-                                loop {
-                                    let page = reader
-                                        .read(ReadViewInput {
-                                            file: ReadFile {
-                                                path: format!("{base}/{path}"),
-                                                offset: bytes.len() as u64,
-                                                limit: (MAX_FILE_BYTES.min(budget) + 1
-                                                    - bytes.len())
-                                                .min(1024 * 1024),
-                                            },
-                                            symlinks: Symlinks::Reject,
-                                        })
-                                        .map_err(read_error)?;
-                                    bytes.extend(page.bytes);
-                                    if bytes.len() > MAX_FILE_BYTES.min(budget) {
-                                        return Err(Error::Invalid(
-                                            "Skill resource tree exceeds limits".into(),
-                                        ));
-                                    }
-                                    if page.next_offset.is_none() {
-                                        break;
-                                    }
+                                let page = reader
+                                    .read(ReadViewInput {
+                                        file: ReadFile {
+                                            path: format!("{base}/{path}"),
+                                            offset: 0,
+                                            limit: usize::MAX,
+                                        },
+                                        symlinks: Symlinks::Reject,
+                                    })
+                                    .map_err(read_error)?;
+                                if page.next_offset.is_some() {
+                                    return Err(Error::Invalid(
+                                        "Incomplete Skill resource capture".into(),
+                                    ));
                                 }
-                                budget -= bytes.len();
+                                let bytes = page.bytes;
                                 Entry::File { bytes, mode: 0o600 }
                             }
                             Kind::Other => {
@@ -241,49 +208,40 @@ impl Tree {
         }
         directory.sync().await
     }
-    fn bytes(&self) -> usize {
-        self.entries
-            .values()
-            .map(|entry| match entry {
-                Entry::File { bytes, .. } => bytes.len(),
-                _ => 0,
-            })
-            .sum()
-    }
     async fn collect(
         &mut self,
         directory: &Directory,
-        prefix: &str,
-        budget: &mut usize,
         cancellation: &CancellationToken,
     ) -> Result<(), Error> {
-        for entry in directory.entries().await? {
-            if cancellation.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            if self.entries.len() == MAX_ENTRIES {
-                return Err(Error::Invalid("Too many Skill resources".into()));
-            }
-            let name = entry.name.as_str();
-            let path = if prefix.is_empty() {
-                name.into()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            validate(&path)?;
-            let kind = entry.kind;
-            if matches!(kind, Kind::Directory) {
-                let child = directory.open(name).await?;
-                self.entries.insert(path.clone(), Entry::Directory);
-                Box::pin(self.collect(&child, &path, budget, cancellation)).await?;
-            } else if matches!(kind, Kind::File) {
-                let (bytes, mode) = directory.read(name, MAX_FILE_BYTES.min(*budget)).await?;
-                *budget -= bytes.len();
-                self.entries.insert(path, Entry::File { bytes, mode });
-            } else {
-                return Err(Error::Invalid(
-                    "Skill resources contain a link or non-regular file".into(),
-                ));
+        let mut pending = vec![(directory.clone(), String::new())];
+        while let Some((directory, prefix)) = pending.pop() {
+            for entry in directory.entries().await? {
+                if cancellation.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                let name = entry.name.as_str();
+                let path = if prefix.is_empty() {
+                    name.into()
+                } else {
+                    format!("{prefix}/{name}")
+                };
+                validate(&path)?;
+                match entry.kind {
+                    Kind::Directory => {
+                        let child = directory.open(name).await?;
+                        self.entries.insert(path.clone(), Entry::Directory);
+                        pending.push((child, path));
+                    }
+                    Kind::File => {
+                        let (bytes, mode) = directory.read(name).await?;
+                        self.entries.insert(path, Entry::File { bytes, mode });
+                    }
+                    Kind::Other => {
+                        return Err(Error::Invalid(
+                            "Skill resources contain a link or non-regular file".into(),
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -291,12 +249,10 @@ impl Tree {
 }
 pub(super) fn validate(path: &str) -> Result<(), Error> {
     if path.is_empty()
-        || path.len() > 4096
         || path.contains('\\')
         || path
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")
-        || Path::new(path).components().count() > 16
         || Path::new(path)
             .components()
             .any(|part| !matches!(part, Component::Normal(_)))

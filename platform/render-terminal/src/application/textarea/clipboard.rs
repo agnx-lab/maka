@@ -22,7 +22,7 @@ use super::super::file::paths;
 use image::{ImageDecoder, ImageEncoder};
 use maka_ui_runtime::{
     budget::{Kind, NativeBudget, Permit},
-    file::{FileError, FileSnapshot, FileSnapshotWriter, MAX_FILE_BYTES},
+    file::{FileError, FileSnapshot, FileSnapshotWriter},
 };
 use std::{collections::VecDeque, io::Cursor, path::PathBuf, sync::Arc};
 
@@ -39,8 +39,6 @@ pub(super) enum Content {
     Image(Arc<FileSnapshot>),
     Text(Text),
 }
-const FILE_LIST_BYTES: usize = 128 * 1024;
-const MAX_PIXELS: u64 = 32 * 1024 * 1024;
 const PIXEL_BYTES: usize = 128 * 1024 * 1024;
 
 pub(super) fn admit_paths(
@@ -83,7 +81,7 @@ pub(super) fn admit_paths(
 // parsing and the separately charged path collection have both finished.
 // Parameters drop in reverse order: files must drop before their reservation.
 fn admit_clipboard_files(
-    _memory: Permit,
+    mut memory: Permit,
     files: Vec<String>,
     budget: &NativeBudget,
 ) -> Result<Paths, FileError> {
@@ -96,12 +94,10 @@ fn admit_clipboard_files(
                 .try_fold(bytes, |bytes, file| bytes.checked_add(file.capacity()))
         })
         .ok_or(FileError::BudgetExhausted)?;
-    if capacity > FILE_LIST_BYTES {
+    if capacity > memory.capacity() {
         return Err(FileError::BudgetExhausted);
     }
-    if files.iter().any(|file| file.len() > 4096) {
-        return Err(FileError::LimitExceeded);
-    }
+    memory.shrink_to(capacity);
     let parsed = files
         .iter()
         .map(|file| paths::local_path(file))
@@ -139,7 +135,7 @@ pub(super) fn read(allow_files: bool, budget: &NativeBudget) -> Result<Content, 
         if !allow_files {
             return Err(FileError::LimitExceeded);
         }
-        let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES)?;
+        let memory = budget.reserve_remaining(Kind::Encoded)?;
         let files = clipboard
             .get_files()
             .map_err(|_| FileError::ClipboardUnavailable)?;
@@ -152,10 +148,10 @@ pub(super) fn read(allow_files: bool, budget: &NativeBudget) -> Result<Content, 
         if !allow_files {
             return Err(FileError::LimitExceeded);
         }
-        let mut memory = budget.reserve(Kind::Encoded, MAX_FILE_BYTES)?;
+        let mut memory = budget.reserve_remaining(Kind::Encoded)?;
         let bytes = image_bytes(&clipboard)?;
-        if bytes.len() > MAX_FILE_BYTES || bytes.capacity() > MAX_FILE_BYTES {
-            return Err(FileError::LimitExceeded);
+        if bytes.capacity() > memory.capacity() {
+            return Err(FileError::BudgetExhausted);
         }
         memory.shrink_to(bytes.capacity());
         let image = encode_image(&bytes, budget)?;
@@ -252,14 +248,15 @@ fn dib_bitmap(mut bytes: Vec<u8>) -> Result<Vec<u8>, FileError> {
         return Err(invalid);
     }
     let length = bytes.len();
-    if length > MAX_FILE_BYTES - 14 {
-        return Err(FileError::LimitExceeded);
-    }
+    let bitmap_length = length
+        .checked_add(14)
+        .and_then(|length| u32::try_from(length).ok())
+        .ok_or(FileError::InvalidFile)?;
     bytes.reserve_exact(14);
     bytes.resize(length + 14, 0);
     bytes.copy_within(0..length, 14);
     bytes[..2].copy_from_slice(b"BM");
-    bytes[2..6].copy_from_slice(&((length + 14) as u32).to_le_bytes());
+    bytes[2..6].copy_from_slice(&bitmap_length.to_le_bytes());
     bytes[6..10].fill(0);
     bytes[10..14].copy_from_slice(&((offset + 14) as u32).to_le_bytes());
     Ok(bytes)
@@ -282,9 +279,7 @@ fn encode_decoder(
     budget: &NativeBudget,
 ) -> Result<Arc<FileSnapshot>, FileError> {
     let (width, height) = decoder.dimensions();
-    if u64::from(width) * u64::from(height) > MAX_PIXELS
-        || decoder.total_bytes() > PIXEL_BYTES as u64
-    {
+    if decoder.total_bytes() > PIXEL_BYTES as u64 {
         return Err(FileError::LimitExceeded);
     }
     let image = image::DynamicImage::from_decoder(decoder).map_err(|_| FileError::InvalidFile)?;
@@ -375,32 +370,46 @@ mod tests {
         let path = directory.path().join("original.txt");
         std::fs::write(&path, b"original").unwrap();
         let original = path.to_str().unwrap().to_owned();
+        let limits = BudgetLimits {
+            encoded_bytes: 4096,
+            ..Default::default()
+        };
         for vector_capacity in [false, true] {
             let mut files = if vector_capacity {
-                Vec::with_capacity(FILE_LIST_BYTES / std::mem::size_of::<String>() + 1)
+                Vec::with_capacity(4096 / std::mem::size_of::<String>() + 1)
             } else {
                 Vec::new()
             };
             let mut value = if vector_capacity {
                 String::new()
             } else {
-                String::with_capacity(FILE_LIST_BYTES)
+                String::with_capacity(4096)
             };
             value.push_str(&original);
             files.push(value);
-            let budget = NativeBudget::default();
-            let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES).unwrap();
+            let budget = NativeBudget::new(limits);
+            let memory = budget.reserve_remaining(Kind::Encoded).unwrap();
             assert!(matches!(
                 admit_clipboard_files(memory, files, &budget),
                 Err(FileError::BudgetExhausted)
             ));
             assert_eq!(budget.usage(), (0, 0, 0));
         }
-        let budget = NativeBudget::default();
-        let memory = budget.reserve(Kind::Encoded, FILE_LIST_BYTES).unwrap();
+        let budget = NativeBudget::new(limits);
+        let retained = budget.reserve(Kind::Encoded, 128).unwrap();
+        let memory = budget.reserve_remaining(Kind::Encoded).unwrap();
+        assert_eq!(memory.capacity(), 3968);
+        assert_eq!(budget.usage(), (4096, 0, 0));
+        assert!(matches!(
+            budget.reserve_remaining(Kind::Encoded),
+            Err(maka_ui_runtime::budget::BudgetExhausted)
+        ));
         let admitted = admit_clipboard_files(memory, vec![original], &budget).unwrap();
         assert_eq!(admitted.items, VecDeque::from([path]));
+        assert_eq!(budget.usage(), (128 + admitted._memory.capacity(), 0, 0));
         drop(admitted);
+        assert_eq!(budget.usage(), (128, 0, 0));
+        drop(retained);
         assert_eq!(budget.usage(), (0, 0, 0));
     }
     #[test]

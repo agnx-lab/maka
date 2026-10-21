@@ -178,7 +178,6 @@ pub(super) fn AttachmentPicker(
             .to_string_lossy()
             .chars()
             .filter(|character| !character.is_control())
-            .take(512)
             .collect();
         let name = if name.is_empty() {
             "Selected file".into()

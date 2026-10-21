@@ -208,10 +208,6 @@ impl Owner {
             let actual = catalog.plans.get(&id).map(|saved| saved.revision);
             let candidate = if expected != actual {
                 Err(ScheduleResult::Conflict { actual })
-            } else if actual.is_none() && catalog.plans.len() >= 256 {
-                Err(ScheduleResult::Rejected {
-                    reason: "scheduler_catalog_full".into(),
-                })
             } else {
                 owner
                     .schedule_candidate(&id, input, catalog.plans.get(&id))
@@ -260,7 +256,7 @@ impl Owner {
                 .map(|saved| &saved.plan)
                 .ok_or_else(|| "scheduler_task_missing".to_string())
         };
-        let mut candidate = match input {
+        let candidate = match input {
             ScheduleChange::Create { input } => {
                 let mut plan =
                     Plan::create(id.into(), input.task, Creator::User, input.timezone, at)
@@ -367,7 +363,7 @@ impl Owner {
                 return Ok(None);
             }
         };
-        repository::prepare_record(&mut candidate)?;
+        candidate.validate().map_err(reason)?;
         Ok(Some(candidate))
     }
 }

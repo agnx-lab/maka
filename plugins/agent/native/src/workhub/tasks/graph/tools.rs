@@ -88,13 +88,11 @@ impl Routing {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NewWork {
     target: Routing,
-    #[schemars(length(min = 1, max = 60000))]
+    #[schemars(length(min = 1))]
     instruction: String,
     #[serde(default)]
-    #[schemars(length(max = 64))]
     input_ids: Vec<String>,
     #[serde(default)]
-    #[schemars(length(max = 64))]
     selected_result_inputs: Vec<HistoricalInput>,
     replaces: Option<String>,
 }
@@ -107,15 +105,15 @@ struct NewWork {
 )]
 enum UpdateInput {
     AddWork {
-        #[schemars(length(min = 1, max = 32))]
+        #[schemars(length(min = 1))]
         work: Vec<NewWork>,
     },
     Stop {
-        #[schemars(length(min = 1, max = 20))]
+        #[schemars(length(min = 1))]
         targets: Vec<Stop>,
     },
     Finish {
-        #[schemars(length(min = 1, max = 64))]
+        #[schemars(length(min = 1))]
         result_ids: Vec<String>,
         reason: String,
     },
@@ -170,7 +168,7 @@ pub(in crate::workhub::tasks) fn registrations(link: Link) -> Vec<ToolRegistrati
     let handler = Arc::new(GraphTool(link));
     [
         ("agent_list", "List explicitly bound workers, presets, worker tools, executors and published directory selections. Workers includes the supervisor's current versioned model selection; workers validate copied selections. Graph targets use these exact published choices.", schemars::schema_for!(ToolRequest<CatalogInput>).into(), ToolSemantics::Parallel),
-        ("view_agent_graph", "Read this conversation's current graph or immutable earlier epochs. Status returns at most 16 work items; continue with after. Work returns the complete bounded instruction and input references. Result reads the original immutable terminal result; continue with nextOffset. History returns earlier epochs. Admission is not completion.", schemars::schema_for!(ToolRequest<ReadInput>).into(), ToolSemantics::Parallel),
+        ("view_agent_graph", "Read this conversation's current graph or immutable earlier epochs. Status returns at most 16 work items; continue with after. Work returns the complete instruction and input references. Result reads the original immutable terminal result; continue with nextOffset. History returns earlier epochs. Admission is not completion.", schemars::schema_for!(ToolRequest<ReadInput>).into(), ToolSemantics::Parallel),
         ("update_agent_graph", "Add, replace or stop graph work, or finish with actual terminal result IDs. Worker targets must use explicit published workspace and model or executor choices. Presets freeze their original settings. Operator targets continue an earlier work's original session only after it settles. inputIds await current graph results; selectedResultInputs must reference selected final results of earlier finished epochs. Finish selects terminal results, including failures, and ends this epoch. After a missing reply, inspect the original graph work; a replacement is a separate explicit decision.", schemars::schema_for!(ToolRequest<UpdateInput>).into(), ToolSemantics::ExclusiveStep),
         ("yield_agent_graph", "End this supervisor turn and await durable worker outcomes. Graph resumes on durable outcomes. Swarm resumes on attention or when the whole active batch settles, not each successful sibling.", schemars::schema_for!(Empty).into(), ToolSemantics::FinishTurn),
         ("agent_swarm_status", "Read this conversation's swarm status and current work. Use view_agent_graph for additional work/result/history pages.", schemars::schema_for!(Empty).into(), ToolSemantics::Parallel),
@@ -456,8 +454,7 @@ impl Hub {
                         route: route_value,
                     }),
                 )
-                .await?
-                .ok_or("graph_input_too_large")?;
+                .await?;
             summaries.push((id.clone(), assignment.worker.clone(), title));
             mutations.push(Mutation {
                 key: self.task_key(&id)?,

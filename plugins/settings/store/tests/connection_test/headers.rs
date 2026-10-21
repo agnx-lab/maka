@@ -209,7 +209,7 @@ async fn header_replacement_rolls_back_secret_test_and_revisions_and_preserves_a
             changed: vec![ConnectionEffectChangedDomain::Credential]
         }
     );
-    // Retention is validated against the resulting aggregate, not just the supplied values.
+    // Retained and replacement fields preserve the complete resulting aggregate.
     let huge: Vec<_> = (0..5)
         .map(|i| json!({"name":format!("X-{i}"),"value":"ÿ".repeat(8192)}))
         .collect();
@@ -221,14 +221,31 @@ async fn header_replacement_rolls_back_secret_test_and_revisions_and_preserves_a
         .unwrap();
     let mut retained: Vec<_> = (0..3).map(|i| json!({"name":format!("X-{i}")})).collect();
     retained.extend_from_slice(&huge[3..]);
-    assert!(replace(json!(retained)).await.is_err());
-    assert_eq!(
-        fixture
+    assert!(matches!(
+        replace(json!(retained)).await.unwrap(),
+        RequestHeadersReplaceResult::Committed { .. }
+    ));
+    let current = fixture
+        .store
+        .credential_status(locator.clone())
+        .await
+        .unwrap();
+    assert_ne!(current, before);
+    let before = current;
+    let headers: std::collections::BTreeMap<String, String> = serde_json::from_str(
+        &fixture
             .store
-            .credential_status(locator.clone())
+            .credential_secret(&locator, None)
             .await
+            .unwrap()
             .unwrap(),
-        before
+    )
+    .unwrap();
+    assert_eq!(
+        headers,
+        (0..5)
+            .map(|i| (format!("X-{i}"), "ÿ".repeat(8192)))
+            .collect()
     );
     let saved = fixture
         .store

@@ -123,7 +123,7 @@ pub struct Configuration {
     /// Explicit Library import for immutable skill input preparation and metadata.
     /// This does not select model tools or confer a service grant.
     #[serde(default)]
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub skill_library: Option<String>,
     /// Initial policy within the selected workspace capability.
     pub permissions: WorkspacePermissions,
@@ -141,7 +141,7 @@ pub struct Configuration {
 pub struct AssistantConfiguration {
     /// Select this home for global instructions and explicit AGENTS.md editing.
     #[serde(default)]
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub home: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -158,7 +158,7 @@ pub struct ServiceTool {
     pub input: ToolInput,
     /// Explicit versioned renderer key, frozen with the call; never inferred from its name.
     #[serde(default)]
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub presentation: Option<String>,
     /// Display only; the selected name, contract and binding still identify execution.
     #[serde(default)]
@@ -167,13 +167,13 @@ pub struct ServiceTool {
     pub result: ToolResult,
     /// Additional user consent for this exact call; service grants remain independent.
     pub confirmation: ToolConfirmation,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub name: String,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub description: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub import: String,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1))]
     pub method: String,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -242,7 +242,6 @@ pub struct List {
     pub scope: SessionListScope,
     /// Literal, case-sensitive title substring; an empty query matches all titles.
     #[serde(default)]
-    #[schemars(length(max = 128))]
     pub title_query: String,
 }
 #[derive(Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -261,7 +260,7 @@ pub enum SessionListScope {
     },
     /// Resolve the exact workspace from an owned session, never a caller path.
     Workspace {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         session_id: String,
     },
 }
@@ -279,17 +278,17 @@ pub enum SessionFilter {
 pub enum SessionPosition {
     Start,
     At {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         cursor: String,
     },
     After {
         revision: String,
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         cursor: String,
     },
     Before {
         revision: String,
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         cursor: String,
     },
 }
@@ -305,9 +304,8 @@ pub struct Create {
     #[serde(default)]
     #[schemars(extend("uniqueItems" = true))]
     pub tools: Option<Vec<String>>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub title: String,
-    #[schemars(length(max = 32))]
     pub labels: Vec<String>,
     pub workspace: WorkspaceSelection,
 }
@@ -332,7 +330,7 @@ pub enum WorkspaceSelection {
         selection: DirectorySelection,
     },
     Session {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         session_id: String,
     },
 }
@@ -340,7 +338,7 @@ pub enum WorkspaceSelection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentDirectorySelection")]
 pub struct DirectorySelection {
-    #[schemars(length(min = 1, max = 64))]
+    #[schemars(length(min = 1))]
     pub root_id: String,
     pub segments: Vec<String>,
     #[schemars(with = "String", regex(pattern = "^sha256:[a-f0-9]{64}$"))]
@@ -390,7 +388,7 @@ pub struct Workspace {
     /// Optional membership in this Agent's canonical Project catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<uuid::Uuid>,
-    #[schemars(length(min = 1, max = 4096))]
+    #[schemars(length(min = 1))]
     pub path: String,
     #[schemars(with = "String", regex(pattern = "^sha256:[a-f0-9]{64}$"))]
     pub directory_identity: DirectoryIdentity,
@@ -407,13 +405,12 @@ pub struct Metadata {
     /// Omission leaves the permission boundary and its approvals unchanged.
     #[serde(default)]
     pub permissions: Option<PermissionChange>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
     pub expected_revision: u64,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub title: String,
-    #[schemars(length(max = 32))]
     pub labels: Vec<String>,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -499,7 +496,6 @@ pub enum GlobalInstructionsUpdated {
 pub struct SkillCandidatesRead {
     pub session_id: String,
     pub backend: SkillCandidatesBackend,
-    #[schemars(length(max = 4096))]
     pub query: String,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -546,9 +542,9 @@ pub struct SkillCandidate {
 #[schemars(rename = "AgentBackendPreference")]
 pub enum BackendPreference {
     Model {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         connection_id: String,
-        #[schemars(length(min = 1, max = 512))]
+        #[schemars(length(min = 1))]
         model_id: String,
         thinking_level: Option<maka_agent_facts::execution::ThinkingLevel>,
     },
@@ -602,7 +598,7 @@ pub struct Send {
     pub model: ModelSelection,
     /// Omission/null uses the configured model default; `off` is explicit.
     pub thinking_level: Option<maka_agent_facts::execution::ThinkingLevel>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
 
     pub message: String,
@@ -625,7 +621,7 @@ pub struct Execute {
     /// IDs of immutable user uploads in this Session, resolved by the Agent owner.
     #[serde(default)]
     pub attachments: Vec<String>,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
 
     pub message: String,
@@ -635,11 +631,11 @@ pub struct Execute {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentUploadAttachment")]
 pub struct UploadAttachment {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 512))]
+    #[schemars(length(min = 1))]
     pub name: String,
-    #[schemars(range(max = 52428800))]
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub bytes: usize,
     #[schemars(regex(pattern = "^sha256:[a-f0-9]{64}$"))]
     pub digest: String,
@@ -673,9 +669,9 @@ pub struct Attachment {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentMarkRead")]
 pub struct MarkRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub message_id: String,
 }
 #[derive(Serialize, JsonSchema)]
@@ -689,16 +685,16 @@ pub enum MarkReadResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentStop")]
 pub struct Stop {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub invocation_id: String,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentWatch")]
 pub struct Watch {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub after: u64,
@@ -912,14 +908,14 @@ impl From<maka_agent_facts::model::TextKind> for ContentKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentSessionRead")]
 pub struct SessionRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentDiagnostics")]
 pub struct Diagnostics {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub position: DiagnosticPosition,
 }
@@ -1077,9 +1073,9 @@ pub enum QueueKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentQueueMessage")]
 pub struct QueueMessage {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub message_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub expected_revision: u64,
@@ -1109,7 +1105,7 @@ pub enum QueueMessageResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentQueueMutation")]
 pub struct QueueMutation {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub expected_revision: u64,
@@ -1125,15 +1121,15 @@ pub struct QueueMutation {
 #[schemars(rename = "AgentQueueAction")]
 pub enum QueueAction {
     Retract {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         message_id: String,
     },
     Promote {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         message_id: String,
     },
     Update {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         message_id: String,
 
         message: String,
@@ -1209,7 +1205,7 @@ pub struct HistoryChunk {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryRead")]
 pub struct History {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: Option<u64>,
@@ -1226,7 +1222,7 @@ pub use maka_agent_ports::session::history::Prompt as HistoryPrompt;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryLandmarksRead")]
 pub struct HistoryLandmarksRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
@@ -1248,7 +1244,7 @@ pub struct HistoryLandmarks {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryLandmark")]
 pub struct HistoryLandmark {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub turn_id: String,
     pub position: RowPosition,
     pub last_position: RowPosition,
@@ -1260,7 +1256,7 @@ pub struct HistoryLandmark {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistoryPromptRead")]
 pub struct HistoryPromptRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
     pub through: u64,
@@ -1271,15 +1267,15 @@ pub struct HistoryPromptRead {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistorySearch")]
 pub struct HistorySearch {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     /// Original raw-event fence, shared with history reads.
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
     /// Exclusive transcript-row position; null starts a scan.
     pub after: Option<RowPosition>,
-    /// Literal query, additionally limited to 512 UTF-8 bytes; no normalization.
-    #[schemars(length(min = 1, max = 512))]
+    /// Literal query; no normalization.
+    #[schemars(length(min = 1))]
     pub query: String,
     /// False uses Unicode simple case folding, without locale or multi-character folding.
     pub case_sensitive: bool,
@@ -1344,7 +1340,7 @@ pub enum HistoryPage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentHistorySourceRead")]
 pub struct HistorySourceRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
@@ -1352,7 +1348,6 @@ pub struct HistorySourceRead {
     pub field: maka_agent_ports::session::history::SourceField,
     /// Optional JSON keys/array indices within arguments, result or receipt.
     #[serde(default)]
-    #[schemars(length(max = 16))]
     pub path: Option<Vec<maka_agent_ports::session::history::SourceSegment>>,
     pub position: maka_agent_ports::session::history::SourcePosition,
 }
@@ -1369,7 +1364,7 @@ pub enum HistorySourceReference {
         position: RowPosition,
     },
     ToolUse {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         tool_use_id: String,
     },
 }
@@ -1383,7 +1378,6 @@ pub enum HistorySourcePage {
         /// Complete file-path evidence resolved on the Host for copying only.
         /// This is display text, never a filesystem capability or open command.
         #[serde(rename = "filePath", skip_serializing_if = "Option::is_none")]
-        #[schemars(length(max = 4096))]
         file_path: Option<String>,
     },
 }
@@ -1392,7 +1386,7 @@ pub enum HistorySourcePage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentToolImageRead")]
 pub struct ToolImageRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
     pub through: u64,
@@ -1432,7 +1426,7 @@ pub enum ToolImagePage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AgentAttachmentImageRead")]
 pub struct AttachmentImageRead {
-    #[schemars(length(min = 1, max = 128))]
+    #[schemars(length(min = 1))]
     pub session_id: String,
     pub source: AttachmentImageSource,
     #[schemars(range(max = 9_007_199_254_740_991u64))]
@@ -1448,7 +1442,7 @@ pub struct AttachmentImageRead {
 #[schemars(rename = "AgentAttachmentImageSource")]
 pub enum AttachmentImageSource {
     Uploaded {
-        #[schemars(length(min = 1, max = 256))]
+        #[schemars(length(min = 1))]
         id: String,
     },
     History {

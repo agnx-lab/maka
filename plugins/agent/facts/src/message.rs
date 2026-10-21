@@ -153,9 +153,6 @@ pub fn validate_sources(
     if sources.is_empty() {
         return Ok(());
     }
-    if sources.len() > 64 {
-        return Err("too many root source messages");
-    }
     let mut ids = HashSet::new();
     let started = sources[0].disposition == MessageDisposition::TurnStarted;
     let orchestration = sources[0]
@@ -215,7 +212,7 @@ pub fn aggregate<'a>(contents: impl IntoIterator<Item = &'a MessageInput>) -> Me
         );
         if let Some(references) = &content.inline_references {
             let target = result.inline_references.get_or_insert_with(Vec::new);
-            for reference in references.iter().take(32 - target.len()) {
+            for reference in references {
                 let mut reference = reference.clone();
                 reference.start = reference.start.saturating_add(offset);
                 target.push(reference);

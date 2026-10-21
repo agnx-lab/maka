@@ -56,7 +56,7 @@ impl ConfigurationStore {
     ) -> Result<Option<ConnectionObservation>> {
         validation::entity_id(&target.connection_id).map_err(ConfigError::Invalid)?;
         validation::revision(target.revision, true).map_err(ConfigError::Invalid)?;
-        validation::text(&target.model_id, 512, true).map_err(ConfigError::Invalid)?;
+        validation::text(&target.model_id).map_err(ConfigError::Invalid)?;
         let id = target.connection_id.clone();
         self.observe_model_if(id, move |row| {
             row.revision == target.revision && row.enabled_model_ids.contains(&target.model_id)

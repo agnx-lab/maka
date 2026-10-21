@@ -203,32 +203,35 @@ async fn content_negotiation_extraction_and_limits_do_not_hide_incomplete_result
             .any(|(key, value)| key == "Accept" && value.starts_with("text/markdown"))
     );
 
+    let markdown = "文本\n".repeat(20_000);
     reply(
         &transport,
         200,
         "https://docs.example/large",
         &[("Content-Type", "text/markdown")],
-        "文本\n".repeat(20_000).into_bytes(),
+        markdown.as_bytes().to_vec(),
     );
     let page = fetcher
         .fetch(&parent, "https://docs.example/large")
         .await
         .unwrap();
-    assert!(page.truncated);
-    assert!(page.content.len() <= 50 * 1024);
-    assert!(page.content.contains('\n'));
+    assert!(!page.truncated);
+    assert_eq!(page.content, markdown);
 
+    let complete = format!("{}UNIQUE_FINAL_CONTENT", "a".repeat(5 * 1024 * 1024));
     let oversized = reply(
         &transport,
         200,
         "https://docs.example/large",
-        &[("Content-Type", "text/html")],
-        vec![b'a'; 5 * 1024 * 1024 + 1],
+        &[("Content-Type", "text/plain")],
+        complete.as_bytes().to_vec(),
     );
-    assert!(matches!(
-        fetcher.fetch(&parent, "https://docs.example/large").await,
-        Err(Error::TooLarge)
-    ));
+    let page = fetcher
+        .fetch(&parent, "https://docs.example/large")
+        .await
+        .unwrap();
+    assert_eq!(page.content, complete);
+    assert!(!page.truncated);
     assert_eq!(oversized.closes.load(Ordering::SeqCst), 1);
 
     let deep = reply(
@@ -238,10 +241,15 @@ async fn content_negotiation_extraction_and_limits_do_not_hide_incomplete_result
         &[("Content-Type", "text/html")],
         format!("{}content{}", "<div>".repeat(150), "</div>".repeat(150)).into_bytes(),
     );
-    assert!(matches!(
-        fetcher.fetch(&parent, "https://docs.example/deep").await,
-        Err(Error::Document(_))
-    ));
+    let page = fetcher
+        .fetch(&parent, "https://docs.example/deep")
+        .await
+        .unwrap();
+    assert_eq!(
+        page.content,
+        format!("{}content{}", "<div>".repeat(150), "</div>".repeat(150))
+    );
+    assert!(!page.truncated);
     assert_eq!(deep.closes.load(Ordering::SeqCst), 1);
     assert!(!parent.cancellation.is_cancelled());
 }

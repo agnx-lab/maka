@@ -53,7 +53,7 @@ pub struct Set {
 pub enum CredentialTarget {
     ApiKey,
     Header {
-        #[schemars(length(min = 1, max = 128))]
+        #[schemars(length(min = 1))]
         name: String,
     },
 }
@@ -70,7 +70,7 @@ pub enum CredentialChange {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "JevCredential")]
 pub struct Credential {
-    #[schemars(length(min = 1, max = 8192))]
+    #[schemars(length(min = 1))]
     pub url: String,
     pub revision: Option<u64>,
     pub target: CredentialTarget,

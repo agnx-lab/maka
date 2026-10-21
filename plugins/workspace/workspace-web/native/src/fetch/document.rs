@@ -23,7 +23,6 @@ use encoding_rs::Encoding;
 use tokio::sync::Semaphore;
 use url::Url;
 
-const TEXT_LIMIT: usize = 50 * 1024;
 // A cancelled spawn_blocking job keeps its permit until it actually exits.
 // Plugin reload must not turn timed-out parses into unbounded CPU work.
 static PARSERS: Semaphore = Semaphore::const_new(2);
@@ -82,32 +81,46 @@ pub(super) async fn extract(
 }
 
 fn render(url: Url, text: String, media: Media) -> Result<Page, Error> {
-    let (mut title, mut content, format) = match media {
+    let (title, content, format) = match media {
         Media::Html => {
             let config = Config {
-                max_elements_to_parse: 20_000,
                 disable_json_ld: true,
                 text_mode: TextMode::Markdown,
                 ..Config::default()
             };
+            let original = text.clone();
             let mut reader = Readability::new(text, Some(url.as_str()), Some(config))
                 .map_err(|error| Error::Document(error.to_string()))?;
             // Check actual HTML tree depth, not '<' counts or a regex approximation.
             // Readability/Markdown traversal must not recurse over hostile depth.
             let mut nodes = vec![(reader.doc.root(), 0)];
-            let mut count = 0;
             while let Some((node, depth)) = nodes.pop() {
-                count += 1;
-                if depth > 128 || count > 20_000 {
-                    return Err(Error::Document(
-                        "HTML exceeds 128 levels or 20,000 nodes".into(),
-                    ));
+                if depth > 128 {
+                    // Readability/Markdown uses recursive dependency walkers.
+                    // Preserve the complete original rather than reject or recurse
+                    // through a shape outside this adapter's supported stack bound.
+                    return Ok(Page {
+                        url: url.into(),
+                        title: None,
+                        content: original,
+                        format: Format::Text,
+                        truncated: false,
+                    });
                 }
                 nodes.extend(node.children_it(false).map(|child| (child, depth + 1)));
             }
-            let article = reader
-                .parse()
-                .map_err(|error| Error::Document(error.to_string()))?;
+            let article = match reader.parse() {
+                Ok(article) => article,
+                Err(_) => {
+                    return Ok(Page {
+                        url: url.into(),
+                        title: None,
+                        content: original,
+                        format: Format::Text,
+                        truncated: false,
+                    });
+                }
+            };
             let title = (!article.title.is_empty()).then_some(article.title);
             (title, article.text_content.to_string(), Format::Markdown)
         }
@@ -117,17 +130,11 @@ fn render(url: Url, text: String, media: Media) -> Result<Page, Error> {
     if content.trim().is_empty() {
         return Err(Error::Empty);
     }
-    let title_truncated = title.as_ref().is_some_and(|title| title.len() > 1024);
-    if let Some(title) = &mut title {
-        title.truncate(title.floor_char_boundary(1024.min(title.len())));
-    }
-    let truncated = content.len() > TEXT_LIMIT || title_truncated;
-    content.truncate(content.floor_char_boundary(TEXT_LIMIT.min(content.len())));
     Ok(Page {
         url: url.into(),
         title,
         content,
         format,
-        truncated,
+        truncated: false,
     })
 }

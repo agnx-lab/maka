@@ -93,8 +93,6 @@ pub enum ReadError {
     Retired,
     #[error("invalid read operation: {0}")]
     Invalid(String),
-    #[error("directory scan exceeds {max} entries per read batch")]
-    ScanLimit { max: u64 },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -332,24 +330,41 @@ impl Reader<'_> {
             file: input,
             symlinks,
         } = input.into();
-        if input.limit == 0 || input.limit > 1024 * 1024 || input.offset > (1_u64 << 53) - 1 {
+        if input.limit == 0 || input.offset > (1_u64 << 53) - 1 {
             return Err(invalid("invalid read range"));
         }
-        let (mut file, _) = self.open(&input.path, symlinks)?;
+        let (mut file, metadata) = self.open(&input.path, symlinks)?;
         file.seek(SeekFrom::Start(input.offset))?;
+        let remaining = metadata.len().saturating_sub(input.offset);
+        let extent = remaining.min(u64::try_from(input.limit).unwrap_or(u64::MAX));
+        let mut reader = file.take(extent);
         let mut bytes = Vec::new();
-        let mut reader = file.take(input.limit as u64 + 1);
         let mut chunk = [0; 8192];
-        loop {
+        while reader.limit() != 0 {
             self.check()?;
             let count = reader.read(&mut chunk)?;
             if count == 0 {
-                break;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "file changed within its captured read extent",
+                )
+                .into());
             }
+            bytes.try_reserve(count).map_err(std::io::Error::other)?;
             bytes.extend_from_slice(&chunk[..count]);
         }
-        let next_offset = (bytes.len() > input.limit).then_some(input.offset + input.limit as u64);
-        bytes.truncate(input.limit);
+        self.check()?;
+        let next_offset = if remaining > extent {
+            Some(
+                input
+                    .offset
+                    .checked_add(extent)
+                    .filter(|offset| *offset < (1_u64 << 53))
+                    .ok_or_else(|| invalid("read offset cannot be represented"))?,
+            )
+        } else {
+            None
+        };
         Ok(FilePage { bytes, next_offset })
     }
 
@@ -398,10 +413,7 @@ impl Reader<'_> {
             files: input,
             symlinks,
         } = input.into();
-        if input.limit == 0
-            || input.limit > 1024
-            || input.after.as_ref().is_some_and(|s| s.len() > 4096)
-        {
+        if input.limit == 0 || input.limit > 1024 {
             return Err(invalid("invalid directory page"));
         }
         let mut entries = BTreeMap::new();
@@ -491,7 +503,6 @@ impl Reader<'_> {
 }
 fn relative(path: &str) -> Result<(), ReadError> {
     if path.is_empty()
-        || path.len() > 4096
         || path.chars().any(char::is_control)
         || path.contains(['\\', ':'])
         || Path::new(path)
