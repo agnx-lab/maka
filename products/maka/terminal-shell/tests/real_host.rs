@@ -195,10 +195,8 @@ fn selected_command<'a>(nodes: &'a [AccessibleNode], title: &str) -> Option<&'a 
                 text.label == title
                     && text.frame.origin.x.0 >= button.frame.origin.x.0
                     && text.frame.origin.y.0 >= button.frame.origin.y.0
-                    && text.frame.origin.x.0
-                        < button.frame.origin.x.0 + button.frame.size.width.0
-                    && text.frame.origin.y.0
-                        < button.frame.origin.y.0 + button.frame.size.height.0
+                    && text.frame.origin.x.0 < button.frame.origin.x.0 + button.frame.size.width.0
+                    && text.frame.origin.y.0 < button.frame.origin.y.0 + button.frame.size.height.0
             })
     })
 }
@@ -2395,12 +2393,20 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             terminal.send(b"\x10");
             terminal.wait_for("Search commands…").await;
             let palette = terminal.wait_for("Resume a conversation").await;
-            assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
+            assert!(
+                palette.contains("Search commands…")
+                    && palette.contains("Sessions")
+                    && palette.contains("Close")
+            );
             terminal.paste("Choose workspace");
             // Removing the old first result proves the query reset keyboard
             // selection to the sole command row, not just the native Input.
             let choice = terminal.wait_for_absent("Resume a conversation").await;
-            assert!(choice.contains("Choose workspace") && choice.contains("Start a conversation in another folder") && choice.contains("Close"));
+            assert!(
+                choice.contains("Choose workspace")
+                    && choice.contains("Start a conversation in another folder")
+                    && choice.contains("Close")
+            );
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
             terminal.wait_for("Workspace locations").await;

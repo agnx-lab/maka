@@ -397,25 +397,27 @@ fn run(
                 let token = input
                     .token
                     .or_else(|| input.startup.then(|| platform.presented()).flatten());
-                let measurement = if let (Some(queued), Some(start)) = (input.queued_at, dispatch_start)
-                {
-                    let mut state = presentation.state.lock().unwrap();
-                    state.trace.as_mut().map(|trace| {
-                        trace.record_input(InputSample {
-                            frame: token.as_ref().map(FrameToken::sequence),
-                            viewport_generation: token.as_ref().map(FrameToken::viewport_generation),
-                            geometry: input.geometry,
-                            kind: super::input::trace_kind(&input.event),
-                            queued,
-                            dispatch_start: start,
-                            dispatch_end: None,
-                            queue_len,
-                            outcome: "incomplete",
+                let measurement =
+                    if let (Some(queued), Some(start)) = (input.queued_at, dispatch_start) {
+                        let mut state = presentation.state.lock().unwrap();
+                        state.trace.as_mut().map(|trace| {
+                            trace.record_input(InputSample {
+                                frame: token.as_ref().map(FrameToken::sequence),
+                                viewport_generation: token
+                                    .as_ref()
+                                    .map(FrameToken::viewport_generation),
+                                geometry: input.geometry,
+                                kind: super::input::trace_kind(&input.event),
+                                queued,
+                                dispatch_start: start,
+                                dispatch_end: None,
+                                queue_len,
+                                outcome: "incomplete",
+                            })
                         })
-                    })
-                } else {
-                    None
-                };
+                    } else {
+                        None
+                    };
                 let mut outcome = if token.is_some() {
                     "missing_snapshot"
                 } else {
