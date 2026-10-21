@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::probe::Capabilities;
+use super::probe::{Capabilities, MouseCoordinates, PixelOrigin};
 use gpui::{PlatformInput, point, px};
 use std::time::{Duration, Instant};
 use termina::{
@@ -93,12 +93,21 @@ impl Mapping {
                 })
             }
             Event::SgrMouse(mouse) => {
-                let position = if caps.pixel_mouse {
-                    point(px(mouse.x as f32), px(mouse.y as f32))
-                } else {
-                    let x = u16::try_from(mouse.x).ok()?.checked_sub(1)?;
-                    let y = u16::try_from(mouse.y).ok()?.checked_sub(1)?;
-                    cell_centre(x, y, caps)?
+                let position = match caps.mouse {
+                    MouseCoordinates::Pixels(origin) => {
+                        let offset = match origin {
+                            PixelOrigin::Zero => 0.0,
+                            PixelOrigin::One => 1.0,
+                        };
+                        // Preserve negative release/drag coordinates outside
+                        // the viewport. Wire zero is outside a one-based grid.
+                        point(px(mouse.x as f32 - offset), px(mouse.y as f32 - offset))
+                    }
+                    MouseCoordinates::Cells => {
+                        let x = u16::try_from(mouse.x).ok()?.checked_sub(1)?;
+                        let y = u16::try_from(mouse.y).ok()?.checked_sub(1)?;
+                        cell_centre(x, y, caps)?
+                    }
                 };
                 Some(self.mouse(mouse.kind, mouse.modifiers, position))
             }
@@ -115,6 +124,7 @@ impl Mapping {
             | Event::Csi(_)
             | Event::Osc(_)
             | Event::Dcs(_)
+            | Event::Iterm2Capabilities(_)
             | Event::KittyGraphicsResponse(_) => None,
         }
     }
@@ -226,7 +236,9 @@ mod tests {
                 pixel_width: Some(960),
                 pixel_height: Some(640),
             },
-            pixel_mouse: true,
+            mouse: MouseCoordinates::Pixels(PixelOrigin::Zero),
+            protocol: None,
+            synchronized: false,
         };
         let mut mapping = Mapping::default();
         let raw = |x, y| {
@@ -237,6 +249,21 @@ mod tests {
                 modifiers: Modifiers::NONE,
             })
         };
+        for (raw_x, raw_y, x, y) in [(1, 1, 0.0, 0.0), (0, 0, -1.0, -1.0), (-5, 650, -6.0, 649.0)] {
+            let Some(PlatformInput::MouseUp(event)) = mapping.input(
+                &raw(raw_x, raw_y),
+                Capabilities {
+                    mouse: MouseCoordinates::Pixels(PixelOrigin::One),
+                    ..caps
+                },
+            ) else {
+                panic!("one-based physical release is preserved");
+            };
+            assert_eq!(
+                (f32::from(event.position.x), f32::from(event.position.y)),
+                (x, y)
+            );
+        }
         for (x, y) in [(0, 0), (-5, 650)] {
             let Some(PlatformInput::MouseUp(event)) = mapping.input(&raw(x, y), caps) else {
                 panic!("physical release is preserved");
@@ -249,7 +276,7 @@ mod tests {
         let Some(PlatformInput::MouseUp(event)) = mapping.input(
             &raw(1, 1),
             Capabilities {
-                pixel_mouse: false,
+                mouse: MouseCoordinates::Cells,
                 ..caps
             },
         ) else {
@@ -264,7 +291,7 @@ mod tests {
                 .input(
                     &raw(0, 1),
                     Capabilities {
-                        pixel_mouse: false,
+                        mouse: MouseCoordinates::Cells,
                         ..caps
                     }
                 )

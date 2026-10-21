@@ -118,7 +118,9 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
         let mut state = presentation.state.lock().unwrap();
         state.pixels = Some(pixels::Inbox::new(pixels::Capabilities {
             size,
-            pixel_mouse: false,
+            mouse: pixels::MouseCoordinates::Cells,
+            protocol: None,
+            synchronized: false,
         }));
         setup.extend(state.pixel_probe.query()?);
         setup

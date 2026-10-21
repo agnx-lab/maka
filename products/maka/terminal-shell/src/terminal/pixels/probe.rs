@@ -21,7 +21,10 @@ use super::geometry::PixelSizeQuery;
 use std::time::{Duration, Instant};
 use termina::{
     Event, WindowSize,
-    escape::csi::{Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Mode},
+    escape::{
+        csi::{Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Mode},
+        dcs::Dcs,
+    },
 };
 
 const TIMEOUT: Duration = Duration::from_millis(250);
@@ -47,10 +50,32 @@ impl Default for Slots {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Protocol {
+    Kitty,
+    Sixel,
+    Iterm2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PixelOrigin {
+    Zero,
+    One,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MouseCoordinates {
+    Cells,
+    Pixels(PixelOrigin),
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Capabilities {
     pub size: WindowSize,
-    pub pixel_mouse: bool,
+    pub mouse: MouseCoordinates,
+    // None during startup, before any image protocol has replied positively.
+    pub protocol: Option<Protocol>,
+    pub synchronized: bool,
 }
 
 impl Capabilities {
@@ -78,6 +103,11 @@ pub(crate) struct Probe {
     deadline: Option<Instant>,
     kitty: Option<(bool, Instant)>,
     mouse: Option<(bool, Instant)>,
+    identity: Option<(Option<PixelOrigin>, Instant)>,
+    sixel: Option<(bool, Instant)>,
+    sixel_mode: Option<(DecModeSetting, Instant)>,
+    inline: Option<(Features, Instant)>,
+    synchronized: Option<(bool, Instant)>,
     pub measurement: PixelSizeQuery,
     cancelled: bool,
 }
@@ -89,6 +119,11 @@ impl Default for Probe {
             deadline: None,
             kitty: None,
             mouse: None,
+            identity: None,
+            sixel: None,
+            sixel_mode: None,
+            inline: None,
+            synchronized: None,
             measurement: PixelSizeQuery::default(),
             cancelled: false,
         }
@@ -102,7 +137,12 @@ impl Probe {
         }
         let mut bytes = nsh_gpui_terminal::kitty::capability_query(self.slots.query)
             .map_err(|error| error.to_string())?;
-        bytes.extend_from_slice(b"\x1b[?1016$p\x1b[14t");
+        // DA1 is already requested by the character image probe. Mouse
+        // precision, identity, static Sixel mode and synchronization remain
+        // independent facts, irrespective of the selected image transport.
+        bytes.extend_from_slice(
+            b"\x1b[?1016$p\x1b[?80$p\x1b[?2026$p\x1b[>q\x1b]1337;Capabilities\x1b\\\x1b[14t",
+        );
         Ok(bytes)
     }
 
@@ -111,6 +151,11 @@ impl Probe {
         self.deadline = Some(deadline);
         self.kitty = self.kitty.filter(|(_, at)| *at <= deadline);
         self.mouse = self.mouse.filter(|(_, at)| *at <= deadline);
+        self.identity = self.identity.filter(|(_, at)| *at <= deadline);
+        self.sixel = self.sixel.filter(|(_, at)| *at <= deadline);
+        self.sixel_mode = self.sixel_mode.filter(|(_, at)| *at <= deadline);
+        self.inline = self.inline.filter(|(_, at)| *at <= deadline);
+        self.synchronized = self.synchronized.filter(|(_, at)| *at <= deadline);
         self.measurement.flushed(at);
     }
 
@@ -126,60 +171,167 @@ impl Probe {
                 self.kitty.get_or_insert((reply.result.is_ok(), now));
             }
             Event::Csi(Csi::Mode(Mode::ReportDecPrivateMode {
-                mode: DecPrivateMode::Code(DecPrivateModeCode::SGRPixelsMouse),
+                mode: DecPrivateMode::Code(mode),
                 setting,
-            })) => {
-                self.mouse.get_or_insert((
-                    matches!(
-                        setting,
-                        DecModeSetting::Set
-                            | DecModeSetting::Reset
-                            | DecModeSetting::PermanentlySet
-                    ),
+            })) => match mode {
+                DecPrivateModeCode::SGRPixelsMouse => {
+                    self.mouse.get_or_insert((supported(*setting), now));
+                }
+                DecPrivateModeCode::SixelDisplayMode => {
+                    self.sixel_mode.get_or_insert((*setting, now));
+                }
+                DecPrivateModeCode::SynchronizedOutput => {
+                    self.synchronized.get_or_insert((supported(*setting), now));
+                }
+                _ => {}
+            },
+            Event::Csi(Csi::PrimaryDeviceAttributes(attributes)) => {
+                self.sixel.get_or_insert((
+                    attributes.terminal_type >= 62 && attributes.attributes.contains(&4),
                     now,
                 ));
+            }
+            Event::Dcs(Dcs::TerminalNameAndVersion(identity)) => {
+                self.identity.get_or_insert((pixel_origin(identity), now));
+            }
+            Event::Iterm2Capabilities(features) => {
+                self.inline.get_or_insert((Features::parse(features), now));
             }
             Event::WindowResized(_) => self.cancelled = true,
             _ => {}
         }
     }
 
-    /// A positive graphics reply is required. A terminal without 1016 keeps
-    /// its real cell precision; its pointer is mapped to that cell's centre.
+    pub fn needs_static_sixel(&self) -> bool {
+        matches!(self.sixel_mode, Some((DecModeSetting::Reset, _)))
+    }
+
+    /// Image support, real geometry and pointer coordinates are independent.
+    /// Unknown 1016 origins keep real cell precision; never infer the origin
+    /// from the image protocol or an environment-variable terminal name.
     pub fn decision(&self, now: Instant, mut size: WindowSize) -> Option<Option<Capabilities>> {
         if self.cancelled {
             return Some(None);
         }
         let deadline = self.deadline?;
-        if self.kitty.is_some_and(|(supported, _)| !supported) {
-            return Some(None);
-        }
-        if self.kitty.is_none()
-            || self.mouse.is_none()
-            || self.measurement.pixels_before(deadline).is_none()
+        let kitty = self.kitty.is_some_and(|(supported, _)| supported);
+        if now < deadline
+            && !(kitty
+                && self.mouse.is_some()
+                && self.identity.is_some()
+                && self.measurement.pixels_before(deadline).is_some())
         {
-            if now < deadline {
-                return None;
-            }
+            return None;
         }
-        if !self.kitty.is_some_and(|(supported, _)| supported) {
+        let features = self
+            .inline
+            .map(|(features, _)| features)
+            .unwrap_or_default();
+        let protocol = if kitty {
+            Protocol::Kitty
+        } else if features.file {
+            Protocol::Iterm2
+        } else if (features.sixel || self.sixel.is_some_and(|(supported, _)| supported))
+            && self.sixel_mode.is_some_and(|(mode, _)| supported(mode))
+        {
+            Protocol::Sixel
+        } else {
             return Some(None);
-        }
+        };
         if let Some((width, height)) = self.measurement.pixels_before(deadline) {
             size.pixel_width = Some(width);
             size.pixel_height = Some(height);
         }
-        if size.cols == 0
-            || size.rows == 0
-            || size.pixel_width.is_none_or(|n| n == 0)
-            || size.pixel_height.is_none_or(|n| n == 0)
-        {
-            return Some(None);
-        }
-        Some(Some(Capabilities {
+        let mouse = if self.mouse.is_some_and(|(supported, _)| supported) {
+            self.identity
+                .and_then(|(origin, _)| origin)
+                .map(MouseCoordinates::Pixels)
+                .unwrap_or(MouseCoordinates::Cells)
+        } else {
+            MouseCoordinates::Cells
+        };
+        let capabilities = Capabilities {
             size,
-            pixel_mouse: self.mouse.is_some_and(|(supported, _)| supported),
-        }))
+            mouse,
+            protocol: Some(protocol),
+            synchronized: features.synchronized
+                || self.synchronized.is_some_and(|(supported, _)| supported),
+        };
+        Some(capabilities.viewport().map(|_| capabilities))
+    }
+}
+
+fn supported(setting: DecModeSetting) -> bool {
+    matches!(
+        setting,
+        DecModeSetting::Set | DecModeSetting::Reset | DecModeSetting::PermanentlySet
+    )
+}
+
+fn pixel_origin(identity: &str) -> Option<PixelOrigin> {
+    // These are actual XTVERSION replies, not image-protocol fingerprints.
+    // Kitty/Ghostty emit zero-based pixels; xterm and iTerm2 add one.
+    if identity
+        .strip_prefix("kitty(")
+        .and_then(|v| v.strip_suffix(')'))
+        .is_some_and(|v| !v.is_empty())
+        || identity
+            .strip_prefix("ghostty ")
+            .is_some_and(|v| !v.is_empty())
+    {
+        Some(PixelOrigin::Zero)
+    } else if identity
+        .strip_prefix("XTerm(")
+        .and_then(|v| v.strip_suffix(')'))
+        .is_some_and(|v| !v.is_empty() && v.bytes().all(|byte| byte.is_ascii_digit()))
+        || identity
+            .strip_prefix("iTerm2 ")
+            .is_some_and(|v| !v.is_empty())
+    {
+        Some(PixelOrigin::One)
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Features {
+    file: bool,
+    sixel: bool,
+    synchronized: bool,
+}
+
+impl Features {
+    fn parse(raw: &str) -> Self {
+        let prefix = raw
+            .as_bytes()
+            .split(|byte| !byte.is_ascii_alphanumeric())
+            .next()
+            .unwrap_or_default();
+        let mut features = Self::default();
+        let mut bare_f = 0;
+        let mut remaining = prefix;
+        while let Some(first) = remaining.first() {
+            if !first.is_ascii_uppercase() {
+                break;
+            }
+            let end = remaining[1..]
+                .iter()
+                .position(|byte| byte.is_ascii_uppercase())
+                .map_or(remaining.len(), |at| at + 1);
+            match &remaining[..end] {
+                b"F" => bare_f += 1,
+                b"Sx" => features.sixel = true,
+                b"Sy" => features.synchronized = true,
+                _ => {}
+            }
+            remaining = &remaining[end..];
+        }
+        // iTerm2 654bb137 VT100Output.m encodes focusReporting and file
+        // separately with the same F. Two bare tokens prove both in that
+        // emitter; a single F is ambiguous and never authorizes File.
+        features.file = bare_f >= 2;
+        features
     }
 }
 
@@ -225,15 +377,102 @@ mod tests {
             probe.flushed(now);
             reply(
                 &mut probe,
-                format!("\x1b_Gi=99;OK\x1b\\\x1b[?1016;{mode}$y\x1b[4;640;960t").as_bytes(),
+                format!("\x1b_Gi=99;OK\x1b\\\x1b[?1016;{mode}$y\x1bP>|kitty(0.49.2)\x1b\\\x1b[4;640;960t").as_bytes(),
                 now,
             );
             let result = probe.decision(now, size()).unwrap().unwrap();
-            assert_eq!(result.pixel_mouse, precision);
+            assert_eq!(
+                matches!(result.mouse, MouseCoordinates::Pixels(_)),
+                precision
+            );
             assert_eq!(
                 result.viewport(),
                 Some(gpui::size(gpui::DevicePixels(960), gpui::DevicePixels(640)))
             );
+        }
+    }
+
+    #[test]
+    fn sixel_requires_real_static_mode_and_keeps_mouse_and_sync_independent() {
+        let now = Instant::now();
+        for (mode, accepted, changed) in [
+            (0, false, false),
+            (1, true, false),
+            (2, true, true),
+            (3, true, false),
+            (4, false, false),
+        ] {
+            let mut probe = probe();
+            probe.flushed(now);
+            reply(&mut probe, format!("\x1b[?62;4c\x1b[?80;{mode}$y\x1b[?2026;2$y\x1b[?1016;2$y\x1bP>|XTerm(390)\x1b\\\x1b[4;627;960t").as_bytes(), now);
+            let result = probe.decision(now + TIMEOUT, size()).unwrap();
+            assert_eq!(result.is_some(), accepted);
+            if let Some(caps) = result {
+                assert_eq!(caps.protocol, Some(Protocol::Sixel));
+                assert_eq!(caps.mouse, MouseCoordinates::Pixels(PixelOrigin::One));
+                assert!(caps.synchronized);
+                assert_eq!(probe.needs_static_sixel(), changed);
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_complete_unambiguous_file_report_selects_iterm_images() {
+        let now = Instant::now();
+        // iTerm2's actual VT100Output emitter reports both focus and File as
+        // bare F, in this complete string. The ambiguity cannot be resolved
+        // from one F, from digits, or by joining separate reports.
+        for (features, file) in [
+            ("T3CwLrMSc7UUw15Ts3BFGsSyHNoSxFP", true),
+            ("T3F", false),
+            ("F1F", false),
+            ("F;F", false),
+            ("FFx", false),
+            ("_FF", false),
+        ] {
+            let mut probe = probe();
+            probe.flushed(now);
+            reply(
+                &mut probe,
+                format!("\x1b]1337;Capabilities={features}\x07\x1b[4;627;960t").as_bytes(),
+                now,
+            );
+            let result = probe.decision(now + TIMEOUT, size()).unwrap();
+            assert_eq!(result.is_some(), file, "{features}");
+            if let Some(caps) = result {
+                assert_eq!(caps.protocol, Some(Protocol::Iterm2));
+                assert_eq!(caps.mouse, MouseCoordinates::Cells);
+                assert!(caps.synchronized);
+            }
+        }
+        let mut probe = probe();
+        probe.flushed(now);
+        reply(&mut probe, b"\x1b[200~\x1b]1337;Capabilities=FF\x07\x1b[201~\x1b]1337;Capabilities=F\x07\x1b]1337;Capabilities=F\x07\x1b[4;627;960t", now);
+        assert!(probe.decision(now + TIMEOUT, size()).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_graphics_ack_does_not_authorize_an_unknown_pixel_coordinate_origin() {
+        let now = Instant::now();
+        for (identity, coordinates) in [
+            ("kitty(0.49.2)", MouseCoordinates::Pixels(PixelOrigin::Zero)),
+            ("ghostty 1.2.3", MouseCoordinates::Pixels(PixelOrigin::Zero)),
+            ("XTerm(390)", MouseCoordinates::Pixels(PixelOrigin::One)),
+            ("iTerm2 3.5.0", MouseCoordinates::Pixels(PixelOrigin::One)),
+            ("another-kitty(1)", MouseCoordinates::Cells),
+            ("unknown 1", MouseCoordinates::Cells),
+        ] {
+            let mut probe = probe();
+            probe.flushed(now);
+            reply(
+                &mut probe,
+                format!("\x1b_Gi=99;OK\x1b\\\x1b[?1016;2$y\x1bP>|{identity}\x1b\\\x1b[4;627;960t")
+                    .as_bytes(),
+                now,
+            );
+            let caps = probe.decision(now + TIMEOUT, size()).unwrap().unwrap();
+            assert_eq!(caps.protocol, Some(Protocol::Kitty));
+            assert_eq!(caps.mouse, coordinates, "{identity}");
         }
     }
 
@@ -261,7 +500,9 @@ mod tests {
         assert!(
             Capabilities {
                 size: ioctl,
-                pixel_mouse: false
+                mouse: MouseCoordinates::Cells,
+                protocol: None,
+                synchronized: false
             }
             .viewport()
             .is_none()

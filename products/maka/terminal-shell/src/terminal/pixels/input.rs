@@ -43,8 +43,22 @@ pub(super) struct Candidate {
     pub geometry: u64,
 }
 
+pub(super) enum WireFrame {
+    Kitty(nsh_gpui_terminal::kitty::KittyFrame),
+    Inline(nsh_gpui_terminal::inline::InlineFrame),
+}
+
+impl WireFrame {
+    pub fn token(&self) -> FrameToken {
+        match self {
+            Self::Kitty(frame) => frame.token(),
+            Self::Inline(frame) => frame.token(),
+        }
+    }
+}
+
 pub(super) struct Encoded {
-    pub frame: nsh_gpui_terminal::kitty::KittyFrame,
+    pub frame: WireFrame,
     pub geometry: u64,
 }
 
@@ -69,6 +83,7 @@ pub(crate) struct Inbox {
     pub reject_through: u64,
     pub wake: Option<std::thread::Thread>,
     pub effects: Option<Vec<u8>>,
+    pub restore_sixel_mode: bool,
 }
 
 impl Inbox {
@@ -93,6 +108,7 @@ impl Inbox {
             reject_through: 0,
             wake: None,
             effects: None,
+            restore_sixel_mode: false,
         }
     }
 
@@ -123,7 +139,10 @@ impl Inbox {
             self.lose_pointer();
             return Ok(false);
         }
-        if matches!(event, Event::Csi(_) | Event::Osc(_) | Event::Dcs(_)) {
+        if matches!(
+            event,
+            Event::Csi(_) | Event::Osc(_) | Event::Dcs(_) | Event::Iterm2Capabilities(_)
+        ) {
             return Ok(false);
         }
         if matches!(event, Event::MouseLeave | Event::FocusOut) {

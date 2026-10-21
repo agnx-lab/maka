@@ -26,8 +26,8 @@ mod session;
 use super::{Presentation, output::Output};
 pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
-pub(super) use probe::Capabilities;
 pub(super) use probe::Probe;
+pub(super) use probe::{Capabilities, MouseCoordinates};
 use std::{
     sync::atomic::Ordering,
     thread,
@@ -90,7 +90,7 @@ enum Phase {
         upload: PixelUpload,
         deadline: Instant,
     },
-    Retire(input::Offer),
+    Publish(input::Offer),
     Effect,
     Measure,
 }
@@ -110,8 +110,17 @@ pub(super) fn run(
     caps: Capabilities,
 ) -> Result<(), String> {
     let mut setup = b"\x1b[?1003h\x1b[?1004h".to_vec();
-    if caps.pixel_mouse {
+    if matches!(caps.mouse, MouseCoordinates::Pixels(_)) {
         setup.extend_from_slice(b"\x1b[?1016h");
+    }
+    {
+        let mut state = presentation.state.lock().unwrap();
+        if caps.protocol == Some(probe::Protocol::Sixel) && state.pixel_probe.needs_static_sixel() {
+            setup.extend_from_slice(b"\x1b[?80h");
+            // Arm restoration before submission: Close remains ordered after
+            // this complete setup even if cancellation races its receipt.
+            state.pixels.as_mut().unwrap().restore_sixel_mode = true;
+        }
     }
     output.submit(setup, None)?;
     let startup = session::spawn(config, presentation.clone())?;
@@ -152,7 +161,7 @@ pub(super) fn run(
                     upload,
                     deadline: at + Duration::from_millis(250),
                 },
-                Phase::Retire(offer) => {
+                Phase::Publish(offer) => {
                     let mut state = presentation.state.lock().unwrap();
                     let inbox = state.pixels.as_mut().unwrap();
                     inbox.ready = Some(offer);
@@ -213,7 +222,7 @@ pub(super) fn run(
                     .displayed_image = Some(upload.image);
                 let offer = upload.offer.clone();
                 output.submit(upload.retire.clone(), None)?;
-                phase = Phase::Retire(offer);
+                phase = Phase::Publish(offer);
             } else if Instant::now() >= *deadline {
                 return Err("terminal pixel-frame acknowledgement timed out".into());
             }
@@ -300,21 +309,32 @@ pub(super) fn run(
                     }
                     continue;
                 }
-                let image = encoded.frame.image_id();
-                // Arm before the first byte; the reader can receive the ACK
-                // before this driver observes the writer's flush receipt.
-                inbox.expected_ack = Some(image);
-                inbox.ack = None;
-                let upload = PixelUpload {
-                    offer: input::Offer {
-                        token: encoded.frame.token(),
-                        geometry: encoded.geometry,
-                    },
-                    image,
-                    retire: encoded.frame.retire_previous().to_vec(),
+                let offer = input::Offer {
+                    token: encoded.frame.token(),
+                    geometry: encoded.geometry,
                 };
-                output.submit(encoded.frame.upload().to_vec(), None)?;
-                phase = Phase::Upload(upload);
+                match encoded.frame {
+                    input::WireFrame::Kitty(frame) => {
+                        let image = frame.image_id();
+                        // Arm before the first byte; ACK may precede the
+                        // driver's observation of the writer flush receipt.
+                        inbox.expected_ack = Some(image);
+                        inbox.ack = None;
+                        let upload = PixelUpload {
+                            offer,
+                            image,
+                            retire: frame.retire_previous().to_vec(),
+                        };
+                        output.submit(frame.upload().to_vec(), None)?;
+                        phase = Phase::Upload(upload);
+                    }
+                    input::WireFrame::Inline(frame) => {
+                        // Sixel and OSC File have no per-image ACK. Only the
+                        // original writer's full flush publishes this draw.
+                        output.submit(frame.bytes().to_vec(), None)?;
+                        phase = Phase::Publish(offer);
+                    }
+                }
             }
         }
         thread::sleep(Duration::from_millis(2));
@@ -326,11 +346,23 @@ pub(super) fn cleanup(presentation: &Presentation) -> Vec<u8> {
     if state.pixels.is_none() {
         return Vec::new();
     }
-    let slots = state.pixel_probe.slots;
+    let inbox = state.pixels.as_ref().unwrap();
     let mut bytes = b"\x1b[?1016l\x1b[?1004l\x1b[?1003l".to_vec();
-    bytes.extend(
-        nsh_gpui_terminal::kitty::cleanup(slots.first, slots.second)
-            .expect("distinct nonzero owned image slots"),
-    );
+    match inbox.capabilities.protocol {
+        Some(probe::Protocol::Kitty) => {
+            let slots = state.pixel_probe.slots;
+            bytes.extend(
+                nsh_gpui_terminal::kitty::cleanup(slots.first, slots.second)
+                    .expect("distinct nonzero owned image slots"),
+            );
+        }
+        Some(probe::Protocol::Sixel | probe::Protocol::Iterm2) => {
+            bytes.extend_from_slice(nsh_gpui_terminal::inline::cleanup());
+        }
+        None => {}
+    }
+    if inbox.restore_sixel_mode {
+        bytes.extend_from_slice(b"\x1b[?80l");
+    }
     bytes
 }

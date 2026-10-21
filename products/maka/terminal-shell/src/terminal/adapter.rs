@@ -68,6 +68,7 @@ pub(super) fn event(event: termina::Event) -> Option<ct::Event> {
         termina::Event::Csi(_)
         | termina::Event::Osc(_)
         | termina::Event::Dcs(_)
+        | termina::Event::Iterm2Capabilities(_)
         | termina::Event::KittyGraphicsResponse(_)
         | termina::Event::MouseLeave => return None,
     })

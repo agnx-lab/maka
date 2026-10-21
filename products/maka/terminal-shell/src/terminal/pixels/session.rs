@@ -476,16 +476,33 @@ fn encode_pending(presentation: &Presentation) {
             slots.first
         };
         inbox.in_flight = Some(candidate.frame.token());
-        (candidate, image, previous, inbox.capabilities.size)
+        (candidate, image, previous, inbox.capabilities)
     };
-    let (candidate, image, previous, size) = work;
-    let result = nsh_gpui_terminal::kitty::KittyFrame::encode(
-        &candidate.frame,
-        image,
-        previous,
-        size.cols,
-        size.rows,
-    )
+    let (candidate, image, previous, caps) = work;
+    let size = caps.size;
+    use super::{input::WireFrame, probe::Protocol};
+    use nsh_gpui_terminal::inline::{InlineFrame, InlineProtocol};
+    let result = match caps.protocol.expect("negotiated pixel transport") {
+        Protocol::Kitty => nsh_gpui_terminal::kitty::KittyFrame::encode(
+            &candidate.frame,
+            image,
+            previous,
+            size.cols,
+            size.rows,
+        )
+        .map(WireFrame::Kitty),
+        protocol @ (Protocol::Sixel | Protocol::Iterm2) => InlineFrame::encode(
+            &candidate.frame,
+            match protocol {
+                Protocol::Sixel => InlineProtocol::Sixel,
+                _ => InlineProtocol::Iterm2,
+            },
+            size.cols,
+            size.rows,
+            caps.synchronized,
+        )
+        .map(WireFrame::Inline),
+    }
     .map(|frame| super::input::Encoded {
         frame,
         geometry: candidate.geometry,
