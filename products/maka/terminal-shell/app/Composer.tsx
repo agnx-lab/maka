@@ -18,7 +18,7 @@
  */
 
 import { cleanup, Input, inputAction, Text, View } from 'nsh';
-import type { YNode } from 'nsh';
+import type { JSX, YNode } from 'nsh';
 import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { platform, windowSize } from 'nsh/device';
@@ -27,7 +27,6 @@ import { DraftAttachments } from './Attachments';
 import type { AttachmentDraft } from './attachmentDraft';
 import type { ImagePreview } from './ImageThumbnail';
 import { Checklist } from './Checklist';
-import { effortCaption, modelCaption } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { C, bodyTextStyle, compact, controlStyle } from './ui';
 import { Icon } from './Icon';
@@ -75,7 +74,7 @@ export function Composer(props: {
   session(): ComposerSession | null;
   attach(node: YNode): void;
   commands(target: { sessionId: string | null }): void;
-  models(target: { sessionId: string | null }): void;
+  models: JSX.Element;
   chooseWorkspace(): void;
   settings(): void;
 }) {
@@ -87,13 +86,6 @@ export function Composer(props: {
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
   let unbind = () => {};
   cleanup(() => unbind());
-  const modelLabel = () => {
-    const owner = props.session();
-    const backend = owner?.backend() ?? null;
-    if (!owner || backend === null) return 'Choose a model';
-    const details = owner.modelDetails();
-    return `${modelCaption(backend, details)} · ${effortCaption(backend, details)}`;
-  };
   const workspaceLabel = () => {
     const path = props.session()?.workspace();
     return path
@@ -353,35 +345,7 @@ export function Composer(props: {
             {props.session()?.permissions()}
           </Text>
           <If when={props.session() !== null}>
-            <Button
-              accessibilityLabel="Choose model and effort"
-              tooltip="Choose model and effort · Ctrl+G"
-              onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
-              style={{
-                ...controlStyle,
-                flex: 1,
-                minWidth: 0,
-                flexDirection: 'row',
-                justifyContent: 'flex-end',
-                alignItems: 'center',
-                gap: 8,
-              }}
-              hoverStyle={{ backgroundColor: C.line }}
-              focusStyle={{ backgroundColor: C.line }}
-              activeStyle={{ backgroundColor: C.surface }}
-            >
-              <Text
-                numberOfLines={1}
-                style={{
-                  color: props.session()?.backend() ? C.secondary : C.warning,
-                  fontSize: 13,
-                  flexShrink: 1,
-                }}
-              >
-                {modelLabel()}
-              </Text>
-              <Icon name="down" color={C.secondary} />
-            </Button>
+            <View style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
           </If>
           <If when={props.session() === null}>
             <View style={{ flex: 1 }} />

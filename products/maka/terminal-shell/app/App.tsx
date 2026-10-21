@@ -166,6 +166,28 @@ function App() {
     browserFocus.set(kind === 'sessions');
     overlay.set({ kind, sessionId, instance: ++overlayInstance });
   };
+  const toggleModels = ({
+    sessionId,
+    instance,
+  }: {
+    sessionId: string;
+    instance: number | null;
+  }) => {
+    if (!alive || selected() !== sessionId || handle()?.sessionId !== sessionId) return;
+    const current = overlay();
+    if (instance !== null) {
+      if (current?.kind === 'models' && current.sessionId === sessionId) closeOverlay(instance);
+    } else if (current?.kind !== 'models') open({ kind: 'models', sessionId });
+  };
+  const manageModels = ({ sessionId, instance }: { sessionId: string; instance: number }) => {
+    if (
+      alive &&
+      selected() === sessionId &&
+      handle()?.sessionId === sessionId &&
+      closeOverlay(instance)
+    )
+      open({ kind: 'settings', sessionId });
+  };
   const chooseModel = async (
     owner: ConversationHandle,
     instance: number,
@@ -568,7 +590,32 @@ function App() {
             editor = node;
           }}
           commands={({ sessionId }) => open({ kind: 'commands', sessionId })}
-          models={({ sessionId }) => open({ kind: 'models', sessionId })}
+          models={
+            <Each<ConversationHandle>
+              of={handle() ? [handle()!] : []}
+              key={(owner: ConversationHandle) => owner.sessionId}
+            >
+              {(item) => {
+                const owner = item();
+                return (
+                  <ModelSelect
+                    owner={owner}
+                    instance={() => {
+                      const current = overlay();
+                      return current?.kind === 'models' && current.sessionId === owner.sessionId
+                        ? current.instance
+                        : null;
+                    }}
+                    current={() => selected() === owner.sessionId && handle() === owner}
+                    toggle={toggleModels}
+                    close={closeOverlay}
+                    manage={manageModels}
+                    select={(instance, backend) => chooseModel(owner, instance, backend)}
+                  />
+                );
+              }}
+            </Each>
+          }
           chooseWorkspace={inputAction(open, { kind: 'workspaces', sessionId: selected() })}
           settings={inputAction(open, { kind: 'settings', sessionId: selected() })}
         />
@@ -638,7 +685,10 @@ function App() {
           </If>
         </View>
       </If>
-      <Each of={overlay() ? [overlay()!] : []} key={(value: Overlay) => value.instance}>
+      <Each
+        of={overlay() && overlay()!.kind !== 'models' ? [overlay()!] : []}
+        key={(value: Overlay) => value.instance}
+      >
         {(value) => {
           const current = value();
           const close = inputAction(closeOverlay, current.instance);
@@ -699,38 +749,6 @@ function App() {
                     void owner.refreshModel().catch(report);
                 }}
               />
-            );
-          if (current.kind === 'models')
-            return (
-              <Each<ConversationHandle>
-                of={handle()?.sessionId === current.sessionId ? [handle()!] : []}
-                key={(owner: ConversationHandle) => owner.sessionId}
-              >
-                {(item) => {
-                  const owner = item();
-                  return (
-                    <ModelSelect
-                      owner={owner}
-                      instance={current.instance}
-                      current={() =>
-                        overlay()?.instance === current.instance &&
-                        selected() === owner.sessionId &&
-                        handle() === owner
-                      }
-                      close={closeOverlay}
-                      manage={() => {
-                        if (
-                          selected() === owner.sessionId &&
-                          handle() === owner &&
-                          closeOverlay(current.instance)
-                        )
-                          open({ kind: 'settings', sessionId: owner.sessionId });
-                      }}
-                      select={(backend) => chooseModel(owner, current.instance, backend)}
-                    />
-                  );
-                }}
-              </Each>
             );
           if (current.kind === 'workspaces')
             return (
