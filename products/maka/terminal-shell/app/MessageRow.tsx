@@ -130,7 +130,9 @@ export function MessageRow({
                         style={{
                           flexDirection: 'row',
                           flexWrap: 'wrap',
-                          alignSelf: 'flex-end',
+                          width: '100%',
+                          minWidth: 0,
+                          justifyContent: 'flex-end',
                           alignItems: 'center',
                           gap: 16,
                         }}
