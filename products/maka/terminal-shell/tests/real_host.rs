@@ -662,6 +662,7 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
             screen.contains("fixture-model-alt · Default · Ctrl+G")
                 && screen.contains("Enter sends")
                 && !screen.contains("Close · Esc")
+                && !screen.contains("Back · Esc")
         })
         .await;
         let editor = view.surface().focused().unwrap();
@@ -679,12 +680,31 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         let selection = view.surface().input_context().unwrap().selection;
         shortcut(&mut view, 'g');
         wait_view(&mut view, |screen| {
+            screen.contains("Effort ·") && screen.contains("Close · Esc")
+        })
+        .await;
+        support::click_label(&mut view, "Choose model");
+        wait_view(&mut view, |screen| {
             screen.contains("Search models…") && screen.contains("Enter selects")
         })
         .await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| {
-            screen.contains("RESIDENT_FIRST_MESSAGE") && !screen.contains("Close · Esc")
+            screen.contains("Effort ·")
+                && screen.contains("Close · Esc")
+                && !screen.contains("Back · Esc")
+        })
+        .await;
+        assert!(
+            view.accessibility_snapshot()
+                .iter()
+                .any(|node| node.focused && node.label == "Choose model")
+        );
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| {
+            screen.contains("RESIDENT_FIRST_MESSAGE")
+                && !screen.contains("Close · Esc")
+                && !screen.contains("Back · Esc")
         })
         .await;
         assert_eq!(view.surface().focused(), Some(editor));
