@@ -361,6 +361,9 @@ export type RuntimeProtocol =
   | AgentToolImageFrame
   | AgentToolImageRead
   | AgentToolImagePage
+  | AgentAttachmentImageRead
+  | AgentAttachmentImageSource
+  | AgentAttachmentImagePage
   | Read
   | HostActivation
   | HostRequest
@@ -5008,6 +5011,29 @@ export type AgentToolImageFrame =
 export type AgentToolImagePage = {
   through: number;
   position: HistoryRowPosition;
+  offset: number;
+  totalBytes: number;
+  mimeType: string;
+  digest: string;
+  /**
+   * Standard padded Base64 of at most 32KiB of encoded image bytes.
+   */
+  data: string;
+  kind: 'ready';
+};
+export type AgentAttachmentImageSource =
+  | {
+      id: string;
+      kind: 'uploaded';
+    }
+  | {
+      through: number;
+      position: HistoryRowPosition;
+      attachmentIndex: number;
+      kind: 'history';
+    };
+export type AgentAttachmentImagePage = {
+  source: AgentAttachmentImageSource;
   offset: number;
   totalBytes: number;
   mimeType: string;
@@ -10719,6 +10745,11 @@ export interface AgentToolImageRead {
   sessionId: string;
   through: number;
   position: HistoryRowPosition;
+  offset: number;
+}
+export interface AgentAttachmentImageRead {
+  sessionId: string;
+  source: AgentAttachmentImageSource;
   offset: number;
 }
 /**
