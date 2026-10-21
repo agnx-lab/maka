@@ -49,6 +49,18 @@ pub(super) fn event(event: termina::Event) -> Option<ct::Event> {
             row: mouse.row,
             modifiers: modifiers(mouse.modifiers),
         }),
+        termina::Event::SgrMouse(mouse) => {
+            // Character input uses one-based SGR 1006 cells. Pixel input
+            // keeps its signed wire coordinates outside this adapter.
+            let column = u16::try_from(mouse.x).ok()?.saturating_sub(1);
+            let row = u16::try_from(mouse.y).ok()?.saturating_sub(1);
+            return self::event(termina::Event::Mouse(tm::MouseEvent {
+                kind: mouse.kind,
+                column,
+                row,
+                modifiers: mouse.modifiers,
+            }));
+        }
         termina::Event::WindowResized(size) => ct::Event::Resize(size.cols, size.rows),
         termina::Event::FocusIn => ct::Event::FocusGained,
         termina::Event::FocusOut => ct::Event::FocusLost,
@@ -56,7 +68,8 @@ pub(super) fn event(event: termina::Event) -> Option<ct::Event> {
         termina::Event::Csi(_)
         | termina::Event::Osc(_)
         | termina::Event::Dcs(_)
-        | termina::Event::KittyGraphicsResponse(_) => return None,
+        | termina::Event::KittyGraphicsResponse(_)
+        | termina::Event::MouseLeave => return None,
     })
 }
 
@@ -267,5 +280,30 @@ mod tests {
                 }))
             );
         }
+    }
+
+    #[test]
+    fn raw_sgr_cell_coordinates_are_converted_once_without_wrapping() {
+        let sgr = |x, y| {
+            termina::Event::SgrMouse(tm::SgrMouseEvent {
+                kind: tm::MouseEventKind::Down(tm::MouseButton::Left),
+                x,
+                y,
+                modifiers: tm::Modifiers::NONE,
+            })
+        };
+        assert_eq!(
+            event(sgr(1, 1)),
+            Some(ct::Event::Mouse(ct::MouseEvent {
+                kind: ct::MouseEventKind::Down(ct::MouseButton::Left),
+                column: 0,
+                row: 0,
+                modifiers: ct::KeyModifiers::NONE,
+            }))
+        );
+        for (x, y) in [(-1, 1), (1, -1), (65536, 1), (1, 65536)] {
+            assert!(event(sgr(x, y)).is_none());
+        }
+        assert!(event(termina::Event::MouseLeave).is_none());
     }
 }
