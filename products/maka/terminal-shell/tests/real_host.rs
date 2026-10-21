@@ -2088,9 +2088,20 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         evidence("rich-response-copies-exact-code", &copied_code);
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        // Host idle may precede the completed-turn seat in this native List.
-        // Observe that final layout before choosing the source button's coordinates.
-        let complete = wait_view_state(&mut view, |view, screen| screen.contains("RICH_CODE_BLOCK") && message_source_available(view, false) && screen.contains("Completed")).await;
+        // Host idle may precede the completed reply's canonical actions. Its
+        // earlier summary can be above the viewport while this reader shows
+        // the answer tail, so observe the actual final-only Usage button here.
+        let complete = wait_view_state(&mut view, |view, screen| {
+            if !screen.contains("RICH_CODE_BLOCK") || !message_source_available(view, false) {
+                return false;
+            }
+            let nodes = view.accessibility_snapshot();
+            let Some(chat) = nodes.iter().find(|node| node.role == nsh_core::AccessibilityRole::Tab && node.label == "Chat") else { return false; };
+            let Some(composer) = nodes.iter().find(|node| node.label == "Conversation composer") else { return false; };
+            nodes.iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "View this turn's model usage" && !node.state.disabled
+                && node.frame.origin.y.0 >= chat.frame.origin.y.0 + chat.frame.size.height.0
+                && node.frame.origin.y.0 + node.frame.size.height.0 <= composer.frame.origin.y.0)
+        }).await;
         evidence("rich-response-complete", &complete);
         wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Show message source").await;
