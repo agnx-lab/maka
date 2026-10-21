@@ -305,7 +305,9 @@ impl Session {
                 if !matches!(
                     mouse.kind,
                     MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
-                ) {
+                ) && !(matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
+                    && lease.is_native_pan())
+                {
                     self.cancel_pointer()?;
                     changed = true;
                     continue;
@@ -376,12 +378,14 @@ impl Session {
                 SurfaceEvent::Event(id, event, payload) if presented_input => {
                     if !invokes_application {
                         invokes_application = if let Some(lease) = lease {
-                            match self.engine.dispatch_bound_event_now(
-                                id,
-                                event,
-                                payload,
-                                lease.binding(),
-                            ) {
+                            let Some(binding) = lease.binding() else {
+                                self.cancel_pointer()?;
+                                break;
+                            };
+                            match self
+                                .engine
+                                .dispatch_bound_event_now(id, event, payload, binding)
+                            {
                                 Some(entered) => entered,
                                 None => {
                                     self.cancel_pointer()?;
@@ -400,6 +404,7 @@ impl Session {
                 SurfaceEvent::Event(id, event, payload) => {
                     control.dispatch_event(id, event, payload)
                 }
+                SurfaceEvent::HintObservation(observation) => control.observe_hint(observation),
                 SurfaceEvent::Scroll(id, offset, applied) => control.scroll(id, offset, applied),
                 SurfaceEvent::States(id, states) => control.set_states(id, states),
                 SurfaceEvent::AnimationsFinished(finished) => control.animations_finished(finished),

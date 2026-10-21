@@ -139,24 +139,30 @@ impl Inbox {
                 MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Down(_)
                     if self.capture.is_some() =>
                 {
-                    // Keep the cancellation in gesture order: a queued Down
-                    // must not recreate its capture after a batch-level cancel.
-                    match self.capture.replace(Capture::Cancelled) {
-                        Some(Capture::Active(pointer)) => Some(pointer),
-                        _ => return,
+                    if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
+                        && let Some(Capture::Active(pointer @ Pointer::Press { lease, .. })) =
+                            &self.capture
+                        && lease.is_native_pan()
+                    {
+                        Some(pointer.clone())
+                    } else {
+                        // Keep the cancellation in gesture order: a queued Down
+                        // must not recreate its capture after a batch-level cancel.
+                        match self.capture.replace(Capture::Cancelled) {
+                            Some(Capture::Active(pointer)) => Some(pointer),
+                            _ => return,
+                        }
                     }
                 }
                 MouseEventKind::ScrollUp
                 | MouseEventKind::ScrollDown
                 | MouseEventKind::ScrollLeft
                 | MouseEventKind::ScrollRight
-                    if !mouse.modifiers.contains(KeyModifiers::CONTROL)
-                        && self.capture.is_none()
-                        && self.resize.is_none() =>
+                    if self.capture.is_none() && self.resize.is_none() =>
                 {
                     self.last_frame.as_ref().and_then(|(offered, snapshot)| {
                         (*offered > self.reject_through)
-                            .then(|| snapshot.wheel_at(mouse.column, mouse.row))
+                            .then(|| snapshot.wheel_at(*mouse))
                             .flatten()
                             .map(|lease| Pointer::Wheel {
                                 epoch: *offered,
@@ -557,5 +563,106 @@ mod tests {
         );
         assert!(inbox.last_frame.is_none());
         assert_eq!(inbox.resize, Some((41, 12)));
+    }
+
+    #[test]
+    fn native_value_gestures_keep_the_original_capture_across_new_presentations() {
+        use nsh_core::{
+            Bounds, GestureValues, MountBatch, MountItem, Point, ROOT_ID, Size, ViewKind,
+            animation::AnimationOp, geometry::px,
+        };
+        use nsh_platform_tui::{CellMetrics, Surface, SurfaceEvent};
+
+        let mut surface = Surface::new(40, 12, CellMetrics::default());
+        surface.apply(MountBatch {
+            items: vec![
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Frame {
+                    id: 2,
+                    frame: Bounds::new(
+                        Point::new(px(0.0), px(0.0)),
+                        Size::new(px(160.0), px(96.0)),
+                    ),
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 100,
+                    value: 0.0,
+                }),
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 102,
+                    value: 1.0,
+                }),
+                MountItem::Gestures {
+                    id: 2,
+                    values: GestureValues {
+                        pan_x: Some(100),
+                        pinch: Some(102),
+                        ..Default::default()
+                    },
+                },
+            ],
+        });
+        surface.drain_events().for_each(drop);
+        let mut inbox = Inbox {
+            last_frame: Some((7, surface.input_snapshot())),
+            ..Default::default()
+        };
+        inbox.push(mouse(), 0);
+        let drag = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 3,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        inbox.push(drag, 8);
+        inbox.push(pointer(MouseEventKind::Up(MouseButton::Left)), 8);
+        let batch = inbox.pop_batch(8);
+        assert_eq!(batch.len(), 3);
+        let mut capture = None;
+        for input in batch {
+            let Some(Pointer::Press { epoch: 7, lease }) = input.pointer else {
+                panic!("every phase must keep the original native capture")
+            };
+            assert!(lease.is_native_pan());
+            assert_eq!(lease.binding(), None);
+            if let Some(original) = &capture {
+                assert!(Arc::ptr_eq(original, &lease));
+            } else {
+                capture = Some(lease.clone());
+            }
+            let Event::Mouse(mouse) = input.event else {
+                unreachable!()
+            };
+            assert!(surface.handle_presented_mouse(mouse, &lease).is_some());
+        }
+        assert!(!inbox.cancel_pointer);
+        let zoom = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::CONTROL,
+        });
+        inbox.push(zoom, 8);
+        let input = inbox.pop(8).unwrap();
+        let Some(Pointer::Wheel { epoch: 7, lease }) = input.pointer else {
+            panic!("Ctrl+wheel must retain its original native pinch owner")
+        };
+        let Event::Mouse(mouse) = input.event else {
+            unreachable!()
+        };
+        assert_eq!(surface.handle_presented_wheel(mouse, 1, &lease), Some(1));
+        assert!(
+            !surface
+                .drain_events()
+                .any(|event| matches!(event, SurfaceEvent::Event(..)))
+        );
     }
 }
