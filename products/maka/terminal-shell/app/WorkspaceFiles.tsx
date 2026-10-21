@@ -152,7 +152,6 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
                 <Button
                   disabled={
                     !model.active() ||
-                    model.busy() ||
                     !!model.error() ||
                     (entry().kind !== 'directory' && entry().kind !== 'file')
                   }

@@ -275,7 +275,6 @@ export function createWorkspaceFiles(options: {
     if (
       !read ||
       !owns(read) ||
-      busy() ||
       error() ||
       target.sessionId !== read.sessionId ||
       !samePath(target.parent, read.path)
