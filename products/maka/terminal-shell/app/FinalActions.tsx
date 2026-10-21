@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { host } from './host';
@@ -36,6 +36,15 @@ type Target = {
   turnId: string;
   through: number;
 };
+const sameTarget = (left: Target | null, right: Target | null) =>
+  left === right ||
+  (left !== null &&
+    right !== null &&
+    left.sessionId === right.sessionId &&
+    left.key === right.key &&
+    left.turnId === right.turnId &&
+    left.position.sourceSequence === right.position.sourceSequence &&
+    left.position.itemIndex === right.position.itemIndex);
 
 /** Actions retain this exact completed reply, even if a later turn is running. */
 export function FinalActions(props: {
@@ -53,30 +62,24 @@ export function FinalActions(props: {
   cleanup(() => {
     alive = false;
   });
-  const target = (): Target | null => {
-    const row = props.row();
-    return row.finalOutput && row.position && row.turnId
-      ? {
-          sessionId: props.sessionId,
-          key: props.ownerKey(),
-          position: { ...row.position },
-          turnId: row.turnId,
-          through: row.metadataThrough ?? props.through(),
-        }
-      : null;
-  };
-  const owns = (original: Target) => {
-    const current = target();
-    return (
-      alive &&
-      current !== null &&
-      current.sessionId === original.sessionId &&
-      current.key === original.key &&
-      current.turnId === original.turnId &&
-      current.position.sourceSequence === original.position.sourceSequence &&
-      current.position.itemIndex === original.position.itemIndex
-    );
-  };
+  const target = computed<Target | null>(
+    () => {
+      const row = props.row();
+      return row.finalOutput && row.position && row.turnId
+        ? {
+            sessionId: props.sessionId,
+            key: props.ownerKey(),
+            position: { ...row.position },
+            turnId: row.turnId,
+            through: row.metadataThrough ?? props.through(),
+          }
+        : null;
+    },
+    // Final output is published after this turn's model outcomes and usage settle.
+    // Later turns must not rebind actions for the same completed reply.
+    { equals: sameTarget },
+  );
+  const owns = (original: Target) => alive && sameTarget(target(), original);
   const fork = async (original: Target | null) => {
     if (!original || !owns(original) || pending()) return;
     pending.set(true);

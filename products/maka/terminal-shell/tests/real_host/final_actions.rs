@@ -111,14 +111,34 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("父会话草稿 stays here"));
         support::wait_draft(&client, &fixture.session, "父会话草稿 stays here").await;
 
+        // Keep one physical usage press while the next turn advances the
+        // history metadata fence. This completed reply still owns that action.
+        let usage_button = support::wait_enabled_button(&mut view, "View this turn's model usage").await;
+        let column = (usage_button.frame.origin.x.0 / 8.0 - 0.5).ceil().max(0.0) as u16;
+        let row = (usage_button.frame.origin.y.0 / 16.0 - 0.5).ceil().max(0.0) as u16;
+        view.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+
         let second = support::mutate(&client, "send", json!({
             "sessionId":fixture.session,"message":"LATER_B must not be copied","model":fixture.selection
         })).await;
         assert_eq!(second["kind"], "started");
         let mut second_request = fixture.next_request().await;
         second_request.delta("ACTIVE_B is still streaming").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("ACTIVE_B") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Fork from this turn" && !node.state.disabled && node.frame.origin.y.0 >= 0.0 && node.frame.origin.y.0 < view.surface().viewport().height.0)).await;
-        activate(&mut view, "View this turn's model usage").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("ACTIVE_B") && screen.contains("LATER_B must not be copied") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Fork from this turn" && !node.state.disabled && node.frame.origin.y.0 >= 0.0 && node.frame.origin.y.0 < view.surface().viewport().height.0)).await;
+        let current_usage = support::wait_enabled_button(&mut view, "View this turn's model usage").await;
+        assert_eq!(current_usage.id, usage_button.id, "the original completed reply must retain its native action owner");
+        assert_eq!(current_usage.frame, usage_button.frame, "this held press must cross a metadata update without moving its target");
+        view.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
         wait_view(&mut view, |screen| screen.contains("Main model usage") && screen.contains("1 main model request in this turn")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| !screen.contains("Main model usage")).await;
