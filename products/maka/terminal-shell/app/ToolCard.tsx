@@ -24,17 +24,29 @@ import type { Row } from './history';
 import type { ImagePreview } from './ImageThumbnail';
 import { ToolImage } from './ToolImage';
 import { createToolSource, OriginalToolSource, type ToolSourceRef } from './ToolSource';
-import {
-  cardFamily,
-  processFamily,
-  toolArguments,
-  toolResult,
-  type ToolSection,
-} from './toolCards';
-import { C, captionTextStyle, codeTextStyle, controlStyle } from './ui';
+import { cardFamily, processFamily, toolArguments, toolResult } from './toolCards';
+import { ToolReader } from './ToolReader';
+import { C, captionTextStyle, controlStyle } from './ui';
 import { Icon } from './Icon';
 
 const detailsGap = 8;
+
+function Status(props: { label: string; success?: boolean; error?: boolean; warning?: boolean }) {
+  const color = () => (props.error ? C.danger : props.warning ? C.warning : C.muted);
+  return (
+    <View
+      pointerEvents="none"
+      accessible
+      accessibilityLabel={props.label}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 }}
+    >
+      <Icon name={props.error ? 'close' : props.success ? 'check' : 'activity'} color={color()} />
+      <If when={!props.success}>
+        <Text style={{ ...captionTextStyle, color: color() }}>{props.label}</Text>
+      </If>
+    </View>
+  );
+}
 
 function reference(tool: HistoryTool, field: 'arguments' | 'result'): ToolSourceRef | null {
   const position = (field === 'arguments' ? tool.call : tool.result)?.position;
@@ -58,54 +70,13 @@ function reference(tool: HistoryTool, field: 'arguments' | 'result'): ToolSource
     : null;
 }
 
-function Sections(props: { items: ToolSection[] }) {
-  return (
-    <View style={{ gap: 8, minWidth: 0 }}>
-      <Each of={props.items}>
-        {(section) => (
-          <View
-            style={{
-              gap: 0,
-              paddingHorizontal: 8,
-              paddingVertical: 8,
-              backgroundColor: C.background,
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: C.secondary, fontWeight: '600' }}>{section().label}</Text>
-            <Text
-              selectable
-              style={{
-                color:
-                  section().tone === 'error' || section().tone === 'removed'
-                    ? C.danger
-                    : section().tone === 'warning'
-                      ? C.warning
-                      : section().tone === 'added'
-                        ? '#78d7a1'
-                        : C.text,
-                ...codeTextStyle,
-              }}
-            >
-              {section().text || '(empty)'}
-            </Text>
-          </View>
-        )}
-      </Each>
-    </View>
-  );
-}
-
 function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; through: number }) {
   const status = createToolSource(props.reference, props.sessionId, props.through, [
     'value',
     'status',
   ]);
   return (
-    <If
-      when={status.complete() && !status.error()}
-      else={<Text style={{ ...captionTextStyle, color: C.muted }}>Recorded</Text>}
-    >
+    <If when={status.complete() && !status.error()} else={<Status label="Recorded" />}>
       <Each of={[status.content()]}>
         {(value) => {
           const phase = value();
@@ -124,20 +95,17 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
             if (phase === 'cancelled') return 'Stopped';
             if (phase === 'orphaned') return 'Unknown';
             if (failed()) return 'Error';
-            if (phase === 'completed') return code() === 0 ? 'OK' : 'Completed';
-            if (phase === 'starting') return 'Preparing';
-            return phase === 'running' ? 'Running' : 'Recorded';
+            if (phase === 'completed') return 'Completed';
+            if (phase === 'starting') return 'Preparing at capture';
+            return phase === 'running' ? 'Running at capture' : 'Recorded';
           };
           return (
-            <Text
-              style={{
-                ...captionTextStyle,
-                color: phase === 'cancelled' ? C.warning : failed() ? C.danger : C.muted,
-              }}
-            >
-              {label()}
-              {typeof code() === 'number' ? ` · Exit ${code()}` : ''}
-            </Text>
+            <Status
+              label={`${label()}${typeof code() === 'number' ? ` · Exit ${code()}` : ''}`}
+              success={phase === 'completed' && !failed()}
+              error={phase !== 'cancelled' && failed()}
+              warning={phase === 'cancelled'}
+            />
           );
         }}
       </Each>
@@ -148,23 +116,19 @@ function ProcessOutcome(props: { reference: ToolSourceRef; sessionId: string; th
 function Outcome(props: { reference: ToolSourceRef; sessionId: string; through: number }) {
   const kind = createToolSource(props.reference, props.sessionId, props.through, ['kind']);
   return (
-    <If
-      when={kind.complete() && !kind.error()}
-      else={<Text style={{ ...captionTextStyle, color: C.muted }}>Recorded</Text>}
-    >
+    <If when={kind.complete() && !kind.error()} else={<Status label="Recorded" />}>
       <If
         when={kind.content() === 'completed'}
         else={
-          <Text
-            style={{ ...captionTextStyle, color: kind.content() === 'failed' ? C.danger : C.muted }}
-          >
-            {kind.content() === 'failed' ? 'Error' : 'Recorded'}
-          </Text>
+          <Status
+            label={kind.content() === 'failed' ? 'Error' : 'Recorded'}
+            error={kind.content() === 'failed'}
+          />
         }
       >
         <If
           when={processFamily(cardFamily(props.reference.presentation))}
-          else={<Text style={{ ...captionTextStyle, color: C.muted }}>OK</Text>}
+          else={<Status label="Completed" success />}
         >
           <ProcessOutcome
             reference={props.reference}
@@ -185,14 +149,14 @@ function Field(props: {
 }) {
   const source = createToolSource(props.reference, props.sessionId, props.through);
   const family = cardFamily(source.original.presentation);
-  const sections = computed(() =>
+  const projection = computed(() =>
     props.reference.field === 'arguments'
       ? toolArguments(family, source.json())
       : toolResult(family, source.json()),
   );
   return (
     <If
-      when={!props.original() && sections() !== null}
+      when={!props.original() && projection() !== null}
       else={
         <OriginalToolSource
           source={source}
@@ -200,7 +164,7 @@ function Field(props: {
         />
       }
     >
-      <Sections items={sections()!} />
+      <ToolReader value={projection()!} source={source} />
     </If>
   );
 }
@@ -220,6 +184,38 @@ export function ToolCard(props: {
 }) {
   const tool = (): HistoryTool | null => props.row().tool ?? null;
   const family = () => cardFamily(tool()?.call?.presentation);
+  const title = () => {
+    const supplied = tool()?.call?.title?.fallback;
+    if (supplied) return supplied;
+    switch (family()) {
+      case 'read':
+        return 'Read file';
+      case 'write':
+        return 'Write file';
+      case 'edit':
+        return 'Edit file';
+      case 'patch':
+        return 'Patch file';
+      case 'glob':
+        return 'Find files';
+      case 'grep':
+        return 'Search files';
+      case 'execute':
+        return 'Run command';
+      case 'processRead':
+        return 'Read process output';
+      case 'stdin':
+        return 'Send process input';
+      case 'stop':
+        return 'Stop process';
+      case 'fetch':
+        return 'Read web page';
+      case 'webSearch':
+        return 'Search the web';
+      default:
+        return tool()?.call?.name ?? 'Tool';
+    }
+  };
   // Open at the recorded output; the complete original arguments remain below.
   const references = () =>
     tool()
@@ -252,6 +248,7 @@ export function ToolCard(props: {
         <Button
           selected={props.expanded()}
           accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
+          tooltip={tool()?.call?.name ?? 'Tool details'}
           onPress={inputAction(props.expand, {
             sessionId: props.sessionId,
             key: props.ownerKey(),
@@ -265,16 +262,16 @@ export function ToolCard(props: {
             alignItems: 'center',
             gap: 8,
           }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.line }}
+          hoverStyle={{ backgroundColor: C.surface }}
+          focusStyle={{ backgroundColor: C.raised }}
         >
           <Icon name={props.expanded() ? 'down' : 'right'} color={C.secondary} />
           <Text
             numberOfLines={1}
+            ellipsizeMode="tail"
             style={{ flex: 1, minWidth: 0, color: C.secondary, fontSize: 13, lineHeight: 16 }}
           >
-            {tool()?.call?.name ?? 'Tool'}
-            {tool()?.call?.title?.fallback ? ` · ${tool()!.call!.title!.fallback}` : ''}
+            {title()}
           </Text>
           <If
             when={
@@ -284,11 +281,11 @@ export function ToolCard(props: {
               !tool()?.result?.isError
             }
             else={
-              <Text
-                style={{ ...captionTextStyle, color: tool()?.result?.isError ? C.danger : C.muted }}
-              >
-                {fallbackState()}
-              </Text>
+              <Status
+                label={fallbackState()}
+                error={fallbackState() === 'Error'}
+                warning={fallbackState() === 'Rejected' || fallbackState() === 'Unknown'}
+              />
             }
           >
             <Each of={result() ? [result()!] : []} key={(value) => value.key}>
@@ -305,19 +302,24 @@ export function ToolCard(props: {
         <If when={props.expanded()}>
           <Button
             accessibilityLabel="Toggle original tool details"
+            tooltip={props.original() ? 'Show readable tool details' : 'Show original tool data'}
             selected={props.original()}
             onPress={inputAction(props.showOriginal, {
               sessionId: props.sessionId,
               key: props.ownerKey(),
               value: !props.original(),
             })}
-            style={{ ...controlStyle, flexShrink: 0 }}
+            style={{
+              ...controlStyle,
+              width: 32,
+              paddingHorizontal: 8,
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.line }}
           >
-            <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.accent }}>
-              {props.original() ? 'Readable card' : 'Original details'}
-            </Text>
+            <Icon name="code" color={props.original() ? C.accent : C.muted} />
           </Button>
         </If>
       </View>

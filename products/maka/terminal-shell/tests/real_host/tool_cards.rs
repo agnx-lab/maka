@@ -21,6 +21,8 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_and_resize() {
+    use base64::Engine as _;
+    use nsh_platform_tui::ServiceOutput;
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::files("readText").await;
         let client = fixture.client().await;
@@ -28,7 +30,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         // Cross the 8192 UTF-8-byte source boundary while staying inside the
         // real tool's 7500 UTF-16-unit model page, including its JSON envelope.
         let line = format!("{}😀\n", "中文".repeat(10));
-        let original = format!("起点_原始\n{}终点_原始\n", line.repeat(200));
+        let original = format!("起点_原始\r\n\t保留空格  \r\n{}终点_原始\r\n\r\n", line.repeat(200));
         assert!(original.len() > 8192, "the real result must require multiple source pages");
         std::fs::write(&path, &original).unwrap();
         let sent = support::mutate(&client, "send", json!({
@@ -48,6 +50,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         std::fs::write(&path, "CHANGED_CURRENT_WORKSPACE").unwrap();
 
         let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
+        view.surface_mut().set_host_services_enabled(true);
         view.resize(120, 40);
         wait_enabled_node(&mut view, "Process group").await;
         support::focus_activity(&mut view).await;
@@ -55,20 +58,48 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;
         let readable = wait_view(&mut view, |screen| screen.contains("Read lines") && screen.contains("起点_原始")).await;
         let text = view.accessibility_snapshot().into_iter()
-            .find(|node| node.label.contains("1 │ 起点_原始") && node.label.contains("终点_原始"))
+            .find(|node| node.label == original)
             .expect("the readable native Text must include both ends of the original paged result");
         assert!(!text.label.contains("CHANGED_CURRENT_WORKSPACE"));
+        view.drain_service_output().for_each(drop);
+        let copy = support::wait_enabled_button(&mut view, "Copy read contents").await.id;
+        support::click_button(&mut view, "Copy read contents").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Copied") && screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.id == copy && node.focused && !node.state.disabled)).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "one read copy must emit one native clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied.as_bytes(), original.as_bytes(), "copy must preserve the complete captured range without line-number chrome or current workspace contents");
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("read copy must encode one complete OSC52 command");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), original.as_bytes());
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2, "copying the recorded range must not run the model or tool again");
         evidence("tool-read-paged-original", &readable);
+
+        // The original-data action is now an icon. Check its real enabled
+        // native target and complete frame rather than former link text.
+        let original_visible = |view: &AppView| {
+            let viewport = view.surface().viewport();
+            view.accessibility_snapshot().iter().any(|node| {
+                let frame = node.frame;
+                node.role == nsh_core::AccessibilityRole::Button
+                    && node.label == "Toggle original tool details"
+                    && !node.state.disabled
+                    && frame.size.width.0 > 0.0 && frame.size.height.0 > 0.0
+                    && frame.origin.x.0 >= 0.0 && frame.origin.y.0 >= 0.0
+                    && frame.origin.x.0 + frame.size.width.0 <= viewport.width.0
+                    && frame.origin.y.0 + frame.size.height.0 <= viewport.height.0
+            })
+        };
 
         // Large originals scroll inside the card while its disclosure and
         // original-details action remain visible in the turn's own viewport.
         support::scroll_snapshot_text(&mut view, &readable, "起点_原始", MouseEventKind::ScrollDown);
-        wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && screen.contains("Original details") && !screen.contains("起点_原始")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Read file") && original_visible(view) && !screen.contains("起点_原始")).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Tool details").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
         let tail = wait_view(&mut view, |screen| screen.contains("终点_原始")).await;
-        assert!(tail.contains("WorkspaceDocument") && tail.contains("Original details"));
+        assert!(tail.contains("Read file") && original_visible(&view));
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-local-scroll-tail", &tail);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
@@ -84,11 +115,11 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.resize(80, 24);
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-        wait_view(&mut view, |screen| screen.contains("WorkspaceDocument")).await;
+        wait_view(&mut view, |screen| screen.contains("Read file")).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Toggle tool WorkspaceDocument").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        let collapsed = wait_view(&mut view, |screen| screen.contains("WorkspaceDocument") && !screen.contains("Original result")).await;
+        let collapsed = wait_view(&mut view, |screen| screen.contains("Read file") && !screen.contains("Original result")).await;
         assert!(!support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-narrow-collapsed", &collapsed);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
@@ -104,17 +135,19 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         let wide = wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("Read lines") && screen.contains("起点_原始")).await;
         support::scroll_snapshot_text(&mut view, &wide, "起点_原始", MouseEventKind::ScrollDown);
-        let reading = wait_view_state(&mut view, |view, screen| screen.contains("WorkspaceDocument") && !screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Return to latest" && !node.state.disabled)).await;
+        let reading = wait_view_state(&mut view, |view, screen| screen.contains("Read file") && !screen.contains("起点_原始") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Return to latest" && !node.state.disabled)).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         let numbered_source = original.lines().enumerate()
-            .map(|(index, line)| format!("{} │ {line}", index + 1)).collect::<Vec<_>>();
+            .filter(|(_, line)| !line.is_empty())
+            .map(|(index, line)| ((index + 1).to_string(), line.to_owned())).collect::<Vec<_>>();
         // Keep exact source glyphs and screen coordinates. The enclosing
         // turn's right-edge scrollbar changes when another row arrives.
         let visible_source = |screen: &str| screen.lines().enumerate().filter_map(|(row, line)| {
-            numbered_source.iter().find_map(|source| {
+            numbered_source.iter().find_map(|(number, source)| {
                 let column = line.find(source.as_str())?;
-                (column == 0 || !line.as_bytes()[column - 1].is_ascii_digit())
-                    .then(|| (row, line[..column].chars().count(), source.clone()))
+                let gutter = line[..column].split(|ch: char| !ch.is_ascii_digit()).rfind(|part| !part.is_empty());
+                (gutter == Some(number.as_str()))
+                    .then(|| (row, line[..column].chars().count(), number.clone(), source.clone()))
             })
         }).collect::<Vec<_>>();
         let anchor = visible_source(&reading);
@@ -122,7 +155,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
         continuation.thinking("INNER_STREAM_A").await;
         let anchored = wait_view(&mut view, |screen| screen.contains("Analyzing the request") && screen.contains("INNER_STREAM_A")).await;
         assert_eq!(visible_source(&anchored), anchor, "new same-group reasoning moved the original tool reader:\n{anchored}");
-        assert!(anchored.contains("WorkspaceDocument") && anchored.contains("Original details"));
+        assert!(anchored.contains("Read file") && original_visible(&view));
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         evidence("tool-read-stream-keeps-local-position", &anchored);
 

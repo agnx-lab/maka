@@ -29,6 +29,68 @@ export type ToolSection = {
   text: string;
   tone?: 'added' | 'removed' | 'warning' | 'error';
 };
+export type ToolRead = {
+  content: string;
+  offset: number;
+  returnedLines: number;
+  totalLines: number;
+  partialLine: boolean;
+  hasMore: boolean;
+};
+type ProcessStatus =
+  | 'starting'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'timed_out'
+  | 'cancelled'
+  | 'orphaned';
+export type ToolProcess = {
+  command: string;
+  cwd: string;
+  status: ProcessStatus;
+  exitCode: number | null;
+  failure: string | null;
+  output:
+    | {
+        mode: 'pipes';
+        stdout: string;
+        stderr: string;
+        stdoutTruncated: boolean;
+        stderrTruncated: boolean;
+        redacted: boolean;
+      }
+    | {
+        mode: 'pty';
+        scrollback: string;
+        screen: string;
+        lastAlternateScreen: string | null;
+        truncated: boolean;
+        redacted: boolean;
+      }
+    | null;
+};
+export type ToolChange =
+  | { phase: 'requested'; operation: 'write'; path: string; content: string }
+  | { phase: 'requested'; operation: 'edit'; path: string; before: string; after: string }
+  | { phase: 'requested'; operation: 'patch'; path: string; type: string; diff: string | null }
+  | { phase: 'recorded'; operation: 'write'; path: string; bytes: number; previous: string | null }
+  | {
+      phase: 'recorded';
+      operation: 'edit';
+      path: string;
+      replacements: number;
+      matchedVia: string | null;
+      startLine: number | null;
+      endLine: number | null;
+    }
+  | { phase: 'recorded'; operation: 'patch' };
+export type ToolProjection =
+  | { kind: 'sections'; sections: ToolSection[] }
+  | { kind: 'read'; value: ToolRead }
+  | { kind: 'process'; value: ToolProcess }
+  | { kind: 'change'; value: ToolChange }
+  | { kind: 'failure'; message: string };
 export const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -40,52 +102,78 @@ const strings = (value: unknown): value is string[] =>
 export const processFamily = (kind: ToolFamily) =>
   ['execute', 'processRead', 'stdin', 'stop'].includes(kind ?? '');
 
-export function toolArguments(kind: ToolFamily, input: unknown): ToolSection[] | null {
+export function toolArguments(kind: ToolFamily, input: unknown): ToolProjection | null {
   const args = record(input);
   if (!kind || !args) return null;
   if (processFamily(kind)) {
     const value = kind === 'execute' ? args.command : args.ref;
     return typeof value === 'string'
-      ? [{ label: kind === 'execute' ? 'Command' : 'Process reference', text: value }]
+      ? {
+          kind: 'sections',
+          sections: [
+            { label: kind === 'execute' ? 'Requested command' : 'Process reference', text: value },
+          ],
+        }
       : null;
   }
   if (kind === 'fetch')
-    return typeof args.url === 'string' ? [{ label: 'Requested URL', text: args.url }] : null;
+    return typeof args.url === 'string'
+      ? { kind: 'sections', sections: [{ label: 'Requested URL', text: args.url }] }
+      : null;
   if (kind === 'webSearch' || kind === 'glob' || kind === 'grep') {
     const value = kind === 'webSearch' ? args.query : args.pattern;
     return typeof value === 'string'
-      ? [{ label: kind === 'webSearch' ? 'Web query' : 'Search pattern', text: value }]
+      ? {
+          kind: 'sections',
+          sections: [{ label: kind === 'webSearch' ? 'Web query' : 'Search pattern', text: value }],
+        }
       : null;
   }
   const operation = record(args.operation);
   const path = kind === 'patch' ? operation?.path : args.path;
   if (typeof path !== 'string') return null;
-  const sections: ToolSection[] = [{ label: 'File', text: path }];
   if (kind === 'write') {
     if (typeof args.content !== 'string') return null;
-    sections.push({ label: 'Requested file contents', text: args.content, tone: 'added' });
+    return {
+      kind: 'change',
+      value: { phase: 'requested', operation: 'write', path, content: args.content },
+    };
   } else if (kind === 'edit') {
     if (typeof args.old_string !== 'string' || typeof args.new_string !== 'string') return null;
-    sections.push(
-      { label: 'Requested removal', text: args.old_string, tone: 'removed' },
-      { label: 'Requested replacement', text: args.new_string, tone: 'added' },
-    );
+    return {
+      kind: 'change',
+      value: {
+        phase: 'requested',
+        operation: 'edit',
+        path,
+        before: args.old_string,
+        after: args.new_string,
+      },
+    };
   } else if (kind === 'patch') {
     if (!operation || typeof operation.type !== 'string') return null;
-    sections.push({ label: 'Requested operation', text: operation.type });
-    if (typeof operation.diff === 'string')
-      sections.push({ label: 'Requested patch', text: operation.diff });
+    if (operation.diff !== undefined && typeof operation.diff !== 'string') return null;
+    return {
+      kind: 'change',
+      value: {
+        phase: 'requested',
+        operation: 'patch',
+        path,
+        type: operation.type,
+        diff: typeof operation.diff === 'string' ? operation.diff : null,
+      },
+    };
   }
-  return sections;
+  return { kind: 'sections', sections: [{ label: 'File', text: path }] };
 }
 
 // Only complete originals under the explicitly recorded display contract are
 // decoded. A malformed or unfamiliar value keeps the literal original view.
-export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | null {
+export function toolResult(kind: ToolFamily, input: unknown): ToolProjection | null {
   const result = record(input);
   if (!kind || !result) return null;
   if (result.kind === 'failed' && typeof result.message === 'string')
-    return [{ label: 'Tool failed', text: result.message, tone: 'error' }];
+    return { kind: 'failure', message: result.message };
   const value = record(result.value);
   if (result.kind !== 'completed' || !value) return null;
   if (processFamily(kind)) {
@@ -108,31 +196,9 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
       (value.failureMessage !== undefined && typeof value.failureMessage !== 'string')
     )
       return null;
-    const exit =
-      typeof value.exitCode === 'number' && Number.isSafeInteger(value.exitCode)
-        ? value.exitCode
-        : null;
-    const sections: ToolSection[] = [
-      {
-        label: 'Recorded process status',
-        text: `${value.status}${exit === null ? '' : ` · Exit ${exit}`}`,
-        tone:
-          value.status === 'cancelled'
-            ? 'warning'
-            : ['failed', 'timed_out', 'orphaned'].includes(value.status) ||
-                (exit !== null && exit !== 0)
-              ? 'error'
-              : undefined,
-      },
-    ];
-    sections.push(
-      { label: 'Recorded command', text: value.cmd },
-      { label: 'Working directory', text: value.cwd },
-    );
-    if (typeof value.failureMessage === 'string')
-      sections.push({ label: 'Process failure', text: value.failureMessage, tone: 'error' });
     const output = record(value.output);
     if (value.output !== undefined && value.output !== null && !output) return null;
+    let captured: ToolProcess['output'] = null;
     if (output?.mode === 'pipes') {
       if (
         typeof output.stdout !== 'string' ||
@@ -142,42 +208,44 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
         typeof output.redacted !== 'boolean'
       )
         return null;
-      sections.push(
-        { label: 'stdout', text: output.stdout },
-        { label: 'stderr', text: output.stderr, tone: 'warning' },
-      );
-      if (output.stdoutTruncated === true || output.stderrTruncated === true)
-        sections.push({
-          label: 'Output notice',
-          text: 'The recorded process output is truncated.',
-          tone: 'warning',
-        });
+      captured = {
+        mode: 'pipes',
+        stdout: output.stdout,
+        stderr: output.stderr,
+        stdoutTruncated: output.stdoutTruncated,
+        stderrTruncated: output.stderrTruncated,
+        redacted: output.redacted,
+      };
     } else if (output?.mode === 'pty') {
       if (
         typeof output.scrollback !== 'string' ||
         typeof output.screen !== 'string' ||
         typeof output.truncated !== 'boolean' ||
-        typeof output.redacted !== 'boolean'
+        typeof output.redacted !== 'boolean' ||
+        (output.lastAlternateScreen !== undefined && typeof output.lastAlternateScreen !== 'string')
       )
         return null;
-      sections.push(
-        { label: 'Terminal scrollback', text: output.scrollback },
-        { label: 'Terminal screen', text: output.screen },
-      );
-      if (output.truncated === true)
-        sections.push({
-          label: 'Output notice',
-          text: 'The recorded terminal output is truncated.',
-          tone: 'warning',
-        });
+      captured = {
+        mode: 'pty',
+        scrollback: output.scrollback,
+        screen: output.screen,
+        lastAlternateScreen:
+          typeof output.lastAlternateScreen === 'string' ? output.lastAlternateScreen : null,
+        truncated: output.truncated,
+        redacted: output.redacted,
+      };
     } else if (output !== null) return null;
-    if (output?.redacted === true)
-      sections.push({
-        label: 'Privacy notice',
-        text: 'The Host redacted parts of this recorded output.',
-        tone: 'warning',
-      });
-    return sections;
+    return {
+      kind: 'process',
+      value: {
+        command: value.cmd,
+        cwd: value.cwd,
+        status: value.status as ProcessStatus,
+        exitCode: typeof value.exitCode === 'number' ? value.exitCode : null,
+        failure: typeof value.failureMessage === 'string' ? value.failureMessage : null,
+        output: captured,
+      },
+    };
   }
   if (kind === 'read') {
     if (
@@ -188,89 +256,85 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
       (value.partialLine !== undefined && typeof value.partialLine !== 'boolean')
     )
       return null;
-    const offset = value.offset;
-    const lines = value.content.split('\n');
-    if (lines.at(-1) === '') lines.pop();
-    return [
-      {
-        label: value.partialLine
-          ? `Read lines · partial line · ${value.totalLines} total`
-          : `Read lines ${value.returnedLines ? value.offset + 1 : value.offset}–${value.offset + value.returnedLines} / ${value.totalLines}`,
-        text: lines.map((line, index) => `${offset + index + 1} │ ${line}`).join('\n'),
+    return {
+      kind: 'read',
+      value: {
+        content: value.content,
+        offset: value.offset,
+        returnedLines: value.returnedLines,
+        totalLines: value.totalLines,
+        partialLine: value.partialLine === true,
+        hasMore: value.next !== null && value.next !== undefined,
       },
-      ...(value.partialLine === true
-        ? [
-            {
-              label: 'Partial line',
-              text: 'This original result contains part of a line.',
-              tone: 'warning' as const,
-            },
-          ]
-        : []),
-      ...(value.next !== null && value.next !== undefined
-        ? [
-            {
-              label: 'Read notice',
-              text: 'The tool read a range of this file; this card preserves that original range.',
-              tone: 'warning' as const,
-            },
-          ]
-        : []),
-    ];
+    };
   }
   if (kind === 'glob' || kind === 'grep') {
     const matches = kind === 'glob' ? value.files : value.matches;
     if (!strings(matches) || typeof value.complete !== 'boolean') return null;
-    return [
-      {
-        label: kind === 'glob' ? 'Matching files' : 'Matching lines',
-        text: matches.length ? matches.join('\n') : 'No matches.',
-      },
-      ...(!value.complete
-        ? [
-            {
-              label: 'Search notice',
-              text: 'The tool reported an incomplete search result.',
-              tone: 'warning' as const,
-            },
-          ]
-        : []),
-    ];
+    return {
+      kind: 'sections',
+      sections: [
+        {
+          label: kind === 'glob' ? 'Matching files' : 'Matching lines',
+          text: matches.length ? matches.join('\n') : 'No matches.',
+        },
+        ...(!value.complete
+          ? [
+              {
+                label: 'Search notice',
+                text: 'The tool reported an incomplete search result.',
+                tone: 'warning' as const,
+              },
+            ]
+          : []),
+      ],
+    };
   }
   if (kind === 'write') {
-    if (value.kind !== 'file_write' || typeof value.path !== 'string' || !integer(value.bytes))
+    if (
+      value.kind !== 'file_write' ||
+      typeof value.path !== 'string' ||
+      !integer(value.bytes) ||
+      (value.previousContent !== undefined && typeof value.previousContent !== 'string')
+    )
       return null;
-    return [
-      { label: 'Recorded write', text: `${value.path} · ${value.bytes} bytes` },
-      ...(typeof value.previousContent === 'string'
-        ? [
-            {
-              label: 'Recorded previous contents',
-              text: value.previousContent,
-              tone: 'removed' as const,
-            },
-          ]
-        : [{ label: 'Previous contents', text: 'Not included in this original result.' }]),
-    ];
+    return {
+      kind: 'change',
+      value: {
+        phase: 'recorded',
+        operation: 'write',
+        path: value.path,
+        bytes: value.bytes,
+        previous: typeof value.previousContent === 'string' ? value.previousContent : null,
+      },
+    };
   }
   if (kind === 'edit') {
-    if (value.ok !== true || typeof value.path !== 'string' || !integer(value.replacements))
+    if (
+      value.ok !== true ||
+      typeof value.path !== 'string' ||
+      !integer(value.replacements) ||
+      (value.matchedVia !== undefined && typeof value.matchedVia !== 'string') ||
+      (value.startLine !== undefined && !integer(value.startLine)) ||
+      (value.endLine !== undefined && !integer(value.endLine))
+    )
       return null;
-    return [
-      { label: 'Recorded edit', text: `${value.path} · ${value.replacements} replacements` },
-      ...(typeof value.matchedVia === 'string'
-        ? [{ label: 'Match method', text: value.matchedVia }]
-        : []),
-    ];
+    return {
+      kind: 'change',
+      value: {
+        phase: 'recorded',
+        operation: 'edit',
+        path: value.path,
+        replacements: value.replacements,
+        matchedVia: typeof value.matchedVia === 'string' ? value.matchedVia : null,
+        startLine: typeof value.startLine === 'number' ? value.startLine : null,
+        endLine: typeof value.endLine === 'number' ? value.endLine : null,
+      },
+    };
   }
   if (kind === 'patch')
     return value.status === 'completed'
-      ? [
-          {
-            label: 'Recorded patch result',
-            text: 'Operation completed. The patch shown above is the original request.',
-          },
-        ]
+      ? { kind: 'change', value: { phase: 'recorded', operation: 'patch' } }
       : null;
   if (kind === 'fetch') {
     if (
@@ -281,22 +345,25 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
       typeof value.truncated !== 'boolean'
     )
       return null;
-    return [
-      {
-        label: typeof value.title === 'string' && value.title ? value.title : 'Web page',
-        text: value.url,
-      },
-      { label: 'Recorded page content', text: value.content },
-      ...(value.truncated
-        ? [
-            {
-              label: 'Web notice',
-              text: 'The extracted page content is truncated.',
-              tone: 'warning' as const,
-            },
-          ]
-        : []),
-    ];
+    return {
+      kind: 'sections',
+      sections: [
+        {
+          label: typeof value.title === 'string' && value.title ? value.title : 'Web page',
+          text: value.url,
+        },
+        { label: 'Recorded page content', text: value.content },
+        ...(value.truncated
+          ? [
+              {
+                label: 'Web notice',
+                text: 'The extracted page content is truncated.',
+                tone: 'warning' as const,
+              },
+            ]
+          : []),
+      ],
+    };
   }
   if (kind === 'webSearch') {
     if (
@@ -329,7 +396,7 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
         text: `The search result is truncated · ${value.omittedResults} omitted results.`,
         tone: 'warning',
       });
-    return sections;
+    return { kind: 'sections', sections };
   }
   return null;
 }
