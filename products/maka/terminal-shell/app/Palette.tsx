@@ -25,6 +25,7 @@ import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
 import {
   C,
+  inputBorderRadius,
   compact,
   controlStyle,
   controlHoverStyle,
@@ -135,7 +136,7 @@ export function Palette(props: {
             color: C.text,
             height: compact() ? 32 : 40,
             backgroundColor: C.background,
-            borderRadius: 8,
+            borderRadius: inputBorderRadius,
             paddingHorizontal: 12,
             fontSize: 14,
           }}

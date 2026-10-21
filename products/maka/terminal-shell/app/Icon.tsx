@@ -17,26 +17,45 @@
  * under the License.
  */
 
-import { Canvas } from 'nsh';
+import { Canvas, Text } from 'nsh';
+import { platform } from 'nsh/device';
 
-export function Icon(props: {
-  name:
-    | 'back'
-    | 'sidebar'
-    | 'plus'
-    | 'send'
-    | 'stop'
-    | 'close'
-    | 'down'
-    | 'right'
-    | 'search'
-    | 'settings'
-    | 'folder';
-  color: string;
-}) {
+const glyphs = {
+  back: '‹',
+  sidebar: '▤',
+  plus: '+',
+  send: '↑',
+  stop: '■',
+  close: '×',
+  down: '⌄',
+  right: '›',
+  search: '⌕',
+  settings: '⚙',
+  folder: '📁',
+};
+
+export function Icon(props: { name: keyof typeof glyphs; color: string }) {
+  if (platform.isTerminal)
+    return (
+      <Text
+        pointerEvents="none"
+        accessibilityElementsHidden
+        style={{
+          width: 16,
+          height: 16,
+          lineHeight: 16,
+          color: props.color,
+          textAlign: 'center',
+          flexShrink: 0,
+        }}
+      >
+        {glyphs[props.name]}
+      </Text>
+    );
   return (
     <Canvas
       pointerEvents="none"
+      accessibilityElementsHidden
       style={{ width: 16, height: 16, flexShrink: 0 }}
       draw={(cx) => {
         cx.strokeStyle = props.color;

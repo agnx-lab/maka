@@ -146,7 +146,6 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
           minHeight: 0,
           backgroundColor: C.surface,
           borderRadius: compact() ? 12 : 24,
-          overflow: 'hidden',
           borderWidth: 1,
           borderColor: C.line,
         }}

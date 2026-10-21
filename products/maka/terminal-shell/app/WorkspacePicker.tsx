@@ -32,6 +32,7 @@ import type {
 } from '../../../../packages/plugin-sdk/src/index.js';
 import {
   C,
+  inputBorderRadius,
   compact,
   controlStyle,
   controlHoverStyle,
@@ -331,7 +332,7 @@ export function WorkspacePicker(props: {
                   color: C.text,
                   height: compact() ? 32 : 40,
                   backgroundColor: C.background,
-                  borderRadius: 8,
+                  borderRadius: inputBorderRadius,
                   paddingHorizontal: 12,
                   fontSize: 14,
                 }}

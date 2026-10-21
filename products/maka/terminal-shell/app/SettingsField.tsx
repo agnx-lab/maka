@@ -18,7 +18,7 @@
  */
 
 import { Input, Text, View } from 'nsh';
-import { C, compact, inputTextStyle } from './ui';
+import { C, compact, inputBorderRadius, inputTextStyle } from './ui';
 
 export function SettingsField(props: {
   label: string;
@@ -46,13 +46,12 @@ export function SettingsField(props: {
           height: props.multiline ? (compact() ? 96 : 120) : compact() ? 32 : 40,
           borderWidth: 1,
           borderColor: C.line,
-          borderRadius: 8,
+          borderRadius: inputBorderRadius,
           backgroundColor: C.background,
-          color: C.text,
+          color: props.disabled ? C.muted : C.text,
           paddingHorizontal: 12,
           paddingVertical: compact() ? 4 : 8,
           ...inputTextStyle,
-          opacity: props.disabled ? 0.5 : 1,
         }}
         focusStyle={{ borderColor: C.accent }}
       />

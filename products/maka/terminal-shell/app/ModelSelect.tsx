@@ -29,6 +29,7 @@ import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
 import {
   C,
+  inputBorderRadius,
   compact,
   controlStyle,
   controlHoverStyle,
@@ -353,7 +354,7 @@ export function ModelSelect(props: {
               color: C.text,
               height: compact() ? 32 : 40,
               backgroundColor: C.background,
-              borderRadius: 8,
+              borderRadius: inputBorderRadius,
               paddingHorizontal: 12,
               fontSize: 14,
             }}

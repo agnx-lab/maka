@@ -45,6 +45,8 @@ export const codeTextStyle = {
   fontSize: 13,
   lineHeight: platform.isTerminal ? 16 : 20,
 };
+// Rounded Input clipping rasterizes the editor on a cell surface.
+export const inputBorderRadius = platform.isTerminal ? 0 : 8;
 export const compact = () => windowSize().height < 480;
 export const controlStyle = {
   minHeight: 32,
@@ -55,7 +57,9 @@ export const controlStyle = {
 } as const;
 export const controlHoverStyle = { backgroundColor: C.raised };
 export const controlFocusStyle = { backgroundColor: C.raised, borderColor: C.accent };
-export const controlDisabledStyle = { opacity: 0.4 };
+export const controlDisabledStyle = platform.isTerminal
+  ? { backgroundColor: C.background }
+  : { opacity: 0.4 };
 export function Header(props: {
   title: string;
   workspace?: string;
