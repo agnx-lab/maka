@@ -583,7 +583,10 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(final_network["proxy"], saved_network["proxy"]);
         assert_eq!(final_network["credential"], saved_network["credential"]);
         assert!(!final_network.to_string().contains(proxy_secret));
-        activate(&mut view, "Close settings").await;
+        activate(&mut view, "Edit personalization").await;
+        assert_input(&mut view, "Display name", "已保存的中文用户").await;
+        support::wait_enabled_button(&mut view, "Back from general settings").await;
+        support::click_button(&mut view, "Close settings").await;
         editable(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer), "settings replaced the resident native composer");
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Use my new connection exactly once"));
