@@ -2458,8 +2458,12 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         assert_eq!(settled.reference, original.reference);
         assert!(matches!(settled.receipt, Some(Receipt::Recorded {outcome:OperationOutcome::Returned {ref value},..}) if value["kind"] == "started"));
         support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        let focus_frame = terminal.wire().len();
         terminal.send(b"\x0c");
+        terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
         terminal.wait_for("OFFLINE_CANONICAL_FINAL").await;
+        // The editor must retain the later draft in the presented UI too.
+        terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
         // A new deliberate send proves the new live subscription receives
         // subsequent facts, rather than merely displaying its recovery snapshot.
         terminal.click_text("Send");
