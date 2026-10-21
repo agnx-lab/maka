@@ -100,11 +100,12 @@ function Field(props: { reference: ToolSourceRef; sessionId: string; through: nu
 export function ToolCard(props: {
   row(): Row;
   sessionId: string;
+  ownerKey(): string;
   through(): number;
   expanded(): boolean;
   original(): boolean;
-  expand(value: boolean): void;
-  showOriginal(value: boolean): void;
+  expand(action: { sessionId: string; key: string; value: boolean }): void;
+  showOriginal(action: { sessionId: string; key: string; value: boolean }): void;
   previewImage(image: ImagePreview): void;
 }) {
   const tool = (): HistoryTool | null => props.row().tool ?? null;
@@ -124,7 +125,9 @@ export function ToolCard(props: {
       <Button
         selected={props.expanded()}
         accessibilityLabel={`Toggle tool ${tool()?.call?.name ?? 'details'}`}
-        onPress={inputAction(props.expand, !props.expanded())}
+        onPress={inputAction(props.expand, {
+          sessionId: props.sessionId, key: props.ownerKey(), value: !props.expanded(),
+        })}
         style={{ height: 16, paddingVertical: 0, flexDirection: 'row', gap: 8 }}
       >
         <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: C.muted, fontSize: 16, lineHeight: 16 }}>
@@ -141,7 +144,9 @@ export function ToolCard(props: {
           <If when={tool()?.result?.image}>
             <ToolImage sessionId={props.sessionId} through={() => props.row().metadataThrough ?? props.through()} position={tool()!.result!.position} preview={props.previewImage} />
           </If>
-          <Button accessibilityLabel="Toggle original tool details" selected={props.original()} onPress={inputAction(props.showOriginal, !props.original())} style={{ alignSelf: 'flex-start' }}>
+          <Button accessibilityLabel="Toggle original tool details" selected={props.original()} onPress={inputAction(props.showOriginal, {
+            sessionId: props.sessionId, key: props.ownerKey(), value: !props.original(),
+          })} style={{ alignSelf: 'flex-start' }}>
             <Text style={{ color: C.accent }}>{props.original() ? 'Readable card' : 'Original details'}</Text>
           </Button>
           <Each of={references()} key={(value) => value.key}>

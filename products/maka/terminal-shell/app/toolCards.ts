@@ -91,12 +91,14 @@ export function toolResult(kind: ToolFamily, input: unknown): ToolSection[] | nu
     return sections;
   }
   if (kind === 'read') {
-    if (typeof value.content !== 'string' || !integer(value.offset) || !integer(value.returnedLines) || !integer(value.totalLines)) return null;
+    if (typeof value.content !== 'string' || !integer(value.offset) || !integer(value.returnedLines) || !integer(value.totalLines) ||
+      (value.partialLine !== undefined && typeof value.partialLine !== 'boolean')) return null;
     const offset = value.offset;
     const lines = value.content.split('\n');
     if (lines.at(-1) === '') lines.pop();
-    return [{ label: `Read lines ${value.returnedLines ? value.offset + 1 : value.offset}–${value.offset + value.returnedLines} / ${value.totalLines}`,
+    return [{ label: value.partialLine ? `Read lines · partial line · ${value.totalLines} total` : `Read lines ${value.returnedLines ? value.offset + 1 : value.offset}–${value.offset + value.returnedLines} / ${value.totalLines}`,
       text: lines.map((line, index) => `${offset + index + 1} │ ${line}`).join('\n') },
+    ...(value.partialLine === true ? [{ label: 'Partial line', text: 'This original result contains part of a line.', tone: 'warning' as const }] : []),
     ...(value.next !== null && value.next !== undefined ? [{ label: 'Read notice', text: 'The tool read a range of this file; this card preserves that original range.', tone: 'warning' as const }] : [])];
   }
   if (kind === 'glob' || kind === 'grep') {

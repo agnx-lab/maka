@@ -179,10 +179,9 @@ export function MessageRow({
                       </If>
                     </View>
                   }>
-                    <ToolCard row={row} sessionId={sessionId} through={through}
+                    <ToolCard row={row} sessionId={sessionId} through={through} ownerKey={() => rowKey(row())}
                       expanded={expanded} original={sourceMode} previewImage={previewImage}
-                      expand={(value) => setExpanded({ sessionId, key: rowKey(row()), value })}
-                      showOriginal={(value) => setSourceMode({ sessionId, key: rowKey(row()), value })}
+                      expand={setExpanded} showOriginal={setSourceMode}
                     />
                   </If>
                 </If>
