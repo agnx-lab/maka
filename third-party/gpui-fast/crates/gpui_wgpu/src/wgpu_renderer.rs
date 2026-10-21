@@ -2634,6 +2634,16 @@ impl gpui::PlatformHeadlessRenderer for WgpuHeadlessRenderer {
         self.render(scene, size)
     }
 
+    fn gpu_specs(&self) -> Option<GpuSpecs> {
+        let adapter_info = &self.core.adapter_info;
+        Some(GpuSpecs {
+            is_software_emulated: adapter_info.device_type == wgpu::DeviceType::Cpu,
+            device_name: adapter_info.name.clone(),
+            driver_name: adapter_info.driver.clone(),
+            driver_info: adapter_info.driver_info.clone(),
+        })
+    }
+
     fn sprite_atlas(&self) -> Arc<dyn gpui::PlatformAtlas> {
         self.core.atlas.clone()
     }

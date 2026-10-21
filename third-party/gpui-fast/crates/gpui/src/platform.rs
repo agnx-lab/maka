@@ -1500,6 +1500,11 @@ pub trait PlatformHeadlessRenderer {
     /// window, but doesn't block on GPU completion or copy pixels back.
     fn render_scene(&mut self, scene: &Scene, size: Size<DevicePixels>) -> Result<()>;
 
+    /// Returns the actual graphics device and whether it uses software emulation.
+    fn gpu_specs(&self) -> Option<GpuSpecs> {
+        None
+    }
+
     /// Returns the sprite atlas used by this renderer.
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
 }
