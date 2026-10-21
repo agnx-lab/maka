@@ -732,7 +732,14 @@ function agentComposition(configuration: CompositionConfiguration): ApplicationS
       // These imports bind known native v1 contracts. Freeze presentation in
       // the configuration; tool names and response shapes cannot opt into it.
       tools: configuration.agent.tools.map((tool) => {
-        if (tool.import === 'web') return { ...tool, input: 'web' as const };
+        if (tool.import === 'web')
+          return {
+            ...tool,
+            input: 'web' as const,
+            ...(tool.presentation === undefined
+              ? { presentation: `maka.workspace.Web@1/${tool.method}` }
+              : {}),
+          };
         if (tool.import === 'skills') return { ...tool, input: 'skill' as const };
         if (tool.import === 'processes' && tool.method === 'execute')
           tool = { ...tool, input: 'shell' };

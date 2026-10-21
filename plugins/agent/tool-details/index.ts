@@ -37,40 +37,8 @@ import {
 import { copy } from './locale.js';
 import { sameValue } from '../../shared/value.js';
 import { compactLabel, output, type Node, type Presentation } from '../../shared/view.js';
-
-/** These keys explicitly name display contracts. Names and JSON shapes do not. */
-export function filePresentation(key: string | null | undefined) {
-  switch (key) {
-    case 'maka.workspace.Files@1/readText':
-      return 'read';
-    case 'maka.workspace.Files@1/write':
-      return 'write';
-    case 'maka.workspace.Files@1/edit':
-      return 'edit';
-    case 'maka.workspace.Files@1/applyPatch':
-      return 'patch';
-    default:
-      return null;
-  }
-}
-export function toolPresentation(key: string | null | undefined) {
-  switch (key) {
-    case 'maka.workspace.Files@1/glob':
-      return 'glob';
-    case 'maka.workspace.Files@1/grep':
-      return 'grep';
-    case 'maka.workspace.Processes@1/execute':
-      return 'execute';
-    case 'maka.workspace.Processes@1/read':
-      return 'processRead';
-    case 'maka.workspace.Processes@1/writeStdin':
-      return 'stdin';
-    case 'maka.workspace.Processes@1/stop':
-      return 'stop';
-    default:
-      return filePresentation(key);
-  }
-}
+import { filePresentation, toolPresentation } from './presentation.js';
+export { filePresentation, toolPresentation } from './presentation.js';
 function compactPart(id: string) {
   return [
     'path',
