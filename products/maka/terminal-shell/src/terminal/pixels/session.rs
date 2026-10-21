@@ -73,12 +73,14 @@ fn run(
             return Ok(());
         }
         if let Some(trace) = &mut state.trace {
-            trace.gpu = renderer.gpu_specs().map(|gpu| serde_json::json!({
-                "is_software_emulated": gpu.is_software_emulated,
-                "device_name": gpu.device_name,
-                "driver_name": gpu.driver_name,
-                "driver_info": gpu.driver_info,
-            }));
+            trace.gpu = renderer.gpu_specs().map(|gpu| {
+                serde_json::json!({
+                    "is_software_emulated": gpu.is_software_emulated,
+                    "device_name": gpu.device_name,
+                    "driver_name": gpu.driver_name,
+                    "driver_info": gpu.driver_info,
+                })
+            });
         }
         state.trace.is_some()
     };
@@ -104,7 +106,13 @@ fn run(
                 .as_ref()
                 .and_then(|started| started.get())
                 .map(|start| {
-                    (start, Instant::now(), frame.token(), frame.pixels().len(), frame.size())
+                    (
+                        start,
+                        Instant::now(),
+                        frame.token(),
+                        frame.pixels().len(),
+                        frame.size(),
+                    )
                 });
             let snapshot = sampled.borrow().sample();
             let has_snapshot = snapshot.is_some();
@@ -129,7 +137,13 @@ fn run(
                 if let Some((start, end, token, bytes, size)) = timing
                     && let Some(trace) = &mut state.trace
                 {
-                    let sample = trace.record(&token, drawn_geometry.get(), "pump_until_candidate", start, end);
+                    let sample = trace.record(
+                        &token,
+                        drawn_geometry.get(),
+                        "pump_until_candidate",
+                        start,
+                        end,
+                    );
                     sample.bytes = Some(bytes);
                     sample.pixel_size = Some((size.width.0, size.height.0));
                     sample.outcome = if admitted { "admitted" } else { "discarded" };
@@ -604,10 +618,22 @@ fn encode_pending(presentation: &Presentation) -> bool {
         inbox.encoded = Some(result);
     }
     if let (Some(start), Some(end), Some(trace)) = (started, ended, &mut state.trace) {
-        let sample = trace.record(&candidate.frame.token(), candidate.geometry, "codec", start, end);
+        let sample = trace.record(
+            &candidate.frame.token(),
+            candidate.geometry,
+            "codec",
+            start,
+            end,
+        );
         sample.bytes = bytes;
         sample.image = (caps.protocol == Some(Protocol::Kitty)).then_some(image);
-        sample.outcome = if failed { "error" } else if discarded { "discarded" } else { "ok" };
+        sample.outcome = if failed {
+            "error"
+        } else if discarded {
+            "discarded"
+        } else {
+            "ok"
+        };
     }
     drop(state);
     presentation.wake_driver();

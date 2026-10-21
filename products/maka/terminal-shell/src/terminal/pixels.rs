@@ -177,7 +177,13 @@ pub(super) fn run(
                     if tracing {
                         let mut state = presentation.state.lock().unwrap();
                         if let Some(trace) = &mut state.trace {
-                            let sample = trace.record(&upload.offer.token, upload.offer.geometry, "upload_flushed", at, at);
+                            let sample = trace.record(
+                                &upload.offer.token,
+                                upload.offer.geometry,
+                                "upload_flushed",
+                                at,
+                                at,
+                            );
                             sample.image = Some(upload.image);
                         }
                     }
@@ -235,7 +241,13 @@ pub(super) fn run(
                 if let Some((at, result)) = &ack
                     && let Some(trace) = &mut state.trace
                 {
-                    let sample = trace.record(&upload.offer.token, upload.offer.geometry, "matching_ack", *at, *at);
+                    let sample = trace.record(
+                        &upload.offer.token,
+                        upload.offer.geometry,
+                        "matching_ack",
+                        *at,
+                        *at,
+                    );
                     sample.image = Some(upload.image);
                     sample.outcome = if result.is_ok() { "ok" } else { "error" };
                 }
@@ -252,7 +264,13 @@ pub(super) fn run(
                 state.pixels.as_mut().unwrap().displayed_image = Some(upload.image);
                 if let Some(trace) = &mut state.trace {
                     let at = Instant::now();
-                    let sample = trace.record(&upload.offer.token, upload.offer.geometry, "retire_submit_begin", at, at);
+                    let sample = trace.record(
+                        &upload.offer.token,
+                        upload.offer.geometry,
+                        "retire_submit_begin",
+                        at,
+                        at,
+                    );
                     sample.bytes = Some(upload.retire.len());
                     sample.image = Some(upload.image);
                 }
@@ -356,7 +374,9 @@ pub(super) fn run(
                 let sample = tracing.then(|| {
                     let at = Instant::now();
                     let (bytes, image) = match &encoded.frame {
-                        input::WireFrame::Kitty(frame) => (frame.upload().len(), Some(frame.image_id())),
+                        input::WireFrame::Kitty(frame) => {
+                            (frame.upload().len(), Some(frame.image_id()))
+                        }
                         input::WireFrame::Inline(frame) => (frame.bytes().len(), None),
                     };
                     (offer.clone(), at, bytes, image)
@@ -386,7 +406,8 @@ pub(super) fn run(
                 if let Some((offer, at, bytes, image)) = sample
                     && let Some(trace) = &mut state.trace
                 {
-                    let sample = trace.record(&offer.token, offer.geometry, "upload_submit_begin", at, at);
+                    let sample =
+                        trace.record(&offer.token, offer.geometry, "upload_submit_begin", at, at);
                     sample.bytes = Some(bytes);
                     sample.image = image;
                 }
