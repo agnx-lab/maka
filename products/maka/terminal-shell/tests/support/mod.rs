@@ -842,14 +842,14 @@ pub fn evidence(name: &str, snapshot: &str) {
 /// Withhold one real IPC result without manufacturing a Host fact or Agent effect.
 pub struct ReplyGate {
     pub address: PathBuf,
-    armed: Arc<AtomicBool>,
+    armed: Arc<AtomicUsize>,
     pub held: Arc<Notify>,
     release: Arc<Notify>,
     worker: JoinHandle<()>,
 }
 impl ReplyGate {
     pub fn start(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "send", "mutation")
+        Self::for_method(directory, target, "send", "mutation", false)
     }
     pub fn directories(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "directories", "finished")
@@ -859,17 +859,26 @@ impl ReplyGate {
     }
     #[cfg(unix)]
     pub fn history(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "history", "finished")
+        Self::for_method(directory, target, "history", "finished", false)
+    }
+    #[cfg(unix)]
+    pub fn disconnect_history(directory: &Path, target: PathBuf) -> Self {
+        Self::for_method(directory, target, "history", "finished", true)
+    }
+    #[cfg(unix)]
+    pub fn disconnect_watch(directory: &Path, target: PathBuf) -> Self {
+        Self::for_method(directory, target, "watch", "item", true)
     }
     fn for_method(
         directory: &Path,
         target: PathBuf,
         method: &'static str,
         reply: &'static str,
+        disconnect: bool,
     ) -> Self {
-        let address = socket(directory, "gate");
+        let address = socket(directory, &format!("gate-{method}-{disconnect}"));
         let mut listener = LocalListener::bind(&address).unwrap();
-        let armed = Arc::new(AtomicBool::new(false));
+        let armed = Arc::new(AtomicUsize::new(0));
         let held = Arc::new(Notify::new());
         let release = Arc::new(Notify::new());
         let worker = tokio::spawn({
@@ -894,12 +903,22 @@ impl ReplyGate {
                                 let _ = up_write.shutdown().await;
                                 };
                                 let down=async move {let mut reader=wire::Reader::new(up_read); while let Ok(value)=reader.read::<Value>().await {
-                                    if selected.load(Ordering::SeqCst) && value["kind"]==reply && armed.swap(false,Ordering::SeqCst) {held.notify_one();release.notified().await;}
+                                    if selected.load(Ordering::SeqCst) && value["kind"]==reply && armed.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1)).is_ok() {
+                                        held.notify_one();
+                                        if disconnect { break; }
+                                        release.notified().await;
+                                    }
                                     if wire::write(&mut down_write,&value).await.is_err(){break;}
                                 }
                                 let _ = down_write.shutdown().await;
                                 };
-                                tokio::join!(up,down);
+                                if disconnect {
+                                    // Drop both physical relay halves. The real Host observes
+                                    // a lost caller; no synthetic business result is inserted.
+                                    tokio::select! { () = up => {}, () = down => {} }
+                                } else {
+                                    tokio::join!(up,down);
+                                }
                             });
                         }
                         Some(result)=connections.join_next(),if !connections.is_empty()=>{result.unwrap();}
@@ -916,7 +935,11 @@ impl ReplyGate {
         }
     }
     pub fn arm(&self) {
-        self.armed.store(true, Ordering::SeqCst);
+        self.armed.store(1, Ordering::SeqCst);
+    }
+    #[cfg(unix)]
+    pub fn arm_times(&self, count: usize) {
+        self.armed.store(count, Ordering::SeqCst);
     }
     pub fn release(&self) {
         self.release.notify_one();

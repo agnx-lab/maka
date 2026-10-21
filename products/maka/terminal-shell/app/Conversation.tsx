@@ -104,6 +104,7 @@ export function Conversation(props: ConversationProps) {
   const interactions = signal<any>({ revision: -1, entries: [] });
   const error = signal('');
   const ready = signal(false);
+  const transcriptStatus = signal<'loading' | 'live' | 'closing' | 'failed'>('loading');
   const before = signal<any>(null);
   const loadingOlder = signal(false);
   const draft = signal('');
@@ -308,6 +309,9 @@ export function Conversation(props: ConversationProps) {
   let list: YNode | undefined;
   let alive = true;
   let subscription: Subscription | null = null;
+  let transcriptTask: Promise<void> | null = null;
+  let wakeReconnect: (() => void) | null = null;
+  let readFailure: { stream: Subscription; reason: unknown } | null = null;
   let refreshFrom: { position: Position; field: string } | null = null;
   let latestKnown = 0;
   let watchLast = 0;
@@ -403,6 +407,7 @@ export function Conversation(props: ConversationProps) {
   const follow = (): Promise<void> => {
     followAgain = true;
     if (followTask) return followTask;
+    const stream = subscription;
     followTask = (async () => {
       do {
         followAgain = false;
@@ -443,10 +448,18 @@ export function Conversation(props: ConversationProps) {
         }
       } while (alive && followAgain);
     })()
-      .catch(report)
+      .catch((reason) => {
+        followAgain = false;
+        if (alive && stream !== null && subscription === stream) {
+          readFailure = { stream, reason };
+          transcriptStatus.set('closing');
+          void stream.close().catch(report);
+        }
+        throw reason;
+      })
       .finally(() => {
         followTask = null;
-        if (alive && followAgain) void follow();
+        if (alive && followAgain) void follow().catch(report);
       });
     return followTask;
   };
@@ -591,10 +604,20 @@ export function Conversation(props: ConversationProps) {
       }
     }
     watchLast = Math.max(watchLast, page.nextAfter);
-    if (changed) void follow();
+    if (changed) void follow().catch(report);
   };
 
   const openTranscript = async () => {
+    // An unconfirmed close remains owned here; retry cleanup before opening
+    // another observer. Recovery never repeats a send or its confirmation.
+    const previous = subscription;
+    if (previous !== null) {
+      await previous.close();
+      if (subscription === previous) subscription = null;
+      if (readFailure?.stream === previous) readFailure = null;
+    }
+    if (followTask) await followTask.catch(() => {});
+    if (!alive) return;
     const observed = await observe();
     if (!alive) return;
     parts.set(
@@ -616,28 +639,91 @@ export function Conversation(props: ConversationProps) {
     }
     subscription = stream;
     watchLast = after;
-    let position: any = { kind: 'tail' };
-    for (;;) {
-      const page = await history(observed.through, position);
-      if (!alive) return;
-      if (page.chunks.length === 0 && page.before !== null) {
-        position = { kind: 'before', cursor: page.before };
-        continue;
+    try {
+      if (ready()) {
+        // Fill the gap from the existing canonical tail, retaining loaded
+        // history and the native reader anchor instead of jumping to the end.
+        await follow();
+      } else {
+        let position: any = { kind: 'tail' };
+        for (;;) {
+          const page = await history(observed.through, position);
+          if (!alive) return;
+          if (page.chunks.length === 0 && page.before !== null) {
+            position = { kind: 'before', cursor: page.before };
+            continue;
+          }
+          before.set(page.before);
+          publishHistory(page.chunks, page.through);
+          ready.set(true);
+          list?.scrollToEnd({ animated: false });
+          break;
+        }
       }
-      before.set(page.before);
-      publishHistory(page.chunks, page.through);
-      ready.set(true);
-      list?.scrollToEnd({ animated: false });
-      break;
-    }
-    // The sole next() loop recovers text and active tool observations from
-    // their starts at the observe fence, without a history/watch gap.
-    for (;;) {
-      const page = await stream.next();
       if (!alive) return;
-      if (page === null) throw new Error('Live updates ended. Reopen the client to reconnect.');
-      batch(() => deliver(page));
+      transcriptStatus.set('live');
+      error.set('');
+      // Subscribe before reading history so facts cannot fall between fences.
+      // The snapshot is sufficient for readiness; no new event is required.
+      for (;;) {
+        const page = await stream.next();
+        if (!alive) return;
+        if (page === null) throw new Error('Live updates ended.');
+        batch(() => deliver(page));
+      }
+    } catch (reason) {
+      throw readFailure?.stream === stream ? readFailure.reason : reason;
+    } finally {
+      if (alive) transcriptStatus.set('closing');
+      await stream.close();
+      if (subscription === stream) subscription = null;
+      if (readFailure?.stream === stream) readFailure = null;
     }
+  };
+  const startTranscript = () => {
+    if (!alive || transcriptTask !== null) return;
+    transcriptStatus.set('loading');
+    error.set('');
+    const task: Promise<void> = (async () => {
+      for (;;) {
+        if (!alive) return;
+        transcriptStatus.set('loading');
+        try {
+          await openTranscript();
+          return;
+        } catch (reason) {
+          if (!alive) return;
+          toolActivity.set([]);
+          report(reason);
+          // Match the desktop catalog's quiet two-second reconnect pause.
+          // Only observations repeat; original mutations remain in the journal.
+          transcriptStatus.set('failed');
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              wakeReconnect = null;
+              resolve();
+            };
+            const timer = setTimeout(done, 2000);
+            wakeReconnect = () => {
+              clearTimeout(timer);
+              done();
+            };
+          });
+          if (!alive) return;
+        }
+      }
+    })().finally(() => {
+      if (transcriptTask !== task) return;
+      transcriptTask = null;
+      if (alive) transcriptStatus.set('failed');
+    });
+    transcriptTask = task;
+  };
+  const retryTranscript = (owner: string) => {
+    if (!alive || owner !== sessionId || transcriptStatus() !== 'failed') return;
+    // Retry wakes the sole observer task; it never starts a parallel loop.
+    if (wakeReconnect) wakeReconnect();
+    else if (transcriptTask === null) startTranscript();
   };
 
   const loadOlder = async () => {
@@ -654,7 +740,7 @@ export function Conversation(props: ConversationProps) {
           publishHistory(page.chunks, page.through, true);
           if (page.through < latestKnown) {
             requestMetadata(page.chunks[0]);
-            void follow();
+            void follow().catch(report);
           }
           break;
         }
@@ -842,6 +928,14 @@ export function Conversation(props: ConversationProps) {
   };
 
   const sendBlockedReason = () => {
+    if (transcriptStatus() === 'closing')
+      return 'Closing disconnected updates… Your draft is kept.';
+    if (transcriptStatus() === 'failed')
+      return ready()
+        ? 'Updates disconnected. Reconnecting automatically; your draft is kept.'
+        : 'History unavailable. Retrying automatically; your draft is kept.';
+    if (ready() && transcriptStatus() !== 'live')
+      return 'Reconnecting updates… Your draft is kept.';
     if (!ready()) return 'Loading session history… Your draft is kept.';
     if (!draftReady()) return 'Loading the saved draft…';
     if (savingFailed()) return 'The draft could not be saved. Sending is unavailable.';
@@ -1098,6 +1192,7 @@ export function Conversation(props: ConversationProps) {
 
   cleanup(() => {
     alive = false;
+    wakeReconnect?.();
     modelGeneration += 1;
     modelRead = null;
     toolActivity.set([]);
@@ -1113,13 +1208,7 @@ export function Conversation(props: ConversationProps) {
         if (alive && pending.revision >= interactions().revision) interactions.set(pending);
       })
       .catch(report);
-    void openTranscript().catch(async (reason) => {
-      if (alive) toolActivity.set([]);
-      report(reason);
-      const stream = subscription;
-      subscription = null;
-      if (stream !== null) await stream.close().catch(() => {});
-    });
+    startTranscript();
     void (async () => {
       const stored = await client.loadDraft();
       if (!alive) return;
@@ -1146,6 +1235,21 @@ export function Conversation(props: ConversationProps) {
         files={props.files}
         filesOpener={props.filesOpener}
       />
+      <If when={transcriptStatus() === 'failed'}>
+        <Button
+          accessibilityLabel={ready() ? 'Reconnect updates' : 'Retry loading conversation'}
+          onPress={inputAction(retryTranscript, sessionId)}
+          style={{
+            alignSelf: 'flex-start',
+            paddingHorizontal: 16,
+            backgroundColor: C.raised,
+          }}
+        >
+          <Text style={{ color: C.accent }}>
+            {ready() ? 'Reconnect updates' : 'Retry loading conversation'}
+          </Text>
+        </Button>
+      </If>
       <View
         style={{
           display: ownHandle.empty() ? 'none' : 'flex',
