@@ -25,7 +25,7 @@ use maka_agent_facts::terminal::{
 };
 use maka_process::terminal::{Screen, display::Viewport};
 use nsh_core::{JsonValue, ui::prelude::*};
-use serde::Deserialize;
+use maka_workspace_api::terminal::OutputEvent as Output;
 use serde_json::json;
 
 /// Native styled cells for a single terminal; the Host retains process ownership.
@@ -97,18 +97,6 @@ impl Live {
     }
 }
 
-// The original OutputEvent is serialize-only. Decode its same wire variants at
-// this native boundary without introducing a second public transport contract.
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
-enum Output {
-    Data { sequence: u64, size: TerminalSize, initial_size: TerminalSize, data_base64: String },
-    Resize { sequence: u64, size: TerminalSize, initial_size: TerminalSize },
-    Pending { after: u64, size: TerminalSize, initial_size: TerminalSize },
-    Closed { after: u64, size: TerminalSize, initial_size: TerminalSize },
-    Unavailable { reason: String },
-}
-
 #[class]
 impl TerminalGrid {
     pub fn new(size: JsonValue) -> Result<Self, String> {
@@ -133,7 +121,7 @@ impl TerminalGrid {
         };
         let terminal_duplicate = match (&event, live.status) {
             (Output::Closed { after, .. }, Status::Closed) => *after == self.after,
-            (Output::Unavailable { reason }, Status::Unavailable) => reason == "not_retained",
+            (Output::Unavailable { .. }, Status::Unavailable) => true,
             _ => false,
         };
         if terminal_duplicate {
@@ -174,12 +162,7 @@ impl TerminalGrid {
                     live.status = Status::Closed;
                 }
             }
-            Output::Unavailable { reason } => {
-                if reason != "not_retained" {
-                    return Err("Unknown terminal output availability".into());
-                }
-                live.status = Status::Unavailable;
-            }
+            Output::Unavailable { .. } => live.status = Status::Unavailable,
         }
         Ok(json!({"after": self.after, "status": live.status.name()}))
     }

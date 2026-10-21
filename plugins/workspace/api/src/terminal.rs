@@ -58,14 +58,14 @@ pub struct OutputRequest {
     #[schemars(range(max = 9007199254740991u64))]
     pub after: u64,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(rename = "TerminalOutputUnavailable")]
 pub enum OutputUnavailable {
     NotRetained,
 }
 /// Ephemeral output observation; Closed is not a process cleanup receipt.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",

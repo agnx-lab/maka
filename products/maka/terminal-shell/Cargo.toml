@@ -44,7 +44,6 @@ nsh-platform-tui.workspace = true
 nsh-base.workspace = true
 crossterm.workspace = true
 ratatui = { workspace = true, features = ["unstable-backend-writer"] }
-serde.workspace = true
 serde_json.workspace = true
 termina.workspace = true
 tokio.workspace = true
