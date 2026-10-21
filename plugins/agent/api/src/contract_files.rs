@@ -18,7 +18,7 @@
  */
 
 pub use maka_fs_tools::files::{
-    FileChange, FileCursor, FileEntry, FileKind, FilePage, FileUnavailable,
+    FileChange, FileContent, FileCursor, FileEntry, FileKind, FilePage, FileUnavailable,
 };
 pub use maka_fs_tools::path::WorkspacePath;
 use schemars::JsonSchema;
@@ -42,4 +42,57 @@ pub struct FileWatch {
     pub session_id: String,
     #[schemars(with = "maka_plugin_core::wire_schema::RequiredNullable<WorkspacePath>")]
     pub path: Option<WorkspacePath>,
+}
+
+/// One bounded current-file capture. A version is a precondition, never read authority.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentFileRead")]
+pub struct FileRead {
+    pub session_id: String,
+    pub path: WorkspacePath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 71, max = 71), regex(pattern = "^sha256:[a-f0-9]{64}$"))]
+    pub expected_version: Option<String>,
+}
+
+/// All parts are subscription items; only End admits a complete preview.
+/// Offsets and byte counts refer to original bytes, not Base64 or UTF-16 lengths.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[schemars(rename = "AgentFileReadPart")]
+pub enum FileReadPart {
+    Begin {
+        version: String,
+        digest: String,
+        bytes: u64,
+        content: FileContent,
+    },
+    Chunk {
+        offset: u64,
+        #[schemars(length(max = 43_692))]
+        data: String,
+    },
+    End {
+        version: String,
+        digest: String,
+        bytes: u64,
+    },
+    Absent,
+    Changed,
+    Binary {
+        bytes: u64,
+    },
+    TooLarge {
+        bytes: u64,
+        limit: u64,
+    },
+    Unsupported {
+        file_kind: FileKind,
+    },
 }

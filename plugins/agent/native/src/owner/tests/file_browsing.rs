@@ -53,6 +53,278 @@ async fn settled_list_files(f: &Fixture, input: Value) -> Result<Value, String> 
     result
 }
 
+async fn read_file(f: &Fixture, input: Value) -> Result<Vec<Value>, String> {
+    let observed = scope(&f.issuer, true);
+    let accepted = f
+        .app
+        .client()
+        .subscribe(
+            f.binding(2).await,
+            "readFile".into(),
+            input,
+            observed.clone(),
+            Attachments::new().into(),
+        )
+        .await;
+    let result = match accepted {
+        Ok(mut stream) => {
+            let mut parts = Vec::new();
+            while let Some(part) = stream.recv().await {
+                parts.push(part);
+            }
+            let completed = stream.completion().await;
+            completed.cleanup.and(completed.result).map(|value| {
+                assert_eq!(
+                    value,
+                    Value::Null,
+                    "End is an explicit item, never a discarded final value"
+                );
+                parts
+            })
+        }
+        Err(error) => Err(error),
+    };
+    observed.resources.finish().await.unwrap();
+    assert!(observed.resources.is_idle());
+    result
+}
+
+fn preview_bytes(parts: &[Value]) -> Vec<u8> {
+    let begin = parts.first().unwrap();
+    assert_eq!(begin["kind"], "begin");
+    let mut bytes = Vec::new();
+    for part in &parts[1..parts.len() - 1] {
+        assert_eq!(part["kind"], "chunk");
+        assert_eq!(part["offset"], bytes.len() as u64);
+        let chunk = STANDARD.decode(part["data"].as_str().unwrap()).unwrap();
+        assert!(chunk.len() <= 32 * 1024);
+        if begin["content"]["kind"] == "text" {
+            std::str::from_utf8(&chunk).unwrap();
+        }
+        bytes.extend(chunk);
+    }
+    assert_eq!(begin["bytes"], bytes.len() as u64);
+    assert_eq!(
+        begin["digest"],
+        maka_agent_facts::artifact::content_digest(&bytes)
+    );
+    assert_eq!(
+        parts.last().unwrap(),
+        &json!({
+            "kind":"end", "version":begin["version"], "digest":begin["digest"], "bytes":bytes.len(),
+        })
+    );
+    bytes
+}
+
+#[tokio::test]
+async fn read_file_serves_bounded_current_text_and_images_under_original_session_authority() {
+    use image::{ExtendedColorType, ImageEncoder, codecs::png};
+    tokio::time::timeout(Duration::from_secs(45), async {
+        let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+        let session = f.create("Current workspace previews").await;
+        std::fs::write(f.workspace.join("text"), "hello\n你好").unwrap();
+        let text = read_file(&f, json!({"sessionId":session,"path":path("text")}))
+            .await
+            .unwrap();
+        assert_eq!(text[0]["content"], json!({"kind":"text"}));
+        assert_eq!(preview_bytes(&text), "hello\n你好".as_bytes());
+        let mut png = Vec::new();
+        png::PngEncoder::new(&mut png)
+            .write_image(
+                &[255, 0, 0, 255, 0, 255, 0, 255],
+                2,
+                1,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        std::fs::write(f.workspace.join("image.data"), &png).unwrap();
+        let image = read_file(&f, json!({"sessionId":session,"path":path("image.data")}))
+            .await
+            .unwrap();
+        assert_eq!(
+            image[0]["content"],
+            json!({"kind":"image","mimeType":"image/png"})
+        );
+        assert_eq!(
+            preview_bytes(&image),
+            png,
+            "actual bytes, not the filename extension, select images"
+        );
+        std::fs::write(f.workspace.join("empty"), "").unwrap();
+        let empty = read_file(&f, json!({"sessionId":session,"path":path("empty")}))
+            .await
+            .unwrap();
+        assert_eq!(empty.len(), 2);
+        assert_eq!(preview_bytes(&empty), b"");
+        std::fs::write(f.workspace.join("binary"), b"a\0b").unwrap();
+        assert_eq!(
+            read_file(&f, json!({"sessionId":session,"path":path("binary")}))
+                .await
+                .unwrap(),
+            vec![json!({"kind":"binary","bytes":3})]
+        );
+        assert_eq!(
+            read_file(&f, json!({"sessionId":session,"path":path("absent/child")}))
+                .await
+                .unwrap(),
+            vec![json!({"kind":"absent"})]
+        );
+        std::fs::create_dir(f.workspace.join("folder")).unwrap();
+        assert_eq!(
+            read_file(&f, json!({"sessionId":session,"path":path("folder")}))
+                .await
+                .unwrap(),
+            vec![json!({"kind":"unsupported","fileKind":"directory"})]
+        );
+        std::fs::write(
+            f.workspace.join("long-text"),
+            vec![b'a'; 2 * 1024 * 1024 + 1],
+        )
+        .unwrap();
+        assert_eq!(
+            read_file(&f, json!({"sessionId":session,"path":path("long-text")}))
+                .await
+                .unwrap(),
+            vec![json!({"kind":"too_large","bytes":2097153,"limit":2097152})]
+        );
+        std::fs::File::create(f.workspace.join("oversize"))
+            .unwrap()
+            .set_len(16 * 1024 * 1024 + 1)
+            .unwrap();
+        assert_eq!(
+            read_file(&f, json!({"sessionId":session,"path":path("oversize")}))
+                .await
+                .unwrap(),
+            vec![json!({"kind":"too_large","bytes":16777217,"limit":16777216})]
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("secret"), "outside").unwrap();
+            std::os::unix::fs::symlink(outside.path().join("secret"), f.workspace.join("link"))
+                .unwrap();
+            assert_eq!(
+                read_file(&f, json!({"sessionId":session,"path":path("link")}))
+                    .await
+                    .unwrap(),
+                vec![json!({"kind":"unsupported","fileKind":"symlink"})]
+            );
+            #[cfg(not(target_os = "macos"))]
+            let raw = b"raw-\xff".as_slice();
+            #[cfg(target_os = "macos")]
+            let raw = b"raw-\\name".as_slice();
+            std::fs::write(
+                f.workspace.join(std::ffi::OsString::from_vec(raw.to_vec())),
+                "exact bytes",
+            )
+            .unwrap();
+            let raw = read_file(
+                &f,
+                json!({"sessionId":session,"path":{"bytesBase64":STANDARD.encode(raw)}}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(preview_bytes(&raw), b"exact bytes");
+        }
+        assert!(
+            read_file(&f, json!({"sessionId":session,"path":path("../text")}))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            read_file(
+                &f,
+                json!({"sessionId":session,"path":path(maka_fs_tools::workspace::MARKER_FILE)})
+            )
+            .await
+            .unwrap_err(),
+            "agent_files_private"
+        );
+        f.store
+            .create_session("foreign_session", "foreign", &json!({"foreign":true}), 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_file(
+                &f,
+                json!({"sessionId":"foreign_session","path":path("text")})
+            )
+            .await
+            .unwrap_err(),
+            "agent_session_unavailable"
+        );
+        let denied = f
+            .app
+            .client()
+            .subscribe(
+                f.binding(2).await,
+                "readFile".into(),
+                json!({"sessionId":session,"path":path("text")}),
+                scope(&f.issuer, false),
+                Attachments::new().into(),
+            )
+            .await;
+        assert_eq!(denied.err().unwrap(), "denied");
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn read_file_keeps_one_capture_across_chunks_and_rejects_replaced_rereads() {
+    tokio::time::timeout(Duration::from_secs(45), async {
+        let f = Fixture::new("http://127.0.0.1:1/v1", None).await;
+        let session = f.create("Preview capture ownership").await;
+        let old = "你".repeat(400_000);
+        let new = "好".repeat(400_000);
+        let file = f.workspace.join("current.txt");
+        std::fs::write(&file, &old).unwrap();
+        let observed = scope(&f.issuer, true);
+        let mut stream = f.app.client().subscribe(f.binding(2).await, "readFile".into(), json!({"sessionId":session,"path":path("current.txt")}), observed.clone(), Attachments::new().into()).await.unwrap();
+        let begin = item(&mut stream).await;
+        assert_eq!(begin["kind"], "begin");
+        let replace = |content: &str| {
+            let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+            let replacement = f.workspace.join("replacement");
+            std::fs::write(&replacement, content).unwrap();
+            std::fs::File::open(&replacement).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+            #[cfg(windows)] std::fs::remove_file(&file).unwrap();
+            std::fs::rename(replacement, &file).unwrap();
+        };
+        replace(&new);
+        let mut parts = vec![begin.clone()];
+        while let Some(part) = stream.recv().await { parts.push(part); }
+        let completed = stream.completion().await;
+        assert_eq!(completed.result.unwrap(), Value::Null);
+        completed.cleanup.unwrap();
+        observed.resources.finish().await.unwrap();
+        assert!(observed.resources.is_idle());
+        assert_eq!(preview_bytes(&parts), old.as_bytes(), "replacement after Begin cannot alter the captured chunks");
+        assert_eq!(read_file(&f, json!({"sessionId":session,"path":path("current.txt"),"expectedVersion":begin["version"]})).await.unwrap(), vec![json!({"kind":"changed"})]);
+        let fresh = read_file(&f, json!({"sessionId":session,"path":path("current.txt")})).await.unwrap();
+        assert_eq!(preview_bytes(&fresh), new.as_bytes());
+        replace(&new);
+        assert_eq!(read_file(&f, json!({"sessionId":session,"path":path("current.txt"),"expectedVersion":fresh[0]["version"]})).await.unwrap(), vec![json!({"kind":"changed"})], "same bytes and mtime in a replacement file still invalidate the physical-file precondition");
+        let observed = scope(&f.issuer, true);
+        let mut stream = f.app.client().subscribe(f.binding(2).await, "readFile".into(), json!({"sessionId":session,"path":path("current.txt")}), observed.clone(), Attachments::new().into()).await.unwrap();
+        assert_eq!(item(&mut stream).await["kind"], "begin");
+        stream.cancel();
+        while let Some(part) = stream.recv().await { assert_ne!(part["kind"], "end"); }
+        let completed = stream.completion().await;
+        assert!(completed.result.is_err());
+        completed.cleanup.unwrap();
+        observed.resources.finish().await.unwrap();
+        assert!(observed.resources.is_idle());
+        assert_eq!(std::fs::read(&file).unwrap(), new.as_bytes());
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
 #[tokio::test]
 async fn list_files_reads_selected_directories_without_crossing_session_or_symlink_boundaries() {
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -512,6 +784,7 @@ async fn list_and_watch_files_keep_owned_root_and_control_private_under_publishe
         let listed_control = f.query("listFiles",json!({"sessionId":session,"path":path(control_parent),"after":null})).await.unwrap();
         assert!(!listed_control["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == path(control)));
         for protected in [business,control] {
+            assert_eq!(read_file(&f,json!({"sessionId":session,"path":path(&format!("{protected}/content"))})).await.unwrap_err(), "agent_files_private");
             assert!(f.query("listFiles",json!({"sessionId":session,"path":path(protected),"after":null})).await.is_err());
             let observed = scope(&f.issuer,true);
             let mut stream = watch(&f,&session,protected,observed.clone()).await;

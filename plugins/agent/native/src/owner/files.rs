@@ -19,12 +19,119 @@
 
 //! Session-bound directory observations; the worker owns watcher settlement.
 use super::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use maka_capabilities::call::Scope;
-use maka_fs_tools::files::{Directory, Watch};
+use maka_fs_tools::files::{Directory, FileCapture, Watch};
 use maka_host_runtime::application::Context;
 use std::{io, path::Path};
 
 impl Owner {
+    pub async fn read_file(
+        self: &Arc<Self>,
+        input: FileRead,
+        context: Context,
+    ) -> Result<Value, String> {
+        let scope = context.scope().clone();
+        self.resource_work(&scope, move |owner, scope| {
+            Box::pin(async move {
+                let (original, directory) = owner
+                    .file_directory(&input.session_id, None, &scope)
+                    .await?;
+                let capture = worktrees::blocking(&scope, &owner.stop, move |cancel| {
+                    directory
+                        .read_file(&input.path, input.expected_version.as_deref(), &cancel)
+                        .map_err(file_failure)
+                })
+                .await;
+                owner
+                    .check_file_session(&input.session_id, &original, &scope)
+                    .await?;
+                let snapshot = match capture? {
+                    FileCapture::Ready(value) => value,
+                    value => {
+                        let part = match value {
+                            FileCapture::Absent => FileReadPart::Absent,
+                            FileCapture::Changed => FileReadPart::Changed,
+                            FileCapture::Binary { bytes } => FileReadPart::Binary { bytes },
+                            FileCapture::TooLarge { bytes, limit } => {
+                                FileReadPart::TooLarge { bytes, limit }
+                            }
+                            FileCapture::Unsupported { file_kind } => {
+                                FileReadPart::Unsupported { file_kind }
+                            }
+                            FileCapture::Ready(_) => unreachable!("ready capture handled above"),
+                        };
+                        owner.emit_file_part(part, &context).await?;
+                        return Ok(Value::Null);
+                    }
+                };
+                let bytes = snapshot.data.len() as u64;
+                owner
+                    .emit_file_part(
+                        FileReadPart::Begin {
+                            version: snapshot.version.clone(),
+                            digest: snapshot.digest.clone(),
+                            bytes,
+                            content: snapshot.content.clone(),
+                        },
+                        &context,
+                    )
+                    .await?;
+                let text = matches!(snapshot.content, FileContent::Text)
+                    .then(|| std::str::from_utf8(&snapshot.data).expect("captured text is UTF-8"));
+                let mut offset = 0;
+                while offset < snapshot.data.len() {
+                    let mut end = (offset + 32 * 1024).min(snapshot.data.len());
+                    if let Some(text) = text {
+                        while !text.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                    }
+                    owner
+                        .emit_file_part(
+                            FileReadPart::Chunk {
+                                offset: offset as u64,
+                                data: STANDARD.encode(&snapshot.data[offset..end]),
+                            },
+                            &context,
+                        )
+                        .await?;
+                    offset = end;
+                }
+                owner
+                    .check_file_session(&input.session_id, &original, &scope)
+                    .await?;
+                owner
+                    .emit_file_part(
+                        FileReadPart::End {
+                            version: snapshot.version,
+                            digest: snapshot.digest,
+                            bytes,
+                        },
+                        &context,
+                    )
+                    .await?;
+                Ok(Value::Null)
+            })
+        })
+        .await
+    }
+
+    async fn emit_file_part(&self, part: FileReadPart, context: &Context) -> Result<(), String> {
+        if context.scope().cancellation.is_cancelled() || self.stop.is_cancelled() {
+            return Err("agent_files_cancelled".into());
+        }
+        let value = serde_json::to_value(part).map_err(|_| "agent_files_output_unavailable")?;
+        maka_plugin_core::json::check_delivery(&value, 64 * 1024)
+            .map_err(|_| "agent_files_output_unavailable")?;
+        tokio::select! {
+            biased;
+            _ = context.scope().cancellation.cancelled() => Err("agent_files_cancelled".into()),
+            _ = self.stop.cancelled() => Err("agent_files_cancelled".into()),
+            result = context.emit(value) => result,
+        }
+    }
+
     pub async fn list_files(
         self: &Arc<Self>,
         input: FileListRead,

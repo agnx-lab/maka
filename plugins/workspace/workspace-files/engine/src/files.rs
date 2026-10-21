@@ -34,6 +34,8 @@ use std::{
 
 mod watch;
 pub use watch::Watch;
+mod preview;
+pub use preview::{FileCapture, FileContent, FileSnapshot};
 #[cfg(test)]
 mod tests;
 
@@ -172,24 +174,28 @@ impl Directory {
             if result.excluded(&result.anchors[0].path) {
                 return Err(error("files_private"));
             }
-            for component in relative.components() {
-                interrupted(cancel)?;
-                let parent = result.anchors.last().expect("workspace anchor");
-                let path = parent.path.join(component.as_os_str());
-                if result.excluded(&path) {
-                    return Err(error("files_private"));
-                }
-                let directory = parent.directory.open_dir_nofollow(component.as_os_str())?;
-                let identity = crate::directory::identity(&directory)?;
-                result.anchors.push(Anchor {
-                    path,
-                    directory,
-                    identity,
-                });
-            }
+            result.descend(&relative, cancel)?;
             result.validate_inner()?;
             Ok(result)
         })())
+    }
+    fn descend(&mut self, relative: &Path, cancel: &AtomicBool) -> io::Result<()> {
+        for component in relative.components() {
+            interrupted(cancel)?;
+            let parent = self.anchors.last().expect("workspace anchor");
+            let path = parent.path.join(component.as_os_str());
+            if self.excluded_child(&parent.path, component.as_os_str()) {
+                return Err(error("files_private"));
+            }
+            let directory = parent.directory.open_dir_nofollow(component.as_os_str())?;
+            let identity = crate::directory::identity(&directory)?;
+            self.anchors.push(Anchor {
+                path,
+                directory,
+                identity,
+            });
+        }
+        Ok(())
     }
     pub fn directory_identity(&self) -> &DirectoryIdentity {
         &self.anchors.last().expect("target anchor").identity

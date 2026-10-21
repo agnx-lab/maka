@@ -1600,6 +1600,10 @@ pub fn contract() -> Contract {
                     method::<FileWatch, FileChange>(MethodMode::Subscription),
                 ),
                 (
+                    "readFile".into(),
+                    method::<FileRead, Option<FileReadPart>>(MethodMode::Subscription),
+                ),
+                (
                     "context".into(),
                     method::<ContextRead, ContextReport>(MethodMode::Query),
                 ),
