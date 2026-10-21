@@ -997,7 +997,7 @@ pub fn click_label(view: &mut AppView, label: &str) {
     click_node(view, node);
 }
 
-fn click_node(view: &mut AppView, node: nsh_platform_tui::AccessibleNode) {
+pub fn click_node(view: &mut AppView, node: nsh_platform_tui::AccessibleNode) {
     use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     // Native input uses cell centers; a half-cell origin must not select its exclusive far edge.
     let column = (node.frame.origin.x.0 / 8.0 - 0.5).ceil().max(0.0) as u16;

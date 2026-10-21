@@ -46,7 +46,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use maka_plugin_core::operation::{OperationOutcome, Receipt};
-use nsh_platform_tui::AppView;
+use nsh_platform_tui::{AccessibleNode, AppView};
 use serde_json::{Value, json};
 #[cfg(unix)]
 use std::time::Instant;
@@ -175,6 +175,23 @@ async fn wait_editable_composer(view: &mut AppView) {
     .expect("the original native message composer did not become editable and focused");
 }
 
+fn selected_command<'a>(nodes: &'a [AccessibleNode], title: &str) -> Option<&'a AccessibleNode> {
+    nodes.iter().find(|button| {
+        button.role == nsh_core::AccessibilityRole::Button
+            && !button.state.disabled
+            && button.state.selected
+            && nodes.iter().any(|text| {
+                text.label == title
+                    && text.frame.origin.x.0 >= button.frame.origin.x.0
+                    && text.frame.origin.y.0 >= button.frame.origin.y.0
+                    && text.frame.origin.x.0
+                        < button.frame.origin.x.0 + button.frame.size.width.0
+                    && text.frame.origin.y.0
+                        < button.frame.origin.y.0 + button.frame.size.height.0
+            })
+    })
+}
+
 async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, choice: &str) {
     let input_label = match placeholder {
         "Search models…" => "Search models",
@@ -225,18 +242,7 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
                 "Search workspaces…" => first.any(|node| {
                     node.label == format!("Browse folder {choice}") && node.state.selected
                 }),
-                "Search commands…" => first.any(|button| {
-                    button.state.selected
-                        && nodes.iter().any(|text| {
-                            text.label.starts_with(&format!("› {choice}"))
-                                && text.frame.origin.x.0 >= button.frame.origin.x.0
-                                && text.frame.origin.y.0 >= button.frame.origin.y.0
-                                && text.frame.origin.x.0
-                                    < button.frame.origin.x.0 + button.frame.size.width.0
-                                && text.frame.origin.y.0
-                                    < button.frame.origin.y.0 + button.frame.size.height.0
-                        })
-                }),
+                "Search commands…" => selected_command(&nodes, choice).is_some(),
                 _ => unreachable!(),
             };
             if ready {
@@ -609,8 +615,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         support::click_text(&mut view, "Close");
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Search commands…")).await;
         support::click_text(&mut view, "Commands");
-        wait_view(&mut view, |screen| screen.contains("Search commands…") && screen.contains("› Sessions")).await;
-        support::click_text(&mut view, "› Sessions");
+        wait_view_state(&mut view, |view, screen| screen.contains("Search commands…") && selected_command(&view.accessibility_snapshot(), "Sessions").is_some()).await;
+        let nodes = view.accessibility_snapshot();
+        support::click_node(&mut view, selected_command(&nodes, "Sessions").unwrap().clone());
         wait_view(&mut view, |screen| screen.contains("Search sessions…") && screen.contains("NSH real Agent") && !screen.contains("Loading…")).await;
         wait_focused_input(&mut view, "Search session titles").await;
         support::click_button(&mut view, "Open conversation NSH real Agent").await;
@@ -2187,7 +2194,8 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         let mut terminal = support::pty::Pty::spawn_sixel(&fixture.directory.path().join("host"), Some(&fixture.session));
         // The emulator appends this ordinary Ctrl+P to its cell-size reply.
         terminal.wait_for("Search commands…").await;
-        terminal.wait_for("Type to filter · ↑↓ to navigate").await;
+        let palette = terminal.wait_for("Resume a conversation").await;
+        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
         terminal.send(b"\x1b");
         terminal.wait_for_absent("Close").await;
         terminal.wait_for_absent("Loading session history").await;
@@ -2375,9 +2383,13 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         for choose in [false, true] {
             terminal.send(b"\x10");
             terminal.wait_for("Search commands…").await;
-            terminal.wait_for("Type to filter · ↑↓ to navigate").await;
+            let palette = terminal.wait_for("Resume a conversation").await;
+            assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
             terminal.paste("Choose workspace");
-            terminal.wait_for("› Choose workspace").await;
+            // Removing the old first result proves the query reset keyboard
+            // selection to the sole command row, not just the native Input.
+            let choice = terminal.wait_for_absent("Resume a conversation").await;
+            assert!(choice.contains("Choose workspace") && choice.contains("Start a conversation in another folder") && choice.contains("Close"));
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
             terminal.wait_for("Workspace locations").await;
@@ -2499,7 +2511,8 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         input.push(0x10);
         terminal.send(&input);
         terminal.wait_for("Search commands…").await;
-        terminal.wait_for("Type to filter · ↑↓ to navigate").await;
+        let palette = terminal.wait_for("Resume a conversation").await;
+        assert!(palette.contains("Search commands…") && palette.contains("Sessions") && palette.contains("Close"));
         terminal.click_text("Close");
         terminal.wait_for_absent("Close").await;
         terminal.wait_for("Make something remarkable.").await;
@@ -2510,7 +2523,8 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         // Removing another command proves the actual query handler committed,
         // rather than treating a native Input border as an app-ready marker.
         terminal.wait_for_absent("A fresh start in your workspace").await;
-        terminal.wait_for("› Sessions").await;
+        let choice = terminal.wait_for("Resume a conversation").await;
+        assert!(choice.contains("Sessions") && choice.contains("Close"));
         terminal.send(b"\r");
         terminal.wait_for_absent("Close").await;
         terminal.wait_for("Search sessions…").await;
