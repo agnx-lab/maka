@@ -20,6 +20,23 @@
 import type { Row } from './history';
 import type { ToolActivity } from './toolActivity';
 
+/** Source identity, ordering and turn/group boundaries, independent of streamed text. */
+export type ProcessRow = Pick<
+  Row,
+  | 'messageId'
+  | 'field'
+  | 'role'
+  | 'position'
+  | 'tool'
+  | 'turnId'
+  | 'timing'
+  | 'finalOutput'
+  | 'metadataThrough'
+  | 'sequence'
+  | 'startSequence'
+>;
+export type ProcessActivity = Pick<ToolActivity, 'toolUseId' | 'turnId' | 'startSequence'>;
+
 export type MemberRef =
   | { kind: 'row'; rowId: string; toolUseId?: string }
   | { kind: 'activity'; toolUseId: string };
@@ -51,15 +68,61 @@ export type TurnPresentation = {
 export type ProcessProjection = {
   entries: ProcessEntry[];
   turns: Map<string, TurnPresentation>;
-  rowsById: Map<string, Row>;
+  rowsById: Map<string, ProcessRow>;
 };
 
 /** One identity across streaming fragments, canonical handoff and tool result pairing. */
-export function stableRowId(row: Row): string {
+export function stableRowId(row: ProcessRow): string {
   const call = row.tool?.call;
   return call
     ? `tool/${row.tool.toolUseId}/${call.position.sourceSequence}/${call.position.itemIndex}`
     : `${row.messageId}/${row.field}`;
+}
+
+export function sourceSequence(row: ProcessRow): number | undefined {
+  return row.position?.sourceSequence ?? row.startSequence ?? row.sequence;
+}
+
+/** Compare only the small live set; a text delta keeps its original source seat. */
+export function sameProcessRows(left: readonly ProcessRow[], right: readonly ProcessRow[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((row, index) => {
+      const next = right[index];
+      return (
+        stableRowId(row) === stableRowId(next) &&
+        row.role === next.role &&
+        row.field === next.field &&
+        row.turnId === next.turnId &&
+        sourceSequence(row) === sourceSequence(next) &&
+        (row.position?.itemIndex ?? 0) === (next.position?.itemIndex ?? 0) &&
+        Boolean(row.tool) === Boolean(next.tool) &&
+        row.tool?.toolUseId === next.tool?.toolUseId &&
+        Boolean(row.tool?.call) === Boolean(next.tool?.call) &&
+        Boolean(row.tool?.result) === Boolean(next.tool?.result) &&
+        row.finalOutput === next.finalOutput &&
+        row.timing === next.timing &&
+        row.metadataThrough === next.metadataThrough
+      );
+    })
+  );
+}
+
+export function sameProcessActivity(
+  left: readonly ProcessActivity[],
+  right: readonly ProcessActivity[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((activity, index) => {
+      const next = right[index];
+      return (
+        activity.toolUseId === next.toolUseId &&
+        activity.turnId === next.turnId &&
+        activity.startSequence === next.startSequence
+      );
+    })
+  );
 }
 
 function memberId(member: MemberRef): string {
@@ -72,8 +135,8 @@ function memberId(member: MemberRef): string {
  * references; a live tool preview can own a header but never becomes a message.
  */
 export function projectProcessGroups(input: {
-  rows: readonly Row[];
-  toolActivity: readonly ToolActivity[];
+  rows: readonly ProcessRow[];
+  toolActivity: readonly ProcessActivity[];
   activeTurnId: string | null;
   previous?: readonly ProcessEntry[];
   /** Only caller-known missing coverage, not gaps between raw event numbers. */
@@ -81,7 +144,7 @@ export function projectProcessGroups(input: {
 }): ProcessProjection {
   const entries: ProcessEntry[] = [];
   const turns = new Map<string, TurnPresentation>();
-  const rowsById = new Map<string, Row>();
+  const rowsById = new Map<string, ProcessRow>();
   const positions: { rowId: string; sequence: number | undefined }[] = [];
   const canonicalTools = new Set<string>();
   const timingThrough = new Map<string, number>();
@@ -106,7 +169,7 @@ export function projectProcessGroups(input: {
     if (!rowsById.has(rowId))
       positions.push({
         rowId,
-        sequence: row.position?.sourceSequence ?? row.startSequence ?? row.sequence,
+        sequence: sourceSequence(row),
       });
     // A paired result refreshes the original call's seat, not a second row.
     if (!rowsById.has(rowId) || !row.tool?.call || row.tool.result) rowsById.set(rowId, row);

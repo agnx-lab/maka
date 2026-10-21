@@ -45,8 +45,20 @@ import { FinalActions } from './FinalActions';
 import type { SessionAction } from './sessionLifecycle';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
-import { projectProcessGroups, stableRowId } from './processGroups';
-import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
+import {
+  projectProcessGroups,
+  sameProcessActivity,
+  sameProcessRows,
+  sourceSequence,
+  stableRowId,
+} from './processGroups';
+import type {
+  ProcessActivity,
+  ProcessEntry,
+  ProcessGroup,
+  ProcessRow,
+  TurnPresentation,
+} from './processGroups';
 import { ReturnToLatest, TurnNavigation } from './TurnNavigation';
 import type { TurnNavigationItem } from './TurnNavigation';
 import type { ConversationStatus } from './sessionStatus';
@@ -99,6 +111,18 @@ type LivePart = {
 };
 function comparePosition(left: Position, right: Position): number {
   return left.sourceSequence - right.sourceSequence || left.itemIndex - right.itemIndex;
+}
+function indexRows(items: readonly Row[]) {
+  const byId = new Map<string, Row>();
+  const byMessage = new Map<string, Row>();
+  for (const row of items) {
+    const id = stableRowId(row);
+    // The result supplies current content at the original tool call's seat.
+    if (!byId.has(id) || !row.tool?.call || row.tool.result) byId.set(id, row);
+    const message = `${row.messageId}/${row.field}`;
+    if (!byMessage.has(message)) byMessage.set(message, row);
+  }
+  return { byId, byMessage };
 }
 function receiptMessage(reply: any): string {
   const receipt = reply?.receipt;
@@ -193,13 +217,23 @@ export function Conversation(props: ConversationProps) {
     }
     return state;
   };
+  const canonicalRows = computed(() => indexRows(rows()));
+  const liveRows = computed(() => indexRows(live()));
+  const currentRow = (id: string) =>
+    canonicalRows().byId.get(id) ??
+    liveRows().byId.get(id) ??
+    pendingMessages().find((row) => stableRowId(row) === id);
+  const processLive = computed<readonly ProcessRow[]>(() => live(), { equals: sameProcessRows });
+  const processActivity = computed<readonly ProcessActivity[]>(() => toolActivity(), {
+    equals: sameProcessActivity,
+  });
   const activity = computed<LiveActivity>(() => {
     if (run() === 'waiting_for_user') return { kind: 'waiting', detail: '' };
     let latest: { part: LivePart; row: Row; sequence: number } | undefined;
     for (const part of parts()) {
       if (part.invocationId !== invocation()) continue;
-      const matches = (row: Row) => row.messageId === part.messageId && row.field === part.field;
-      const row = live().find(matches) ?? rows().find(matches);
+      const message = `${part.messageId}/${part.field}`;
+      const row = liveRows().byMessage.get(message) ?? canonicalRows().byMessage.get(message);
       if (!row || row.closedAt != null) continue;
       const sequence = Math.max(part.startSequence, row.sequence ?? 0);
       if (!latest || sequence > latest.sequence) latest = { part, row, sequence };
@@ -220,18 +254,16 @@ export function Conversation(props: ConversationProps) {
   const projection = computed(() => {
     // Canonical position and live PartStarted sequence are source order. A send
     // echo has no source position yet and stays at the local tail until admitted.
-    const order = (row: Row) =>
-      row.position?.sourceSequence ?? row.startSequence ?? row.sequence ?? 0;
-    const ordered = [...rows(), ...live()].sort((left, right) => {
+    const ordered = [...rows(), ...processLive()].sort((left, right) => {
       return (
-        order(left) - order(right) ||
+        (sourceSequence(left) ?? 0) - (sourceSequence(right) ?? 0) ||
         (left.position?.itemIndex ?? 0) - (right.position?.itemIndex ?? 0) ||
         Number(left.field === 'body') - Number(right.field === 'body')
       );
     });
     const next = projectProcessGroups({
       rows: [...ordered, ...pendingMessages().filter((row) => row.placement === 'transcript')],
-      toolActivity: toolActivity(),
+      toolActivity: processActivity(),
       activeTurnId: invocation() === null ? null : runTurn(),
       previous: previousGroups,
     });
@@ -385,11 +417,10 @@ export function Conversation(props: ConversationProps) {
   const report = (reason: unknown) => {
     if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
   };
-  const covered = computed(() => new Set(rows().map((row) => `${row.messageId}/${row.field}`)));
   const publishHistory = (chunks: any[], through: number, older = false) => {
     batch(() => {
       rows.set(mergeChunks(rows(), chunks, older, through));
-      const canonical = covered();
+      const canonical = canonicalRows().byMessage;
       live.set(live().filter((row) => !canonical.has(`${row.messageId}/${row.field}`)));
       pendingMessages.set(
         pendingMessages().filter((row) => !canonical.has(`${row.messageId}/${row.field}`)),
@@ -694,7 +725,7 @@ export function Conversation(props: ConversationProps) {
               part.stepId === fact.stepId &&
               part.partId === fact.partId,
           );
-          if (!part || covered().has(`${part.messageId}/${part.field}`)) break;
+          if (!part || canonicalRows().byMessage.has(`${part.messageId}/${part.field}`)) break;
           const key = `live/${part.messageId}/${part.field}`;
           const previous = live().find((row) => row.key === key);
           if (previous?.sequence !== undefined && event.sequence <= previous.sequence) break;
@@ -1159,7 +1190,7 @@ export function Conversation(props: ConversationProps) {
       notice.set(receiptMessage(reply));
       return;
     }
-    if (text !== undefined && !covered().has(`${accepted.messageId}/body`)) {
+    if (text !== undefined && !canonicalRows().byMessage.has(`${accepted.messageId}/body`)) {
       pendingMessages.set([
         ...pendingMessages().filter((row) => row.messageId !== accepted.messageId),
         {
@@ -1726,7 +1757,7 @@ export function Conversation(props: ConversationProps) {
                         turn={turn}
                         toolActivity={tool}
                         state={groupState(initial.group.key)}
-                        row={(id) => projection().rowsById.get(id)}
+                        row={currentRow}
                         rowState={rowState}
                         sessionId={sessionId}
                         through={() => latestKnown}
@@ -1741,14 +1772,9 @@ export function Conversation(props: ConversationProps) {
                       />
                     );
                   }
-                  const first =
-                    projection().rowsById.get(initial.rowId) ??
-                    pendingMessages().find((row) => stableRowId(row) === initial.rowId);
+                  const first = currentRow(initial.rowId);
                   if (!first) return <View />;
-                  const row = () =>
-                    projection().rowsById.get(initial.rowId) ??
-                    pendingMessages().find((row) => stableRowId(row) === initial.rowId) ??
-                    first;
+                  const row = () => currentRow(initial.rowId) ?? first;
                   return (
                     <View>
                       <If

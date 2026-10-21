@@ -1773,6 +1773,8 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         let streaming = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE") && screen.contains("Writing response")).await;
         evidence("streaming", &streaming);
         request.delta(" and committed.").await;
+        let appended = wait_view(&mut view, |screen| screen.contains("REAL_PROVIDER_STREAM_VISIBLE") && screen.contains("committed.") && screen.contains("Writing response")).await;
+        evidence("streaming-second-fragment", &appended);
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         let committed = wait_view(&mut view, |screen| screen.contains("Completed") && screen.matches("REAL_PROVIDER_STREAM_VISIBLE").count() == 1 && screen.contains("committed.") && !screen.contains("NATIVE_THINK_SOURCE_FIRST") && !screen.contains("NATIVE_ACTIVITY_HEADER_TAIL_APPENDED")).await;
