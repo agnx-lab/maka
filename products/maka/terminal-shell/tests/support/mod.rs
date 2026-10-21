@@ -944,10 +944,10 @@ impl ReplyGate {
         Self::for_method(directory, target, "send", "mutation", false)
     }
     pub fn directories(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "directories", "finished")
+        Self::for_method(directory, target, "directories", "finished", false)
     }
     pub fn respond(directory: &Path, target: PathBuf) -> Self {
-        Self::for_method(directory, target, "respond", "mutation")
+        Self::for_method(directory, target, "respond", "mutation", false)
     }
     #[cfg(unix)]
     pub fn history(directory: &Path, target: PathBuf) -> Self {
@@ -995,7 +995,7 @@ impl ReplyGate {
                                 let _ = up_write.shutdown().await;
                                 };
                                 let down=async move {let mut reader=wire::Reader::new(up_read); while let Ok(value)=reader.read::<Value>().await {
-                                    if selected.load(Ordering::SeqCst) && value["kind"]==reply && armed.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1)).is_ok() {
+                                    if selected.load(Ordering::SeqCst) && value["kind"]==reply && armed.try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1)).is_ok() {
                                         held.notify_one();
                                         if disconnect { break; }
                                         release.notified().await;

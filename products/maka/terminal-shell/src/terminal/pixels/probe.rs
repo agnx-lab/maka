@@ -99,7 +99,7 @@ impl Capabilities {
 }
 
 pub(crate) struct Probe {
-    pub slots: Slots,
+    pub(super) slots: Slots,
     deadline: Option<Instant>,
     kitty: Option<(bool, Instant)>,
     mouse: Option<(bool, Instant)>,
@@ -108,7 +108,7 @@ pub(crate) struct Probe {
     sixel_mode: Option<(DecModeSetting, Instant)>,
     inline: Option<(Features, Instant)>,
     synchronized: Option<(bool, Instant)>,
-    pub measurement: PixelSizeQuery,
+    pub(super) measurement: PixelSizeQuery,
     cancelled: bool,
 }
 

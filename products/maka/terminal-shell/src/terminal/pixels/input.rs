@@ -70,11 +70,11 @@ pub(crate) struct Inbox {
     pub published: Option<FrameToken>,
     pub keyboard: Option<FrameToken>,
     capture: Option<FrameToken>,
-    pub pending: Option<Candidate>,
-    pub encoded: Option<Result<Encoded, String>>,
+    pub(super) pending: Option<Candidate>,
+    pub(super) encoded: Option<Result<Encoded, String>>,
     pub displayed_image: Option<u32>,
     pub in_flight: Option<FrameToken>,
-    pub ready: Option<Offer>,
+    pub(super) ready: Option<Offer>,
     pub geometry: u64,
     pub resize: Option<WindowSize>,
     pub cancel_pointer: bool,
@@ -201,7 +201,7 @@ impl Inbox {
         self.bytes = self.events.iter().map(|input| bytes(&input.event)).sum();
     }
 
-    pub fn pop(&mut self) -> Option<Input> {
+    pub(super) fn pop(&mut self) -> Option<Input> {
         if self
             .events
             .front()
