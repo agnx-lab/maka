@@ -81,9 +81,16 @@ function rejection(value: any): Error {
   if (
     value?.kind === 'connection_stale' ||
     value?.kind === 'revision_conflict' ||
-    value?.kind === 'superseded'
+    value?.kind === 'superseded' ||
+    value?.kind === 'credential_stale' ||
+    value?.reason === 'credential_changed' ||
+    value?.reason === 'connection_changed'
   )
     return new Error('This connection changed elsewhere. Reload it before saving again.');
+  if (value?.kind === 'connection_exists')
+    return new Error('That connection ID is already in use. Choose another ID.');
+  if (value?.kind === 'invalid_default_target')
+    return new Error('Enable the connection and model before making it the default.');
   return new Error(
     `The Host rejected this action (${value?.reason ?? value?.kind ?? 'unknown result'}).`,
   );
@@ -412,12 +419,12 @@ export function createModelSettings(changed: () => void) {
   const adopt = async (
     target: ConnectionVersionBasis,
     captured: number,
-    key: 'unchanged' | 'saved' | 'refresh' = 'refresh',
+    key: 'unchanged' | 'committed' | 'refresh' = 'refresh',
   ) => {
     changed();
     let detail: Detail;
     try {
-      detail = await readDetail(target, key === 'saved');
+      detail = await readDetail(target, key === 'committed');
     } catch (reason) {
       if (alive && editor()?.instance === captured) {
         editor.set(null);
@@ -525,7 +532,7 @@ export function createModelSettings(changed: () => void) {
         editor.set({ ...editor()!, apiKey: '' });
         // Reauthentication advances the connection revision independently.
         // Read the actual new basis; never guess a revision or reuse the old one.
-        if (!(await adopt(basis(detail), form.instance, 'saved'))) return;
+        if (!(await adopt(basis(detail), form.instance, 'committed'))) return;
         notice.set('Connection and API key saved.');
         changed();
       } else if (alive && !result) notice.set('No connection changes.');
@@ -543,6 +550,10 @@ export function createModelSettings(changed: () => void) {
       if (!form?.baseline || dirty())
         throw new Error('Save the connection and API key before fetching models.');
       const result = await mutate('setup', 'discoverModels', form.baseline.target);
+      if (result.kind === 'failed')
+        throw new Error(
+          'Could not fetch models. Check the saved base URL, API key and network access, or add a model manually.',
+        );
       if (result.kind !== 'ready') throw rejection(result);
       await adopt(result.connection, form.instance);
       await loadConnections();
@@ -668,7 +679,8 @@ export function createModelSettings(changed: () => void) {
     if (
       current(request) &&
       !busy() &&
-      (request.kind !== 'model' || model()?.originalId === request.modelId)
+      (request.kind !== 'model' || model()?.originalId === request.modelId) &&
+      (request.kind !== 'key' || !dirty())
     )
       confirmation.set(request.kind);
   };
@@ -681,7 +693,8 @@ export function createModelSettings(changed: () => void) {
     if (
       !current(request) ||
       confirmation() !== request.kind ||
-      (request.kind === 'model' && model()?.originalId !== request.modelId)
+      (request.kind === 'model' && model()?.originalId !== request.modelId) ||
+      (request.kind === 'key' && dirty())
     )
       return;
     return run(async () => {
@@ -706,10 +719,8 @@ export function createModelSettings(changed: () => void) {
           expectedConnection: form.baseline.target,
         });
         if (result.kind !== 'committed') throw rejection(result);
-        if (alive) {
-          credential.set(result.status);
-          notice.set('API key removed.');
-        }
+        if (!(await adopt(basis(form.baseline), form.instance, 'committed'))) return;
+        if (alive) notice.set('API key removed.');
       } else if (kind === 'model') {
         const current = model();
         if (!current?.originalId) return;

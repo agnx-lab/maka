@@ -84,7 +84,7 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           />
           <If when={owner.credential()?.configured}>
             <Button
-              disabled={disabled()}
+              disabled={disabled() || owner.dirty()}
               onPress={inputAction(owner.confirm, {
                 ...owner.action(),
                 kind: 'key',
@@ -93,6 +93,11 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             >
               <Text style={{ color: C.danger }}>Remove stored API key</Text>
             </Button>
+            <If when={owner.dirty()}>
+              <Text style={{ color: C.muted }}>
+                Save or discard connection edits before removing the stored key.
+              </Text>
+            </If>
           </If>
         </If>
         <SettingsField
