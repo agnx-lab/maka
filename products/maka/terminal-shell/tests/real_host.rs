@@ -202,6 +202,27 @@ async fn browse_workspace_folder(view: &mut AppView, name: &str) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_before_one_send() {
+    async fn editable(view: &mut AppView, label: &str) {
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                support::tick(view);
+                if view
+                    .surface()
+                    .input_context()
+                    .is_some_and(|input| input.editable)
+                    && view
+                        .accessibility_snapshot()
+                        .iter()
+                        .any(|node| node.focused && node.label == label)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the native Input {label:?} did not become editable"));
+    }
     async fn activate(view: &mut AppView, label: &str) {
         tab_to_label(view, label).await;
         view.handle_event(Event::Key(KeyEvent::new(
@@ -211,7 +232,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
     }
     async fn fill(view: &mut AppView, label: &str, value: &str) {
         tab_to_label(view, label).await;
-        wait_focused_input(view, label).await;
+        editable(view, label).await;
         shortcut(view, 'a');
         view.handle_event(Event::Paste(value.into()));
         // Commit the real native onChange before another control can save it.
@@ -318,8 +339,11 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Back from connection settings").await;
         wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close · Esc")).await;
         support::click_label(&mut view, "Choose composer workspace");
-        wait_view(&mut view, |screen| screen.contains("Workspaces") && screen.contains("› Workspace") && !screen.contains("Loading…")).await;
-        select_palette(&mut view, "Search workspaces…", "Workspace", "Workspace").await;
+        wait_view(&mut view, |screen| screen.contains("Workspace locations") && screen.contains("› Workspace /") && !screen.contains("Loading folders…")).await;
+        support::click_label(&mut view, "Browse folder Workspace");
+        wait_view(&mut view, |screen| screen.contains("Folder · Workspace") && !screen.contains("Loading folders…")).await;
+        wait_enabled_node(&mut view, "Use this workspace folder").await;
+        support::click_label(&mut view, "Use this workspace folder");
         wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
         select_palette(&mut view, "Search models…", "manual-ui-agent", "Manual UI Agent").await;
         wait_view(&mut view, |screen| screen.contains("Manual UI Agent · Default · high · Ctrl+G") && screen.contains("Enter sends") && !screen.contains("Back · Esc") && !screen.contains("Close · Esc")).await;
@@ -328,7 +352,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         let session = sessions["sessions"][0]["id"].as_str().unwrap().to_owned();
         let observed = client.query("agent", "observe", json!({"sessionId":session})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":basis["connectionId"],"modelId":"manual-ui-agent","thinkingLevel":null}));
-        wait_focused_input(&mut view, "Message composer").await;
+        editable(&mut view, "Message composer").await;
         view.handle_event(Event::Paste("Use my new connection exactly once".into()));
         support::wait_draft(&client, &session, "Use my new connection exactly once").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
