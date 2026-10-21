@@ -1625,6 +1625,7 @@ export function Conversation(props: ConversationProps) {
                     list?.scrollToIndex({
                       index: displayKeys().indexOf(ownedKey()),
                       viewPosition: 0,
+                      animated: false,
                     });
                   if (initial.kind === 'summary') {
                     const first = projection().turns.get(initial.turnId);
