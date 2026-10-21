@@ -88,6 +88,8 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
 
         actions(&mut view, "Renamed original").await;
         support::click_label(&mut view, "Archive conversation");
+        wait_view(&mut view, |screen| !screen.contains("Conversation actions")).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("This conversation is archived.")).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["session"]["archived"], true);
         support::wait_draft(&client, &fixture.session, "Original draft stays with its owner").await;
@@ -98,9 +100,11 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         support::click_label(&mut view, "Actions for Renamed original");
         wait_enabled_node(&mut view, "Restore conversation").await;
         support::click_label(&mut view, "Restore conversation");
+        wait_view(&mut view, |screen| !screen.contains("Conversation actions")).await;
+        support::click_label(&mut view, "Show active conversations");
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| !screen.contains("This conversation is archived.") && screen.contains("Enter sends")).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["session"]["archived"], false);
-        support::click_label(&mut view, "Show active conversations");
 
         actions(&mut view, "Renamed original").await;
         support::click_label(&mut view, "Fork conversation");
@@ -127,6 +131,12 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         tab_to_label(&mut view, "Message composer").await;
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Original draft stays with its owner"));
 
+        shortcut(&mut view, 'o');
+        wait_enabled_node(&mut view, "Choose workspace scope").await;
+        support::click_label(&mut view, "Choose workspace scope");
+        wait_view(&mut view, |screen| screen.contains("Choose a workspace below")).await;
+        support::click_text(&mut view, "Current workspace");
+        wait_view(&mut view, |screen| !screen.contains("Choose a workspace below") && screen.contains("Search sessions…")).await;
         actions(&mut view, "Renamed original").await;
         support::click_label(&mut view, "Delete conversation");
         wait_enabled_node(&mut view, "Confirm delete conversation").await;
@@ -136,6 +146,11 @@ async fn real_session_lifecycle_keeps_original_revisions_history_and_separate_dr
         let remaining = client.query("agent", "list", json!({"filter":"all","scope":{"kind":"all"},"titleQuery":"","position":{"kind":"start"}})).await.unwrap();
         assert_eq!(remaining["sessions"].as_array().unwrap().len(), 1);
         assert_eq!(remaining["sessions"][0]["id"], fork_id);
+        // The removed source no longer grants a workspace-scoped read. The
+        // same browser must retire that scope and still expose the real fork.
+        shortcut(&mut view, 'o');
+        wait_enabled_node(&mut view, "Open conversation Independent fork").await;
+        wait_view(&mut view, |screen| screen.contains("All workspaces")).await;
         support::wait_draft(&client, &fork_id, "Independent fork draft").await;
         assert!(fixture.directory.path().join("workspace").is_dir(), "deleting a conversation must retain its workspace");
         assert!(client.pending_controls().await.unwrap().is_empty());
