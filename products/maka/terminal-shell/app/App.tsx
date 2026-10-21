@@ -211,6 +211,9 @@ function App() {
     else open({ kind: 'workspaces', sessionId });
   };
   const removeSelected = async (sessionId: string) => {
+    const scope = browsing.scope();
+    if (scope.kind === 'workspace' && scope.sessionId === sessionId)
+      browsing.setScope({ kind: 'all' });
     const owner = handle();
     if (!alive || selected() !== sessionId || owner?.sessionId !== sessionId) return;
     if (!(await owner.flushDraft()))
@@ -404,7 +407,8 @@ function App() {
           report(reason);
         }
       }
-      await handle()?.refresh();
+      const owner = handle();
+      if (owner && selected() === owner.sessionId) await owner.refresh();
       await browsing.refresh();
       status.set('Original actions checked.');
     } catch (reason) {
