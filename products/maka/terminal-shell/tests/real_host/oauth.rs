@@ -203,7 +203,7 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         assert_eq!(original.method, "loginCredential");
         assert_eq!(original.reference.as_ref(), Some(reference));
         let nodes = view.accessibility_snapshot();
-        for label in ["Settings section General", "Settings section Connections & models", "Settings section Network", "Back from connection settings"] {
+        for label in ["Settings section General", "Settings section Connections & models", "Settings section Network", "Back from connection settings", "Close settings"] {
             let mut buttons = nodes.iter().filter(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == label);
             let button = buttons.next().unwrap_or_else(|| panic!("the live sign-in lost native button {label:?}"));
             assert!(buttons.next().is_none(), "ambiguous live sign-in button {label:?}");
@@ -237,8 +237,8 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         assert_eq!(client.query("settings", "connections", json!({"kind":"start"})).await.unwrap(), catalog);
         assert_eq!(client.query("settings", "credentialStatus", credential_input).await.unwrap(), credential);
         activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Refresh connections") && screen.contains("Close") && !screen.contains("Connection name")).await;
-        activate(&mut view, "Back from connection settings").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Refresh connections") && !screen.contains("Connection name") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close settings" && !node.state.disabled) && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Back from connection settings")).await;
+        activate(&mut view, "Close settings").await;
         editable(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(draft));

@@ -496,9 +496,9 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Back from connection settings").await;
         wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
         activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && screen.contains("Close")).await;
-        activate(&mut view, "Back from connection settings").await;
-        wait_view(&mut view, |screen| screen.contains("Make something remarkable.") && !screen.contains("Close")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Connections & models") && screen.contains("Refresh connections") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close settings" && !node.state.disabled) && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Back from connection settings")).await;
+        activate(&mut view, "Close settings").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Make something remarkable.") && !view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Close settings")).await;
         support::click_button(&mut view, "Choose composer workspace").await;
         wait_view_state(&mut view, |view, screen| screen.contains("Workspace locations") && !screen.contains("Loading folders…") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Browse folder Workspace" && !node.state.disabled)).await;
         support::click_button(&mut view, "Browse folder Workspace").await;
@@ -583,7 +583,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(final_network["proxy"], saved_network["proxy"]);
         assert_eq!(final_network["credential"], saved_network["credential"]);
         assert!(!final_network.to_string().contains(proxy_secret));
-        activate(&mut view, "Back from general settings").await;
+        activate(&mut view, "Close settings").await;
         editable(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(composer), "settings replaced the resident native composer");
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Use my new connection exactly once"));
