@@ -128,8 +128,15 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     let result = (|| {
         input = Some(start_reader(presentation.clone(), reader)?);
         #[cfg(target_os = "linux")]
-        if let Some(capabilities) = pixels::select(&mut output, &presentation, size)? {
-            return pixels::run(&mut output, &presentation, config, capabilities);
+        {
+            let capabilities = pixels::select(&mut output, &presentation, size)?;
+            if presentation.stop.load(Ordering::Acquire) || presentation.state.lock().unwrap().quit
+            {
+                return Ok(());
+            }
+            if let Some(capabilities) = capabilities {
+                return pixels::run(&mut output, &presentation, config, capabilities);
+            }
         }
         let (commands, frames) =
             ui::spawn(config, presentation.clone()).map_err(|error| error.to_string())?;

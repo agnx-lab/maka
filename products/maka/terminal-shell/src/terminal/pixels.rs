@@ -225,6 +225,11 @@ pub(super) fn run(
                                 }
                             }
                         }
+                        if presentation.stop.load(Ordering::Acquire)
+                            || presentation.state.lock().unwrap().quit
+                        {
+                            return Ok(());
+                        }
                         let (commands, frames) = super::ui::spawn(config, presentation.clone())
                             .map_err(|error| error.to_string())?;
                         return super::drive(output, presentation, &commands, &frames);

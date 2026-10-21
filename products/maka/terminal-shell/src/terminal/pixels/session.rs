@@ -56,6 +56,9 @@ fn run(
     presentation: &Presentation,
     ready: mpsc::SyncSender<Result<(), EngineConfig>>,
 ) -> Result<(), String> {
+    if presentation.stop.load(Ordering::Acquire) || presentation.state.lock().unwrap().quit {
+        return Ok(());
+    }
     let renderer = match gpui_wgpu::WgpuHeadlessRenderer::new() {
         Ok(renderer) => renderer,
         Err(_) => {
@@ -63,6 +66,9 @@ fn run(
             return Ok(());
         }
     };
+    if presentation.stop.load(Ordering::Acquire) || presentation.state.lock().unwrap().quit {
+        return Ok(());
+    }
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
@@ -139,10 +145,14 @@ fn run(
                     cx,
                 );
                 *surface.borrow_mut() = view.input_source();
+                let cancelled =
+                    error.stop.load(Ordering::Acquire) || error.state.lock().unwrap().quit;
                 view.on_error(move |message| {
                     error.state.lock().unwrap().error = Some(message.into());
                 });
-                view.load_with_config(config);
+                if !cancelled {
+                    view.load_with_config(config);
+                }
                 view
             })
         }) {
