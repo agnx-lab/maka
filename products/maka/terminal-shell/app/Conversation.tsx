@@ -1334,7 +1334,7 @@ export function Conversation(props: ConversationProps) {
     subscription = null;
     if (stream !== null) void stream.close().catch(() => {});
   });
-  effect(() => {
+  effect(() => untracked(() => {
     void host
       .query('agent', 'pendingInteractions', { sessionId })
       .then((pending: any) => {
@@ -1356,7 +1356,7 @@ export function Conversation(props: ConversationProps) {
       receiptsKnown.set(true);
       if (operations.length) await recover();
     })().catch(report);
-  });
+  }));
 
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
