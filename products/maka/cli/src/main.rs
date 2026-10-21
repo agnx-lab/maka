@@ -144,6 +144,26 @@ fn main() -> std::process::ExitCode {
         }
     }
     let cli = args::Cli::parse();
+    #[cfg(target_os = "linux")]
+    if cli.is_terminal_shell()
+        && std::path::Path::new("/dev/dxg").exists()
+        && [
+            "GALLIUM_DRIVER",
+            "MESA_LOADER_DRIVER_OVERRIDE",
+            "LIBGL_ALWAYS_SOFTWARE",
+            "LIBGL_ALWAYS_INDIRECT",
+        ]
+        .iter()
+        .all(|name| std::env::var_os(name).is_none())
+    {
+        // WSL's GPU bridge is available; prefer it over Mesa's software default.
+        // SAFETY: This synchronous entry precedes logging, Tokio and the UI/GPU.
+        // Normal cursor/desktop bootstraps only register executable/resolver
+        // state; their helper paths return from main instead of reaching here.
+        // Terminal-shell argument parsing starts no workers. No other thread
+        // can read the environment while this process-local default is set.
+        unsafe { std::env::set_var("GALLIUM_DRIVER", "d3d12") };
+    }
     if cli.logs_to_stderr()
         && let Err(error) = logging::initialize()
     {
