@@ -80,7 +80,8 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
   };
   const cancel = (request: BackAction) => () => back(request);
   const recover = () =>
-    operations.recover((method) => {
+    operations.recover((original) => {
+      const method = original.method;
       if (method === 'updateAssistantPreferences') general.reset();
       else if (method === 'updateNetwork') network.reset();
       else {

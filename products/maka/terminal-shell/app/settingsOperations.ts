@@ -20,9 +20,22 @@
 import { cleanup, signal } from 'nsh';
 import { host } from './host';
 import type {
+  ClientOperation,
   CredentialStatus,
   CredentialVersionBasis,
 } from '../../../../packages/plugin-sdk/src/generated/runtime';
+
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+export function settingsValue(reply: unknown): unknown {
+  const receipt = record(reply) && record(reply.receipt) ? reply.receipt : null;
+  const outcome = receipt?.kind === 'recorded' && record(receipt.outcome) ? receipt.outcome : null;
+  if (outcome?.kind !== 'returned')
+    throw new Error(
+      'The result is unknown. Recover the original action before making another change.',
+    );
+  return outcome.value;
+}
 
 export const credentialBasis = (status: CredentialStatus | null): CredentialVersionBasis | null =>
   status?.configured && status.credentialId !== null && status.revision !== null
@@ -52,7 +65,7 @@ export function createSettingsOperations() {
   const busy = signal(false);
   const error = signal('');
   const notice = signal('');
-  const pending = signal<any[]>([]);
+  const pending = signal<ClientOperation[]>([]);
   const pendingKnown = signal(false);
   let alive = true;
   cleanup(() => {
@@ -73,21 +86,13 @@ export function createSettingsOperations() {
       throw reason;
     }
   };
-  const returned = (reply: any) => {
-    const receipt = reply?.receipt;
-    if (receipt?.kind !== 'recorded' || receipt.outcome?.kind !== 'returned')
-      throw new Error(
-        'The result is unknown. Recover the original action before making another change.',
-      );
-    return receipt.outcome.value;
-  };
   const mutate = async (
-    endpoint: 'settings' | 'setup',
+    endpoint: 'settings' | 'setup' | 'authentication' | 'management',
     method: string,
     input: unknown,
     secret: string | null = null,
-  ) => {
-    return returned((await host.settingsMutation(endpoint, method, input, secret)).reply);
+  ): Promise<any> => {
+    return settingsValue((await host.settingsMutation(endpoint, method, input, secret)).reply);
   };
   const run = async (operation: () => Promise<void>) => {
     if (!alive || busy() || !pendingKnown() || pending().length) return;
@@ -103,7 +108,7 @@ export function createSettingsOperations() {
       if (alive) busy.set(false);
     }
   };
-  const recover = (afterKnown: (method: string) => void) => {
+  const recover = (afterKnown: (original: ClientOperation, value: unknown) => void) => {
     if (!alive || busy()) return;
     busy.set(true);
     error.set('');
@@ -111,12 +116,23 @@ export function createSettingsOperations() {
       try {
         for (const original of await host.pendingSettings()) {
           if (!original.reference) continue;
-          const value = returned(await host.recoverSetting(original.id));
+          const value = settingsValue(await host.recoverSetting(original.id));
           if (!alive) return;
-          const outcome = value?.kind === 'applied' ? value.result : value;
-          if (!['committed', 'saved', 'ready'].includes(outcome?.kind))
-            throw settingsRejection(outcome);
-          afterKnown(original.method);
+          if (original.endpoint === 'management') {
+            if (!record(value) || value.status !== 'committed') {
+              if (record(value) && value.status === 'conflict')
+                throw new Error('Host services changed elsewhere. Reload before saving again.');
+              throw new Error('The Host rejected this service change. Reload and review it.');
+            }
+          } else {
+            const outcome = record(value) && value.kind === 'applied' ? value.result : value;
+            if (
+              !record(outcome) ||
+              !['committed', 'saved', 'ready'].some((kind) => kind === outcome.kind)
+            )
+              throw settingsRejection(outcome);
+          }
+          afterKnown(original, value);
         }
         if (alive) notice.set('Original settings action receipts checked.');
       } catch (reason) {
