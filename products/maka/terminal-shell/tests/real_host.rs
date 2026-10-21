@@ -1512,7 +1512,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         support::click_button(&mut view, "Return to latest").await;
-        let returned = wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("Source")).await;
+        let returned = wait_view_state(&mut view, |view, screen| screen.contains("History 15 paragraph 29") && message_source_available(view, false)).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != previous {
                 support::tick(&mut view);
@@ -1523,7 +1523,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // Retain the original shortcut check from older transcript content.
         wheel_history_up_to(&mut view, "History 00 paragraph").await;
         shortcut(&mut view, 'l');
-        wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("Source")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("History 15 paragraph 29") && message_source_available(view, false)).await;
         tokio::time::timeout(Duration::from_secs(20), async {
             while view.surface().focused() != previous {
                 view.poll().unwrap();
@@ -1858,6 +1858,22 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
     }).await.expect("real Host/Agent UI integration timed out");
 }
 
+fn message_source_available(view: &AppView, selected: bool) -> bool {
+    let label = if selected {
+        "Show formatted message"
+    } else {
+        "Show message source"
+    };
+    view.accessibility_snapshot().iter().any(|node| {
+        node.role == nsh_core::AccessibilityRole::Button
+            && node.label == label
+            && node.state.selected == selected
+            && !node.state.disabled
+            && node.frame.origin.y.0 >= 0.0
+            && node.frame.origin.y.0 < view.surface().viewport().height.0
+    })
+}
+
 #[track_caller]
 fn wait_mode_layout(view: &mut AppView) -> impl std::future::Future<Output = ()> {
     let caller = std::panic::Location::caller();
@@ -1885,30 +1901,45 @@ fn wait_mode_layout(view: &mut AppView) -> impl std::future::Future<Output = ()>
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_markdown_source_mode_survives_canonical_handoff() {
+    use base64::Engine as _;
+    use nsh_platform_tui::ServiceOutput;
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        view.surface_mut().set_host_services_enabled(true);
         wait_editable_composer(&mut view).await;
+        let original_user = "Keep the live source mode 中文😀\n\tbefore and after handoff  \n";
         let sent = support::mutate(&client, "send", json!({
-            "sessionId":fixture.session,"message":"Keep the live source mode", "model":fixture.selection
+            "sessionId":fixture.session,"message":original_user, "model":fixture.selection
         })).await;
         assert_eq!(sent["kind"], "started");
         let mut request = fixture.next_request().await;
         let source = "# LIVE_HEADING\n\n**LIVE_BOLD**\n\n```txt\nLIVE_CODE_BLOCK\n```";
         request.delta(source).await;
-        wait_view(&mut view, |screen| screen.contains("LIVE_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt") && !screen.contains("**LIVE_BOLD**")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("LIVE_CODE_BLOCK") && message_source_available(view, false) && !screen.contains("```txt") && !screen.contains("**LIVE_BOLD**")).await;
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "Source");
-        let literal = |screen: &str| screen.contains("# LIVE_HEADING") && screen.contains("**LIVE_BOLD**") && screen.contains("```txt") && screen.contains("LIVE_CODE_BLOCK") && screen.contains("Formatted");
+        support::click_button(&mut view, "Show message source").await;
+        let literal = |view: &AppView, screen: &str| screen.contains("# LIVE_HEADING") && screen.contains("**LIVE_BOLD**") && screen.contains("```txt") && screen.contains("LIVE_CODE_BLOCK") && message_source_available(view, true);
         // Keep the provider physically open until the actual native click
         // has selected source mode; then exercise that same row's handoff.
-        let live = wait_view(&mut view, literal).await;
+        let live = wait_view_state(&mut view, literal).await;
         evidence("live-markdown-source-selected", &live);
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
-        let settled = wait_view(&mut view, |screen| literal(screen) && screen.contains("Completed")).await;
+        let settled = wait_view_state(&mut view, |view, screen| literal(view, screen) && screen.contains("Completed")).await;
         evidence("live-markdown-source-settled", &settled);
+        wait_mode_layout(&mut view).await;
+        view.drain_service_output().for_each(drop);
+        support::click_button(&mut view, "Copy user message").await;
+        wait_view(&mut view, |screen| screen.contains("User message copied")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "canonical assistant handoff must retain the original user copy action");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied, original_user);
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("the original user must retain a complete OSC52 sequence after handoff");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), original_user.as_bytes());
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
@@ -1931,11 +1962,32 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         view.surface_mut().set_host_services_enabled(true);
         wait_editable_composer(&mut view).await;
+        let original_user = format!("USER_COPY_BEGIN 中文😀\n{}USER_COPY_END 尾部\n\ttrailing whitespace  \n  ", "分页原文😀\tkeep spaces  \n".repeat(1600));
         let sent = support::mutate(&client, "send", json!({
-            "sessionId":fixture.session,"message":"Render the original Markdown", "model":fixture.selection
+            "sessionId":fixture.session,"message":original_user, "model":fixture.selection
         })).await;
         assert_eq!(sent["kind"], "started");
         let mut request = fixture.next_request().await;
+        // The canonical user source exceeds both the history tail and source
+        // query pages. Keep the real provider open with no assistant delta yet.
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        let user = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "user" && chunk["field"] == "body").unwrap();
+        assert_eq!(user["totalBytes"].as_u64(), Some(original_user.len() as u64));
+        assert!(user["offset"].as_u64().unwrap() > 0, "this real history page must omit the beginning of the user message");
+        assert!(original_user.ends_with(user["text"].as_str().unwrap()));
+        view.drain_service_output().for_each(drop);
+        support::click_button(&mut view, "Copy user message").await;
+        let copied_user = wait_view(&mut view, |screen| screen.contains("User message copied")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "one user copy must emit exactly one native clipboard effect");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert_eq!(copied, &original_user, "copy must reread the whole canonical user message instead of its loaded tail");
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("user copy must encode one complete OSC52 command");
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), original_user.as_bytes());
+        evidence("rich-response-copies-complete-original-user", &copied_user);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "copying the user message must not start another model request");
         let prefix = "# RICH_HEADING\n\n**RICH_BOLD** *RICH_ITALIC* ~~RICH_STRIKE~~ `RICH_CODE`";
         request.delta(prefix).await;
         let rendered = wait_view(&mut view, |screen| {
@@ -1978,7 +2030,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let suffix = format!("{table}{code}");
         request.delta(code).await;
         // The stream remains physically open: parsing cannot wait for final.
-        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("RICH_CODE_BLOCK") && message_source_available(view, false) && !screen.contains("```txt")).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy code").await;
         let copied_code = wait_view(&mut view, |screen| screen.contains("Copied") && screen.contains("RICH_CODE_BLOCK")).await;
@@ -1994,17 +2046,17 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         fixture.idle(&client, &fixture.session).await;
         // Host idle may precede the completed-turn seat in this native List.
         // Observe that final layout before choosing the source button's coordinates.
-        let complete = wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && screen.contains("Completed")).await;
+        let complete = wait_view_state(&mut view, |view, screen| screen.contains("RICH_CODE_BLOCK") && message_source_available(view, false) && screen.contains("Completed")).await;
         evidence("rich-response-complete", &complete);
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "Source");
-        let original = wait_view(&mut view, |screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && screen.contains("Formatted")).await;
+        support::click_button(&mut view, "Show message source").await;
+        let original = wait_view_state(&mut view, |view, screen| screen.contains("```txt") && screen.contains("RICH_CODE_BLOCK") && message_source_available(view, true)).await;
         evidence("rich-response-original-source", &original);
         // Source has a different native height. Observe the original text
         // first, then let its scroll/layout motion finish before one click.
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "Formatted");
-        wait_view(&mut view, |screen| screen.contains("RICH_CODE_BLOCK") && screen.contains("Source") && !screen.contains("```txt")).await;
+        support::click_button(&mut view, "Show formatted message").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("RICH_CODE_BLOCK") && message_source_available(view, false) && !screen.contains("```txt")).await;
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
         let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
@@ -2012,7 +2064,7 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy message").await;
-        let sent_to_clipboard = wait_view(&mut view, |screen| screen.contains("Sent to terminal clipboard")).await;
+        let sent_to_clipboard = wait_view(&mut view, |screen| screen.contains("Message copied")).await;
         let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
         assert_eq!(clipboard.len(), 1, "one copy action must emit exactly one native clipboard effect");
         let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
@@ -2033,11 +2085,11 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler 中文😀\n".repeat(60_000));
         assert!(source.len() > 1024 * 1024);
         request.delta(&source).await;
-        let long_formatted = wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source") && !screen.contains("```") && !screen.contains("Formatting unavailable")).await;
+        let long_formatted = wait_view_state(&mut view, |view, screen| screen.contains("**RICH_TAIL_MARK**") && message_source_available(view, false) && !screen.contains("```") && !screen.contains("Formatting unavailable")).await;
         evidence("rich-response-long-formatted", &long_formatted);
         wait_mode_layout(&mut view).await;
-        support::click_text(&mut view, "Source");
-        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Formatted") && screen.contains("```") && !screen.contains("Formatting unavailable")).await;
+        support::click_button(&mut view, "Show message source").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("**RICH_TAIL_MARK**") && message_source_available(view, true) && screen.contains("```") && !screen.contains("Formatting unavailable")).await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         drop(view);
@@ -2054,12 +2106,12 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         assert!(response["offset"].as_u64().unwrap() > 0, "this history must omit the original opening fence");
         let (mut view, bindings) = fixture.view(client, Some(fixture.session.clone()));
         view.surface_mut().set_host_services_enabled(true);
-        let literal = wait_view(&mut view, |screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source")).await;
+        let literal = wait_view_state(&mut view, |view, screen| screen.contains("# RICH_TAIL_HEADING") && screen.contains("**RICH_TAIL_MARK**") && message_source_available(view, false)).await;
         evidence("rich-response-incomplete-history", &literal);
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy message").await;
-        let copied_large = wait_view(&mut view, |screen| screen.contains("Sent to terminal clipboard")).await;
+        let copied_large = wait_view(&mut view, |screen| screen.contains("Message copied")).await;
         let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
         assert_eq!(clipboard.len(), 1, "the exact long canonical body must be copied once");
         let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };

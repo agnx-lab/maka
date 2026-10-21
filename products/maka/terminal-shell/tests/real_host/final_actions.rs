@@ -77,7 +77,7 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         let first_turn = final_row["turnId"].as_str().unwrap().to_owned();
         assert_eq!(final_row["timing"]["finished"]["outcome"], "completed");
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
-        wait_view(&mut view, |screen| screen.contains("FINAL_A") && screen.contains("Fork from here") && screen.contains("fixture-model")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("FINAL_A") && screen.contains("fixture-model") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Fork from this turn" && !node.state.disabled && node.frame.origin.y.0 >= 0.0 && node.frame.origin.y.0 < view.surface().viewport().height.0)).await;
         activate(&mut view, "View this turn's model usage").await;
         let usage = wait_view(&mut view, |screen| screen.contains("1 main model request in this turn") && screen.contains("Output tokens")).await;
         // Accessibility is scoped to the active dialog; the terminal line can
@@ -117,7 +117,7 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         assert_eq!(second["kind"], "started");
         let mut second_request = fixture.next_request().await;
         second_request.delta("ACTIVE_B is still streaming").await;
-        wait_view(&mut view, |screen| screen.contains("ACTIVE_B") && screen.contains("Fork from here")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("ACTIVE_B") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Fork from this turn" && !node.state.disabled && node.frame.origin.y.0 >= 0.0 && node.frame.origin.y.0 < view.surface().viewport().height.0)).await;
         activate(&mut view, "View this turn's model usage").await;
         wait_view(&mut view, |screen| screen.contains("Main model usage") && screen.contains("1 main model request in this turn")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
@@ -148,7 +148,7 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         evidence("final-actions-fork-excludes-later-active-turn", &forked);
 
         view.resize(80, 24);
-        wait_view(&mut view, |screen| screen.contains("FINAL_A") && screen.contains("Usage")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("FINAL_A") && view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "View this turn's model usage" && !node.state.disabled && node.frame.origin.y.0 >= 0.0 && node.frame.origin.y.0 < view.surface().viewport().height.0)).await;
         activate(&mut view, "View this turn's model usage").await;
         let copied_usage = wait_view(&mut view, |screen| screen.contains("No model usage is recorded for this turn")).await;
         assert!(!copied_usage.contains("Input tokens"), "copied history must not invent provider counters:\n{copied_usage}");
