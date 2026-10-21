@@ -142,7 +142,7 @@ impl Inbox {
                     if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
                         && let Some(Capture::Active(pointer @ Pointer::Press { lease, .. })) =
                             &self.capture
-                        && lease.is_native_pan()
+                        && (lease.is_native_pan() || lease.is_native_input())
                     {
                         Some(pointer.clone())
                     } else {

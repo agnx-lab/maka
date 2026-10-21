@@ -306,7 +306,7 @@ impl Session {
                     mouse.kind,
                     MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
                 ) && !(matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
-                    && lease.is_native_pan())
+                    && (lease.is_native_pan() || lease.is_native_input()))
                 {
                     self.cancel_pointer()?;
                     changed = true;
@@ -1031,6 +1031,147 @@ mod tests {
             session.surface.snapshot().contains("after closed:3"),
             "the next native click remains usable after cancellation"
         );
+    }
+
+    #[test]
+    fn a_flushed_editor_keeps_click_and_drag_selection_while_background_output_is_pending() {
+        const APP: &str = r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, bindProp, insert, append } from "nsh:rt";
+            const status = signal("before");
+            const draft = signal("hello");
+            mount(() => {
+                const root = element("view");
+                prop(root, "style", { flex: 1 });
+                const result = element("text");
+                prop(result, "style", { height: 16 });
+                insert(result, () => status() + " draft:" + draft());
+                append(root, result);
+                const previous = element("input");
+                prop(previous, "style", { height: 16 });
+                prop(previous, "autoFocus", true);
+                prop(previous, "value", "previous");
+                append(root, previous);
+                const input = element("input");
+                prop(input, "style", { height: 16 });
+                prop(input, "accessibilityLabel", "Composer");
+                bindProp(input, "value", draft);
+                prop(input, "onChange", text => draft.set(text));
+                append(root, input);
+                return root;
+            });
+            requestAnimationFrame(() => status.set("after"));
+        "#;
+        for (drag, selected, expected, caret) in
+            [(false, 2..2, "heXllo", 3..3), (true, 1..4, "hXo", 2..2)]
+        {
+            let mut session = Session::new(config(APP)).unwrap();
+            // Reproduce the completed/pending frame pair from the physical
+            // workspace-picker failure without advancing through idle turns.
+            session.epoch = 64;
+            let mut output = super::super::output::Output::new(io::sink()).unwrap();
+            let presentation = session.presentation.clone();
+            let initial = session.initial_frame().unwrap();
+            assert_eq!(initial.epoch, 65);
+            publish(&mut output, &presentation, initial);
+            assert_eq!(
+                session.surface.input_context().unwrap().text.as_deref(),
+                Some("previous")
+            );
+            let composer = session
+                .surface
+                .accessibility_snapshot()
+                .into_iter()
+                .find(|node| node.label == "Composer")
+                .unwrap();
+            let pointer = |kind, offset| {
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column: (composer.frame.origin.x.0 / 8.0) as u16 + offset,
+                    row: (composer.frame.origin.y.0 / 16.0) as u16,
+                    modifiers: KeyModifiers::NONE,
+                })
+            };
+            let background = session
+                .advance_if_needed(Advance {
+                    image_protocol: None,
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            assert_eq!(background.epoch, 66);
+            assert!(session.surface.snapshot().contains("after draft:hello"));
+            assert_eq!(
+                presentation
+                    .presented
+                    .load(std::sync::atomic::Ordering::Acquire),
+                0
+            );
+            {
+                let mut inbox = presentation.state.lock().unwrap();
+                assert_eq!(inbox.last_frame.as_ref().unwrap().0, 65);
+                inbox.reject_through = 56;
+                inbox.push(
+                    pointer(
+                        MouseEventKind::Down(MouseButton::Left),
+                        if drag { 1 } else { 2 },
+                    ),
+                    0,
+                );
+                if drag {
+                    inbox.push(pointer(MouseEventKind::Drag(MouseButton::Left), 4), 0);
+                }
+                inbox.push(
+                    pointer(
+                        MouseEventKind::Up(MouseButton::Left),
+                        if drag { 4 } else { 2 },
+                    ),
+                    0,
+                );
+                inbox.push(Event::Paste("X".into()), 0);
+            }
+            publish(&mut output, &presentation, background);
+            let (inputs, cancel_pointer) = {
+                let mut inbox = presentation.state.lock().unwrap();
+                (
+                    inbox.pop_batch(session.epoch),
+                    std::mem::take(&mut inbox.cancel_pointer),
+                )
+            };
+            assert_eq!(inputs.len(), if drag { 3 } else { 2 });
+            let acted = session
+                .advance(Advance {
+                    image_protocol: None,
+                    inputs,
+                    resize: None,
+                    cancel_pointer,
+                })
+                .unwrap();
+            let editor = session.surface.input_context().unwrap();
+            assert_eq!(editor.node, composer.id);
+            assert_eq!(editor.text.as_deref(), Some("hello"));
+            assert_eq!(editor.selection, selected);
+            publish(&mut output, &presentation, acted);
+            let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
+            session
+                .advance(Advance {
+                    image_protocol: None,
+                    inputs,
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            let editor = session.surface.input_context().unwrap();
+            assert_eq!(editor.text.as_deref(), Some(expected));
+            assert_eq!(editor.selection, caret);
+            let screen = session.surface.snapshot();
+            assert!(
+                screen.contains(&format!("after draft:{expected}")),
+                "{screen}"
+            );
+            assert!(screen.contains("previous"), "{screen}");
+        }
     }
 
     fn click(surface: &Surface, label: &str) -> Vec<Event> {
