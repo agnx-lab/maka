@@ -84,7 +84,10 @@ export function sourceSequence(row: ProcessRow): number | undefined {
 }
 
 /** Compare only the small live set; a text delta keeps its original source seat. */
-export function sameProcessRows(left: readonly ProcessRow[], right: readonly ProcessRow[]): boolean {
+export function sameProcessRows(
+  left: readonly ProcessRow[],
+  right: readonly ProcessRow[],
+): boolean {
   return (
     left.length === right.length &&
     left.every((row, index) => {
