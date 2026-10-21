@@ -956,33 +956,71 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
     }).await.expect("real Host/Agent UI integration timed out");
 }
 
+#[track_caller]
+fn wait_mode_layout(view: &mut AppView) -> impl std::future::Future<Output = ()> {
+    let caller = std::panic::Location::caller();
+    async move {
+        let started = std::time::Instant::now();
+        loop {
+            support::tick(view);
+            assert!(
+                view.last_error().is_none(),
+                "NSH app error at {caller}: {:?}",
+                view.last_error()
+            );
+            if !view.surface().animating() {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "Markdown mode layout did not settle at {caller}:\n{}",
+                view.snapshot()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_markdown_source_mode_survives_canonical_handoff() {
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::open().await;
+        let client = fixture.client().await;
+        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        wait_view(&mut view, |screen| screen.contains("Enter sends")).await;
+        let sent = support::mutate(&client, "send", json!({
+            "sessionId":fixture.session,"message":"Keep the live source mode", "model":fixture.selection
+        })).await;
+        assert_eq!(sent["kind"], "started");
+        let mut request = fixture.next_request().await;
+        let source = "# LIVE_HEADING\n\n**LIVE_BOLD**\n\n```txt\nLIVE_CODE_BLOCK\n```";
+        request.delta(source).await;
+        wait_view(&mut view, |screen| screen.contains("LIVE_CODE_BLOCK") && screen.contains("[Source]") && !screen.contains("```txt") && !screen.contains("**LIVE_BOLD**")).await;
+        wait_mode_layout(&mut view).await;
+        support::click_text(&mut view, "[Source]");
+        let literal = |screen: &str| screen.contains("# LIVE_HEADING") && screen.contains("**LIVE_BOLD**") && screen.contains("```txt") && screen.contains("LIVE_CODE_BLOCK") && screen.contains("[Formatted]");
+        // Keep the provider physically open until the actual native click
+        // has selected source mode; then exercise that same row's handoff.
+        let live = wait_view(&mut view, literal).await;
+        evidence("live-markdown-source-selected", &live);
+        request.finish().await;
+        fixture.idle(&client, &fixture.session).await;
+        let settled = wait_view(&mut view, |screen| literal(screen) && screen.contains("› Completed")).await;
+        evidence("live-markdown-source-settled", &settled);
+        let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        let response = history["chunks"].as_array().unwrap().iter().find(|chunk| chunk["role"] == "assistant" && chunk["field"] == "body").unwrap();
+        assert_eq!(response["text"], source);
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1);
+        drop(view);
+        bindings.close().await.unwrap();
+        fixture.finish().await;
+    }).await.expect("real Host live source handoff timed out");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_source() {
     use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
-    #[track_caller]
-    fn wait_mode_layout(view: &mut AppView) -> impl std::future::Future<Output = ()> {
-        let caller = std::panic::Location::caller();
-        async move {
-            let started = std::time::Instant::now();
-            loop {
-                support::tick(view);
-                assert!(
-                    view.last_error().is_none(),
-                    "NSH app error at {caller}: {:?}",
-                    view.last_error()
-                );
-                if !view.surface().animating() {
-                    return;
-                }
-                assert!(
-                    started.elapsed() < Duration::from_secs(20),
-                    "Markdown mode layout did not settle at {caller}:\n{}",
-                    view.snapshot()
-                );
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        }
-    }
     tokio::time::timeout(Duration::from_secs(90), async {
         let mut fixture = Fixture::open().await;
         let client = fixture.client().await;
