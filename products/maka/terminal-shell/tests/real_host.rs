@@ -2389,7 +2389,7 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         // The full-window reader uses this same immutable selector even though
         // the workspace path no longer contains an image. Inspect painted image
         // columns so zoom controls cannot pass by changing only their captions.
-        let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
+        let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
         view.resize(120, 40);
         wait_editable_composer(&mut view).await;
         let composer = view.surface().focused().unwrap();
