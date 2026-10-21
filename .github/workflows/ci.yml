@@ -50,7 +50,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap pkg-config libx11-dev libxi-dev libxtst-dev libxext-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype6-dev libwayland-dev
+          sudo apt-get install -y bubblewrap ripgrep pkg-config libx11-dev libxi-dev libxtst-dev libxext-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype6-dev libwayland-dev
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Update Rust
         run: rustup update stable --no-self-update

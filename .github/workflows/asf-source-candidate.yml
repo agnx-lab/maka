@@ -57,7 +57,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap pkg-config libx11-dev libxi-dev libxtst-dev libxext-dev
+          sudo apt-get install -y bubblewrap ripgrep pkg-config libx11-dev libxi-dev libxtst-dev libxext-dev
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Select npm
         run: npm install --global --no-audit --no-fund "$(node -p 'require("./package.json").packageManager')"
