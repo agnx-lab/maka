@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, effect, inputAction, mount, signal, Text, View } from 'nsh';
+import { cleanup, effect, inputAction, mount, signal, Scroll, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from './host';
@@ -32,7 +32,8 @@ import { WorkspacePicker } from './WorkspacePicker';
 import { ModelSelect } from './ModelSelect';
 import { ModelSettings } from './ModelSettings';
 import type { ModelBackend } from './modelSelection';
-import { InteractionPanel } from './InteractionPanel';
+import { InteractionComposer, interactionOutcomeSummary } from './InteractionComposer';
+import type { AgentInteractionResult } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import type { ImagePreview } from './ImageThumbnail';
 import { createResources } from './resources';
 import { createBrowsing } from './browsing';
@@ -41,13 +42,11 @@ import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 import { performSessionAction, type SessionAction } from './sessionLifecycle';
 
-type Overlay = { instance: number } & (
-  | {
-      kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
-      sessionId: string | null;
-    }
-  | { kind: 'interaction'; sessionId: string; requestId: string }
-);
+type Overlay = {
+  instance: number;
+  kind: 'commands' | 'workspaces' | 'models' | 'sessions' | 'settings';
+  sessionId: string | null;
+};
 type CommandContext = { instance: number; sessionId: string | null };
 function App() {
   const browsing = createBrowsing();
@@ -77,6 +76,28 @@ function App() {
   const report = (reason: unknown) => {
     if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
   };
+  const presentInteraction = (
+    original: { sessionId: string; requestId: string },
+    result: AgentInteractionResult,
+  ) => {
+    if (!alive || selected() !== original.sessionId) return false;
+    if (result.kind === 'recorded') {
+      const record = result.record;
+      if (
+        record.sessionId === original.sessionId &&
+        record.requestId === original.requestId &&
+        record.outcome
+      ) {
+        error.set('');
+        status.set(interactionOutcomeSummary(record.outcome));
+        return true;
+      }
+      report('The Host returned a different or incomplete original request outcome.');
+    } else {
+      report(`Answer was not accepted: ${result.reason}. Refresh the request before trying again.`);
+    }
+    return false;
+  };
   const refreshControls = async () => {
     const reading = ++controlRead;
     const originals = await host.pendingControls();
@@ -92,6 +113,7 @@ function App() {
       if (handle() && !(await handle()!.flushDraft())) return;
       if (alive) {
         overlay.set(null);
+        status.set('');
         selected.set(id);
       }
     } catch (reason) {
@@ -128,7 +150,12 @@ function App() {
       throw new Error('An action is being confirmed. Try again in a moment.');
     if (method !== 'stop') busy.set(true);
     try {
-      return returned((await host.control(method, input)).reply);
+      const result = returned((await host.control(method, input)).reply);
+      if (method === 'respond') presentInteraction(input, result);
+      return result;
+    } catch (reason) {
+      if (method === 'respond' && selected() === input.sessionId) report(reason);
+      throw reason;
     } finally {
       await refreshControls().catch((reason) => {
         controlsKnown.set(false);
@@ -288,6 +315,11 @@ function App() {
       return;
     void owner.stop(invocationId).catch(report);
   };
+  const stopAction = () =>
+    inputAction(stop, {
+      sessionId: selected(),
+      invocationId: handle()?.invocation() ?? null,
+    });
   const closeCommand = (context: CommandContext) =>
     alive &&
     selected() === context.sessionId &&
@@ -433,12 +465,29 @@ function App() {
     error.set('');
     try {
       const originals = await host.pendingControls();
+      let responseConfirmed = false;
       for (const original of originals) {
         if (!original.reference) continue;
         try {
           const reply = await host.recoverControl(original.id);
           if (!alive) return;
           const result = returned(reply);
+          if (
+            original.method === 'respond' &&
+            original.sessionId &&
+            original.correlation !== null &&
+            typeof original.correlation === 'object' &&
+            'requestId' in original.correlation &&
+            typeof original.correlation.requestId === 'string'
+          )
+            responseConfirmed =
+              presentInteraction(
+                {
+                  sessionId: original.sessionId,
+                  requestId: original.correlation.requestId,
+                },
+                result,
+              ) || responseConfirmed;
           if (
             original.method === 'changeSession' &&
             result.kind === 'removed' &&
@@ -459,7 +508,7 @@ function App() {
       const owner = handle();
       if (owner && selected() === owner.sessionId) await owner.refresh();
       await browsing.refresh();
-      status.set('Original actions checked.');
+      if (!responseConfirmed) status.set('Original actions checked.');
     } catch (reason) {
       report(reason);
     } finally {
@@ -476,11 +525,6 @@ function App() {
     } catch (reason) {
       report(reason);
     }
-  };
-  const openInteraction = ({ sessionId, requestId }: { sessionId: string; requestId: string }) => {
-    if (!alive || selected() !== sessionId) return;
-    browserFocus.set(false);
-    overlay.set({ kind: 'interaction', sessionId, requestId, instance: ++overlayInstance });
   };
   const previewImage = (image: ImagePreview) => {
     if (!alive || selected() !== image.source.read.sessionId || overlay()) return;
@@ -545,12 +589,6 @@ function App() {
       <Workbench
         expanded={() => sidebarExpanded() && overlay()?.kind !== 'sessions'}
         browser={browserProps}
-        stopAction={() =>
-          inputAction(stop, {
-            sessionId: selected(),
-            invocationId: handle()?.invocation() ?? null,
-          })
-        }
         resources={resources}
       >
         <If when={selected() === null}>
@@ -572,9 +610,9 @@ function App() {
               browse={inputAction(open, { kind: 'sessions', sessionId: id() })}
               files={inputAction(resources.openFiles, { sessionId: id() })}
               filesOpener={(node) => resources.attachOpener(id(), node)}
-              interaction={openInteraction}
               previewImage={previewImage}
               focusComposer={focusComposer}
+              stopAction={stopAction}
               attach={(next) => {
                 handle.set(next);
               }}
@@ -586,6 +624,100 @@ function App() {
         </Each>
         <Composer
           session={handle}
+          stopAction={stopAction}
+          request={
+            <View style={{ minHeight: 0, flexShrink: 1 }}>
+              <Each<ConversationHandle>
+                of={handle() ? [handle()!] : []}
+                key={(owner: ConversationHandle) => owner.sessionId}
+              >
+                {(item) => {
+                  const owner = item();
+                  return (
+                    <Each
+                      of={owner.interactions().entries.slice(0, 1)}
+                      key={(entry) => entry.requestId}
+                    >
+                      {(entry) => (
+                        <InteractionComposer
+                          sessionId={owner.sessionId}
+                          requestId={entry().requestId}
+                          control={control}
+                          focusComposer={focusComposer}
+                          confirming={() => busy() || !controlsKnown()}
+                        />
+                      )}
+                    </Each>
+                  );
+                }}
+              </Each>
+              <If
+                when={
+                  error() ||
+                  status() ||
+                  switching() ||
+                  busy() ||
+                  !controlsKnown() ||
+                  controls().length
+                }
+              >
+                <Scroll
+                  style={{ minHeight: 0, flexShrink: 1, backgroundColor: C.surface }}
+                  contentStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
+                >
+                  <If when={error()}>
+                    <Text selectable style={{ color: C.danger }}>
+                      {error()}
+                    </Text>
+                  </If>
+                  <If when={switching() || busy()}>
+                    <Text style={{ color: C.muted }}>
+                      {switching() ? 'Saving draft before switching…' : 'Confirming action…'}
+                    </Text>
+                  </If>
+                  <If when={status()}>
+                    <Text selectable style={{ color: C.muted }}>
+                      {status()}
+                    </Text>
+                  </If>
+                  <If when={!controlsKnown() || controls().length > 0}>
+                    <Button
+                      disabled={recovering()}
+                      onPress={inputAction(recoverControls, null)}
+                      style={controlStyle}
+                      hoverStyle={controlHoverStyle}
+                      focusStyle={controlFocusStyle}
+                    >
+                      <Text style={{ color: C.warning }}>
+                        {recovering()
+                          ? 'Reading original action receipts…'
+                          : controlsKnown()
+                            ? `Recover original actions (${controls().length})`
+                            : 'Recheck original actions'}
+                      </Text>
+                    </Button>
+                    <Each
+                      of={controls().filter((original) => !original.reference)}
+                      key={(original) => original.id}
+                    >
+                      {(original) => (
+                        <Button
+                          onPress={inputAction(abandonControl, original().id)}
+                          style={controlStyle}
+                          hoverStyle={controlHoverStyle}
+                          focusStyle={controlFocusStyle}
+                        >
+                          <Text style={{ color: C.warning }}>
+                            Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
+                          </Text>
+                        </Button>
+                      )}
+                    </Each>
+                  </If>
+                </Scroll>
+              </If>
+            </View>
+          }
           attach={(node) => {
             editor = node;
           }}
@@ -630,61 +762,6 @@ function App() {
           <Text style={{ color: C.accent }}>Open recovered fork · {recoveredFork()!.title}</Text>
         </Button>
       </If>
-      <If
-        when={error() || status() || switching() || busy() || !controlsKnown() || controls().length}
-      >
-        <View
-          style={{ backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
-        >
-          <If when={error()}>
-            <Text selectable style={{ color: C.danger }}>
-              {error()}
-            </Text>
-          </If>
-          <If when={switching() || busy()}>
-            <Text style={{ color: C.muted }}>
-              {switching() ? 'Saving draft before switching…' : 'Confirming action…'}
-            </Text>
-          </If>
-          <If when={status()}>
-            <Text style={{ color: C.muted }}>{status()}</Text>
-          </If>
-          <If when={!controlsKnown() || controls().length > 0}>
-            <Button
-              disabled={recovering()}
-              onPress={inputAction(recoverControls, null)}
-              style={controlStyle}
-              hoverStyle={controlHoverStyle}
-              focusStyle={controlFocusStyle}
-            >
-              <Text style={{ color: C.warning }}>
-                {recovering()
-                  ? 'Reading original action receipts…'
-                  : controlsKnown()
-                    ? `Recover original actions (${controls().length})`
-                    : 'Recheck original actions'}
-              </Text>
-            </Button>
-            <Each
-              of={controls().filter((original) => !original.reference)}
-              key={(original) => original.id}
-            >
-              {(original) => (
-                <Button
-                  onPress={inputAction(abandonControl, original().id)}
-                  style={controlStyle}
-                  hoverStyle={controlHoverStyle}
-                  focusStyle={controlFocusStyle}
-                >
-                  <Text style={{ color: C.warning }}>
-                    Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
-                  </Text>
-                </Button>
-              )}
-            </Each>
-          </If>
-        </View>
-      </If>
       <Each
         of={overlay() && overlay()!.kind !== 'models' ? [overlay()!] : []}
         key={(value: Overlay) => value.instance}
@@ -692,15 +769,6 @@ function App() {
         {(value) => {
           const current = value();
           const close = inputAction(closeOverlay, current.instance);
-          if (current.kind === 'interaction')
-            return (
-              <InteractionPanel
-                sessionId={current.sessionId}
-                requestId={current.requestId}
-                control={control}
-                close={close}
-              />
-            );
           if (current.kind === 'sessions')
             return (
               <Dialog

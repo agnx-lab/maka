@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, Input, inputAction, Text, View } from 'nsh';
+import { cleanup, effect, Input, inputAction, signal, Text, View } from 'nsh';
 import type { JSX, YNode } from 'nsh';
 import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
@@ -75,6 +75,8 @@ export function Composer(props: {
   attach(node: YNode): void;
   commands(target: { sessionId: string | null }): void;
   models: JSX.Element;
+  request: JSX.Element;
+  stopAction(): () => void;
   chooseWorkspace(): void;
   settings(): void;
 }) {
@@ -86,6 +88,12 @@ export function Composer(props: {
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
   let unbind = () => {};
   cleanup(() => unbind());
+  const bodyRoot = signal<YNode | null>(null);
+  effect(() => {
+    const stop = props.stopAction();
+    const node = bodyRoot();
+    if (node) return keymap.bind('escape', stop, { when: 'always', within: node });
+  });
   const workspaceLabel = () => {
     const path = props.session()?.workspace();
     return path
@@ -97,23 +105,10 @@ export function Composer(props: {
   };
   return (
     <View
-      ref={(node) => {
-        unbind();
-        unbind = keymap.bind(
-          'mod+u',
-          () => {
-            const owner = props.session();
-            if (owner && owner.editable())
-              owner.attachments.open({
-                owner: owner.sessionId,
-                value: !owner.attachments.picker(),
-              });
-          },
-          { when: 'always', within: node },
-        );
-      }}
       style={{
         flex: hero() ? 1 : 0,
+        flexShrink: 1,
+        minHeight: 0,
         justifyContent: 'center',
         width: '100%',
         maxWidth: 832,
@@ -122,211 +117,209 @@ export function Composer(props: {
         paddingBottom: hero() ? 16 : 8,
       }}
     >
-      <If when={hero()}>
-        <View style={{ gap: compact() ? 8 : 16, paddingBottom: 12 }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 12,
-              paddingVertical: compact() ? 8 : 16,
-            }}
-          >
-            <If when={windowSize().height >= 336}>
-              <Image src={logo} resizeMode="contain" style={{ width: 32, height: 32 }} />
-            </If>
-            <Text
+      {props.request}
+      <View ref={(node) => bodyRoot.set(node)} style={{ flexShrink: 0 }}>
+        <If when={hero()}>
+          <View style={{ gap: compact() ? 8 : 16, paddingBottom: 12 }}>
+            <View
               style={{
-                color: C.text,
-                fontSize: compact() ? 20 : 26,
-                lineHeight: 32,
-                fontWeight: '500',
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 12,
+                paddingVertical: compact() ? 8 : 16,
               }}
             >
-              Make something remarkable.
-            </Text>
-          </View>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
-            <Button
-              accessibilityLabel="Choose composer workspace"
-              tooltip={props.session()?.workspace() || 'Choose workspace'}
-              onPress={props.chooseWorkspace}
+              <If when={windowSize().height >= 336}>
+                <Image src={logo} resizeMode="contain" style={{ width: 32, height: 32 }} />
+              </If>
+              <Text
+                style={{
+                  color: C.text,
+                  fontSize: compact() ? 20 : 26,
+                  lineHeight: 32,
+                  fontWeight: '500',
+                }}
+              >
+                Make something remarkable.
+              </Text>
+            </View>
+            <View
               style={{
-                ...controlStyle,
                 flexDirection: 'row',
                 alignItems: 'center',
-                maxWidth: '100%',
-                minWidth: 0,
-                flexShrink: 1,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
                 gap: 8,
               }}
-              hoverStyle={{ backgroundColor: C.surface }}
-              focusStyle={{ backgroundColor: C.raised }}
             >
-              <Icon name="folder" color={C.secondary} />
-              <Text numberOfLines={1} style={{ color: C.secondary, fontSize: 13, flexShrink: 1 }}>
-                {workspaceLabel()}
-              </Text>
-              <Icon name="down" color={C.secondary} />
-            </Button>
-            <Button
-              accessibilityLabel="Connections & models"
-              onPress={props.settings}
-              style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
-              hoverStyle={{ backgroundColor: C.surface }}
-              focusStyle={{ backgroundColor: C.raised }}
-            >
-              <Text style={{ color: C.muted, fontSize: 13 }}>Connections & models</Text>
-            </Button>
+              <Button
+                accessibilityLabel="Choose composer workspace"
+                tooltip={props.session()?.workspace() || 'Choose workspace'}
+                onPress={props.chooseWorkspace}
+                style={{
+                  ...controlStyle,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  maxWidth: '100%',
+                  minWidth: 0,
+                  flexShrink: 1,
+                  gap: 8,
+                }}
+                hoverStyle={{ backgroundColor: C.surface }}
+                focusStyle={{ backgroundColor: C.raised }}
+              >
+                <Icon name="folder" color={C.secondary} />
+                <Text numberOfLines={1} style={{ color: C.secondary, fontSize: 13, flexShrink: 1 }}>
+                  {workspaceLabel()}
+                </Text>
+                <Icon name="down" color={C.secondary} />
+              </Button>
+              <Button
+                accessibilityLabel="Connections & models"
+                onPress={props.settings}
+                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                hoverStyle={{ backgroundColor: C.surface }}
+                focusStyle={{ backgroundColor: C.raised }}
+              >
+                <Text style={{ color: C.muted, fontSize: 13 }}>Connections & models</Text>
+              </Button>
+            </View>
           </View>
-        </View>
-      </If>
-      <If when={props.session()?.error()}>
-        <Text selectable style={{ color: C.danger }}>
-          {props.session()?.error()}
-        </Text>
-      </If>
-      <If when={props.session()?.notice()}>
-        <Text
-          style={{
-            color: C.muted,
-            fontSize: 12,
-            // A single line occupies 32 points: 16 of text, 8 above and 8 below.
-            // This keeps the next card's outward cell paint clear of the notice.
-            ...(platform.isTerminal ? { lineHeight: 16, paddingVertical: 8 } : { paddingTop: 4 }),
-          }}
-        >
-          {props.session()?.notice()}
-        </Text>
-      </If>
-      <Each of={props.session() ? [props.session()!] : []} key={(session) => session.sessionId}>
-        {(session) => {
-          const owner = session();
-          return (
-            <View>
-              <Checklist sessionId={owner.sessionId} />
-              <If when={owner.recoverable()}>
-                <Button
-                  disabled={owner.recovering()}
-                  onPress={inputAction(owner.recover, null)}
-                  style={controlStyle}
-                  hoverStyle={{ backgroundColor: C.raised }}
-                  focusStyle={{ backgroundColor: C.line }}
-                >
-                  <Text style={{ color: C.warning }}>
-                    {owner.recovering()
-                      ? 'Reading original receipts…'
-                      : 'Recover original send receipt'}
-                  </Text>
-                </Button>
-              </If>
-              <Each of={owner.unconfirmed()} key={(id: string) => id}>
-                {(id) => (
+        </If>
+        <If when={props.session()?.error()}>
+          <Text selectable style={{ color: C.danger }}>
+            {props.session()?.error()}
+          </Text>
+        </If>
+        <If when={props.session()?.notice()}>
+          <Text
+            style={{
+              color: C.muted,
+              fontSize: 12,
+              // A single line occupies 32 points: 16 of text, 8 above and 8 below.
+              // This keeps the next card's outward cell paint clear of the notice.
+              ...(platform.isTerminal ? { lineHeight: 16, paddingVertical: 8 } : { paddingTop: 4 }),
+            }}
+          >
+            {props.session()?.notice()}
+          </Text>
+        </If>
+        <Each of={props.session() ? [props.session()!] : []} key={(session) => session.sessionId}>
+          {(session) => {
+            const owner = session();
+            return (
+              <View>
+                <Checklist sessionId={owner.sessionId} />
+                <If when={owner.recoverable()}>
                   <Button
                     disabled={owner.recovering()}
-                    onPress={inputAction(owner.abandon, id())}
+                    onPress={inputAction(owner.recover, null)}
                     style={controlStyle}
                     hoverStyle={{ backgroundColor: C.raised }}
                     focusStyle={{ backgroundColor: C.line }}
                   >
                     <Text style={{ color: C.warning }}>
-                      Abandon unconfirmed send · {id().slice(0, 8)}
+                      {owner.recovering()
+                        ? 'Reading original receipts…'
+                        : 'Recover original send receipt'}
                     </Text>
                   </Button>
-                )}
-              </Each>
-            </View>
-          );
-        }}
-      </Each>
-      <View
-        accessibilityLabel="Conversation composer"
-        style={{
-          backgroundColor: C.raised,
-          borderRadius: compact() ? 16 : 24,
-          borderWidth: 1,
-          borderColor: C.line,
-          paddingHorizontal: 16,
-          paddingTop: 12,
-          paddingBottom: 8,
-          gap: 12,
-          minHeight: hero() && !compact() ? 120 : undefined,
-        }}
-      >
-        <Each
-          of={props.session() ? [props.session()!] : [null]}
-          key={(owner) => owner?.sessionId ?? 'no-session'}
-        >
-          {(session) => {
-            const owner = session();
-            // Undo, selection and queued native events belong to this session.
-            // Hero/history and responsive layout never replace this editor.
-            return (
-              <View style={{ gap: 8 }}>
-                <If when={owner !== null}>
-                  <DraftAttachments draft={owner!.attachments} preview={owner!.previewImage} />
                 </If>
-                <Input
-                  ref={props.attach}
-                  testID="message"
-                  accessibilityLabel="Message composer"
-                  autoFocus
-                  multiline
-                  submitBehavior="submit"
-                  value={owner?.draft() ?? ''}
-                  readonly={!owner?.editable()}
-                  onChange={owner?.changeDraft}
-                  onSubmit={owner?.submit}
-                  placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
-                  style={{
-                    minHeight: hero() && !compact() ? 40 : 24,
-                    maxHeight: compact() ? 64 : 144,
-                    color: C.text,
-                    placeholderColor: C.muted,
-                    ...bodyTextStyle,
-                  }}
-                />
+                <Each of={owner.unconfirmed()} key={(id: string) => id}>
+                  {(id) => (
+                    <Button
+                      disabled={owner.recovering()}
+                      onPress={inputAction(owner.abandon, id())}
+                      style={controlStyle}
+                      hoverStyle={{ backgroundColor: C.raised }}
+                      focusStyle={{ backgroundColor: C.line }}
+                    >
+                      <Text style={{ color: C.warning }}>
+                        Abandon unconfirmed send · {id().slice(0, 8)}
+                      </Text>
+                    </Button>
+                  )}
+                </Each>
               </View>
             );
           }}
         </Each>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Button
-            onPress={inputAction(props.commands, { sessionId: props.session()?.sessionId ?? null })}
-            accessibilityLabel="Open commands"
-            tooltip="Commands · Ctrl+P"
-            style={{
-              width: 32,
-              height: 32,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 16,
-            }}
-            hoverStyle={{ backgroundColor: C.line }}
-            focusStyle={{ backgroundColor: C.line }}
-            activeStyle={{ backgroundColor: C.surface }}
+        <View
+          ref={(node) => {
+            unbind();
+            unbind = keymap.bind(
+              'mod+u',
+              () => {
+                const owner = props.session();
+                if (owner && owner.editable())
+                  owner.attachments.open({
+                    owner: owner.sessionId,
+                    value: !owner.attachments.picker(),
+                  });
+              },
+              { when: 'always', within: node },
+            );
+          }}
+          accessibilityLabel="Conversation composer"
+          style={{
+            flexShrink: 0,
+            backgroundColor: C.raised,
+            borderRadius: compact() ? 16 : 24,
+            borderWidth: 1,
+            borderColor: C.line,
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: 8,
+            gap: 12,
+            minHeight: hero() && !compact() ? 120 : undefined,
+          }}
+        >
+          <Each
+            of={props.session() ? [props.session()!] : [null]}
+            key={(owner) => owner?.sessionId ?? 'no-session'}
           >
-            <Icon name="plus" color={C.secondary} />
-          </Button>
-          <If when={props.session() !== null}>
+            {(session) => {
+              const owner = session();
+              // Undo, selection and queued native events belong to this session.
+              // Hero/history and responsive layout never replace this editor.
+              return (
+                <View style={{ gap: 8 }}>
+                  <If when={owner !== null}>
+                    <DraftAttachments draft={owner!.attachments} preview={owner!.previewImage} />
+                  </If>
+                  <Input
+                    ref={props.attach}
+                    testID="message"
+                    accessibilityLabel="Message composer"
+                    autoFocus
+                    multiline
+                    submitBehavior="submit"
+                    value={owner?.draft() ?? ''}
+                    readonly={!owner?.editable()}
+                    onChange={owner?.changeDraft}
+                    onSubmit={owner?.submit}
+                    placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
+                    style={{
+                      minHeight: hero() && !compact() ? 40 : 24,
+                      maxHeight: compact() ? 64 : 144,
+                      color: C.text,
+                      placeholderColor: C.muted,
+                      ...bodyTextStyle,
+                    }}
+                  />
+                </View>
+              );
+            }}
+          </Each>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Button
-              accessibilityLabel="Attach files"
-              tooltip="Attach files · Ctrl+U"
-              disabled={props.session()!.attachments.restoring()}
-              onPress={inputAction(props.session()!.attachments.open, {
-                owner: props.session()!.sessionId,
-                value: !props.session()!.attachments.picker(),
+              onPress={inputAction(props.commands, {
+                sessionId: props.session()?.sessionId ?? null,
               })}
+              accessibilityLabel="Open commands"
+              tooltip="Commands · Ctrl+P"
               style={{
                 width: 32,
                 height: 32,
@@ -338,24 +331,76 @@ export function Composer(props: {
               focusStyle={{ backgroundColor: C.line }}
               activeStyle={{ backgroundColor: C.surface }}
             >
-              <Icon name="paperclip" color={C.secondary} />
+              <Icon name="plus" color={C.secondary} />
             </Button>
-          </If>
-          <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>
-            {props.session()?.permissions()}
-          </Text>
-          <If when={props.session() !== null}>
-            <View style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
-          </If>
-          <If when={props.session() === null}>
-            <View style={{ flex: 1 }} />
-          </If>
-          <If when={props.session()?.invocation() != null}>
+            <If when={props.session() !== null}>
+              <Button
+                accessibilityLabel="Attach files"
+                tooltip="Attach files · Ctrl+U"
+                disabled={props.session()!.attachments.restoring()}
+                onPress={inputAction(props.session()!.attachments.open, {
+                  owner: props.session()!.sessionId,
+                  value: !props.session()!.attachments.picker(),
+                })}
+                style={{
+                  width: 32,
+                  height: 32,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 16,
+                }}
+                hoverStyle={{ backgroundColor: C.line }}
+                focusStyle={{ backgroundColor: C.line }}
+                activeStyle={{ backgroundColor: C.surface }}
+              >
+                <Icon name="paperclip" color={C.secondary} />
+              </Button>
+            </If>
+            <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, flexShrink: 1 }}>
+              {props.session()?.permissions()}
+            </Text>
+            <If when={props.session() !== null}>
+              <View style={{ flex: 1, minWidth: 0 }}>{props.models}</View>
+            </If>
+            <If when={props.session() === null}>
+              <View style={{ flex: 1 }} />
+            </If>
+            <If when={props.session()?.invocation() != null}>
+              <Button
+                disabled={props.session()!.stopping()}
+                accessibilityLabel="Stop response"
+                tooltip="Stop response · Esc"
+                onPress={inputAction(props.session()!.stop, props.session()!.invocation())}
+                style={{
+                  width: 32,
+                  height: 32,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: C.accent,
+                  borderRadius: 16,
+                }}
+                hoverStyle={{ backgroundColor: C.accentHover }}
+                focusStyle={{ backgroundColor: C.accentHover }}
+                activeStyle={{ backgroundColor: C.accent }}
+                disabledStyle={{ backgroundColor: C.line }}
+              >
+                <Icon name="stop" color={props.session()!.stopping() ? C.muted : C.background} />
+              </Button>
+            </If>
             <Button
-              disabled={props.session()!.stopping()}
-              accessibilityLabel="Stop response"
-              tooltip="Stop response · Esc"
-              onPress={inputAction(props.session()!.stop, props.session()!.invocation())}
+              accessibilityLabel="Send message"
+              tooltip="Send message · Enter"
+              disabled={cannotSend()}
+              onPress={
+                props.session()
+                  ? inputAction(props.session()!.sendRendered, {
+                      owner: props.session()!.sessionId,
+                      text: props.session()!.draft(),
+                      backend: props.session()!.backend(),
+                      attachments: props.session()!.attachments.ids(),
+                    })
+                  : undefined
+              }
               style={{
                 width: 32,
                 height: 32,
@@ -369,50 +414,21 @@ export function Composer(props: {
               activeStyle={{ backgroundColor: C.accent }}
               disabledStyle={{ backgroundColor: C.line }}
             >
-              <Icon name="stop" color={props.session()!.stopping() ? C.muted : C.background} />
+              <Icon name="send" color={cannotSend() ? C.muted : C.background} />
             </Button>
-          </If>
-          <Button
-            accessibilityLabel="Send message"
-            tooltip="Send message · Enter"
-            disabled={cannotSend()}
-            onPress={
-              props.session()
-                ? inputAction(props.session()!.sendRendered, {
-                    owner: props.session()!.sessionId,
-                    text: props.session()!.draft(),
-                    backend: props.session()!.backend(),
-                    attachments: props.session()!.attachments.ids(),
-                  })
-                : undefined
-            }
-            style={{
-              width: 32,
-              height: 32,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: C.accent,
-              borderRadius: 16,
-            }}
-            hoverStyle={{ backgroundColor: C.accentHover }}
-            focusStyle={{ backgroundColor: C.accentHover }}
-            activeStyle={{ backgroundColor: C.accent }}
-            disabledStyle={{ backgroundColor: C.line }}
-          >
-            <Icon name="send" color={cannotSend() ? C.muted : C.background} />
-          </Button>
+          </View>
         </View>
-      </View>
-      <View style={{ minHeight: 24, paddingTop: 8 }}>
-        <If when={blocked()}>
-          <Text style={{ color: C.warning, fontSize: 12, lineHeight: 16 }}>{blocked()}</Text>
+        <View style={{ minHeight: 24, paddingTop: 8 }}>
+          <If when={blocked()}>
+            <Text style={{ color: C.warning, fontSize: 12, lineHeight: 16 }}>{blocked()}</Text>
+          </If>
+        </View>
+        <If when={props.session()?.metrics()}>
+          <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>
+            {props.session()?.metrics()}
+          </Text>
         </If>
       </View>
-      <If when={props.session()?.metrics()}>
-        <Text numberOfLines={1} style={{ color: C.muted, fontSize: 12, paddingTop: 4 }}>
-          {props.session()?.metrics()}
-        </Text>
-      </If>
     </View>
   );
 }

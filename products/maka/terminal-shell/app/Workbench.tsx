@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { effect, inputAction, signal, View, type JSX, type YNode } from 'nsh';
+import { effect, inputAction, signal, View, type JSX } from 'nsh';
 import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
 import { Dialog } from 'nsh/base';
@@ -40,7 +40,6 @@ const canDockPreview = () => windowSize().width >= CENTER_MIN + PREVIEW_MIN + CE
 export function Workbench(props: {
   expanded(): boolean;
   browser: WorkspaceBrowserProps;
-  stopAction(): () => void;
   resources: Resources;
   children: JSX.Element;
 }) {
@@ -85,12 +84,6 @@ export function Workbench(props: {
         ),
       );
   };
-  const content = signal<YNode | null>(null);
-  effect(() => {
-    const stop = props.stopAction();
-    const node = content();
-    if (node) return keymap.bind('escape', stop, { when: 'always', within: node });
-  });
   effect(() => {
     windowSize().width;
     windowSize().height;
@@ -154,9 +147,7 @@ export function Workbench(props: {
           />
         </View>
       </If>
-      <View ref={(node) => content.set(node)} style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-        {props.children}
-      </View>
+      <View style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{props.children}</View>
       <If when={preview()}>
         <View
           accessibilityLabel="Resize workspace preview"

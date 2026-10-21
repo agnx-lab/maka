@@ -82,8 +82,7 @@ export function CapabilityRequest(props: { request: Request; sessionId: string }
       </View>
       <If when={!computerCapability(props.request)}>
         <Text style={{ ...bodyTextStyle, color: C.warning }}>
-          This Host cannot answer the requested capability. Closing leaves the original request
-          pending.
+          This Host cannot answer the requested capability. The original request remains pending.
         </Text>
       </If>
       <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 16 }}>

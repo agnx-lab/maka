@@ -18,11 +18,23 @@
  */
 
 import { cleanup, effect, inputAction, Input, signal, Scroll, Text, View } from 'nsh';
+import type { YNode } from 'nsh';
 import { host } from './host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
-import { Button, Dialog } from 'nsh/base';
-import type { InteractionOutcome } from '../../../../packages/plugin-sdk/src/generated/runtime';
+import { Button } from 'nsh/base';
+import type {
+  InteractionAnswer,
+  AgentInteractionRespond,
+  AgentInteractionResult,
+  HistoryRowPosition,
+  InteractionOutcome,
+  InteractionQuestion,
+  InteractionRecord,
+  InteractionRequest,
+  Permissions,
+  Scope2 as InteractionScope,
+} from '../../../../packages/plugin-sdk/src/generated/runtime';
 import {
   bodyTextStyle,
   C,
@@ -47,13 +59,15 @@ import {
   type FormDraft,
 } from './interaction-form';
 
-type InteractionControl = (method: string, input: unknown) => Promise<any>;
-type InteractionScope = 'once' | 'turn' | 'session';
+type InteractionControl = (
+  method: 'respond',
+  input: AgentInteractionRespond,
+) => Promise<AgentInteractionResult>;
 type InteractionOwner = { sessionId: string; requestId: string };
-type InteractionQuestion = {
-  question: string;
-  options: Array<{ label: string; description?: string }>;
-};
+type ApprovalSource = Pick<
+  Extract<InteractionRequest, { kind: 'service_approval' }>,
+  'kind' | 'through' | 'toolUseId' | 'toolName'
+>;
 function InteractionAction(props: {
   label: string;
   onPress: () => void;
@@ -61,7 +75,7 @@ function InteractionAction(props: {
   selected?: boolean;
   primary?: boolean;
   kind?: 'radio';
-  icon?: 'close' | 'refresh';
+  icon?: 'refresh';
   iconOnly?: boolean;
   tooltip?: string;
 }) {
@@ -109,9 +123,9 @@ function InteractionAction(props: {
     </Button>
   );
 }
-function interactionPermissions(value: any): string {
+function interactionPermissions(value: Permissions): string {
   const paths = value.filesystem.map(
-    (rule: any) =>
+    (rule) =>
       `${rule.access === 'write' ? 'Read/write' : 'Read'} · ${rule.scope === 'exact' ? 'this exact path' : 'path and descendants'}\n  ${rule.path}`,
   );
   const network =
@@ -119,11 +133,11 @@ function interactionPermissions(value: any): string {
       ? 'Network: all destinations'
       : value.network === 'denied'
         ? 'Network: no additional access'
-        : `Network: listed destinations only\n${value.network.restricted.destinations.map((target: any) => `  ${target.host}:${target.port}`).join('\n')}`;
+        : `Network: listed destinations only\n${value.network.restricted.destinations.map((target) => `  ${target.host}:${target.port}`).join('\n')}`;
   return [...(paths.length ? paths : ['Filesystem: no additional access']), network].join('\n\n');
 }
 
-function outcomeSummary(outcome: InteractionOutcome): string {
+export function interactionOutcomeSummary(outcome: InteractionOutcome): string {
   if (outcome.kind === 'form_answer')
     return outcome.action === 'accept'
       ? `Form submitted · ${Object.keys(outcome.values).length} fields`
@@ -142,18 +156,20 @@ function outcomeSummary(outcome: InteractionOutcome): string {
   return `Request closed · ${outcome.reason.replaceAll('_', ' ')}`;
 }
 
-export function InteractionPanel({
+export function InteractionComposer({
   sessionId,
   requestId,
   control,
-  close,
+  focusComposer,
+  confirming,
 }: {
   sessionId: string;
   requestId: string;
   control: InteractionControl;
-  close: () => void;
+  focusComposer(): void;
+  confirming(): boolean;
 }) {
-  const record = signal<any>(null);
+  const record = signal<InteractionRecord | null>(null);
   const loading = signal(false),
     busy = signal(false),
     uncertain = signal(false);
@@ -167,22 +183,43 @@ export function InteractionPanel({
     argumentTotal = signal<number | null>(null);
   const argumentBusy = signal(false),
     argumentError = signal('');
-  let argumentPosition: any = null;
+  let argumentPosition: HistoryRowPosition | null = null;
   let alive = true;
   cleanup(() => {
     alive = false;
   });
   const request = () => record()?.request;
-  const sameRecord = (value: any) =>
+  const approvalRequest = () => {
+    const current = request();
+    return current?.kind === 'service_approval' ? current : null;
+  };
+  const permissionsRequest = () => {
+    const current = request();
+    return current?.kind === 'permissions' ? current : null;
+  };
+  const questionRequest = () => {
+    const current = request();
+    return current?.kind === 'question' ? current : null;
+  };
+  const formRequest = () => {
+    const current = request();
+    return current?.kind === 'form' ? current : null;
+  };
+  const capabilityRequest = () => {
+    const current = request();
+    return current?.kind === 'client_capability' ? current : null;
+  };
+  const sameRecord = (value: InteractionRecord | null | undefined) =>
     value?.sessionId === sessionId && value?.requestId === requestId;
   const ownsAction = (owner: InteractionOwner) =>
     alive && owner.sessionId === sessionId && owner.requestId === requestId;
-  const questionIdentity = () =>
-    request()?.kind === 'question' ? JSON.stringify(request().questions) : null;
+  const questionIdentity = () => {
+    const current = questionRequest();
+    return current ? JSON.stringify(current.questions) : null;
+  };
   const responseIdentity = () =>
-    ['form', 'client_capability'].includes(request()?.kind) ? JSON.stringify(request()) : null;
-  const form = () =>
-    formSubmission(request()?.kind === 'form' ? request().fields : [], formDrafts());
+    formRequest() || capabilityRequest() ? JSON.stringify(request()) : null;
+  const form = () => formSubmission(formRequest()?.fields ?? [], formDrafts());
   const changeForm = (
     choice: InteractionOwner & {
       requestJSON: string | null;
@@ -193,9 +230,9 @@ export function InteractionPanel({
     if (
       !ownsAction(choice) ||
       blocked() ||
-      request()?.kind !== 'form' ||
+      !formRequest() ||
       choice.requestJSON !== responseIdentity() ||
-      !request().fields[choice.index]
+      !formRequest()!.fields[choice.index]
     )
       return;
     formDrafts.update((current) =>
@@ -214,7 +251,9 @@ export function InteractionPanel({
     });
   const editForm = (index: number, requestJSON: string, value: string) =>
     changeForm({ sessionId, requestId, requestJSON, index, change: { value } });
-  const sourceIdentity = (original = request()) =>
+  const sourceIdentity = (
+    original: ApprovalSource | InteractionRequest | null | undefined = request(),
+  ) =>
     original?.kind === 'service_approval'
       ? JSON.stringify({
           kind: original.kind,
@@ -230,12 +269,19 @@ export function InteractionPanel({
         original.sessionId === sessionId &&
         original.correlation?.requestId === requestId,
     );
-  const blocked = () => loading() || busy() || uncertain() || !pending() || !!record()?.outcome;
+  const blocked = () =>
+    !alive ||
+    confirming() ||
+    loading() ||
+    busy() ||
+    uncertain() ||
+    !pending() ||
+    !!record()?.outcome;
   const completeArguments = () =>
     argumentTotal() !== null && interactionBytes(argumentsText()) === argumentTotal();
   const questionReady = () =>
-    request()?.kind === 'question' &&
-    answers().length === request().questions.length &&
+    questionRequest() !== null &&
+    answers().length === questionRequest()!.questions.length &&
     answers().every(
       (part) => part.value === null || (typeof part.value === 'string' && !!part.value.trim()),
     );
@@ -255,8 +301,8 @@ export function InteractionPanel({
   ) => {
     if (
       !ownsAction(choice) ||
-      request()?.kind !== 'question' ||
-      JSON.stringify(request().questions[choice.index]) !== choice.questionJSON
+      !questionRequest() ||
+      JSON.stringify(questionRequest()!.questions[choice.index]) !== choice.questionJSON
     )
       return;
     choose(choice.index, choice.value, choice.other);
@@ -265,13 +311,13 @@ export function InteractionPanel({
     if (
       !ownsAction(choice) ||
       blocked() ||
-      request()?.kind !== 'permissions' ||
-      (choice.value === 'once' && request().toolUseId === null)
+      !permissionsRequest() ||
+      (choice.value === 'once' && permissionsRequest()!.toolUseId === null)
     )
       return;
     scope.set(choice.value);
   };
-  const readArguments = async (original = request()) => {
+  const readArguments = async (original: ApprovalSource | null = approvalRequest()) => {
     if (
       !alive ||
       argumentBusy() ||
@@ -294,8 +340,10 @@ export function InteractionPanel({
       if (!alive || sourceIdentity(original) !== sourceIdentity()) return;
       const source = page.source,
         call = source?.tool?.call;
-      const equalPosition = (a: any, b: any) =>
-        !!a && !!b && a.sourceSequence === b.sourceSequence && a.itemIndex === b.itemIndex;
+      const equalPosition = (
+        a: HistoryRowPosition | null | undefined,
+        b: HistoryRowPosition | null | undefined,
+      ) => !!a && !!b && a.sourceSequence === b.sourceSequence && a.itemIndex === b.itemIndex;
       const end = offset + interactionBytes(source?.text ?? '');
       if (
         page.kind !== 'ready' ||
@@ -335,7 +383,7 @@ export function InteractionPanel({
     void readArguments(JSON.parse(owner.sourceJSON));
   };
   const refresh = async () => {
-    if (loading() || busy()) return;
+    if (!alive || loading() || busy()) return;
     loading.set(true);
     error.set('');
     try {
@@ -348,7 +396,7 @@ export function InteractionPanel({
       if (!sameRecord(canonical)) throw new Error('The Host returned a different request.');
       record.set(canonical);
       uncertain.set(unresolved);
-      pending.set(list.entries.some((entry: any) => entry.requestId === requestId));
+      pending.set(list.entries.some((entry) => entry.requestId === requestId));
       if (
         canonical.request.kind === 'permissions' &&
         canonical.request.toolUseId === null &&
@@ -381,7 +429,7 @@ export function InteractionPanel({
   const refreshRendered = (owner: InteractionOwner) => {
     if (ownsAction(owner)) void refresh();
   };
-  const respond = async (answer: any) => {
+  const respond = async (answer: InteractionAnswer) => {
     if (blocked() || answer.kind !== request()?.kind) return;
     busy.set(true);
     error.set('');
@@ -423,7 +471,7 @@ export function InteractionPanel({
       if (alive) busy.set(false);
     }
   };
-  const submissionAnswer = () => {
+  const submissionAnswer = (): InteractionAnswer | null => {
     const current = request();
     if (!current) return null;
     if (current.kind === 'service_approval') {
@@ -437,7 +485,7 @@ export function InteractionPanel({
       };
     } else if (current.kind === 'question') {
       if (questionReady())
-        return { kind: 'question', answers: answers().map((part) => part.value) };
+        return { kind: 'question', answers: answers().map((part) => part.value as string | null) };
     } else if (current.kind === 'form') {
       return form().answer;
     } else if (current.kind === 'client_capability' && computerCapability(current)) {
@@ -458,12 +506,12 @@ export function InteractionPanel({
     const answer = submissionAnswer();
     if (answer) void respond(answer);
   };
-  const denialAnswer = () => {
+  const denialAnswer = (): InteractionAnswer | null => {
     const kind = request()?.kind;
     if (kind === 'service_approval') return { kind, decision: 'deny' };
     if (kind === 'permissions') return { kind, decision: { decision: 'deny' } };
     if (kind === 'form') return { kind, action: 'decline' };
-    if (kind === 'client_capability' && computerCapability(request()))
+    if (kind === 'client_capability' && computerCapability(capabilityRequest()!))
       return { kind, decision: 'deny' };
     return null;
   };
@@ -480,7 +528,7 @@ export function InteractionPanel({
     },
   ) => {
     if (!ownsAction(rendered) || blocked()) return;
-    const answer = JSON.parse(rendered.answerJSON);
+    const answer = JSON.parse(rendered.answerJSON) as InteractionAnswer | null;
     if (!answer || answer.kind !== request()?.kind) return;
     if (answer.kind === 'question' && rendered.questionsJSON !== questionIdentity()) return;
     if (answer.kind === 'service_approval' && rendered.sourceJSON !== sourceIdentity()) return;
@@ -501,7 +549,7 @@ export function InteractionPanel({
     // Current state can reject a stale answer; only the presented answer is sent.
     void respond(answer);
   };
-  const answerBinding = (answer: unknown) =>
+  const answerBinding = (answer: InteractionAnswer | null) =>
     inputAction(respondRendered, {
       sessionId,
       requestId,
@@ -510,17 +558,24 @@ export function InteractionPanel({
       sourceJSON: sourceIdentity(),
       requestJSON: responseIdentity(),
     });
-  // Parent mounts only the current keyed panel. Native keymap ownership removes
-  // these bindings on close; the Dialog owns Escape without answering a request.
-  keymap.bind('mod+enter', submit, { when: 'always' });
-  keymap.bind(
-    'mod+r',
-    () => {
-      void refresh();
-    },
-    { when: 'always' },
-  );
-  keymap.bind('d', deny, { when: 'notEditing' });
+  let unbindKeys = () => {};
+  cleanup(() => unbindKeys());
+  const attach = (node: YNode) => {
+    unbindKeys();
+    const bindings = [
+      keymap.bind('mod+enter', submit, { when: 'always', within: node }),
+      keymap.bind('mod+r', () => void refresh(), { when: 'always', within: node }),
+      keymap.bind('d', deny, { when: 'notEditing', within: node }),
+      keymap.bind(
+        'escape',
+        () => {
+          if (alive) focusComposer();
+        },
+        { when: 'always', within: node },
+      ),
+    ];
+    unbindKeys = () => bindings.forEach((remove) => remove());
+  };
   // Start once after construction, without tracking refresh's loading guards
   // as effect dependencies (which would create a request loop).
   effect(() => {
@@ -528,31 +583,32 @@ export function InteractionPanel({
       if (alive) void refresh();
     });
   });
-  const title = () =>
-    ({
-      service_approval: 'Review tool call',
-      permissions: 'Review additional access',
-      question: 'A question for you',
-      form: 'Form request',
-      client_capability: 'Capability request',
-    })[request()?.kind as string] ?? 'Review request';
+  const title = () => {
+    const current = request();
+    return current
+      ? {
+          service_approval: 'Review tool call',
+          permissions: 'Review additional access',
+          question: 'A question for you',
+          form: 'Form request',
+          client_capability: 'Capability request',
+        }[current.kind]
+      : 'Review request';
+  };
   return (
-    <Dialog
-      animation="none"
-      onOpenChange={close}
+    <View
+      ref={attach}
+      accessibilityLabel="Pending request"
       style={{
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 16,
-        backgroundColor: '#000000bb',
+        minHeight: 0,
+        flexShrink: 1,
+        paddingBottom: 8,
       }}
     >
       <View
         style={{
-          width: Math.max(8, Math.min(768, windowSize().width - 16)),
-          height: Math.max(80, Math.min(640, windowSize().height - 32)),
+          minHeight: 0,
+          flexShrink: 1,
           backgroundColor: C.surface,
           borderRadius: 16,
           borderWidth: 1,
@@ -568,27 +624,20 @@ export function InteractionPanel({
             paddingVertical: 12,
             borderBottomWidth: 1,
             borderBottomColor: C.line,
+            flexShrink: 0,
           }}
         >
-          <If
-            when={['service_approval', 'permissions', 'client_capability'].includes(
-              request()?.kind,
-            )}
-          >
+          <If when={approvalRequest() || permissionsRequest() || capabilityRequest()}>
             <Icon name="shield" color={C.secondary} />
           </If>
           <Text style={{ ...bodyTextStyle, flex: 1, color: C.text, fontWeight: '600' }}>
             {title()}
           </Text>
-          <InteractionAction
-            label="Close request"
-            icon="close"
-            iconOnly
-            tooltip="Close · Esc"
-            onPress={close}
-          />
         </View>
-        <Scroll style={{ flex: 1, minHeight: 0 }} contentStyle={{ padding: 16, gap: 16 }}>
+        <Scroll
+          style={{ flexShrink: 1, minHeight: 0, maxHeight: 336 }}
+          contentStyle={{ padding: 16, gap: 16 }}
+        >
           <If when={!record()}>
             <Text style={{ ...bodyTextStyle, color: C.muted }}>
               {loading() ? 'Reading the original request…' : 'Request not available.'}
@@ -601,10 +650,10 @@ export function InteractionPanel({
                 <If when={request()?.kind === 'service_approval'}>
                   <View style={{ gap: 4 }}>
                     <Text selectable style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}>
-                      {request()?.toolName}
+                      {approvalRequest()?.toolName}
                     </Text>
                     <Text selectable style={{ ...codeTextStyle, color: C.muted }}>
-                      {`${request()?.service}.${request()?.method}`}
+                      {`${approvalRequest()?.service}.${approvalRequest()?.method}`}
                     </Text>
                   </View>
                   <Text style={{ ...bodyTextStyle, color: C.secondary }}>
@@ -639,9 +688,9 @@ export function InteractionPanel({
                 </If>
                 <If when={request()?.kind === 'permissions'}>
                   <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
-                    {request()?.request.reason}
+                    {permissionsRequest()?.request.reason}
                   </Text>
-                  <If when={request()?.request.command}>
+                  <If when={permissionsRequest()?.request.command}>
                     <View
                       style={{
                         gap: 8,
@@ -651,18 +700,18 @@ export function InteractionPanel({
                       }}
                     >
                       <Text selectable style={{ ...codeTextStyle, color: C.text }}>
-                        {request()?.request.command.command}
+                        {permissionsRequest()?.request.command?.command}
                       </Text>
                       <Text selectable style={{ ...captionTextStyle, color: C.muted }}>
-                        {`Working directory: ${request()?.request.command.cwd}`}
+                        {`Working directory: ${permissionsRequest()?.request.command?.cwd}`}
                       </Text>
                     </View>
                   </If>
                   <View style={{ gap: 8 }}>
                     <Text style={{ ...captionTextStyle, color: C.muted }}>Requested access</Text>
                     <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
-                      {request()?.kind === 'permissions'
-                        ? interactionPermissions(request().request.permissions)
+                      {permissionsRequest()
+                        ? interactionPermissions(permissionsRequest()!.request.permissions)
                         : ''}
                     </Text>
                   </View>
@@ -673,7 +722,7 @@ export function InteractionPanel({
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                       <Each
                         of={
-                          request()?.toolUseId === null
+                          permissionsRequest()?.toolUseId === null
                             ? ['turn', 'session']
                             : ['once', 'turn', 'session']
                         }
@@ -702,14 +751,14 @@ export function InteractionPanel({
                   </View>
                 </If>
                 <If when={request()?.kind === 'question'}>
-                  <Each<InteractionQuestion> of={request()?.questions ?? []}>
+                  <Each<InteractionQuestion> of={questionRequest()?.questions ?? []} key="index">
                     {(question, index) => (
                       <View style={{ gap: 8 }}>
                         <Text
                           selectable
                           style={{ ...bodyTextStyle, color: C.text, fontWeight: '600' }}
                         >{`${index() + 1}. ${question().question}`}</Text>
-                        <Each of={question().options}>
+                        <Each of={question().options} key="index">
                           {(option) => (
                             <Button
                               accessibilityLabel={option().label}
@@ -816,7 +865,7 @@ export function InteractionPanel({
                 </If>
                 <If when={request()?.kind === 'form'}>
                   <FormRequest
-                    request={request()}
+                    request={formRequest()!}
                     drafts={formDrafts()}
                     problems={form().problems}
                     blocked={blocked()}
@@ -825,13 +874,12 @@ export function InteractionPanel({
                   />
                 </If>
                 <If when={request()?.kind === 'client_capability'}>
-                  <CapabilityRequest request={request()} sessionId={sessionId} />
+                  <CapabilityRequest request={capabilityRequest()!} sessionId={sessionId} />
                 </If>
               </View>
             }
           >
             <View style={{ gap: 8 }}>
-              <Text style={{ ...captionTextStyle, color: C.muted }}>Recorded outcome</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Icon name="check" color={C.accent} />
                 <Text
@@ -844,18 +892,10 @@ export function InteractionPanel({
                     fontWeight: '600',
                   }}
                 >
-                  {record()?.outcome ? outcomeSummary(record().outcome) : ''}
+                  {record()?.outcome ? interactionOutcomeSummary(record()!.outcome!) : ''}
                 </Text>
               </View>
             </View>
-            <If when={record()?.outcome?.kind !== 'form_answer'}>
-              <View style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 8 }}>
-                <Text style={{ ...captionTextStyle, color: C.muted }}>Original response</Text>
-                <Text selectable style={{ ...codeTextStyle, color: C.secondary }}>
-                  {JSON.stringify(record()?.outcome, null, 2)}
-                </Text>
-              </View>
-            </If>
           </If>
           <If when={error()}>
             <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
@@ -873,7 +913,7 @@ export function InteractionPanel({
               Choose an option, write another answer, or skip each question.
             </Text>
           </If>
-          <If when={record() && !record().outcome && !pending() && !loading()}>
+          <If when={record() && !record()!.outcome && !pending() && !loading()}>
             <Text style={{ ...bodyTextStyle, color: C.warning }}>
               This request is no longer listed as pending. Refresh to read its canonical outcome.
             </Text>
@@ -887,6 +927,7 @@ export function InteractionPanel({
             padding: 12,
             borderTopWidth: 1,
             borderTopColor: C.line,
+            flexShrink: 0,
           }}
         >
           <InteractionAction
@@ -922,8 +963,9 @@ export function InteractionPanel({
             <If
               when={
                 !record()?.outcome &&
-                (['service_approval', 'permissions'].includes(request()?.kind) ||
-                  (request()?.kind === 'client_capability' && computerCapability(request())))
+                (approvalRequest() ||
+                  permissionsRequest() ||
+                  (capabilityRequest() && computerCapability(capabilityRequest()!)))
               }
             >
               <InteractionAction
@@ -936,10 +978,11 @@ export function InteractionPanel({
             <If
               when={
                 !record()?.outcome &&
-                (['service_approval', 'permissions', 'question', 'form'].includes(
-                  request()?.kind,
-                ) ||
-                  (request()?.kind === 'client_capability' && computerCapability(request())))
+                (approvalRequest() ||
+                  permissionsRequest() ||
+                  questionRequest() ||
+                  formRequest() ||
+                  (capabilityRequest() && computerCapability(capabilityRequest()!)))
               }
             >
               <InteractionAction
@@ -973,6 +1016,6 @@ export function InteractionPanel({
           </View>
         </View>
       </View>
-    </Dialog>
+    </View>
   );
 }

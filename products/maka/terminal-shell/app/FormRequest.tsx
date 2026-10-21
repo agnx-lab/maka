@@ -98,7 +98,7 @@ export function FormRequest(props: {
       <Text selectable style={{ ...bodyTextStyle, color: C.text }}>
         {props.request.message}
       </Text>
-      <Each<FormField> of={props.request.fields}>
+      <Each<FormField> of={props.request.fields} key="index">
         {(field, index) => {
           const draft = () => props.drafts[index()];
           const disabled = () => props.blocked || !draft()?.included;
@@ -195,7 +195,7 @@ export function FormRequest(props: {
                   </View>
                 </If>
                 <If when={field().kind === 'single_select' || field().kind === 'multi_select'}>
-                  <Each of={options()}>
+                  <Each of={options()} key="index">
                     {(option) => {
                       const selected = () =>
                         field().kind === 'multi_select'

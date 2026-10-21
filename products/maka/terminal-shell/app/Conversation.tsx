@@ -21,8 +21,8 @@ import { batch, cleanup, computed, effect, inputAction, signal, Text, untracked,
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
+import { keymap } from 'nsh/keymap';
 import { AnimatedValue } from 'nsh/animated';
-import { platform } from 'nsh/device';
 import {
   host,
   loadDraft,
@@ -34,7 +34,6 @@ import {
   type ScopedHost,
 } from './host';
 import { C, Header, captionTextStyle, controlStyle } from './ui';
-import { Icon } from './Icon';
 import { acceptedSend, historyMetadata, mergeChunks, replayStartCursor } from './history';
 import type { Row, Position, Subscription } from './history';
 import type { ComposerSession, SendAction } from './Composer';
@@ -68,6 +67,7 @@ import type { ToolActivity } from './toolActivity';
 import type {
   AgentHistoryAttachment,
   AgentHistoryLandmark,
+  AgentPendingInteractions,
 } from '../../../../packages/plugin-sdk/src/index.js';
 import {
   createAttachmentDraft,
@@ -77,6 +77,7 @@ import {
 
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = ComposerSession & {
+  interactions(): AgentPendingInteractions;
   activeTurn(): string | null;
   activityTurn(): string | null;
   flushDraft(): Promise<boolean>;
@@ -95,11 +96,11 @@ type ConversationProps = {
   browse(): void;
   files(): void;
   filesOpener(node: YNode): void;
-  interaction(target: { sessionId: string; requestId: string }): void;
   previewImage(image: ImagePreview): void;
   attach(handle: ConversationHandle): void;
   detach(handle: ConversationHandle): void;
   focusComposer(): void;
+  stopAction(): () => void;
 };
 type LivePart = {
   invocationId: string | null;
@@ -136,6 +137,12 @@ function receiptMessage(reply: any): string {
 }
 
 export function Conversation(props: ConversationProps) {
+  const root = signal<YNode | null>(null);
+  effect(() => {
+    const stop = props.stopAction();
+    const node = root();
+    if (node) return keymap.bind('escape', stop, { when: 'always', within: node });
+  });
   const client = props.client;
   const sessionId = client.sessionId;
   const rows = signal<Row[]>([]);
@@ -153,7 +160,7 @@ export function Conversation(props: ConversationProps) {
   const permissions = signal('');
   const runTurn = signal<string | null>(null);
   const backend = signal<any>(null);
-  const interactions = signal<any>({ revision: -1, entries: [] });
+  const interactions = signal<AgentPendingInteractions>({ revision: -1, entries: [] });
   const error = signal('');
   const ready = signal(false);
   const transcriptStatus = signal<'loading' | 'live' | 'closing' | 'failed'>('loading');
@@ -1400,6 +1407,7 @@ export function Conversation(props: ConversationProps) {
   };
   const ownHandle: ConversationHandle = {
     sessionId,
+    interactions,
     draft,
     attachments,
     previewImage: props.previewImage,
@@ -1531,7 +1539,7 @@ export function Conversation(props: ConversationProps) {
     untracked(() => {
       void host
         .query('agent', 'pendingInteractions', { sessionId })
-        .then((pending: any) => {
+        .then((pending) => {
           if (alive && pending.revision >= interactions().revision) interactions.set(pending);
         })
         .catch(report);
@@ -1555,8 +1563,11 @@ export function Conversation(props: ConversationProps) {
 
   return (
     <View
+      ref={(node) => root.set(node)}
       style={{
         flex: ownHandle.empty() ? 0 : 1,
+        flexBasis: 'auto',
+        flexShrink: 0,
         minHeight: 0,
         backgroundColor: C.background,
       }}
@@ -1837,32 +1848,6 @@ export function Conversation(props: ConversationProps) {
             activate={inputAction(ownHandle.jumpLatest, null)}
           />
         </View>
-        <If when={interactions().entries.length > 0}>
-          <Button
-            accessibilityLabel={`! Your input is needed · Open request (${interactions().entries.length})`}
-            onPress={inputAction(props.interaction, {
-              sessionId,
-              requestId: interactions().entries[0].requestId,
-            })}
-            style={{
-              ...controlStyle,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              backgroundColor: C.surface,
-            }}
-            hoverStyle={{ backgroundColor: C.raised }}
-            focusStyle={{ backgroundColor: C.line }}
-          >
-            <If when={!platform.isTerminal}>
-              <Icon name="shield" color={C.warning} />
-            </If>
-            <Text style={{ ...captionTextStyle, color: C.warning }}>
-              {platform.isTerminal ? '! ' : ''}Your input is needed · Open request (
-              {interactions().entries.length})
-            </Text>
-          </Button>
-        </If>
       </View>
     </View>
   );
