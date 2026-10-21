@@ -55,8 +55,27 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         wait_view(&mut view, |screen| screen.contains("FINAL_A") && screen.contains("Fork from here") && screen.contains("fixture-model")).await;
         activate(&mut view, "View this turn's model usage").await;
         let usage = wait_view(&mut view, |screen| screen.contains("1 main model request in this turn") && screen.contains("Output tokens")).await;
-        for (label, expected) in [("Input tokens", "1"), ("Output tokens", "2"), ("Reasoning tokens", "Unavailable")] {
-            assert!(usage.lines().any(|line| line.contains(label) && line.split_whitespace().last() == Some(expected)), "{label} did not show the original provider counter:\n{usage}");
+        // Accessibility is scoped to the active dialog; the terminal line can
+        // also contain conversation text painted outside its bounds.
+        let nodes = view.accessibility_snapshot();
+        for (label, expected) in [
+            ("Input tokens", "1"),
+            ("Output tokens", "2"),
+            ("Reasoning tokens", "0"),
+            ("Cache read tokens", "0"),
+            ("Cache write tokens", "Unavailable"),
+            ("Recorded cost", "Unavailable"),
+        ] {
+            let field = nodes.iter().find(|node| node.label == label).unwrap();
+            let values: Vec<_> = nodes.iter().filter(|node| {
+                node.frame.origin.y == field.frame.origin.y
+                    && node.frame.origin.x.0 >= field.frame.origin.x.0 + field.frame.size.width.0
+            }).collect();
+            assert_eq!(values.len(), 1, "expected one visible {label} value:\n{usage}");
+            let value = values[0];
+            assert_eq!(value.label, expected, "{label} did not retain its exact counter");
+            let row = (value.frame.origin.y.0 / view.surface().metrics().height().0).floor() as usize;
+            assert_eq!(support::painted_text(&view, &value.label, row).trim(), expected, "{label} did not paint its exact counter:\n{usage}");
         }
         evidence("final-actions-original-main-usage", &usage);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
