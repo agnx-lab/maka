@@ -33,7 +33,11 @@ import {
 import { Button, Dialog } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { keymap } from 'nsh/keymap';
-import type { RawAction, TerminalSize } from '../../../../packages/plugin-sdk/src/index.js';
+import type {
+  RawAction,
+  TerminalModifiers,
+  TerminalSize,
+} from '../../../../packages/plugin-sdk/src/index.js';
 import type { TerminalModel } from './terminalState';
 import { C } from './ui';
 
@@ -131,7 +135,7 @@ export function Terminal(props: { model: TerminalModel }) {
     model.control() === 'held' &&
     offset() === 0 &&
     frame().metadata.input.mouseTrackingMode !== 'none';
-  const key = (name: string, modifiers: ('ctrl' | 'alt' | 'shift')[] = []) =>
+  const key = (name: string, modifiers: TerminalModifiers = []) =>
     model.input([{ type: 'key', key: name, modifiers }]);
   const copy = async () => {
     try {
@@ -171,7 +175,7 @@ export function Terminal(props: { model: TerminalModel }) {
       pagedown: 'page_down',
     };
     for (let index = 1; index <= 12; index++) if (index !== 11) names[`f${index}`] = `f${index}`;
-    const variants: ('ctrl' | 'alt' | 'shift')[][] = [
+    const variants: TerminalModifiers[] = [
       [],
       ['shift'],
       ['ctrl'],
@@ -181,16 +185,17 @@ export function Terminal(props: { model: TerminalModel }) {
     ];
     for (const [stroke, name] of Object.entries(names))
       for (const modifiers of variants) {
-        if (stroke === 'f4' && modifiers.includes('alt')) continue;
+        if (stroke === 'f4' && modifiers.some((modifier) => modifier === 'alt')) continue;
         if (stroke === 'tab' && modifiers.some((modifier) => modifier !== 'shift')) continue;
         bindings[[...modifiers, stroke].join('+')] = () => {
           if (['enter', 'escape', 'backspace'].includes(stroke)) {
-            if (modifiers.includes('alt'))
+            if (modifiers.some((modifier) => modifier === 'alt'))
               model.input([
                 { type: 'key', key: 'escape' },
                 { type: 'key', key: name },
               ]);
-            else if (stroke === 'backspace' && modifiers.includes('ctrl')) key('h', ['ctrl']);
+            else if (stroke === 'backspace' && modifiers.some((modifier) => modifier === 'ctrl'))
+              key('h', ['ctrl']);
             else key(name);
           } else key(name, modifiers);
         };

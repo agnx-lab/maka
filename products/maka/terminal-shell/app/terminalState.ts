@@ -79,7 +79,7 @@ export function createTerminals(options: {
     owner: ScopedHost,
     method: M,
     input: Parameters<typeof terminalMutation<M>>[2],
-  ): Promise<Awaited<ReturnType<typeof terminalMutation<M>>>> => {
+  ): ReturnType<typeof terminalMutation<M>> => {
     // Releases are cleanup of their immutable original, including after selection changes.
     if (
       method !== 'release' &&
