@@ -1625,7 +1625,6 @@ export function Conversation(props: ConversationProps) {
             onLayout={(frame) => readingSize.set({ width: frame.width, height: frame.height })}
             each={displayKeys()}
             onScrollBeginDrag={cancelTurnNavigation}
-            onTouchStart={cancelTurnNavigation}
             onViewableItemsChanged={(event) =>
               visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
             }
