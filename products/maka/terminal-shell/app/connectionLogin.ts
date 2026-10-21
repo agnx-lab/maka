@@ -69,6 +69,10 @@ export function createConnectionLogin(
           const event = await mutation.next();
           if (!event)
             throw new Error('Sign-in ended without a final receipt. Recover the original action.');
+          if (event.kind === 'not_dispatched') {
+            if (alive) operations.notice.set('Sign-in cancelled before it started.');
+            return;
+          }
           if (event.kind === 'progress') {
             // This exact method's progress and output are validated against
             // settingsAuthentication by the Host before native delivery.
