@@ -1026,9 +1026,6 @@ export interface ServiceMethods {
       input: {
         controller: TerminalControlInput_TerminalController;
         sequence: number;
-        /**
-         * @maxItems 64
-         */
         actions?: TerminalControlInput_RawAction[];
         size?: TerminalControlInput_TerminalSize | null;
       };
