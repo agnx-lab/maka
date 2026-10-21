@@ -17,21 +17,31 @@
  * under the License.
  */
 
-import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Clipboard } from 'nsh/clipboard';
 import { host } from './host';
 import { messageBytes, type Position, type Row } from './history';
-import { C, controlStyle } from './ui';
+import { C, controlStyle, controlDisabledStyle } from './ui';
+import { Icon } from './Icon';
 
 type OriginalMessage = {
   sessionId: string;
   key: string;
+  role: 'user' | 'assistant';
   position: Position;
   through: number;
 };
 const samePosition = (left: Position, right: Position) =>
   left.sourceSequence === right.sourceSequence && left.itemIndex === right.itemIndex;
+const sameMessage = (left: OriginalMessage | null, right: OriginalMessage | null) =>
+  left === right ||
+  (left !== null &&
+    right !== null &&
+    left.sessionId === right.sessionId &&
+    left.key === right.key &&
+    left.role === right.role &&
+    samePosition(left.position, right.position));
 
 /** Copy one canonical body, including text outside the loaded history window. */
 export function MessageCopy(props: {
@@ -47,27 +57,24 @@ export function MessageCopy(props: {
   cleanup(() => {
     alive = false;
   });
-  const target = (): OriginalMessage | null => {
-    const row = props.row();
-    if (!row.finalOutput || row.role !== 'assistant' || row.field !== 'body' || !row.position)
-      return null;
-    return {
-      sessionId: props.sessionId,
-      key: props.ownerKey(),
-      position: { ...row.position },
-      through: row.metadataThrough ?? props.through(),
-    };
-  };
-  const owns = (original: OriginalMessage) => {
-    const current = target();
-    return (
-      alive &&
-      current !== null &&
-      current.sessionId === original.sessionId &&
-      current.key === original.key &&
-      samePosition(current.position, original.position)
-    );
-  };
+  const target = computed<OriginalMessage | null>(
+    () => {
+      const row = props.row();
+      if (row.field !== 'body' || !row.position) return null;
+      if (row.role !== 'user' && (row.role !== 'assistant' || !row.finalOutput)) return null;
+      return {
+        sessionId: props.sessionId,
+        key: props.ownerKey(),
+        role: row.role,
+        position: { ...row.position },
+        through: row.metadataThrough ?? props.through(),
+      };
+    },
+    // A canonical body is immutable at its position. New metadata fences
+    // do not replace the original copy target while another turn streams.
+    { equals: sameMessage },
+  );
+  const owns = (original: OriginalMessage) => alive && sameMessage(target(), original);
   const copy = async (original: OriginalMessage | null) => {
     if (original === null || !owns(original) || busy()) return;
     busy.set(true);
@@ -93,7 +100,7 @@ export function MessageCopy(props: {
           page.through !== original.through ||
           !samePosition(source.position, original.position) ||
           source.field !== 'body' ||
-          source.role !== 'assistant' ||
+          source.role !== original.role ||
           source.format !== 'text' ||
           source.path != null ||
           source.offset !== offset ||
@@ -112,7 +119,8 @@ export function MessageCopy(props: {
       }
       if (!owns(original)) return;
       await Clipboard.writeText(content);
-      if (owns(original)) notice.set('Sent to terminal clipboard');
+      if (owns(original))
+        notice.set(original.role === 'user' ? 'User message copied' : 'Message copied');
     } catch (reason) {
       if (owns(original)) {
         failed.set(true);
@@ -123,23 +131,38 @@ export function MessageCopy(props: {
     }
   };
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+    <View
+      style={{
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 8,
+        minWidth: 0,
+        maxWidth: '100%',
+      }}
+    >
       <If when={notice()}>
         <Text style={{ color: failed() ? C.danger : C.muted, fontSize: 12, lineHeight: 16 }}>
           {notice()}
         </Text>
       </If>
       <Button
-        accessibilityLabel="Copy message"
-        disabled={busy()}
+        accessibilityLabel={props.row().role === 'user' ? 'Copy user message' : 'Copy message'}
+        tooltip={
+          busy()
+            ? 'Reading original message…'
+            : props.row().role === 'user'
+              ? 'Copy user message'
+              : 'Copy message'
+        }
+        disabled={busy() || target() === null}
         onPress={inputAction(copy, target())}
-        style={controlStyle}
+        style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
         hoverStyle={{ backgroundColor: C.surface }}
         focusStyle={{ backgroundColor: C.raised }}
+        disabledStyle={controlDisabledStyle}
       >
-        <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
-          {busy() ? 'Reading…' : 'Copy'}
-        </Text>
+        <Icon name={notice() && !failed() ? 'check' : 'copy'} color={C.muted} />
       </Button>
     </View>
   );

@@ -132,9 +132,9 @@ export function MessageRow({
                           flexWrap: 'wrap',
                           width: '100%',
                           minWidth: 0,
-                          justifyContent: 'flex-end',
+                          justifyContent: 'flex-start',
                           alignItems: 'center',
-                          gap: 16,
+                          gap: 8,
                         }}
                       >
                         <If
@@ -160,19 +160,26 @@ export function MessageRow({
                           </If>
                         </If>
                         <Button
+                          accessibilityLabel={
+                            sourceMode() ? 'Show formatted message' : 'Show message source'
+                          }
+                          tooltip={sourceMode() ? 'Show formatted message' : 'Show message source'}
                           selected={sourceMode()}
                           onPress={inputAction(setSourceMode, {
                             sessionId,
                             key: rowKey(row()),
                             value: !sourceMode(),
                           })}
-                          style={{ ...controlStyle, alignSelf: 'flex-end' }}
+                          style={{
+                            ...controlStyle,
+                            width: 32,
+                            paddingHorizontal: 8,
+                            alignItems: 'center',
+                          }}
                           hoverStyle={{ backgroundColor: C.surface }}
                           focusStyle={{ backgroundColor: C.raised }}
                         >
-                          <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
-                            {sourceMode() ? 'Formatted' : 'Source'}
-                          </Text>
+                          <Icon name={sourceMode() ? 'file' : 'code'} color={C.muted} />
                         </Button>
                       </View>
                     </View>
@@ -259,19 +266,31 @@ export function MessageRow({
                   />
                 </If>
               </View>
-              <If when={timestamp()}>
-                <Text
-                  style={{
-                    alignSelf: 'flex-end',
-                    color: C.muted,
-                    fontSize: 12,
-                    lineHeight: 16,
-                    paddingTop: 4,
-                  }}
-                >
-                  {timestamp()}
-                </Text>
-              </If>
+              <View
+                style={{
+                  alignSelf: 'flex-end',
+                  width: '78%',
+                  minWidth: 0,
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'flex-end',
+                  gap: 8,
+                  paddingTop: 4,
+                }}
+              >
+                <If when={timestamp()}>
+                  <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>
+                    {timestamp()}
+                  </Text>
+                </If>
+                <MessageCopy
+                  row={row}
+                  ownerKey={() => rowKey(row())}
+                  sessionId={sessionId}
+                  through={through}
+                />
+              </View>
             </If>
           </View>
         );

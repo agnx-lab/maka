@@ -26,7 +26,8 @@ import type { Position, Row } from './history';
 import { MessageCopy } from './MessageCopy';
 import { forkTitle, type SessionAction } from './sessionLifecycle';
 import { TurnUsage } from './TurnUsage';
-import { C, captionTextStyle, controlStyle } from './ui';
+import { C, controlStyle } from './ui';
+import { Icon } from './Icon';
 
 type Target = {
   sessionId: string;
@@ -143,29 +144,29 @@ export function FinalActions(props: {
           through={props.through}
         />
         <Button
-          style={controlStyle}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           accessibilityLabel="Fork from this turn"
+          tooltip={pending() ? 'Creating fork…' : 'Fork from this turn'}
           disabled={pending() || target() === null}
           onPress={inputAction(fork, target())}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ ...captionTextStyle, color: C.muted }}>
-            {pending() ? 'Forking…' : 'Fork from here'}
-          </Text>
+          <Icon name="fork" color={C.muted} />
         </Button>
         <Button
           ref={(node) => {
             usageButton = node;
           }}
-          style={controlStyle}
+          style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           accessibilityLabel="View this turn's model usage"
+          tooltip="View this turn's model usage"
           disabled={target() === null}
           onPress={inputAction(showUsage, target())}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ ...captionTextStyle, color: C.muted }}>Usage</Text>
+          <Icon name="activity" color={C.muted} />
         </Button>
         <If when={details()}>
           <Text style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}>{details()}</Text>
