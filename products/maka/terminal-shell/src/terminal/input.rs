@@ -412,7 +412,9 @@ mod tests {
 
     #[test]
     fn native_wheels_keep_the_queue_bound_and_actions_and_resize_revoke_them() {
-        use nsh_core::{Bounds, MountBatch, MountItem, Point, ROOT_ID, Size, ViewKind, geometry::px};
+        use nsh_core::{
+            Bounds, MountBatch, MountItem, Point, ROOT_ID, Size, ViewKind, geometry::px,
+        };
         use nsh_platform_tui::{CellMetrics, Surface, SurfaceEvent};
         let mut surface = Surface::new(40, 12, CellMetrics::default());
         surface.apply(MountBatch {

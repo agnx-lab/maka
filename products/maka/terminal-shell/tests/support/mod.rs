@@ -429,6 +429,7 @@ impl Fixture {
             ..Default::default()
         });
         load_application(&mut view);
+        view.surface_mut().set_assets(Some(bindings.assets()));
         (view, bindings)
     }
     pub async fn finish(self) {

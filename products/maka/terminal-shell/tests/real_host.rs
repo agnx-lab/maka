@@ -1397,7 +1397,17 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let (mut view, bindings) = fixture.view(client.clone(), Some(fixture.session.clone()));
         view.resize(120, 40);
         wait_focused_input(&mut view, "Message composer").await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                support::tick(&mut view);
+                if view.surface().input_context().is_some_and(|context| context.editable) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the focused composer did not finish loading its saved draft");
         view.handle_event(Event::Paste("UNSENT_PREVIEW_DRAFT".into()));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("UNSENT_PREVIEW_DRAFT"));
         support::wait_draft(&client, &fixture.session, "UNSENT_PREVIEW_DRAFT").await;
         let composer = view.surface().focused().unwrap();
         support::click_label(&mut view, "Browse workspace files");
@@ -1424,9 +1434,9 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let narrow = wait_view(&mut view, |screen| screen.contains("Current worktree diff") && screen.contains("+REFRESHED_CURRENT_EDIT") && screen.contains("Close · Esc")).await;
         evidence("workspace-current-diff-dialog", &narrow);
         support::evidence_cells("workspace-current-diff-dialog", &view);
-        assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| !screen.contains("Current worktree diff") && screen.contains("UNSENT_PREVIEW_DRAFT")).await;
+        assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer));
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
         support::click_label(&mut view, "file: 001-scene.data");
