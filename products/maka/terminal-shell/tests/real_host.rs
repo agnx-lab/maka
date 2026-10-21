@@ -2058,9 +2058,11 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         terminal.paste(" + LATER_UNSENT_B");
         terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
         support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        request.delta("ACTIVE_PREFIX_ABCD").await;
+        terminal.wait_for("ACTIVE_PREFIX_ABCD").await;
 
-        // Move the real reader to old history, then finish enough output while
-        // disconnected that an accidental jump to the new tail is observable.
+        // Move the reader to old history while the same model part stays open.
+        // Recovery must preserve both this anchor and its already shown prefix.
         let focus_frame = terminal.wire().len();
         terminal.send(b"\x1b[1;3A");
         terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
@@ -2072,12 +2074,8 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         let reconnecting = terminal.wait_for("Reconnecting updates").await;
         assert!(!reconnecting.contains("Enter sends"));
         assert!(!reconnecting.contains("Reconnect updates"), "one transient loss must recover without a button");
-        let body: String = (0..80).map(|row| format!("Offline response paragraph {row:02}.\n\n")).collect();
-        request.delta(&body).await;
-        request.delta("OFFLINE_CANONICAL_FINAL").await;
-        request.finish().await;
+        request.delta(" ACTIVE_OFFLINE_SUFFIX").await;
         let control = fixture.client().await;
-        fixture.idle(&control, &fixture.session).await;
         catchup.release();
         // Three real losses span more than four seconds. Returning service
         // still resumes automatically, with no mandatory Reconnect click.
@@ -2090,7 +2088,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         terminal.wait_for("Updates disconnected.").await;
         terminal.wait_for("Confirming send").await;
         let restored = terminal.wait_for("History 00 paragraph 00").await;
-        assert!(!restored.contains("OFFLINE_CANONICAL_FINAL"), "reconnect must not jump an old reader to the new tail");
+        assert!(!restored.contains("ACTIVE_OFFLINE_SUFFIX"), "reconnect must not jump an old reader to the new tail");
         let retained = terminal_client.operation(original.id).await.unwrap();
         assert_eq!(retained.reference, original.reference);
         assert!(retained.receipt.is_none(), "reconnecting a watch must not settle or replace the held send receipt");
@@ -2098,6 +2096,12 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         evidence("production-reconnect-retains-reader", &restored);
+        terminal.send(b"\x0c");
+        let active = terminal.wait_for("ACTIVE_OFFLINE_SUFFIX").await;
+        assert_eq!(active.matches("ACTIVE_PREFIX_ABCD").count(), 1, "replaying an unfinished part must not repeat its visible prefix");
+        request.delta(" OFFLINE_CANONICAL_FINAL").await;
+        request.finish().await;
+        fixture.idle(&control, &fixture.session).await;
 
         send.release();
         terminal.wait_for("Enter sends").await;

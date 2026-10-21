@@ -438,12 +438,17 @@ export function Conversation(props: ConversationProps) {
           // Completion changes metadata on earlier multipart output as well.
           // Never merge these newly budgeted fragments into already loaded text.
           let cursor: any = { kind: 'row', position: refresh.position, field: refresh.field };
-          for (;;) {
-            const page = await history(metadataFence, cursor);
-            if (!alive) return;
-            publishMetadata(page.chunks, page.through);
-            if (page.after === null) break;
-            cursor = { kind: 'after', cursor: page.after };
+          try {
+            for (;;) {
+              const page = await history(metadataFence, cursor);
+              if (!alive) return;
+              publishMetadata(page.chunks, page.through);
+              if (page.after === null) break;
+              cursor = { kind: 'after', cursor: page.after };
+            }
+          } catch (reason) {
+            requestMetadata(refresh);
+            throw reason;
           }
         }
       } while (alive && followAgain);
@@ -542,6 +547,7 @@ export function Conversation(props: ConversationProps) {
           if (!part || covered().has(`${part.messageId}/${part.field}`)) break;
           const key = `live/${part.messageId}/${part.field}`;
           const previous = live().find((row) => row.key === key);
+          if (previous?.sequence !== undefined && event.sequence <= previous.sequence) break;
           const next = {
             ...part,
             invocationId: part.invocationId ?? undefined,
@@ -608,16 +614,12 @@ export function Conversation(props: ConversationProps) {
   };
 
   const openTranscript = async () => {
-    // An unconfirmed close remains owned here; retry cleanup before opening
-    // another observer. Recovery never repeats a send or its confirmation.
-    const previous = subscription;
-    if (previous !== null) {
-      await previous.close();
-      if (subscription === previous) subscription = null;
-      if (readFailure?.stream === previous) readFailure = null;
-    }
     if (followTask) await followTask.catch(() => {});
     if (!alive) return;
+    // A turn may have ended while its watch was offline. Earlier accepted
+    // fragments need the same completion metadata refresh as an ended event.
+    const previousTurn = runTurn();
+    if (previousTurn !== null) requestMetadata(rows().find((row) => row.turnId === previousTurn));
     const observed = await observe();
     if (!alive) return;
     parts.set(
@@ -639,6 +641,7 @@ export function Conversation(props: ConversationProps) {
     }
     subscription = stream;
     watchLast = after;
+    let failure: { reason: unknown } | null = null;
     try {
       if (ready()) {
         // Fill the gap from the existing canonical tail, retaining loaded
@@ -672,12 +675,23 @@ export function Conversation(props: ConversationProps) {
         batch(() => deliver(page));
       }
     } catch (reason) {
-      throw readFailure?.stream === stream ? readFailure.reason : reason;
+      failure = { reason: readFailure?.stream === stream ? readFailure.reason : reason };
+      throw failure.reason;
     } finally {
       if (alive) transcriptStatus.set('closing');
-      await stream.close();
-      if (subscription === stream) subscription = null;
-      if (readFailure?.stream === stream) readFailure = null;
+      try {
+        await stream.close();
+      } catch (reason) {
+        throw new Error(
+          `${failure ? String(failure.reason) : 'Observation stopped'}; original observation cleanup remains unconfirmed: ${String(reason)}`,
+        );
+      } finally {
+        // This replaces only the read-only JS observer. Native Client retains
+        // unconfirmed Request custody, within its existing limit, until the
+        // original session close acknowledges cleanup. No mutation is replayed.
+        if (subscription === stream) subscription = null;
+        if (readFailure?.stream === stream) readFailure = null;
+      }
     }
   };
   const startTranscript = () => {
