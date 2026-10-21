@@ -81,10 +81,7 @@ export function MessageRow({
           if (action.value) onExpand?.(action.key);
         };
         const text = computed(() => row().text);
-        const preview = computed(() => {
-          const first = /\S[^\r\n]*/.exec(text())?.[0].trim() ?? '';
-          return first.length > 160 ? `${first.slice(0, 160)}…` : first;
-        });
+        const preview = computed(() => /\S[^\r\n]*/.exec(text())?.[0].trim() ?? '');
         const thinking = () => row().field === 'thinking' || row().role === 'thinking';
         const isTool = () =>
           row().tool != null || row().role === 'tool_call' || row().role === 'tool_result';
@@ -214,6 +211,7 @@ export function MessageRow({
                             <Icon name={expanded() ? 'down' : 'right'} color={C.secondary} />
                             <Text
                               numberOfLines={1}
+                              ellipsizeMode="tail"
                               style={{ flex: 1, color: C.muted, fontSize: 13, lineHeight: 16 }}
                             >
                               {summary()}
