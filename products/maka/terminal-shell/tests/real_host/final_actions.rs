@@ -92,6 +92,12 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         let mut second_request = fixture.next_request().await;
         second_request.delta("ACTIVE_B is still streaming").await;
         wait_view(&mut view, |screen| screen.contains("ACTIVE_B") && screen.contains("Fork from here")).await;
+        activate(&mut view, "View this turn's model usage").await;
+        wait_view(&mut view, |screen| screen.contains("Main model usage") && screen.contains("1 main model request in this turn")).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view(&mut view, |screen| !screen.contains("Main model usage")).await;
+        let after_close = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        assert_eq!(after_close["run"]["invocationId"], second["invocationId"], "Escape in turn usage must close its dialog without stopping the active turn");
         support::click_button(&mut view, "Fork from this turn").await;
         let forked = wait_view(&mut view, |screen| screen.contains("Fork of NSH real Agent") && screen.contains("FINAL_A") && !screen.contains("ACTIVE_B")).await;
         let listed = client.query("agent", "list", json!({"filter":"all","scope":{"kind":"all"},"titleQuery":"Fork of NSH real Agent","position":{"kind":"start"}})).await.unwrap();
