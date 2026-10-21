@@ -2721,7 +2721,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         let mut next = loop {
             terminal.read();
             if let Ok(request) = fixture.requests.try_recv() { break request; }
-            assert!(started.elapsed() < Duration::from_secs(20), "new Send did not reach the provider");
+            assert!(started.elapsed() < Duration::from_secs(20), "new Send did not reach the provider:\n{}", terminal.snapshot());
             tokio::time::sleep(Duration::from_millis(2)).await;
         };
         assert!(next.body.to_string().contains("RECOVERY_ORIGINAL_A + LATER_UNSENT_B"));

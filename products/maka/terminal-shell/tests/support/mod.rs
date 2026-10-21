@@ -415,6 +415,7 @@ impl Fixture {
                             "watchChecklist",
                             "observe",
                             "history",
+                            "historyLandmarks",
                             "watch",
                         ],
                         false,
