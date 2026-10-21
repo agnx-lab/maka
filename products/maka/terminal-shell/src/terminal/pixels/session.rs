@@ -312,7 +312,6 @@ fn run(
                         {
                             if let Event::Paste(text) = event {
                                 if source.borrow().editor_matches(&snapshot) {
-                                    refresh = true;
                                     platform.paste(text).map_err(|error| error.to_string())?;
                                     let mut state = presentation.state.lock().unwrap();
                                     let inbox = state.pixels.as_mut().unwrap();
@@ -348,7 +347,6 @@ fn run(
                                                 )?
                                         }
                                     };
-                                    refresh |= admitted;
                                     if admitted {
                                         release_pending = false;
                                     }
