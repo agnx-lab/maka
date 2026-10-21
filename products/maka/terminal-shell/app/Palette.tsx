@@ -111,6 +111,7 @@ export function Palette(props: {
             removeSearchKeys = () => unbind.forEach((remove) => remove());
           }}
           testID="palette-search"
+          accessibilityLabel="Search commands"
           autoFocus
           value={query()}
           onChange={(text) => {
