@@ -32,6 +32,21 @@ const glyphs = {
   search: '⌕',
   settings: '⚙',
   folder: '📁',
+  refresh: '↻',
+  file: '📄',
+  terminal: '⌁',
+  copy: '⧉',
+  code: '⌘',
+  check: '✓',
+  more: '⋯',
+  latest: '↓',
+  paperclip: '📎',
+  image: '▧',
+  fork: '⑂',
+  shield: '◇',
+  lock: '▣',
+  activity: '◌',
+  unread: '●',
 };
 
 export function Icon(props: { name: keyof typeof glyphs; color: string }) {
@@ -132,6 +147,119 @@ export function Icon(props: { name: keyof typeof glyphs; color: string }) {
             cx.lineTo(14.5, 13);
             cx.lineTo(1.5, 13);
             cx.closePath();
+            break;
+          case 'refresh':
+            cx.arc(8, 8, 5, -0.7, Math.PI * 1.7);
+            cx.moveTo(12, 1.5);
+            cx.lineTo(12.5, 5);
+            cx.lineTo(9, 4.5);
+            break;
+          case 'file':
+            cx.moveTo(3, 1.5);
+            cx.lineTo(9, 1.5);
+            cx.lineTo(13, 5.5);
+            cx.lineTo(13, 14.5);
+            cx.lineTo(3, 14.5);
+            cx.closePath();
+            cx.moveTo(9, 1.5);
+            cx.lineTo(9, 5.5);
+            cx.lineTo(13, 5.5);
+            break;
+          case 'terminal':
+            cx.roundRect(1, 2, 14, 12, 2);
+            cx.moveTo(4, 5);
+            cx.lineTo(7, 8);
+            cx.lineTo(4, 11);
+            cx.moveTo(9, 11);
+            cx.lineTo(12, 11);
+            break;
+          case 'copy':
+            cx.roundRect(2, 1.5, 9, 10, 1.5);
+            cx.roundRect(5, 4.5, 9, 10, 1.5);
+            break;
+          case 'code':
+            cx.moveTo(6, 4);
+            cx.lineTo(2, 8);
+            cx.lineTo(6, 12);
+            cx.moveTo(10, 4);
+            cx.lineTo(14, 8);
+            cx.lineTo(10, 12);
+            break;
+          case 'check':
+            cx.moveTo(3, 8);
+            cx.lineTo(6.5, 11.5);
+            cx.lineTo(13, 4.5);
+            break;
+          case 'more':
+            for (const x of [3, 8, 13]) {
+              cx.moveTo(x + 1, 8);
+              cx.arc(x, 8, 1, 0, Math.PI * 2);
+            }
+            cx.fill();
+            return;
+          case 'latest':
+            cx.moveTo(8, 2);
+            cx.lineTo(8, 12);
+            cx.moveTo(3.5, 7.5);
+            cx.lineTo(8, 12);
+            cx.lineTo(12.5, 7.5);
+            break;
+          case 'paperclip':
+            cx.moveTo(5, 11);
+            cx.lineTo(10, 6);
+            cx.arc(9, 5, 1.5, -0.8, Math.PI * 1.2, true);
+            cx.lineTo(4, 9);
+            cx.arc(6, 11, 3, Math.PI * 1.2, 0.2, true);
+            cx.lineTo(13, 6);
+            break;
+          case 'image':
+            cx.roundRect(1.5, 2, 13, 12, 2);
+            cx.moveTo(2, 12);
+            cx.lineTo(6, 8);
+            cx.lineTo(9, 11);
+            cx.lineTo(11, 9);
+            cx.lineTo(14, 12);
+            cx.moveTo(11, 5.5);
+            cx.arc(10, 5.5, 1, 0, Math.PI * 2);
+            break;
+          case 'fork':
+            cx.arc(5, 3, 1.5, 0, Math.PI * 2);
+            cx.moveTo(5, 4.5);
+            cx.lineTo(5, 11.5);
+            cx.moveTo(6.5, 13);
+            cx.arc(5, 13, 1.5, 0, Math.PI * 2);
+            cx.moveTo(5, 9);
+            cx.lineTo(11, 6);
+            cx.lineTo(11, 4.5);
+            cx.moveTo(12.5, 3);
+            cx.arc(11, 3, 1.5, 0, Math.PI * 2);
+            break;
+          case 'shield':
+            cx.moveTo(8, 1.5);
+            cx.lineTo(13.5, 4);
+            cx.lineTo(12.5, 10);
+            cx.lineTo(8, 14.5);
+            cx.lineTo(3.5, 10);
+            cx.lineTo(2.5, 4);
+            cx.closePath();
+            break;
+          case 'lock':
+            cx.roundRect(3, 7, 10, 7, 2);
+            cx.moveTo(5, 7);
+            cx.lineTo(5, 4.5);
+            cx.arc(8, 4.5, 3, Math.PI, 0);
+            cx.lineTo(11, 7);
+            break;
+          case 'activity':
+            cx.arc(8, 8, 6, 0, Math.PI * 2);
+            cx.moveTo(8, 4);
+            cx.lineTo(8, 8);
+            cx.lineTo(11, 9.5);
+            break;
+          case 'unread':
+            cx.arc(8, 8, 2.5, 0, Math.PI * 2);
+            cx.fill();
+            return;
         }
         cx.stroke();
       }}
