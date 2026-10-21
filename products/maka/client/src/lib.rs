@@ -386,6 +386,21 @@ impl Client {
         journal::validate_upload(&operation, &key)?;
         Ok(operation)
     }
+    /// Exact lookup distinguishes a pre-reservation selection failure from an
+    /// unknown original upload. List truncation and lookup errors are not absence.
+    pub async fn find_upload(
+        &self,
+        session: &str,
+        editor: &str,
+        id: Uuid,
+    ) -> Result<Option<Operation>> {
+        let key = self.draft_key("agent", session, editor).await?;
+        let operation = self.0.journal.find(&self.0.source, id).await?;
+        if let Some(operation) = &operation {
+            journal::validate_upload(operation, &key)?;
+        }
+        Ok(operation)
+    }
     /// Reserve a shell control attempt separately from composer draft sends.
     pub async fn control(&self, id: Uuid, method: &str, input: Value) -> Result<Mutation> {
         if !CONTROL_METHODS.contains(&method) {

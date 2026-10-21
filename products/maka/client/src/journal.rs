@@ -401,10 +401,15 @@ impl Journal {
         Ok(())
     }
     pub(crate) async fn load(&self, host: &DeploymentRef, id: Uuid) -> Result<Operation> {
+        self.find(host, id)
+            .await?
+            .ok_or_else(|| "original client operation not found for this Host".into())
+    }
+    pub(crate) async fn find(&self, host: &DeploymentRef, id: Uuid) -> Result<Option<Operation>> {
         let row = sqlx::query("SELECT context,reference,receipt,abandoned FROM operations WHERE id=? AND domain=? AND deployment=?")
             .bind(id.to_string()).bind(&host.state_domain).bind(host.deployment.to_string())
-            .fetch_optional(&self.0).await.map_err(error)?.ok_or("original client operation not found for this Host")?;
-        decode_operation(row)
+            .fetch_optional(&self.0).await.map_err(error)?;
+        row.map(decode_operation).transpose()
     }
     pub(crate) async fn abandon(&self, host: &DeploymentRef, id: Uuid) -> Result<Operation> {
         sqlx::query("UPDATE operations SET abandoned=1 WHERE id=? AND domain=? AND deployment=? AND reference IS NULL AND receipt IS NULL")
