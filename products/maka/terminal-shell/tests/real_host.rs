@@ -1053,7 +1053,8 @@ async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority
         wait_enabled_node(&mut view, "Browse folder 子目录").await;
         for (columns, rows) in [(80, 24), (120, 40)] {
             view.resize(columns, rows);
-            wait_view(&mut view, |screen| screen.contains("Folder · 中文工程") && screen.contains("子目录") && screen.contains("Ctrl+Enter uses folder")).await;
+            wait_view(&mut view, |screen| screen.contains("Folder · 中文工程") && screen.contains("子目录")).await;
+            support::wait_enabled_button(&mut view, "Use this workspace folder").await;
             wait_focused_input(&mut view, "Search workspace folders").await;
         }
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
