@@ -146,6 +146,11 @@ impl From<String> for DraftEdit {
         }
     }
 }
+impl From<&str> for DraftEdit {
+    fn from(text: &str) -> Self {
+        text.to_owned().into()
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
