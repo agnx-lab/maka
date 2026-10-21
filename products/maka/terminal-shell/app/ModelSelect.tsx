@@ -27,8 +27,13 @@ import { host } from './host';
 import type { ConversationHandle } from './Conversation';
 import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import { Icon } from './Icon';
 import {
   C,
+  bodyTextStyle,
+  captionTextStyle,
+  inputTextStyle,
   inputBorderRadius,
   compact,
   controlStyle,
@@ -243,22 +248,32 @@ export function ModelSelect(props: {
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#00000099',
-        padding: 16,
+        padding: compact() ? 8 : 16,
       }}
     >
       <View
         style={{
           width: '100%',
           maxWidth: 640,
+          maxHeight: '100%',
+          minHeight: 0,
+          flexShrink: 1,
           backgroundColor: C.surface,
           padding: 16,
-          gap: 16,
+          gap: compact() ? 8 : 16,
           borderWidth: 1,
           borderRadius: 16,
           borderColor: C.line,
         }}
       >
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
           <Text style={{ color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '600' }}>
             Models
           </Text>
@@ -272,12 +287,15 @@ export function ModelSelect(props: {
                 ? inputAction(close, { instance: props.instance, from: pane() })
                 : inputAction(changePane, { instance: props.instance, from: pane(), to: 'root' })
             }
-            style={controlStyle}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>{pane() === 'root' ? 'Close' : 'Back'}</Text>
+            <Icon name={pane() === 'root' ? 'close' : 'back'} color={C.muted} />
+            <Text style={{ ...captionTextStyle, color: C.muted }}>
+              {pane() === 'root' ? 'Close' : 'Back'}
+            </Text>
           </Button>
         </View>
         <If when={pane() === 'root'}>
@@ -290,19 +308,28 @@ export function ModelSelect(props: {
               from: 'root',
               to: 'models',
             })}
-            style={{ ...controlStyle, backgroundColor: C.background, gap: 8 }}
+            style={{
+              ...controlStyle,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: C.background,
+              gap: 12,
+            }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.raised }}
             disabledStyle={controlDisabledStyle}
           >
-            <Text numberOfLines={1} style={{ color: C.text }}>
-              Model · {modelCaption(owner.backend(), owner.modelDetails())} ▸
-            </Text>
-            <Text numberOfLines={1} style={{ color: C.muted }}>
-              {readyChoice()?.connectionName ??
-                owner.backend()?.connectionId ??
-                'Choose a connection and model'}
-            </Text>
+            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+              <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text, fontSize: 14 }}>
+                Model · {modelCaption(owner.backend(), owner.modelDetails())}
+              </Text>
+              <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
+                {readyChoice()?.connectionName ??
+                  owner.backend()?.connectionId ??
+                  'Choose a connection and model'}
+              </Text>
+            </View>
+            <Icon name="right" color={C.muted} />
           </Button>
           <Button
             ref={(node) => focusRoot('effort', node)}
@@ -313,15 +340,26 @@ export function ModelSelect(props: {
               from: 'root',
               to: 'effort',
             })}
-            style={{ ...controlStyle, backgroundColor: C.background, gap: 8 }}
+            style={{
+              ...controlStyle,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: C.background,
+              gap: 12,
+            }}
             hoverStyle={{ backgroundColor: C.raised }}
             focusStyle={{ backgroundColor: C.raised }}
             disabledStyle={controlDisabledStyle}
           >
-            <Text numberOfLines={1} style={{ color: C.text }}>
-              Effort · {effortCaption(owner.backend(), owner.modelDetails())} ▸
-            </Text>
-            <Text style={{ color: C.muted }}>Default inherits this connection’s policy</Text>
+            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+              <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text, fontSize: 14 }}>
+                Effort · {effortCaption(owner.backend(), owner.modelDetails())}
+              </Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
+                Default uses this connection’s settings
+              </Text>
+            </View>
+            <Icon name="right" color={C.muted} />
           </Button>
         </If>
         <If when={pane() === 'models'}>
@@ -350,13 +388,13 @@ export function ModelSelect(props: {
             placeholder="Search models…"
             maxLength={256}
             style={{
+              ...inputTextStyle,
               placeholderColor: C.muted,
               color: C.text,
               height: compact() ? 32 : 40,
               backgroundColor: C.background,
               borderRadius: inputBorderRadius,
               paddingHorizontal: 12,
-              fontSize: 14,
             }}
           />
           <List
@@ -368,7 +406,7 @@ export function ModelSelect(props: {
             onLoadMore={() => {
               if (!error()) void loadModels();
             }}
-            style={{ height: count() * 48 }}
+            style={{ height: count() * 48, minHeight: 0, flexShrink: 1 }}
           >
             {(id) => (
               <Each<string> of={[id()]} key={(key: string) => key}>
@@ -384,7 +422,12 @@ export function ModelSelect(props: {
                       onPress={inputAction(submit, modelAction(choice()))}
                       style={{
                         height: 48,
-                        paddingHorizontal: 8,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 12,
                         backgroundColor:
                           choices()[index()] && routeId(choices()[index()]) === key()
                             ? C.line
@@ -394,27 +437,36 @@ export function ModelSelect(props: {
                       focusStyle={{ backgroundColor: C.raised }}
                       disabledStyle={controlDisabledStyle}
                     >
-                      <Text numberOfLines={1} style={{ color: C.text }}>
-                        {choice().label}
-                        {sameRoute(owner.backend(), choice().selection) ? ' ✓' : ''}
-                      </Text>
-                      <Text numberOfLines={1} style={{ color: C.muted }}>
-                        {choice().connectionName} · {choice().selection.modelId}
-                      </Text>
+                      <View pointerEvents="none" style={{ flex: 1, minWidth: 0 }}>
+                        <Text
+                          numberOfLines={1}
+                          style={{ ...captionTextStyle, color: C.text, fontSize: 14 }}
+                        >
+                          {choice().label}
+                        </Text>
+                        <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
+                          {choice().connectionName} · {choice().selection.modelId}
+                        </Text>
+                      </View>
+                      <ChoiceIndicator
+                        kind="radio"
+                        checked={sameRoute(owner.backend(), choice().selection)}
+                        disabled={pending()}
+                      />
                     </Button>
                   );
                 }}
               </Each>
             )}
           </List>
-          <Text style={{ color: C.muted }}>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
             {loading()
               ? 'Loading…'
               : `${choices().length} model${choices().length === 1 ? '' : 's'}${page()?.next ? ' · scroll for more' : ''}`}
           </Text>
         </If>
         <If when={pane() === 'effort'}>
-          <Scroll style={{ maxHeight: count() * 48 }}>
+          <Scroll style={{ maxHeight: count() * 48, minHeight: 0, flexShrink: 1 }}>
             <Each<ModelChoice>
               of={readyChoice() ? [readyChoice()!] : []}
               key={(choice: ModelChoice) => routeId(choice)}
@@ -441,16 +493,22 @@ export function ModelSelect(props: {
                           }),
                         )}
                         style={{
-                          minHeight: 32,
+                          ...controlStyle,
                           backgroundColor: C.background,
-                          paddingHorizontal: 8,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 12,
                         }}
                         hoverStyle={{ backgroundColor: C.raised }}
                         focusStyle={{ backgroundColor: C.raised }}
                         disabledStyle={controlDisabledStyle}
                       >
-                        <Text style={{ color: C.text }}>
-                          {owner.backend()?.thinkingLevel === level() ? '✓ ' : '  '}
+                        <ChoiceIndicator
+                          kind="radio"
+                          checked={owner.backend()?.thinkingLevel === level()}
+                          disabled={pending()}
+                        />
+                        <Text style={{ ...captionTextStyle, color: C.text }}>
                           {level() === null ? 'Default · Use connection default' : level()}
                         </Text>
                       </Button>
@@ -462,7 +520,7 @@ export function ModelSelect(props: {
           </Scroll>
         </If>
         <If when={pane() !== 'models' && owner.modelDetails().kind !== 'ready'}>
-          <Text style={{ color: C.muted }}>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>
             {owner.modelDetails().kind === 'loading'
               ? 'Loading model policy…'
               : 'The saved model policy is unavailable. Its selection is preserved.'}
@@ -476,7 +534,7 @@ export function ModelSelect(props: {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.accent }}>Retry</Text>
+            <Text style={{ ...captionTextStyle, color: C.accent }}>Retry</Text>
           </Button>
         </If>
         <Button
@@ -488,10 +546,10 @@ export function ModelSelect(props: {
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Manage connections & models</Text>
+          <Text style={{ ...captionTextStyle, color: C.accent }}>Manage connections & models</Text>
         </Button>
         <If when={error()}>
-          <Text style={{ color: C.danger }}>{error()}</Text>
+          <Text style={{ ...bodyTextStyle, color: C.danger }}>{error()}</Text>
           <If when={pane() === 'models'}>
             <Button
               disabled={pending()}
@@ -502,12 +560,12 @@ export function ModelSelect(props: {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.accent }}>Retry</Text>
+              <Text style={{ ...captionTextStyle, color: C.accent }}>Retry</Text>
             </Button>
           </If>
         </If>
         <If when={pending()}>
-          <Text style={{ color: C.muted }}>Saving selection…</Text>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>Saving selection…</Text>
         </If>
       </View>
     </Dialog>

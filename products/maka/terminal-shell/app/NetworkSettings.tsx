@@ -21,8 +21,17 @@ import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import type { ProxyProtocol } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { SettingsField } from './SettingsField';
+import { ChoiceIndicator } from './ChoiceIndicator';
 import type { NetworkSettingsOwner } from './networkSettings';
-import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import {
+  bodyTextStyle,
+  captionTextStyle,
+  C,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
   const owner = props.owner;
@@ -30,16 +39,15 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
   const disabled = () => owner.disabled();
   const protocols: ProxyProtocol[] = ['http', 'https', 'socks5'];
   return (
-    <View style={{ flex: 1, gap: 8 }}>
+    <View style={{ flex: 1, minHeight: 0, gap: 8 }}>
       <If when={owner.loading()}>
-        <Text style={{ color: C.muted }}>Loading network settings…</Text>
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>Loading network settings…</Text>
       </If>
       <If when={owner.draft() && owner.snapshot()}>
-        <Scroll style={{ flex: 1 }}>
+        <Scroll style={{ flex: 1, minHeight: 0 }}>
           <View style={{ gap: 12, padding: 8 }}>
-            <Text style={{ color: C.muted }}>
-              Applies to this Host’s future network requests. Running requests keep their captured
-              policy.
+            <Text style={{ ...captionTextStyle, color: C.muted }}>
+              Applies to new requests. Requests already running keep their settings.
             </Text>
             <Button
               disabled={disabled()}
@@ -50,16 +58,25 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 kind: 'enabled',
                 value: !value().proxy.enabled,
               })}
-              style={controlStyle}
+              style={{
+                ...controlStyle,
+                minHeight: 40,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+              }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.text }}>
-                {value().proxy.enabled ? '✓ Proxy enabled' : '○ Proxy disabled'}
-              </Text>
+              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>Proxy</Text>
+              <ChoiceIndicator
+                kind="switch"
+                checked={value().proxy.enabled}
+                disabled={disabled()}
+              />
             </Button>
-            <View style={{ flexDirection: 'row', gap: 16 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Each of={protocols} key={(protocol) => protocol}>
                 {(protocol) => (
                   <Button
@@ -71,12 +88,24 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                       kind: 'protocol',
                       value: protocol(),
                     })}
-                    style={controlStyle}
+                    style={{
+                      ...controlStyle,
+                      minHeight: 40,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                    selectedStyle={{ backgroundColor: C.raised }}
                     hoverStyle={controlHoverStyle}
                     focusStyle={controlFocusStyle}
                     disabledStyle={controlDisabledStyle}
                   >
-                    <Text style={{ color: C.accent }}>{protocol()}</Text>
+                    <ChoiceIndicator
+                      kind="radio"
+                      checked={value().proxy.protocol === protocol()}
+                      disabled={disabled()}
+                    />
+                    <Text style={{ ...bodyTextStyle, color: C.text }}>{protocol()}</Text>
                   </Button>
                 )}
               </Each>
@@ -86,7 +115,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               value={value().proxy.host}
               disabled={disabled()}
               change={(text) => owner.edit('host', text)}
-              hint="Host name or IP address; enter the port separately."
+              hint="Hostname or IP address; enter the port separately."
             />
             <SettingsField
               label="Proxy port"
@@ -103,18 +132,25 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 kind: 'authentication',
                 value: !value().proxy.authEnabled,
               })}
-              style={controlStyle}
+              style={{
+                ...controlStyle,
+                minHeight: 40,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+              }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.text }}>
-                {value().proxy.authEnabled
-                  ? '✓ Proxy authentication enabled'
-                  : '○ Proxy authentication disabled'}
-              </Text>
+              <Text style={{ ...bodyTextStyle, color: C.text, flex: 1 }}>Proxy authentication</Text>
+              <ChoiceIndicator
+                kind="switch"
+                checked={value().proxy.authEnabled}
+                disabled={disabled()}
+              />
             </Button>
-            <Text style={{ color: C.muted }}>
+            <Text style={{ ...captionTextStyle, color: C.muted }}>
               Saving with proxy authentication disabled deletes its stored password.
             </Text>
             <If when={value().proxy.authEnabled}>
@@ -124,7 +160,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                 disabled={disabled()}
                 change={(text) => owner.edit('username', text)}
               />
-              <View style={{ flexDirection: 'row', gap: 16 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <Button
                   disabled={disabled()}
                   selected={value().credential === 'keep'}
@@ -134,12 +170,24 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     kind: 'credential',
                     value: 'keep',
                   })}
-                  style={controlStyle}
+                  style={{
+                    ...controlStyle,
+                    minHeight: 40,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  selectedStyle={{ backgroundColor: C.raised }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>Keep stored password</Text>
+                  <ChoiceIndicator
+                    kind="radio"
+                    checked={value().credential === 'keep'}
+                    disabled={disabled()}
+                  />
+                  <Text style={{ ...bodyTextStyle, color: C.text }}>Keep stored password</Text>
                 </Button>
                 <Button
                   disabled={disabled()}
@@ -150,15 +198,27 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                     kind: 'credential',
                     value: 'replace',
                   })}
-                  style={controlStyle}
+                  style={{
+                    ...controlStyle,
+                    minHeight: 40,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  selectedStyle={{ backgroundColor: C.raised }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>Replace password</Text>
+                  <ChoiceIndicator
+                    kind="radio"
+                    checked={value().credential === 'replace'}
+                    disabled={disabled()}
+                  />
+                  <Text style={{ ...bodyTextStyle, color: C.text }}>Replace password</Text>
                 </Button>
               </View>
-              <Text style={{ color: C.muted }}>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
                 {owner.snapshot()?.credential.configured
                   ? 'A proxy password is stored. Its value is never read back.'
                   : 'No proxy password is stored.'}
@@ -170,7 +230,7 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
                   masked
                   disabled={disabled()}
                   change={(text) => owner.edit('secret', text)}
-                  hint="Saved as a private Host credential, separately from the proxy configuration."
+                  hint="Stored securely, separately from your proxy settings."
                 />
               </If>
             </If>
@@ -180,10 +240,10 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               multiline
               disabled={disabled()}
               change={(text) => owner.edit('bypass', text)}
-              hint="One Host bypass rule per line. Automatic rules are retained."
+              hint="One bypass rule per line. Automatic rules are retained."
             />
             <If when={owner.snapshot()!.proxy.autoBypassDomains.length > 0}>
-              <Text style={{ color: C.muted }}>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
                 Automatic bypass: {owner.snapshot()!.proxy.autoBypassDomains.join(', ')}
               </Text>
             </If>
@@ -191,23 +251,25 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
               disabled={disabled()}
               accessibilityLabel="Save network settings"
               onPress={inputAction(owner.save, owner.action())}
-              style={controlStyle}
-              hoverStyle={controlHoverStyle}
-              focusStyle={controlFocusStyle}
+              style={{ ...controlStyle, alignSelf: 'flex-start', backgroundColor: C.accent }}
+              hoverStyle={{ backgroundColor: C.accentHover }}
+              focusStyle={{ backgroundColor: C.accentHover }}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.accent }}>Save network settings</Text>
+              <Text style={{ ...bodyTextStyle, color: C.background, fontWeight: '500' }}>
+                Save network settings
+              </Text>
             </Button>
             <Button
               disabled={disabled()}
               accessibilityLabel="Reload network settings"
               onPress={inputAction(owner.reload, owner.action())}
-              style={controlStyle}
+              style={{ ...controlStyle, alignSelf: 'flex-start' }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.muted }}>Discard edits and reload</Text>
+              <Text style={{ ...bodyTextStyle, color: C.secondary }}>Discard edits and reload</Text>
             </Button>
           </View>
         </Scroll>
@@ -216,12 +278,12 @@ export function NetworkSettings(props: { owner: NetworkSettingsOwner }) {
         <Button
           accessibilityLabel="Reload network settings"
           onPress={inputAction(owner.reload, owner.action())}
-          style={controlStyle}
+          style={{ ...controlStyle, alignSelf: 'flex-start' }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Reload network settings</Text>
+          <Text style={{ ...bodyTextStyle, color: C.secondary }}>Reload network settings</Text>
         </Button>
       </If>
     </View>

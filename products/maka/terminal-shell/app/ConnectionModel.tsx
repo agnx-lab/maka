@@ -21,7 +21,16 @@ import { inputAction, Scroll, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { thinkingLevels, type ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
-import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
   const owner = props.settings;
@@ -29,7 +38,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
   const disabled = () => owner.busy() || !owner.pendingKnown() || owner.pending().length > 0;
   return (
     <Scroll style={{ flex: 1 }}>
-      <View style={{ padding: 8, gap: 12 }}>
+      <View style={{ padding: 8, gap: 16 }}>
         <SettingsField
           label="Model ID"
           value={model().id}
@@ -45,17 +54,24 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           change={(label) => owner.changeModel({ label })}
           hint="Optional. Empty uses the provider’s name."
         />
-        <Text style={{ color: C.text }}>Supported reasoning efforts</Text>
+        <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
+          Supported reasoning efforts
+        </Text>
         <Button
           disabled={disabled()}
           selected={model().thinkingLevels === null}
           onPress={inputAction(owner.useProviderThinking, owner.modelAction())}
-          style={controlStyle}
+          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Use provider defaults</Text>
+          <ChoiceIndicator
+            kind="radio"
+            checked={model().thinkingLevels === null}
+            disabled={disabled()}
+          />
+          <Text style={{ ...captionTextStyle, color: C.text }}>Use provider defaults</Text>
         </Button>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
           <Each of={thinkingLevels} key={(level) => level}>
@@ -68,35 +84,43 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
                   ...owner.modelAction(),
                   level: level(),
                 })}
-                style={controlStyle}
+                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                 hoverStyle={controlHoverStyle}
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text
-                  style={{ color: model().thinkingLevels?.includes(level()) ? C.accent : C.muted }}
-                >
-                  {level()}
-                </Text>
+                <ChoiceIndicator
+                  kind="checkbox"
+                  checked={model().thinkingLevels?.includes(level()) ?? false}
+                  disabled={disabled()}
+                />
+                <Text style={{ ...captionTextStyle, color: C.text }}>{level()}</Text>
               </Button>
             )}
           </Each>
         </View>
-        <Text style={{ color: C.muted }}>
-          Declare only the efforts this model supports. The session picker uses the Host’s resolved
-          capabilities.
+        <Text style={{ ...bodyTextStyle, color: C.muted }}>
+          Select the reasoning efforts supported by this model. They will be available in
+          conversations.
         </Text>
-        <Text style={{ color: C.text }}>Connection default reasoning effort</Text>
+        <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
+          Connection default reasoning effort
+        </Text>
         <Button
           disabled={disabled()}
           selected={model().defaultThinkingLevel === null}
           onPress={inputAction(owner.defaultThinking, { ...owner.modelAction(), level: null })}
-          style={controlStyle}
+          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.accent }}>Provider default</Text>
+          <ChoiceIndicator
+            kind="radio"
+            checked={model().defaultThinkingLevel === null}
+            disabled={disabled()}
+          />
+          <Text style={{ ...captionTextStyle, color: C.text }}>Provider default</Text>
         </Button>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
           <Each of={model().thinkingLevels ?? []} key={(level) => level}>
@@ -109,12 +133,17 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
                   ...owner.modelAction(),
                   level: level(),
                 })}
-                style={controlStyle}
+                style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                 hoverStyle={controlHoverStyle}
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ color: C.accent }}>{level()}</Text>
+                <ChoiceIndicator
+                  kind="radio"
+                  checked={model().defaultThinkingLevel === level()}
+                  disabled={disabled()}
+                />
+                <Text style={{ ...captionTextStyle, color: C.text }}>{level()}</Text>
               </Button>
             )}
           </Each>
@@ -128,7 +157,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           focusStyle={{ backgroundColor: C.accentHover }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.background, fontWeight: '500' }}>
+          <Text style={{ ...captionTextStyle, color: C.background, fontWeight: '500' }}>
             {owner.busy() ? 'Saving…' : 'Save model'}
           </Text>
         </Button>
@@ -145,7 +174,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.danger }}>Remove model</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>Remove model</Text>
           </Button>
         </If>
       </View>

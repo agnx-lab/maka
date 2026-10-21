@@ -23,7 +23,17 @@ import { List } from 'nsh/list';
 import type { ModelSettingsOwner } from './settings';
 import { ConnectionForm } from './ConnectionForm';
 import { ConnectionModel } from './ConnectionModel';
-import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
   const owner = props.owner;
@@ -33,8 +43,17 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
   return (
     <View style={{ flex: 1, gap: 8 }}>
       <If when={owner.confirmation()}>
-        <View style={{ gap: 16, padding: 16, backgroundColor: C.background }}>
-          <Text style={{ color: C.text }}>
+        <View
+          style={{
+            gap: 16,
+            padding: 16,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: C.line,
+            backgroundColor: C.background,
+          }}
+        >
+          <Text style={{ ...bodyTextStyle, color: C.text }}>
             {owner.confirmation() === 'connection'
               ? 'Delete this connection, its stored provider credential and model settings? Existing conversations keep their saved selection.'
               : owner.confirmation() === 'key'
@@ -50,7 +69,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.danger }}>Confirm removal</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>Confirm removal</Text>
           </Button>
           <Button
             disabled={owner.busy()}
@@ -60,23 +79,24 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.muted }}>Cancel</Text>
+            <Text style={{ ...captionTextStyle, color: C.muted }}>Cancel</Text>
           </Button>
         </View>
       </If>
       <If when={!owner.confirmation()}>
         <If when={owner.page() === 'connections'}>
-          <View style={{ flexDirection: 'row', gap: 16 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               disabled={disabled()}
               accessibilityLabel="Add connection"
               onPress={inputAction(owner.newConnection, null)}
-              style={controlStyle}
+              style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.accent }}>Add connection</Text>
+              <Icon name="plus" color={C.accent} />
+              <Text style={{ ...captionTextStyle, color: C.accent }}>Add connection</Text>
             </Button>
             <Button
               disabled={owner.loading() || owner.busy()}
@@ -86,11 +106,11 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.muted }}>Refresh connections</Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>Refresh connections</Text>
             </Button>
           </View>
           <If when={!owner.loading() && !owner.connections().length}>
-            <Text style={{ color: C.muted }}>
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>
               Add your first connection, then fetch or add a model.
             </Text>
           </If>
@@ -111,6 +131,9 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 style={{
                   height: 64,
                   padding: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
                   justifyContent: 'center',
                   borderRadius: 8,
                   borderWidth: 1,
@@ -121,18 +144,26 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 hoverStyle={{ backgroundColor: C.raised }}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text numberOfLines={1} style={{ color: C.text }}>
-                  {item().name}
-                </Text>
-                <Text numberOfLines={1} style={{ color: C.muted }}>
-                  {item().enabled ? 'Enabled' : 'Disabled'} · {item().enabledModelCount} models
-                </Text>
+                <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{ ...captionTextStyle, color: C.text, fontWeight: '500' }}
+                  >
+                    {item().name}
+                  </Text>
+                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
+                    {item().enabled ? 'Enabled' : 'Disabled'} · {item().enabledModelCount} models
+                  </Text>
+                </View>
+                <Icon name="right" color={C.muted} />
               </Button>
             )}
           </List>
         </If>
         <If when={owner.page() === 'providers'}>
-          <Text style={{ color: C.muted }}>Choose the API provider for this connection.</Text>
+          <Text style={{ ...bodyTextStyle, color: C.muted }}>
+            Choose the API provider for this connection.
+          </Text>
           <List
             each={owner.providers()}
             keyExtractor={(item) => JSON.stringify(item.identity)}
@@ -150,6 +181,9 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 style={{
                   height: 48,
                   padding: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
                   justifyContent: 'center',
                   borderRadius: 8,
                   backgroundColor: C.background,
@@ -158,9 +192,10 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                 hoverStyle={{ backgroundColor: C.raised }}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text numberOfLines={1} style={{ color: C.text }}>
+                <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text, flex: 1 }}>
                   {item().label}
                 </Text>
+                <Icon name="right" color={C.muted} />
               </Button>
             )}
           </List>
@@ -181,7 +216,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.accent }}>Add model manually</Text>
+            <Text style={{ ...captionTextStyle, color: C.accent }}>Add model manually</Text>
           </Button>
           <List
             each={models()}
@@ -208,10 +243,10 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text numberOfLines={1} style={{ color: C.text }}>
+                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.text }}>
                     {owner.editor()?.baseline?.editing?.modelOverrides?.[id()]?.displayName ?? id()}
                   </Text>
-                  <Text numberOfLines={1} style={{ color: C.muted }}>
+                  <Text numberOfLines={1} style={{ ...captionTextStyle, color: C.muted }}>
                     {id()}
                   </Text>
                 </Button>
@@ -224,16 +259,25 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
                     owner.defaultTarget()?.modelId === id()
                   }
                   onPress={inputAction(owner.setDefault, { ...owner.action(), id: id() })}
-                  style={controlStyle}
+                  style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
                   hoverStyle={controlHoverStyle}
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>
+                  <ChoiceIndicator
+                    kind="radio"
+                    checked={
+                      owner.defaultTarget()?.connectionId ===
+                        owner.editor()?.baseline?.target.connectionId &&
+                      owner.defaultTarget()?.modelId === id()
+                    }
+                    disabled={disabled() || !owner.editor()?.enabled}
+                  />
+                  <Text style={{ ...captionTextStyle, color: C.accent }}>
                     {owner.defaultTarget()?.connectionId ===
                       owner.editor()?.baseline?.target.connectionId &&
                     owner.defaultTarget()?.modelId === id()
-                      ? '✓ Default'
+                      ? 'Default'
                       : 'Set default'}
                   </Text>
                 </Button>
@@ -243,7 +287,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
         </If>
       </If>
       <If when={owner.loading()}>
-        <Text style={{ color: C.muted }}>Loading settings…</Text>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>Loading settings…</Text>
       </If>
     </View>
   );

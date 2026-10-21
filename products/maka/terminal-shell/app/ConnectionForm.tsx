@@ -22,7 +22,17 @@ import { Button } from 'nsh/base';
 import type { ModelSettingsOwner } from './settings';
 import { SettingsField } from './SettingsField';
 import { ConnectionLogin } from './ConnectionLogin';
-import { C, controlStyle, controlHoverStyle, controlFocusStyle, controlDisabledStyle } from './ui';
+import { ChoiceIndicator } from './ChoiceIndicator';
+import { Icon } from './Icon';
+import {
+  C,
+  bodyTextStyle,
+  captionTextStyle,
+  controlStyle,
+  controlHoverStyle,
+  controlFocusStyle,
+  controlDisabledStyle,
+} from './ui';
 
 export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
   const owner = props.settings;
@@ -32,8 +42,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
   const models = () => form().baseline?.editing?.enabledModelIds ?? [];
   return (
     <Scroll style={{ flex: 1 }}>
-      <View style={{ padding: 8, gap: 12 }}>
-        <Text style={{ color: C.muted }}>{form().provider.descriptor.label}</Text>
+      <View style={{ padding: 8, gap: 16 }}>
+        <Text style={{ ...captionTextStyle, color: C.muted }}>
+          {form().provider.descriptor.label}
+        </Text>
         <SettingsField
           label="Connection name"
           value={form().name}
@@ -65,12 +77,15 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             ...owner.action(),
             enabled: !form().enabled,
           })}
-          style={controlStyle}
+          style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 12 }}
           hoverStyle={controlHoverStyle}
           focusStyle={controlFocusStyle}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.text }}>{form().enabled ? '✓ Enabled' : '○ Disabled'}</Text>
+          <ChoiceIndicator kind="switch" checked={form().enabled} disabled={disabled()} />
+          <Text style={{ ...captionTextStyle, color: C.text }}>
+            {form().enabled ? 'Enabled' : 'Disabled'}
+          </Text>
         </Button>
         <If
           when={form().provider.descriptor.authentication.some(
@@ -86,7 +101,7 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             hint={
               owner.credential()?.configured
                 ? 'A provider credential is stored. Leave blank to keep it; enter a key to replace it.'
-                : 'The key is saved in the Host credential vault and is never read back here.'
+                : 'Your key is stored securely and is never displayed again.'
             }
           />
         </If>
@@ -105,10 +120,12 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.danger }}>Remove stored provider credential</Text>
+            <Text style={{ ...captionTextStyle, color: C.danger }}>
+              Remove stored provider credential
+            </Text>
           </Button>
           <If when={owner.dirty()}>
-            <Text style={{ color: C.muted }}>
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>
               Save or discard connection edits before removing the stored credential.
             </Text>
           </If>
@@ -132,24 +149,27 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
           focusStyle={{ backgroundColor: C.accentHover }}
           disabledStyle={controlDisabledStyle}
         >
-          <Text style={{ color: C.background, fontWeight: '500' }}>
+          <Text style={{ ...captionTextStyle, color: C.background, fontWeight: '500' }}>
             {owner.busy() ? 'Saving…' : 'Save connection'}
           </Text>
         </Button>
         <If when={form().baseline}>
           <View style={{ height: 1, backgroundColor: C.line }} />
-          <View style={{ flexDirection: 'row', gap: 16 }}>
-            <Text style={{ color: C.text, flex: 1 }}>Models · {models().length}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <Text style={{ ...bodyTextStyle, color: C.text, flex: 1, fontWeight: '500' }}>
+              Models · {models().length}
+            </Text>
             <Button
               disabled={disabled() || owner.dirty()}
               accessibilityLabel="Add model manually"
               onPress={inputAction(owner.editModel, { ...owner.action(), id: null })}
-              style={controlStyle}
+              style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
               hoverStyle={controlHoverStyle}
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.accent }}>Add model</Text>
+              <Icon name="plus" color={C.accent} />
+              <Text style={{ ...captionTextStyle, color: C.accent }}>Add model</Text>
             </Button>
             <If when={form().provider.descriptor.discovery}>
               <Button
@@ -161,12 +181,12 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
                 focusStyle={controlFocusStyle}
                 disabledStyle={controlDisabledStyle}
               >
-                <Text style={{ color: C.accent }}>Fetch models</Text>
+                <Text style={{ ...captionTextStyle, color: C.accent }}>Fetch models</Text>
               </Button>
             </If>
           </View>
           <If when={!models().length}>
-            <Text style={{ color: C.muted }}>
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>
               Fetch the provider’s catalog or add its exact model ID.
             </Text>
           </If>
@@ -174,15 +194,20 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
             disabled={disabled() || owner.dirty()}
             accessibilityLabel="Manage models"
             onPress={inputAction(owner.showModels, owner.action())}
-            style={controlStyle}
+            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.accent }}>Manage models · {models().length}</Text>
+            <Text style={{ ...captionTextStyle, color: C.accent, flex: 1 }}>
+              Manage models · {models().length}
+            </Text>
+            <Icon name="right" color={C.muted} />
           </Button>
           <If when={owner.dirty()}>
-            <Text style={{ color: C.muted }}>Save changes before fetching or editing models.</Text>
+            <Text style={{ ...bodyTextStyle, color: C.muted }}>
+              Save changes before fetching or editing models.
+            </Text>
           </If>
           <If when={owner.defaultTarget()?.connectionId === form().baseline?.target.connectionId}>
             <Button
@@ -193,10 +218,10 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.muted }}>Clear default model</Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>Clear default model</Text>
             </Button>
           </If>
-          <View style={{ flexDirection: 'row', gap: 16 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Button
               disabled={disabled()}
               onPress={inputAction(owner.openConnection, {
@@ -208,7 +233,9 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.muted }}>Discard changes and reload</Text>
+              <Text style={{ ...captionTextStyle, color: C.muted }}>
+                Discard changes and reload
+              </Text>
             </Button>
             <Button
               disabled={disabled()}
@@ -222,7 +249,7 @@ export function ConnectionForm(props: { settings: ModelSettingsOwner }) {
               focusStyle={controlFocusStyle}
               disabledStyle={controlDisabledStyle}
             >
-              <Text style={{ color: C.danger }}>Delete connection</Text>
+              <Text style={{ ...captionTextStyle, color: C.danger }}>Delete connection</Text>
             </Button>
           </View>
         </If>

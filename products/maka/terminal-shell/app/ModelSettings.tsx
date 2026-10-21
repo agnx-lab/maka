@@ -32,6 +32,8 @@ import { createPluginSettings } from './pluginSettings';
 import {
   C,
   compact,
+  bodyTextStyle,
+  captionTextStyle,
   controlStyle,
   controlHoverStyle,
   controlFocusStyle,
@@ -177,7 +179,9 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ color: C.secondary }}>{nested() ? 'Back' : 'Close'}</Text>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>
+              {nested() ? 'Back' : 'Close'}
+            </Text>
             <Icon name={nested() ? 'back' : 'close'} color={C.secondary} />
           </Button>
         </View>
@@ -207,7 +211,12 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                   focusStyle={controlFocusStyle}
                   disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: section() === item().id ? C.text : C.muted, fontSize: 13 }}>
+                  <Text
+                    style={{
+                      ...captionTextStyle,
+                      color: section() === item().id ? C.text : C.muted,
+                    }}
+                  >
                     {item().label}
                   </Text>
                 </Button>
@@ -218,24 +227,30 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
             style={{ flex: 1, minWidth: 0, minHeight: 0, padding: compact() ? 8 : 16, gap: 16 }}
           >
             <If when={operations.error()}>
-              <Text selectable style={{ color: C.danger }}>
+              <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
                 {operations.error()}
               </Text>
             </If>
             <If when={operations.notice()}>
-              <Text style={{ color: C.muted }}>{operations.notice()}</Text>
+              <Text style={{ ...bodyTextStyle, color: C.muted }}>{operations.notice()}</Text>
             </If>
             <If when={!operations.pendingKnown() || operations.pending().length > 0}>
-              <View style={{ gap: 4 }}>
-                <Text style={{ color: C.warning }}>
+              <View
+                style={{ gap: 8, padding: 12, backgroundColor: C.background, borderRadius: 12 }}
+              >
+                <Text style={{ ...bodyTextStyle, color: C.warning }}>
                   Earlier settings actions must be resolved before another change.
                 </Text>
                 <Button
                   disabled={operations.busy()}
                   accessibilityLabel="Recover settings actions"
                   onPress={inputAction(recover, null)}
+                  style={{ ...controlStyle, alignSelf: 'flex-start' }}
+                  hoverStyle={controlHoverStyle}
+                  focusStyle={controlFocusStyle}
+                  disabledStyle={controlDisabledStyle}
                 >
-                  <Text style={{ color: C.accent }}>
+                  <Text style={{ ...captionTextStyle, color: C.accent }}>
                     {operations.busy() ? 'Checking receipts…' : 'Recover original settings actions'}
                   </Text>
                 </Button>
@@ -247,8 +262,14 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                     <Button
                       disabled={operations.busy()}
                       onPress={inputAction(operations.abandon, item().id)}
+                      style={{ ...controlStyle, alignSelf: 'flex-start' }}
+                      hoverStyle={controlHoverStyle}
+                      focusStyle={controlFocusStyle}
+                      disabledStyle={controlDisabledStyle}
                     >
-                      <Text style={{ color: C.warning }}>Abandon unconfirmed {item().method}</Text>
+                      <Text style={{ ...captionTextStyle, color: C.warning }}>
+                        Abandon unconfirmed {item().method}
+                      </Text>
                     </Button>
                   )}
                 </Each>
