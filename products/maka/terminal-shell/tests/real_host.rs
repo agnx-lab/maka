@@ -1900,11 +1900,11 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let mut request = fixture.next_request().await;
         let source = format!("```txt\n{}\n# RICH_TAIL_HEADING\n**RICH_TAIL_MARK**\n```", "filler line\n".repeat(24000));
         request.delta(&source).await;
-        let long_formatted = wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source") && !screen.contains("```txt") && !screen.contains("Formatting unavailable")).await;
+        let long_formatted = wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Source") && !screen.contains("```") && !screen.contains("Formatting unavailable")).await;
         evidence("rich-response-long-formatted", &long_formatted);
         wait_mode_layout(&mut view).await;
         support::click_text(&mut view, "Source");
-        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Formatted") && !screen.contains("Formatting unavailable")).await;
+        wait_view(&mut view, |screen| screen.contains("**RICH_TAIL_MARK**") && screen.contains("Formatted") && screen.contains("```") && !screen.contains("Formatting unavailable")).await;
         request.finish().await;
         fixture.idle(&client, &fixture.session).await;
         drop(view);
