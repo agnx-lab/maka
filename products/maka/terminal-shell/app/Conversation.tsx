@@ -1633,7 +1633,7 @@ export function Conversation(props: ConversationProps) {
             ref={list}
             onLayout={(frame) => readingSize.set(frame.size)}
             each={displayKeys()}
-            onScrollDragStart={navigatingTurn() !== null ? () => cancelTurnNavigation() : undefined}
+            onScrollDragStart={() => cancelTurnNavigation()}
             onViewableItemsChange={(event) =>
               visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
             }
