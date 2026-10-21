@@ -49,7 +49,7 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
 
         let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
         view.resize(120, 40);
-        wait_enabled_node(&mut view, "Turn activity").await;
+        wait_enabled_node(&mut view, "Process group").await;
         support::focus_activity(&mut view).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;
@@ -192,7 +192,7 @@ async fn tool_cards_show_recorded_search_changes_and_business_failures_without_i
             std::fs::write(&path, "LATER_WORKSPACE_CONTENT").unwrap();
             let (mut view, bindings) = fixture.view(fixture.client().await, Some(fixture.session.clone()));
             view.resize(120, 40);
-            wait_enabled_node(&mut view, "Turn activity").await;
+            wait_enabled_node(&mut view, "Process group").await;
             support::focus_activity(&mut view).await;
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
             support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;

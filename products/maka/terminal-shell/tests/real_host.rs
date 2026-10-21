@@ -1507,7 +1507,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         // Rapid paragraphs must update during the stream, at a bounded cadence,
         // while the expanded source and its reader anchor stay put.
         let cadence = std::time::Instant::now();
-        let mut titles = vec![(Duration::ZERO, support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row))];
+        let mut titles = vec![(Duration::ZERO, support::painted_text(&view, "Analyzing the request", cadence_header_row))];
         let mut paragraph = 0;
         while cadence.elapsed() < Duration::from_millis(650) {
             paragraph += 1;
@@ -1519,7 +1519,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
                 assert!(at_source_start(&screen), "a title update moved the source reader:\n{screen}");
                 assert_eq!(screen.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row), "a title update moved the original source row:\n{screen}");
                 assert!(screen.lines().nth(cadence_header_row).unwrap().contains("Analyzing the request"), "the fixed activity header moved:\n{screen}");
-                let title = support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row);
+                let title = support::painted_text(&view, "Analyzing the request", cadence_header_row);
                 if title != titles.last().unwrap().1 {
                     titles.push((cadence.elapsed(), title));
                 }
@@ -1529,7 +1529,7 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(titles.len() >= 3, "continuous input postponed every intermediate title: {titles:?}");
         let latest = format!("TITLE_{paragraph:02} 规划 e\u{301}");
         wait_view(&mut view, |screen| at_source_start(screen) && screen.lines().nth(cadence_header_row).is_some_and(|line| line.contains(&latest))).await;
-        let last = support::painted_text(&view, "⌃ Analyzing the request", cadence_header_row);
+        let last = support::painted_text(&view, "Analyzing the request", cadence_header_row);
         assert!(last.ends_with('…') && !last.ends_with("e…"), "the long title must ellipsize without splitting a combining grapheme: {last}");
         if last != titles.last().unwrap().1 {
             titles.push((cadence.elapsed(), last));
@@ -1558,8 +1558,14 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         request.delta("NATIVE_INTERMEDIATE_RESPONSE_OUTSIDE_PROCESS").await;
         // A reply closes only this contiguous process segment. The same native
         // source reader stays at its original row while later work gets a group.
-        let cut = wait_view(&mut view, |screen| at_source_start(screen) && screen.contains("⌃ 1 thought")).await;
-        assert_eq!(cut.lines().position(|line| line.contains("⌃ 1 thought")), Some(cadence_header_row));
+        let cut = wait_view(&mut view, |screen| at_source_start(screen) && screen.contains("1 thought")).await;
+        assert_eq!(cut.lines().position(|line| line.contains("1 thought")), Some(cadence_header_row));
+        let header_y = (cadence_header_row as f32 + 0.5) * view.surface().metrics().height().0;
+        assert!(view.accessibility_snapshot().iter().any(|node| {
+            node.label == "Process group" && node.state.selected
+                && node.frame.origin.y.0 <= header_y
+                && header_y < node.frame.origin.y.0 + node.frame.size.height.0
+        }), "the same thought group must stay expanded at its original header row");
         assert_eq!(cut.lines().position(|line| line.contains("NATIVE_THINK_SOURCE_01")), Some(cadence_source_row));
         evidence("intermediate-response-cuts-process-group", &cut);
         support::evidence_cells("intermediate-response-cuts-process-group", &view);
@@ -1580,7 +1586,14 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         request.tool_suffix(suffix).await;
         // A real tool result causes exactly one additional model HTTP request.
         let mut request = fixture.next_request().await;
-        wait_view(&mut view, |screen| screen.contains("⌃ Working…") && !screen.contains("Running tool")).await;
+        let working = wait_view(&mut view, |screen| screen.contains("Working…") && !screen.contains("Running tool")).await;
+        let working_row = working.lines().position(|line| line.contains("Working…")).unwrap();
+        let working_y = (working_row as f32 + 0.5) * view.surface().metrics().height().0;
+        assert!(view.accessibility_snapshot().iter().any(|node| {
+            node.label == "Process group" && node.state.selected
+                && node.frame.origin.y.0 <= working_y
+                && working_y < node.frame.origin.y.0 + node.frame.size.height.0
+        }), "the new working group must remain expanded after its original Alt+Down");
         let complete_call = request.body["messages"].as_array().unwrap().iter()
             .filter_map(|message| message["tool_calls"].as_array()).flatten()
             .find(|call| call["id"] == "nsh-native-todo-call").unwrap();
