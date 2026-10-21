@@ -26,7 +26,8 @@ use base64::{
 use maka_agent_api::contract::{FileContent, FileRead, FileReadPart, WorkspacePath};
 use maka_agent_facts::artifact::content_digest;
 use maka_app_client::{Subscription, SubscriptionEvent};
-use serde_json::{Value, json};
+use nsh_core::{JsonValue, ui::prelude::*};
+use serde_json::json;
 
 pub(super) const PREFIX: &str = "asset:/workspace-file/";
 
@@ -40,6 +41,70 @@ pub(super) struct Capture {
 pub(super) enum Outcome {
     Ready(Capture),
     Unavailable(FileReadPart),
+}
+
+/// One immutable, verified file capture; line text is materialized only for readers.
+#[class(interface)]
+pub struct CapturedFile {
+    metadata: JsonValue,
+    text: Option<TextSource>,
+}
+
+struct TextSource {
+    text: String,
+    starts: Vec<usize>,
+}
+
+/// One original source line, including its original line ending.
+#[derive(Debug, Clone, JsObject)]
+pub struct FileLine {
+    /// Byte offset in the verified UTF-8 source.
+    pub offset: usize,
+    /// One-based source line number.
+    pub line: usize,
+    /// Original text; soft wrapping belongs to the native Text engine.
+    pub text: String,
+}
+
+#[class]
+impl CapturedFile {
+    /// The original capture outcome, version, digest and byte count.
+    pub fn metadata(&self) -> JsonValue {
+        self.metadata.clone()
+    }
+
+    /// Number of natural source lines; an empty text file has one empty line.
+    #[getter]
+    pub fn length(&self) -> usize {
+        self.text.as_ref().map_or(0, |source| source.starts.len())
+    }
+
+    /// Read one natural source line from this capture, without a new filesystem read.
+    pub fn at(&self, index: usize) -> Result<FileLine, String> {
+        let source = self.text.as_ref().ok_or("The capture is not text")?;
+        let start = *source
+            .starts
+            .get(index)
+            .ok_or("Source line is out of range")?;
+        let end = source
+            .starts
+            .get(index + 1)
+            .copied()
+            .unwrap_or(source.text.len());
+        Ok(FileLine {
+            offset: start,
+            line: index + 1,
+            text: source.text[start..end].to_owned(),
+        })
+    }
+
+    /// Complete original text for an explicit copy; readers do not retain a second full source.
+    pub fn original_text(&self) -> Result<String, String> {
+        self.text
+            .as_ref()
+            .map(|source| source.text.clone())
+            .ok_or_else(|| "The capture is not text".into())
+    }
 }
 
 pub(super) fn path_label(path: &WorkspacePath) -> Result<String, String> {
@@ -189,10 +254,13 @@ fn is_digest(value: &str) -> bool {
     })
 }
 
-pub(super) fn presentation(outcome: Outcome, mut source: FileRead) -> Result<Value, String> {
+pub(super) fn presentation(outcome: Outcome, mut source: FileRead) -> Result<CapturedFile, String> {
     let capture = match outcome {
         Outcome::Unavailable(status) => {
-            return serde_json::to_value(status).map_err(|_| "Invalid file outcome".into());
+            return Ok(CapturedFile {
+                metadata: serde_json::to_value(status).map_err(|_| "Invalid file outcome")?,
+                text: None,
+            });
         }
         Outcome::Ready(value) => value,
     };
@@ -201,39 +269,24 @@ pub(super) fn presentation(outcome: Outcome, mut source: FileRead) -> Result<Val
             source.expected_version = Some(capture.version.clone());
             let encoded = URL_SAFE_NO_PAD
                 .encode(serde_json::to_vec(&source).map_err(|_| "Invalid file selector")?);
-            Ok(
-                json!({"kind":"image","uri":format!("{PREFIX}{encoded}"),"version":capture.version,"digest":capture.digest,"bytes":capture.total,"mimeType":mime_type}),
-            )
+            Ok(CapturedFile {
+                metadata: json!({"kind":"image","uri":format!("{PREFIX}{encoded}"),"version":capture.version,"digest":capture.digest,"bytes":capture.total,"mimeType":mime_type}),
+                text: None,
+            })
         }
         FileContent::Text => {
-            let text =
-                std::str::from_utf8(&capture.bytes).map_err(|_| "Current file is not UTF-8")?;
-            // Prepare once; recycled rows bound per-frame shaping for long lines.
-            // Offsets retain source order, and no text is truncated.
-            let mut rows = Vec::new();
-            let mut start = 0;
-            let mut count = 0;
-            let mut line = 1;
-            let mut start_line = 1;
-            for (offset, ch) in text.char_indices() {
-                count += 1;
-                if ch == '\n' {
-                    line += 1;
-                }
-                if count == 256 {
-                    let end = offset + ch.len_utf8();
-                    rows.push(json!({"offset":start,"line":start_line,"text":&text[start..end]}));
-                    start = end;
-                    count = 0;
-                    start_line = line;
-                }
-            }
-            if start < text.len() || rows.is_empty() {
-                rows.push(json!({"offset":start,"line":start_line,"text":&text[start..]}));
-            }
-            Ok(
-                json!({"kind":"text","rows":rows,"version":capture.version,"digest":capture.digest,"bytes":capture.total}),
-            )
+            // Move the verified allocation; no second full text or per-line DTO array.
+            let text = String::from_utf8(capture.bytes).map_err(|_| "Current file is not UTF-8")?;
+            let starts = std::iter::once(0)
+                .chain(text.match_indices('\n').filter_map(|(offset, _)| {
+                    let next = offset + 1;
+                    (next < text.len()).then_some(next)
+                }))
+                .collect();
+            Ok(CapturedFile {
+                metadata: json!({"kind":"text","version":capture.version,"digest":capture.digest,"bytes":capture.total}),
+                text: Some(TextSource { text, starts }),
+            })
         }
     }
 }
@@ -243,7 +296,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn complete_text_uses_bounded_blocks_even_for_newlines_and_long_unicode_lines() {
+    fn captured_text_keeps_original_lines_and_bytes_without_splitting_graphemes() {
         let source = FileRead {
             session_id: "original-session".into(),
             path: WorkspacePath {
@@ -251,7 +304,12 @@ mod tests {
             },
             expected_version: None,
         };
-        for text in ["\n".repeat(2 * 1024 * 1024), "😀a\n".repeat(400)] {
+        for text in [
+            String::new(),
+            "\n".repeat(2 * 1024 * 1024),
+            "first\r\n\t中文 😀\r\nlast".into(),
+            format!("{}e\u{301}{}\nnext\n", "a".repeat(255), "中😀".repeat(400)),
+        ] {
             let view = presentation(
                 Outcome::Ready(Capture {
                     version: "version".into(),
@@ -263,19 +321,27 @@ mod tests {
                 source.clone(),
             )
             .unwrap();
-            let rows = view["rows"].as_array().unwrap();
-            assert!(rows.len() <= 8192);
-            let mut reconstructed = String::new();
-            let mut line = 1_u64;
-            for row in rows {
-                assert_eq!(row["offset"], reconstructed.len());
-                assert_eq!(row["line"], line);
-                let block = row["text"].as_str().unwrap();
-                assert!(block.chars().count() <= 256);
-                line += block.chars().filter(|ch| *ch == '\n').count() as u64;
-                reconstructed.push_str(block);
+            assert_eq!(view.metadata()["version"], "version");
+            assert_eq!(view.metadata()["digest"], "digest");
+            assert_eq!(view.metadata()["bytes"], text.len());
+            let mut reconstructed = String::with_capacity(text.len());
+            let mut lines = 0;
+            for (index, original) in text
+                .split_inclusive('\n')
+                .chain(text.is_empty().then_some(""))
+                .enumerate()
+            {
+                let row = view.at(index).unwrap();
+                assert_eq!(row.offset, reconstructed.len());
+                assert_eq!(row.line, index + 1);
+                assert_eq!(row.text, original);
+                reconstructed.push_str(&row.text);
+                lines += 1;
             }
+            assert_eq!(view.length(), lines);
+            assert!(view.at(lines).is_err());
             assert_eq!(reconstructed, text);
+            assert_eq!(view.original_text().unwrap(), text);
         }
     }
 }

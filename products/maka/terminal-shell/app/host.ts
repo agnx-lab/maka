@@ -18,7 +18,7 @@
  */
 
 import { host as nativeHost } from 'maka/host';
-import type { ScopedHost } from 'maka/host';
+import type { CapturedFile, ScopedHost } from 'maka/host';
 import type {
   AgentFileKind,
   ClientDraft,
@@ -63,7 +63,7 @@ type StreamMethod<E extends Endpoint> = E extends 'agent'
 export type FileView =
   | {
       kind: 'text';
-      rows: { offset: number; line: number; text: string }[];
+      rows: CapturedFile;
       version: string;
       digest: string;
       bytes: number;
@@ -85,8 +85,18 @@ const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const count = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-function fileView(value: unknown): FileView {
+function fileView(capture: CapturedFile): FileView {
+  const value: unknown = capture.metadata();
   if (!object(value)) throw new Error('Invalid native file presentation.');
+  const { version, digest, bytes } = value;
+  if (
+    value.kind === 'text' &&
+    typeof version === 'string' &&
+    typeof digest === 'string' &&
+    count(bytes) &&
+    count(capture.length)
+  )
+    return { kind: 'text', rows: capture, version, digest, bytes };
   const captured = () =>
     typeof value.version === 'string' && typeof value.digest === 'string' && count(value.bytes);
   const valid =
@@ -99,14 +109,7 @@ function fileView(value: unknown): FileView {
     (value.kind === 'image' &&
       captured() &&
       typeof value.uri === 'string' &&
-      typeof value.mimeType === 'string') ||
-    (value.kind === 'text' &&
-      captured() &&
-      Array.isArray(value.rows) &&
-      value.rows.every(
-        (row) =>
-          object(row) && count(row.offset) && count(row.line) && typeof row.text === 'string',
-      ));
+      typeof value.mimeType === 'string');
   if (!valid) throw new Error('Invalid native file presentation.');
   return value as FileView;
 }

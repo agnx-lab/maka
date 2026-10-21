@@ -2248,7 +2248,8 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
             let output = std::process::Command::new("git").args(arguments).current_dir(&workspace).output().unwrap();
             assert!(output.status.success(), "git fixture failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        let captured_contents = format!("AFTER_CURRENT_EDIT\r\n原文\t保留空白  \r\n{}\r\n", "capture 中文\t".repeat(30));
+        let long_line = format!("{}e\u{301}{}", "a".repeat(255), "中文😀".repeat(40));
+        let captured_contents = format!("AFTER_CURRENT_EDIT\r\n原文\t保留空白  \r\n{long_line}\r\n");
         std::fs::write(&text_path, &captured_contents).unwrap();
         let pixels: Vec<u8> = (0..64 * 48).flat_map(|index| if index % 64 < 32 { [255, 64, 32, 255] } else { [32, 220, 96, 255] }).collect();
         let mut png_bytes = Vec::new();
@@ -2278,8 +2279,15 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("000-preview.txt") && screen.contains("001-scene.data") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
         support::click_label(&mut view, "file: 000-preview.txt");
-        let first = wait_view(&mut view, |screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version") && !screen.contains("Reading current file…")).await;
+        let first = wait_view_state(&mut view, |view, screen| screen.contains("AFTER_CURRENT_EDIT") && screen.contains("Captured version") && !screen.contains("Reading current file…") && view.accessibility_snapshot().iter().any(|node| node.label == long_line && node.frame.size.height.0 > 16.0)).await;
         assert!(!first.contains("BEFORE_CURRENT_EDIT"));
+        // One original line stays one native Text, including a combining
+        // sequence across the old scalar-block boundary. Its soft-wrapped
+        // body has one source line number rather than a repeated gutter.
+        let nodes = view.accessibility_snapshot();
+        let source_line = nodes.iter().find(|node| node.label == long_line).unwrap();
+        let reader_frame = nodes.iter().find(|node| node.label == "Captured file text").unwrap().frame;
+        assert!(nodes.iter().any(|node| node.label == "3" && node.frame.origin.y.0 == source_line.frame.origin.y.0 && node.frame.origin.x.0 >= reader_frame.origin.x.0 && node.frame.origin.x.0 < source_line.frame.origin.x.0));
         let first_version = view.accessibility_snapshot().into_iter().find(|node| node.label.starts_with("Captured version ")).unwrap().label;
 
         // Resize the actual right divider with both side panes docked. Its

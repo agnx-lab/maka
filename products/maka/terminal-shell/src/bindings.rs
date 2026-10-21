@@ -692,7 +692,7 @@ impl Drop for ScopedSubscription {
 #[class]
 impl ScopedSubscription {
     /// Verify a complete current-file stream using its original selector, off the JS heap.
-    pub async fn read_file(this: Instance<Self>) -> Result<JsonValue, String> {
+    pub async fn read_file(this: Instance<Self>) -> Result<Instance<files::CapturedFile>, String> {
         let (owner, subscription, source) = this.with_mut(|item| {
             let source = match &mut item.kind {
                 SubscriptionKind::File(source) => source.take(),
@@ -702,13 +702,14 @@ impl ScopedSubscription {
         });
         drop(this);
         let source = source.ok_or("File subscription already consumed or is not a file read")?;
-        execute(owner, async move {
+        let capture = execute(owner, async move {
             let outcome = files::collect(&subscription, &source).await?;
             tokio::task::spawn_blocking(move || files::presentation(outcome, source))
                 .await
                 .map_err(|_| "Current file presentation worker failed")?
         })
-        .await
+        .await?;
+        Ok(Instance::new(capture))
     }
     /// Pull one observation from the original subscription.
     pub async fn next(this: Instance<Self>) -> Result<JsonValue, String> {

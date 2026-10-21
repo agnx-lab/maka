@@ -132,7 +132,7 @@ export function createCurrentFile(target: WorkspaceFileTarget): CurrentFileModel
       request.stream = opened;
       try {
         // Native drains Begin/Chunk/End through successful completion and cleanup,
-        // verifies bytes/digest, and prepares bounded text rows or an image asset.
+        // verifies bytes/digest, and returns an indexed capture or an image asset.
         const result = await opened.readFile();
         await close(request);
         if (!ownsRead(request, watch)) return;
@@ -255,7 +255,7 @@ export function CurrentFile(props: { model: CurrentFileModel; openImageViewer: O
       copying.set(true);
       copyReceipt.set(null);
       try {
-        await Clipboard.writeText(original.rows.map((row) => row.text).join(''));
+        await Clipboard.writeText(original.rows.originalText());
         if (owns())
           copyReceipt.set({
             version: original.version,
@@ -543,7 +543,7 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
           <Text
             style={{
               ...codeTextStyle,
-              width: Math.max(24, String(props.view.rows.at(-1)?.line ?? 1).length * 8),
+              width: Math.max(24, String(props.view.rows.length).length * 8),
               color: C.muted,
             }}
           >
@@ -558,8 +558,8 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
               color: C.text,
             }}
           >
-            {/* Each native block starts at this source line; internal newlines remain intact. */}
-            {row().text.endsWith('\n') ? row().text.slice(0, -1) : row().text}
+            {/* Soft-wrapped visual lines retain their original source line number. */}
+            {row().text.replace(/\r?\n$/, '')}
           </Text>
         </View>
       )}
