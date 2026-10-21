@@ -123,7 +123,15 @@ fn model_menu_button(view: &AppView, label: &str) -> Option<nsh_platform_tui::Ac
 }
 
 fn model_menu_ready(view: &AppView, label: &str) -> bool {
-    model_menu_button(view, label).is_some_and(|node| !node.state.disabled)
+    let viewport = view.surface().viewport();
+    model_menu_button(view, label).is_some_and(|node| {
+        let frame = node.frame;
+        !node.state.disabled
+            && frame.origin.x.0 >= 0.0
+            && frame.origin.y.0 >= 0.0
+            && frame.origin.x.0 + frame.size.width.0 <= viewport.width.0
+            && frame.origin.y.0 + frame.size.height.0 <= viewport.height.0
+    })
 }
 
 fn model_menu_closed(view: &AppView) -> bool {
