@@ -53,7 +53,10 @@ pub(super) fn event(event: termina::Event) -> Option<ct::Event> {
         termina::Event::FocusIn => ct::Event::FocusGained,
         termina::Event::FocusOut => ct::Event::FocusLost,
         termina::Event::Paste(text) => ct::Event::Paste(text),
-        termina::Event::Csi(_) | termina::Event::Osc(_) | termina::Event::Dcs(_) => return None,
+        termina::Event::Csi(_)
+        | termina::Event::Osc(_)
+        | termina::Event::Dcs(_)
+        | termina::Event::KittyGraphicsResponse(_) => return None,
     })
 }
 
