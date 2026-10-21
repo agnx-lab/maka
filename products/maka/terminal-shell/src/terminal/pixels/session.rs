@@ -166,7 +166,7 @@ fn run(
     let mut mapping = Mapping::default();
     let result = (|| {
         while !presentation.stop.load(Ordering::Acquire) {
-            let (resize, cancel, ready, input, caps, generation, quit, error) = {
+            let (resize, cancel, ready, caps, generation, quit, error) = {
                 let mut state = presentation.state.lock().unwrap();
                 let quit = state.quit;
                 let error = state.error.clone();
@@ -175,7 +175,6 @@ fn run(
                     inbox.resize.take(),
                     std::mem::take(&mut inbox.cancel_pointer),
                     inbox.ready.take(),
-                    inbox.pop(),
                     inbox.capabilities,
                     inbox.geometry,
                     quit,
@@ -243,16 +242,29 @@ fn run(
             // no pump occurs between this check and its actual dispatch.
             platform.pump();
             encode_pending(presentation);
-            {
-                let state = presentation.state.lock().unwrap();
+            let (input, late_cancel) = {
+                let mut state = presentation.state.lock().unwrap();
                 if presentation.stop.load(Ordering::Acquire) || state.quit {
                     return Ok(());
                 }
                 if let Some(error) = &state.error {
                     return Err(error.clone());
                 }
+                let inbox = state.pixels.as_mut().unwrap();
+                (inbox.pop(), std::mem::take(&mut inbox.cancel_pointer))
+            };
+            if late_cancel {
+                source.borrow().cancel_pointer();
+                application.update(|cx| {
+                    if let Some(window) = window.borrow().as_ref() {
+                        let _ = window.update(cx, |_, window, cx| {
+                            window.refresh();
+                            cx.notify();
+                        });
+                    }
+                });
             }
-            let exact_ready = !platform.has_pending();
+            let exact_ready = !late_cancel && !platform.has_pending();
             if let Some(input) = input {
                 let mut refresh = false;
                 let mut release_pending = super::input::released(&input.event);

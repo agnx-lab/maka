@@ -120,18 +120,14 @@ impl Inbox {
             self.resize = Some(size);
             self.published = None;
             self.pending = None;
-            self.capture = None;
-            self.cancel_pointer = true;
-            self.events.retain(|input| !pointer(&input.event));
-            self.bytes = self.events.iter().map(|input| bytes(&input.event)).sum();
+            self.lose_pointer();
             return Ok(false);
         }
         if matches!(event, Event::Csi(_) | Event::Osc(_) | Event::Dcs(_)) {
             return Ok(false);
         }
         if matches!(event, Event::MouseLeave | Event::FocusOut) {
-            self.capture = None;
-            self.cancel_pointer = true;
+            self.lose_pointer();
         }
         let token = match &event {
             Event::SgrMouse(mouse) => match mouse.kind {
@@ -159,7 +155,7 @@ impl Inbox {
                     .is_some_and(|token| token.sequence() <= self.reject_through))
         {
             if released(&event) {
-                self.cancel_pointer = true;
+                self.lose_pointer();
             }
             return Ok(false);
         }
@@ -177,6 +173,13 @@ impl Inbox {
             startup: self.keyboard.is_none(),
         });
         Ok(false)
+    }
+
+    fn lose_pointer(&mut self) {
+        self.capture = None;
+        self.cancel_pointer = true;
+        self.events.retain(|input| !pointer(&input.event));
+        self.bytes = self.events.iter().map(|input| bytes(&input.event)).sum();
     }
 
     pub fn pop(&mut self) -> Option<Input> {
