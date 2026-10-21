@@ -162,5 +162,55 @@
       "file": "scripts/rust/licenses/declared-cc0.txt",
       "source": "https://github.com/lifthrasiir/hexf/blob/4225763d744183d720f575ae96d04161b4d08ea0/parse/Cargo.toml"
     }
+  ],
+  "async-scoped@0.9.0": [
+    {
+      "file": "scripts/rust/licenses/declared-mit.txt",
+      "source": "https://github.com/rmanoka/async-scoped/blob/15fa11deb2a5d26fbd00d6cf26e97f73763ce2ba/Cargo.toml"
+    }
+  ],
+  "base-encode@0.3.1": [
+    {
+      "file": "scripts/rust/licenses/declared-mit.txt",
+      "source": "https://github.com/janispritzkau/rust-base-encode/blob/41bdeb57488beec4ed63180e848ce1e99fba227d/Cargo.toml"
+    }
+  ],
+  "escape-simd@0.1.0": [
+    {
+      "file": "scripts/rust/licenses/declared-mit.txt",
+      "source": "https://github.com/napi-rs/escape-simd/blob/4f54347555d2f520ac38b406cf69ff66d9570a57/Cargo.toml"
+    }
+  ],
+  "json-escape-simd@3.1.2": [
+    {
+      "file": "scripts/rust/licenses/declared-mit.txt",
+      "source": "https://github.com/napi-rs/escape-simd/blob/4f54347555d2f520ac38b406cf69ff66d9570a57/Cargo.toml"
+    }
+  ],
+  "typedmap@0.6.0": [
+    {
+      "file": "scripts/rust/licenses/declared-mit.txt",
+      "source": "https://github.com/kodieg/typedmap/blob/0168ea19785b159589adc2619bc6cac66bf9974f/Cargo.toml"
+    }
+  ],
+  "rolldown_plugin_asset_module@1.2.13": [
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
+  ],
+  "rolldown_plugin_chunk_import_map@1.2.13": [
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
+  ],
+  "rolldown_plugin_copy_module@1.2.13": [
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
+  ],
+  "rolldown_plugin_data_url@1.2.13": [
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
+  ],
+  "string_wizard@1.2.13": [
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/LICENSE",
+    "https://raw.githubusercontent.com/rolldown/rolldown/f7de35f45bcd4cb8e4b6d8d11e74fbfb20b03127/THIRD-PARTY-LICENSE"
   ]
 }
