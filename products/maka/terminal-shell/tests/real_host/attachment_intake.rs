@@ -85,7 +85,7 @@ mount(() => <View style={{{{width:"100%",padding:8,gap:8}}}}>
         committed.await.unwrap();
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), path.to_str());
         assert!(client.pending_uploads(&fixture.session, EDITOR).await.unwrap().is_empty());
-        support::click_text(&mut view, "Upload selected file");
+        support::click_button(&mut view, "Upload selected file").await;
         let first = wait_view(&mut view, |screen| screen.contains("complete:") && screen.contains("uploads:1")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label=="Attachment path"));
         let original = client.pending_uploads(&fixture.session, EDITOR).await.unwrap();

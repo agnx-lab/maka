@@ -693,6 +693,45 @@ impl ModelRequest {
 }
 
 // A public accessibility frame chooses coordinates; real native mouse events act.
+pub async fn wait_enabled_button(
+    view: &mut AppView,
+    label: &str,
+) -> nsh_platform_tui::AccessibleNode {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            view.poll().unwrap();
+            tick(view);
+            assert!(view.last_error().is_none(), "{:?}", view.last_error());
+            let mut buttons = view.accessibility_snapshot().into_iter().filter(|node| {
+                node.role == nsh_core::AccessibilityRole::Button
+                    && node.label == label
+                    && node.frame.origin.y.0 >= 0.0
+                    && node.frame.origin.y.0 < view.surface().viewport().height.0
+            });
+            let button = buttons.next();
+            assert!(
+                buttons.next().is_none(),
+                "ambiguous native button {label:?}"
+            );
+            if let Some(button) = button
+                && !button.state.disabled
+            {
+                return button;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("native button {label:?} did not become enabled"))
+}
+
+pub async fn click_button(view: &mut AppView, label: &str) {
+    let node = wait_enabled_button(view, label).await;
+    // Readiness refers to this native target, never to its identically labeled
+    // static child. Send exactly one physical Down/Up after it is ready.
+    click_node(view, node);
+}
+
 pub fn click_text(view: &mut AppView, prefix: &str) {
     let node = view
         .accessibility_snapshot()
