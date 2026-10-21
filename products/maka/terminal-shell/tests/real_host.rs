@@ -196,14 +196,23 @@ async fn select_palette(view: &mut AppView, placeholder: &str, search: &str, cho
 
 async fn open_workspace_picker(view: &mut AppView) {
     shortcut(view, 'p');
-    select_palette(view, "Search commands…", "Choose workspace", "Choose workspace").await;
+    select_palette(
+        view,
+        "Search commands…",
+        "Choose workspace",
+        "Choose workspace",
+    )
+    .await;
     wait_focused_input(view, "Search workspace folders").await;
 }
 
 async fn browse_workspace_folder(view: &mut AppView, name: &str) {
     select_palette(view, "Search workspaces…", name, name).await;
     let folder = format!("Folder · {name}");
-    wait_view(view, |screen| screen.contains(&folder) && !screen.contains("Loading folders…")).await;
+    wait_view(view, |screen| {
+        screen.contains(&folder) && !screen.contains("Loading folders…")
+    })
+    .await;
     wait_enabled_node(view, "Use this workspace folder").await;
     wait_focused_input(view, "Search workspace folders").await;
 }
@@ -1079,7 +1088,17 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         select_palette(&mut view, "Search workspaces…", root_name, root_name).await;
         wait_enabled_node(&mut view, "Use this workspace folder").await;
         assert_eq!(
-            client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(),
+            client
+                .query(
+                    "agent",
+                    "list",
+                    json!({"filter":"all","position":{"kind":"start"}})
+                )
+                .await
+                .unwrap()["sessions"]
+                .as_array()
+                .unwrap()
+                .len(),
             1,
             "opening a folder must not create a conversation"
         );
@@ -2236,7 +2255,10 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         let child_path = fixture.directory.path().join("workspace/中文工程/子目录");
         std::fs::create_dir_all(&child_path).unwrap();
         let client = fixture.client().await;
-        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        let mut terminal = support::pty::Pty::spawn(
+            &fixture.directory.path().join("host"),
+            Some(&fixture.session),
+        );
         terminal.wait_for("Enter sends").await;
         terminal.wait_for("Message or run a task…").await;
         terminal.click_text("Message or run a task…");
@@ -2244,9 +2266,17 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
         let terminal_client = Client::new(
             HostClient::connect(&fixture.address, None).await.unwrap(),
-            Journal::open(&fixture.directory.path().join("host/clients/terminal.sqlite")).await.unwrap(),
+            Journal::open(
+                &fixture
+                    .directory
+                    .path()
+                    .join("host/clients/terminal.sqlite"),
+            )
+            .await
+            .unwrap(),
             "receipts".into(),
-        ).unwrap();
+        )
+        .unwrap();
         support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
 
         for choose in [false, true] {
@@ -2257,7 +2287,9 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             terminal.wait_for("› Choose workspace").await;
             terminal.send(b"\r");
             terminal.wait_for("Search workspaces…").await;
-            terminal.wait_for("Enter opens · Ctrl+Enter uses folder").await;
+            terminal
+                .wait_for("Enter opens · Ctrl+Enter uses folder")
+                .await;
             terminal.wait_for("› Workspace /").await;
             terminal.click_text("Workspace /");
             terminal.wait_for("Folder · Workspace").await;
@@ -2291,15 +2323,39 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
                 terminal.send(b"\x1b");
                 terminal.wait_for_absent("Close · Esc").await;
                 terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
-                support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
-                assert_eq!(client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap()["sessions"].as_array().unwrap().len(), 1);
+                support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好")
+                    .await;
+                assert_eq!(
+                    client
+                        .query(
+                            "agent",
+                            "list",
+                            json!({"filter":"all","position":{"kind":"start"}})
+                        )
+                        .await
+                        .unwrap()["sessions"]
+                        .as_array()
+                        .unwrap()
+                        .len(),
+                    1
+                );
             }
         }
         terminal.wait_for("Search models…").await;
-        let catalog = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
+        let catalog = client
+            .query(
+                "agent",
+                "list",
+                json!({"filter":"all","position":{"kind":"start"}}),
+            )
+            .await
+            .unwrap();
         let sessions = catalog["sessions"].as_array().unwrap();
         assert_eq!(sessions.len(), 2);
-        let created = sessions.iter().find(|session| session["id"] != fixture.session).unwrap();
+        let created = sessions
+            .iter()
+            .find(|session| session["id"] != fixture.session)
+            .unwrap();
         assert_eq!(
             std::fs::canonicalize(created["workspace"]["path"].as_str().unwrap()).unwrap(),
             child_path.canonicalize().unwrap()
@@ -2312,16 +2368,26 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         terminal.click_text("Message or run a task…");
         terminal.paste("PTY_NEW_FOLDER_DRAFT");
         terminal.wait_for("PTY_NEW_FOLDER_DRAFT").await;
-        support::wait_draft(&terminal_client, created["id"].as_str().unwrap(), "PTY_NEW_FOLDER_DRAFT").await;
+        support::wait_draft(
+            &terminal_client,
+            created["id"].as_str().unwrap(),
+            "PTY_NEW_FOLDER_DRAFT",
+        )
+        .await;
         support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
-        evidence("production-workspace-picker-deep-folder", &terminal.snapshot());
+        evidence(
+            "production-workspace-picker-deep-folder",
+            &terminal.snapshot(),
+        );
         terminal.send(b"\x11");
         terminal.finish().await;
         terminal_client.close().await.unwrap();
         client.close().await.unwrap();
         fixture.finish().await;
-    }).await.expect("production workspace folder selection timed out");
+    })
+    .await
+    .expect("production workspace folder selection timed out");
 }
 
 #[cfg(unix)]
