@@ -39,7 +39,7 @@ use uuid::Uuid;
 // Keep admission and pending observations on the same immutable Settings owner.
 macro_rules! settings_owner_sql {
     () => {
-        "draft_owner IS NULL AND json_type(context,'$.draft')='null' AND json_type(context,'$.sessionId')='null' AND json_type(context,'$.correlation')='object' AND json_extract(context,'$.correlation')=? AND ((json_extract(context,'$.endpoint')='settings' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?))) OR (json_extract(context,'$.endpoint')='setup' AND json_extract(context,'$.method')='discoverModels'))"
+        "draft_owner IS NULL AND json_type(context,'$.draft')='null' AND json_type(context,'$.sessionId')='null' AND json_type(context,'$.correlation')='object' AND json_extract(context,'$.correlation')=? AND ((json_extract(context,'$.endpoint')='settings' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?))) OR (json_extract(context,'$.endpoint')='setup' AND json_extract(context,'$.method')='discoverModels') OR (json_extract(context,'$.endpoint')='management' AND json_extract(context,'$.method') IN ('setEnabled','configure')))"
     };
 }
 
