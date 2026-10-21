@@ -28,6 +28,8 @@ import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
 import { Palette } from './Palette';
 import type { PaletteEntry, PaletteKind } from './Palette';
+import { ModelSelect } from './ModelSelect';
+import type { ModelBackend } from './modelSelection';
 import { InteractionPanel } from './InteractionPanel';
 import { ImageViewer, type ImagePreview } from './ToolImage';
 import { createPresentationSettings } from './presentation';
@@ -37,7 +39,7 @@ import { Workbench, canDockBrowser } from './Workbench';
 import { WorkspaceBrowser, type WorkspaceBrowserProps } from './WorkspaceBrowser';
 
 type Overlay = { instance: number } & (
-  | { kind: PaletteKind | 'sessions'; sessionId: string | null }
+  | { kind: PaletteKind | 'models' | 'sessions'; sessionId: string | null }
   | { kind: 'interaction'; sessionId: string; requestId: string }
   | { kind: 'image'; sessionId: string; image: ImagePreview }
 );
@@ -137,7 +139,7 @@ function App() {
     kind,
     sessionId,
   }: {
-    kind: PaletteKind | 'sessions';
+    kind: PaletteKind | 'models' | 'sessions';
     sessionId: string | null;
   }) => {
     if (!alive || selected() !== sessionId) return;
@@ -156,29 +158,25 @@ function App() {
     browserFocus.set(kind === 'sessions');
     overlay.set({ kind, sessionId, instance: ++overlayInstance });
   };
-  const chooseModel = async (sessionId: string, choice: any) => {
-    try {
-      error.set('');
-      const result = await control('selectBackend', {
-        sessionId,
-        backend: {
-          kind: 'model',
-          connectionId: choice.selection.connectionId,
-          modelId: choice.selection.modelId,
-          thinkingLevel: choice.defaultThinkingLevel ?? null,
-        },
-      });
-      if (!alive) return;
-      if (result.kind !== 'committed')
-        throw new Error(`Model selection rejected: ${result.reason ?? result.kind}`);
-      if (selected() === sessionId) {
-        await handle()?.refresh();
-        handle()?.focus();
-      }
-      status.set('');
-    } catch (reason) {
-      report(reason);
-    }
+  const chooseModel = async (
+    owner: ConversationHandle,
+    instance: number,
+    backend: ModelBackend,
+  ) => {
+    if (
+      !alive ||
+      selected() !== owner.sessionId ||
+      handle() !== owner ||
+      overlay()?.instance !== instance
+    )
+      throw new Error('This model selection is no longer open.');
+    const result = await control('selectBackend', {
+      sessionId: owner.sessionId,
+      backend: { kind: 'model', ...backend },
+    });
+    if (result.kind !== 'committed')
+      throw new Error(`Model selection rejected: ${result.reason ?? result.kind}`);
+    await owner.refresh();
   };
   const create = async (workspace: BrowserWorkspace, expectedSessionId = selected()) => {
     if (!alive || selected() !== expectedSessionId) return;
@@ -553,15 +551,37 @@ function App() {
                 </View>
               </Dialog>
             );
+          if (current.kind === 'models')
+            return (
+              <Each<ConversationHandle>
+                of={handle()?.sessionId === current.sessionId ? [handle()!] : []}
+                key={(owner: ConversationHandle) => owner.sessionId}
+              >
+                {(item) => {
+                  const owner = item();
+                  return (
+                    <ModelSelect
+                      owner={owner}
+                      instance={current.instance}
+                      current={() =>
+                        overlay()?.instance === current.instance &&
+                        selected() === owner.sessionId &&
+                        handle() === owner
+                      }
+                      close={closeOverlay}
+                      select={(backend) => chooseModel(owner, current.instance, backend)}
+                    />
+                  );
+                }}
+              </Each>
+            );
           return (
             <Palette
               kind={current.kind}
-              sessionId={current.sessionId}
               instance={current.instance}
               commands={commands({ instance: current.instance, sessionId: current.sessionId })}
               close={closeOverlay}
               create={(workspace) => create(workspace, current.sessionId)}
-              chooseModel={chooseModel}
             />
           );
         }}

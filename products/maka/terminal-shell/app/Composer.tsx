@@ -23,14 +23,11 @@ import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
 import { Checklist } from './Checklist';
+import { effortCaption, modelCaption } from './modelSelection';
+import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { C } from './ui';
 import logo from './assets/maka.png';
 
-export type BackendIdentity = {
-  connectionId: string;
-  modelId: string;
-  thinkingLevel: string | null;
-} | null;
 export type SendAction = { owner: string; text: string; backend: BackendIdentity };
 
 // These are the immutable session controller's original reads and actions.
@@ -41,6 +38,8 @@ export type ComposerSession = {
   editable(): boolean;
   blockedReason(): string;
   backend(): BackendIdentity;
+  modelDetails(): ModelDetails;
+  refreshModel(): Promise<void>;
   permissions(): string;
   workspace(): string;
   empty(): boolean;
@@ -71,6 +70,13 @@ export function Composer(props: {
   const hero = () => props.session() === null || props.session()!.empty();
   const blocked = () => props.session()?.blockedReason() ?? 'Choose a workspace to begin.';
   const cannotSend = () => !!blocked() || !props.session()?.draft().trim();
+  const modelLabel = () => {
+    const owner = props.session();
+    const backend = owner?.backend() ?? null;
+    if (!owner || backend === null) return 'Choose a model';
+    const details = owner.modelDetails();
+    return `${modelCaption(backend, details)} · ${effortCaption(backend, details)} · Ctrl+G`;
+  };
   return (
     <View
       onLayout={(frame) => width.set(frame.width)}
@@ -209,14 +215,18 @@ export function Composer(props: {
           <Text style={{ color: C.secondary }}>{props.session()?.permissions()}</Text>
           <Button
             disabled={props.session() === null}
+            accessibilityLabel="Choose model and effort"
             onPress={inputAction(props.models, { sessionId: props.session()?.sessionId ?? null })}
             style={{ flex: 1, alignItems: 'flex-end' }}
+            hoverStyle={{ backgroundColor: C.line }}
+            focusStyle={{ backgroundColor: C.line }}
+            activeStyle={{ backgroundColor: C.surface }}
           >
             <Text
               numberOfLines={1}
               style={{ color: props.session()?.backend() ? C.secondary : C.warning }}
             >
-              {props.session()?.backend()?.modelId ?? 'Choose a model'} · Ctrl+G
+              {modelLabel()} ▾
             </Text>
           </Button>
           <If when={props.session()?.invocation() != null}>

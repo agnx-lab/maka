@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, computed, effect, Input, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { List } from 'nsh/list';
 import { host } from 'maka/host';
@@ -33,16 +33,14 @@ export type PaletteEntry = {
   hint?: string;
   run(): void;
 };
-export type PaletteKind = 'commands' | 'models' | 'workspaces';
+export type PaletteKind = 'commands' | 'workspaces';
 
 export function Palette(props: {
   kind: PaletteKind;
-  sessionId: string | null;
   instance: number;
   commands: PaletteEntry[];
   close(instance: number): boolean;
   create(workspace: any): Promise<void>;
-  chooseModel(id: string, choice: any): Promise<void>;
 }) {
   const query = signal('');
   const selected = signal(0);
@@ -53,22 +51,6 @@ export function Palette(props: {
   let alive = true;
   let generation = 0;
   let removeSearchKeys = () => {};
-  let page: any = null;
-  let choices: any[] = [];
-  const chooseModel = ({
-    instance,
-    sessionId,
-    choice,
-  }: {
-    instance: number;
-    sessionId: string | null;
-    choice: {
-      selection: { connectionId: string; modelId: string };
-      defaultThinkingLevel: string | null;
-    };
-  }) => {
-    if (sessionId !== null && props.close(instance)) void props.chooseModel(sessionId, choice);
-  };
   const create = ({ instance, selection }: { instance: number; selection: any }) => {
     if (props.close(instance)) void props.create({ kind: 'directory', selection });
   };
@@ -80,12 +62,9 @@ export function Palette(props: {
   const matches = computed(() => {
     const needle = query().toLowerCase().trim();
     const available = props.kind === 'commands' ? props.commands : entries();
-    // Settings performs model search; workspace roots and commands filter locally.
-    return props.kind === 'models'
-      ? available
-      : available.filter((entry) =>
-          `${entry.title} ${entry.detail ?? ''}`.toLowerCase().includes(needle),
-        );
+    return available.filter((entry) =>
+      `${entry.title} ${entry.detail ?? ''}`.toLowerCase().includes(needle),
+    );
   });
   const index = () => Math.min(selected(), Math.max(0, matches().length - 1));
   const count = () => Math.max(1, Math.min(8, Math.floor((windowSize().height / 16 - 14) / 3)));
@@ -96,80 +75,32 @@ export function Palette(props: {
     const next = Math.max(0, Math.min(matches().length - 1, index() + delta));
     selected.set(next);
     list?.scrollToIndex({ index: next, animated: false, viewPosition: delta > 0 ? 1 : 0 });
-    if (delta > 0 && next >= matches().length - count()) loadMore();
   };
   const activate = () => {
     const entry = matches()[index()];
     if (!entry) return;
     entry.run();
   };
-  const load = async (search: string, more = false) => {
+  const load = async () => {
     const reading = ++generation;
-    const minimum = more ? matches().length + count() : count();
     loading.set(true);
     error.set('');
-    if (props.kind === 'models' && !more) {
-      entries.set([]);
-      page = null;
-      choices = [];
-    }
     try {
-      if (props.kind === 'models') {
-        do {
-          const result = await host.query(
-            'settings',
-            'models',
-            more
-              ? { kind: 'continue', revision: page.revision, cursor: page.next }
-              : { kind: 'start', query: search },
-          );
-          if (!alive || reading !== generation) return;
-          if (result.kind !== 'ready')
-            throw new Error('The model catalog changed. Edit the search to refresh.');
-          page = result;
-          choices = more ? [...choices, ...result.choices] : result.choices;
-          entries.set(
-            choices.map((choice) => ({
-              id: `${choice.selection.connectionId}/${choice.selection.modelId}`,
-              title: choice.label,
-              detail: `${choice.connectionName} · ${choice.selection.modelId}`,
-              run: inputAction(chooseModel, {
-                instance: props.instance,
-                sessionId: props.sessionId,
-                choice: {
-                  selection: {
-                    connectionId: choice.selection.connectionId,
-                    modelId: choice.selection.modelId,
-                  },
-                  defaultThinkingLevel: choice.defaultThinkingLevel ?? null,
-                },
-              }),
-            })),
-          );
-          note.set(
-            page.next
-              ? 'Type to search models'
-              : `${choices.length} model${choices.length === 1 ? '' : 's'}`,
-          );
-          more = true;
-        } while (page.next && choices.length < minimum && alive && reading === generation);
-      } else if (props.kind === 'workspaces') {
-        const result = await host.query('agent', 'directories', { kind: 'roots' });
-        if (!alive || reading !== generation) return;
-        entries.set(
-          result.roots.map((directory: any) => ({
-            id: directory.path,
-            title: directory.name,
-            detail: directory.path,
-            run: inputAction(create, { instance: props.instance, selection: directory.selection }),
-          })),
-        );
-        note.set(
-          result.roots.length
-            ? 'Choose where the new conversation can work'
-            : 'No workspaces are published by this Host.',
-        );
-      }
+      const result = await host.query('agent', 'directories', { kind: 'roots' });
+      if (!alive || reading !== generation) return;
+      entries.set(
+        result.roots.map((directory: any) => ({
+          id: directory.path,
+          title: directory.name,
+          detail: directory.path,
+          run: inputAction(create, { instance: props.instance, selection: directory.selection }),
+        })),
+      );
+      note.set(
+        result.roots.length
+          ? 'Choose where the new conversation can work'
+          : 'No workspaces are published by this Host.',
+      );
     } catch (reason) {
       if (alive && reading === generation)
         error.set(reason instanceof Error ? reason.message : String(reason));
@@ -177,17 +108,8 @@ export function Palette(props: {
       if (alive && reading === generation) loading.set(false);
     }
   };
-  const loadMore = () => {
-    if (!alive || loading()) return;
-    if (props.kind === 'models' && page?.next) void load(query(), true);
-  };
-  if (props.kind === 'models')
-    effect(() => {
-      void load(query());
-    });
-  else if (props.kind !== 'commands') void load('');
-  const label = () =>
-    ({ commands: 'Commands', models: 'Models', workspaces: 'Workspaces' })[props.kind];
+  if (props.kind === 'workspaces') void load();
+  const label = () => ({ commands: 'Commands', workspaces: 'Workspaces' })[props.kind];
   return (
     <Dialog
       animation="none"
@@ -252,7 +174,6 @@ export function Palette(props: {
             list = node;
           }}
           estimatedItemSize={48}
-          onEndReached={loadMore}
           style={{ height: count() * 48 }}
         >
           {(id) => (

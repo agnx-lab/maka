@@ -95,17 +95,20 @@ pub struct Fixture {
 
 impl Fixture {
     pub async fn open() -> Self {
-        Self::open_with_options(false, false).await
+        Self::open_with_options(false, false, false).await
+    }
+    pub async fn reasoning_models() -> Self {
+        Self::open_with_options(false, false, true).await
     }
     #[cfg(unix)]
     pub async fn registered() -> Self {
-        Self::open_with_options(true, false).await
+        Self::open_with_options(true, false, false).await
     }
     #[cfg(unix)]
     pub async fn registered_images() -> Self {
-        Self::open_with_options(true, true).await
+        Self::open_with_options(true, true, false).await
     }
-    async fn open_with_options(registered: bool, images: bool) -> Self {
+    async fn open_with_options(registered: bool, images: bool, reasoning: bool) -> Self {
         let directory = tempfile::tempdir().unwrap();
         private_directory(directory.path()).unwrap();
         let workspace = directory.path().join("workspace");
@@ -122,7 +125,7 @@ impl Fixture {
             Arc::new(RootOwner::create(&directory.path().join("host"), &namespaces).unwrap());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}/v1", listener.local_addr().unwrap());
-        let selection = configure(owner.clone(), &base, images).await;
+        let selection = configure(owner.clone(), &base, images, reasoning).await;
         let store = Arc::new(EventLog::for_root(owner).await.unwrap());
         let package = |id: &str,
                        implementation: &str,
@@ -433,7 +436,7 @@ impl Fixture {
     }
 }
 
-async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool) -> Value {
+async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool, reasoning: bool) -> Value {
     use maka_agent_facts::configuration::CatalogMutationResult;
     let config = Arc::new(
         maka_config::ConfigurationStore::for_root(owner)
@@ -441,8 +444,15 @@ async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool) -> Value {
             .unwrap(),
     );
     let provider = json!({"packageId":"maka.providers","entryId":"maka.providers","scope":"profile","name":"openai-compatible"});
+    let mut overrides = json!({"fixture-model":{"contextWindow":200000,"vision":vision},"fixture-model-alt":{"contextWindow":200000,"vision":vision}});
+    if reasoning {
+        overrides["fixture-model"]["thinkingLevels"] = json!(["off", "low", "high"]);
+        overrides["fixture-model"]["defaultThinkingLevel"] = json!("low");
+        overrides["fixture-model-alt"]["thinkingLevels"] = json!(["off", "high"]);
+        overrides["fixture-model-alt"]["defaultThinkingLevel"] = json!("high");
+    }
     let CatalogMutationResult::Committed {connection:Some(connection),..} = config.create_connection(serde_json::from_value(json!({
-        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":{"fixture-model":{"contextWindow":200000,"vision":vision},"fixture-model-alt":{"contextWindow":200000,"vision":vision}}}
+        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":overrides}
     })).unwrap()).await.unwrap() else { panic!("create fixture connection") };
     let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = config.prepare_oauth_login(serde_json::from_value(json!({
         "expectedCredential":null,"attemptId":Uuid::new_v4(),"target":{"kind":"existing","expected":{"connectionId":connection.connection_id,"revision":connection.revision,"provider":provider,"slug":"nsh-fixture","configuration":{"baseUrl":base}},"configuration":{"baseUrl":base}},
@@ -583,13 +593,32 @@ impl ModelRequest {
 
 // A public accessibility frame chooses coordinates; real native mouse events act.
 pub fn click_text(view: &mut AppView, prefix: &str) {
-    use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let node = view
         .accessibility_snapshot()
         .into_iter()
         .filter(|node| node.label.starts_with(prefix) && node.frame.origin.y.0 >= 0.0)
         .max_by(|a, b| a.frame.origin.y.0.total_cmp(&b.frame.origin.y.0))
         .unwrap_or_else(|| panic!("no rendered native text starts with {prefix:?}"));
+    click_node(view, node);
+}
+
+pub fn click_label(view: &mut AppView, label: &str) {
+    let mut matching = view
+        .accessibility_snapshot()
+        .into_iter()
+        .filter(|node| node.label == label && node.frame.origin.y.0 >= 0.0);
+    let node = matching
+        .next()
+        .unwrap_or_else(|| panic!("no rendered native node has label {label:?}"));
+    assert!(
+        matching.next().is_none(),
+        "ambiguous native label {label:?}"
+    );
+    click_node(view, node);
+}
+
+fn click_node(view: &mut AppView, node: nsh_platform_tui::AccessibleNode) {
+    use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     // Native input uses cell centers; a half-cell origin must not select its exclusive far edge.
     let column = (node.frame.origin.x.0 / 8.0 - 0.5).ceil().max(0.0) as u16;
     let row = (node.frame.origin.y.0 / 16.0 - 0.5).ceil().max(0.0) as u16;

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { batch, cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
+import { batch, cleanup, computed, effect, inputAction, signal, Text, untracked, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
@@ -26,7 +26,9 @@ import { host } from 'maka/host';
 import { C, Header } from './ui';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
 import type { Row, Position, Subscription } from './history';
-import type { ComposerSession, BackendIdentity, SendAction } from './Composer';
+import type { ComposerSession, SendAction } from './Composer';
+import { sameRoute } from './modelSelection';
+import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { MessageRow, type MessageViewState } from './MessageRow';
 import { TurnPanel, TurnSummary, ActivityStatus, turnOutcome } from './TurnPanel';
 import type { GroupViewState, LiveActivity, TurnViewState } from './TurnPanel';
@@ -724,6 +726,71 @@ export function Conversation(props: ConversationProps) {
       : left.connectionId === right.connectionId &&
         left.modelId === right.modelId &&
         left.thinkingLevel === right.thinkingLevel;
+  // Metadata follows the route's value, not observe()'s newly allocated backend
+  // objects or live stream state. The durable backend remains the only choice.
+  const modelRoute = computed(() => {
+    const value = backendIdentity(backend());
+    return value === null ? null : JSON.stringify([value.connectionId, value.modelId]);
+  });
+  const modelProjection = signal<{ route: string | null; details: ModelDetails }>({
+    route: null,
+    details: { kind: 'unavailable', message: 'Choose a model.' },
+  });
+  let modelGeneration = 0;
+  let modelRead: { route: string; generation: number; task: Promise<void> } | null = null;
+  const modelDetails = (): ModelDetails => {
+    const value = modelProjection();
+    return value.route === modelRoute() ? value.details : { kind: 'loading' };
+  };
+  const refreshModel = (): Promise<void> => {
+    if (!alive) return Promise.resolve();
+    const route = modelRoute();
+    const captured = backendIdentity(backend());
+    if (route === null || captured === null) {
+      modelGeneration += 1;
+      modelRead = null;
+      modelProjection.set({
+        route: null,
+        details: { kind: 'unavailable', message: 'Choose a model.' },
+      });
+      return Promise.resolve();
+    }
+    if (modelRead?.route === route) return modelRead.task;
+    const generation = ++modelGeneration;
+    modelProjection.set({ route, details: { kind: 'loading' } });
+    const current = () => alive && generation === modelGeneration && modelRoute() === route;
+    const task = Promise.resolve().then(async () => {
+      try {
+        if (!current()) return;
+        const result = await host.query('settings', 'resolveModel', {
+          connectionId: captured.connectionId,
+          modelId: captured.modelId,
+        });
+        if (!current()) return;
+        modelProjection.set({
+          route,
+          details:
+            result.kind === 'ready' && sameRoute(captured, result.choice.selection)
+              ? { kind: 'ready', choice: result.choice }
+              : { kind: 'unavailable', message: `Model unavailable: ${captured.modelId}.` },
+        });
+      } catch (reason) {
+        if (current())
+          modelProjection.set({
+            route,
+            details: { kind: 'unavailable', message: String(reason) },
+          });
+      } finally {
+        if (modelRead?.generation === generation) modelRead = null;
+      }
+    });
+    modelRead = { route, generation, task };
+    return task;
+  };
+  effect(() => {
+    modelRoute();
+    untracked(() => void refreshModel());
+  });
   const selection = async (expectedBackend?: BackendIdentity) => {
     const observed = await observe();
     if (!alive) return null;
@@ -928,6 +995,8 @@ export function Conversation(props: ConversationProps) {
     editable: () => draftReady() && !savingFailed(),
     blockedReason: sendBlockedReason,
     backend: () => backendIdentity(backend()),
+    modelDetails,
+    refreshModel,
     permissions,
     workspace,
     empty: () =>
@@ -1027,6 +1096,8 @@ export function Conversation(props: ConversationProps) {
 
   cleanup(() => {
     alive = false;
+    modelGeneration += 1;
+    modelRead = null;
     toolActivity.set([]);
     props.detach(ownHandle);
     const stream = subscription;
