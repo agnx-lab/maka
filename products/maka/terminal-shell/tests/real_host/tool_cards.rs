@@ -147,18 +147,38 @@ async fn tool_cards_show_recorded_search_changes_and_business_failures_without_i
             view.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
             support::click_button(&mut view, "Toggle tool WorkspaceDocument").await;
             let screen = wait_view(&mut view, |screen| screen.contains(marker)).await;
+            if matches!(method, "write" | "edit") {
+                // Recorded results open first. Reach the original request
+                // through the same local reader a user scrolls with End.
+                tab_to_label(&mut view, "Tool details").await;
+                view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+                let arguments = wait_view(&mut view, |screen| {
+                    if method == "write" {
+                        screen.contains("Requested file contents") && screen.contains("新文件_记录")
+                    } else {
+                        screen.contains("Requested replacement") && screen.contains("替换_记录")
+                    }
+                }).await;
+                evidence(&format!("tool-card-{method}-arguments"), &arguments);
+            }
             let labels = view.accessibility_snapshot().into_iter().map(|node| node.label).collect::<Vec<_>>();
             assert!(!labels.iter().any(|label| label.contains("LATER_WORKSPACE_CONTENT")));
             match method {
                 "grep" => assert!(labels.iter().any(|label| label.contains("中文 needle"))),
                 "write" => {
+                    assert!(labels.iter().any(|label| label == "File"));
+                    assert!(labels.iter().any(|label| label == "new.txt"));
                     assert!(labels.iter().any(|label| label == "Requested file contents"));
                     assert!(labels.iter().any(|label| label == "新文件_记录\n"));
                     assert!(!labels.iter().any(|label| label == "Applied diff"));
                 }
                 "edit" => {
+                    assert!(labels.iter().any(|label| label == "File"));
+                    assert!(labels.iter().any(|label| label == "original.txt"));
                     assert!(labels.iter().any(|label| label == "Requested removal"));
+                    assert!(labels.iter().any(|label| label == "needle"));
                     assert!(labels.iter().any(|label| label == "Requested replacement"));
+                    assert!(labels.iter().any(|label| label == "替换_记录"));
                     assert!(!labels.iter().any(|label| label == "Applied diff"));
                 }
                 "readText" => {
