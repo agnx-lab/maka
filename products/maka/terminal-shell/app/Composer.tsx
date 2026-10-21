@@ -17,24 +17,35 @@
  * under the License.
  */
 
-import { Input, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, Input, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Image } from 'nsh/image';
 import { Button } from 'nsh/base';
 import { windowSize } from 'nsh/device';
+import { keymap } from 'nsh/keymap';
+import { DraftAttachments } from './Attachments';
+import type { AttachmentDraft } from './attachmentDraft';
+import type { ImagePreview } from './ImageThumbnail';
 import { Checklist } from './Checklist';
 import { effortCaption, modelCaption } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { C } from './ui';
 import logo from './assets/maka.png';
 
-export type SendAction = { owner: string; text: string; backend: BackendIdentity };
+export type SendAction = {
+  owner: string;
+  text: string;
+  backend: BackendIdentity;
+  attachments: string[];
+};
 
 // These are the immutable session controller's original reads and actions.
 // The resident composer owns no second draft or model selection.
 export type ComposerSession = {
   sessionId: string;
   draft(): string;
+  attachments: AttachmentDraft;
+  previewImage(image: ImagePreview): void;
   editable(): boolean;
   blockedReason(): string;
   backend(): BackendIdentity;
@@ -70,7 +81,11 @@ export function Composer(props: {
   const width = signal(windowSize().width);
   const hero = () => props.session() === null || props.session()!.empty();
   const blocked = () => props.session()?.blockedReason() ?? 'Choose a workspace to begin.';
-  const cannotSend = () => !!blocked() || !props.session()?.draft().trim();
+  const cannotSend = () =>
+    !!blocked() ||
+    (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
+  let unbind = () => {};
+  cleanup(() => unbind());
   const modelLabel = () => {
     const owner = props.session();
     const backend = owner?.backend() ?? null;
@@ -80,6 +95,21 @@ export function Composer(props: {
   };
   return (
     <View
+      ref={(node) => {
+        unbind();
+        unbind = keymap.bind(
+          'mod+u',
+          () => {
+            const owner = props.session();
+            if (owner && owner.editable())
+              owner.attachments.open({
+                owner: owner.sessionId,
+                value: !owner.attachments.picker(),
+              });
+          },
+          { when: 'always', within: node },
+        );
+      }}
       onLayout={(frame) => width.set(frame.width)}
       style={{
         flex: hero() ? 1 : 0,
@@ -188,27 +218,32 @@ export function Composer(props: {
             // Undo, selection and queued native events belong to this session.
             // Hero/history and responsive layout never replace this editor.
             return (
-              <Input
-                ref={props.attach}
-                testID="message"
-                accessibilityLabel="Message composer"
-                autoFocus
-                multiline
-                submitBehavior="submit"
-                value={owner?.draft() ?? ''}
-                readonly={!owner?.editable()}
-                onChange={owner?.changeDraft}
-                onSubmit={owner?.submit}
-                placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
-                style={{
-                  minHeight: 16,
-                  maxHeight: 80,
-                  color: C.text,
-                  placeholderColor: C.muted,
-                  fontSize: 16,
-                  lineHeight: 16,
-                }}
-              />
+              <View style={{ gap: 8 }}>
+                <If when={owner !== null}>
+                  <DraftAttachments draft={owner!.attachments} preview={owner!.previewImage} />
+                </If>
+                <Input
+                  ref={props.attach}
+                  testID="message"
+                  accessibilityLabel="Message composer"
+                  autoFocus
+                  multiline
+                  submitBehavior="submit"
+                  value={owner?.draft() ?? ''}
+                  readonly={!owner?.editable()}
+                  onChange={owner?.changeDraft}
+                  onSubmit={owner?.submit}
+                  placeholder={owner ? 'Message or run a task…' : 'Choose a workspace to begin…'}
+                  style={{
+                    minHeight: 16,
+                    maxHeight: 80,
+                    color: C.text,
+                    placeholderColor: C.muted,
+                    fontSize: 16,
+                    lineHeight: 16,
+                  }}
+                />
+              </View>
             );
           }}
         </Each>
@@ -264,6 +299,7 @@ export function Composer(props: {
                     owner: props.session()!.sessionId,
                     text: props.session()!.draft(),
                     backend: props.session()!.backend(),
+                    attachments: props.session()!.attachments.ids(),
                   })
                 : undefined
             }

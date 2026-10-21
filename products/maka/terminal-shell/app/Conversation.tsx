@@ -36,9 +36,15 @@ import { projectProcessGroups, stableRowId } from './processGroups';
 import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
 import type { PresentationSettings } from './presentation';
 import { PresentationControls } from './PresentationControls';
-import type { ImagePreview } from './ToolImage';
+import type { ImagePreview } from './ImageThumbnail';
 import { latestToolActivity, toolActivitySummary, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
+import type { AgentHistoryAttachment } from '../../../../packages/plugin-sdk/src/index.js';
+import {
+  createAttachmentDraft,
+  type AttachmentEdit,
+  type DraftAttachment,
+} from './attachmentDraft';
 
 export type Control = (method: string, input: any) => Promise<any>;
 export type ConversationHandle = ComposerSession & {
@@ -107,6 +113,8 @@ export function Conversation(props: ConversationProps) {
   const transcriptStatus = signal<'loading' | 'live' | 'closing' | 'failed'>('loading');
   const before = signal<any>(null);
   const loadingOlder = signal(false);
+  const attachmentMetadataFailed = signal(false);
+  const attachmentMetadataReads = new Set<string>();
   const draft = signal('');
   const draftReady = signal(false);
   const savingFailed = signal(false);
@@ -320,8 +328,19 @@ export function Conversation(props: ConversationProps) {
   let followAgain = false;
   let draftRevision = 0;
   let editEpoch = 0;
-  let pendingDraft: string | null = null;
+  let pendingDraft: (AttachmentEdit & { text: string }) | null = null;
   let saveTask: Promise<void> | null = null;
+  const attachments = createAttachmentDraft({
+    sessionId,
+    client,
+    focus: props.focusComposer,
+    changed() {
+      if (!alive || !draftReady()) return;
+      editEpoch += 1;
+      pendingDraft = { text: draft(), ...attachments.snapshot() };
+      startSave();
+    },
+  });
 
   const report = (reason: unknown) => {
     if (alive) error.set(reason instanceof Error ? reason.message : String(reason));
@@ -336,6 +355,7 @@ export function Conversation(props: ConversationProps) {
         pendingMessages().filter((row) => !canonical.has(`${row.messageId}/${row.field}`)),
       );
     });
+    hydrateAttachmentMetadata();
   };
   const requestMetadata = (row: { position?: Position; field: string } | undefined) => {
     if (!row?.position) return;
@@ -358,10 +378,13 @@ export function Conversation(props: ConversationProps) {
       rows().map((row) => {
         const chunk = metadata.get(row.key);
         return chunk && through >= (row.metadataThrough ?? 0)
-          ? { ...row, ...historyMetadata(chunk, through) }
+          ? { ...row, ...historyMetadata(chunk, through, row) }
           : row;
       }),
     );
+    if (!rows().some((row) => row.role === 'user' && row.attachments === undefined))
+      attachmentMetadataFailed.set(false);
+    hydrateAttachmentMetadata();
   };
   const history = async (through: number, position: any) => {
     const page = await host.query('agent', 'history', {
@@ -373,6 +396,70 @@ export function Conversation(props: ConversationProps) {
     });
     if (page.through !== through) throw new Error('History changed its requested fence.');
     return page;
+  };
+  const hydrateAttachmentMetadata = () => {
+    for (const row of rows()) {
+      if (
+        row.role !== 'user' ||
+        row.field !== 'body' ||
+        !row.position ||
+        row.attachments !== undefined
+      )
+        continue;
+      const through = row.metadataThrough!;
+      const key = `${row.key}/${through}`;
+      if (attachmentMetadataReads.has(key)) continue;
+      attachmentMetadataReads.add(key);
+      const position = { ...row.position };
+      // A tail fragment can omit the first-fragment metadata. Read just that
+      // row's first page; its text never changes the loaded window or anchor.
+      void history(through, { kind: 'row', position, field: 'body' })
+        .then((page) => {
+          if (!alive) return;
+          const current = rows().find((candidate) => candidate.key === row.key);
+          if (
+            !current ||
+            current.messageId !== row.messageId ||
+            current.metadataThrough !== through
+          )
+            return;
+          const first = page.chunks.find(
+            (chunk: any) =>
+              chunk.position.sourceSequence === position.sourceSequence &&
+              chunk.position.itemIndex === position.itemIndex &&
+              chunk.field === 'body',
+          );
+          if (
+            !first ||
+            first.offset !== 0 ||
+            first.messageId !== row.messageId ||
+            first.role !== 'user'
+          )
+            throw new Error('The original attachment metadata could not be verified.');
+          publishMetadata([first], through);
+        })
+        .catch((reason) => {
+          if (
+            alive &&
+            rows().some(
+              (current) =>
+                current.key === row.key &&
+                current.messageId === row.messageId &&
+                current.metadataThrough === through &&
+                current.attachments === undefined,
+            )
+          ) {
+            attachmentMetadataFailed.set(true);
+            report(reason);
+          }
+        })
+        .finally(() => attachmentMetadataReads.delete(key));
+    }
+  };
+  const retryAttachmentMetadata = () => {
+    if (!alive) return;
+    attachmentMetadataFailed.set(false);
+    hydrateAttachmentMetadata();
   };
   const observe = async () => {
     const observed = await host.query('agent', 'observe', { sessionId });
@@ -773,11 +860,12 @@ export function Conversation(props: ConversationProps) {
     if (saveTask || pendingDraft === null || !alive || savingFailed()) return;
     saveTask = (async () => {
       while (alive && pendingDraft !== null) {
-        const text = pendingDraft;
+        const edit = pendingDraft;
         pendingDraft = null;
-        const saved = await client.saveDraft(draftRevision, text);
+        const saved = await client.saveDraft(draftRevision, edit);
         if (!alive) return;
         draftRevision = saved.revision;
+        attachments.saved(edit);
       }
     })()
       .catch((reason) => {
@@ -799,10 +887,13 @@ export function Conversation(props: ConversationProps) {
     if (!alive || !draftReady()) return;
     editEpoch += 1;
     draft.set(text);
-    pendingDraft = text;
+    pendingDraft = { text, ...attachments.snapshot() };
     startSave();
   };
-  const acceptRecoveredDraft = (stored: { revision: number; text: string }, epoch: number) => {
+  const acceptRecoveredDraft = (
+    stored: { revision: number; text: string; attachments: DraftAttachment[] },
+    epoch: number,
+  ) => {
     if (
       editEpoch === epoch &&
       draftRevision === stored.revision &&
@@ -811,6 +902,7 @@ export function Conversation(props: ConversationProps) {
       saveTask === null
     ) {
       draft.set(stored.text);
+      attachments.restore(stored.attachments);
     }
   };
 
@@ -910,7 +1002,12 @@ export function Conversation(props: ConversationProps) {
     return { model: resolved.choice.selection, thinkingLevel: backend.thinkingLevel ?? null };
   };
 
-  const settleReply = (reply: any, text?: string, epoch?: number) => {
+  const settleReply = (
+    reply: any,
+    text?: string,
+    epoch?: number,
+    files: DraftAttachment[] = [],
+  ) => {
     const accepted = acceptedSend(reply, sessionId);
     if (!accepted) {
       notice.set(receiptMessage(reply));
@@ -926,10 +1023,19 @@ export function Conversation(props: ConversationProps) {
           role: 'user',
           placement: accepted.kind === 'queued' ? 'queued' : 'transcript',
           text,
+          attachments: files.map(
+            (file): AgentHistoryAttachment => ({
+              name: file.name,
+              mimeType: file.mimeType,
+              bytes: file.bytes,
+              kind: file.mimeType.startsWith('image/') ? 'image' : 'other',
+            }),
+          ),
         },
       ]);
     }
     if (text !== undefined && editEpoch === epoch && draft() === text) draft.set('');
+    if (text !== undefined) attachments.sent(files.map((file) => file.id));
     notice.set(
       accepted.kind === 'queued'
         ? 'Message queued.'
@@ -953,6 +1059,7 @@ export function Conversation(props: ConversationProps) {
     if (!ready()) return 'Loading session history… Your draft is kept.';
     if (!draftReady()) return 'Loading the saved draft…';
     if (savingFailed()) return 'The draft could not be saved. Sending is unavailable.';
+    if (attachments.blocked()) return attachments.blocked();
     if (sending()) return 'Confirming send… New typing is kept.';
     if (recovering()) return 'Reading original receipts… New typing is kept.';
     if (!receiptsKnown() || unresolved().length)
@@ -960,7 +1067,7 @@ export function Conversation(props: ConversationProps) {
     return '';
   };
   const send = async (text: string, expectedBackend?: BackendIdentity) => {
-    if (!alive || !text.trim()) return;
+    if (!alive || (!text.trim() && attachments.files().length === 0)) return;
     if (sendBlockedReason()) {
       notice.set(
         'This message was not sent. Your draft is kept; check the status below before trying again.',
@@ -969,6 +1076,7 @@ export function Conversation(props: ConversationProps) {
     }
     if (draft() !== text) changeDraft(text);
     const epoch = editEpoch;
+    const files = [...attachments.files()];
     sending.set(true);
     error.set('');
     try {
@@ -989,7 +1097,7 @@ export function Conversation(props: ConversationProps) {
       receiptsKnown.set(false);
       const sent = await client.send(draftRevision, model);
       if (!alive) return;
-      settleReply(sent.reply, text, epoch);
+      settleReply(sent.reply, text, epoch, files);
     } catch (reason) {
       report(reason);
     } finally {
@@ -1089,11 +1197,17 @@ export function Conversation(props: ConversationProps) {
   const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
     if (alive && owner === sessionId) reading.set(mode);
   };
-  const sendRendered = ({ owner, text, backend: expectedBackend }: SendAction) => {
+  const sendRendered = ({
+    owner,
+    text,
+    backend: expectedBackend,
+    attachments: files,
+  }: SendAction) => {
     if (
       !alive ||
       owner !== sessionId ||
       draft() !== text ||
+      !attachments.same(files) ||
       !sameBackend(backendIdentity(backend()), expectedBackend)
     )
       return;
@@ -1102,6 +1216,8 @@ export function Conversation(props: ConversationProps) {
   const ownHandle: ConversationHandle = {
     sessionId,
     draft,
+    attachments,
+    previewImage: props.previewImage,
     editable: () => draftReady() && !savingFailed(),
     blockedReason: sendBlockedReason,
     backend: () => backendIdentity(backend()),
@@ -1228,7 +1344,9 @@ export function Conversation(props: ConversationProps) {
       if (!alive) return;
       draftRevision = stored.revision;
       draft.set(stored.text);
+      attachments.restore(stored.attachments);
       draftReady.set(true);
+      void attachments.start();
       const operations = await client.pending();
       if (!alive) return;
       unresolved.set(operations);
@@ -1239,6 +1357,11 @@ export function Conversation(props: ConversationProps) {
 
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
+      <If when={attachmentMetadataFailed()}>
+        <Button onPress={retryAttachmentMetadata}>
+          <Text style={{ color: C.accent }}>Retry attachment metadata</Text>
+        </Button>
+      </If>
       <Header
         title={title()}
         workspace={workspace()}

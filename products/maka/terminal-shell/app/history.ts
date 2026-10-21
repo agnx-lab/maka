@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import type { AgentHistoryAttachment } from '../../../../packages/plugin-sdk/src/index.js';
+
 export type Position = { sourceSequence: number; itemIndex: number };
 type Fragment = { offset: number; text: string };
 export type Subscription = { next(): Promise<any | null>; close(): Promise<void> };
@@ -30,6 +32,7 @@ export type Row = {
   fragments?: Fragment[];
   totalBytes?: number;
   tool?: any;
+  attachments?: AgentHistoryAttachment[];
   turnId?: string;
   timestamp?: number;
   timing?: any;
@@ -68,9 +71,11 @@ export function hasCompletePrefix(row: Row): boolean {
   return row.fragments.length > 0 && row.totalBytes !== undefined && offset <= row.totalBytes;
 }
 
-export function historyMetadata(chunk: any, through: number) {
+export function historyMetadata(chunk: any, through: number, previous?: Row) {
   return {
     totalBytes: chunk.totalBytes,
+    attachments:
+      chunk.offset === 0 ? (chunk.attachments ?? []) : (previous?.attachments ?? chunk.attachments),
     timing: chunk.timing,
     model: chunk.model,
     finalOutput: chunk.finalOutput,
@@ -103,7 +108,7 @@ export function mergeChunks(rows: Row[], chunks: any[], older = false, through =
       timestamp: chunk.timestamp,
       ...((previous?.metadataThrough ?? -1) > through
         ? historyMetadata(previous, previous!.metadataThrough!)
-        : historyMetadata(chunk, through)),
+        : historyMetadata(chunk, through, previous)),
       position: chunk.position,
       field: chunk.field,
       role: chunk.field === 'thinking' ? 'thinking' : chunk.role,

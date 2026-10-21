@@ -23,7 +23,9 @@ import { host } from 'maka/host';
 import { messageBytes, messageKey, type Position, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
 import { C } from './ui';
-import { ToolImage, type ImagePreview } from './ToolImage';
+import { HistoryAttachments } from './Attachments';
+import { ToolImage } from './ToolImage';
+import type { ImagePreview } from './ImageThumbnail';
 
 export type MessageViewState = {
   expanded: ReturnType<typeof signal<boolean>>;
@@ -365,6 +367,15 @@ export function MessageRow({
                 <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
                   {text()}
                 </Text>
+                <If when={(row().attachments?.length ?? 0) > 0}>
+                  <HistoryAttachments
+                    sessionId={sessionId}
+                    through={row().metadataThrough ?? through()}
+                    position={row().position}
+                    attachments={row().attachments!}
+                    preview={previewImage}
+                  />
+                </If>
               </View>
               <If when={timestamp()}>
                 <Text

@@ -1,0 +1,334 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { cleanup, signal } from 'nsh';
+
+export type DraftAttachment = { id: string; name: string; mimeType: string; bytes: number };
+type AttachmentStatus = {
+  operationId: string;
+  kind: 'reading' | 'uploading' | 'failed' | 'complete';
+  name: string;
+  error?: string;
+};
+export type AttachmentTarget = { owner: string; id: string };
+export type UploadRow = {
+  id: string;
+  name: string;
+  kind: 'reading' | 'uploading' | 'failed' | 'unknown';
+  error?: string;
+  original?: any;
+};
+export type AttachmentEdit = { attachments: DraftAttachment[]; settledUploads: string[] };
+type UploadSubscription = { next(): Promise<any[] | null>; close(): void };
+const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
+
+// Native status is only progress. The original Journal receipt is the sole
+// authority for readiness, recovery and whether an attempt exists at all.
+function attachmentStatus(value: unknown): AttachmentStatus | null {
+  if (!value || typeof value !== 'object') return null;
+  const data = value as Record<string, unknown>;
+  if (
+    typeof data.operationId !== 'string' ||
+    typeof data.name !== 'string' ||
+    !['reading', 'uploading', 'failed', 'complete'].includes(String(data.kind)) ||
+    (data.error !== undefined && typeof data.error !== 'string')
+  )
+    return null;
+  return data as AttachmentStatus;
+}
+
+export function createAttachmentDraft(options: {
+  sessionId: string;
+  client: any;
+  changed(): void;
+  focus(): void;
+}) {
+  const files = signal<DraftAttachment[]>([]);
+  const originals = signal<any[]>([]);
+  const selecting = signal<UploadRow[]>([]);
+  const picker = signal(false);
+  const restoring = signal(true);
+  const error = signal('');
+  const recovering = signal<string | null>(null);
+  // Keep adopted IDs for this observer's lifetime: a Journal read that began
+  // before CAS must not resurrect a file after removal or a successful send.
+  const settled = new Map<string, 'pending' | 'saved'>();
+  let alive = true;
+  let subscription: UploadSubscription | null = null;
+  let reading = false;
+  let watchFailed = false;
+  const owns = (target: { owner: string }) => alive && target.owner === options.sessionId;
+  const returned = (original: any) =>
+    original.receipt?.kind === 'recorded' && original.receipt.outcome?.kind === 'returned'
+      ? original.receipt.outcome.value
+      : null;
+  const uploaded = (original: any): DraftAttachment | null => {
+    const value = returned(original),
+      attachment = value?.attachment;
+    if (
+      value?.kind !== 'uploaded' ||
+      attachment?.sessionId !== options.sessionId ||
+      typeof attachment.id !== 'string' ||
+      typeof attachment.name !== 'string' ||
+      typeof attachment.mimeType !== 'string' ||
+      !Number.isSafeInteger(attachment.bytes) ||
+      attachment.bytes < 0 ||
+      attachment.bytes > 50 * 1024 * 1024
+    )
+      return null;
+    return {
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      bytes: attachment.bytes,
+    };
+  };
+  const receive = (operations: any[]) => {
+    if (!alive) return;
+    originals.set(operations);
+    const known = new Set(operations.map((original) => original.id));
+    selecting.set(selecting().filter((item) => !known.has(item.id)));
+    let changed = false;
+    for (const original of operations) {
+      const attachment = uploaded(original);
+      if (!attachment || settled.has(original.id)) continue;
+      if (!files().some((file) => file.id === attachment.id)) files.set([...files(), attachment]);
+      settled.set(original.id, 'pending');
+      changed = true;
+    }
+    restoring.set(false);
+    if (changed) options.changed();
+  };
+  const receiveOne = (original: any) => {
+    const known = originals().find((item) => item.id === original.id);
+    // A slower exact lookup must not replace an already recorded receipt.
+    receive([
+      ...originals().filter((item) => item.id !== original.id),
+      known?.receipt && !original.receipt ? known : original,
+    ]);
+  };
+  const rows = (): UploadRow[] => [
+    ...selecting(),
+    ...originals()
+      .filter((original) => !settled.has(original.id) && !uploaded(original))
+      .map((original) => {
+        const result = returned(original);
+        return {
+          id: original.id,
+          name: original.upload.name,
+          kind:
+            result?.kind === 'rejected' || original.abandoned
+              ? ('failed' as const)
+              : ('unknown' as const),
+          error: result?.kind === 'rejected' ? `Upload rejected: ${result.reason}` : undefined,
+          original,
+        };
+      }),
+  ];
+  const start = async () => {
+    if (!alive || reading) return;
+    reading = true;
+    watchFailed = false;
+    error.set('');
+    let stream: UploadSubscription | null = null;
+    try {
+      // Native registers this observer before the first Journal read.
+      stream = options.client.watchUploads();
+      subscription = stream;
+      while (alive && subscription === stream) {
+        const operations = await stream!.next();
+        if (!alive || subscription !== stream) return;
+        if (operations === null) throw new Error('Attachment updates ended.');
+        receive(operations);
+      }
+    } catch (reason) {
+      if (alive) {
+        watchFailed = true;
+        error.set(message(reason));
+      }
+    } finally {
+      stream?.close();
+      if (subscription === stream) subscription = null;
+      reading = false;
+    }
+  };
+  cleanup(() => {
+    alive = false;
+    subscription?.close();
+    subscription = null;
+  });
+  const inspect = async (target: AttachmentTarget) => {
+    if (!owns(target) || recovering()) return;
+    recovering.set(target.id);
+    if (!watchFailed) error.set('');
+    try {
+      const original = await options.client.findUpload(target.id);
+      if (!alive) return;
+      if (original !== null) {
+        receiveOne(original);
+        return;
+      }
+      // None is an exact original-UUID lookup, never absence from a bounded list.
+      selecting.set(
+        selecting().map((item) => (item.id === target.id ? { ...item, kind: 'failed' } : item)),
+      );
+    } catch (reason) {
+      if (alive)
+        selecting.set(
+          selecting().map((item) =>
+            item.id === target.id ? { ...item, kind: 'unknown', error: message(reason) } : item,
+          ),
+        );
+    } finally {
+      if (alive) recovering.set(null);
+    }
+  };
+  const status = (value: unknown) => {
+    const update = attachmentStatus(value);
+    if (
+      !alive ||
+      !update ||
+      settled.has(update.operationId) ||
+      originals().some((original) => original.id === update.operationId)
+    )
+      return;
+    if (update.kind === 'reading') {
+      picker.set(false);
+      options.focus();
+    }
+    const kept = selecting().filter((item) => item.id !== update.operationId);
+    selecting.set([
+      ...kept,
+      {
+        id: update.operationId,
+        name: update.name,
+        kind:
+          update.kind === 'failed'
+            ? 'unknown'
+            : update.kind === 'complete'
+              ? 'uploading'
+              : update.kind,
+        error: update.error,
+      },
+    ]);
+    if (update.kind === 'failed')
+      void inspect({ owner: options.sessionId, id: update.operationId });
+  };
+  const remove = (target: AttachmentTarget) => {
+    if (!owns(target)) return;
+    const original = originals().find((item) => item.id === target.id);
+    const local = selecting().find((item) => item.id === target.id);
+    if (
+      (original && !returned(original) && !original.abandoned) ||
+      (local && local.kind !== 'failed')
+    )
+      return;
+    if (original && !settled.has(original.id)) settled.set(original.id, 'pending');
+    selecting.set(selecting().filter((item) => item.id !== target.id));
+    files.set(files().filter((file) => file.id !== target.id));
+    if (!watchFailed) error.set('');
+    options.changed();
+  };
+  const recover = async (target: AttachmentTarget) => {
+    if (!owns(target) || recovering()) return;
+    recovering.set(target.id);
+    if (!watchFailed) error.set('');
+    try {
+      const original = await options.client.recoverUpload(target.id);
+      if (alive) receiveOne(original);
+    } catch (reason) {
+      if (alive) error.set(message(reason));
+    } finally {
+      if (alive) recovering.set(null);
+    }
+  };
+  const abandon = async (target: AttachmentTarget) => {
+    if (!owns(target) || recovering()) return;
+    recovering.set(target.id);
+    if (!watchFailed) error.set('');
+    try {
+      const original = await options.client.abandonUpload(target.id);
+      if (!alive) return;
+      if (!original.abandoned)
+        throw new Error('This upload is prepared. Recover its original receipt.');
+      receiveOne(original);
+      settled.set(original.id, 'pending');
+      options.changed();
+    } catch (reason) {
+      if (alive) error.set(message(reason));
+    } finally {
+      if (alive) recovering.set(null);
+    }
+  };
+  return {
+    sessionId: options.sessionId,
+    client: options.client,
+    files,
+    rows,
+    picker,
+    restoring,
+    error,
+    recovering,
+    status,
+    remove,
+    recover,
+    abandon,
+    inspect,
+    open(target: { owner: string; value: boolean }) {
+      if (!owns(target)) return;
+      picker.set(target.value);
+      if (!target.value) options.focus();
+    },
+    restore(attachments: DraftAttachment[]) {
+      if (alive) files.set(attachments);
+    },
+    start,
+    retry: start,
+    snapshot: (): AttachmentEdit => ({
+      attachments: [...files()],
+      settledUploads: [...settled].filter(([, state]) => state === 'pending').map(([id]) => id),
+    }),
+    saved(snapshot: AttachmentEdit) {
+      for (const id of snapshot.settledUploads) settled.set(id, 'saved');
+    },
+    ids: () => files().map((file) => file.id),
+    same(ids: string[]) {
+      return ids.length === files().length && ids.every((id, index) => files()[index].id === id);
+    },
+    sent(ids: string[]) {
+      const sent = new Set(ids),
+        remaining = files().filter((file) => !sent.has(file.id));
+      if (remaining.length !== files().length) {
+        files.set(remaining);
+        options.changed();
+      }
+    },
+    blocked() {
+      if (restoring()) return 'Restoring attachment drafts…';
+      if (error()) return 'Attachment state needs attention. Your draft is kept.';
+      if (rows().some((row) => row.kind === 'unknown'))
+        return 'Recover the original upload receipt before sending.';
+      if (rows().some((row) => row.kind === 'reading' || row.kind === 'uploading'))
+        return 'Uploading attachments… Your typing is kept.';
+      if (rows().length) return 'Remove the failed attachment or choose it again.';
+      return '';
+    },
+  };
+}
+export type AttachmentDraft = ReturnType<typeof createAttachmentDraft>;
