@@ -19979,6 +19979,239 @@ export const contracts = {
           },
           resources: {},
         },
+        readFile: {
+          mode: 'subscription',
+          input: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentFileRead',
+            description:
+              'One bounded current-file capture. A version is a precondition, never read authority.',
+            type: 'object',
+            properties: {
+              sessionId: {
+                type: 'string',
+              },
+              path: {
+                $ref: '#/$defs/WorkspacePath',
+              },
+              expectedVersion: {
+                type: ['string', 'null'],
+                minLength: 71,
+                maxLength: 71,
+                pattern: '^sha256:[a-f0-9]{64}$',
+              },
+            },
+            additionalProperties: false,
+            required: ['sessionId', 'path'],
+            $defs: {
+              WorkspacePath: {
+                type: 'object',
+                properties: {
+                  bytesBase64: {
+                    type: 'string',
+                    maxLength: 5464,
+                  },
+                },
+                additionalProperties: false,
+                required: ['bytesBase64'],
+              },
+            },
+          },
+          output: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'Nullable_AgentFileReadPart',
+            anyOf: [
+              {
+                $ref: '#/$defs/AgentFileReadPart',
+              },
+              {
+                type: 'null',
+              },
+            ],
+            $defs: {
+              AgentFileReadPart: {
+                description:
+                  'All parts are subscription items; only End admits a complete preview.\nOffsets and byte counts refer to original bytes, not Base64 or UTF-16 lengths.',
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      version: {
+                        type: 'string',
+                      },
+                      digest: {
+                        type: 'string',
+                      },
+                      bytes: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      content: {
+                        $ref: '#/$defs/AgentFileContent',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'begin',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'version', 'digest', 'bytes', 'content'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      offset: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      data: {
+                        type: 'string',
+                        maxLength: 43692,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'chunk',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'offset', 'data'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      version: {
+                        type: 'string',
+                      },
+                      digest: {
+                        type: 'string',
+                      },
+                      bytes: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'end',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'version', 'digest', 'bytes'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'absent',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'changed',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      bytes: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'binary',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'bytes'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      bytes: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      limit: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'too_large',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'bytes', 'limit'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      fileKind: {
+                        $ref: '#/$defs/AgentFileKind',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'unsupported',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'fileKind'],
+                  },
+                ],
+              },
+              AgentFileContent: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: {
+                        type: 'string',
+                        const: 'text',
+                      },
+                    },
+                    required: ['kind'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      mimeType: {
+                        type: 'string',
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'image',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'mimeType'],
+                  },
+                ],
+              },
+              AgentFileKind: {
+                type: 'string',
+                enum: ['file', 'directory', 'symlink', 'other'],
+              },
+            },
+          },
+          resources: {},
+        },
         readPatch: {
           mode: 'query',
           input: {
