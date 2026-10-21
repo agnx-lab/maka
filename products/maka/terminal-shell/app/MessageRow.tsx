@@ -213,8 +213,8 @@ export function MessageRow({
                       sessionId={sessionId}
                       through={through}
                       ownerKey={() => rowKey(row())}
-                      expanded={expanded}
-                      original={sourceMode}
+                      expanded={() => expanded() ?? false}
+                      original={() => sourceMode() ?? false}
                       previewImage={previewImage}
                       expand={setExpanded}
                       showOriginal={setSourceMode}
