@@ -1364,6 +1364,17 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
             assert!(scrolling.elapsed() < Duration::from_secs(20), "scrolling did not load original history:\n{screen}");
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+        support::click_button(&mut view, "Return to latest").await;
+        let returned = wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while view.surface().focused() != previous {
+                support::tick(&mut view);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("the visible return button did not restore composer focus");
+        evidence("history-visible-return-to-latest", &returned);
+        // Retain the original shortcut check from older transcript content.
+        wheel_history_up_to(&mut view, "History 00 paragraph").await;
         shortcut(&mut view, 'l');
         wait_view(&mut view, |screen| screen.contains("History 15 paragraph 29") && screen.contains("[Source]") && screen.contains("Enter sends")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
@@ -1675,6 +1686,55 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         wait_view(&mut view, |screen| screen.contains("Fold:")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.label == "Fold work details: Next input" && node.state.selected));
         evidence("process-policy-survives-reload", &persisted);
+        support::click_text(&mut view, "Details ·");
+        wait_view(&mut view, |screen| !screen.contains("Fold:") && screen.contains("SECOND_POLICY_TURN_FINAL")).await;
+        // Reload starts with a fresh tail window. The first real Turn is not in
+        // that page, so its rail mark must navigate across unloaded history.
+        let current = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
+        let first = client.query("agent", "history", json!({"sessionId":fixture.session,"through":current["through"],"position":{"kind":"start"},"view":"conversation"})).await.unwrap();
+        assert_eq!(first["chunks"][0]["text"], "History question 00");
+        let fresh_tail = client.query("agent", "history", json!({"sessionId":fixture.session,"through":current["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        assert!(!fresh_tail["before"].is_null());
+        assert!(fresh_tail["chunks"].as_array().unwrap().iter().all(|chunk| chunk["turnId"] != first["chunks"][0]["turnId"]));
+        assert!(!view.snapshot().contains("History 00 paragraph"));
+        let composer = view.accessibility_snapshot().into_iter().find(|node| node.label == "Message composer").expect("the reloaded app must keep its native composer").id;
+        let scrolling = std::time::Instant::now();
+        loop {
+            support::tick(&mut view);
+            let nodes = view.accessibility_snapshot();
+            let rail = nodes.iter().find(|node| node.label == "Turn navigation").expect("the real history must expose its native turn rail").frame;
+            if nodes.iter().any(|node| node.role == nsh_core::AccessibilityRole::Button
+                && node.label == "Jump to turn: History question 00"
+                && node.frame.origin.y.0 >= rail.origin.y.0
+                && node.frame.origin.y.0 + node.frame.size.height.0 <= rail.origin.y.0 + rail.size.height.0) {
+                break;
+            }
+            assert!(scrolling.elapsed() < Duration::from_secs(20), "the native turn rail did not reveal its first mark:\n{}", view.snapshot());
+            let column = ((rail.origin.x.0 + rail.size.width.0 / 2.0) / 8.0).floor().max(0.0) as u16;
+            let row = ((rail.origin.y.0 + rail.size.height.0 / 2.0) / 16.0).floor().max(0.0) as u16;
+            // Pointer entry stops active-turn centering; the wheel then belongs
+            // to this real nested rail rather than the outer transcript.
+            for kind in [MouseEventKind::Moved, MouseEventKind::ScrollUp] {
+                view.handle_event(Event::Mouse(MouseEvent {kind,column,row,modifiers:KeyModifiers::NONE}));
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        support::click_button(&mut view, "Jump to turn: History question 00").await;
+        // Leave the rail preview so its label cannot stand in for the actual
+        // user message in the transcript visibility assertion.
+        view.handle_event(Event::Mouse(MouseEvent {kind:MouseEventKind::Moved,column:0,row:0,modifiers:KeyModifiers::NONE}));
+        let jumped = wait_view(&mut view, |screen| screen.contains("History question 00") && screen.contains("History 00 paragraph 00")).await;
+        assert!(!jumped.contains("Load earlier messages"));
+        evidence("turn-rail-loads-unloaded-history", &jumped);
+        support::click_button(&mut view, "Return to latest").await;
+        let returned = wait_view(&mut view, |screen| screen.contains("SECOND_POLICY_TURN_FINAL") && screen.contains("Enter sends")).await;
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while view.surface().focused() != Some(composer) || view.surface().input_context().is_none() {
+                support::tick(&mut view);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.expect("returning from a turn jump did not restore composer focus");
+        evidence("turn-rail-return-to-latest", &returned);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 19);
         assert!(client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().is_empty());
         drop(view);

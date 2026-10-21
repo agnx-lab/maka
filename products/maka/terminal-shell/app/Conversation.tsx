@@ -45,10 +45,15 @@ import { projectProcessGroups, stableRowId } from './processGroups';
 import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
 import type { PresentationSettings } from './presentation';
 import { PresentationControls } from './PresentationControls';
+import { ReturnToLatest, TurnNavigation } from './TurnNavigation';
+import type { TurnNavigationItem } from './TurnNavigation';
 import type { ImagePreview } from './ImageThumbnail';
 import { latestToolActivity, toolActivitySummary, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
-import type { AgentHistoryAttachment } from '../../../../packages/plugin-sdk/src/index.js';
+import type {
+  AgentHistoryAttachment,
+  AgentHistoryLandmark,
+} from '../../../../packages/plugin-sdk/src/index.js';
 import {
   createAttachmentDraft,
   type AttachmentEdit,
@@ -88,6 +93,9 @@ type LivePart = {
   field: 'thinking' | 'body';
   startSequence: number;
 };
+function comparePosition(left: Position, right: Position): number {
+  return left.sourceSequence - right.sourceSequence || left.itemIndex - right.itemIndex;
+}
 function receiptMessage(reply: any): string {
   const receipt = reply?.receipt;
   if (receipt?.kind === 'recorded' && receipt.outcome?.kind === 'returned') {
@@ -122,7 +130,13 @@ export function Conversation(props: ConversationProps) {
   const ready = signal(false);
   const transcriptStatus = signal<'loading' | 'live' | 'closing' | 'failed'>('loading');
   const before = signal<any>(null);
-  const loadingOlder = signal(false);
+  const landmarks = signal<{ through: number; items: AgentHistoryLandmark[] }>({
+    through: 0,
+    items: [],
+  });
+  const awayFromLatest = signal(false);
+  const visibleTurn = signal<string | null>(null);
+  const navigatingTurn = signal<string | null>(null);
   const attachmentMetadataFailed = signal(false);
   const attachmentMetadataReads = new Set<string>();
   const draft = signal('');
@@ -324,6 +338,45 @@ export function Conversation(props: ConversationProps) {
   });
   const displayByKey = computed(() => new Map(display().map((item) => [item.key, item])));
   const displayKeys = computed(() => display().map((item) => item.key));
+  const navigationItems = computed<TurnNavigationItem[]>(() => {
+    const items = new Map<string, TurnNavigationItem>();
+    for (const item of landmarks().items) {
+      items.set(item.turnId, {
+        turnId: item.turnId,
+        label: item.label,
+        anchor: {
+          kind: 'landmark',
+          through: landmarks().through,
+          position: item.position,
+          lastPosition: item.lastPosition,
+        },
+      });
+    }
+    for (const row of rows()) {
+      if (!row.turnId || !row.position) continue;
+      const previous = items.get(row.turnId);
+      const label =
+        row.role === 'user'
+          ? Array.from(row.text.replace(/\s+/g, ' ').trim()).slice(0, 96).join('')
+          : '';
+      if (!previous)
+        items.set(row.turnId, {
+          turnId: row.turnId,
+          label,
+          anchor: { kind: 'loaded', position: row.position },
+        });
+      else if (!previous.label && label) items.set(row.turnId, { ...previous, label });
+    }
+    return [...items.values()].sort((left, right) =>
+      comparePosition(left.anchor.position, right.anchor.position),
+    );
+  });
+  const entryTurn = (key: string) => {
+    const entry = displayByKey().get(key);
+    if (entry?.kind === 'summary') return entry.turnId;
+    if (entry?.kind === 'process' || entry?.kind === 'activity') return entry.group.turnId;
+    return entry?.kind === 'row' ? (projection().rowsById.get(entry.rowId)?.turnId ?? null) : null;
+  };
   let list: YNode | undefined;
   let alive = true;
   let subscription: Subscription | null = null;
@@ -336,6 +389,9 @@ export function Conversation(props: ConversationProps) {
   let runThrough = 0;
   let followTask: Promise<void> | null = null;
   let followAgain = false;
+  let olderTask: Promise<boolean> | null = null;
+  let landmarksReadingThrough = -1;
+  let turnJump: TurnNavigationItem | null = null;
   let draftRevision = 0;
   let editEpoch = 0;
   let pendingDraft: (AttachmentEdit & { text: string }) | null = null;
@@ -471,11 +527,29 @@ export function Conversation(props: ConversationProps) {
     attachmentMetadataFailed.set(false);
     hydrateAttachmentMetadata();
   };
+  const readLandmarks = (through: number) => {
+    if (through <= landmarksReadingThrough) return;
+    landmarksReadingThrough = through;
+    void host
+      .query('agent', 'historyLandmarks', { sessionId, through })
+      .then((page) => {
+        if (page.through !== through)
+          throw new Error('Turn landmarks changed their requested fence.');
+        if (alive && page.through >= landmarks().through)
+          landmarks.set({ through: page.through, items: page.landmarks });
+      })
+      .catch((reason) => {
+        if (!alive || through < landmarks().through) return;
+        if (landmarksReadingThrough === through) landmarksReadingThrough = -1;
+        report(reason);
+      });
+  };
   const observe = async () => {
     const observed = await host.query('agent', 'observe', { sessionId });
     if (!alive) return observed;
     if (observed.session.id !== sessionId) throw new Error('Host observed a different session.');
     latestKnown = Math.max(latestKnown, observed.through);
+    readLandmarks(observed.through);
     title.set(observed.session.title || 'Untitled conversation');
     archived.set(observed.session.archived);
     workspace.set(observed.session.workspace.path);
@@ -838,15 +912,16 @@ export function Conversation(props: ConversationProps) {
     else if (transcriptTask === null) startTranscript();
   };
 
-  const loadOlder = async () => {
-    if (!alive || !ready() || loadingOlder() || before() === null) return;
-    loadingOlder.set(true);
+  // Automatic paging and an explicit Turn jump await the same native-history read.
+  const loadOlder = (): Promise<boolean> => {
+    if (olderTask) return olderTask;
+    if (!alive || !ready() || before() === null) return Promise.resolve(false);
     const fence = latestKnown;
-    try {
+    olderTask = (async () => {
       let position: any = { kind: 'before', cursor: before() };
       for (;;) {
         const page = await history(fence, position);
-        if (!alive) return;
+        if (!alive) return false;
         before.set(page.before);
         if (page.chunks.length || page.before === null) {
           publishHistory(page.chunks, page.through, true);
@@ -854,14 +929,87 @@ export function Conversation(props: ConversationProps) {
             requestMetadata(page.chunks[0]);
             void follow().catch(report);
           }
-          break;
+          return true;
         }
         position = { kind: 'before', cursor: page.before };
       }
-    } catch (reason) {
-      report(reason);
+    })()
+      .catch((reason) => {
+        report(reason);
+        return false;
+      })
+      .finally(() => {
+        olderTask = null;
+      });
+    return olderTask;
+  };
+  const cancelTurnNavigation = () => {
+    turnJump = null;
+    navigatingTurn.set(null);
+  };
+  const navigateTurn = async (item: TurnNavigationItem) => {
+    if (!alive || !ready()) return;
+    turnJump = item;
+    navigatingTurn.set(item.turnId);
+    innerReader.set(null);
+    try {
+      if (item.anchor.kind === 'landmark') {
+        const target = item.anchor;
+        // The raw Turn opening may itself be omitted from conversation history.
+        // Load past that boundary, then choose a real display seat in its bounds.
+        while (
+          alive &&
+          turnJump === item &&
+          before() !== null &&
+          (comparePosition(before().position, target.position) > 0 ||
+            (comparePosition(before().position, target.position) === 0 && before().offset > 0))
+        ) {
+          const previous = before();
+          if (!(await loadOlder())) return;
+          if (
+            before() !== null &&
+            comparePosition(before().position, previous.position) === 0 &&
+            before().field === previous.field &&
+            before().offset === previous.offset
+          ) {
+            notice.set('Older history did not advance. This turn could not be reached.');
+            return;
+          }
+        }
+      }
+      if (!alive || turnJump !== item) return;
+      const targetRows = new Set(
+        rows()
+          .filter(
+            (row) =>
+              row.turnId === item.turnId &&
+              (item.anchor.kind === 'loaded' ||
+                (row.position &&
+                  comparePosition(row.position, item.anchor.position) >= 0 &&
+                  comparePosition(row.position, item.anchor.lastPosition) <= 0)),
+          )
+          .map(stableRowId),
+      );
+      const index =
+        targetRows.size === 0
+          ? -1
+          : display().findIndex((entry) =>
+              entry.kind === 'summary'
+                ? entry.turnId === item.turnId
+                : entry.kind === 'row'
+                  ? targetRows.has(entry.rowId)
+                  : entry.group.turnId === item.turnId &&
+                    entry.group.rowIds.some((id) => targetRows.has(id)),
+            );
+      if (index < 0) {
+        notice.set('This turn has no visible messages in the current reading mode.');
+        return;
+      }
+      awayFromLatest.set(true);
+      list?.scrollToIndex({ index, viewPosition: 0 });
+      list?.focus();
     } finally {
-      if (alive) loadingOlder.set(false);
+      if (turnJump === item) cancelTurnNavigation();
     }
   };
 
@@ -1054,6 +1202,8 @@ export function Conversation(props: ConversationProps) {
           ? 'Message accepted.'
           : '',
     );
+    cancelTurnNavigation();
+    awayFromLatest.set(false);
     innerReader.set(null);
     list?.scrollToEnd({ animated: false });
   };
@@ -1087,6 +1237,7 @@ export function Conversation(props: ConversationProps) {
       );
       return;
     }
+    cancelTurnNavigation();
     if (draft() !== text) changeDraft(text);
     const epoch = editEpoch;
     const files = [...attachments.files()];
@@ -1208,7 +1359,10 @@ export function Conversation(props: ConversationProps) {
     }
   };
   const chooseReading = ({ owner, mode }: { owner: string; mode: 'chat' | 'trajectory' }) => {
-    if (alive && owner === sessionId) reading.set(mode);
+    if (alive && owner === sessionId) {
+      cancelTurnNavigation();
+      reading.set(mode);
+    }
   };
   const sendRendered = ({
     owner,
@@ -1280,9 +1434,11 @@ export function Conversation(props: ConversationProps) {
       props.focusComposer();
     },
     focusHistory() {
+      cancelTurnNavigation();
       list?.focus();
     },
     focusActivity(turnId) {
+      cancelTurnNavigation();
       const group = projection().entries.findLast(
         (entry) => entry.kind === 'process' && entry.turnId === turnId,
       );
@@ -1319,6 +1475,8 @@ export function Conversation(props: ConversationProps) {
       } else list?.focus();
     },
     jumpLatest(turnId) {
+      cancelTurnNavigation();
+      awayFromLatest.set(false);
       innerReader.set(null);
       const group = projection().entries.findLast(
         (entry) => entry.kind === 'process' && entry.turnId === turnId,
@@ -1335,6 +1493,7 @@ export function Conversation(props: ConversationProps) {
 
   cleanup(() => {
     alive = false;
+    turnJump = null;
     wakeReconnect?.();
     modelGeneration += 1;
     modelRead = null;
@@ -1344,29 +1503,31 @@ export function Conversation(props: ConversationProps) {
     subscription = null;
     if (stream !== null) void stream.close().catch(() => {});
   });
-  effect(() => untracked(() => {
-    void host
-      .query('agent', 'pendingInteractions', { sessionId })
-      .then((pending: any) => {
-        if (alive && pending.revision >= interactions().revision) interactions.set(pending);
-      })
-      .catch(report);
-    startTranscript();
-    void (async () => {
-      const stored = await loadDraft(client);
-      if (!alive) return;
-      draftRevision = stored.revision;
-      draft.set(stored.text);
-      attachments.restore(stored.attachments);
-      draftReady.set(true);
-      void attachments.start();
-      const operations = await pendingSends(client);
-      if (!alive) return;
-      unresolved.set(operations);
-      receiptsKnown.set(true);
-      if (operations.length) await recover();
-    })().catch(report);
-  }));
+  effect(() =>
+    untracked(() => {
+      void host
+        .query('agent', 'pendingInteractions', { sessionId })
+        .then((pending: any) => {
+          if (alive && pending.revision >= interactions().revision) interactions.set(pending);
+        })
+        .catch(report);
+      startTranscript();
+      void (async () => {
+        const stored = await loadDraft(client);
+        if (!alive) return;
+        draftRevision = stored.revision;
+        draft.set(stored.text);
+        attachments.restore(stored.attachments);
+        draftReady.set(true);
+        void attachments.start();
+        const operations = await pendingSends(client);
+        if (!alive) return;
+        unresolved.set(operations);
+        receiptsKnown.set(true);
+        if (operations.length) await recover();
+      })().catch(report);
+    }),
+  );
 
   return (
     <View style={{ flex: ownHandle.empty() ? 0 : 1, minHeight: 0, backgroundColor: C.background }}>
@@ -1458,13 +1619,16 @@ export function Conversation(props: ConversationProps) {
           paddingHorizontal: 16,
         }}
       >
-        <View
-          style={{ flex: 1, minHeight: 0 }}
-          onLayout={(frame) => readingSize.set({ width: frame.width, height: frame.height })}
-        >
+        <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
           <List
             ref={list}
+            onLayout={(frame) => readingSize.set({ width: frame.width, height: frame.height })}
             each={displayKeys()}
+            onScrollBeginDrag={cancelTurnNavigation}
+            onTouchStart={cancelTurnNavigation}
+            onViewableItemsChanged={(event) =>
+              visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
+            }
             estimatedItemSize={96}
             maintainVisibleContentPosition={
               innerReader() === null ? { autoscrollToBottomThreshold: 32 } : {}
@@ -1472,6 +1636,7 @@ export function Conversation(props: ConversationProps) {
             contentStyle={{ paddingRight: 8 }}
             style={{ flex: 1, minHeight: 0 }}
             onScroll={(event) => {
+              awayFromLatest.set(event.y < Math.max(0, event.contentHeight - event.height) - 32);
               const reader = innerReader();
               if (
                 reader !== null &&
@@ -1605,6 +1770,21 @@ export function Conversation(props: ConversationProps) {
               </Each>
             )}
           </List>
+          <If when={ready() && navigationItems().length > 1}>
+            <TurnNavigation
+              items={navigationItems}
+              active={visibleTurn}
+              busy={navigatingTurn}
+              navigate={(item) => {
+                void navigateTurn(item).catch(report);
+              }}
+              cancel={cancelTurnNavigation}
+            />
+          </If>
+          <ReturnToLatest
+            visible={awayFromLatest() || innerReader() !== null}
+            activate={() => ownHandle.jumpLatest(runTurn())}
+          />
         </View>
         <If when={interactions().entries.length > 0}>
           <Button
