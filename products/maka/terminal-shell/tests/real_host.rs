@@ -1913,7 +1913,6 @@ async fn a_lost_confirmation_recovers_its_original_reference_and_reload_keeps_a_
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-<<<<<<< HEAD
 async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_terminal() {
     use maka_app_client::{Client, Journal};
     use maka_host_runtime::application::host::Client as HostClient;
@@ -1928,27 +1927,11 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
         terminal.click_text("Message or run a task…");
         terminal.paste("PTY_FOLDER_DRAFT_你好");
         terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
-=======
-async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_and_reader() {
-    use maka_app_client::{Client, Journal};
-    use maka_host_runtime::application::host::Client as HostClient;
-    tokio::time::timeout(Duration::from_secs(90), async {
-        let mut fixture = Fixture::registered().await;
-        fixture.seed_history(1).await;
-        let history = ReplyGate::disconnect_history(fixture.directory.path(), fixture.address.clone());
-        let catchup = ReplyGate::history(fixture.directory.path(), history.address.clone());
-        let watch = ReplyGate::disconnect_watch(fixture.directory.path(), catchup.address.clone());
-        let send = ReplyGate::start(fixture.directory.path(), watch.address.clone());
-        history.arm();
-        fixture.register_at(&send.address);
-        maka_event_log::root::private_directory(&fixture.directory.path().join("host/clients")).unwrap();
->>>>>>> 3bdb526ff (fix(terminal): resume interrupted conversation observations)
         let terminal_client = Client::new(
             HostClient::connect(&fixture.address, None).await.unwrap(),
             Journal::open(&fixture.directory.path().join("host/clients/terminal.sqlite")).await.unwrap(),
             "receipts".into(),
         ).unwrap();
-<<<<<<< HEAD
         support::wait_draft(&terminal_client, &fixture.session, "PTY_FOLDER_DRAFT_你好").await;
 
         for choose in [false, true] {
@@ -2024,122 +2007,6 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         client.close().await.unwrap();
         fixture.finish().await;
     }).await.expect("production workspace folder selection timed out");
-=======
-        terminal_client.save_draft("agent", &fixture.session, EDITOR, None, "RECOVERY_ORIGINAL_A".into()).await.unwrap();
-        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
-        let failed = terminal.wait_for("Retry loading conversation").await;
-        assert!(failed.contains("History unavailable."));
-        assert!(!failed.contains("Enter sends"));
-        terminal.wait_for("RECOVERY_ORIGINAL_A").await;
-        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A").await;
-        terminal.click_text("Retry loading conversation");
-        terminal.wait_for("Enter sends").await;
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "retry must not send the retained draft");
-
-        send.arm();
-        terminal.click_text("Send");
-        let started = Instant::now();
-        let mut request = loop {
-            terminal.read();
-            if let Ok(request) = fixture.requests.try_recv() { break request; }
-            assert!(started.elapsed() < Duration::from_secs(20), "real Send did not reach the provider");
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        };
-        assert!(request.body.to_string().contains("RECOVERY_ORIGINAL_A"));
-        terminal.wait_for("Confirming send").await;
-        let pending = terminal_client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap();
-        assert_eq!(pending.len(), 1);
-        let original = pending[0].clone();
-        assert!(original.reference.is_some());
-        assert!(original.receipt.is_none());
-        let focus_frame = terminal.wire().len();
-        terminal.send(b"\x0c");
-        terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
-        terminal.paste(" + LATER_UNSENT_B");
-        terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
-        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
-        request.delta("ACTIVE_PREFIX_ABCD").await;
-        terminal.wait_for("ACTIVE_PREFIX_ABCD").await;
-
-        // Move the reader to old history while the same model part stays open.
-        // Recovery must preserve both this anchor and its already shown prefix.
-        let focus_frame = terminal.wire().len();
-        terminal.send(b"\x1b[1;3A");
-        terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
-        terminal.send(b"\x1b[H");
-        terminal.wait_for("History 00 paragraph 00").await;
-        catchup.arm();
-        watch.arm_times(3);
-        request.delta("MISSED_WHILE_DISCONNECTED\n\n").await;
-        let reconnecting = terminal.wait_for("Reconnecting updates").await;
-        assert!(!reconnecting.contains("Enter sends"));
-        assert!(!reconnecting.contains("Reconnect updates"), "one transient loss must recover without a button");
-        request.delta(" ACTIVE_OFFLINE_SUFFIX").await;
-        let control = fixture.client().await;
-        catchup.release();
-        // Three real losses span more than four seconds. Returning service
-        // still resumes automatically, with no mandatory Reconnect click.
-        let started = Instant::now();
-        while watch.remaining() != 0 {
-            terminal.read();
-            assert!(started.elapsed() < Duration::from_secs(20), "expected real watch disconnections did not occur");
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        }
-        terminal.wait_for("Updates disconnected.").await;
-        terminal.wait_for("Confirming send").await;
-        let restored = terminal.wait_for("History 00 paragraph 00").await;
-        assert!(!restored.contains("ACTIVE_OFFLINE_SUFFIX"), "reconnect must not jump an old reader to the new tail");
-        let retained = terminal_client.operation(original.id).await.unwrap();
-        assert_eq!(retained.reference, original.reference);
-        assert!(retained.receipt.is_none(), "reconnecting a watch must not settle or replace the held send receipt");
-        assert_eq!(terminal_client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().len(), 1);
-        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
-        evidence("production-reconnect-retains-reader", &restored);
-        terminal.send(b"\x0c");
-        let active = terminal.wait_for("ACTIVE_OFFLINE_SUFFIX").await;
-        assert_eq!(active.matches("ACTIVE_PREFIX_ABCD").count(), 1, "replaying an unfinished part must not repeat its visible prefix");
-        request.delta(" OFFLINE_CANONICAL_FINAL").await;
-        request.finish().await;
-        fixture.idle(&control, &fixture.session).await;
-
-        send.release();
-        terminal.wait_for("Enter sends").await;
-        let settled = terminal_client.operation(original.id).await.unwrap();
-        assert_eq!(settled.reference, original.reference);
-        assert!(matches!(settled.receipt, Some(Receipt::Recorded {outcome:OperationOutcome::Returned {ref value},..}) if value["kind"] == "started"));
-        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
-        terminal.send(b"\x0c");
-        terminal.wait_for("OFFLINE_CANONICAL_FINAL").await;
-        // A new deliberate send proves the new live subscription receives
-        // subsequent facts, rather than merely displaying its recovery snapshot.
-        terminal.click_text("Send");
-        let started = Instant::now();
-        let mut next = loop {
-            terminal.read();
-            if let Ok(request) = fixture.requests.try_recv() { break request; }
-            assert!(started.elapsed() < Duration::from_secs(20), "new Send did not reach the provider");
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        };
-        assert!(next.body.to_string().contains("RECOVERY_ORIGINAL_A + LATER_UNSENT_B"));
-        next.delta("RECONNECTED_LIVE_RESPONSE").await;
-        terminal.wait_for("RECONNECTED_LIVE_RESPONSE").await;
-        next.finish().await;
-        fixture.idle(&control, &fixture.session).await;
-        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 3);
-        let canonical = control.query("agent", "history", json!({"sessionId":fixture.session,"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
-        assert_eq!(canonical["chunks"].as_array().unwrap().iter().filter(|chunk| chunk["role"] == "user" && chunk["text"] == "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").count(), 1);
-        terminal.send(b"\x11");
-        terminal.finish().await;
-        terminal_client.close().await.unwrap();
-        control.close().await.unwrap();
-        drop(send);
-        drop(watch);
-        drop(catchup);
-        drop(history);
-        fixture.finish().await;
-    }).await.expect("production transcript recovery timed out");
->>>>>>> 3bdb526ff (fix(terminal): resume interrupted conversation observations)
 }
 
 #[cfg(unix)]
@@ -2260,4 +2127,140 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
     })
     .await
     .expect("production binary PTY verification timed out");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_and_reader() {
+    use maka_app_client::{Client, Journal};
+    use maka_host_runtime::application::host::Client as HostClient;
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut fixture = Fixture::registered().await;
+        fixture.seed_history(1).await;
+        let history = ReplyGate::disconnect_history(fixture.directory.path(), fixture.address.clone());
+        let catchup = ReplyGate::history(fixture.directory.path(), history.address.clone());
+        let watch = ReplyGate::disconnect_watch(fixture.directory.path(), catchup.address.clone());
+        let send = ReplyGate::start(fixture.directory.path(), watch.address.clone());
+        history.arm();
+        fixture.register_at(&send.address);
+        maka_event_log::root::private_directory(&fixture.directory.path().join("host/clients")).unwrap();
+        let terminal_client = Client::new(
+            HostClient::connect(&fixture.address, None).await.unwrap(),
+            Journal::open(&fixture.directory.path().join("host/clients/terminal.sqlite")).await.unwrap(),
+            "receipts".into(),
+        ).unwrap();
+        terminal_client.save_draft("agent", &fixture.session, EDITOR, None, "RECOVERY_ORIGINAL_A".into()).await.unwrap();
+        let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
+        let failed = terminal.wait_for("Retry loading conversation").await;
+        assert!(failed.contains("History unavailable."));
+        assert!(!failed.contains("Enter sends"));
+        terminal.wait_for("RECOVERY_ORIGINAL_A").await;
+        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A").await;
+        terminal.click_text("Retry loading conversation");
+        terminal.wait_for("Enter sends").await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "retry must not send the retained draft");
+
+        send.arm();
+        terminal.click_text("Send");
+        let started = Instant::now();
+        let mut request = loop {
+            terminal.read();
+            if let Ok(request) = fixture.requests.try_recv() { break request; }
+            assert!(started.elapsed() < Duration::from_secs(20), "real Send did not reach the provider");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        };
+        assert!(request.body.to_string().contains("RECOVERY_ORIGINAL_A"));
+        terminal.wait_for("Confirming send").await;
+        let pending = terminal_client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let original = pending[0].clone();
+        assert!(original.reference.is_some());
+        assert!(original.receipt.is_none());
+        let focus_frame = terminal.wire().len();
+        terminal.send(b"\x0c");
+        terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
+        terminal.paste(" + LATER_UNSENT_B");
+        terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        request.delta("ACTIVE_PREFIX_ABCD").await;
+        terminal.wait_for("ACTIVE_PREFIX_ABCD").await;
+
+        // Move the reader to old history while the same model part stays open.
+        // Recovery must preserve both this anchor and its already shown prefix.
+        let focus_frame = terminal.wire().len();
+        terminal.send(b"\x1b[1;3A");
+        terminal.wait_for_wire(b"\x1b[?2026l", focus_frame).await;
+        terminal.send(b"\x1b[H");
+        terminal.wait_for("History 00 paragraph 00").await;
+        catchup.arm();
+        watch.arm_times(3);
+        request.delta("MISSED_WHILE_DISCONNECTED\n\n").await;
+        let reconnecting = terminal.wait_for("Reconnecting updates").await;
+        assert!(!reconnecting.contains("Enter sends"));
+        assert!(!reconnecting.contains("Reconnect updates"), "one transient loss must recover without a button");
+        request.delta(" ACTIVE_OFFLINE_SUFFIX").await;
+        let control = fixture.client().await;
+        catchup.release();
+        // Three real losses span more than four seconds. Returning service
+        // still resumes automatically, with no mandatory Reconnect click.
+        let started = Instant::now();
+        while watch.remaining() != 0 {
+            terminal.read();
+            assert!(started.elapsed() < Duration::from_secs(20), "expected real watch disconnections did not occur");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        terminal.wait_for("Updates disconnected.").await;
+        terminal.wait_for("Confirming send").await;
+        let restored = terminal.wait_for("History 00 paragraph 00").await;
+        assert!(!restored.contains("ACTIVE_OFFLINE_SUFFIX"), "reconnect must not jump an old reader to the new tail");
+        let retained = terminal_client.operation(original.id).await.unwrap();
+        assert_eq!(retained.reference, original.reference);
+        assert!(retained.receipt.is_none(), "reconnecting a watch must not settle or replace the held send receipt");
+        assert_eq!(terminal_client.pending_operations("agent", &fixture.session, EDITOR).await.unwrap().len(), 1);
+        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+        evidence("production-reconnect-retains-reader", &restored);
+        terminal.send(b"\x0c");
+        let active = terminal.wait_for("ACTIVE_OFFLINE_SUFFIX").await;
+        assert_eq!(active.matches("ACTIVE_PREFIX_ABCD").count(), 1, "replaying an unfinished part must not repeat its visible prefix");
+        request.delta(" OFFLINE_CANONICAL_FINAL").await;
+        request.finish().await;
+        fixture.idle(&control, &fixture.session).await;
+
+        send.release();
+        terminal.wait_for("Enter sends").await;
+        let settled = terminal_client.operation(original.id).await.unwrap();
+        assert_eq!(settled.reference, original.reference);
+        assert!(matches!(settled.receipt, Some(Receipt::Recorded {outcome:OperationOutcome::Returned {ref value},..}) if value["kind"] == "started"));
+        support::wait_draft(&terminal_client, &fixture.session, "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
+        terminal.send(b"\x0c");
+        terminal.wait_for("OFFLINE_CANONICAL_FINAL").await;
+        // A new deliberate send proves the new live subscription receives
+        // subsequent facts, rather than merely displaying its recovery snapshot.
+        terminal.click_text("Send");
+        let started = Instant::now();
+        let mut next = loop {
+            terminal.read();
+            if let Ok(request) = fixture.requests.try_recv() { break request; }
+            assert!(started.elapsed() < Duration::from_secs(20), "new Send did not reach the provider");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        };
+        assert!(next.body.to_string().contains("RECOVERY_ORIGINAL_A + LATER_UNSENT_B"));
+        next.delta("RECONNECTED_LIVE_RESPONSE").await;
+        terminal.wait_for("RECONNECTED_LIVE_RESPONSE").await;
+        next.finish().await;
+        fixture.idle(&control, &fixture.session).await;
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 3);
+        let canonical = control.query("agent", "history", json!({"sessionId":fixture.session,"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
+        assert_eq!(canonical["chunks"].as_array().unwrap().iter().filter(|chunk| chunk["role"] == "user" && chunk["text"] == "RECOVERY_ORIGINAL_A + LATER_UNSENT_B").count(), 1);
+        terminal.send(b"\x11");
+        terminal.finish().await;
+        terminal_client.close().await.unwrap();
+        control.close().await.unwrap();
+        drop(send);
+        drop(watch);
+        drop(catchup);
+        drop(history);
+        fixture.finish().await;
+    }).await.expect("production transcript recovery timed out");
 }
