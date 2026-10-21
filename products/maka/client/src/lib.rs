@@ -152,7 +152,7 @@ struct State {
 }
 enum Drained {
     Finished {
-        reply: OperationReply,
+        reply: Box<OperationReply>,
         cleanup: Result<()>,
     },
     NotDispatched,
@@ -264,10 +264,7 @@ impl Client {
         let drained = match state.call.drain().await? {
             Some(Reply::Mutation { reply, cleanup }) => {
                 self.observe_mutation(request, &reply).await?;
-                Drained::Finished {
-                    reply: *reply,
-                    cleanup,
-                }
+                Drained::Finished { reply, cleanup }
             }
             Some(Reply::Aborted { cleanup, .. })
                 if unconfirmed && cleanup.is_ok() && request.operation.is_some() =>
@@ -861,7 +858,7 @@ pub enum MutationEvent {
     /// The original preparation was cleanly aborted before confirmation began.
     NotDispatched,
     Finished {
-        reply: OperationReply,
+        reply: Box<OperationReply>,
         cleanup: Result<()>,
     },
 }
@@ -916,7 +913,7 @@ impl Mutation {
                 Some(MutationEvent::Progress(_)) => event = self.next().await?,
                 Some(MutationEvent::Finished { reply, cleanup }) => {
                     cleanup?;
-                    return Ok(reply);
+                    return Ok(*reply);
                 }
                 Some(MutationEvent::NotDispatched) => {
                     return Err("client mutation was cancelled before dispatch".into());
@@ -968,10 +965,7 @@ impl Mutation {
                 Some(Ok(Reply::Mutation { reply, cleanup })) => {
                     self.client.observe_mutation(&self.request, &reply).await?;
                     state.phase = Phase::Complete;
-                    Ok(Some(MutationEvent::Finished {
-                        reply: *reply,
-                        cleanup,
-                    }))
+                    Ok(Some(MutationEvent::Finished { reply, cleanup }))
                 }
                 received => {
                     let failure = match received {
