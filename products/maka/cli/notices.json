@@ -1,13 +1,13 @@
 {
   "inputs": {
-    "Cargo.lock": "c8c566200dc1b06360047404d747507d08c47b0b9aff46ab1d205b0c41d053fc",
-    "Cargo.toml": "b59973ad90a42a44d93836b89025e6e3794bc751ad38b24a33f43d7ae9036cd7",
+    "Cargo.lock": "b3fbeaf2564c507bca99707d94f75eba7d78b7621d61976a072f75ab79c1cb06",
+    "Cargo.toml": "450da44c3fab5721ad82374baa3197bd4940959fc2b82f2b18658ba0606cfe28",
     "package-lock.json": "a5af15aca21fabe0e1bdd48784167df4dc81cee17777d54861dcbd641168a4eb",
     "package.json": "38baf3beeb5876849ca16e31868d59bfaee769f260c7555b4a8a1847b92e28a1",
-    "packages/plugin-sdk/src/configurations.ts": "e7bb3e7245adc43f27a3834c2522b2645540ae5a6a1300a706842abd4a4da852",
-    "packages/plugin-sdk/src/contracts.ts": "0b3e73f7d87f4a38323c8ec062d796e8f6564120ba33caf5d6dacc62aaaf6852",
-    "packages/plugin-sdk/src/generated/methods.ts": "00d4a237633b9a263a262c4ca50f3edfd1e12619cc41c39ee2c9d5eb186b9598",
-    "packages/plugin-sdk/src/generated/runtime.ts": "14e14d46fdf39ed13e6d1b9dd3f0991dba01b601552a8068a830a2e0b0e4ac46",
+    "packages/plugin-sdk/src/configurations.ts": "93fcc2c070289ffd4b48dcbaee426d72abff74f95c3166ad73447eec588c011a",
+    "packages/plugin-sdk/src/contracts.ts": "50068913c6ce27f6b538bfd7de40ad481dba6410c9732f12076c84dc58aadac7",
+    "packages/plugin-sdk/src/generated/methods.ts": "c74acd3653ef10ababfddbc4ce8907f8f13b35e52fc54809a9b7d5d0f268bb83",
+    "packages/plugin-sdk/src/generated/runtime.ts": "3d0a936f27a7935d09b9ba9c94dfc99000fed4e94b3260c9e194e3d0024b982c",
     "packages/plugin-sdk/src/index.ts": "88b6d3a3d55e0d720584967c27abeb10d5ca343cd2f346563452c8608f423e67",
     "packages/plugin-sdk/src/native.ts": "f94d07642c8dd32d786444c7ff4cbbadd5bb1debea44f124f84eadd321607fa8",
     "packages/plugin-sdk/src/ui.ts": "d669d2c5c70fc61aae3c0582f586950bf9cea863ee72b48af673e57c30c1b0b9",
@@ -1393,5 +1393,5 @@
     "third-party/termina/upstream.json": "31ce8c2b8b45305bff1ce8a52db55f06e5887e770346dbc6c3ea3c574b58ebad",
     "tools/schema/Cargo.toml": "d8f47765451f555f872ea034945abd7afd54dc4c188ad5d5553932f8f2bc2462"
   },
-  "sha256": "a6d7411c85eb39a7a1ac46acb93924e2e46422fb5963e8905ffa8fdc2d1e7200"
+  "sha256": "e232711993a2d0b5d0d1f2e4bc93ee8db1af84a1a03b5ae62729210a1663dd83"
 }
