@@ -18,11 +18,16 @@
  */
 
 use super::geometry::PixelSizeQuery;
-use std::time::{Duration, Instant};
+use std::{
+    num::NonZeroU32,
+    time::{Duration, Instant},
+};
 use termina::{
     Event, WindowSize,
     escape::{
-        csi::{Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Mode},
+        csi::{
+            Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, GraphicsAttributeResponse, Mode,
+        },
         dcs::Dcs,
     },
 };
@@ -69,6 +74,41 @@ pub(crate) enum MouseCoordinates {
     Pixels(PixelOrigin),
 }
 
+/// The terminal's optional XTSMGRAPHICS maximum, independent of its viewport.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum SixelGeometry {
+    #[default]
+    Unknown,
+    Unbounded,
+    Finite {
+        width: NonZeroU32,
+        height: NonZeroU32,
+    },
+    Unavailable(u16),
+}
+
+impl SixelGeometry {
+    fn response(reply: &GraphicsAttributeResponse) -> Option<Self> {
+        if reply.item != 2 {
+            return None;
+        }
+        if reply.status != 0 {
+            return reply
+                .values
+                .is_empty()
+                .then_some(Self::Unavailable(reply.status));
+        }
+        match reply.values.as_slice() {
+            [0, 0] => Some(Self::Unbounded),
+            [width, height] => Some(Self::Finite {
+                width: NonZeroU32::new(*width)?,
+                height: NonZeroU32::new(*height)?,
+            }),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Capabilities {
     pub size: WindowSize,
@@ -76,6 +116,7 @@ pub(crate) struct Capabilities {
     // None during startup, before any image protocol has replied positively.
     pub protocol: Option<Protocol>,
     pub synchronized: bool,
+    pub sixel_geometry: SixelGeometry,
 }
 
 impl Capabilities {
@@ -94,7 +135,25 @@ impl Capabilities {
         if self.size.cols == 0 || self.size.rows == 0 {
             return None;
         }
-        self.pixel_size()
+        let mut viewport = self.pixel_size()?;
+        if self.protocol == Some(Protocol::Sixel)
+            && let SixelGeometry::Finite { width, height } = self.sixel_geometry
+        {
+            // Keep the actual terminal geometry for pointer conversion. The
+            // same native window lays out at this unscaled, top-left canvas.
+            viewport.width.0 = (viewport.width.0 as u32).min(width.get()) as i32;
+            viewport.height.0 = (viewport.height.0 as u32).min(height.get()) as i32;
+        }
+        Some(viewport)
+    }
+
+    pub fn contains(self, position: gpui::Point<gpui::Pixels>) -> bool {
+        self.viewport().is_some_and(|viewport| {
+            position.x >= gpui::px(0.0)
+                && position.y >= gpui::px(0.0)
+                && f32::from(position.x) < viewport.width.0 as f32
+                && f32::from(position.y) < viewport.height.0 as f32
+        })
     }
 }
 
@@ -109,6 +168,7 @@ pub(crate) struct Probe {
     sixel_mode: Option<(DecModeSetting, Instant)>,
     inline: Option<(Features, Instant)>,
     synchronized: Option<(bool, Instant)>,
+    pub(crate) sixel_geometry: SixelGeometry,
     pub(super) measurement: PixelSizeQuery,
     cancelled: bool,
 }
@@ -128,7 +188,7 @@ impl Probe {
         // precision, identity, static Sixel mode and synchronization remain
         // independent facts, irrespective of the selected image transport.
         bytes.extend_from_slice(
-            b"\x1b[?1016$p\x1b[?80$p\x1b[?2026$p\x1b[>q\x1b]1337;Capabilities\x1b\\\x1b[14t",
+            b"\x1b[?1016$p\x1b[?80$p\x1b[?2026$p\x1b[>q\x1b]1337;Capabilities\x1b\\\x1b[14t\x1b[?2;4;0S",
         );
         Ok(bytes)
     }
@@ -148,6 +208,14 @@ impl Probe {
 
     pub fn observe(&mut self, event: &Event, now: Instant) {
         self.measurement.observe(event, now);
+        // This optional maximum neither delays discovery nor expires with it.
+        // Only one max query is issued; current/max replies have no action id.
+        if self.sixel_geometry == SixelGeometry::Unknown
+            && let Event::Csi(Csi::GraphicsAttributes(reply)) = event
+            && let Some(geometry) = SixelGeometry::response(reply)
+        {
+            self.sixel_geometry = geometry;
+        }
         if self.cancelled || self.deadline.is_some_and(|deadline| now > deadline) {
             return;
         }
@@ -241,7 +309,13 @@ impl Probe {
             protocol: Some(protocol),
             synchronized: features.synchronized
                 || self.synchronized.is_some_and(|(supported, _)| supported),
+            sixel_geometry: self.sixel_geometry,
         };
+        if protocol == Protocol::Sixel && capabilities.pixel_size() != capabilities.viewport() {
+            // No app exists yet: use the original Unicode path instead of
+            // starting a native scene larger than the reported image device.
+            return Some(None);
+        }
         Some(capabilities.viewport().map(|_| capabilities))
     }
 }
@@ -362,7 +436,7 @@ mod tests {
             probe.flushed(now);
             reply(
                 &mut probe,
-                format!("\x1b_Gi=99;OK\x1b\\\x1b[?1016;{mode}$y\x1bP>|kitty(0.49.2)\x1b\\\x1b[4;640;960t").as_bytes(),
+                format!("\x1b_Gi=99;OK\x1b\\\x1b[?1016;{mode}$y\x1bP>|kitty(0.49.2)\x1b\\\x1b[4;640;960t\x1b[?2;0;100;100S").as_bytes(),
                 now,
             );
             let result = probe.decision(now, size()).unwrap().unwrap();
@@ -411,6 +485,7 @@ mod tests {
         let caps = probe.decision(now + TIMEOUT, size()).unwrap().unwrap();
         assert_eq!(caps.protocol, Some(Protocol::Sixel));
         assert_eq!(caps.mouse, MouseCoordinates::Cells);
+        assert_eq!(caps.sixel_geometry, SixelGeometry::Unknown);
         assert_eq!(
             caps.viewport(),
             Some(gpui::size(
@@ -419,6 +494,55 @@ mod tests {
             ))
         );
         assert!(probe.needs_static_sixel());
+    }
+
+    #[test]
+    fn optional_sixel_maximum_honors_the_device_without_waiting_for_metadata() {
+        let now = Instant::now();
+        let finite = SixelGeometry::Finite {
+            width: NonZeroU32::new(1200).unwrap(),
+            height: NonZeroU32::new(800).unwrap(),
+        };
+        for (report, maximum, accepted) in [
+            (b"".as_slice(), SixelGeometry::Unknown, true),
+            (b"\x1b[?2;0;0;0S".as_slice(), SixelGeometry::Unbounded, true),
+            (b"\x1b[?2;0;1200;800S".as_slice(), finite, true),
+            (b"\x1b[?2;1S".as_slice(), SixelGeometry::Unavailable(1), true),
+            (b"\x1b[?2;2S".as_slice(), SixelGeometry::Unavailable(2), true),
+            (b"\x1b[?2;3S".as_slice(), SixelGeometry::Unavailable(3), true),
+            (b"\x1b[?1;0;1000;1000S".as_slice(), SixelGeometry::Unknown, true),
+            (b"\x1b[?2;0;0;800S".as_slice(), SixelGeometry::Unknown, true),
+            (
+                b"\x1b[?2;0;1000;1000S".as_slice(),
+                SixelGeometry::Finite {
+                    width: NonZeroU32::new(1000).unwrap(),
+                    height: NonZeroU32::new(1000).unwrap(),
+                },
+                false,
+            ),
+        ] {
+            let mut probe = probe();
+            probe.flushed(now);
+            reply(&mut probe, b"\x1b[?61;4c\x1b[?80;2$y\x1b[4;800;1200t", now);
+            reply(&mut probe, report, now);
+            assert_eq!(probe.sixel_geometry, maximum);
+            let selected = probe.decision(now + TIMEOUT, size()).unwrap();
+            assert_eq!(selected.is_some(), accepted, "{report:?}");
+            if let Some(caps) = selected {
+                assert_eq!(caps.protocol, Some(Protocol::Sixel));
+                assert_eq!(caps.sixel_geometry, maximum);
+                assert_eq!(caps.size.pixel_width, Some(1200));
+                assert_eq!(caps.size.pixel_height, Some(800));
+            }
+        }
+        // Max metadata can arrive after discovery. Before select it must still
+        // choose the existing Unicode path, rather than overwrite that fact.
+        let mut probe = probe();
+        probe.flushed(now);
+        reply(&mut probe, b"\x1b[?61;4c\x1b[?80;2$y\x1b[4;800;1200t", now);
+        let late = now + TIMEOUT + Duration::from_millis(1);
+        reply(&mut probe, b"\x1b[?2;0;1000;1000S", late);
+        assert!(matches!(probe.decision(late, size()), Some(None)));
     }
 
     #[test]
@@ -507,7 +631,8 @@ mod tests {
                 size: ioctl,
                 mouse: MouseCoordinates::Cells,
                 protocol: None,
-                synchronized: false
+                synchronized: false,
+                sixel_geometry: Default::default(),
             }
             .viewport()
             .is_none()

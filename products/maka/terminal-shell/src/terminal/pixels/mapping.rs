@@ -93,29 +93,13 @@ impl Mapping {
                 })
             }
             Event::SgrMouse(mouse) => {
-                let position = match caps.mouse {
-                    MouseCoordinates::Pixels(origin) => {
-                        let offset = match origin {
-                            PixelOrigin::Zero => 0.0,
-                            PixelOrigin::One => 1.0,
-                        };
-                        // Preserve negative release/drag coordinates outside
-                        // the viewport. Wire zero is outside a one-based grid.
-                        point(px(mouse.x as f32 - offset), px(mouse.y as f32 - offset))
-                    }
-                    MouseCoordinates::Cells => {
-                        let x = u16::try_from(mouse.x).ok()?.checked_sub(1)?;
-                        let y = u16::try_from(mouse.y).ok()?.checked_sub(1)?;
-                        cell_centre(x, y, caps)?
-                    }
-                };
+                let position = mouse_position(event, caps)?;
                 Some(self.mouse(mouse.kind, mouse.modifiers, position))
             }
-            Event::Mouse(mouse) => Some(self.mouse(
-                mouse.kind,
-                mouse.modifiers,
-                cell_centre(mouse.column, mouse.row, caps)?,
-            )),
+            Event::Mouse(mouse) => {
+                let position = mouse_position(event, caps)?;
+                Some(self.mouse(mouse.kind, mouse.modifiers, position))
+            }
             Event::MouseLeave => None,
             Event::WindowResized(_)
             | Event::FocusIn
@@ -195,6 +179,36 @@ impl Mapping {
     }
 }
 
+/// Shared by input admission and native dispatch, using actual terminal units.
+pub(super) fn mouse_position(
+    event: &Event,
+    caps: Capabilities,
+) -> Option<gpui::Point<gpui::Pixels>> {
+    match event {
+        Event::SgrMouse(mouse) => {
+            let position = match caps.mouse {
+                MouseCoordinates::Pixels(origin) => {
+                    let offset = match origin {
+                        PixelOrigin::Zero => 0.0,
+                        PixelOrigin::One => 1.0,
+                    };
+                    // Preserve negative release/drag coordinates outside the
+                    // canvas. Wire zero is outside a one-based pixel grid.
+                    point(px(mouse.x as f32 - offset), px(mouse.y as f32 - offset))
+                }
+                MouseCoordinates::Cells => {
+                    let x = u16::try_from(mouse.x).ok()?.checked_sub(1)?;
+                    let y = u16::try_from(mouse.y).ok()?.checked_sub(1)?;
+                    cell_centre(x, y, caps)?
+                }
+            };
+            Some(position)
+        }
+        Event::Mouse(mouse) => cell_centre(mouse.column, mouse.row, caps),
+        _ => None,
+    }
+}
+
 fn cell_centre(x: u16, y: u16, caps: Capabilities) -> Option<gpui::Point<gpui::Pixels>> {
     if caps.size.cols == 0 || caps.size.rows == 0 {
         return None;
@@ -226,6 +240,7 @@ fn modifiers(modifiers: Modifiers) -> gpui::Modifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::num::NonZeroU32;
 
     #[test]
     fn pixel_zero_and_negative_release_coordinates_do_not_take_the_cell_conversion() {
@@ -239,6 +254,7 @@ mod tests {
             mouse: MouseCoordinates::Pixels(PixelOrigin::Zero),
             protocol: None,
             synchronized: false,
+            sixel_geometry: Default::default(),
         };
         let mut mapping = Mapping::default();
         let raw = |x, y| {
@@ -296,6 +312,42 @@ mod tests {
                     }
                 )
                 .is_none()
+        );
+        let letterbox = Capabilities {
+            protocol: Some(super::super::probe::Protocol::Sixel),
+            sixel_geometry: super::super::probe::SixelGeometry::Finite {
+                width: NonZeroU32::new(400).unwrap(),
+                height: NonZeroU32::new(300).unwrap(),
+            },
+            ..caps
+        };
+        let Some(PlatformInput::MouseUp(event)) = mapping.input(
+            &raw(51, 1),
+            Capabilities {
+                mouse: MouseCoordinates::Cells,
+                ..letterbox
+            },
+        ) else {
+            panic!("the real cell centre remains unscaled in a letterbox");
+        };
+        assert_eq!(
+            (f32::from(event.position.x), f32::from(event.position.y)),
+            (404.0, 8.0)
+        );
+        assert!(!letterbox.contains(event.position));
+        let drag = Event::SgrMouse(termina::event::SgrMouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            x: -5,
+            y: 650,
+            modifiers: Modifiers::NONE,
+        });
+        let Some(PlatformInput::MouseMove(event)) = mapping.input(&drag, letterbox) else {
+            panic!("a captured drag keeps its physical position outside the canvas");
+        };
+        assert_eq!(event.pressed_button, Some(gpui::MouseButton::Left));
+        assert_eq!(
+            (f32::from(event.position.x), f32::from(event.position.y)),
+            (-5.0, 650.0)
         );
     }
 }

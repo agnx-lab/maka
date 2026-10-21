@@ -73,6 +73,9 @@ pub enum Csi {
     /// A primary device-attributes response, preserving its numeric parameters.
     PrimaryDeviceAttributes(PrimaryDeviceAttributes),
 
+    /// An XTSMGRAPHICS response, preserving its item, status, and reported values.
+    GraphicsAttributes(GraphicsAttributeResponse),
+
     /// Window commands described by [`Window`].
     ///
     /// This family covers window manipulation and reports, mostly from xterm-compatible
@@ -93,6 +96,7 @@ impl Display for Csi {
             Self::Keyboard(keyboard) => keyboard.fmt(f),
             Self::Device(device) => device.fmt(f),
             Self::PrimaryDeviceAttributes(attributes) => attributes.fmt(f),
+            Self::GraphicsAttributes(attributes) => attributes.fmt(f),
             Self::Window(window) => window.fmt(f),
         }
     }
@@ -114,6 +118,33 @@ impl Display for PrimaryDeviceAttributes {
             write!(f, ";{attribute}")?;
         }
         f.write_str("c")
+    }
+}
+
+/// The values reported by xterm's XTSMGRAPHICS graphics-attribute query.
+///
+/// Replies do not identify whether the request read the current or maximum value. Unknown items
+/// and statuses are preserved so callers can interpret the reply for their outstanding request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphicsAttributeResponse {
+    /// The requested item: `1` for color registers, `2` for Sixel geometry, or `3` for ReGIS.
+    pub item: u16,
+    /// `0` is success, `1` an item error, `2` an action error, and `3` a failure.
+    pub status: u16,
+    /// Values in wire order: successful geometry reports contain width followed by height.
+    ///
+    /// Zero values are retained. A successful maximum-geometry report of `0;0` means that the
+    /// terminal does not impose a maximum geometry. Failure reports may contain no values.
+    pub values: Vec<u32>,
+}
+
+impl Display for GraphicsAttributeResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "?{};{}", self.item, self.status)?;
+        for value in &self.values {
+            write!(f, ";{value}")?;
+        }
+        f.write_str("S")
     }
 }
 

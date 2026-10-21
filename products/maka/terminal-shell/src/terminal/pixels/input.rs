@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::probe::Capabilities;
+use super::probe::{Capabilities, SixelGeometry};
 use nsh_gpui_terminal::{CandidateFrame, FrameToken};
 use std::collections::{HashSet, VecDeque};
 use termina::{
@@ -126,15 +126,8 @@ impl Inbox {
             return Ok(false);
         }
         if let Event::WindowResized(size) = event {
-            self.geometry = self
-                .geometry
-                .checked_add(1)
-                .ok_or("terminal geometry generation exhausted")?;
             self.capabilities.size = size;
-            self.resize = Some(size);
-            self.published = None;
-            self.pending = None;
-            self.lose_pointer();
+            self.invalidate_geometry()?;
             return Ok(false);
         }
         if matches!(
@@ -145,6 +138,30 @@ impl Inbox {
         }
         if matches!(event, Event::MouseLeave | Event::FocusOut) {
             self.lose_pointer();
+        }
+        let mouse = match &event {
+            Event::SgrMouse(mouse) => Some(mouse.kind),
+            Event::Mouse(mouse) => Some(mouse.kind),
+            _ => None,
+        };
+        if let Some(kind) = mouse
+            && !super::mapping::mouse_position(&event, self.capabilities)
+                .is_some_and(|position| self.capabilities.contains(position))
+        {
+            match kind {
+                MouseEventKind::Down(_)
+                | MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight => return Ok(false),
+                MouseEventKind::Moved => {
+                    // Leaving the native canvas has the same cleanup authority
+                    // as a physical leave, even without an admissible frame.
+                    self.lose_pointer();
+                    return Ok(false);
+                }
+                MouseEventKind::Drag(_) | MouseEventKind::Up(_) => {}
+            }
         }
         let token = match &event {
             Event::SgrMouse(mouse) => match mouse.kind {
@@ -211,6 +228,30 @@ impl Inbox {
         Ok(false)
     }
 
+    pub fn set_sixel_geometry(&mut self, geometry: SixelGeometry) -> Result<(), String> {
+        if self.capabilities.sixel_geometry == geometry {
+            return Ok(());
+        }
+        let viewport = self.capabilities.viewport();
+        self.capabilities.sixel_geometry = geometry;
+        if viewport != self.capabilities.viewport() {
+            self.invalidate_geometry()?;
+        }
+        Ok(())
+    }
+
+    fn invalidate_geometry(&mut self) -> Result<(), String> {
+        self.geometry = self
+            .geometry
+            .checked_add(1)
+            .ok_or("terminal geometry generation exhausted")?;
+        self.resize = Some(self.capabilities.size);
+        self.published = None;
+        self.pending = None;
+        self.lose_pointer();
+        Ok(())
+    }
+
     fn lose_pointer(&mut self) {
         self.capture = None;
         self.cancel_pointer = true;
@@ -269,7 +310,136 @@ pub(super) fn released(event: &Event) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::num::NonZeroU32;
     use termina::event::KeyEvent;
+
+    fn maximum(width: u32, height: u32) -> SixelGeometry {
+        SixelGeometry::Finite {
+            width: NonZeroU32::new(width).unwrap(),
+            height: NonZeroU32::new(height).unwrap(),
+        }
+    }
+
+    fn capabilities() -> Capabilities {
+        Capabilities {
+            size: WindowSize {
+                cols: 120,
+                rows: 40,
+                pixel_width: Some(1200),
+                pixel_height: Some(800),
+            },
+            mouse: super::super::probe::MouseCoordinates::Cells,
+            protocol: Some(super::super::probe::Protocol::Sixel),
+            synchronized: false,
+            sixel_geometry: SixelGeometry::Unknown,
+        }
+    }
+
+    #[test]
+    fn late_sixel_maxima_resize_the_same_canvas_without_changing_terminal_units() {
+        let mut inbox = Inbox::new(capabilities());
+        let token = FrameToken::default();
+        inbox.published = Some(token.clone());
+        inbox.keyboard = Some(token.clone());
+        inbox.capture = Some(token.clone());
+        let draft = Event::Paste("unfinished 你好 draft".into());
+        inbox.push(draft.clone()).unwrap();
+        inbox.set_sixel_geometry(maximum(1000, 1000)).unwrap();
+        assert_eq!(inbox.geometry, 2);
+        assert_eq!(inbox.resize, Some(capabilities().size));
+        assert_eq!(inbox.capabilities.size.pixel_width, Some(1200));
+        assert_eq!(inbox.capabilities.size.pixel_height, Some(800));
+        assert_eq!(
+            inbox.capabilities.viewport(),
+            Some(gpui::size(gpui::DevicePixels(1000), gpui::DevicePixels(800)))
+        );
+        assert!(inbox.published.is_none());
+        assert!(inbox.capture.is_none());
+        assert!(inbox.cancel_pointer);
+        assert_eq!(inbox.keyboard, Some(token.clone()));
+        assert_eq!(inbox.pop().unwrap().event, draft);
+
+        // A new fact that does not change this canvas must not revoke a click.
+        inbox.resize = None;
+        inbox.cancel_pointer = false;
+        inbox.published = Some(token.clone());
+        inbox.capture = Some(token.clone());
+        inbox.set_sixel_geometry(maximum(1000, 1200)).unwrap();
+        assert_eq!(inbox.geometry, 2);
+        assert_eq!(inbox.published, Some(token.clone()));
+        assert_eq!(inbox.capture, Some(token));
+        assert!(!inbox.cancel_pointer);
+
+        // Actual terminal resize always revokes old coordinates, even if the
+        // effective canvas happens to stay unchanged.
+        let mut size = capabilities().size;
+        size.cols = 140;
+        size.pixel_width = Some(1400);
+        inbox.push(Event::WindowResized(size)).unwrap();
+        assert_eq!(inbox.geometry, 3);
+        assert!(inbox.published.is_none());
+        assert!(inbox.cancel_pointer);
+        assert_eq!(inbox.capabilities.size.pixel_width, Some(1400));
+        assert_eq!(
+            inbox.capabilities.viewport(),
+            Some(gpui::size(gpui::DevicePixels(1000), gpui::DevicePixels(800)))
+        );
+        size.cols = 80;
+        size.pixel_width = Some(800);
+        size.pixel_height = Some(600);
+        inbox.push(Event::WindowResized(size)).unwrap();
+        assert_eq!(inbox.geometry, 4);
+        assert_eq!(
+            inbox.capabilities.viewport(),
+            Some(gpui::size(gpui::DevicePixels(800), gpui::DevicePixels(600)))
+        );
+    }
+
+    #[test]
+    fn letterbox_presses_and_wheels_do_not_capture_and_hover_leaves_without_a_frame() {
+        let mut caps = capabilities();
+        caps.sixel_geometry = maximum(1000, 600);
+        let mut inbox = Inbox::new(caps);
+        let token = FrameToken::default();
+        let pointer = |kind, x, y| {
+            Event::SgrMouse(termina::event::SgrMouseEvent {
+                kind,
+                x,
+                y,
+                modifiers: Modifiers::NONE,
+            })
+        };
+        // Real cells remain 10x20 pixels. The right/bottom margins begin at
+        // cell 101/31, independently of the smaller native canvas dimensions.
+        for (x, y) in [(101, 1), (1, 31), (0, 1)] {
+            inbox.capture = Some(token.clone());
+            inbox
+                .push(pointer(
+                    MouseEventKind::Down(termina::event::MouseButton::Left),
+                    x,
+                    y,
+                ))
+                .unwrap();
+            inbox.push(pointer(MouseEventKind::ScrollDown, x, y)).unwrap();
+            assert_eq!(inbox.capture, Some(token.clone()));
+            assert!(!inbox.cancel_pointer);
+            inbox.push(pointer(MouseEventKind::Moved, x, y)).unwrap();
+            assert!(inbox.capture.is_none());
+            assert!(inbox.cancel_pointer);
+            inbox.cancel_pointer = false;
+        }
+        // The adjacent visible cell reaches admission instead of being
+        // confused with the margin. No published frame means no new capture.
+        inbox.capture = Some(token);
+        inbox
+            .push(pointer(
+                MouseEventKind::Down(termina::event::MouseButton::Left),
+                100,
+                30,
+            ))
+            .unwrap();
+        assert!(inbox.capture.is_none());
+    }
 
     #[test]
     fn keyboard_bursts_and_large_paste_survive_startup_and_resize_in_order() {
@@ -283,6 +453,7 @@ mod tests {
             mouse: super::super::probe::MouseCoordinates::Cells,
             protocol: None,
             synchronized: false,
+            sixel_geometry: Default::default(),
         });
         let mut expected = Vec::new();
         for character in "a你b界".repeat(1024).chars() {

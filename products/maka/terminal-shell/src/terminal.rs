@@ -133,6 +133,7 @@ pub(crate) fn run(
             mouse: pixels::MouseCoordinates::Cells,
             protocol: None,
             synchronized: false,
+            sixel_geometry: Default::default(),
         }));
         setup.extend(state.pixel_probe.query()?);
         setup
@@ -343,8 +344,11 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         #[cfg(target_os = "linux")]
                         {
                             inbox.pixel_probe.observe(&event, Instant::now());
+                            let sixel_geometry = inbox.pixel_probe.sixel_geometry;
                             if let Some(pixels) = &mut inbox.pixels {
-                                let result = pixels.push(event);
+                                let result = pixels
+                                    .set_sixel_geometry(sixel_geometry)
+                                    .and_then(|()| pixels.push(event));
                                 if let Some(wake) = &pixels.wake {
                                     wake.unpark();
                                 }

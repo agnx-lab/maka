@@ -468,6 +468,7 @@ fn parse_csi(buffer: &[u8]) -> Result<Option<Event>> {
         b'Q' => Some(Event::Key(KeyCode::Function(2).into())),
         b'S' => Some(Event::Key(KeyCode::Function(4).into())),
         b'?' => match buffer[buffer.len() - 1] {
+            b'S' => return parse_csi_graphics_attributes(buffer),
             b'u' => return parse_csi_keyboard_enhancement_flags(buffer),
             b'c' => return parse_csi_primary_device_attributes(buffer),
             b'n' => return parse_csi_theme_mode(buffer),
@@ -1214,6 +1215,28 @@ fn parse_csi_primary_device_attributes(buffer: &[u8]) -> Result<Option<Event>> {
     ))))
 }
 
+fn parse_csi_graphics_attributes(buffer: &[u8]) -> Result<Option<Event>> {
+    let parameters = str::from_utf8(&buffer[3..buffer.len() - 1])?;
+    let mut parameters = parameters.split(';');
+    let item = parse_reply_parameter(parameters.next().ok_or(MalformedSequenceError)?)?;
+    let status = parse_reply_parameter(parameters.next().ok_or(MalformedSequenceError)?)?;
+    let values = parameters
+        .map(|parameter| {
+            if parameter.is_empty() || !parameter.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(MalformedSequenceError);
+            }
+            parameter.parse::<u32>().map_err(|_| MalformedSequenceError)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(Event::Csi(Csi::GraphicsAttributes(
+        csi::GraphicsAttributeResponse {
+            item,
+            status,
+            values,
+        },
+    ))))
+}
+
 fn parse_csi_pixel_size(buffer: &[u8]) -> Result<Option<Event>> {
     let parameters = str::from_utf8(&buffer[2..buffer.len() - 1])?;
     let mut parameters = parameters.split(';');
@@ -1488,7 +1511,16 @@ mod test {
 
     #[test]
     fn graphics_replies_preserve_input_and_paste_at_every_byte_boundary() {
-        let wire = "你\x1b_Gi=31;OK\x1b\\\x1b]1337;Capabilities=T3FFSxSy;future=1\x1b\\\x1bP>|XTerm(411)\x1b\\\x1b[?1016;2$y\x1b[?64;1;4;22c\x1b[6;16;8t\x1b[4;680;960t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\\x1b[<0;4;5M\x1b[<0;4;5m\x1b[<288;-1;-20M\x1b[200~literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z";
+        let wire = concat!(
+            "你\x1b_Gi=31;OK\x1b\\\x1b]1337;Capabilities=T3FFSxSy;future=1\x1b\\",
+            "\x1bP>|XTerm(411)\x1b\\\x1b[?1016;2$y\x1b[?64;1;4;22c",
+            "\x1b[?2;0;1000;800S\x1b[?2;0;0;0S",
+            "\x1b[?2;1S\x1b[?2;2S\x1b[?2;3S\x1b[?17;99;4294967295S\x10",
+            "\x1b[6;16;8t\x1b[4;680;960t\x1b_Gp=1,i=32;ENOENT: missing image\x1b\\",
+            "\x1b[<0;4;5M\x1b[<0;4;5m\x1b[<288;-1;-20M",
+            "\x1b[200~literal \x1b[?64;4c \x1b[?2;0;1000;800S ",
+            "\x1b[6;16;8t \x1b_Gi=33;OK\x1b\\\x1b[201~z",
+        );
         let expected = vec![
             Event::Key(KeyCode::Char('你').into()),
             Event::KittyGraphicsResponse(KittyGraphicsResponse {
@@ -1507,6 +1539,37 @@ mod test {
                 terminal_type: 64,
                 attributes: vec![1, 4, 22],
             })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 0,
+                values: vec![1000, 800],
+            })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 0,
+                values: vec![0, 0],
+            })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 1,
+                values: vec![],
+            })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 2,
+                values: vec![],
+            })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 3,
+                values: vec![],
+            })),
+            Event::Csi(Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 17,
+                status: 99,
+                values: vec![4294967295],
+            })),
+            Event::Key(KeyEvent::new(KeyCode::Char('p'), Modifiers::CONTROL)),
             Event::Csi(Csi::Window(Box::new(
                 csi::Window::ReportCellSizePixelsResponse {
                     width: Some(8),
@@ -1538,7 +1601,10 @@ mod test {
                 modifiers: Modifiers::NONE,
             }),
             Event::MouseLeave,
-            Event::Paste("literal \x1b[?64;4c \x1b[6;16;8t \x1b_Gi=33;OK\x1b\\".to_string()),
+            Event::Paste(concat!(
+                "literal \x1b[?64;4c \x1b[?2;0;1000;800S ",
+                "\x1b[6;16;8t \x1b_Gi=33;OK\x1b\\",
+            ).to_string()),
             Event::Key(KeyCode::Char('z').into()),
         ];
         for split in 0..=wire.len() {
@@ -1555,6 +1621,24 @@ mod test {
             })
             .to_string(),
             "\x1b[?64;1;4;22c"
+        );
+        assert_eq!(
+            Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 0,
+                values: vec![1000, 800],
+            })
+            .to_string(),
+            "\x1b[?2;0;1000;800S"
+        );
+        assert_eq!(
+            Csi::GraphicsAttributes(csi::GraphicsAttributeResponse {
+                item: 2,
+                status: 3,
+                values: vec![],
+            })
+            .to_string(),
+            "\x1b[?2;3S"
         );
     }
 
@@ -1633,6 +1717,18 @@ mod test {
             b"\x1b[?64;+4c",
             b"\x1b[?64;;4c",
             b"\x1b[?64;65536c",
+            b"\x1b[?S",
+            b"\x1b[?2S",
+            b"\x1b[?;0S",
+            b"\x1b[?+2;0;1000;800S",
+            b"\x1b[?65536;0S",
+            b"\x1b[?2;+0S",
+            b"\x1b[?2;65536S",
+            b"\x1b[?2;;0S",
+            b"\x1b[?2;0;+1000;800S",
+            b"\x1b[?2;0;1:2;800S",
+            b"\x1b[?2;0;4294967296;800S",
+            b"\x1b[?2;0;1000;S",
             b"\x1b[6;+16;8t",
             b"\x1b[6;16;+8t",
             b"\x1b[6;0;8t",
@@ -1647,6 +1743,18 @@ mod test {
             b"\x1b[4;680;960;1t",
         ] {
             assert!(parse_event(invalid, false).is_err(), "{invalid:?}");
+            let start = Instant::now();
+            let mut parser = Parser::default();
+            parser.parse_at(invalid, false, start).unwrap();
+            parser
+                .parse_at(b"\x10", false, start + Duration::from_millis(100))
+                .unwrap();
+            assert_eq!(
+                parser.pop(),
+                Some(Event::Key(KeyEvent::new(KeyCode::Char('p'), Modifiers::CONTROL))),
+                "{invalid:?}"
+            );
+            assert_eq!(parser.pop(), None, "{invalid:?}");
         }
     }
 
