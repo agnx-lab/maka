@@ -81,6 +81,7 @@ pub mod pty;
 /// A real Agent, settings store and public Host gateway, without the old UI.
 pub struct Fixture {
     pub address: PathBuf,
+    pub store: Arc<EventLog>,
     pub session: String,
     pub selection: Value,
     pub requests: mpsc::Receiver<ModelRequest>,
@@ -234,7 +235,7 @@ impl Fixture {
             },
         };
         let host = Host::open(
-            store,
+            store.clone(),
             deployment,
             native,
             None,
@@ -325,6 +326,7 @@ impl Fixture {
         let mut fixture = Self {
             directory,
             address,
+            store,
             session: String::new(),
             selection,
             requests,
@@ -851,6 +853,9 @@ impl ReplyGate {
     }
     pub fn directories(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "directories", "finished")
+    }
+    pub fn respond(directory: &Path, target: PathBuf) -> Self {
+        Self::for_method(directory, target, "respond", "mutation")
     }
     #[cfg(unix)]
     pub fn history(directory: &Path, target: PathBuf) -> Self {

@@ -23,6 +23,14 @@ import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';
 import { C } from './ui';
+import { CapabilityRequest, computerCapability } from './CapabilityRequest';
+import { FormRequest } from './FormRequest';
+import {
+  formSubmission,
+  initialForm,
+  utf8Bytes as interactionBytes,
+  type FormDraft,
+} from './interaction-form';
 
 type InteractionControl = (method: string, input: unknown) => Promise<any>;
 type InteractionScope = 'once' | 'turn' | 'session';
@@ -30,14 +38,6 @@ type InteractionOwner = { sessionId: string; requestId: string };
 type InteractionQuestion = {
   question: string;
   options: Array<{ label: string; description?: string }>;
-};
-const interactionBytes = (text: string) => {
-  let length = 0;
-  for (const point of text) {
-    const code = point.codePointAt(0)!;
-    length += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-  }
-  return length;
 };
 function InteractionAction(props: {
   label: string;
@@ -103,6 +103,8 @@ export function InteractionPanel({
     error = signal('');
   const scope = signal<InteractionScope>('once');
   const answers = signal<Array<{ other: boolean; value: string | null | undefined }>>([]);
+  const formDrafts = signal<FormDraft[]>([]);
+  let originalForm: string | null = null;
   const argumentsText = signal(''),
     argumentTotal = signal<number | null>(null);
   const argumentBusy = signal(false),
@@ -119,6 +121,41 @@ export function InteractionPanel({
     alive && owner.sessionId === sessionId && owner.requestId === requestId;
   const questionIdentity = () =>
     request()?.kind === 'question' ? JSON.stringify(request().questions) : null;
+  const responseIdentity = () =>
+    ['form', 'client_capability'].includes(request()?.kind) ? JSON.stringify(request()) : null;
+  const form = () =>
+    formSubmission(request()?.kind === 'form' ? request().fields : [], formDrafts());
+  const changeForm = (
+    choice: InteractionOwner & {
+      requestJSON: string | null;
+      index: number;
+      change: Partial<FormDraft>;
+    },
+  ) => {
+    if (
+      !ownsAction(choice) ||
+      blocked() ||
+      request()?.kind !== 'form' ||
+      choice.requestJSON !== responseIdentity() ||
+      !request().fields[choice.index]
+    )
+      return;
+    formDrafts.update((current) =>
+      current.map((draft, index) =>
+        index === choice.index ? { ...draft, ...choice.change } : draft,
+      ),
+    );
+  };
+  const formAction = (index: number, change: Partial<FormDraft>) =>
+    inputAction(changeForm, {
+      sessionId,
+      requestId,
+      requestJSON: responseIdentity(),
+      index,
+      change,
+    });
+  const editForm = (index: number, requestJSON: string, value: string) =>
+    changeForm({ sessionId, requestId, requestJSON, index, change: { value } });
   const sourceIdentity = (original = request()) =>
     original?.kind === 'service_approval'
       ? JSON.stringify({
@@ -266,6 +303,15 @@ export function InteractionPanel({
       if (canonical.request.kind === 'question' && answers().length === 0) {
         answers.set(canonical.request.questions.map(() => ({ other: false, value: undefined })));
       }
+      if (
+        canonical.request.kind === 'form' &&
+        !canonical.outcome &&
+        originalForm !== JSON.stringify(canonical.request)
+      ) {
+        originalForm = JSON.stringify(canonical.request);
+        formDrafts.set(initialForm(canonical.request.fields));
+      }
+      if (canonical.request.kind === 'form' && canonical.outcome) formDrafts.set([]);
       if (canonical.request.kind === 'service_approval' && !canonical.outcome)
         void readArguments(canonical.request);
     } catch (reason) {
@@ -291,6 +337,7 @@ export function InteractionPanel({
         // This is the canonical winner, which can differ from our answer.
         record.set(result.record);
         pending.set(false);
+        if (result.record.request.kind === 'form') formDrafts.set([]);
       } else if (result?.kind === 'rejected') {
         error.set(
           `Answer was not accepted: ${result.reason}. Refresh the request before trying again.`,
@@ -336,6 +383,10 @@ export function InteractionPanel({
     } else if (current.kind === 'question') {
       if (questionReady())
         return { kind: 'question', answers: answers().map((part) => part.value) };
+    } else if (current.kind === 'form') {
+      return form().answer;
+    } else if (current.kind === 'client_capability' && computerCapability(current)) {
+      return { kind: 'client_capability', decision: 'allow' };
     }
     return null;
   };
@@ -347,6 +398,10 @@ export function InteractionPanel({
       );
       return;
     }
+    if (request()?.kind === 'form' && !form().answer) {
+      error.set(form().error ?? 'Complete the included fields before submitting.');
+      return;
+    }
     const answer = submissionAnswer();
     if (answer) void respond(answer);
   };
@@ -355,6 +410,8 @@ export function InteractionPanel({
     if (kind === 'service_approval') return { kind, decision: 'deny' };
     if (kind === 'permissions') return { kind, decision: { decision: 'deny' } };
     if (kind === 'form') return { kind, action: 'decline' };
+    if (kind === 'client_capability' && computerCapability(request()))
+      return { kind, decision: 'deny' };
     return null;
   };
   const deny = () => {
@@ -366,6 +423,7 @@ export function InteractionPanel({
       answerJSON: string;
       questionsJSON: string | null;
       sourceJSON: string | null;
+      requestJSON: string | null;
     },
   ) => {
     if (!ownsAction(rendered) || blocked()) return;
@@ -374,8 +432,15 @@ export function InteractionPanel({
     if (answer.kind === 'question' && rendered.questionsJSON !== questionIdentity()) return;
     if (answer.kind === 'service_approval' && rendered.sourceJSON !== sourceIdentity()) return;
     if (
+      ['form', 'client_capability'].includes(answer.kind) &&
+      rendered.requestJSON !== responseIdentity()
+    )
+      return;
+    if (
       (answer.kind === 'question' ||
         (answer.kind === 'permissions' && answer.decision.decision === 'allow') ||
+        (answer.kind === 'form' && answer.action === 'accept') ||
+        (answer.kind === 'client_capability' && answer.decision === 'allow') ||
         (answer.kind === 'service_approval' && answer.decision === 'allow')) &&
       rendered.answerJSON !== JSON.stringify(submissionAnswer())
     )
@@ -390,6 +455,7 @@ export function InteractionPanel({
       answerJSON: JSON.stringify(answer),
       questionsJSON: questionIdentity(),
       sourceJSON: sourceIdentity(),
+      requestJSON: responseIdentity(),
     });
   // Parent mounts only the current keyed panel. Native keymap ownership removes
   // these bindings on close; the Dialog owns Escape without answering a request.
@@ -628,22 +694,36 @@ export function InteractionPanel({
                     )}
                   </Each>
                 </If>
-                <If when={request()?.kind === 'form' || request()?.kind === 'client_capability'}>
-                  <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
-                    {request()?.kind === 'form'
-                      ? 'Fill this form in the existing client, or explicitly Decline / Cancel the request here.'
-                      : 'Review this capability in the existing client. Closing this view leaves it pending.'}
-                  </Text>
-                  <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-                    {JSON.stringify(request(), null, 2)}
-                  </Text>
+                <If when={request()?.kind === 'form'}>
+                  <FormRequest
+                    request={request()}
+                    drafts={formDrafts()}
+                    problems={form().problems}
+                    blocked={blocked()}
+                    action={formAction}
+                    edit={editForm}
+                  />
+                  <If when={form().error}>
+                    <Text style={{ color: C.warning, fontSize: 16, lineHeight: 16 }}>
+                      {form().error}
+                    </Text>
+                  </If>
+                </If>
+                <If when={request()?.kind === 'client_capability'}>
+                  <CapabilityRequest request={request()} sessionId={sessionId} />
                 </If>
               </View>
             }
           >
             <Text style={{ color: C.accent, fontSize: 16, lineHeight: 16 }}>Recorded outcome</Text>
             <Text selectable style={{ color: C.text, fontSize: 16, lineHeight: 16 }}>
-              {JSON.stringify(record()?.outcome, null, 2)}
+              {record()?.outcome?.kind === 'form_answer'
+                ? record().outcome.action === 'accept'
+                  ? `Form submitted · ${Object.keys(record().outcome.values).length} fields`
+                  : record().outcome.action === 'decline'
+                    ? 'Form declined'
+                    : 'Form cancelled'
+                : JSON.stringify(record()?.outcome, null, 2)}
             </Text>
           </If>
           <If when={error()}>
@@ -683,7 +763,8 @@ export function InteractionPanel({
           <If
             when={
               !record()?.outcome &&
-              ['service_approval', 'permissions', 'question'].includes(request()?.kind)
+              (['service_approval', 'permissions', 'question', 'form'].includes(request()?.kind) ||
+                (request()?.kind === 'client_capability' && computerCapability(request())))
             }
           >
             <InteractionAction
@@ -691,19 +772,22 @@ export function InteractionPanel({
               label={
                 busy()
                   ? 'Recording answer…'
-                  : request()?.kind === 'question'
-                    ? '[Ctrl+Enter] Submit answers'
-                    : '[Ctrl+Enter] Allow'
+                  : request()?.kind === 'form'
+                    ? '[Ctrl+Enter] Submit form'
+                    : request()?.kind === 'question'
+                      ? '[Ctrl+Enter] Submit answers'
+                      : '[Ctrl+Enter] Allow'
               }
               disabled={
                 blocked() ||
                 (request()?.kind === 'question' && !questionReady()) ||
+                (request()?.kind === 'form' && !form().answer) ||
                 (request()?.kind === 'service_approval' &&
                   (!completeArguments() || argumentBusy() || !!argumentError()))
               }
               onPress={answerBinding(submissionAnswer())}
             />
-            <If when={request()?.kind !== 'question'}>
+            <If when={!['question', 'form'].includes(request()?.kind)}>
               <InteractionAction
                 label="[D] Deny"
                 disabled={blocked()}
