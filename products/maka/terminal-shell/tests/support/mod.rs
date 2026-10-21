@@ -1034,7 +1034,9 @@ pub fn scroll_snapshot_text(
         .enumerate()
         .find(|(_, line)| line.contains(text))
         .unwrap_or_else(|| panic!("no rendered native text contains {text:?}:\n{snapshot}"));
-    let column = line[..line.find(text).unwrap()].chars().count() as u16;
+    let prefix = &line[..line.find(text).unwrap()];
+    // Count rendered cells, including wide sidebar text sharing this row.
+    let column = ratatui::text::Line::from(prefix).width() as u16;
     view.handle_event(Event::Mouse(MouseEvent {
         kind,
         column,
