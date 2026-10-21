@@ -94,6 +94,9 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
       return;
     if (pages[request.section].back()) props.close();
   };
+  const close = () => {
+    if (alive && !operations.busy()) props.close();
+  };
   const cancel = (request: BackAction) => () => back(request);
   const recover = () =>
     operations.recover((original) => {
@@ -163,26 +166,38 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
             borderBottomColor: C.line,
           }}
         >
+          <If when={nested()}>
+            <Button
+              disabled={operations.busy()}
+              accessibilityLabel={
+                section() === 'connections'
+                  ? 'Back from connection settings'
+                  : `Back from ${section()} settings`
+              }
+              tooltip="Back"
+              onPress={inputAction(back, backAction())}
+              style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+              hoverStyle={controlHoverStyle}
+              focusStyle={controlFocusStyle}
+              disabledStyle={controlDisabledStyle}
+            >
+              <Icon name="back" color={C.secondary} />
+            </Button>
+          </If>
           <Text style={{ flex: 1, color: C.text, fontWeight: '600', fontSize: 18, lineHeight: 24 }}>
             {title()}
           </Text>
           <Button
             disabled={operations.busy()}
-            accessibilityLabel={
-              section() === 'connections'
-                ? 'Back from connection settings'
-                : `Back from ${section()} settings`
-            }
-            onPress={inputAction(back, backAction())}
-            style={{ ...controlStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            accessibilityLabel="Close settings"
+            tooltip="Close settings"
+            onPress={inputAction(close, null)}
+            style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
             hoverStyle={controlHoverStyle}
             focusStyle={controlFocusStyle}
             disabledStyle={controlDisabledStyle}
           >
-            <Text style={{ ...captionTextStyle, color: C.secondary }}>
-              {nested() ? 'Back' : 'Close'}
-            </Text>
-            <Icon name={nested() ? 'back' : 'close'} color={C.secondary} />
+            <Icon name="close" color={C.secondary} />
           </Button>
         </View>
         <View style={{ flex: 1, minHeight: 0, flexDirection: rail() ? 'row' : 'column' }}>
