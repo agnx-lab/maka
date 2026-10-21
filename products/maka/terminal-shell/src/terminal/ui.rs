@@ -254,15 +254,17 @@ impl Session {
         }
         let mut inputs = command.inputs.into_iter().peekable();
         while let Some(input) = inputs.next() {
+            if matches!(
+                &input.pointer,
+                Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. })
+                    if *epoch <= self.presentation.state.lock().unwrap().reject_through
+            ) {
+                self.cancel_pointer()?;
+                changed = true;
+                continue;
+            }
             let lease = match &input.pointer {
-                Some(Pointer::Press { epoch, lease }) => {
-                    if *epoch <= self.presentation.state.lock().unwrap().reject_through {
-                        self.cancel_pointer()?;
-                        changed = true;
-                        continue;
-                    }
-                    Some(lease.as_ref())
-                }
+                Some(Pointer::Press { lease, .. }) => Some(lease.as_ref()),
                 _ => None,
             };
             if let Event::Mouse(mouse) = &input.event
@@ -278,10 +280,15 @@ impl Session {
                 // The Surface resolves its original target once. A custom
                 // component may consume only one; its old-frame remainder
                 // is revoked, never replayed against another target.
-                changed |= self
-                    .surface
-                    .handle_wheel(*mouse, (1 + inputs.count()) as u16)
-                    != 0;
+                let steps = (1 + inputs.count()) as u16;
+                let consumed = match &input.pointer {
+                    Some(Pointer::Wheel { lease, .. }) => self
+                        .surface
+                        .handle_presented_wheel(*mouse, steps, lease)
+                        .unwrap_or(0),
+                    _ => self.surface.handle_wheel(*mouse, steps),
+                };
+                changed |= consumed != 0;
                 self.forward_events(true)?;
                 break;
             }
@@ -586,6 +593,28 @@ mod tests {
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
         config
+    }
+
+    fn publish(
+        output: &mut super::super::output::Output,
+        presentation: &Presentation,
+        frame: Frame,
+    ) {
+        output
+            .submit(
+                frame.bytes.unwrap_or_default(),
+                Some((
+                    presentation.clone(),
+                    frame.epoch,
+                    frame.input.expect("completed frame input"),
+                )),
+            )
+            .unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while !output.poll().unwrap() {
+            assert!(Instant::now() < deadline, "output did not flush");
+            thread::yield_now();
+        }
     }
 
     #[test]
@@ -900,28 +929,11 @@ mod tests {
         .unwrap();
         let mut output = super::super::output::Output::new(io::sink()).unwrap();
         let presentation = session.presentation.clone();
-        let publish = |output: &mut super::super::output::Output, frame: Frame| {
-            output
-                .submit(
-                    frame.bytes.unwrap_or_default(),
-                    Some((
-                        presentation.clone(),
-                        frame.epoch,
-                        frame.input.expect("completed frame input"),
-                    )),
-                )
-                .unwrap();
-            let deadline = Instant::now() + std::time::Duration::from_secs(2);
-            while !output.poll().unwrap() {
-                assert!(Instant::now() < deadline, "output did not flush");
-                thread::yield_now();
-            }
-        };
         // The next UI revision is ready before stdout has displayed it. The
         // ordinary Close action still belongs to the previously flushed UI.
         let initial = session.initial_frame().unwrap();
         let initial_epoch = initial.epoch;
-        publish(&mut output, initial);
+        publish(&mut output, &presentation, initial);
         let events = click(&session.surface, "Close");
         let background = session
             .advance_if_needed(Advance {
@@ -971,7 +983,7 @@ mod tests {
             assert!(inbox.cancel_pointer);
             inbox.cancel_pointer = false;
         }
-        publish(&mut output, acted);
+        publish(&mut output, &presentation, acted);
         {
             let mut inbox = session.presentation.state.lock().unwrap();
             for event in events {
@@ -996,7 +1008,7 @@ mod tests {
             session.surface.snapshot().contains("after closed:2"),
             "a freshly displayed Close remains usable"
         );
-        publish(&mut output, fresh);
+        publish(&mut output, &presentation, fresh);
         let events = click(&session.surface, "Close");
         {
             let mut inbox = session.presentation.state.lock().unwrap();
@@ -1256,6 +1268,166 @@ mod tests {
         );
         drive_burst(&mut session, |surface| click(surface, "row:9"));
         assert!(session.surface.snapshot().contains("offset:144 selected:9"));
+    }
+
+    #[test]
+    fn a_flushed_wheel_survives_background_work_but_not_a_keyed_reader_replacement() {
+        const APP: &str = r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, bindProp, insert, append } from "nsh:rt";
+            const owners = signal([{ id: "A" }]);
+            const status = signal("before");
+            const observed = signal("none");
+            const draft = signal("wheel draft");
+            mount(() => {
+                const root = element("view");
+                prop(root, "style", { flex: 1 });
+                const result = element("text");
+                prop(result, "style", { height: 16 });
+                insert(result, () => status() + " " + observed());
+                append(root, result);
+                insert(root, Each({
+                    get of() { return owners(); },
+                    key: owner => owner.id,
+                    children: owner => {
+                        const id = owner().id;
+                        const scroll = element("scroll");
+                        prop(scroll, "style", { flex: 1 });
+                        prop(scroll, "accessibilityLabel", "owner:" + id);
+                        prop(scroll, "contentOffset", { y: 144 });
+                        prop(scroll, "onScroll", event => observed.set(id + ":" + event.y));
+                        for (let row = 0; row < 30; row++) {
+                            const node = element("view");
+                            prop(node, "style", { height: 16 });
+                            prop(node, "accessibilityLabel", "row:" + id + ":" + row);
+                            const label = element("text");
+                            insert(label, "Row " + id + ":" + row);
+                            append(node, label);
+                            append(scroll, node);
+                        }
+                        return scroll;
+                    },
+                }));
+                const input = element("input");
+                prop(input, "style", { height: 16, flexShrink: 0 });
+                prop(input, "autoFocus", true);
+                bindProp(input, "value", draft);
+                prop(input, "onChange", text => draft.set(text));
+                append(root, input);
+                return root;
+            });
+            requestAnimationFrame(() => {
+                status.set("after");
+                if (REPLACE_OWNER) owners.set([{ id: "B" }]);
+            });
+        "#;
+        for replace_owner in [false, true] {
+            let mut session = Session::new(config(
+                &APP.replace("REPLACE_OWNER", &replace_owner.to_string()),
+            ))
+            .unwrap();
+            let mut output = super::super::output::Output::new(io::sink()).unwrap();
+            let presentation = session.presentation.clone();
+            let initial = session.initial_frame().unwrap();
+            let initial_epoch = initial.epoch;
+            publish(&mut output, &presentation, initial);
+            assert!(session.surface.snapshot().contains("Row A:9"));
+            let editor = session.surface.input_context().unwrap();
+            assert_eq!(editor.text.as_deref(), Some("wheel draft"));
+            let owner_id = |surface: &Surface, owner: &str| {
+                surface
+                    .accessibility_snapshot()
+                    .into_iter()
+                    .find(|node| node.label == format!("owner:{owner}"))
+                    .unwrap()
+                    .id
+            };
+            let original_owner = owner_id(&session.surface, "A");
+            let Event::Mouse(mut wheel) = click(&session.surface, "row:A:9")[0] else {
+                unreachable!()
+            };
+            wheel.kind = MouseEventKind::ScrollUp;
+            let background = session
+                .advance_if_needed(Advance {
+                    image_protocol: None,
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            assert!(background.epoch > initial_epoch);
+            assert!(session.surface.snapshot().contains("after "));
+            assert_eq!(
+                presentation
+                    .presented
+                    .load(std::sync::atomic::Ordering::Acquire),
+                0
+            );
+            let owner = if replace_owner { "B" } else { "A" };
+            let current_owner = owner_id(&session.surface, owner);
+            if replace_owner {
+                assert_ne!(current_owner, original_owner);
+            } else {
+                assert_eq!(current_owner, original_owner);
+            }
+            {
+                let mut inbox = presentation.state.lock().unwrap();
+                assert_eq!(inbox.last_frame.as_ref().unwrap().0, initial_epoch);
+                inbox.push(Event::Mouse(wheel), 0);
+            }
+            // The queued wheel still names the flushed reader when newer
+            // background output completes before the driver can deliver it.
+            publish(&mut output, &presentation, background);
+            let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
+            assert_eq!(inputs.len(), 1);
+            let acted = session
+                .advance(Advance {
+                    image_protocol: None,
+                    inputs,
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            let screen = session.surface.snapshot();
+            if replace_owner {
+                assert!(screen.contains("after B:144"), "{screen}");
+                assert!(screen.contains("Row B:9"), "{screen}");
+                assert!(!screen.contains("Row B:6"), "{screen}");
+            } else {
+                assert!(screen.contains("after A:96"), "{screen}");
+                assert!(screen.contains("Row A:6"), "{screen}");
+            }
+            let current_editor = session.surface.input_context().unwrap();
+            assert_eq!(current_editor.node, editor.node);
+            assert_eq!(current_editor.text, editor.text);
+            assert_eq!(current_editor.selection, editor.selection);
+            if replace_owner {
+                // Rejection is specific to the old owner: a newly flushed
+                // wheel reaches B and produces its real onScroll payload.
+                publish(&mut output, &presentation, acted);
+                let Event::Mouse(mut fresh) = click(&session.surface, "row:B:9")[0] else {
+                    unreachable!()
+                };
+                fresh.kind = MouseEventKind::ScrollUp;
+                let inputs = {
+                    let mut inbox = presentation.state.lock().unwrap();
+                    inbox.push(Event::Mouse(fresh), session.epoch);
+                    inbox.pop_batch(session.epoch)
+                };
+                assert_eq!(inputs.len(), 1);
+                session
+                    .advance(Advance {
+                        image_protocol: None,
+                        inputs,
+                        resize: None,
+                        cancel_pointer: false,
+                    })
+                    .unwrap();
+                let screen = session.surface.snapshot();
+                assert!(screen.contains("after B:96"), "{screen}");
+                assert!(screen.contains("Row B:6"), "{screen}");
+            }
+        }
     }
 
     #[test]
