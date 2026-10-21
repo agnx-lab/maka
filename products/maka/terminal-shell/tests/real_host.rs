@@ -1933,9 +1933,15 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         wait_mode_layout(&mut view).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy message").await;
-        let too_large = wait_view(&mut view, |screen| screen.contains("64 KiB")).await;
-        assert!(!view.drain_service_output().any(|effect| matches!(effect, ServiceOutput::Clipboard(_))), "an oversized original body must not copy its loaded tail or a truncated prefix");
-        evidence("rich-response-copy-rejects-oversized-source", &too_large);
+        let copied_large = wait_view(&mut view, |screen| screen.contains("Sent to terminal clipboard")).await;
+        let clipboard = view.drain_service_output().filter(|effect| matches!(effect, ServiceOutput::Clipboard(_))).collect::<Vec<_>>();
+        assert_eq!(clipboard.len(), 1, "the exact long canonical body must be copied once");
+        let ServiceOutput::Clipboard(copied) = &clipboard[0] else { unreachable!() };
+        assert!(copied == &source, "copy must reread the original source instead of copying its loaded tail");
+        let sequence = clipboard[0].terminal_sequence(false);
+        let payload = sequence.strip_prefix("\u{1b}]52;c;").and_then(|sequence| sequence.strip_suffix("\u{1b}\\")).expect("the large source must produce one complete OSC52 sequence");
+        assert!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap() == source.as_bytes());
+        evidence("rich-response-copies-complete-large-source", &copied_large);
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         drop(view);
         bindings.close().await.unwrap();

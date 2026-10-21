@@ -20,10 +20,10 @@
 use super::{
     Presentation,
     input::{Input, Pointer},
-    output::{FrameWriter, exceeded_budget},
+    output::FrameWriter,
 };
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
-use nsh_core::{Command, MountBatch, MountItem, ROOT_ID, platform::Environment};
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use nsh_core::{MountBatch, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
     CellMetrics, ImageProtocol, InputSnapshot, PressLease, ProtocolType, ServiceOutput,
@@ -138,7 +138,6 @@ struct Session {
     epoch: u64,
     started: Instant,
     effects: Vec<u8>,
-    sixel: bool,
     presentation: Presentation,
 }
 
@@ -180,7 +179,6 @@ impl Session {
             epoch: 0,
             started: Instant::now(),
             effects: Vec::new(),
-            sixel: false,
             presentation: Presentation::default(),
         })
     }
@@ -226,7 +224,6 @@ impl Session {
         }
         if let Some((columns, rows)) = command.resize {
             self.surface.set_image_protocol(None);
-            self.sixel = false;
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
             self.engine.set_focus_path_now(&self.surface.focus_path());
@@ -244,7 +241,6 @@ impl Session {
                 return Err("this shell only negotiates stateless Sixel images".into());
             }
             self.surface.set_image_protocol(Some(protocol));
-            self.sixel = true;
             changed = true;
         }
         for input in &command.inputs {
@@ -291,11 +287,6 @@ impl Session {
                 changed |= consumed != 0;
                 self.forward_events(true)?;
                 break;
-            }
-            if self.oversized_cut(&input.event) {
-                self.clipboard_failure();
-                changed = true;
-                continue;
             }
             if let (Event::Mouse(mouse), Some(lease)) = (&input.event, lease) {
                 if !matches!(
@@ -352,46 +343,6 @@ impl Session {
         self.dispatch_events(events, false, None).map(|_| ())
     }
 
-    fn oversized_cut(&self, event: &Event) -> bool {
-        let Event::Key(key) = event else { return false };
-        if key.kind == KeyEventKind::Release
-            || !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
-            || !matches!(key.code, KeyCode::Char('x' | 'X'))
-        {
-            return false;
-        }
-        let Some(context) = self.surface.input_context() else {
-            return false;
-        };
-        let Some(text) = context.text else {
-            return false;
-        };
-        let selected: Vec<_> = text
-            .encode_utf16()
-            .skip(context.selection.start as usize)
-            .take((context.selection.end - context.selection.start) as usize)
-            .collect();
-        // Native selections end at complete Unicode characters. Ask the
-        // actual transport encoder before the editor performs a cut.
-        ServiceOutput::Clipboard(String::from_utf16(&selected).expect("valid native selection"))
-            .terminal_sequence(false)
-            .is_empty()
-    }
-
-    fn clipboard_failure(&mut self) {
-        self.surface.apply(MountBatch {
-            items: vec![MountItem::Command {
-                id: ROOT_ID,
-                command: Command::Toast {
-                    text: "Copy failed: exceeds 64 KiB.".into(),
-                    long: true,
-                },
-            }],
-        });
-    }
-
     fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
         let events: Vec<_> = self.surface.drain_events().collect();
         self.dispatch_events(events, presented_input, None)
@@ -445,11 +396,7 @@ impl Session {
                 SurfaceEvent::Service(ServiceRequest::ClipboardWrite(text)) => {
                     let sequence = ServiceOutput::Clipboard(text)
                         .terminal_sequence(std::env::var_os("TMUX").is_some());
-                    if sequence.is_empty() {
-                        self.clipboard_failure();
-                    } else {
-                        self.effects.extend_from_slice(sequence.as_bytes());
-                    }
+                    self.effects.extend_from_slice(sequence.as_bytes());
                 }
                 SurfaceEvent::Service(ServiceRequest::ClipboardRead { id, has_only }) => {
                     self.surface.complete_clipboard(
@@ -504,45 +451,12 @@ impl Session {
             });
         }
         // This UI draws its own caret, so the physical cursor is always hidden.
-        let mut suffix = Vec::new();
-        crossterm::queue!(
-            suffix,
-            crossterm::cursor::Hide,
-            crossterm::terminal::EndSynchronizedUpdate
-        )
-        .map_err(|error| error.to_string())?;
-        let suffix_bytes = suffix
-            .len()
-            .checked_add(self.effects.len())
-            .ok_or("terminal frame exceeds byte limit")?;
         let writer = self.terminal.backend_mut().writer_mut();
-        let prefix = writer.0.len();
-        writer
-            .reserve(suffix_bytes)
-            .map_err(|error| error.to_string())?;
         crossterm::queue!(writer, crossterm::terminal::BeginSynchronizedUpdate)
             .map_err(|error| error.to_string())?;
         self.surface
             .render(self.area, self.terminal.current_buffer_mut());
-        if let Err(error) = self.terminal.flush() {
-            if !self.sixel || !exceeded_budget(&error) {
-                return Err(error.to_string());
-            }
-            // backend.draw failed before cursor bookkeeping or buffer swap. Keep
-            // resize bytes already queued before this pass, discard its partial
-            // candidate, and admit Unicode exactly once with the same suffix.
-            self.terminal.backend_mut().writer_mut().0.truncate(prefix);
-            self.terminal.current_buffer_mut().reset();
-            crossterm::queue!(
-                self.terminal.backend_mut().writer_mut(),
-                crossterm::terminal::BeginSynchronizedUpdate
-            )
-            .map_err(|error| error.to_string())?;
-            self.surface
-                .render_plain(self.area, self.terminal.current_buffer_mut());
-            self.terminal.flush().map_err(|error| error.to_string())?;
-        }
-        self.terminal.backend_mut().writer_mut().release();
+        self.terminal.flush().map_err(|error| error.to_string())?;
         self.terminal
             .hide_cursor()
             .map_err(|error| error.to_string())?;
@@ -712,10 +626,8 @@ mod tests {
             "the real output frame must paint the image's Unicode fallback"
         );
 
-        // Calibrate the actual Unicode wire frame after a clear. The later
-        // effects fill exactly the remaining complete-frame budget, so native
-        // Sixel must fall back before committing Ratatui's previous buffer.
-        // These opaque marker bytes stay in FrameWriter; the test never writes stdout.
+        // Exercise the same image protocol with a large clipboard effect.
+        // The test captures FrameWriter bytes without writing real stdout.
         let prepare = |session: &mut Session| {
             // A fresh fixed terminal resets both diff buffers without calling
             // Terminal::clear, whose cursor query would read the real stdin.
@@ -734,8 +646,6 @@ mod tests {
                 .unwrap();
             session.terminal.backend().writer().0.clone()
         };
-        prepare(&mut session);
-        let plain_bytes = session.encode(true).unwrap().bytes.unwrap();
         let protocol = ImageProtocol::new(ProtocolType::Sixel, 24, 48).unwrap();
         let mut native = session
             .advance(Advance {
@@ -809,38 +719,27 @@ mod tests {
                 .unwrap_or_default();
             thread::sleep(std::time::Duration::from_millis(1));
         }
-        prepare(&mut session);
-        let native_bytes = session.encode(true).unwrap().bytes.unwrap();
-        assert!(
-            native_bytes.len() > plain_bytes.len(),
-            "fixture must force a real Sixel budget rejection"
-        );
         let prefix = prepare(&mut session);
-        session.effects.resize(
-            super::super::output::MAX_FRAME_BYTES - plain_bytes.len() - 6,
-            b'e',
-        );
-        session.effects.extend_from_slice(b"EFFECT");
+        let original = "中😀".repeat(1_200_000);
+        let effect = ServiceOutput::Clipboard(original).terminal_sequence(false);
+        session.effects.extend_from_slice(effect.as_bytes());
         let frame = session.encode(true).unwrap().bytes.unwrap();
-        assert_eq!(frame.len(), super::super::output::MAX_FRAME_BYTES);
+        assert!(frame.len() > 8 * 1024 * 1024);
         assert!(
             frame.starts_with(&prefix),
-            "clear and preexisting output survive the rejected candidate"
+            "clear and preexisting output precede the complete image and effect"
         );
-        assert!(!frame.windows(2).any(|bytes| bytes == b"\x1bP"));
-        assert!(frame.ends_with(b"EFFECT"));
+        assert!(frame.windows(2).any(|bytes| bytes == b"\x1bP"));
+        assert!(frame.ends_with(effect.as_bytes()));
         assert_eq!(
-            frame.windows(6).filter(|bytes| *bytes == b"EFFECT").count(),
+            frame
+                .windows(7)
+                .filter(|bytes| *bytes == b"\x1b]52;c;")
+                .count(),
             1
         );
         assert!(session.effects.is_empty());
-        session.surface.set_image_protocol(None);
-        session.sixel = false;
-        let next = session.encode(true).unwrap().bytes.unwrap();
-        assert!(
-            next.len() < 128,
-            "the accepted Unicode cells must be the next diff baseline"
-        );
+        assert!(session.encode(false).unwrap().bytes.is_none());
     }
 
     const APP: &str = r#"
@@ -1640,12 +1539,12 @@ mod tests {
     }
 
     #[test]
-    fn oversized_copy_and_cut_keep_the_draft_and_allow_later_editing() {
+    fn large_copy_preserves_the_draft_and_cut_delivers_the_complete_text_once() {
         let mut session = Session::new(config(
             r#"
             import { mount, signal } from "nsh";
             import { element, prop, bindProp } from "nsh:rt";
-            const value = signal("x".repeat(65535) + "😀");
+            const value = signal("x".repeat(1048577) + "😀");
             mount(() => {
                 const input = element("input");
                 prop(input, "autoFocus", true);
@@ -1670,6 +1569,7 @@ mod tests {
         session
             .advance(command('a', KeyModifiers::CONTROL))
             .unwrap();
+        let original = "x".repeat(1_048_577) + "😀";
         for key in ['c', 'x'] {
             let frame = session
                 .advance(command(key, KeyModifiers::CONTROL))
@@ -1677,20 +1577,19 @@ mod tests {
             assert!(!frame.quit);
             assert_eq!(
                 session.surface.input_context().unwrap().text,
-                Some("x".repeat(65_535) + "😀")
+                Some(if key == 'c' {
+                    original.clone()
+                } else {
+                    String::new()
+                })
             );
+            let bytes = frame.bytes.unwrap();
+            let sequence = ServiceOutput::Clipboard(original.clone())
+                .terminal_sequence(std::env::var_os("TMUX").is_some());
             assert!(
-                session
-                    .surface
-                    .snapshot()
-                    .contains("Copy failed: exceeds 64 KiB.")
-            );
-            assert!(
-                !frame
-                    .bytes
-                    .unwrap()
-                    .windows(4)
-                    .any(|bytes| bytes == b"\x1b]52")
+                bytes
+                    .windows(sequence.len())
+                    .any(|bytes| bytes == sequence.as_bytes())
             );
         }
         session.advance(command('z', KeyModifiers::NONE)).unwrap();

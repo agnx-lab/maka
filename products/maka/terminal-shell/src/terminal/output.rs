@@ -26,8 +26,6 @@ use std::{
     time::Instant,
 };
 
-pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
-
 enum Request {
     Frame(
         Vec<u8>,
@@ -93,9 +91,6 @@ impl Output {
         if self.pending.is_some() {
             return Err("terminal frame still in flight".into());
         }
-        if bytes.len() > MAX_FRAME_BYTES {
-            return Err("terminal frame exceeds byte limit".into());
-        }
         let (send, receive) = mpsc::sync_channel(1);
         let presentation =
             presentation.map(|(owner, epoch, snapshot)| (owner, epoch, Box::new(snapshot)));
@@ -143,57 +138,16 @@ impl Output {
     }
 }
 
-#[derive(Debug)]
-struct FrameBudget;
-
-impl std::fmt::Display for FrameBudget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("terminal frame exceeds byte limit")
-    }
-}
-impl std::error::Error for FrameBudget {}
-
-pub(super) fn exceeded_budget(error: &io::Error) -> bool {
-    error
-        .get_ref()
-        .is_some_and(|error| error.is::<FrameBudget>())
-}
-
-pub(super) struct FrameWriter(pub Vec<u8>, usize);
-
-impl Default for FrameWriter {
-    fn default() -> Self {
-        Self(Vec::new(), MAX_FRAME_BYTES)
-    }
-}
-
-impl FrameWriter {
-    /// Reserve the exact epilogue before attempting a candidate buffer diff.
-    pub fn reserve(&mut self, suffix: usize) -> io::Result<()> {
-        self.1 = MAX_FRAME_BYTES
-            .checked_sub(suffix)
-            .ok_or_else(|| io::Error::other(FrameBudget))?;
-        if self.0.len() > self.1 {
-            return Err(io::Error::other(FrameBudget));
-        }
-        Ok(())
-    }
-
-    pub fn release(&mut self) {
-        self.1 = MAX_FRAME_BYTES;
-    }
-}
+#[derive(Default)]
+pub(super) struct FrameWriter(pub Vec<u8>);
 
 impl Write for FrameWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if self
-            .0
+        self.0
             .len()
             .checked_add(bytes.len())
-            .is_none_or(|size| size > self.1)
-        {
-            return Err(io::Error::other(FrameBudget));
-        }
+            .ok_or_else(|| io::Error::other("terminal output length overflow"))?;
+        self.0.try_reserve(bytes.len()).map_err(io::Error::other)?;
         self.0.extend_from_slice(bytes);
         Ok(bytes.len())
     }
@@ -286,20 +240,85 @@ mod tests {
     }
 
     #[test]
-    fn reserved_suffix_and_prefix_share_the_complete_frame_limit() {
-        let mut writer = FrameWriter::default();
-        writer.write_all(b"PREFIX").unwrap();
-        writer.reserve(17).unwrap();
-        writer
-            .write_all(&vec![b'x'; MAX_FRAME_BYTES - 6 - 17])
+    fn large_clipboard_frame_finishes_before_cleanup_through_the_same_writer() {
+        use base64::Engine as _;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct ChunkedWriter {
+            bytes: Arc<Mutex<Vec<u8>>>,
+            first: Option<mpsc::Receiver<()>>,
+            entered: mpsc::SyncSender<()>,
+            flushes: Arc<AtomicUsize>,
+        }
+        impl Write for ChunkedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if let Some(gate) = self.first.take() {
+                    self.entered.send(()).unwrap();
+                    gate.recv().unwrap();
+                }
+                let length = bytes.len().min(64 * 1024);
+                self.bytes
+                    .lock()
+                    .unwrap()
+                    .extend_from_slice(&bytes[..length]);
+                Ok(length)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let original = "中😀".repeat(1_200_000);
+        assert!(original.len() > 8 * 1024 * 1024);
+        let clipboard =
+            nsh_platform_tui::ServiceOutput::Clipboard(original.clone()).terminal_sequence(false);
+        let encoded = clipboard
+            .strip_prefix("\x1b]52;c;")
+            .and_then(|bytes| bytes.strip_suffix("\x1b\\"))
+            .expect("the complete clipboard must retain its original OSC52 envelope");
+        assert!(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap()
+                == original.as_bytes()
+        );
+        let mut frame = FrameWriter::default();
+        frame.write_all(b"PREFIX").unwrap();
+        frame.write_all(clipboard.as_bytes()).unwrap();
+        frame.write_all(b"EPILOGUE").unwrap();
+        let expected = frame.0.clone();
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let flushes = Arc::new(AtomicUsize::new(0));
+        let (release, gate) = mpsc::channel();
+        let (entered, observing) = mpsc::sync_channel(1);
+        let mut output = Output::new(ChunkedWriter {
+            bytes: bytes.clone(),
+            first: Some(gate),
+            entered,
+            flushes: flushes.clone(),
+        })
+        .unwrap();
+        let presentation = Presentation::default();
+        output
+            .submit(frame.0, Some((presentation.clone(), 7, snapshot())))
             .unwrap();
-        let error = writer.write_all(b"!").unwrap_err();
-        assert!(exceeded_budget(&error));
-        writer.release();
-        writer.write_all(&[b'e'; 17]).unwrap();
-        assert_eq!(writer.0.len(), MAX_FRAME_BYTES);
-        assert!(exceeded_budget(&writer.write_all(b"!").unwrap_err()));
-        assert!(!exceeded_budget(&io::Error::other("real IO failure")));
+        observing.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(!output.poll().unwrap());
+        assert!(output.submit(b"replacement".to_vec(), None).is_err());
+        let closed = output.close(b"RESTORE".to_vec()).unwrap();
+        assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        release.send(()).unwrap();
+        closed
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        let written = bytes.lock().unwrap();
+        assert!(
+            written[..expected.len()] == expected,
+            "the complete original large frame must be delivered once"
+        );
+        assert_eq!(&written[expected.len()..], b"RESTORE");
+        assert_eq!(flushes.load(Ordering::SeqCst), 2);
+        assert_eq!(presentation.presented.load(Ordering::Acquire), 7);
     }
 
     #[test]

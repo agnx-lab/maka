@@ -419,9 +419,6 @@ fn run(
                 let bytes = nsh_platform_tui::ServiceOutput::Clipboard(text)
                     .terminal_sequence(std::env::var_os("TMUX").is_some())
                     .into_bytes();
-                if bytes.is_empty() {
-                    return Err("terminal copy exceeds its 64 KiB limit".into());
-                }
                 presentation
                     .state
                     .lock()

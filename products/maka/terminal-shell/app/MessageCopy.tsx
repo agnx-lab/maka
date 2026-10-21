@@ -30,7 +30,6 @@ type OriginalMessage = {
   position: Position;
   through: number;
 };
-const CLIPBOARD_BYTES = 64 * 1024;
 const samePosition = (left: Position, right: Position) =>
   left.sourceSequence === right.sourceSequence && left.itemIndex === right.itemIndex;
 
@@ -106,8 +105,6 @@ export function MessageCopy(props: {
         ) {
           throw new Error('The original message source could not be verified.');
         }
-        if (source.totalBytes > CLIPBOARD_BYTES)
-          throw new Error('Message exceeds the terminal clipboard limit (64 KiB).');
         total = source.totalBytes;
         content += source.text;
         offset = end;
