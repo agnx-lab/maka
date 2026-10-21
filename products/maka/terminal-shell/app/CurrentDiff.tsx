@@ -233,7 +233,7 @@ function DiffRows(props: { model: CurrentDiffModel }) {
       estimatedItemSize={16}
       contentOffset={initialOffset}
       onScroll={(event) => {
-        if (mounted) model.position = { x: event.x, y: event.y };
+        if (mounted) model.position = { x: event.offset.x, y: event.offset.y };
       }}
       style={{ flex: 1, minHeight: 0 }}
       empty={<Text style={{ color: C.muted }}>The current patch has no displayable rows.</Text>}

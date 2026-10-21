@@ -348,7 +348,7 @@ export function ModelSelect(props: {
               list = node;
             }}
             estimatedItemSize={48}
-            onEndReached={() => {
+            onLoadMore={() => {
               if (!error()) void loadModels();
             }}
             style={{ height: count() * 48 }}

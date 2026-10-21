@@ -292,7 +292,7 @@ function FileRows(props: { model: CurrentFileModel; view: Extract<FileView, { ki
       estimatedItemSize={16}
       contentOffset={initialOffset}
       onScroll={(event) => {
-        if (mounted) props.model.position = { x: event.x, y: event.y };
+        if (mounted) props.model.position = { x: event.offset.x, y: event.offset.y };
       }}
       accessibilityLabel="Captured file text"
       style={{ flex: 1, minHeight: 0 }}

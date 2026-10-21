@@ -111,7 +111,7 @@ export function Composer(props: {
           { when: 'always', within: node },
         );
       }}
-      onLayout={(frame) => width.set(frame.width)}
+      onLayout={(frame) => width.set(frame.size.width)}
       style={{
         flex: hero() ? 1 : 0,
         justifyContent: 'center',

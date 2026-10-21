@@ -366,8 +366,8 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
             </If>
           </View>
         )}
-        onLayout={(frame) => viewportHeight.set(frame.height)}
-        onEndReached={() => {
+        onLayout={(frame) => viewportHeight.set(frame.size.height)}
+        onLoadMore={() => {
           if (!choosingWorkspace()) void browser.loadMore();
         }}
         style={{ flex: 1, minHeight: 32 }}

@@ -222,10 +222,11 @@ function ActivityLog(props: {
           maintainVisibleContentPosition={
             state.following() ? { autoscrollToBottomThreshold: 16 } : {}
           }
-          showsIndicator={true}
+          scrollbar={true}
           onScroll={(event) => {
             if (!alive || lease !== state.lease) return;
-            const away = event.y < Math.max(0, event.contentHeight - event.height) - 1;
+            const away =
+              event.offset.y < Math.max(0, event.contentSize.height - event.size.height) - 1;
             // A capped tool reader can be at the turn's bottom while the user
             // is reading its original. Only an explicit return resumes follow.
             if (
@@ -272,15 +273,15 @@ function ActivityLog(props: {
                       const width = props.viewport().width;
                       const old = state.measured.get(ownedId());
                       if (
-                        frame.height > 0 &&
-                        (!old || old.width !== width || old.height !== frame.height)
+                        frame.size.height > 0 &&
+                        (!old || old.width !== width || old.height !== frame.size.height)
                       ) {
-                        state.measured.set(ownedId(), { width, height: frame.height });
+                        state.measured.set(ownedId(), { width, height: frame.size.height });
                         measurements.set(measurements() + 1);
                         const pending = pendingReveal();
                         if (
                           pending?.rowId === ownedId() &&
-                          frame.height > pending.height &&
+                          frame.size.height > pending.height &&
                           props.rowState(ownedId()).expanded()
                         ) {
                           pendingReveal.set(null);

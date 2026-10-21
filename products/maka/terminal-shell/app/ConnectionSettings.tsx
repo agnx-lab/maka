@@ -82,7 +82,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             each={owner.connections()}
             keyExtractor={(item) => item.basis.connectionId}
             estimatedItemSize={64}
-            onEndReached={() => {
+            onLoadMore={() => {
               if (!owner.error()) void owner.loadConnections(true);
             }}
             style={{ flex: 1 }}
@@ -112,7 +112,7 @@ export function ConnectionSettings(props: { owner: ModelSettingsOwner }) {
             each={owner.providers()}
             keyExtractor={(item) => JSON.stringify(item.identity)}
             estimatedItemSize={48}
-            onEndReached={() => {
+            onLoadMore={() => {
               if (!owner.error()) void owner.loadProviders(true);
             }}
             style={{ flex: 1 }}

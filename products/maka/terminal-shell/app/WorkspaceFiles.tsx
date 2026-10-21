@@ -114,14 +114,14 @@ export function WorkspaceFiles(props: { model: WorkspaceFilesModel }) {
               contentOffset={initialOffset}
               onScroll={(event) => {
                 if (ownsView()) {
-                  model.position.x = event.x;
-                  model.position.y = event.y;
+                  model.position.x = event.offset.x;
+                  model.position.y = event.offset.y;
                 }
               }}
               onLayout={(frame) => {
-                if (ownsView()) viewportHeight.set(frame.height);
+                if (ownsView()) viewportHeight.set(frame.size.height);
               }}
-              onEndReached={() => {
+              onLoadMore={() => {
                 if (ownsView()) void model.loadMore();
               }}
               accessibilityLabel="Workspace files"

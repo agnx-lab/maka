@@ -130,7 +130,7 @@ export function Checklist(props: { sessionId: string }) {
         <If when={expanded()}>
           <List
             each={items()}
-            onEndReached={() => void loadMore()}
+            onLoadMore={() => void loadMore()}
             estimatedItemSize={16}
             keyExtractor={(_, index) => String(index)}
             style={{

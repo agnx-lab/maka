@@ -1581,10 +1581,10 @@ export function Conversation(props: ConversationProps) {
         <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
           <List
             ref={list}
-            onLayout={(frame) => readingSize.set({ width: frame.width, height: frame.height })}
+            onLayout={(frame) => readingSize.set(frame.size)}
             each={displayKeys()}
-            onScrollBeginDrag={cancelTurnNavigation}
-            onViewableItemsChanged={(event) =>
+            onScrollDragStart={cancelTurnNavigation}
+            onViewableItemsChange={(event) =>
               visibleTurn.set(entryTurn(event.viewableItems[0]?.item ?? ''))
             }
             estimatedItemSize={96}
@@ -1594,7 +1594,9 @@ export function Conversation(props: ConversationProps) {
             contentStyle={{ paddingRight: 8 }}
             style={{ flex: 1, minHeight: 0 }}
             onScroll={(event) => {
-              awayFromLatest.set(event.y < Math.max(0, event.contentHeight - event.height) - 32);
+              awayFromLatest.set(
+                event.offset.y < Math.max(0, event.contentSize.height - event.size.height) - 32,
+              );
               const reader = innerReader();
               const row = reader === null ? undefined : projection().rowsById.get(reader);
               const toolReader =
@@ -1606,10 +1608,10 @@ export function Conversation(props: ConversationProps) {
                 reader !== null &&
                 !groupStates.get(reader)?.list &&
                 !toolReader &&
-                event.y >= Math.max(0, event.contentHeight - event.height) - 1
+                event.offset.y >= Math.max(0, event.contentSize.height - event.size.height) - 1
               )
                 innerReader.set(null);
-              if (event.y <= 32) void loadOlder();
+              if (event.offset.y <= 32) void loadOlder();
             }}
             empty={
               <Text style={{ color: C.muted, paddingVertical: 32 }}>Loading session history…</Text>

@@ -139,7 +139,7 @@ export function Terminal(props: { model: TerminalModel }) {
     model.input([{ type: 'key', key: name, modifiers }]);
   const copy = async () => {
     try {
-      await Clipboard.setString(
+      await Clipboard.writeText(
         frame()
           .rows.map((row) =>
             row
@@ -283,8 +283,8 @@ export function Terminal(props: { model: TerminalModel }) {
       geometry !== dimensions()
     )
       return;
-    const column = Math.floor((x - bounds.pageX + model.position.x) / CELL);
-    const row = current.firstLine + Math.floor((y - bounds.pageY) / LINE);
+    const column = Math.floor((x - bounds.pagePosition.x + model.position.x) / CELL);
+    const row = current.firstLine + Math.floor((y - bounds.pagePosition.y) / LINE);
     if (
       column < 0 ||
       row < 0 ||
@@ -390,7 +390,7 @@ export function Terminal(props: { model: TerminalModel }) {
         ref={(node) => {
           body = node;
         }}
-        onLayout={(event) => dimensions.set({ width: event.width, height: event.height })}
+        onLayout={(event) => dimensions.set(event.size)}
         onPress={() => {
           input?.focus();
           if (!model.agentOwned()) model.takeControl();
@@ -410,7 +410,7 @@ export function Terminal(props: { model: TerminalModel }) {
           <Scroll
             horizontal
             onScroll={(event) => {
-              model.position.x = event.x;
+              model.position.x = event.offset.x;
             }}
             style={{ flex: 1 }}
           >
@@ -420,11 +420,11 @@ export function Terminal(props: { model: TerminalModel }) {
               }}
               contentOffset={model.position}
               onScroll={(event) => {
-                model.position.y = event.y;
+                model.position.y = event.offset.y;
                 const current = frame();
                 const distance = Math.max(
                   0,
-                  current.totalRows - rows() - Math.floor(event.y / LINE),
+                  current.totalRows - rows() - Math.floor(event.offset.y / LINE),
                 );
                 model.atBottom = distance <= 1;
                 offset.set(model.atBottom ? 0 : distance);
@@ -534,7 +534,7 @@ export function Terminal(props: { model: TerminalModel }) {
             onBlur={() => model.release()}
             autoCapitalize="none"
             autoCorrect={false}
-            caretHidden
+            caret={false}
             multiline
             submitBehavior="newline"
             accessibilityLabel="Terminal keyboard input"

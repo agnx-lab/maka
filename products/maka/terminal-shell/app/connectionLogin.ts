@@ -117,7 +117,7 @@ export function createConnectionLogin(
     // business outcome and cleanup arrive. It may already have been saved.
     original?.cancel();
   };
-  const copy = (action: CopyAction) => {
+  const copy = async (action: CopyAction) => {
     const current = state();
     if (
       !alive ||
@@ -125,8 +125,13 @@ export function createConnectionLogin(
       current.prompt?.[action.field] !== action.value
     )
       return;
-    Clipboard.setString(action.value);
-    operations.notice.set(action.field === 'url' ? 'Sign-in URL copied.' : 'Sign-in code copied.');
+    try {
+      await Clipboard.writeText(action.value);
+      if (alive && state()?.occurrence === action.occurrence)
+        operations.notice.set(action.field === 'url' ? 'Sign-in URL copied.' : 'Sign-in code copied.');
+    } catch (reason) {
+      if (alive && state()?.occurrence === action.occurrence) operations.report(reason);
+    }
   };
   return { state, start, cancel, copy };
 }

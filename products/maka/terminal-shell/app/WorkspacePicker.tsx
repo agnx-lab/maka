@@ -315,7 +315,7 @@ export function WorkspacePicker(props: {
                   list = node;
                 }}
                 estimatedItemSize={32}
-                onEndReached={() => {
+                onLoadMore={() => {
                   void load(read);
                 }}
                 accessibilityLabel="Workspace folders"

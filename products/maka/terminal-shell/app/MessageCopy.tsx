@@ -111,8 +111,8 @@ export function MessageCopy(props: {
         if (offset === total) break;
       }
       if (!owns(original)) return;
-      Clipboard.setString(content);
-      notice.set('Sent to terminal clipboard');
+      await Clipboard.writeText(content);
+      if (owns(original)) notice.set('Sent to terminal clipboard');
     } catch (reason) {
       if (owns(original)) {
         failed.set(true);

@@ -48,7 +48,7 @@ export function Header(props: {
   const width = signal(windowSize().width);
   return (
     <View
-      onLayout={(frame) => width.set(frame.width)}
+      onLayout={(frame) => width.set(frame.size.width)}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
