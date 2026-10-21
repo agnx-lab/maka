@@ -150,6 +150,9 @@ impl Pty {
         self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
     }
     pub fn click_text(&mut self, label: &str) {
+        self.click_text_in_row(label, "");
+    }
+    pub fn click_text_in_row(&mut self, label: &str, row_marker: &str) {
         assert!(
             completed_presentation(&self.output),
             "cannot locate a physical click in an incomplete synchronized frame"
@@ -158,8 +161,10 @@ impl Pty {
         let (row, line) = screen
             .lines()
             .enumerate()
-            .find(|(_, line)| line.contains(label))
-            .unwrap_or_else(|| panic!("no visible PTY button {label:?}:\n{screen}"));
+            .find(|(_, line)| line.contains(label) && line.contains(row_marker))
+            .unwrap_or_else(|| {
+                panic!("no visible PTY button {label:?} in row {row_marker:?}:\n{screen}")
+            });
         let offset = line.find(label).unwrap();
         let column = ratatui::text::Line::from(&line[..offset]).width() + 1;
         let row = row + 1;

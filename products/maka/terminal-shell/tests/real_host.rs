@@ -2084,8 +2084,8 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         terminal.wait_for_absent("Loading session history").await;
         terminal.wait_for("Working…").await;
         terminal.send(b"\x1b[1;3B");
-        terminal.wait_for("Read").await;
-        terminal.click_text("Read");
+        terminal.wait_for("Recorded").await;
+        terminal.click_text_in_row("Read", "Recorded");
         let inline = terminal.wait_for("Open image · 192 × 128").await;
         assert!(inline.contains('▀'), "the actual PNG must paint in the production terminal");
         evidence("tool-image-inline", &inline);
@@ -2192,9 +2192,9 @@ async fn production_sixel_negotiates_from_real_queries_and_resize_keeps_unicode_
         support::wait_draft(&terminal_client, &fixture.session, "GRAPHICS_INPUT_你好_PRESERVED").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
         terminal.send(b"\x1b[1;3B");
-        terminal.wait_for("Read").await;
+        terminal.wait_for("Recorded").await;
         let image_start = terminal.wire().len();
-        terminal.click_text("Read");
+        terminal.click_text_in_row("Read", "Recorded");
         terminal.wait_for("Open image · 64 × 48").await;
         terminal.wait_for_wire(SIXEL, image_start).await;
         let native_wire = &terminal.wire()[image_start..];
@@ -2335,9 +2335,9 @@ async fn production_workspace_picker_browses_deep_folders_and_restores_the_real_
             &fixture.directory.path().join("host"),
             Some(&fixture.session),
         );
-        terminal.wait_for("fixture-model · Default").await;
-        terminal.wait_for_absent("Loading session history").await;
         terminal.wait_for("Message or run a task…").await;
+        terminal.wait_for_absent("Loading session history").await;
+        terminal.wait_for_absent("Loading the saved draft").await;
         terminal.click_text("Message or run a task…");
         terminal.paste("PTY_FOLDER_DRAFT_你好");
         terminal.wait_for("PTY_FOLDER_DRAFT_你好").await;
