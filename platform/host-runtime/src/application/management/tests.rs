@@ -559,7 +559,7 @@ async fn historical_binary_bundle_export_round_trips_and_cancels_with_cleanup() 
 }
 
 #[tokio::test]
-async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_pages() {
+async fn immutable_document_resource_over_two_mib_roundtrips_through_validated_pages() {
     async fn read_all(manager: &Manager, source: &DeploymentRef) -> String {
         let contract = deployment_manager_contract();
         let Interface::Service { methods } = contract.interface else {
@@ -570,7 +570,7 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
         let output_validator = jsonschema::validator_for(&method.output).unwrap();
         let mut offset = 0;
         let mut text = String::new();
-        let mut read_beyond_one_mib = false;
+        let mut read_beyond_two_mib = false;
         loop {
             let input = json!({"source":source,"offset":offset});
             input_validator.validate(&input).unwrap();
@@ -587,7 +587,7 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
             assert_eq!(&chunk.source, source);
             assert_eq!(chunk.offset, offset);
             assert!(chunk.text.len() <= 65536);
-            read_beyond_one_mib |= chunk.offset > 1024 * 1024;
+            read_beyond_two_mib |= chunk.offset > 2 * 1024 * 1024;
             text.push_str(&chunk.text);
             if let Some(next) = chunk.next {
                 assert_eq!(next, text.len());
@@ -599,7 +599,7 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
             }
         }
         assert!(
-            read_beyond_one_mib,
+            read_beyond_two_mib,
             "public continuation offsets must cross the old document limit"
         );
         text
@@ -608,7 +608,7 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
     let fixture = Fixture::new().await;
     let selected = package(vec![0, 255, 128]);
     let mut large_input = input(&selected);
-    let padding = format!("界{}\n🙂尾", "x".repeat(1024 * 1024 + 128 * 1024));
+    let padding = format!("界{}\n🙂尾", "x".repeat(2 * 1024 * 1024 + 128 * 1024));
     large_input
         .instances
         .get_mut("payload")
@@ -621,15 +621,18 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
         remote_exports: vec![],
         packages: vec![selected.application_ref()],
     };
-    assert!(serde_json::to_vec(&document).unwrap().len() > 1024 * 1024);
+    assert!(serde_json::to_vec(&document).unwrap().len() > 2 * 1024 * 1024);
     let replaced = replace(&fixture.manager, 1, &document, Some(bundles(&[&selected]))).await;
+    if replaced["status"] != "committed" {
+        fixture.store.shutdown().await.unwrap();
+    }
     assert_eq!(replaced["status"], "committed", "{replaced}");
     let source: DeploymentRef = serde_json::from_value(replaced["value"].clone()).unwrap();
     assert_eq!(source.revision, 2);
     let first = read_all(&fixture.manager, &source).await;
-    assert_eq!(
-        serde_json::from_str::<Value>(&first).unwrap(),
-        serde_json::to_value(&document).unwrap()
+    assert!(
+        serde_json::from_str::<Value>(&first).unwrap() == serde_json::to_value(&document).unwrap(),
+        "paged document differs from the complete original source"
     );
 
     // Advancing the head cannot reinterpret any old-source continuation.
@@ -642,9 +645,14 @@ async fn immutable_document_resource_over_one_mib_roundtrips_through_validated_p
     assert_eq!(newer["status"], "committed", "{newer}");
     assert_eq!(newer["value"]["revision"], 3);
     let repeated = read_all(&fixture.manager, &source).await;
-    assert_eq!(repeated, first);
-    assert_eq!(
-        serde_json::from_str::<Value>(&repeated).unwrap(),
-        serde_json::to_value(&document).unwrap()
+    assert!(
+        repeated == first,
+        "later head changed the original source pages"
     );
+    assert!(
+        serde_json::from_str::<Value>(&repeated).unwrap()
+            == serde_json::to_value(&document).unwrap(),
+        "original document bytes did not survive the later head"
+    );
+    fixture.store.shutdown().await.unwrap();
 }

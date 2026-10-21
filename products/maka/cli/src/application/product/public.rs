@@ -122,7 +122,6 @@ impl Host {
             )?;
             if chunk.source != *source
                 || chunk.offset != text.len()
-                || chunk.total_bytes > maka_plugin_core::deployment::management::MAX_DOCUMENT_BYTES
                 || chunk.text.len() > chunk.total_bytes.saturating_sub(text.len())
             {
                 return Err("product Host returned an invalid document continuation".into());

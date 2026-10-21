@@ -30,10 +30,7 @@ pub use changes::DeploymentChanges;
 use maka_packages::Package;
 use maka_plugin_core::{
     composition::Input,
-    deployment::{
-        Deployment, DeploymentRef, RemoteObservation,
-        management::{DeploymentDocument, MAX_DOCUMENT_BYTES, ManagedDeployment},
-    },
+    deployment::{Deployment, DeploymentRef, RemoteObservation, management::ManagedDeployment},
     package::{PackageRef, Packages},
     plan::{Plan, RemoteExports},
 };
@@ -44,8 +41,6 @@ use std::{
 };
 
 use uuid::Uuid;
-
-const MAX_JSON: usize = MAX_DOCUMENT_BYTES;
 
 /// Immutable source, bytes and plan checked together before persistence.
 /// This value carries no Root authority and is not evidence of a committed revision.
@@ -61,11 +56,6 @@ impl PreparedApplication {
         observations: Vec<RemoteObservation>,
         packages: Vec<Package>,
     ) -> Result<Self, StoreError> {
-        check_document(
-            &input,
-            &observations,
-            packages.iter().map(Package::application_ref).collect(),
-        )?;
         let plan = validate(&input, &observations, &packages)?;
         Ok(Self {
             input,
@@ -186,23 +176,6 @@ fn validate_plan(
     }
     Plan::prepare(input, packages, &remote).map_err(|e| invalid(e.to_string()))
 }
-fn check_document(
-    input: &Input,
-    observations: &[RemoteObservation],
-    packages: Vec<PackageRef>,
-) -> Result<(), StoreError> {
-    // Admission and the paged editor share one document budget, including its
-    // package references. A second, smaller source limit rejects valid products.
-    encode(
-        &DeploymentDocument {
-            input: input.clone(),
-            remote_exports: observations.to_vec(),
-            packages,
-        },
-        MAX_JSON,
-    )
-    .map(|_| ())
-}
 /// Shared deterministic source checks, before any SQL effect. This validates
 /// metadata and immutable bytes; it grants no deployment management authority.
 pub fn validate_application(
@@ -210,25 +183,15 @@ pub fn validate_application(
     observations: &[RemoteObservation],
     bytes: &[Package],
 ) -> Result<(), StoreError> {
-    check_document(
-        input,
-        observations,
-        bytes.iter().map(Package::application_ref).collect(),
-    )?;
     validate(input, observations, bytes).map(|_| ())
 }
 
 /// Check several sources against the same immutable package set. Each source
-/// keeps its own document budget, selected packages, observations and plan.
+/// keeps its selected packages, observations and plan.
 pub fn prepare_applications(
     sources: &[(&Input, &[RemoteObservation])],
     bytes: &[Package],
 ) -> Result<Vec<PreparedApplication>, StoreError> {
-    for (input, observations) in sources {
-        // Reject oversized source data before planning. Package references are
-        // counted after selection: other sources' packages are not persisted here.
-        check_document(input, observations, Vec::new())?;
-    }
     let packages = validate_packages(bytes)?;
     sources
         .iter()
@@ -244,11 +207,6 @@ pub fn prepare_applications(
                 .filter(|package| required.contains(&package.application_ref()))
                 .cloned()
                 .collect();
-            check_document(
-                input,
-                observations,
-                selected.iter().map(Package::application_ref).collect(),
-            )?;
             Ok(PreparedApplication {
                 input: (*input).clone(),
                 observations: observations.to_vec(),
@@ -303,8 +261,8 @@ impl EventLog {
             packages: bytes,
             plan,
         } = prepared;
-        let encoded = encode(&input, MAX_JSON)?;
-        let remote = encode(&observations, MAX_JSON - encoded.len())?;
+        let encoded = serde_json::to_string(&input)?;
+        let remote = serde_json::to_string(&observations)?;
         let owner = std::sync::Arc::downgrade(self.root_owner.as_ref().expect("owned source Root"));
         let commits = self.commits.clone();
         self.connection.run(move |connection| Box::pin(async move {
@@ -380,7 +338,7 @@ impl EventLog {
         self.read_metadata(deployment, None).await
     }
 
-    /// Bounded metadata of the exact committed revision, independent of head.
+    /// Metadata of the exact committed revision, independent of head.
     pub async fn read_application_metadata_at(
         &self,
         reference: &DeploymentRef,
@@ -482,17 +440,19 @@ async fn read_metadata(
             None => return Ok(None),
         },
     };
-    let Some(row) = sqlx::query("SELECT revision,
-                CASE WHEN length(CAST(input_json AS BLOB)) + length(CAST(remote_exports_json AS BLOB)) <= ?3 THEN input_json END AS input_json,
-                CASE WHEN length(CAST(input_json AS BLOB)) + length(CAST(remote_exports_json AS BLOB)) <= ?3 THEN remote_exports_json END AS remote_exports_json
-                FROM application_sources WHERE deployment = ?1 AND revision = ?2")
-                .bind(&id).bind(revision as i64).bind(MAX_JSON as i64).fetch_optional(&mut *connection).await? else { return Ok(None); };
-    let input_json: String = row
-        .try_get::<Option<String>, _>("input_json")?
-        .ok_or_else(|| invalid("application source exceeds document byte limit"))?;
-    let remote_json: String = row
-        .try_get::<Option<String>, _>("remote_exports_json")?
-        .ok_or_else(|| invalid("application source exceeds document byte limit"))?;
+    let Some(row) = sqlx::query(
+        "SELECT revision, input_json, remote_exports_json
+                FROM application_sources WHERE deployment = ?1 AND revision = ?2",
+    )
+    .bind(&id)
+    .bind(revision as i64)
+    .fetch_optional(&mut *connection)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let input_json: String = row.try_get("input_json")?;
+    let remote_json: String = row.try_get("remote_exports_json")?;
     let input: Input = serde_json::from_str(&input_json)?;
     let observations: Vec<RemoteObservation> = serde_json::from_str(&remote_json)?;
     let reference = DeploymentRef {
@@ -520,7 +480,6 @@ async fn read_metadata(
             .map_err(|error| invalid(error.to_string()))?;
         packages.push(reference);
     }
-    check_document(&input, &observations, packages.clone())?;
     Ok(Some(ManagedDeployment {
         source: Deployment {
             reference,

@@ -23,9 +23,9 @@ use maka_event_log::{EventLog, StoreError, applications::validate_application};
 use maka_plugin_core::contract::binary_resource_type;
 use maka_plugin_core::deployment::management::{
     DeploymentDocument, DeploymentDocumentChunk, DeploymentDocumentRead, DeploymentInstances,
-    DeploymentRead, DeploymentReplace, InstanceSetEnabled, MAX_DOCUMENT_BYTES, ManagedInstance,
-    ManagedInstancesPage, ManagementRejection, ManagementResult, PackageBundleExport,
-    PackageBundleRead, PackageInstall, PackageInstalled, deployment_manager_contract,
+    DeploymentRead, DeploymentReplace, InstanceSetEnabled, ManagedInstance, ManagedInstancesPage,
+    ManagementRejection, ManagementResult, PackageBundleExport, PackageBundleRead, PackageInstall,
+    PackageInstalled, deployment_manager_contract,
 };
 use serde::Deserialize;
 
@@ -579,28 +579,8 @@ impl NativeOwner for Manager {
         Box::pin(async { Ok(()) })
     }
 }
-// Pretty formatting is cosmetic. Abort at the document budget and use compact
-// encoding if indentation would exceed it; every committed source still roundtrips.
 fn document_text(document: DeploymentDocument) -> Result<String> {
-    struct Writer(Vec<u8>);
-    impl std::io::Write for Writer {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes.len() > MAX_DOCUMENT_BYTES.saturating_sub(self.0.len()) {
-                return Err(std::io::Error::other("document exceeds byte limit"));
-            }
-            self.0.extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut writer = Writer(Vec::new());
-    if serde_json::to_writer_pretty(&mut writer, &document).is_err() {
-        writer.0.clear();
-        serde_json::to_writer(&mut writer, &document).map_err(|e| e.to_string())?;
-    }
-    String::from_utf8(writer.0).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&document).map_err(|error| error.to_string())
 }
 fn read_document_resource(
     resource: &Arc<dyn maka_capabilities::call::ReadResource>,
@@ -609,11 +589,8 @@ fn read_document_resource(
     if resource.resource_type() != maka_plugin_core::contract::text_resource_type()
         || resource.encoding() != ResourceEncoding::Utf8
         || resource.bytes() == 0
-        || resource.bytes() > MAX_DOCUMENT_BYTES
     {
-        return Err(format!(
-            "source document must be immutable UTF-8 and at most {MAX_DOCUMENT_BYTES} bytes"
-        ));
+        return Err("source document must be nonempty immutable UTF-8".into());
     }
     let length = resource.bytes();
     let mut bytes = Vec::with_capacity(length);

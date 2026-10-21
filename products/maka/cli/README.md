@@ -39,6 +39,8 @@ Dedicated Host processes capture stderr in their Root's private control-cache fi
 
 ## Product updates, recovery and URL installation
 
+Composition commands read complete JSON source and remote-export files. The Plugins composition editor loads an exact source revision in UTF-8 pages of at most 64 KiB and saves the confirmed native editor snapshot against that revision. Whole documents have no separate byte ceiling; typed validation, package checks, Host permissions, revision conflicts and actual resource admission still apply. Committed revisions retain the complete source for subsequent reads and reopening the Root.
+
 To update a standalone Host's selected bundled plugins, stop that Host and use its State Root:
 
 ```sh
