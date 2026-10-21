@@ -2053,7 +2053,9 @@ async fn current_workspace_previews_keep_real_contents_drafts_and_session_owners
         let roots = client.query("agent", "directories", json!({"kind":"roots"})).await.unwrap();
         let other = support::mutate(&client, "create", json!({"title":"Other preview owner","labels":[],"workspace":{"kind":"directory","selection":roots["roots"][0]["selection"]}})).await;
         shortcut(&mut view, 'o');
-        select_palette(&mut view, "Search sessions…", "Other preview owner", "Other preview owner").await;
+        // The docked browser ellipsizes titles; select the actual full-title
+        // native button rather than waiting for its truncated painted text.
+        support::click_button(&mut view, "Open conversation Other preview owner").await;
         wait_view(&mut view, |screen| screen.contains("Other preview owner") && !screen.contains("UNSENT_PREVIEW_DRAFT") && screen.contains("Enter sends")).await;
         support::click_label(&mut view, "Browse workspace files");
         wait_view(&mut view, |screen| screen.contains("000-preview.txt") && !screen.contains("Loading files…") && !screen.contains("Updating files…")).await;
