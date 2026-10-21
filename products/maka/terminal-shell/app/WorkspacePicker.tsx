@@ -23,7 +23,7 @@ import { Button, Dialog } from 'nsh/base';
 import { List } from 'nsh/list';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
-import { host } from 'maka/host';
+import { host } from './host';
 import type {
   AgentDirectory,
   AgentDirectoryPage,

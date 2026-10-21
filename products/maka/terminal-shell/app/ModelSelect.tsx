@@ -23,7 +23,7 @@ import { Button, Dialog } from 'nsh/base';
 import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
 import { windowSize } from 'nsh/device';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { ConversationHandle } from './Conversation';
 import { effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';

@@ -20,7 +20,7 @@
 import { cleanup, effect, inputAction, mount, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
-import { host } from 'maka/host';
+import { host } from './host';
 import { keymap } from 'nsh/keymap';
 import { C, Header } from './ui';
 import { Composer } from './Composer';

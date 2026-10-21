@@ -47,8 +47,8 @@ async fn a_late_original_upload_read_cannot_restore_a_removed_draft_attachment()
         // already-started read is held, so this exercises the observer race
         // without inventing an upload result or a second persistence authority.
         let source = format!(r#"
-{controller}
-import {{ mount, Text, View }} from "nsh";
+import {{ createAttachmentDraft }} from {controller};
+import {{ mount, signal, Text, View }} from "nsh";
 import {{ Button }} from "nsh/base";
 import {{ host }} from "maka/host";
 const original = {original};
@@ -98,12 +98,19 @@ return <View style={{{{ width: "100%", gap: 8 }}}}>
 </View>;
 }});
 "#,
-            controller = include_str!("../../app/attachmentDraft.ts"),
+            controller = serde_json::to_string(&std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("app/attachmentDraft.ts").to_string_lossy()).unwrap(),
             original = serde_json::to_string(&original).unwrap(),
             reserved = serde_json::to_string(&reserved).unwrap(),
             attachment = serde_json::to_string(&attachment).unwrap());
-        let source = nsh_bundler::compile_module("attachment-draft.tsx", &source,
-            &sets.iter().map(Into::into).collect::<Vec<_>>()).unwrap();
+        let entry = fixture.directory.path().join("attachment-draft.tsx");
+        std::fs::write(&entry, source).unwrap();
+        let source = nsh_bundler::bundle_async(&nsh_bundler::BundleOptions {
+            entry,
+            minify: false,
+            split: false,
+            ui_sets: sets.iter().map(Into::into).collect(),
+        }).await.unwrap().code;
         let mut view = AppView::new(AppOptions {
             size: (100, 24), data_dir: Some(fixture.directory.path().join("draft-nsh")),
             ui_sets: Some(sets), ..Default::default()

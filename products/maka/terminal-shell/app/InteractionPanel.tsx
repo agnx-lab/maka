@@ -18,7 +18,7 @@
  */
 
 import { cleanup, effect, inputAction, Input, signal, Scroll, Text, View } from 'nsh';
-import { host } from 'maka/host';
+import { host } from './host';
 import { keymap } from 'nsh/keymap';
 import { windowSize } from 'nsh/device';
 import { Button, Dialog } from 'nsh/base';

@@ -21,7 +21,7 @@ import { batch, cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { windowSize } from 'nsh/device';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { Subscription } from './history';
 import { C } from './ui';
 

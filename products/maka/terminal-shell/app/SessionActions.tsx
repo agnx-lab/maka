@@ -19,7 +19,7 @@
 
 import { cleanup, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { BrowserSession } from './browsing';
 import { SessionRevisionConflict } from './sessionLifecycle';
 import type { SessionAction } from './sessionLifecycle';

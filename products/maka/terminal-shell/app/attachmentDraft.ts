@@ -18,8 +18,10 @@
  */
 
 import { cleanup, signal } from 'nsh';
+import { findUpload, recoverUpload, abandonUpload, watchUploads, type ScopedHost } from './host';
+import type { ClientDraftAttachment } from '../../../../packages/plugin-sdk/src/index.js';
 
-export type DraftAttachment = { id: string; name: string; mimeType: string; bytes: number };
+export type DraftAttachment = ClientDraftAttachment;
 type AttachmentStatus = {
   operationId: string;
   kind: 'reading' | 'uploading' | 'failed' | 'complete';
@@ -55,7 +57,7 @@ function attachmentStatus(value: unknown): AttachmentStatus | null {
 
 export function createAttachmentDraft(options: {
   sessionId: string;
-  client: any;
+  client: ScopedHost;
   changed(): void;
   focus(): void;
 }) {
@@ -165,7 +167,7 @@ export function createAttachmentDraft(options: {
     let stream: UploadSubscription | null = null;
     try {
       // Native registers this observer before the first Journal read.
-      stream = options.client.watchUploads();
+      stream = watchUploads(options.client);
       subscription = stream;
       while (alive && subscription === stream) {
         const operations = await stream!.next();
@@ -194,7 +196,7 @@ export function createAttachmentDraft(options: {
     recovering.set(target.id);
     if (!watchFailed) error.set('');
     try {
-      const original = await options.client.findUpload(target.id);
+      const original = await findUpload(options.client, target.id);
       if (!alive) return;
       if (original !== null) {
         receiveOne(original);
@@ -257,7 +259,7 @@ export function createAttachmentDraft(options: {
     recovering.set(target.id);
     if (!watchFailed) error.set('');
     try {
-      const original = await options.client.recoverUpload(target.id);
+      const original = await recoverUpload(options.client, target.id);
       if (alive) receiveOne(original);
     } catch (reason) {
       if (alive) error.set(message(reason));
@@ -270,7 +272,7 @@ export function createAttachmentDraft(options: {
     recovering.set(target.id);
     if (!watchFailed) error.set('');
     try {
-      const original = await options.client.abandonUpload(target.id);
+      const original = await abandonUpload(options.client, target.id);
       if (!alive) return;
       if (!original.abandoned)
         throw new Error('This upload is prepared. Recover its original receipt.');

@@ -64,6 +64,7 @@ import type {
   Contract,
   HostRequest,
   RequestContext,
+  ServiceMethods,
   RecoveryRef,
   Surface,
 } from '@maka-agent/plugin-sdk';
@@ -629,3 +630,13 @@ void [
   continueWorkspaceFiles,
   observeWorkspaceFiles,
 ];
+
+// The method map uses the actual contract route and mode, not caller-selected T.
+// @ts-expect-error A missing method is not an arbitrary plugin result type.
+type MissingAgentMethod = ServiceMethods['agent']['missingMethod'];
+const historyMode: ServiceMethods['agent']['history']['mode'] = 'query';
+// @ts-expect-error Query methods cannot become subscriptions in the generated map.
+const historySubscription: ServiceMethods['agent']['history']['mode'] = 'subscription';
+// @ts-expect-error Session continuations require their explicit position.
+const unfencedListInput: ServiceMethods['agent']['list']['input'] = { filter: 'all' };
+void [historyMode, historySubscription, unfencedListInput];

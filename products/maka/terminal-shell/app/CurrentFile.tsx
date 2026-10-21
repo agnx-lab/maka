@@ -21,33 +21,11 @@ import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { Image } from 'nsh/image';
 import { List } from 'nsh/list';
-import { host } from 'maka/host';
-import type { AgentFileChange, AgentFileKind } from '../../../../packages/plugin-sdk/src/index.js';
+import { host, type FileView } from './host';
+import type { AgentFileChange } from '../../../../packages/plugin-sdk/src/index.js';
 import type { WorkspaceFileTarget } from './workspaceFiles';
 import { C } from './ui';
 
-// This is the native collector's verified presentation, not the Host wire stream.
-type FileView =
-  | {
-      kind: 'text';
-      rows: { offset: number; line: number; text: string }[];
-      version: string;
-      digest: string;
-      bytes: number;
-    }
-  | {
-      kind: 'image';
-      uri: string;
-      mimeType: string;
-      version: string;
-      digest: string;
-      bytes: number;
-    }
-  | { kind: 'absent' }
-  | { kind: 'changed' }
-  | { kind: 'binary'; bytes: number }
-  | { kind: 'too_large'; bytes: number; limit: number }
-  | { kind: 'unsupported'; fileKind: AgentFileKind };
 type FileState =
   | FileView
   | { kind: 'idle' }

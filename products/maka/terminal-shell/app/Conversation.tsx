@@ -22,7 +22,16 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { AnimatedValue } from 'nsh/animated';
-import { host } from 'maka/host';
+import {
+  host,
+  loadDraft,
+  saveDraft,
+  sendDraft,
+  pendingSends,
+  recoverSend,
+  abandonSend,
+  type ScopedHost,
+} from './host';
 import { C, Header } from './ui';
 import { acceptedSend, historyMetadata, mergeChunks } from './history';
 import type { Row, Position, Subscription } from './history';
@@ -58,7 +67,7 @@ export type ConversationHandle = ComposerSession & {
   focusActivity(turnId: string | null): void;
 };
 type ConversationProps = {
-  client: any;
+  client: ScopedHost;
   presentation: PresentationSettings;
   control: Control;
   commands(): void;
@@ -864,7 +873,7 @@ export function Conversation(props: ConversationProps) {
       while (alive && pendingDraft !== null) {
         const edit = pendingDraft;
         pendingDraft = null;
-        const saved = await client.saveDraft(draftRevision, edit);
+        const saved = await saveDraft(client, draftRevision, edit);
         if (!alive) return;
         draftRevision = saved.revision;
         attachments.saved(edit);
@@ -1059,7 +1068,8 @@ export function Conversation(props: ConversationProps) {
     if (ready() && transcriptStatus() !== 'live')
       return 'Reconnecting updates… Your draft is kept.';
     if (!ready()) return 'Loading session history… Your draft is kept.';
-    if (archived()) return 'This conversation is archived. Restore it in Sessions to send; your draft is kept.';
+    if (archived())
+      return 'This conversation is archived. Restore it in Sessions to send; your draft is kept.';
     if (!draftReady()) return 'Loading the saved draft…';
     if (savingFailed()) return 'The draft could not be saved. Sending is unavailable.';
     if (attachments.blocked()) return attachments.blocked();
@@ -1098,7 +1108,7 @@ export function Conversation(props: ConversationProps) {
       // The native journal consumes only this exact revision. New edits keep
       // saving while confirmation waits and never inherit this send attempt.
       receiptsKnown.set(false);
-      const sent = await client.send(draftRevision, model);
+      const sent = await sendDraft(client, draftRevision, model);
       if (!alive) return;
       settleReply(sent.reply, text, epoch, files);
     } catch (reason) {
@@ -1106,7 +1116,7 @@ export function Conversation(props: ConversationProps) {
     } finally {
       try {
         if (alive) {
-          const operations = await client.pending();
+          const operations = await pendingSends(client);
           if (alive) {
             unresolved.set(operations);
             receiptsKnown.set(true);
@@ -1126,7 +1136,7 @@ export function Conversation(props: ConversationProps) {
     await flushDraft();
     if (!alive) return;
     try {
-      const originals = await client.pending();
+      const originals = await pendingSends(client);
       if (!alive) return;
       unresolved.set(originals);
       receiptsKnown.set(true);
@@ -1137,14 +1147,14 @@ export function Conversation(props: ConversationProps) {
           );
           continue;
         }
-        const reply = await client.recover(original.id);
+        const reply = await recoverSend(client, original.id);
         if (!alive) return;
         settleReply(reply);
       }
-      const stored = await client.loadDraft();
+      const stored = await loadDraft(client);
       if (!alive) return;
       acceptRecoveredDraft(stored, epoch);
-      const remaining = await client.pending();
+      const remaining = await pendingSends(client);
       if (!alive) return;
       unresolved.set(remaining);
     } catch (reason) {
@@ -1159,21 +1169,21 @@ export function Conversation(props: ConversationProps) {
     recovering.set(true);
     const epoch = editEpoch;
     try {
-      const original = await client.abandonUnprepared(operationId);
+      const original = await abandonSend(client, operationId);
       if (!alive) return;
       if (original.abandoned) {
         notice.set(
           'Unconfirmed attempt abandoned. The draft is kept; press Enter explicitly to send a new attempt.',
         );
       } else if (original.reference) {
-        const reply = await client.recover(operationId);
+        const reply = await recoverSend(client, operationId);
         if (!alive) return;
         settleReply(reply);
-        const stored = await client.loadDraft();
+        const stored = await loadDraft(client);
         if (!alive) return;
         acceptRecoveredDraft(stored, epoch);
       }
-      const operations = await client.pending();
+      const operations = await pendingSends(client);
       if (!alive) return;
       unresolved.set(operations);
       receiptsKnown.set(true);
@@ -1343,14 +1353,14 @@ export function Conversation(props: ConversationProps) {
       .catch(report);
     startTranscript();
     void (async () => {
-      const stored = await client.loadDraft();
+      const stored = await loadDraft(client);
       if (!alive) return;
       draftRevision = stored.revision;
       draft.set(stored.text);
       attachments.restore(stored.attachments);
       draftReady.set(true);
       void attachments.start();
-      const operations = await client.pending();
+      const operations = await pendingSends(client);
       if (!alive) return;
       unresolved.set(operations);
       receiptsKnown.set(true);

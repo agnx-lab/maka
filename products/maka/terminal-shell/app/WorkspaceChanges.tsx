@@ -20,7 +20,7 @@
 import { cleanup, effect, inputAction, signal, Text, untracked, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { GitStatus, GitStatusEntry } from '../../../../packages/plugin-sdk/src/index.js';
 import { gitAreaLabel, type CurrentDiffTarget } from './CurrentDiff';
 import { C } from './ui';

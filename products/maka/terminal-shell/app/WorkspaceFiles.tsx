@@ -20,7 +20,7 @@
 import { cleanup, effect, inputAction, Scroll, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
 import { C } from './ui';
 import type { WorkspaceFilesModel } from './workspaceFiles';

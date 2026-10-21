@@ -19,7 +19,7 @@
 
 import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
-import { host } from 'maka/host';
+import { host } from './host';
 import { messageBytes, messageKey, type Position, type Row } from './history';
 import { MarkdownBody } from './MarkdownBody';
 import { C } from './ui';

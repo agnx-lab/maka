@@ -20,7 +20,7 @@
 import { cleanup, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
-import { host } from 'maka/host';
+import { host } from './host';
 import type { GitArea, GitDiff, WorkspacePath } from '../../../../packages/plugin-sdk/src/index.js';
 import { parsePatch } from '../../desktop-shell/app/patch.js';
 import { C } from './ui';

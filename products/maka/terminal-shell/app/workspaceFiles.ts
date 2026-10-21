@@ -18,7 +18,7 @@
  */
 
 import { batch, cleanup, effect, signal, untracked } from 'nsh';
-import { host } from 'maka/host';
+import { host } from './host';
 import type {
   AgentFileChange,
   AgentFileCursor,
