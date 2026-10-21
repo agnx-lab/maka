@@ -31,7 +31,7 @@ use maka_agent_ports::session::history::Role;
 use maka_agent_ports::session::history::{HistoryField, HistoryView};
 use sqlx::{Connection, Row, SqliteConnection};
 
-// One body projection for conversation windows and exact source reads.
+// Text windows and exact source reads retain material labels in their body.
 pub(super) const BODY: &str = "COALESCE(CASE json_extract(payload, '$.type')
                     WHEN 'user' THEN (SELECT group_concat(line, char(10)) FROM (
                         SELECT COALESCE(json_extract(payload, '$.displayText'), json_extract(payload, '$.text'), '') AS line
@@ -57,6 +57,15 @@ pub(super) const BODY: &str = "COALESCE(CASE json_extract(payload, '$.type')
                         WHEN 'operation' THEN (SELECT group_concat(atom, char(10)) FROM json_tree(payload, '$.content.reply.receipt.outcome.value') WHERE type = 'text')
                         ELSE '' END
                     ELSE '' END, '')";
+
+// Conversation windows carry attachments separately. Directory references
+// still need their labels because they have no structured history field.
+const CONVERSATION_USER: &str = "COALESCE((SELECT group_concat(line, char(10)) FROM (
+    SELECT COALESCE(json_extract(payload, '$.displayText'), json_extract(payload, '$.text'), '') AS line
+        WHERE COALESCE(json_extract(payload, '$.displayText'), json_extract(payload, '$.text'), '') != ''
+    UNION ALL
+    SELECT '▱ ' || json_extract(value, '$.path')
+        FROM json_each(payload, '$.directoryReferences') WHERE json_type(value, '$.path') = 'text')), '')";
 
 impl EventLog {
     /// Exact ascending UTF-8 windows over immutable derived text. The byte and
@@ -145,10 +154,10 @@ impl EventLog {
                     if cursor.offset > row.total {
                         return Err(invalid("history offset exceeds message"));
                     }
-                    let byte: Vec<u8> = if cursor.offset == row.total { Vec::new() } else { sqlx::query_scalar(
-                        "SELECT substr(body, ?4, 1) FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?5"
-                    ).bind(&session).bind(sql_position(cursor.position)?.0).bind(sql_position(cursor.position)?.1).bind(sql_number(cursor.offset)? + 1).bind(field_name(cursor.field))
-                        .fetch_one(&mut *tx).await? };
+                    let byte = if cursor.offset == row.total { Vec::new() } else {
+                        fragment(&mut tx, &session, cursor, 1,
+                            view == HistoryView::Conversation && row.role == "user").await?
+                    };
                     if byte.first().is_some_and(|byte| byte & 0xc0 == 0x80) {
                         return Err(invalid("history offset splits UTF-8"));
                     }
@@ -224,10 +233,10 @@ impl EventLog {
                         let start = cursor_offset.unwrap_or(0);
                         (start, row.total.min(start + (max_bytes - bytes) as u64))
                     };
-                    let fragment: Vec<u8> = if row.total == 0 { Vec::new() } else { sqlx::query_scalar(
-                        "SELECT substr(body, ?4, ?5) FROM transcript_text WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?6"
-                    ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(sql_number(start)? + 1)
-                        .bind(sql_number(end - start)?).bind(field_name(field)).fetch_one(&mut *tx).await? };
+                    let fragment = if row.total == 0 { Vec::new() } else {
+                        fragment(&mut tx, &session, Cursor { field, position: locator, offset: start }, end - start,
+                            view == HistoryView::Conversation && row.role == "user").await?
+                    };
                     let text = if reverse {
                         let skip = fragment.iter().take_while(|byte| **byte & 0xc0 == 0x80).count();
                         start += skip as u64;
@@ -246,8 +255,15 @@ impl EventLog {
                     let ending = (Cursor { field, position: locator, offset: end }, row.total);
                     let candidate_left = if reverse { Some(beginning) } else { left.or(Some(beginning)) };
                     let candidate_right = if reverse { right.or(Some(ending)) } else { Some(ending) };
+                    let attachments: Vec<maka_agent_facts::attachment::AttachmentRef> = if start == 0 && row.role == "user" {
+                        let encoded: Option<String> = sqlx::query_scalar(
+                            "SELECT json_extract(payload, '$.attachments') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
+                        encoded.map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default()
+                    } else { Vec::new() };
                     let emit = (!row.hidden || exact_target) && (exact_target || row.total != 0
                         || matches!(row.role.as_str(), "tool_call" | "tool_result")
+                        || (view == HistoryView::Conversation && !attachments.is_empty())
                         || (view == HistoryView::Conversation && row.role == "context_compacted"));
                     if emit {
                     let role = match row.role.as_str() {
@@ -257,12 +273,6 @@ impl EventLog {
                         "turn_state" | "model_interruption" => Role::Failure,
                         _ => return Err(invalid("invalid history text role")),
                     };
-                    let attachments = if start == 0 && role == Role::User {
-                        let encoded: Option<String> = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.attachments') FROM transcript_rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
-                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
-                        encoded.map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default()
-                    } else { Vec::new() };
                     let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
                         let Some(tool) = tool_metadata(&mut tx, &session, locator, through_sql, max_json_bytes).await? else {
                             if left.is_none() { return Err(invalid("history fragment exceeds JSON window budget")); }
@@ -397,8 +407,8 @@ async fn header(
             CASE WHEN source.role = 'user' THEN source.user_origin END
             FROM transcript_directory source JOIN transcript_text cached USING(session_id, source_sequence, item_index)
             WHERE source.session_id = ?1 AND source.source_sequence = ?2 AND item_index = ?3 AND cached.field = ?4"
-    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(tx).await?;
-    Ok(Header {
+    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).bind(field_name(field)).fetch_one(&mut *tx).await?;
+    let mut header = Header {
         origin: row
             .try_get::<Option<String>, _>(5)?
             .map(|value| serde_json::from_str(&value))
@@ -409,8 +419,53 @@ async fn header(
         role: row.try_get(3)?,
         hidden: false,
         total: sequence_number(row.try_get(4)?)?,
-    })
+    };
+    if view == HistoryView::Conversation && field == HistoryField::Body && header.role == "user" {
+        let query = format!(
+            "SELECT length(CAST({CONVERSATION_USER} AS BLOB)) FROM transcript_rows
+            WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+        );
+        header.total = sequence_number(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(query.as_str()))
+                .bind(session)
+                .bind(sql_position(locator)?.0)
+                .bind(sql_position(locator)?.1)
+                .fetch_one(tx)
+                .await?,
+        )?;
+    }
+    Ok(header)
 }
+
+async fn fragment(
+    tx: &mut SqliteConnection,
+    session: &str,
+    cursor: Cursor,
+    bytes: u64,
+    conversation_user: bool,
+) -> Result<Vec<u8>, StoreError> {
+    let query = if conversation_user {
+        format!(
+            "SELECT substr(CAST({CONVERSATION_USER} AS BLOB), ?4, ?5) FROM transcript_rows
+            WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+        )
+    } else {
+        "SELECT substr(body, ?4, ?5) FROM transcript_text
+            WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3 AND field = ?6"
+            .into()
+    };
+    let mut query = sqlx::query_scalar(sqlx::AssertSqlSafe(query.as_str()))
+        .bind(session)
+        .bind(sql_position(cursor.position)?.0)
+        .bind(sql_position(cursor.position)?.1)
+        .bind(sql_number(cursor.offset)? + 1)
+        .bind(sql_number(bytes)?);
+    if !conversation_user {
+        query = query.bind(field_name(cursor.field));
+    }
+    Ok(query.fetch_one(tx).await?)
+}
+
 async fn conversation_tool(
     tx: &mut SqliteConnection,
     session: &str,

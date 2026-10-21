@@ -1384,6 +1384,98 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
         assert_eq!(chunks[0].text, expected);
         assert_eq!(chunks[0].timestamp, timestamp);
         let sequence = chunks[0].position;
+        let conversation = match session {
+            "a" => "Visible 中\0tail\n▱ src/中文",
+            "b" => "▱ src/中文",
+            "c" => "",
+            _ => unreachable!(),
+        };
+        for reverse in [false, true] {
+            let mut position = if reverse {
+                Position::Tail
+            } else {
+                Position::Start
+            };
+            let mut actual = String::new();
+            let mut pages = 0;
+            loop {
+                pages += 1;
+                assert!(pages < conversation.len() + 8);
+                let Page::Ready {
+                    chunks,
+                    before,
+                    after,
+                    ..
+                } = log
+                    .history_view(
+                        session,
+                        through,
+                        position,
+                        false,
+                        maka_agent_ports::session::history::HistoryView::Conversation,
+                        4,
+                        Some(1),
+                        64 * 1024,
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    chunks.len(),
+                    1,
+                    "attachment-only conversation rows remain visible"
+                );
+                let chunk = &chunks[0];
+                assert_eq!(chunk.total_bytes, conversation.len() as u64);
+                if chunk.offset == 0 {
+                    assert_eq!(
+                        chunk.attachments.len(),
+                        match session {
+                            "a" => 3,
+                            "c" => 1,
+                            _ => 0,
+                        }
+                    );
+                } else {
+                    assert!(chunk.attachments.is_empty());
+                }
+                if reverse {
+                    actual.insert_str(0, &chunk.text);
+                } else {
+                    actual.push_str(&chunk.text);
+                }
+                let Some(cursor) = (if reverse { before } else { after }) else {
+                    break;
+                };
+                position = if reverse {
+                    Position::Before { cursor }
+                } else {
+                    Position::After { cursor }
+                };
+            }
+            assert_eq!(actual, conversation);
+        }
+        if session == "a" {
+            let split = maka_agent_ports::session::history::Cursor {
+                position: sequence,
+                field: maka_agent_ports::session::history::HistoryField::Body,
+                offset: "Visible 中\0tail\n▱ src/".len() as u64 + 1,
+            };
+            assert!(
+                log.history_view(
+                    session,
+                    through,
+                    Position::After { cursor: split },
+                    false,
+                    maka_agent_ports::session::history::HistoryView::Conversation,
+                    4,
+                    Some(1),
+                    64 * 1024,
+                )
+                .await
+                .is_err(),
+                "conversation cursors must validate their own UTF-8 bytes"
+            );
+        }
         for budget in [4, 19, 8192] {
             for reverse in [false, true] {
                 let mut position = if reverse {
@@ -1453,7 +1545,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
                 assert_eq!(actual, expected);
             }
         }
-        sources.push((session, through, sequence, expected));
+        sources.push((session, through, sequence, expected, conversation));
     }
     assert!(
         !temp.path().join("not-opened").exists(),
@@ -1492,7 +1584,7 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
         serde_json::to_vec(&log.prefix(10, 65536).await.unwrap()).unwrap(),
         before
     );
-    for (session, through, sequence, expected) in sources {
+    for (session, through, sequence, expected, conversation) in sources {
         let Page::Ready { chunks, .. } = log
             .history_text(session, through, Position::Start, false, 8192, 1, 64 * 1024)
             .await
@@ -1500,6 +1592,21 @@ async fn message_material_labels_and_time_survive_exact_paging_and_text_cache_lo
         assert_eq!(chunks[0].text, expected);
         assert_eq!(chunks[0].position, sequence);
         assert_eq!(chunks[0].timestamp, timestamp);
+        let Page::Ready { chunks, .. } = log
+            .history_view(
+                session,
+                through,
+                Position::Start,
+                false,
+                maka_agent_ports::session::history::HistoryView::Conversation,
+                8192,
+                Some(1),
+                64 * 1024,
+            )
+            .await
+            .unwrap();
+        assert_eq!(chunks[0].text, conversation);
+        assert_eq!(chunks[0].total_bytes, conversation.len() as u64);
     }
     drop(db);
     log.close().await.unwrap();
