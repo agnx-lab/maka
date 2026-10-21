@@ -17,10 +17,11 @@
  * under the License.
  */
 
+use super::geometry::PixelSizeQuery;
 use std::time::{Duration, Instant};
 use termina::{
     Event, WindowSize,
-    escape::csi::{Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Mode, Window},
+    escape::csi::{Csi, DecModeSetting, DecPrivateMode, DecPrivateModeCode, Mode},
 };
 
 const TIMEOUT: Duration = Duration::from_millis(250);
@@ -53,11 +54,22 @@ pub(crate) struct Capabilities {
 }
 
 impl Capabilities {
+    pub fn pixel_size(self) -> Option<gpui::Size<gpui::DevicePixels>> {
+        let width = self.size.pixel_width?;
+        let height = self.size.pixel_height?;
+        (width != 0 && height != 0).then(|| {
+            gpui::size(
+                gpui::DevicePixels(i32::from(width)),
+                gpui::DevicePixels(i32::from(height)),
+            )
+        })
+    }
+
     pub fn viewport(self) -> Option<gpui::Size<gpui::DevicePixels>> {
-        Some(gpui::size(
-            gpui::DevicePixels(i32::from(self.size.pixel_width?)),
-            gpui::DevicePixels(i32::from(self.size.pixel_height?)),
-        ))
+        if self.size.cols == 0 || self.size.rows == 0 {
+            return None;
+        }
+        self.pixel_size()
     }
 }
 
@@ -66,7 +78,7 @@ pub(crate) struct Probe {
     deadline: Option<Instant>,
     kitty: Option<(bool, Instant)>,
     mouse: Option<(bool, Instant)>,
-    pixels: Option<(u16, u16, Instant)>,
+    pub measurement: PixelSizeQuery,
     cancelled: bool,
 }
 
@@ -77,14 +89,17 @@ impl Default for Probe {
             deadline: None,
             kitty: None,
             mouse: None,
-            pixels: None,
+            measurement: PixelSizeQuery::default(),
             cancelled: false,
         }
     }
 }
 
 impl Probe {
-    pub fn query(&self) -> Result<Vec<u8>, String> {
+    pub fn query(&mut self) -> Result<Vec<u8>, String> {
+        if !self.measurement.begin(1)? {
+            return Err("terminal geometry query is already in flight".into());
+        }
         let mut bytes = nsh_gpui_terminal::kitty::capability_query(self.slots.query)
             .map_err(|error| error.to_string())?;
         bytes.extend_from_slice(b"\x1b[?1016$p\x1b[14t");
@@ -96,10 +111,11 @@ impl Probe {
         self.deadline = Some(deadline);
         self.kitty = self.kitty.filter(|(_, at)| *at <= deadline);
         self.mouse = self.mouse.filter(|(_, at)| *at <= deadline);
-        self.pixels = self.pixels.filter(|(_, _, at)| *at <= deadline);
+        self.measurement.flushed(at);
     }
 
     pub fn observe(&mut self, event: &Event, now: Instant) {
+        self.measurement.observe(event, now);
         if self.cancelled || self.deadline.is_some_and(|deadline| now > deadline) {
             return;
         }
@@ -123,18 +139,6 @@ impl Probe {
                     now,
                 ));
             }
-            Event::Csi(Csi::Window(window)) => {
-                if let Window::ReportTextAreaSizePixelsResponse {
-                    width: Some(width),
-                    height: Some(height),
-                } = window.as_ref()
-                    && let (Ok(width), Ok(height)) = (u16::try_from(*width), u16::try_from(*height))
-                    && width != 0
-                    && height != 0
-                {
-                    self.pixels.get_or_insert((width, height, now));
-                }
-            }
             Event::WindowResized(_) => self.cancelled = true,
             _ => {}
         }
@@ -150,7 +154,10 @@ impl Probe {
         if self.kitty.is_some_and(|(supported, _)| !supported) {
             return Some(None);
         }
-        if self.kitty.is_none() || self.mouse.is_none() || self.pixels.is_none() {
+        if self.kitty.is_none()
+            || self.mouse.is_none()
+            || self.measurement.pixels_before(deadline).is_none()
+        {
             if now < deadline {
                 return None;
             }
@@ -158,7 +165,7 @@ impl Probe {
         if !self.kitty.is_some_and(|(supported, _)| supported) {
             return Some(None);
         }
-        if let Some((width, height, _)) = self.pixels {
+        if let Some((width, height)) = self.measurement.pixels_before(deadline) {
             size.pixel_width = Some(width);
             size.pixel_height = Some(height);
         }
@@ -190,14 +197,16 @@ mod tests {
     }
 
     fn probe() -> Probe {
-        Probe {
+        let mut probe = Probe {
             slots: Slots {
                 query: 99,
                 first: 41,
                 second: 73,
             },
             ..Default::default()
-        }
+        };
+        probe.query().unwrap();
+        probe
     }
 
     fn reply(probe: &mut Probe, bytes: &[u8], at: Instant) {
@@ -226,6 +235,37 @@ mod tests {
                 Some(gpui::size(gpui::DevicePixels(960), gpui::DevicePixels(640)))
             );
         }
+    }
+
+    #[test]
+    fn startup_geometry_reply_debt_survives_the_capability_observation_window() {
+        let flushed = Instant::now();
+        let mut probe = probe();
+        probe.flushed(flushed);
+        reply(&mut probe, b"\x1b_Gi=99;OK\x1b\\\x1b[?1016;2$y", flushed);
+        let mut ioctl = size();
+        ioctl.pixel_width = Some(960);
+        ioctl.pixel_height = Some(640);
+        assert!(probe.decision(flushed + TIMEOUT, ioctl).unwrap().is_some());
+        // A resize cannot reassign the still-unfinished startup query. Its
+        // late reply belongs to geometry 1, even after discovery has ended.
+        assert!(!probe.measurement.begin(2).unwrap());
+        let after_discovery = flushed + TIMEOUT + Duration::from_millis(10);
+        reply(&mut probe, b"\x1b[4;640;960t", after_discovery);
+        assert_eq!(
+            probe.measurement.poll(after_discovery).unwrap(),
+            Some((1, 960, 640))
+        );
+        assert!(probe.measurement.begin(2).unwrap());
+        ioctl.pixel_width = Some(0);
+        assert!(
+            Capabilities {
+                size: ioctl,
+                pixel_mouse: false
+            }
+            .viewport()
+            .is_none()
+        );
     }
 
     #[test]

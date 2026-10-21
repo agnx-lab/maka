@@ -77,16 +77,7 @@ fn run(
     let sampled = source.clone();
     let retained = snapshots.clone();
     let delivered = presentation.clone();
-    let geometry = Rc::new(Cell::new(
-        presentation
-            .state
-            .lock()
-            .unwrap()
-            .pixels
-            .as_ref()
-            .unwrap()
-            .geometry,
-    ));
+    let geometry = Rc::new(Cell::new(0));
     let drawn_geometry = geometry.clone();
     let owner = thread::current();
     let waker = owner.clone();
@@ -108,15 +99,31 @@ fn run(
         Arc::new(move || waker.unpark()),
     )
     .map_err(|error| error.to_string())?;
-    let caps = {
-        let mut state = presentation.state.lock().unwrap();
-        let inbox = state.pixels.as_mut().expect("selected pixel presentation");
-        inbox.wake = Some(owner);
-        inbox.capabilities
+    // Renderer initialization can overlap a terminal resize. Wait for the
+    // same reader/writer measurement to complete, then keep its size and
+    // geometry together; never pair startup dimensions with a newer ticket.
+    let viewport = loop {
+        let measured = {
+            let mut state = presentation.state.lock().unwrap();
+            if presentation.stop.load(Ordering::Acquire) || state.quit {
+                return Ok(());
+            }
+            if let Some(error) = &state.error {
+                return Err(error.clone());
+            }
+            let inbox = state.pixels.as_mut().expect("selected pixel presentation");
+            inbox.wake = Some(owner.clone());
+            inbox
+                .capabilities
+                .viewport()
+                .map(|viewport| (viewport, inbox.geometry))
+        };
+        if let Some((viewport, generation)) = measured {
+            geometry.set(generation);
+            break viewport;
+        }
+        thread::park_timeout(Duration::from_millis(10));
     };
-    let viewport = caps
-        .viewport()
-        .ok_or("terminal pixel dimensions are unavailable")?;
     config
         .assets
         .get_or_insert_with(|| Arc::new(crate::ApplicationAssets));
@@ -172,7 +179,11 @@ fn run(
                 let error = state.error.clone();
                 let inbox = state.pixels.as_mut().expect("selected pixel presentation");
                 (
-                    inbox.resize.take(),
+                    if inbox.capabilities.viewport().is_some() {
+                        inbox.resize.take()
+                    } else {
+                        None
+                    },
                     std::mem::take(&mut inbox.cancel_pointer),
                     inbox.ready.take(),
                     inbox.capabilities,
@@ -264,7 +275,17 @@ fn run(
                     }
                 });
             }
-            let exact_ready = !late_cancel && !platform.has_pending();
+            let exact_ready = !late_cancel
+                && !platform.has_pending()
+                && presentation
+                    .state
+                    .lock()
+                    .unwrap()
+                    .pixels
+                    .as_ref()
+                    .unwrap()
+                    .resize
+                    .is_none();
             if let Some(input) = input {
                 let mut refresh = false;
                 let mut release_pending = super::input::released(&input.event);

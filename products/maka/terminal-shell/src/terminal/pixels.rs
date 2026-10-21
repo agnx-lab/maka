@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod geometry;
 mod input;
 mod mapping;
 mod probe;
@@ -91,6 +92,7 @@ enum Phase {
     },
     Retire(input::Offer),
     Effect,
+    Measure,
 }
 
 struct PixelUpload {
@@ -136,6 +138,16 @@ pub(super) fn run(
         if let Some(at) = flushed {
             phase = match phase {
                 Phase::Setup | Phase::Effect => Phase::Idle,
+                Phase::Measure => {
+                    presentation
+                        .state
+                        .lock()
+                        .unwrap()
+                        .pixel_probe
+                        .measurement
+                        .flushed(at);
+                    Phase::Idle
+                }
                 Phase::Upload(upload) => Phase::Ack {
                     upload,
                     deadline: at + Duration::from_millis(250),
@@ -153,6 +165,26 @@ pub(super) fn run(
                     return Err("unexpected terminal output receipt".into());
                 }
             };
+        }
+        {
+            let mut state = presentation.state.lock().unwrap();
+            let measured = state.pixel_probe.measurement.poll(Instant::now());
+            let inbox = state.pixels.as_mut().unwrap();
+            let needs_pixels = inbox.resize.is_some() && inbox.capabilities.pixel_size().is_none();
+            match measured {
+                Ok(Some((generation, width, height)))
+                    if generation == inbox.geometry && needs_pixels =>
+                {
+                    inbox.capabilities.size.pixel_width = Some(width);
+                    inbox.capabilities.size.pixel_height = Some(height);
+                    inbox.resize = Some(inbox.capabilities.size);
+                    if let Some(wake) = &inbox.wake {
+                        wake.unpark();
+                    }
+                }
+                Err(error) if needs_pixels => return Err(error),
+                _ => {}
+            }
         }
         if let Phase::Ack { upload, deadline } = &phase {
             let ack = presentation
@@ -242,7 +274,21 @@ pub(super) fn run(
                 }
             }
             let mut state = presentation.state.lock().unwrap();
+            let missing = state
+                .pixels
+                .as_ref()
+                .filter(|inbox| inbox.resize.is_some() && inbox.capabilities.pixel_size().is_none())
+                .map(|inbox| inbox.geometry);
+            if let Some(generation) = missing
+                && state.pixel_probe.measurement.begin(generation)?
+            {
+                output.submit(geometry::QUERY.to_vec(), None)?;
+                phase = Phase::Measure;
+            }
             let inbox = state.pixels.as_mut().unwrap();
+            if !matches!(phase, Phase::Idle) {
+                continue;
+            }
             if let Some(bytes) = inbox.effects.take() {
                 output.submit(bytes, None)?;
                 phase = Phase::Effect;
