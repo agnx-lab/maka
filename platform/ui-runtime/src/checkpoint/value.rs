@@ -142,26 +142,46 @@ impl ValueCheckpoint {
                 loop {
                     let sequence = command.sequence();
                     let result: Result<ValueCheckpointState, String> = async {
-                        let _bytes = budget
-                            .reserve(Kind::Encoded, super::MAX_CONTENT + 32 * 1024)
-                            .map_err(|e| e.to_string())?;
                         if checkpoints.is_none() {
                             checkpoints = Some(scope.open(&store)?);
                         }
                         let checkpoints = checkpoints.as_ref().unwrap();
                         match command {
                             ValueCheckpointCommand::Read { .. } => {
-                                let saved =
-                                    checkpoints.read(&key).await.map_err(|e| e.to_string())?;
+                                let budget = budget.clone();
+                                let saved = checkpoints
+                                    .read(&key, move |content_bytes| {
+                                        if content_bytes > 16384 {
+                                            return Err(
+                                                maka_event_log::StoreError::InvalidTransition(
+                                                    "UI preference format is incompatible".into(),
+                                                ),
+                                            );
+                                        }
+                                        budget
+                                            .reserve(
+                                                Kind::Encoded,
+                                                content_bytes
+                                                    + super::MAX_METADATA
+                                                    + super::MAX_SOURCE
+                                                    + 128,
+                                            )
+                                            .map_err(|error| {
+                                                maka_event_log::StoreError::InvalidTransition(
+                                                    error.to_string(),
+                                                )
+                                            })
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
                                 match saved {
                                     None => Ok(ValueCheckpointState::Ready {
                                         revision: None,
                                         value: None,
                                     }),
-                                    Some(saved) => {
+                                    Some((saved, _bytes)) => {
                                         if saved.format != format
                                             || saved.data_source != Value::Null
-                                            || saved.content.len() > 16384
                                         {
                                             return Err(
                                                 "UI preference format is incompatible".into()
@@ -181,11 +201,15 @@ impl ValueCheckpoint {
                                 value,
                                 ..
                             } => {
+                                let mut bytes = budget
+                                    .reserve(Kind::Encoded, 16384)
+                                    .map_err(|e| e.to_string())?;
                                 let content =
                                     serde_json::to_vec(&value).map_err(|e| e.to_string())?;
                                 if content.len() > 16384 {
                                     return Err("UI preferences exceed 16 KiB".into());
                                 }
+                                bytes.shrink_to(content.len());
                                 let revision = checkpoints
                                     .write(
                                         &key,

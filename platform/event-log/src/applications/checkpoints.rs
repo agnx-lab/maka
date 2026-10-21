@@ -28,10 +28,8 @@ use serde_json::Value;
 use sqlx::{Connection, Row};
 use std::sync::Arc;
 
-pub const MAX_CONTENT: usize = 1024 * 1024;
 pub const MAX_METADATA: usize = 32 * 1024;
 pub const MAX_SOURCE: usize = 4096;
-const MAX_NAMESPACE: usize = 40 * 1024 * 1024;
 const MAX_REVISION: u64 = (1 << 53) - 1;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,29 +84,44 @@ impl EventLog {
     }
 }
 impl Checkpoints {
-    pub async fn read(&self, key: &str) -> Result<Option<Checkpoint>, StoreError> {
+    /// Admit the original content allocation before fetching it. The callback
+    /// and payload read share one SQLite snapshot; its token follows the result.
+    pub async fn read<T: Send + 'static>(
+        &self,
+        key: &str,
+        admit: impl FnOnce(usize) -> Result<T, StoreError> + Send + 'static,
+    ) -> Result<Option<(Checkpoint, T)>, StoreError> {
         key_valid(key)?;
         self.store.validate_root()?;
         let deployment = self.deployment.clone();
         let instance = self.instance.clone();
         let key = key.to_owned();
         self.store.connection.run(move |connection| Box::pin(async move {
+            let mut tx = connection.begin().await?;
+            let bytes: Option<i64> = sqlx::query_scalar("SELECT length(CAST(content AS BLOB)) FROM application_ui_checkpoints WHERE deployment=? AND instance=? AND key=?")
+                .bind(&deployment).bind(&instance).bind(&key).fetch_optional(&mut *tx).await?;
+            let Some(bytes) = bytes else {
+                tx.commit().await?;
+                return Ok(None);
+            };
+            let bytes = usize::try_from(bytes).map_err(|_| invalid("invalid UI checkpoint content length"))?;
+            let token = admit(bytes)?;
             let row = sqlx::query("SELECT revision,
                 CASE WHEN length(CAST(format AS BLOB)) BETWEEN 1 AND 128 THEN format END AS format,
                 CASE WHEN length(CAST(data_source_json AS BLOB)) <= 4096 THEN data_source_json END AS source,
                 CASE WHEN length(CAST(metadata_json AS BLOB)) <= 32768 THEN metadata_json END AS metadata,
-                CASE WHEN length(content) <= 1048576 THEN content END AS content
+                content
                 FROM application_ui_checkpoints WHERE deployment=? AND instance=? AND key=?")
-                .bind(deployment).bind(instance).bind(key).fetch_optional(connection).await?;
-            row.map(|row| {
-                let revision: i64 = row.try_get("revision")?;
-                if !(1..=MAX_REVISION as i64).contains(&revision) { return Err(invalid("invalid UI checkpoint revision")); }
-                let format = row.try_get::<Option<String>, _>("format")?.ok_or_else(|| invalid("invalid UI checkpoint format"))?;
-                let data_source = serde_json::from_str(&row.try_get::<Option<String>, _>("source")?.ok_or_else(|| invalid("UI checkpoint source exceeds budget"))?)?;
-                let metadata = serde_json::from_str(&row.try_get::<Option<String>, _>("metadata")?.ok_or_else(|| invalid("UI checkpoint metadata exceeds budget"))?)?;
-                let content = row.try_get::<Option<Vec<u8>>, _>("content")?.ok_or_else(|| invalid("UI checkpoint content exceeds budget"))?;
-                Ok(Checkpoint { revision: revision as u64, format, data_source, metadata, content })
-            }).transpose()
+                .bind(deployment).bind(instance).bind(key).fetch_one(&mut *tx).await?;
+            let revision: i64 = row.try_get("revision")?;
+            if !(1..=MAX_REVISION as i64).contains(&revision) { return Err(invalid("invalid UI checkpoint revision")); }
+            let format = row.try_get::<Option<String>, _>("format")?.ok_or_else(|| invalid("invalid UI checkpoint format"))?;
+            let data_source = serde_json::from_str(&row.try_get::<Option<String>, _>("source")?.ok_or_else(|| invalid("UI checkpoint source exceeds budget"))?)?;
+            let metadata = serde_json::from_str(&row.try_get::<Option<String>, _>("metadata")?.ok_or_else(|| invalid("UI checkpoint metadata exceeds budget"))?)?;
+            let content: Vec<u8> = row.try_get("content")?;
+            if content.len() != bytes { return Err(invalid("UI checkpoint content length changed")); }
+            tx.commit().await?;
+            Ok(Some((Checkpoint { revision: revision as u64, format, data_source, metadata, content }, token)))
         })).await
     }
 
@@ -127,7 +140,6 @@ impl Checkpoints {
         self.store.validate_root()?;
         if format.is_empty()
             || format.len() > 128
-            || content.len() > MAX_CONTENT
             || expected.is_some_and(|value| value == 0 || value >= MAX_REVISION)
         {
             return Err(invalid("invalid or oversized UI checkpoint"));
@@ -138,7 +150,6 @@ impl Checkpoints {
         let instance = self.instance.clone();
         let key = key.to_owned();
         let format = format.to_owned();
-        let size = 256 + key.len() + format.len() + source.len() + metadata.len() + content.len();
         self.store.connection.run(move |connection| Box::pin(async move {
             let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
             let current: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as("SELECT revision, CASE WHEN length(CAST(format AS BLOB)) BETWEEN 1 AND 128 THEN format END, CASE WHEN length(CAST(data_source_json AS BLOB)) <= 4096 THEN data_source_json END FROM application_ui_checkpoints WHERE deployment=? AND instance=? AND key=?")
@@ -150,11 +161,6 @@ impl Checkpoints {
             }); }
             if current.is_some_and(|(_, previous_format, previous_source)| previous_format.as_deref() != Some(format.as_str()) || previous_source.as_deref() != Some(source.as_str())) {
                 return Err(invalid("UI checkpoint format or data source changed"));
-            }
-            let occupied: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(256 + length(CAST(key AS BLOB)) + length(CAST(format AS BLOB)) + length(CAST(data_source_json AS BLOB)) + length(CAST(metadata_json AS BLOB)) + length(content)), 0) FROM application_ui_checkpoints WHERE deployment=? AND instance=? AND key<>?")
-                .bind(&deployment).bind(&instance).bind(&key).fetch_one(&mut *tx).await?;
-            if occupied < 0 || size > MAX_NAMESPACE.saturating_sub(occupied as usize) {
-                return Err(invalid("UI checkpoint namespace exceeds 40 MiB"));
             }
             let revision = actual.unwrap_or(0) + 1;
             sqlx::query("INSERT INTO application_ui_checkpoints (deployment,instance,key,revision,format,data_source_json,metadata_json,content) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(deployment,instance,key) DO UPDATE SET revision=excluded.revision,metadata_json=excluded.metadata_json,content=excluded.content")
