@@ -25,6 +25,8 @@ mod adapter;
 mod graphics;
 mod input;
 mod output;
+#[cfg(target_os = "linux")]
+mod pixels;
 mod ui;
 
 use crossterm::event;
@@ -105,14 +107,30 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
         .set_max_pending_bytes(input::MAX_BYTES + 12)
         .map_err(|error| error.to_string())?;
     let mut output = Output::new(io::stdout()).map_err(|error| error.to_string())?;
-    output.submit([SETUP, graphics::QUERY].concat(), None)?;
     let presentation = Presentation {
         stop: stop.clone(),
         ..Default::default()
     };
+    let setup = [SETUP, graphics::QUERY].concat();
+    #[cfg(target_os = "linux")]
+    let setup = {
+        let mut setup = setup;
+        let mut state = presentation.state.lock().unwrap();
+        state.pixels = Some(pixels::Inbox::new(pixels::Capabilities {
+            size,
+            pixel_mouse: false,
+        }));
+        setup.extend(state.pixel_probe.query()?);
+        setup
+    };
+    output.submit(setup, None)?;
     let mut input = None;
     let result = (|| {
         input = Some(start_reader(presentation.clone(), reader)?);
+        #[cfg(target_os = "linux")]
+        if let Some(capabilities) = pixels::select(&mut output, &presentation, size)? {
+            return pixels::run(&mut output, &presentation, config, capabilities);
+        }
         let (commands, frames) =
             ui::spawn(config, presentation.clone()).map_err(|error| error.to_string())?;
         // Returning drops both channel endpoints without joining either
@@ -123,7 +141,11 @@ pub fn run(mut config: EngineConfig, stop: Arc<AtomicBool>) -> Result<(), String
     // The platform guard must outlive the sole reader: restoring console modes
     // or code pages while it can still decode input races shutdown on Windows.
     drop(input);
-    let cleanup = output.close(CLEANUP.to_vec()).and_then(|receipt| {
+    let mut cleanup = Vec::new();
+    #[cfg(target_os = "linux")]
+    cleanup.extend(pixels::cleanup(&presentation));
+    cleanup.extend_from_slice(CLEANUP);
+    let cleanup = output.close(cleanup).and_then(|receipt| {
         match receipt.recv_timeout(Duration::from_millis(100)) {
             Ok(result) => result.map_err(|error| error.to_string()),
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -271,6 +293,25 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         };
                         read += 1;
                         inbox.graphics.observe(&event, Instant::now());
+                        #[cfg(target_os = "linux")]
+                        {
+                            inbox.pixel_probe.observe(&event, Instant::now());
+                            if let Some(pixels) = &mut inbox.pixels {
+                                let result = pixels.push(event);
+                                if let Some(wake) = &pixels.wake {
+                                    wake.unpark();
+                                }
+                                match result {
+                                    Ok(true) => inbox.quit = true,
+                                    Ok(false) => {}
+                                    Err(error) => inbox.error = Some(error),
+                                }
+                                if inbox.quit || inbox.error.is_some() {
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
                         let Some(event) = adapter::event(event) else {
                             continue;
                         };

@@ -28,10 +28,35 @@ use std::{
 
 pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
+enum Payload {
+    Bytes(Vec<u8>),
+    #[cfg(target_os = "linux")]
+    Pixels {
+        frame: Box<nsh_gpui_terminal::CandidateFrame>,
+        image: u32,
+        previous: Option<u32>,
+        columns: u16,
+        rows: u16,
+    },
+}
+
+#[cfg(target_os = "linux")]
+pub(super) struct PixelUpload {
+    pub token: nsh_gpui_terminal::FrameToken,
+    pub image: u32,
+    pub retire: Vec<u8>,
+}
+
+struct Flushed {
+    at: Instant,
+    #[cfg(target_os = "linux")]
+    pixels: Option<PixelUpload>,
+}
+
 enum Request {
     Frame(
-        Vec<u8>,
-        mpsc::SyncSender<io::Result<Instant>>,
+        Payload,
+        mpsc::SyncSender<io::Result<Flushed>>,
         Option<(Presentation, u64, Box<InputSnapshot>)>,
     ),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
@@ -41,8 +66,10 @@ enum Request {
 /// abandoning observation never replaces a partially written ANSI frame.
 pub(super) struct Output {
     send: mpsc::SyncSender<Request>,
-    pending: Option<mpsc::Receiver<io::Result<Instant>>>,
+    pending: Option<mpsc::Receiver<io::Result<Flushed>>>,
     flushed: Option<Instant>,
+    #[cfg(target_os = "linux")]
+    pixels: Option<PixelUpload>,
 }
 
 impl Output {
@@ -55,11 +82,41 @@ impl Output {
             .spawn(move || {
                 while let Ok(request) = receive.recv() {
                     match request {
-                        Request::Frame(bytes, receipt, presentation) => {
-                            let result = writer.write_all(&bytes).and_then(|_| writer.flush());
+                        Request::Frame(payload, receipt, presentation) => {
+                            let result = (|| {
+                                #[cfg(target_os = "linux")]
+                                let mut pixels = None;
+                                match payload {
+                                    Payload::Bytes(bytes) => writer.write_all(&bytes)?,
+                                    #[cfg(target_os = "linux")]
+                                    Payload::Pixels {
+                                        frame,
+                                        image,
+                                        previous,
+                                        columns,
+                                        rows,
+                                    } => {
+                                        let frame = nsh_gpui_terminal::kitty::KittyFrame::encode(
+                                            &frame, image, previous, columns, rows,
+                                        )
+                                        .map_err(io::Error::other)?;
+                                        pixels = Some(PixelUpload {
+                                            token: frame.token(),
+                                            image: frame.image_id(),
+                                            retire: frame.retire_previous().to_vec(),
+                                        });
+                                        writer.write_all(frame.upload())?;
+                                    }
+                                };
+                                writer.flush()?;
+                                Ok(Flushed {
+                                    at: Instant::now(),
+                                    #[cfg(target_os = "linux")]
+                                    pixels,
+                                })
+                            })();
                             let failed = result.is_err();
-                            let result = result.map(|()| {
-                                let flushed = Instant::now();
+                            let result = result.map(|flushed| {
                                 if let Some((presentation, epoch, snapshot)) = presentation {
                                     presentation.publish(epoch, *snapshot);
                                 }
@@ -82,6 +139,8 @@ impl Output {
             send,
             pending: None,
             flushed: None,
+            #[cfg(target_os = "linux")]
+            pixels: None,
         })
     }
 
@@ -90,17 +149,48 @@ impl Output {
         bytes: Vec<u8>,
         presentation: Option<(Presentation, u64, InputSnapshot)>,
     ) -> Result<(), String> {
-        if self.pending.is_some() {
-            return Err("terminal frame still in flight".into());
-        }
         if bytes.len() > MAX_FRAME_BYTES {
             return Err("terminal frame exceeds byte limit".into());
         }
-        let (send, receive) = mpsc::sync_channel(1);
         let presentation =
             presentation.map(|(owner, epoch, snapshot)| (owner, epoch, Box::new(snapshot)));
+        self.queue(Payload::Bytes(bytes), presentation)
+    }
+
+    /// Compression and upload run on the existing sole writer. Neither the
+    /// terminal reader nor the GPUI thread waits for a slow terminal link.
+    #[cfg(target_os = "linux")]
+    pub fn submit_pixels(
+        &mut self,
+        frame: nsh_gpui_terminal::CandidateFrame,
+        image: u32,
+        previous: Option<u32>,
+        columns: u16,
+        rows: u16,
+    ) -> Result<(), String> {
+        self.queue(
+            Payload::Pixels {
+                frame: Box::new(frame),
+                image,
+                previous,
+                columns,
+                rows,
+            },
+            None,
+        )
+    }
+
+    fn queue(
+        &mut self,
+        payload: Payload,
+        presentation: Option<(Presentation, u64, Box<InputSnapshot>)>,
+    ) -> Result<(), String> {
+        if self.pending.is_some() {
+            return Err("terminal frame still in flight".into());
+        }
+        let (send, receive) = mpsc::sync_channel(1);
         self.send
-            .try_send(Request::Frame(bytes, send, presentation))
+            .try_send(Request::Frame(payload, send, presentation))
             .map_err(|error| error.to_string())?;
         self.pending = Some(receive);
         Ok(())
@@ -115,7 +205,11 @@ impl Output {
                 self.pending = None;
                 result
                     .map(|flushed| {
-                        self.flushed = Some(flushed);
+                        self.flushed = Some(flushed.at);
+                        #[cfg(target_os = "linux")]
+                        {
+                            self.pixels = flushed.pixels;
+                        }
                         true
                     })
                     .map_err(|error| error.to_string())
@@ -130,6 +224,11 @@ impl Output {
     /// Actual writer flush time, rather than the time the driver polled its receipt.
     pub fn take_flushed(&mut self) -> Option<Instant> {
         self.flushed.take()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn take_pixels(&mut self) -> Option<PixelUpload> {
+        self.pixels.take()
     }
 
     /// Queue restoration behind the current frame, without joining a writer

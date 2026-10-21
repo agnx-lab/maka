@@ -68,6 +68,10 @@ pub(super) struct Inbox {
     /// action is revoked, including offers older than the UI's current frame.
     pub reject_through: u64,
     capture: Option<Capture>,
+    #[cfg(target_os = "linux")]
+    pub pixel_probe: super::pixels::Probe,
+    #[cfg(target_os = "linux")]
+    pub pixels: Option<super::pixels::Inbox>,
 }
 
 impl Inbox {

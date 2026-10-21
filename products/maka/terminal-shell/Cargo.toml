@@ -46,6 +46,12 @@ tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui = { package = "gpui-fast", version = "0.1.10", default-features = false, features = ["offscreen"] }
+gpui_wgpu = { package = "gpui-fast-wgpu", version = "0.1.10", default-features = false, features = ["offscreen"] }
+nsh-platform-gpui.workspace = true
+nsh-gpui-terminal.workspace = true
+
 [build-dependencies]
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-core.workspace = true

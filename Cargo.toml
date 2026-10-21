@@ -95,6 +95,8 @@ maka-app-client = { path = "products/maka/client" }
 nsh-core = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169" }
 nsh-engine = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169" }
 nsh-platform-tui = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169" }
+nsh-platform-gpui = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169", default-features = false, features = ["js"] }
+nsh-gpui-terminal = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169" }
 nsh-bundler = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169", default-features = false }
 nsh-base = { git = "https://github.com/M4n5ter/nsh", rev = "6268a888b14693708bdd104f91f0098e920b3169" }
 maka-agent-facts = { path = "plugins/agent/facts" }
