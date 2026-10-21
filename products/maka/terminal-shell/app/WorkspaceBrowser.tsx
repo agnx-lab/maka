@@ -47,6 +47,7 @@ import { Icon } from './Icon';
 import type { Browsing, BrowserScope, BrowserWorkspace, BrowserSession } from './browsing';
 import { SessionActions } from './SessionActions';
 import type { SessionAction } from './sessionLifecycle';
+import { sessionStatusCaption } from './sessionStatus';
 
 export type WorkspaceBrowserProps = {
   browsing: Browsing;
@@ -525,9 +526,9 @@ export function WorkspaceBrowser(props: WorkspaceBrowserProps) {
                       style={{ color: C.muted, fontSize: 12, lineHeight: 16 }}
                     >
                       {session()?.activity === 'working'
-                        ? 'Working · '
+                        ? `${sessionStatusCaption.working} · `
                         : session()?.activity === 'waiting'
-                          ? 'Waiting · '
+                          ? `${sessionStatusCaption.waiting} · `
                           : ''}
                       {session()?.workspace.path.split('/').filter(Boolean).at(-1) ||
                         session()?.workspace.path}

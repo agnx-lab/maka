@@ -49,6 +49,8 @@ import { projectProcessGroups, stableRowId } from './processGroups';
 import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
 import { ReturnToLatest, TurnNavigation } from './TurnNavigation';
 import type { TurnNavigationItem } from './TurnNavigation';
+import { sessionStatusCaption } from './sessionStatus';
+import type { ConversationStatus } from './sessionStatus';
 import type { ImagePreview } from './ImageThumbnail';
 import { latestToolActivity, updateToolActivity } from './toolActivity';
 import type { ToolActivity } from './toolActivity';
@@ -120,7 +122,7 @@ export function Conversation(props: ConversationProps) {
   const pendingMessages = signal<(Row & { placement: 'queued' | 'transcript' })[]>([]);
   const title = signal(sessionId);
   const archived = signal(false);
-  const run = signal('Loading session…');
+  const run = signal<ConversationStatus>('loading');
   const invocation = signal<string | null>(null);
   const stoppingRun = signal<string | null>(null);
   const stopping = () => invocation() !== null && stoppingRun() === invocation();
@@ -538,7 +540,7 @@ export function Conversation(props: ConversationProps) {
     backend.set(observed.session.backend ?? observed.rememberedBackend ?? null);
     metrics.set(observed.metrics ?? null);
     if (observed.through >= runThrough) {
-      run.set(observed.run?.state ?? 'Idle');
+      run.set(observed.run?.state ?? 'idle');
       invocation.set(observed.run?.invocationId ?? null);
       runTurn.set(observed.run?.turnId ?? null);
       if (!observed.run) stoppingRun.set(null);
@@ -737,7 +739,7 @@ export function Conversation(props: ConversationProps) {
           closeLive(event.sequence, event.invocationId);
           parts.set(parts().filter((part) => part.invocationId !== event.invocationId));
           if (event.sequence > runThrough) {
-            run.set(fact.failed ? 'Failed' : 'Idle');
+            run.set(fact.failed ? 'failed' : 'idle');
             invocation.set(null);
             runTurn.set(null);
             stoppingRun.set(null);
@@ -1542,7 +1544,7 @@ export function Conversation(props: ConversationProps) {
       <Header
         title={title()}
         workspace={workspace()}
-        status={stopping() ? 'Stopping…' : run()}
+        status={stopping() ? 'Stopping…' : sessionStatusCaption[run()]}
         active={invocation() !== null}
         commands={props.commands}
         browse={props.browse}
