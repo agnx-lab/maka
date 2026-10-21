@@ -190,19 +190,19 @@ impl Journal {
             .execute(&mut *transaction).await.map_err(error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS drafts (owner TEXT PRIMARY KEY, revision INTEGER NOT NULL, text TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0)")
             .execute(&mut *transaction).await.map_err(error)?;
-        for (table, column, alter) in [
+        for (inspect, column, alter) in [
             (
-                "drafts",
+                "PRAGMA table_info(drafts)",
                 "attachments",
                 "ALTER TABLE drafts ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
             ),
             (
-                "operations",
+                "PRAGMA table_info(operations)",
                 "upload_adopted",
                 "ALTER TABLE operations ADD COLUMN upload_adopted INTEGER NOT NULL DEFAULT 0",
             ),
         ] {
-            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+            let columns = sqlx::query(inspect)
                 .fetch_all(&mut *transaction)
                 .await
                 .map_err(error)?;
