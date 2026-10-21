@@ -452,6 +452,7 @@ impl Fixture {
                     endpoint(
                         "settings",
                         &[
+                            "usage",
                             "models",
                             "resolveModel",
                             "updateModelSettings",
