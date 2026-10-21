@@ -1397,6 +1397,63 @@ pub enum ToolImagePage {
     },
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AgentAttachmentImageRead")]
+pub struct AttachmentImageRead {
+    #[schemars(length(min = 1, max = 128))]
+    pub session_id: String,
+    pub source: AttachmentImageSource,
+    #[schemars(range(max = 9_007_199_254_740_991u64))]
+    pub offset: u64,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[schemars(rename = "AgentAttachmentImageSource")]
+pub enum AttachmentImageSource {
+    Uploaded {
+        #[schemars(length(min = 1, max = 256))]
+        id: String,
+    },
+    History {
+        #[schemars(range(max = 9_007_199_254_740_991u64))]
+        through: u64,
+        position: RowPosition,
+        attachment_index: u32,
+    },
+}
+#[derive(Serialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[schemars(rename = "AgentAttachmentImagePage")]
+pub enum AttachmentImagePage {
+    Ready {
+        source: AttachmentImageSource,
+        offset: u64,
+        #[schemars(range(min = 1, max = 9_007_199_254_740_991u64))]
+        total_bytes: u64,
+        #[schemars(regex(pattern = "^image/(png|jpeg|gif|webp|avif)$"))]
+        mime_type: String,
+        #[schemars(regex(pattern = "^sha256:[a-f0-9]{64}$"))]
+        digest: String,
+        /// Standard padded Base64 of at most 32KiB of encoded image bytes.
+        #[schemars(
+            length(max = 43692),
+            regex(pattern = "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
+        )]
+        data: String,
+    },
+}
+
 #[derive(Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "AgentToolNames")]
@@ -1578,6 +1635,10 @@ pub fn contract() -> Contract {
                 (
                     "toolImage".into(),
                     method::<ToolImageRead, ToolImagePage>(MethodMode::Query),
+                ),
+                (
+                    "attachmentImage".into(),
+                    method::<AttachmentImageRead, AttachmentImagePage>(MethodMode::Query),
                 ),
                 (
                     "create".into(),

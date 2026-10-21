@@ -19,12 +19,107 @@
 
 use super::read::{sql_number, sql_position};
 use crate::{EventLog, StoreError, artifacts::ImageChunk};
-use maka_agent_facts::attachment::StorageRef;
+use maka_agent_facts::attachment::{AttachmentKind, AttachmentRef, StorageRef};
 use maka_agent_facts::history::RowPosition;
 use maka_agent_facts::tool_output::ImageOutput;
 use sqlx::Connection;
 
 impl EventLog {
+    /// Read only an immutable user upload belonging to this Session.
+    pub async fn uploaded_image(
+        &self,
+        session: &str,
+        id: &str,
+        offset: u64,
+        limit: usize,
+    ) -> Result<ImageChunk, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        sql_number(offset)?;
+        if limit == 0 || limit > 32 * 1024 {
+            return Err(invalid("invalid attachment image window"));
+        }
+        let (session, id) = (session.to_owned(), id.to_owned());
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let chunk = crate::artifacts::read_attachment_image(
+                        &mut tx, &session, &id, None, offset, limit,
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    Ok(chunk)
+                })
+            })
+            .await
+    }
+
+    /// Resolve one attachment of the selected immutable user row at its fence.
+    pub async fn attachment_image(
+        &self,
+        session: &str,
+        through: u64,
+        position: RowPosition,
+        attachment_index: u32,
+        offset: u64,
+        limit: usize,
+    ) -> Result<ImageChunk, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        sql_number(through)?;
+        sql_number(offset)?;
+        if position.source_sequence > through || limit == 0 || limit > 32 * 1024 {
+            return Err(invalid("invalid attachment image window"));
+        }
+        let (source_sequence, item_index) = sql_position(position)?;
+        let session = session.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    super::directory::check_read(&mut tx, &session, through).await?;
+                    super::bodycache::ensure(&mut tx, &session, position).await?;
+                    let raw: String = sqlx::query_scalar(
+                        "SELECT a.value FROM transcript_rows r, json_each(r.payload, '$.attachments') a
+                         WHERE r.session_id = ?1 AND r.source_sequence = ?2 AND r.item_index = ?3
+                         AND json_extract(r.payload, '$.type') = 'user' AND a.key = ?4
+                         AND length(CAST(a.value AS BLOB)) <= 16384",
+                    )
+                    .bind(&session)
+                    .bind(source_sequence)
+                    .bind(item_index)
+                    .bind(i64::from(attachment_index))
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .ok_or_else(|| invalid("canonical image attachment not found"))?;
+                    let attachment: AttachmentRef = serde_json::from_str(&raw)?;
+                    let StorageRef::SessionFile {
+                        session_id,
+                        relative_path,
+                    } = &attachment.storage_ref
+                    else {
+                        return Err(invalid("image attachment has no immutable upload"));
+                    };
+                    if session_id != &session || attachment.kind != AttachmentKind::Image {
+                        return Err(invalid("image attachment is outside this Session"));
+                    }
+                    let chunk = crate::artifacts::read_attachment_image(
+                        &mut tx,
+                        &session,
+                        relative_path,
+                        Some(&attachment),
+                        offset,
+                        limit,
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    Ok(chunk)
+                })
+            })
+            .await
+    }
+
     /// Resolve only the immutable image selected by this canonical row/fence.
     pub async fn tool_image(
         &self,

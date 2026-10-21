@@ -661,6 +661,54 @@ impl Handler for Agent {
                 "uploadAttachment" => {
                     encode(owner.upload_attachment(decode(input)?, context).await?)
                 }
+                "attachmentImage" => {
+                    let input: AttachmentImageRead = decode(input)?;
+                    owner.session(&input.session_id).await?;
+                    let image = match &input.source {
+                        AttachmentImageSource::Uploaded { id } => {
+                            owner
+                                .store
+                                .uploaded_image(&input.session_id, id, input.offset, 32 * 1024)
+                                .await
+                        }
+                        AttachmentImageSource::History {
+                            through,
+                            position,
+                            attachment_index,
+                        } => {
+                            if *through > *owner.store.subscribe_commits().borrow() {
+                                return Err("agent_cursor_invalid".into());
+                            }
+                            owner
+                                .store
+                                .attachment_image(
+                                    &input.session_id,
+                                    *through,
+                                    *position,
+                                    *attachment_index,
+                                    input.offset,
+                                    32 * 1024,
+                                )
+                                .await
+                        }
+                    }
+                    .map_err(|_| "agent_image_unavailable")?;
+                    owner.session(&input.session_id).await?;
+                    if context.scope().cancellation.is_cancelled() {
+                        return Err("agent_observation_cancelled".into());
+                    }
+                    let result = encode(AttachmentImagePage::Ready {
+                        source: input.source,
+                        offset: input.offset,
+                        total_bytes: image.total_bytes,
+                        mime_type: image.mime_type,
+                        digest: image.digest,
+                        data: STANDARD.encode(image.bytes),
+                    })?;
+                    maka_plugin_core::json::check_delivery(&result, 64 * 1024)
+                        .map_err(|_| "agent_image_unavailable")?;
+                    Ok(result)
+                }
                 "send" => {
                     let input: Send = decode(input)?;
                     let operation = context.operation().ok_or("agent_mutation_required")?;

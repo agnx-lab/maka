@@ -246,6 +246,140 @@ async fn canonical_images_use_original_agent_grants_and_bounded_base64() {
     fixture.config.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn user_attachment_images_use_uploaded_identity_and_canonical_user_rows() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let f = Fixture::new(&format!("http://{}/v1", listener.local_addr().unwrap()), None).await;
+        enable_vision(&f).await;
+        let session = f.create("User image previews").await;
+        let other = f.create("Unrelated image previews").await;
+        let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMQNE5uAAACKAEoAfdvjgAAAABJRU5ErkJggg==";
+        let bytes = STANDARD.decode(encoded).unwrap();
+        let image = attachments::upload(&f, &session, "image.png", &bytes, Uuid::new_v4())
+            .await
+            .unwrap();
+        let image_id = image["attachment"]["id"].as_str().unwrap();
+        let text = attachments::upload(&f, &session, "notes.txt", b"notes\n", Uuid::new_v4())
+            .await
+            .unwrap();
+        let uploaded = json!({"kind":"uploaded","id":image_id});
+        let expected = |source: Value| json!({
+            "kind":"ready","source":source,"offset":0,"totalBytes":70,
+            "mimeType":"image/png",
+            "digest":"sha256:9dd3ba490b98e42f0933bc132655c484bdd8682731f639aaffe8c09bfd476dca",
+            "data":encoded
+        });
+        assert_eq!(
+            f.query("attachmentImage", json!({"sessionId":session,"source":uploaded,"offset":0}))
+                .await.unwrap(),
+            expected(uploaded.clone())
+        );
+        for source in [
+            json!({"kind":"uploaded","id":text["attachment"]["id"]}),
+            json!({"kind":"uploaded","id":"missing"}),
+        ] {
+            assert!(f.query("attachmentImage", json!({"sessionId":session,"source":source,"offset":0}))
+                .await.is_err());
+        }
+        assert!(f.query("attachmentImage", json!({"sessionId":other,"source":uploaded,"offset":0}))
+            .await.is_err());
+        let mut tool_only = f.store.get_artifact(&session, image_id).await.unwrap().record.unwrap();
+        tool_only.id = "tool-image-only".into();
+        tool_only.source = maka_agent_facts::artifact::ArtifactSource::ToolResult;
+        f.store.commit_artifact(tool_only, bytes.clone()).await.unwrap();
+        assert!(f.query("attachmentImage", json!({"sessionId":session,"source":{"kind":"uploaded","id":"tool-image-only"},"offset":0}))
+            .await.is_err());
+
+        let sent = f.mutation(2, "send", json!({"sessionId":session,"message":"Preview original attachments",
+            "attachments":[text["attachment"]["id"],image_id],"model":f.selection().await}), Uuid::new_v4())
+            .await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        response_with_text(&mut socket, "Image received").await;
+        f.drained().await;
+        let through = *f.store.subscribe_commits().borrow();
+        let history = f.query("history", json!({"sessionId":session,"through":through,"position":{"kind":"start"}}))
+            .await.unwrap();
+        let rows = history["chunks"].as_array().unwrap();
+        let user = rows.iter().find(|row| row["role"] == "user").unwrap();
+        assert_eq!(user["attachments"][1], json!({"name":"image.png","mimeType":"image/png","bytes":70,"kind":"image"}));
+        let source = json!({"kind":"history","through":through,"position":user["position"],"attachmentIndex":1});
+        let read = json!({"sessionId":session,"source":source,"offset":0});
+        assert_eq!(f.query("attachmentImage", read.clone()).await.unwrap(), expected(source.clone()));
+        for (key, value) in [
+            ("through", json!(user["position"]["sourceSequence"].as_u64().unwrap() - 1)),
+            ("through", json!(through + 1)),
+            ("attachmentIndex", json!(0)),
+            ("attachmentIndex", json!(2)),
+            ("position", rows.iter().find(|row| row["role"] == "assistant").unwrap()["position"].clone()),
+        ] {
+            let mut wrong = read.clone();
+            wrong["source"][key] = value;
+            assert!(f.query("attachmentImage", wrong).await.is_err());
+        }
+        let mut wrong = read.clone();
+        wrong["sessionId"] = json!(other);
+        assert!(f.query("attachmentImage", wrong).await.is_err());
+        let mut wrong = read.clone();
+        wrong["offset"] = json!(71);
+        assert!(f.query("attachmentImage", wrong).await.is_err());
+        let mut end = read.clone();
+        end["offset"] = json!(70);
+        let mut empty = expected(source.clone());
+        empty["offset"] = json!(70);
+        empty["data"] = json!("");
+        assert_eq!(f.query("attachmentImage", end).await.unwrap(), empty);
+
+        let turn = f.store.invocation_boundary(&session, sent["invocationId"].as_str().unwrap())
+            .await.unwrap().unwrap().0.invocation.turn_id;
+        let revision = f.owner.session(&session).await.unwrap().revision;
+        let fork = f.mutation(2, "fork", json!({"sessionId":session,"expectedRevision":revision,
+            "turnId":turn,"title":"Retained image preview","labels":[]}), Uuid::new_v4()).await.unwrap();
+        assert_eq!(fork["kind"], "forked");
+        let child = fork["session"]["id"].as_str().unwrap();
+        let mut copied = read.clone();
+        copied["sessionId"] = json!(child);
+        assert_eq!(f.query("attachmentImage", copied.clone()).await.unwrap(), expected(source.clone()));
+
+        // A typed row cannot change the upload's canonical descriptor.
+        let mut content: maka_agent_facts::input::MessageInput = "Mismatched image metadata".into();
+        content.attachments = Some(vec![maka_agent_facts::attachment::AttachmentRef {
+            kind: maka_agent_facts::attachment::AttachmentKind::Image,
+            name: "different.png".into(), mime_type: "image/png".into(), bytes: 70,
+            storage_ref: maka_agent_facts::attachment::StorageRef::SessionFile {
+                session_id: session.clone(), relative_path: image_id.into(),
+            },
+        }]);
+        let invocation = Invocation { session_id: session.clone(), turn_id: "bad-image-turn".into(),
+            run_id: "bad-image-run".into(), invocation_id: "bad-image-invocation".into() };
+        let write = |fact| EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap();
+        let bad = f.store.append(&write(Fact::InvocationOpened { configuration: None,
+            input: InvocationInput::Message { content, source_messages: Vec::new(), request_fingerprint: None } }))
+            .await.unwrap();
+        f.store.append(&write(Fact::InvocationEnded { outcome: InvocationOutcome::Completed })).await.unwrap();
+        let bad_fence = *f.store.subscribe_commits().borrow();
+        let bad_history = f.query("history", json!({"sessionId":session,"through":bad_fence,"position":{"kind":"start"}}))
+            .await.unwrap();
+        let bad_row = bad_history["chunks"].as_array().unwrap().iter()
+            .find(|row| row["role"] == "user" && row["position"]["sourceSequence"] == bad).unwrap();
+        assert_eq!(bad_row["attachments"][0]["name"], "different.png");
+        assert!(f.query("attachmentImage", json!({"sessionId":session,"source":{"kind":"history",
+            "through":bad_fence,"position":bad_row["position"],"attachmentIndex":0},"offset":0}))
+            .await.is_err());
+
+        // Existing uploads may be deleted; a retained branch owns its own copy.
+        assert!(matches!(f.store.delete_user_artifact(&session, image_id).await.unwrap(),
+            maka_event_log::artifacts::ArtifactDeletion::Deleted));
+        assert!(f.query("attachmentImage", read).await.is_err());
+        assert!(f.query("attachmentImage", json!({"sessionId":session,"source":uploaded,"offset":0}))
+            .await.is_err());
+        assert_eq!(f.query("attachmentImage", copied).await.unwrap(), expected(source));
+        f.app.shutdown().await.unwrap();
+        f.config.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
 pub(super) fn gif(minimum: usize) -> Vec<u8> {
     let mut bytes = vec![
         71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 0, 0, 0, 255, 255, 255, 33, 249, 4, 1, 0, 0,

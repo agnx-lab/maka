@@ -262,6 +262,43 @@ pub(crate) async fn read_image(
             "tool image bytes were not frozen at their canonical row",
         ));
     }
+    image_chunk(connection, &artifact, digest, mime, offset, limit).await
+}
+
+pub(crate) async fn read_attachment_image(
+    connection: &mut sqlx::SqliteConnection,
+    session: &str,
+    id: &str,
+    attachment: Option<&maka_agent_facts::attachment::AttachmentRef>,
+    offset: u64,
+    limit: usize,
+) -> Result<ImageChunk, StoreError> {
+    records::ids(session, Some(id))?;
+    require_session(connection, session).await?;
+    let (artifact, digest) = read_record(connection, session, id)
+        .await?
+        .ok_or_else(|| invalid("uploaded image artifact not found"))?;
+    if artifact.source != ArtifactSource::UserUpload || artifact.summary.as_ref() != Some(&digest) {
+        return Err(invalid("image is not an immutable user upload"));
+    }
+    if let Some(attachment) = attachment {
+        artifact.validate_attachment(attachment).map_err(invalid)?;
+    }
+    let mime = artifact
+        .mime_type
+        .as_deref()
+        .ok_or_else(|| invalid("uploaded image has no MIME type"))?;
+    image_chunk(connection, &artifact, digest, mime, offset, limit).await
+}
+
+async fn image_chunk(
+    connection: &mut sqlx::SqliteConnection,
+    artifact: &Artifact,
+    digest: String,
+    mime: &str,
+    offset: u64,
+    limit: usize,
+) -> Result<ImageChunk, StoreError> {
     if artifact.kind != maka_agent_facts::artifact::ArtifactKind::Image
         || artifact.mime_type.as_deref() != Some(mime)
         || !matches!(
@@ -276,18 +313,18 @@ pub(crate) async fn read_image(
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
     {
-        return Err(invalid("invalid retained tool image metadata"));
+        return Err(invalid("invalid retained image metadata"));
     }
     if offset > artifact.size_bytes {
         return Err(StoreError::ArtifactOffset);
     }
     let (total, bytes): (i64, Vec<u8>) = sqlx::query_as(
         "SELECT length(payload), substr(payload, ?, ?) FROM artifacts WHERE session_id = ? AND id = ?"
-    ).bind(offset as i64 + 1).bind(limit as i64).bind(session).bind(id).fetch_one(&mut *connection).await?;
+    ).bind(offset as i64 + 1).bind(limit as i64).bind(&artifact.session_id).bind(&artifact.id).fetch_one(&mut *connection).await?;
     if total as u64 != artifact.size_bytes
         || bytes.len() as u64 != (artifact.size_bytes - offset).min(limit as u64)
     {
-        return Err(invalid("tool image artifact size mismatch"));
+        return Err(invalid("image artifact size mismatch"));
     }
     Ok(ImageChunk {
         total_bytes: artifact.size_bytes,
