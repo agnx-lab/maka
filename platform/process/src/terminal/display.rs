@@ -36,7 +36,86 @@ use maka_agent_facts::terminal::{
     display::{self, Color, Display, Metadata, Row, Run, Style},
 };
 
+/// A physical viewport into the original styled grid. Capturing it visits only
+/// the requested rows, irrespective of the amount of retained scrollback.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Viewport {
+    pub metadata: Metadata,
+    pub rows: Vec<Row>,
+    /// Rows above the bottom of the grid, clamped to the retained extent.
+    pub offset: usize,
+    pub total_rows: usize,
+    pub scrollback_rows: usize,
+    /// Original grid coordinate: current screen starts at zero, history is negative.
+    pub first_line: i32,
+}
+
+impl Viewport {
+    /// Read a validated, settled display (for example from `Assembly::finish`)
+    /// without cloning its other rows or alternate buffer. This is not an input
+    /// validation boundary: validating again would walk the entire history.
+    pub fn from_display(
+        display: &Display,
+        offset: usize,
+        count: usize,
+    ) -> Result<Self, &'static str> {
+        let history = display.scrollback.len();
+        let (offset, first_line) = viewport_range(display.metadata.size, history, offset, count)?;
+        let first = (first_line + history as i32) as usize;
+        let rows = (first..first + count)
+            .map(|line| {
+                if line < history {
+                    display.scrollback[line].clone()
+                } else {
+                    display.screen[line - history].clone()
+                }
+            })
+            .collect();
+        Ok(Self {
+            metadata: display.metadata.clone(),
+            rows,
+            offset,
+            total_rows: history + usize::from(display.metadata.size.rows()),
+            scrollback_rows: history,
+            first_line,
+        })
+    }
+}
+
+fn viewport_range(
+    size: maka_agent_facts::terminal::TerminalSize,
+    history: usize,
+    offset: usize,
+    count: usize,
+) -> Result<(usize, i32), &'static str> {
+    let screen_rows = usize::from(size.rows());
+    if count == 0 || count > screen_rows {
+        return Err("terminal viewport must contain between one and the screen's rows");
+    }
+    let offset = offset.min(history + screen_rows - count);
+    Ok((offset, (screen_rows - count) as i32 - offset as i32))
+}
+
 impl Screen {
+    /// Capture at most one screen of original styled cells, without walking or
+    /// encoding the retained history. Offset zero follows the live bottom.
+    pub fn viewport(&self, offset: usize, count: usize) -> Result<Viewport, &'static str> {
+        let term = &self.state.term;
+        let history = term.history_size();
+        let (offset, first_line) = viewport_range(self.size(), history, offset, count)?;
+        let mut metadata = metadata(term, self);
+        metadata.truncated |= self.failed;
+        Ok(Viewport {
+            metadata,
+            rows: rows(term, first_line..first_line + count as i32),
+            offset,
+            total_rows: history + term.screen_lines(),
+            scrollback_rows: history,
+            first_line,
+        })
+    }
+
     /// Capture even a sticky-failed parser's structurally valid grid. The failed
     /// display includes only the applied prefix, and is explicitly incomplete.
     pub fn display(&self) -> Display {
@@ -275,6 +354,28 @@ fn install_row<T: EventListener>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_reads_only_the_requested_physical_extent_and_clamps_to_retained_history() {
+        let mut source = Screen::new(maka_agent_facts::terminal::TerminalSize::new(8, 3).unwrap());
+        source.write("zero\r\none\r\ntwo\r\nthree").unwrap();
+        let text = |view: &Viewport| view.rows.iter()
+            .map(|row| row.iter().map(|run| run.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>();
+        let bottom = source.viewport(0, 2).unwrap();
+        assert_eq!(bottom.first_line, 1);
+        assert_eq!(bottom.scrollback_rows, 1);
+        assert_eq!(bottom.total_rows, 4);
+        assert_eq!(text(&bottom), ["two     ", "three   "]);
+        let top = source.viewport(usize::MAX, 2).unwrap();
+        assert_eq!(top.offset, 2);
+        assert_eq!(top.first_line, -1);
+        assert_eq!(text(&top), ["zero    ", "one     "]);
+        let display = source.display();
+        assert_eq!(Viewport::from_display(&display, 2, 2).unwrap(), top);
+        assert!(source.viewport(0, 0).is_err());
+        assert!(source.viewport(0, 4).is_err());
+    }
     use maka_agent_facts::terminal::TerminalSize;
 
     #[test]

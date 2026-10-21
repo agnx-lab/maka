@@ -23,6 +23,8 @@ mod assets;
 mod files;
 mod mutation;
 mod settings;
+mod terminal;
+mod terminal_grid;
 mod uploads;
 
 pub use mutation::OriginalMutation;
@@ -91,6 +93,7 @@ impl Bindings {
         let owner = self.owner.clone();
         let mut registry = Registry::ui_set("maka/host");
         registry.register::<uploads::AttachmentPicker>();
+        registry.class::<terminal_grid::TerminalGrid>();
         registry.value("host", move || {
             Instance::new(ApplicationHost {
                 owner: owner.clone(),
@@ -143,6 +146,8 @@ async fn execute<T: Send + 'static>(
 // methods. Host output validation still checks the captured actual descriptor.
 fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(), String> {
     static AGENT_CONTRACT: LazyLock<Contract> = LazyLock::new(maka_agent_api::contract);
+    static TERMINAL_CONTRACT: LazyLock<Contract> =
+        LazyLock::new(maka_workspace_api::terminal::contract);
     static SETTINGS_CONTRACT: LazyLock<Contract> =
         LazyLock::new(maka_settings_native::contract::contract);
     static AUTHENTICATION_CONTRACT: LazyLock<Contract> =
@@ -153,6 +158,7 @@ fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(
         LazyLock::new(maka_plugin_core::deployment::management::deployment_manager_contract);
     let expected: &Contract = match endpoint {
         "agent" => &AGENT_CONTRACT,
+        "terminal" => &TERMINAL_CONTRACT,
         "settings" => &SETTINGS_CONTRACT,
         "authentication" => &AUTHENTICATION_CONTRACT,
         "setup" => &SETUP_CONTRACT,
@@ -248,6 +254,10 @@ impl ApplicationHost {
             SubscriptionKind::File(Some(
                 serde_json::from_value(input.clone()).map_err(|_| "Invalid file read selector")?,
             ))
+        } else if endpoint == "terminal" {
+            // Terminal subscriptions can return a real final item: in particular,
+            // readDisplay's End and a refused acquire's failed business outcome.
+            SubscriptionKind::Terminal
         } else {
             SubscriptionKind::Events
         };
@@ -436,6 +446,34 @@ impl ScopedHost {
     #[getter]
     pub fn session_id(&self) -> String {
         self.scope.session.clone()
+    }
+
+    /// Execute one original terminal mutation in this immutable session.
+    pub async fn terminal(this: Instance<Self>, method: String, input: JsonValue) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        drop(this);
+        terminal::mutate(scope, method, input).await
+    }
+
+    /// Unresolved original terminal actions for this exact session and Host.
+    pub async fn pending_terminals(this: Instance<Self>) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        drop(this);
+        terminal::pending(scope).await
+    }
+
+    /// Recover an original terminal receipt, never repeat its business input.
+    pub async fn recover_terminal(this: Instance<Self>, operation_id: String) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        drop(this);
+        terminal::recover(scope, operation_id).await
+    }
+
+    /// Fence a terminal original only if preparation did not commit.
+    pub async fn abandon_terminal(this: Instance<Self>, operation_id: String) -> Result<JsonValue, String> {
+        let scope = this.with(|host| host.scope.clone());
+        drop(this);
+        terminal::abandon(scope, operation_id).await
     }
 
     /// Read this editor's persisted draft and its monotonic editing revision.
@@ -629,6 +667,7 @@ pub struct ScopedSubscription {
 }
 enum SubscriptionKind {
     Events,
+    Terminal,
     File(Option<maka_agent_api::contract::FileRead>),
 }
 
@@ -647,7 +686,7 @@ impl ScopedSubscription {
         let (owner, subscription, source) = this.with_mut(|item| {
             let source = match &mut item.kind {
                 SubscriptionKind::File(source) => source.take(),
-                SubscriptionKind::Events => None,
+                SubscriptionKind::Events | SubscriptionKind::Terminal => None,
             };
             (item.owner.clone(), item.subscription.clone(), source)
         });
@@ -666,12 +705,14 @@ impl ScopedSubscription {
         if this.with(|item| matches!(item.kind, SubscriptionKind::File(_))) {
             return Err("Consume file subscriptions with readFile".into());
         }
-        let (owner, subscription) =
-            this.with(|item| (item.owner.clone(), item.subscription.clone()));
+        let (owner, subscription, terminal) = this.with(|item| (
+            item.owner.clone(), item.subscription.clone(), matches!(item.kind, SubscriptionKind::Terminal),
+        ));
         drop(this);
         execute(owner, async move {
             match subscription.next().await? {
                 Some(SubscriptionEvent::Item(value)) => Ok(value),
+                Some(SubscriptionEvent::Finished(value)) if terminal => Ok(value),
                 Some(SubscriptionEvent::Finished(_)) | None => Ok(JsonValue::Null),
             }
         })

@@ -152,7 +152,7 @@ const object = (properties) => ({
   additionalProperties: false,
 });
 const services = Object.fromEntries(
-  ['agent', 'settings', 'settingsAuthentication', 'settingsSetup', 'deploymentManager'].map(
+  ['agent', 'settings', 'settingsAuthentication', 'settingsSetup', 'deploymentManager', 'terminal'].map(
     (service) => [
       service,
       object(

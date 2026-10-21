@@ -22,6 +22,8 @@ import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { keymap } from 'nsh/keymap';
 import { Image } from 'nsh/image';
+import { Terminal } from './Terminal';
+import { Terminals } from './Terminals';
 import { WorkspaceFiles } from './WorkspaceFiles';
 import { WorkspaceChanges } from './WorkspaceChanges';
 import { CurrentDiff } from './CurrentDiff';
@@ -59,7 +61,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
       }}
       style={{ flex: 1, minHeight: 0, backgroundColor: C.surface, padding: 8, gap: 8 }}
     >
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button
           accessibilityLabel="Browse files"
           selected={resources.active() === 'files'}
@@ -88,6 +90,13 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           <Text style={{ color: resources.active() === 'changes' ? C.accent : C.muted }}>
             Changes
           </Text>
+        </Button>
+        <Button
+          accessibilityLabel="Show conversation terminals"
+          onPress={inputAction(resources.inventory, { sessionId: resources.sessionId()!, kind: 'terminals' })}
+          style={{ paddingHorizontal: 8, backgroundColor: resources.active() === 'terminals' ? C.raised : 'transparent' }}
+          hoverStyle={{ backgroundColor: C.raised }} focusStyle={{ backgroundColor: C.line }}>
+          <Text style={{ color: resources.active() === 'terminals' ? C.text : C.accent }}>Terminal</Text>
         </Button>
         <View style={{ flex: 1 }} />
         <Button
@@ -142,6 +151,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           </View>
         </Scroll>
       </If>
+      <If when={resources.active() === 'terminals'}><Terminals model={resources.terminals} sessionId={resources.sessionId()!} /></If>
       <If when={resources.active() === 'files'}>
         <WorkspaceFiles model={resources.files} />
       </If>
@@ -153,6 +163,7 @@ export function ResourcePane(props: { resources: Resources; docked: boolean }) {
           const current = tab();
           if (current.kind === 'file') return <CurrentFile model={current.model} />;
           if (current.kind === 'diff') return <CurrentDiff model={current.model} />;
+          if (current.kind === 'terminal') return <Terminal model={current.model} />;
           return <OriginalImage image={current.image} />;
         }}
       </Each>

@@ -23,6 +23,8 @@ import { createWorkspaceFiles, type WorkspaceFileTarget } from './workspaceFileS
 import { createCurrentFile, type CurrentFileModel } from './CurrentFile';
 import { createCurrentDiff, type CurrentDiffTarget, type CurrentDiffModel } from './CurrentDiff';
 import type { ImagePreview } from './ImageThumbnail';
+import { createTerminals, type TerminalModel } from './terminalState';
+import type { ResourceUpdate } from '../../../../packages/plugin-sdk/src/index.js';
 
 export type ResourceTab = {
   instance: number;
@@ -33,6 +35,7 @@ export type ResourceTab = {
   | { kind: 'file'; model: CurrentFileModel }
   | { kind: 'diff'; model: CurrentDiffModel }
   | { kind: 'image'; image: ImagePreview }
+  | { kind: 'terminal'; model: TerminalModel }
 );
 
 // Window presentation state only. All resource authority remains in the
@@ -40,7 +43,7 @@ export type ResourceTab = {
 export function createResources(options: { selected(): string | null; blocked(): boolean }) {
   const shown = signal(false);
   const tabs = signal<ResourceTab[]>([]);
-  const active = signal<number | 'files' | 'changes'>('files');
+  const active = signal<number | 'files' | 'changes' | 'terminals'>('files');
   const focusRequest = signal(false);
   const instance = signal(0);
   let nextInstance = 0;
@@ -147,7 +150,7 @@ export function createResources(options: { selected(): string | null; blocked():
     const fallback = headerOpener(sessionId);
     opener = () => image.restoreFocus?.() || fallback();
   };
-  const inventory = (target: { sessionId: string; kind: 'files' | 'changes' }) => {
+  const inventory = (target: { sessionId: string; kind: 'files' | 'changes' | 'terminals' }) => {
     if (!admits(target.sessionId)) return;
     adopt();
     active.set(target.kind);
@@ -178,6 +181,16 @@ export function createResources(options: { selected(): string | null; blocked():
       focusRequest.set(true);
     }
   };
+  const terminals = createTerminals({
+    sessionId: options.selected,
+    active: () => shown() && (active() === 'terminals' || tabs().some((tab) => tab.instance === active() && tab.kind === 'terminal')),
+    open(entry: ResourceUpdate, model: TerminalModel) {
+      open(entry.sessionId, `terminal:${entry.result.ref}`, (instance) => ({
+        kind: 'terminal', instance, identity: `terminal:${entry.result.ref}`,
+        sessionId: entry.sessionId, title: entry.result.cmd || 'Terminal', model,
+      }));
+    },
+  });
   const files = createWorkspaceFiles({
     sessionId: options.selected,
     active: () => shown() && active() === 'files',
@@ -189,7 +202,7 @@ export function createResources(options: { selected(): string | null; blocked():
     const current = tabs();
     untracked(() =>
       current.forEach((tab) => {
-        if (tab.kind === 'file') {
+        if (tab.kind === 'file' || tab.kind === 'terminal') {
           if (visible && selected === tab.instance) tab.model.activate();
           else tab.model.suspend();
         }
@@ -205,6 +218,7 @@ export function createResources(options: { selected(): string | null; blocked():
     tabs,
     active,
     files,
+    terminals,
     inventory,
     openFiles,
     openImage,

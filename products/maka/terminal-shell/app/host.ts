@@ -36,6 +36,7 @@ type Services = {
   authentication: ServiceMethods['settingsAuthentication'];
   setup: ServiceMethods['settingsSetup'];
   management: ServiceMethods['deploymentManager'];
+  terminal: ServiceMethods['terminal'];
 };
 type Endpoint = keyof Services;
 type Method<E extends Endpoint, Mode extends string> = {
@@ -181,7 +182,7 @@ export const host = {
   async settingsMutation(endpoint: string, method: string, input: unknown, secret?: string | null) {
     return attempt(await nativeHost.settingsMutation(endpoint, method, input, secret));
   },
-  beginSetting<E extends Exclude<Endpoint, 'agent'>, M extends Method<E, 'mutation'>>(
+  beginSetting<E extends Exclude<Endpoint, 'agent' | 'terminal'>, M extends Method<E, 'mutation'>>(
     endpoint: E,
     method: M,
     input: Input<E, M>,
@@ -222,3 +223,25 @@ export const abandonUpload = (scope: ScopedHost, id: string) =>
   scope.abandonUpload(id) as Promise<ClientOperation>;
 export const watchUploads = (scope: ScopedHost) =>
   scope.watchUploads() as { next(): Promise<ClientOperation[] | null>; close(): void };
+
+// The immutable native scope checks the original terminal session before dispatch.
+export async function terminalMutation<M extends Method<'terminal', 'mutation'>>(
+  scope: ScopedHost,
+  method: M,
+  input: Input<'terminal', M>,
+): Promise<Output<'terminal', M>> {
+  const observed = await scope.terminal(method, input);
+  if (!object(observed) || !object(observed.reply)) throw new Error('Invalid terminal receipt.');
+  const reply = observed.reply as unknown as OperationReply;
+  if (reply.receipt.kind !== 'recorded' || reply.receipt.outcome.kind !== 'returned')
+    throw new Error('Terminal result is unknown. Recover the original action before trying again.');
+  if (observed.cleanupError)
+    throw new Error(`Terminal result was recorded, but its original call did not finish cleanup: ${String(observed.cleanupError)}. Do not repeat this action.`);
+  return reply.receipt.outcome.value as Output<'terminal', M>;
+}
+export const pendingTerminals = (scope: ScopedHost) =>
+  scope.pendingTerminals() as Promise<ClientOperation[]>;
+export const recoverTerminal = (scope: ScopedHost, id: string) =>
+  scope.recoverTerminal(id) as Promise<OperationReply>;
+export const abandonTerminal = (scope: ScopedHost, id: string) =>
+  scope.abandonTerminal(id) as Promise<ClientOperation>;

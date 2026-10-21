@@ -34,6 +34,8 @@ maka-capabilities.workspace = true
 maka-event-log.workspace = true
 maka-host-runtime.workspace = true
 maka-plugin-core.workspace = true
+maka-process.workspace = true
+maka-workspace-api.workspace = true
 maka-settings-native.workspace = true
 maka-ui-runtime.workspace = true
 nsh-core.workspace = true
@@ -42,6 +44,7 @@ nsh-platform-tui.workspace = true
 nsh-base.workspace = true
 crossterm.workspace = true
 ratatui = { workspace = true, features = ["unstable-backend-writer"] }
+serde.workspace = true
 serde_json.workspace = true
 termina.workspace = true
 tokio.workspace = true
@@ -62,11 +65,9 @@ nsh-base.workspace = true
 [dev-dependencies]
 nsh-bundler.workspace = true
 libc.workspace = true
-maka-process.workspace = true
 tempfile.workspace = true
 maka-agent-native.workspace = true
 maka-files-native.workspace = true
-maka-workspace-api.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 maka-config.workspace = true
 maka-packages.workspace = true

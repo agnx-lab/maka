@@ -705,6 +705,10 @@ impl Client {
         }
         Ok(operation)
     }
+    /// Unsettled terminal attempts for this exact Host and immutable Agent session.
+    pub async fn pending_terminals(&self, session: &str) -> Result<Vec<Operation>> {
+        self.0.journal.pending_terminals(&self.0.source, session).await
+    }
     /// Unsettled Settings attempts for this exact Host deployment.
     pub async fn pending_settings(&self) -> Result<Vec<Operation>> {
         self.0.journal.pending_settings(&self.0.source).await
