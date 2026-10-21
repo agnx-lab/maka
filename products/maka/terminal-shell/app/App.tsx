@@ -239,8 +239,24 @@ function App() {
     else if (handle()?.sessionId === result.session.id) await handle()!.refresh();
     await browsing.refresh();
   };
-  const stop = () => {
-    if (!overlay() && handle()) void handle()!.stop(handle()!.invocation()).catch(report);
+  const stop = ({
+    sessionId,
+    invocationId,
+  }: {
+    sessionId: string | null;
+    invocationId: string | null;
+  }) => {
+    const owner = handle();
+    if (
+      !alive ||
+      overlay() ||
+      !owner ||
+      selected() !== sessionId ||
+      owner.sessionId !== sessionId ||
+      owner.invocation() !== invocationId
+    )
+      return;
+    void owner.stop(invocationId).catch(report);
   };
   const closeCommand = (context: CommandContext) =>
     alive &&
@@ -495,7 +511,12 @@ function App() {
       <Workbench
         expanded={() => sidebarExpanded() && overlay()?.kind !== 'sessions'}
         browser={browserProps}
-        stop={stop}
+        stopAction={() =>
+          inputAction(stop, {
+            sessionId: selected(),
+            invocationId: handle()?.invocation() ?? null,
+          })
+        }
         resources={resources}
       >
         <If when={selected() === null}>

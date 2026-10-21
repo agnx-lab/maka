@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, effect, inputAction, signal, View, type JSX } from 'nsh';
+import { effect, inputAction, signal, View, type JSX, type YNode } from 'nsh';
 import { windowSize } from 'nsh/device';
 import { keymap } from 'nsh/keymap';
 import { Dialog } from 'nsh/base';
@@ -39,7 +39,7 @@ const canDockPreview = () => windowSize().width >= CENTER_MIN + PREVIEW_MIN + CE
 export function Workbench(props: {
   expanded(): boolean;
   browser: WorkspaceBrowserProps;
-  stop(): void;
+  stopAction(): () => void;
   resources: Resources;
   children: JSX.Element;
 }) {
@@ -66,8 +66,12 @@ export function Workbench(props: {
       ),
     );
   let drag: { x: number; width: number; viewport: number } | null = null;
-  let removeEscape = () => {};
-  cleanup(() => removeEscape());
+  const content = signal<YNode | null>(null);
+  effect(() => {
+    const stop = props.stopAction();
+    const node = content();
+    if (node) return keymap.bind('escape', stop, { when: 'always', within: node });
+  });
   effect(() => {
     windowSize().width;
     windowSize().height;
@@ -114,13 +118,7 @@ export function Workbench(props: {
           hoverStyle={{ backgroundColor: C.accent }}
         />
       </If>
-      <View
-        ref={(node) => {
-          removeEscape();
-          removeEscape = keymap.bind('escape', props.stop, { when: 'always', within: node });
-        }}
-        style={{ flex: 1, minWidth: 0, minHeight: 0 }}
-      >
+      <View ref={(node) => content.set(node)} style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
         {props.children}
       </View>
       <If when={preview()}>
