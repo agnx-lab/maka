@@ -36,7 +36,11 @@ use std::path::Path;
 use uuid::Uuid;
 
 // Keep admission and pending observations on the same immutable Settings owner.
-const SETTINGS_OWNER: &str = "draft_owner IS NULL AND json_type(context,'$.draft')='null' AND json_type(context,'$.sessionId')='null' AND json_type(context,'$.correlation')='object' AND json_extract(context,'$.correlation')=? AND ((json_extract(context,'$.endpoint')='settings' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?))) OR (json_extract(context,'$.endpoint')='setup' AND json_extract(context,'$.method')='discoverModels'))";
+macro_rules! settings_owner_sql {
+    () => {
+        "draft_owner IS NULL AND json_type(context,'$.draft')='null' AND json_type(context,'$.sessionId')='null' AND json_type(context,'$.correlation')='object' AND json_extract(context,'$.correlation')=? AND ((json_extract(context,'$.endpoint')='settings' AND json_extract(context,'$.method') IN (SELECT value FROM json_each(?))) OR (json_extract(context,'$.endpoint')='setup' AND json_extract(context,'$.method')='discoverModels'))"
+    };
+}
 
 /// One user attempt. Neither this observation nor its original reference grants access.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -356,10 +360,11 @@ impl Journal {
     }
     pub(crate) async fn reserve_settings(&self, operation: &Operation) -> Result<()> {
         let context = encode_operation(operation)?;
-        let statement = format!(
-            "INSERT OR IGNORE INTO operations (id,domain,deployment,context,draft_owner) SELECT ?,?,?,?,NULL WHERE NOT EXISTS (SELECT 1 FROM operations WHERE domain=? AND deployment=? AND {SETTINGS_OWNER} AND receipt IS NULL AND abandoned=0)"
-        );
-        let inserted = sqlx::query(&statement)
+        let inserted = sqlx::query(concat!(
+            "INSERT OR IGNORE INTO operations (id,domain,deployment,context,draft_owner) SELECT ?,?,?,?,NULL WHERE NOT EXISTS (SELECT 1 FROM operations WHERE domain=? AND deployment=? AND ",
+            settings_owner_sql!(),
+            " AND receipt IS NULL AND abandoned=0)"
+        ))
             .bind(operation.id.to_string())
             .bind(&operation.host.state_domain)
             .bind(operation.host.deployment.to_string())
@@ -444,10 +449,11 @@ impl Journal {
         rows.into_iter().map(decode_operation).collect()
     }
     pub(crate) async fn pending_settings(&self, host: &DeploymentRef) -> Result<Vec<Operation>> {
-        let statement = format!(
-            "SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND {SETTINGS_OWNER} AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128"
-        );
-        let rows = sqlx::query(&statement)
+        let rows = sqlx::query(concat!(
+            "SELECT context,reference,receipt,abandoned FROM operations WHERE domain=? AND deployment=? AND ",
+            settings_owner_sql!(),
+            " AND receipt IS NULL AND abandoned=0 ORDER BY rowid DESC LIMIT 128"
+        ))
             .bind(&host.state_domain)
             .bind(host.deployment.to_string())
             .bind(serde_json::json!({"kind": SETTINGS_KIND}).to_string())
