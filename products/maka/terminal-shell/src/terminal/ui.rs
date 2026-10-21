@@ -1177,7 +1177,7 @@ mod tests {
                 append(root, result);
                 const scroll = element("scroll");
                 prop(scroll, "style", { flex: 1 });
-                prop(scroll, "onScroll", (event) => offset.set(event.y));
+                prop(scroll, "onScroll", (event) => offset.set(event.offset.y));
                 for (let row = 0; row < 30; row++) {
                     const node = element("view");
                     prop(node, "style", { height: 16 });
@@ -1239,7 +1239,7 @@ mod tests {
                         prop(scroll, "style", { flex: 1 });
                         prop(scroll, "accessibilityLabel", "owner:" + id);
                         prop(scroll, "contentOffset", { y: 144 });
-                        prop(scroll, "onScroll", event => observed.set(id + ":" + event.y));
+                        prop(scroll, "onScroll", event => observed.set(id + ":" + event.offset.y));
                         for (let row = 0; row < 30; row++) {
                             const node = element("view");
                             prop(node, "style", { height: 16 });
