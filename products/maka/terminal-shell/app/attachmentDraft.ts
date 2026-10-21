@@ -102,8 +102,19 @@ export function createAttachmentDraft(options: {
   const receive = (operations: any[]) => {
     if (!alive) return;
     originals.set(operations);
-    const known = new Set(operations.map((original) => original.id));
-    selecting.set(selecting().filter((item) => !known.has(item.id)));
+    selecting.set(
+      selecting().filter((item) => {
+        const original = operations.find((original) => original.id === item.id);
+        // Reserve/prepared invalidations arrive while this native worker still
+        // owns the upload. Its known progress is not an unknown outcome.
+        return (
+          !original ||
+          ((item.kind === 'reading' || item.kind === 'uploading') &&
+            !original.receipt &&
+            !original.abandoned)
+        );
+      }),
+    );
     let changed = false;
     for (const original of operations) {
       const attachment = uploaded(original);
@@ -126,7 +137,12 @@ export function createAttachmentDraft(options: {
   const rows = (): UploadRow[] => [
     ...selecting(),
     ...originals()
-      .filter((original) => !settled.has(original.id) && !uploaded(original))
+      .filter(
+        (original) =>
+          !settled.has(original.id) &&
+          !uploaded(original) &&
+          !selecting().some((item) => item.id === original.id),
+      )
       .map((original) => {
         const result = returned(original);
         return {
@@ -201,13 +217,9 @@ export function createAttachmentDraft(options: {
   };
   const status = (value: unknown) => {
     const update = attachmentStatus(value);
-    if (
-      !alive ||
-      !update ||
-      settled.has(update.operationId) ||
-      originals().some((original) => original.id === update.operationId)
-    )
-      return;
+    if (!alive || !update || settled.has(update.operationId)) return;
+    const original = originals().find((original) => original.id === update.operationId);
+    if (original && (original.receipt || original.abandoned)) return;
     if (update.kind === 'reading') {
       picker.set(false);
       options.focus();
@@ -218,16 +230,11 @@ export function createAttachmentDraft(options: {
       {
         id: update.operationId,
         name: update.name,
-        kind:
-          update.kind === 'failed'
-            ? 'unknown'
-            : update.kind === 'complete'
-              ? 'uploading'
-              : update.kind,
+        kind: update.kind === 'failed' || update.kind === 'complete' ? 'unknown' : update.kind,
         error: update.error,
       },
     ]);
-    if (update.kind === 'failed')
+    if (update.kind === 'failed' || update.kind === 'complete')
       void inspect({ owner: options.sessionId, id: update.operationId });
   };
   const remove = (target: AttachmentTarget) => {

@@ -32,6 +32,7 @@ async fn a_late_original_upload_read_cannot_restore_a_removed_draft_attachment()
         std::fs::write(&path, b"original selected content").unwrap();
         let selected = read_selected(&path, &NativeBudget::default()).unwrap();
         let upload = client.upload_attachment(Uuid::new_v4(), &fixture.session, EDITOR, selected).await.unwrap();
+        let reserved = client.operation_for_upload(&fixture.session, EDITOR, upload.id()).await.unwrap();
         upload.prepare().await.unwrap();
         upload.confirm().await.unwrap();
         let original = client.operation_for_upload(&fixture.session, EDITOR, upload.id())
@@ -51,6 +52,7 @@ import {{ mount, Text, View }} from "nsh";
 import {{ Button }} from "nsh/base";
 import {{ host }} from "maka/host";
 const original = {original};
+const reserved = {reserved};
 const attachment = {attachment};
 mount(() => {{
 const client = host.session(host.initialSession);
@@ -62,11 +64,12 @@ const delivered = signal(false);
 const state = createAttachmentDraft({{
   sessionId: host.initialSession,
   client: {{ watchUploads: () => ({{
-    next: () => initial ? (initial = false, Promise.resolve([original])) : new Promise(resolve => {{ release = resolve; }}),
+    next: () => initial ? (initial = false, Promise.resolve([reserved])) : new Promise(resolve => {{ release = resolve; }}),
     close: () => {{ release?.(null); }},
   }}) }},
   changed() {{}}, focus() {{}},
 }});
+state.status({{ operationId: original.id, name: attachment.name, kind: "uploading" }});
 const save = async () => {{
   const snapshot = state.snapshot();
   const stored = await client.saveDraft(revision, {{ text: "", ...snapshot }});
@@ -76,6 +79,10 @@ const save = async () => {{
 }};
 void state.start();
 return <View style={{{{ width: "100%", gap: 8 }}}}>
+  <Button accessibilityLabel="Deliver confirmed original read" onPress={{() => {{ release([original]); }}}}>
+    <Text>Deliver confirmed original read</Text>
+  </Button>
+  <Text>{{state.blocked()}}</Text>
   <Button accessibilityLabel="Save attachment draft" onPress={{save}}><Text>Save attachment draft</Text></Button>
   <Button accessibilityLabel="Remove selected attachment" onPress={{() => {{
     state.remove({{ owner: host.initialSession, id: attachment.id }}); saved.set(false);
@@ -93,6 +100,7 @@ return <View style={{{{ width: "100%", gap: 8 }}}}>
 "#,
             controller = include_str!("../../app/attachmentDraft.ts"),
             original = serde_json::to_string(&original).unwrap(),
+            reserved = serde_json::to_string(&reserved).unwrap(),
             attachment = serde_json::to_string(&attachment).unwrap());
         let source = nsh_bundler::compile_module("attachment-draft.tsx", &source,
             &sets.iter().map(Into::into).collect::<Vec<_>>()).unwrap();
@@ -101,6 +109,8 @@ return <View style={{{{ width: "100%", gap: 8 }}}}>
             ui_sets: Some(sets), ..Default::default()
         });
         view.load(Bundle::source(source).into()).unwrap();
+        wait_view(&mut view, |screen| screen.contains("files:0") && screen.contains("Uploading attachments")).await;
+        support::click_text(&mut view, "Deliver confirmed original read");
         wait_view(&mut view, |screen| screen.contains("files:1")).await;
         support::click_text(&mut view, "Save attachment draft");
         wait_view(&mut view, |screen| screen.contains("Draft saved")).await;
