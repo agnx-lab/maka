@@ -22,10 +22,10 @@
 #[cfg(windows)]
 pub mod windows;
 
-#[cfg(all(windows, feature = "windows-legacy"))]
-use windows::legacy;
 #[cfg(windows)]
 use windows::InputReaderMode;
+#[cfg(all(windows, feature = "windows-legacy"))]
+use windows::legacy;
 
 use std::{
     collections::VecDeque,
@@ -45,6 +45,7 @@ const TERMINAL_REPLY_INPUT_TIMEOUT: Duration = Duration::from_millis(100);
 use crate::EventReader;
 
 use crate::{
+    Event,
     escape::{
         self,
         csi::{self, Csi, KittyKeyboardFlags, ThemeMode},
@@ -54,7 +55,7 @@ use crate::{
         KeyCode, KeyEvent, KeyEventKind, KeyEventState, KittyGraphicsResponse, MediaKeyCode,
         ModifierKeyCode, Modifiers, MouseButton, MouseEvent, MouseEventKind, SgrMouseEvent,
     },
-    style, Event,
+    style,
 };
 
 /// An incremental parser for terminal input.
@@ -1601,10 +1602,13 @@ mod test {
                 modifiers: Modifiers::NONE,
             }),
             Event::MouseLeave,
-            Event::Paste(concat!(
-                "literal \x1b[?64;4c \x1b[?2;0;1000;800S ",
-                "\x1b[6;16;8t \x1b_Gi=33;OK\x1b\\",
-            ).to_string()),
+            Event::Paste(
+                concat!(
+                    "literal \x1b[?64;4c \x1b[?2;0;1000;800S ",
+                    "\x1b[6;16;8t \x1b_Gi=33;OK\x1b\\",
+                )
+                .to_string(),
+            ),
             Event::Key(KeyCode::Char('z').into()),
         ];
         for split in 0..=wire.len() {
@@ -1751,7 +1755,10 @@ mod test {
                 .unwrap();
             assert_eq!(
                 parser.pop(),
-                Some(Event::Key(KeyEvent::new(KeyCode::Char('p'), Modifiers::CONTROL))),
+                Some(Event::Key(KeyEvent::new(
+                    KeyCode::Char('p'),
+                    Modifiers::CONTROL
+                ))),
                 "{invalid:?}"
             );
             assert_eq!(parser.pop(), None, "{invalid:?}");
