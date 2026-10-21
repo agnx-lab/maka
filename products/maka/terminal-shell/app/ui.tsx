@@ -132,7 +132,6 @@ export function Header(props: {
       <If when={props.files}>
         <Button
           accessibilityLabel="Browse workspace files"
-          accessibilityHint={props.workspace}
           tooltip={props.workspace || 'Browse workspace files'}
           ref={props.filesOpener}
           onPress={props.files}
