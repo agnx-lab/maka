@@ -1206,6 +1206,7 @@ async fn workspace_folders_page_navigate_and_reject_replaced_directory_authority
         wait_focused_input(&mut view, "Message composer").await;
         assert_ne!(view.surface().focused(), Some(editor));
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
+        wait_view_state(&mut view, |view, _| view.accessibility_snapshot().iter().any(|node| node.label == "Browse workspace files" && node.hint.as_deref() == created["workspace"]["path"].as_str())).await;
         view.handle_event(Event::Paste("NEW_FOLDER_DRAFT".into()));
         support::wait_draft(&client, created_id, "NEW_FOLDER_DRAFT").await;
         support::wait_draft(&client, &fixture.session, DRAFT).await;

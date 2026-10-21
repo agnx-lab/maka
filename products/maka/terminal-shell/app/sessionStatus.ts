@@ -24,13 +24,14 @@ import type {
 
 export type ConversationStatus = AgentRunState | 'loading' | 'idle' | 'failed';
 
-export const sessionStatusCaption: Record<ConversationStatus | AgentSessionActivity, string> = {
-  admitted: 'Working',
-  running: 'Working',
-  waiting_for_user: 'Waiting for you',
+export const sessionStatusCaption: Record<
+  AgentSessionActivity | 'loading' | 'stopping' | 'failed',
+  string
+> = {
   working: 'Working',
   waiting: 'Waiting for you',
   loading: 'Loading session…',
+  stopping: 'Stopping…',
   idle: 'Idle',
   failed: 'Failed',
 };

@@ -49,7 +49,6 @@ import { projectProcessGroups, stableRowId } from './processGroups';
 import type { ProcessEntry, ProcessGroup, TurnPresentation } from './processGroups';
 import { ReturnToLatest, TurnNavigation } from './TurnNavigation';
 import type { TurnNavigationItem } from './TurnNavigation';
-import { sessionStatusCaption } from './sessionStatus';
 import type { ConversationStatus } from './sessionStatus';
 import type { ImagePreview } from './ImageThumbnail';
 import { latestToolActivity, updateToolActivity } from './toolActivity';
@@ -1544,8 +1543,15 @@ export function Conversation(props: ConversationProps) {
       <Header
         title={title()}
         workspace={workspace()}
-        status={stopping() ? 'Stopping…' : sessionStatusCaption[run()]}
-        active={invocation() !== null}
+        status={
+          stopping()
+            ? 'stopping'
+            : run() === 'loading'
+              ? 'loading'
+              : run() === 'failed'
+                ? 'failed'
+                : undefined
+        }
         commands={props.commands}
         browse={props.browse}
         files={props.files}

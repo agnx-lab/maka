@@ -17,11 +17,12 @@
  * under the License.
  */
 
-import { signal, Text, View } from 'nsh';
+import { Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
 import { platform, windowSize } from 'nsh/device';
 import { Icon } from './Icon';
+import { sessionStatusCaption } from './sessionStatus';
 
 export const C = {
   background: '#161719',
@@ -64,17 +65,24 @@ export const controlDisabledStyle = platform.isTerminal
 export function Header(props: {
   title: string;
   workspace?: string;
-  status?: string;
-  active?: boolean;
+  status?: 'loading' | 'stopping' | 'failed';
   commands(): void;
   browse?(): void;
   files?(): void;
   filesOpener?(node: YNode): void;
 }) {
-  const width = signal(windowSize().width);
+  const workspaceName = () => {
+    const path = props.workspace;
+    if (!path) return 'Files';
+    return (
+      path
+        .split(path.startsWith('/') ? '/' : /[\\/]/)
+        .filter(Boolean)
+        .at(-1) || path
+    );
+  };
   return (
     <View
-      onLayout={(frame) => width.set(frame.size.width)}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -110,6 +118,7 @@ export function Header(props: {
         <Button
           onPress={props.browse}
           accessibilityLabel="Browse sessions"
+          tooltip="Browse sessions · Ctrl+O"
           style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
@@ -117,42 +126,50 @@ export function Header(props: {
           <Icon name="sidebar" color={C.secondary} />
         </Button>
       </If>
-      <Text numberOfLines={1} style={{ color: C.text, flex: 1, fontWeight: '500' }}>
+      <Text numberOfLines={1} style={{ color: C.text, flex: 1, minWidth: 0, fontWeight: '500' }}>
         {props.title}
       </Text>
       <If when={props.files}>
         <Button
           accessibilityLabel="Browse workspace files"
+          accessibilityHint={props.workspace}
+          tooltip={props.workspace || 'Browse workspace files'}
           ref={props.filesOpener}
           onPress={props.files}
-          style={controlStyle}
+          style={{
+            ...controlStyle,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            maxWidth: 240,
+            minWidth: 0,
+            flexShrink: 1,
+          }}
           hoverStyle={{ backgroundColor: C.surface }}
           focusStyle={{ backgroundColor: C.raised }}
         >
-          <Text style={{ ...captionTextStyle, color: C.secondary }}>Files</Text>
+          <Icon name="folder" color={C.secondary} />
+          <Text
+            numberOfLines={1}
+            style={{ ...captionTextStyle, color: C.secondary, minWidth: 0, flexShrink: 1 }}
+          >
+            {workspaceName()}
+          </Text>
         </Button>
       </If>
-      <If when={width() >= 880 && props.workspace}>
-        <Text numberOfLines={1} style={{ color: C.muted, maxWidth: 240 }}>
-          {props.workspace?.split('/').filter(Boolean).at(-1)}
-        </Text>
-      </If>
-      <If
-        when={platform.isTerminal}
-        else={
-          <View pointerEvents="none" style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <If when={props.active}>
-              <Icon name="unread" color={C.accent} />
-            </If>
-            <Text style={{ ...captionTextStyle, color: props.active ? C.accent : C.muted }}>
-              {props.status || ''}
-            </Text>
-          </View>
-        }
-      >
-        <Text style={{ color: props.active ? C.accent : C.muted, fontSize: 12 }}>
-          {props.active ? '● ' : ''}
-          {props.status || ''}
+      <If when={props.status}>
+        <Text
+          style={{
+            ...captionTextStyle,
+            color:
+              props.status === 'failed'
+                ? C.danger
+                : props.status === 'stopping'
+                  ? C.accent
+                  : C.muted,
+          }}
+        >
+          {props.status ? sessionStatusCaption[props.status] : ''}
         </Text>
       </If>
     </View>
