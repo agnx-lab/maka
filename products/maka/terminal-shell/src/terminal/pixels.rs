@@ -28,7 +28,6 @@ use super::{
 };
 pub(super) use input::Inbox;
 use nsh_engine::EngineConfig;
-use nsh_gpui_terminal::FrameToken;
 pub(super) use probe::Capabilities;
 pub(super) use probe::Probe;
 use std::{
@@ -93,7 +92,7 @@ enum Phase {
         upload: PixelUpload,
         deadline: Instant,
     },
-    Retire(FrameToken),
+    Retire(input::Offer),
     Effect,
 }
 
@@ -142,10 +141,12 @@ pub(super) fn run(
                         .ok_or("terminal pixel upload receipt is missing")?,
                     deadline: at + Duration::from_millis(250),
                 },
-                Phase::Retire(token) => {
+                Phase::Retire(offer) => {
                     let mut state = presentation.state.lock().unwrap();
                     let inbox = state.pixels.as_mut().unwrap();
-                    inbox.ready = Some(token);
+                    if offer.geometry == inbox.geometry {
+                        inbox.ready = Some(offer);
+                    }
                     if let Some(wake) = &inbox.wake {
                         wake.unpark();
                     }
@@ -174,9 +175,12 @@ pub(super) fn run(
                 }
                 result.map_err(|error| format!("terminal rejected the pixel frame: {error}"))?;
                 displayed = Some(upload.image);
-                let token = upload.token.clone();
+                let offer = input::Offer {
+                    token: upload.token.clone(),
+                    geometry: upload.geometry,
+                };
                 output.submit(upload.retire.clone(), None)?;
-                phase = Phase::Retire(token);
+                phase = Phase::Retire(offer);
             } else if Instant::now() >= *deadline {
                 return Err("terminal pixel-frame acknowledgement timed out".into());
             }
@@ -188,7 +192,13 @@ pub(super) fn run(
                     Ok(Err(config)) => {
                         // No app was started. Return the exact original Host
                         // configuration to the character renderer.
-                        output.submit(cleanup(presentation), None)?;
+                        let mut restore = cleanup(presentation);
+                        // Kitty keeps one active mouse tracking/encoding
+                        // value: resetting pixel modes also clears the
+                        // original character modes. Re-enable those after
+                        // cleanup without re-entering the alternate screen.
+                        restore.extend_from_slice(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+                        output.submit(restore, None)?;
                         while !output.poll()? {
                             if presentation.stop.load(Ordering::Acquire)
                                 || presentation.state.lock().unwrap().quit
@@ -231,7 +241,8 @@ pub(super) fn run(
                 output.submit(bytes, None)?;
                 phase = Phase::Effect;
             } else if inbox.resize.is_none()
-                && let Some(frame) = inbox.pending.take()
+                && let Some(candidate) = inbox.pending.take()
+                && candidate.geometry == inbox.geometry
             {
                 let image = if displayed == Some(slots.first) {
                     slots.second
@@ -242,9 +253,16 @@ pub(super) fn run(
                 // before this driver observes the writer's flush receipt.
                 inbox.expected_ack = Some(image);
                 inbox.ack = None;
-                inbox.in_flight = Some(frame.token());
+                inbox.in_flight = Some(candidate.frame.token());
                 let size = inbox.capabilities.size;
-                output.submit_pixels(frame, image, displayed, size.cols, size.rows)?;
+                output.submit_pixels(
+                    candidate.frame,
+                    image,
+                    displayed,
+                    size.cols,
+                    size.rows,
+                    candidate.geometry,
+                )?;
                 phase = Phase::Upload;
             }
         }

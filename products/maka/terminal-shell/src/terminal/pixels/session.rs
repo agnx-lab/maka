@@ -25,7 +25,7 @@ use nsh_engine::EngineConfig;
 use nsh_gpui_terminal::{FrameToken, TerminalPlatform};
 use nsh_platform_gpui::{AppOptions, AppView, InputDisposition, InputSnapshot, InputSource};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
     sync::{Arc, atomic::Ordering, mpsc},
@@ -71,6 +71,17 @@ fn run(
     let sampled = source.clone();
     let retained = snapshots.clone();
     let delivered = presentation.clone();
+    let geometry = Rc::new(Cell::new(
+        presentation
+            .state
+            .lock()
+            .unwrap()
+            .pixels
+            .as_ref()
+            .unwrap()
+            .geometry,
+    ));
+    let drawn_geometry = geometry.clone();
     let owner = thread::current();
     let waker = owner.clone();
     let platform = TerminalPlatform::new(
@@ -79,7 +90,12 @@ fn run(
             if let Some(snapshot) = sampled.borrow().sample() {
                 retained.borrow_mut().insert(frame.token(), snapshot);
                 if let Some(inbox) = &mut delivered.state.lock().unwrap().pixels {
-                    inbox.pending = Some(frame);
+                    if drawn_geometry.get() == inbox.geometry && inbox.resize.is_none() {
+                        inbox.pending = Some(super::input::Candidate {
+                            frame,
+                            geometry: drawn_geometry.get(),
+                        });
+                    }
                 }
             }
         }),
@@ -140,7 +156,7 @@ fn run(
     let mut mapping = Mapping::default();
     let result = (|| {
         while !presentation.stop.load(Ordering::Acquire) {
-            let (resize, cancel, ready, input, caps, quit, error) = {
+            let (resize, cancel, ready, input, caps, generation, quit, error) = {
                 let mut state = presentation.state.lock().unwrap();
                 let quit = state.quit;
                 let error = state.error.clone();
@@ -151,6 +167,7 @@ fn run(
                     inbox.ready.take(),
                     inbox.pop(),
                     inbox.capabilities,
+                    inbox.geometry,
                     quit,
                     error,
                 )
@@ -165,6 +182,7 @@ fn run(
                 source.borrow().cancel_capture();
             }
             if resize.is_some() {
+                geometry.set(generation);
                 let viewport = caps
                     .viewport()
                     .ok_or("terminal resize did not report its real pixel dimensions")?;
@@ -179,15 +197,27 @@ fn run(
                     .as_mut()
                     .unwrap()
                     .pending = None;
+                application.update(|cx| {
+                    if let Some(window) = window.borrow().as_ref() {
+                        let _ = window.update(cx, |_, window, cx| {
+                            window.refresh();
+                            cx.notify();
+                        });
+                    }
+                });
             }
-            if let Some(token) = ready {
+            if let Some(offer) = ready {
                 // Resize invalidates the receipt immediately, even while GPU
                 // readback or an old output transaction is still finishing.
-                if resize.is_none() && platform.mark_presented(token.clone()).is_ok() {
+                if resize.is_none()
+                    && offer.geometry == generation
+                    && platform.mark_presented(offer.token.clone()).is_ok()
+                {
                     let mut state = presentation.state.lock().unwrap();
                     let inbox = state.pixels.as_mut().unwrap();
-                    if inbox.resize.is_none() {
-                        inbox.published = Some(token);
+                    if inbox.resize.is_none() && inbox.geometry == offer.geometry {
+                        inbox.keyboard = Some(offer.token.clone());
+                        inbox.published = Some(offer.token);
                     }
                 }
             }
@@ -197,7 +227,9 @@ fn run(
             platform.pump();
             let exact_ready = !platform.has_pending();
             if let Some(input) = input {
-                let token = input.token.or_else(|| platform.presented());
+                let token = input
+                    .token
+                    .or_else(|| input.startup.then(|| platform.presented()).flatten());
                 match &input.event {
                     Event::FocusIn => {
                         platform
@@ -219,16 +251,14 @@ fn run(
                                     platform.paste(text).map_err(|error| error.to_string())?;
                                 }
                             } else if let Some(event) = mapping.input(event, caps) {
+                                let (floor, current_geometry) = {
+                                    let state = presentation.state.lock().unwrap();
+                                    let inbox = state.pixels.as_ref().unwrap();
+                                    (inbox.reject_through, inbox.geometry)
+                                };
                                 let stale = super::input::pointer(&input.event)
-                                    && token.sequence()
-                                        <= presentation
-                                            .state
-                                            .lock()
-                                            .unwrap()
-                                            .pixels
-                                            .as_ref()
-                                            .unwrap()
-                                            .reject_through;
+                                    && (token.sequence() <= floor
+                                        || input.geometry != current_geometry);
                                 if !stale {
                                     let disposition = source.borrow().dispatch(&snapshot, &event);
                                     match disposition {
@@ -236,6 +266,7 @@ fn run(
                                         InputDisposition::Rejected => continue,
                                         InputDisposition::ExactFallback => {
                                             if !(exact_ready
+                                                && input.geometry == current_geometry
                                                 && platform.dispatch_input_exact(
                                                     token.clone(),
                                                     event.clone(),

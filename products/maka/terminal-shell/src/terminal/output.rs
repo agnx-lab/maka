@@ -37,6 +37,7 @@ enum Payload {
         previous: Option<u32>,
         columns: u16,
         rows: u16,
+        geometry: u64,
     },
 }
 
@@ -45,6 +46,7 @@ pub(super) struct PixelUpload {
     pub token: nsh_gpui_terminal::FrameToken,
     pub image: u32,
     pub retire: Vec<u8>,
+    pub geometry: u64,
 }
 
 struct Flushed {
@@ -83,11 +85,15 @@ impl Output {
                 while let Ok(request) = receive.recv() {
                     match request {
                         Request::Frame(payload, receipt, presentation) => {
+                            let mut attempted_write = false;
                             let result = (|| {
                                 #[cfg(target_os = "linux")]
                                 let mut pixels = None;
                                 match payload {
-                                    Payload::Bytes(bytes) => writer.write_all(&bytes)?,
+                                    Payload::Bytes(bytes) => {
+                                        attempted_write = true;
+                                        writer.write_all(&bytes)?;
+                                    }
                                     #[cfg(target_os = "linux")]
                                     Payload::Pixels {
                                         frame,
@@ -95,6 +101,7 @@ impl Output {
                                         previous,
                                         columns,
                                         rows,
+                                        geometry,
                                     } => {
                                         let frame = nsh_gpui_terminal::kitty::KittyFrame::encode(
                                             &frame, image, previous, columns, rows,
@@ -104,7 +111,9 @@ impl Output {
                                             token: frame.token(),
                                             image: frame.image_id(),
                                             retire: frame.retire_previous().to_vec(),
+                                            geometry,
                                         });
+                                        attempted_write = true;
                                         writer.write_all(frame.upload())?;
                                     }
                                 };
@@ -123,7 +132,7 @@ impl Output {
                                 flushed
                             });
                             let _ = receipt.send(result);
-                            if failed {
+                            if failed && attempted_write {
                                 break;
                             }
                         }
@@ -167,6 +176,7 @@ impl Output {
         previous: Option<u32>,
         columns: u16,
         rows: u16,
+        geometry: u64,
     ) -> Result<(), String> {
         self.queue(
             Payload::Pixels {
@@ -175,6 +185,7 @@ impl Output {
                 previous,
                 columns,
                 rows,
+                geometry,
             },
             None,
         )
@@ -304,6 +315,53 @@ impl Write for FrameWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rejected_pixel_encoding_keeps_the_healthy_writer_for_restoration() {
+        struct Recorded(Arc<Mutex<(Vec<u8>, u32)>>);
+        impl Write for Recorded {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.0.lock().unwrap().1 += 1;
+                Ok(())
+            }
+        }
+        let recorded = Arc::new(Mutex::new((Vec::new(), 0)));
+        let mut output = Output::new(Recorded(recorded.clone())).unwrap();
+        // An inert candidate is rejected by the real codec before any byte.
+        output
+            .submit_pixels(
+                nsh_gpui_terminal::CandidateFrame::default(),
+                41,
+                None,
+                120,
+                40,
+                1,
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match output.poll() {
+                Err(_) => break,
+                Ok(false) => {
+                    assert!(Instant::now() < deadline);
+                    thread::yield_now();
+                }
+                Ok(true) => panic!("inert pixel frame must fail admission"),
+            }
+        }
+        output
+            .close(b"RESTORE".to_vec())
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(*recorded.lock().unwrap(), (b"RESTORE".to_vec(), 1));
+    }
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 

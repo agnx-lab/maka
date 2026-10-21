@@ -28,6 +28,19 @@ use termina::{
 pub(super) struct Input {
     pub event: Event,
     pub token: Option<FrameToken>,
+    pub geometry: u64,
+    pub startup: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct Offer {
+    pub token: FrameToken,
+    pub geometry: u64,
+}
+
+pub(super) struct Candidate {
+    pub frame: CandidateFrame,
+    pub geometry: u64,
 }
 
 /// Send-only terminal state. GPUI snapshots stay on their native owner thread.
@@ -36,10 +49,12 @@ pub(crate) struct Inbox {
     events: VecDeque<Input>,
     bytes: usize,
     pub published: Option<FrameToken>,
+    pub keyboard: Option<FrameToken>,
     capture: Option<FrameToken>,
-    pub pending: Option<CandidateFrame>,
+    pub pending: Option<Candidate>,
     pub in_flight: Option<FrameToken>,
-    pub ready: Option<FrameToken>,
+    pub ready: Option<Offer>,
+    pub geometry: u64,
     pub resize: Option<WindowSize>,
     pub cancel_capture: bool,
     pub expected_ack: Option<u32>,
@@ -56,10 +71,12 @@ impl Inbox {
             events: VecDeque::new(),
             bytes: 0,
             published: None,
+            keyboard: None,
             capture: None,
             pending: None,
             in_flight: None,
             ready: None,
+            geometry: 1,
             resize: None,
             cancel_capture: false,
             expected_ack: None,
@@ -86,6 +103,10 @@ impl Inbox {
             return Ok(false);
         }
         if let Event::WindowResized(size) = event {
+            self.geometry = self
+                .geometry
+                .checked_add(1)
+                .ok_or("terminal geometry generation exhausted")?;
             self.capabilities.size = size;
             self.resize = Some(size);
             self.published = None;
@@ -115,6 +136,7 @@ impl Inbox {
                 MouseEventKind::Drag(termina::event::MouseButton::Left) => self.capture.clone(),
                 _ => self.published.clone(),
             },
+            Event::Key(_) | Event::Paste(_) => self.keyboard.clone(),
             _ => self.published.clone(),
         };
         if pointer(&event)
@@ -133,7 +155,12 @@ impl Inbox {
             return Err("terminal input exceeded its pending budget; input was rejected".into());
         }
         self.bytes += length;
-        self.events.push_back(Input { event, token });
+        self.events.push_back(Input {
+            event,
+            token,
+            geometry: self.geometry,
+            startup: self.keyboard.is_none(),
+        });
         Ok(false)
     }
 
@@ -156,10 +183,11 @@ impl Inbox {
             .iter()
             .filter_map(|input| input.token.clone())
             .chain(self.published.iter().cloned())
+            .chain(self.keyboard.iter().cloned())
             .chain(self.capture.iter().cloned())
-            .chain(self.pending.iter().map(CandidateFrame::token))
+            .chain(self.pending.iter().map(|candidate| candidate.frame.token()))
             .chain(self.in_flight.iter().cloned())
-            .chain(self.ready.iter().cloned())
+            .chain(self.ready.iter().map(|offer| offer.token.clone()))
             .collect()
     }
 
