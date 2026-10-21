@@ -46,6 +46,20 @@ impl Args {
         }
         #[cfg(windows)]
         {
+            use windows_sys::Win32::System::Console::{
+                CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+            };
+
+            unsafe extern "system" fn console_interrupt(event: u32) -> i32 {
+                i32::from(matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT))
+            }
+
+            // Both processes receive console interrupts. Keep this waiter alive
+            // until the shell has restored the terminal and closed its client.
+            // A NULL handler would instead make the child inherit ignored Ctrl+C.
+            if unsafe { SetConsoleCtrlHandler(Some(console_interrupt), 1) } == 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
             let status = command
                 .status()
                 .map_err(|error| format!("{}: {error}", executable.display()))?;

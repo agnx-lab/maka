@@ -56,8 +56,18 @@ try {
   const child = spawn(join(dirname(packagePath), 'bin', executable), process.argv.slice(2), {
     stdio: 'inherit',
   });
-  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-  const handlers = new Map(signals.map((signal) => [signal, () => child.kill(signal)]));
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP', ...(platform === 'win32' ? ['SIGBREAK'] : [])];
+  const handlers = new Map(
+    signals.map((signal) => [
+      signal,
+      () => {
+        // Windows already broadcasts Ctrl+C/Break to the native child. kill(SIGINT)
+        // would forcibly terminate it before its terminal cleanup can finish.
+        if (platform !== 'win32' || (signal !== 'SIGINT' && signal !== 'SIGBREAK'))
+          child.kill(signal);
+      },
+    ]),
+  );
   const cleanup = () => {
     for (const [signal, handler] of handlers) process.off(signal, handler);
   };
