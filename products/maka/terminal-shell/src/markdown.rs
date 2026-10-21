@@ -19,7 +19,7 @@
 
 //! CommonMark/GFM presentation, independent of Host content.
 
-use ::markdown::{ParseOptions, mdast::Node};
+use ::markdown::{ParseOptions, mdast::AlignKind, mdast::Node};
 use nsh_core::ui::prelude::*;
 
 /// Inline content; unsupported constructs retain their complete source spelling.
@@ -39,8 +39,35 @@ pub enum MarkdownBlockKind {
     Paragraph,
     Heading,
     Code,
+    Table,
     Literal,
     Rule,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PropEnum)]
+pub enum MarkdownTableAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownTableCell {
+    pub key: String,
+    pub runs: Vec<MarkdownRun>,
+}
+
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownTableRow {
+    pub key: String,
+    pub cells: Vec<MarkdownTableCell>,
+}
+
+/// Rows retain their natural cell count; the first row is the table header.
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownTable {
+    pub columns: Vec<MarkdownTableAlignment>,
+    pub rows: Vec<MarkdownTableRow>,
 }
 
 /// A block's key uses its starting source offset, so appending text preserves it.
@@ -55,6 +82,7 @@ pub struct MarkdownBlock {
     pub text: String,
     pub level: u32,
     pub language: String,
+    pub table: Option<MarkdownTable>,
 }
 
 /// Stateless, local Markdown presentation; it reads no files and follows no URLs.
@@ -192,12 +220,56 @@ impl Presentation<'_> {
                 block.language = code.lang.clone().unwrap_or_default();
                 self.blocks.push(block);
             }
+            Node::Table(table) => {
+                let mut columns = table
+                    .align
+                    .iter()
+                    .map(|alignment| match alignment {
+                        AlignKind::Left | AlignKind::None => MarkdownTableAlignment::Left,
+                        AlignKind::Center => MarkdownTableAlignment::Center,
+                        AlignKind::Right => MarkdownTableAlignment::Right,
+                    })
+                    .collect::<Vec<_>>();
+                let mut rows = Vec::new();
+                for row_node in &table.children {
+                    let Node::TableRow(row) = row_node else {
+                        unreachable!("Markdown table children are table rows");
+                    };
+                    let mut cells = Vec::new();
+                    for cell_node in &row.children {
+                        let Node::TableCell(cell) = cell_node else {
+                            unreachable!("Markdown table row children are table cells");
+                        };
+                        let mut runs = Vec::new();
+                        for child in &cell.children {
+                            inline(self.source, child, Marks::default(), &mut runs);
+                        }
+                        cells.push(MarkdownTableCell {
+                            key: format!("table-cell:{}", start(cell_node)),
+                            runs,
+                        });
+                    }
+                    // Keep every parsed cell, including an overfull row, instead
+                    // of discarding content beyond the delimiter's columns.
+                    if cells.len() > columns.len() {
+                        columns.resize(cells.len(), MarkdownTableAlignment::Left);
+                    }
+                    rows.push(MarkdownTableRow {
+                        key: format!("table-row:{}", start(row_node)),
+                        cells,
+                    });
+                }
+                let mut block = self.block(node, MarkdownBlockKind::Table, context);
+                block.text = raw(self.source, node).into();
+                block.table = Some(MarkdownTable { columns, rows });
+                self.blocks.push(block);
+            }
             Node::ThematicBreak(_) => {
                 let mut block = self.block(node, MarkdownBlockKind::Rule, context);
                 block.text = raw(self.source, node).into();
                 self.blocks.push(block);
             }
-            // Tables, HTML, images, links, footnotes and definitions have no
+            // HTML, images, links, footnotes and definitions have no
             // terminal activation or lossy "text content" representation.
             _ => {
                 let mut block = self.block(node, MarkdownBlockKind::Literal, context);
@@ -218,6 +290,7 @@ impl Presentation<'_> {
             text: String::new(),
             level: 0,
             language: String::new(),
+            table: None,
         }
     }
 
@@ -379,6 +452,120 @@ mod tests {
     }
 
     #[test]
+    fn tables_keep_columns_rows_empty_cells_and_nested_inline_marks() {
+        let source = "| 左 **列** | *中* | 右 | 默认 |\n| :--- | :---: | ---: | --- |\n| **粗 *斜*** | ~~删~~ | `码🙂` | |\n| 👩🏽‍💻 e\u{301} | | [原](https://example.test) ![图](image.png) | 尾 |";
+        let blocks = parse_source(source).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, MarkdownBlockKind::Table);
+        assert_eq!(blocks[0].text, source);
+        let table = blocks[0].table.as_ref().unwrap();
+        assert_eq!(
+            table.columns,
+            [
+                MarkdownTableAlignment::Left,
+                MarkdownTableAlignment::Center,
+                MarkdownTableAlignment::Right,
+                MarkdownTableAlignment::Left,
+            ]
+        );
+        let text = table
+            .rows
+            .iter()
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|cell| {
+                        cell.runs
+                            .iter()
+                            .map(|run| run.text.as_str())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            text,
+            [
+                vec!["左 列", "中", "右", "默认"],
+                vec!["粗 斜", "删", "码🙂", ""],
+                vec![
+                    "👩🏽‍💻 e\u{301}",
+                    "",
+                    "[原](https://example.test) ![图](image.png)",
+                    "尾",
+                ],
+            ]
+        );
+        assert!(table.rows[0].cells[0].runs[1].strong);
+        assert!(table.rows[0].cells[1].runs[0].emphasis);
+        let nested = &table.rows[1].cells[0].runs[1];
+        assert_eq!(nested.text, "斜");
+        assert!(nested.strong && nested.emphasis);
+        assert!(table.rows[1].cells[1].runs[0].strike);
+        assert!(table.rows[1].cells[2].runs[0].code);
+        assert!(table.rows[1].cells[3].runs.is_empty());
+        assert!(table.rows[2].cells[1].runs.is_empty());
+        assert_eq!(
+            table
+                .rows
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(
+            table
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter().map(|cell| cell.key.as_str()))
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            12
+        );
+    }
+
+    #[test]
+    fn table_append_keeps_existing_row_cell_and_inline_identity() {
+        let source = "前言🙂\n\n| 标题 | 数量 |\n| --- | ---: |\n| **值** | 1";
+        let first = parse_source(source).unwrap();
+        let next = parse_source(&format!("{source}2 |\n| 新 | 3 |")).unwrap();
+        assert_eq!(first[1].key, next[1].key);
+        let before = first[1].table.as_ref().unwrap();
+        let after = next[1].table.as_ref().unwrap();
+        assert_eq!(before.rows.len(), 2);
+        assert_eq!(after.rows.len(), 3);
+        for (before, after) in before.rows.iter().zip(&after.rows) {
+            assert_eq!(before.key, after.key);
+            assert_eq!(before.cells.len(), after.cells.len());
+            for (before, after) in before.cells.iter().zip(&after.cells) {
+                assert_eq!(before.key, after.key);
+                assert_eq!(before.runs[0].key, after.runs[0].key);
+            }
+        }
+        assert_eq!(before.rows[1].cells[1].runs[0].text, "1");
+        assert_eq!(after.rows[1].cells[1].runs[0].text, "12");
+        assert_eq!(after.rows[2].cells[0].runs[0].text, "新");
+        assert_eq!(after.rows[2].cells[1].runs[0].text, "3");
+        assert!(first[0].table.is_none());
+    }
+
+    #[test]
+    fn code_fences_keep_exact_utf8_whitespace_and_trailing_blank_line() {
+        let blocks =
+            parse_source("```rust\n  let 你好 = \"👩🏽‍💻 e\u{301}\";  \n\tprintln!(\"完成\");\n\n```")
+                .unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, MarkdownBlockKind::Code);
+        assert_eq!(blocks[0].language, "rust");
+        assert_eq!(
+            blocks[0].text.as_bytes(),
+            "  let 你好 = \"👩🏽‍💻 e\u{301}\";  \n\tprintln!(\"完成\");\n".as_bytes()
+        );
+        assert!(blocks[0].table.is_none());
+    }
+
+    #[test]
     fn unsupported_constructs_keep_complete_source_without_activation() {
         let source = "[label](https://example.test/target) ![alt](image.png) [^note]\n\n| left | right |\n| --- | --- |\n| 一 | 二 |\n\n<div>HTML</div>\n\n[id]: https://example.test/definition\n\n[^note]: footnote\n\n$E = mc^2$ \\(x\\) \\[y\\]";
         let blocks = parse_source(source).unwrap();
@@ -387,7 +574,6 @@ mod tests {
             "[label](https://example.test/target) ![alt](image.png) [^note]"
         );
         for original in [
-            "| left | right |\n| --- | --- |\n| 一 | 二 |",
             "<div>HTML</div>",
             "[id]: https://example.test/definition",
             // The footnote container includes its final line ending.
