@@ -54,7 +54,7 @@ async fn progress_cancellation_and_scope_drain_preserve_saved_business_receipts(
             }
             let original = client.operation(id).await.unwrap();
             assert_eq!(original.reference, prepared.reference);
-            assert!(matches!(original.receipt, Some(Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. }) if value == &json!({"kind":"saved"})));
+            assert!(matches!(&original.receipt, Some(Receipt::Recorded { outcome: OperationOutcome::Returned { value }, .. }) if value == &json!({"kind":"saved"})), "finish={finish}, cleanup_failure={cleanup_failure}, original={original:?}");
             assert_eq!(fixture.counter.effects.load(Ordering::SeqCst), 1);
             if cleanup_failure {
                 assert_eq!(client.pending_requests().await, 1, "a business receipt does not release unconfirmed physical custody");
