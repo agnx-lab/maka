@@ -348,7 +348,11 @@ export function Terminal(props: { model: TerminalModel }) {
           <Text style={{ color: C.accent }}>Copy</Text>
         </Button>
         <If when={model.local() && model.running()}>
-          <Button disabled={model.stopping()} onPress={() => confirmation.set(true)}>
+          <Button
+            disabled={model.stopping()}
+            onPress={() => confirmation.set(true)}
+            accessibilityLabel="Stop terminal process"
+          >
             <Text style={{ color: C.warning }}>
               {model.stopping() ? 'Stopping…' : 'Stop process'}
             </Text>
@@ -570,6 +574,7 @@ export function Terminal(props: { model: TerminalModel }) {
                 <Text style={{ color: C.text }}>Keep running</Text>
               </Button>
               <Button
+                accessibilityLabel="Confirm stop terminal process"
                 onPress={() => {
                   confirmation.set(false);
                   void model.stop();

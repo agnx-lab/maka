@@ -45,6 +45,17 @@ fn assert_colored_output(view: &AppView) {
     );
 }
 
+fn stop_evidence(view: &AppView, phase: &str, resource: &Value) {
+    let screen = view.snapshot();
+    evidence(&format!("terminal-workbench-{phase}"), &screen);
+    let buttons: Vec<_> = view
+        .accessibility_snapshot()
+        .into_iter()
+        .filter(|node| node.role == nsh_core::AccessibilityRole::Button)
+        .collect();
+    eprintln!("terminal workbench {phase}: Host {resource}\n{screen}\nButtons: {buttons:#?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening() {
     tokio::time::timeout(Duration::from_secs(90), async {
@@ -119,9 +130,17 @@ async fn original_pty_workbench_keeps_its_output_and_chat_draft_across_reopening
         assert_eq!(reopened["value"]["resources"].as_array().unwrap().len(), 1);
         assert_eq!(reopened["value"]["resources"][0]["result"]["ref"], target["ref"], "reopening must reuse the original PTY");
 
-        support::click_button(&mut view, "Stop process").await;
+        let before_stop = client.query("terminal", "read", target.clone()).await.unwrap();
+        assert_eq!(before_stop["kind"], "completed", "{before_stop}");
+        assert_eq!(before_stop["value"]["result"]["status"], "running");
+        stop_evidence(&view, "open-stop-confirmation", &before_stop);
+        support::click_button(&mut view, "Stop terminal process").await;
         wait_view(&mut view, |screen| screen.contains("Stop this terminal and its running process?")).await;
-        support::click_button(&mut view, "Stop process").await;
+        let confirming = client.query("terminal", "read", target.clone()).await.unwrap();
+        assert_eq!(confirming["kind"], "completed", "{confirming}");
+        assert_eq!(confirming["value"]["result"]["status"], "running", "opening confirmation must not stop the process");
+        stop_evidence(&view, "confirm-stop", &confirming);
+        support::click_button(&mut view, "Confirm stop terminal process").await;
         wait_view(&mut view, |screen| screen.contains("cancelled") && !screen.contains("Stop this terminal and its running process?")).await;
         let stopped = client.query("terminal", "read", target.clone()).await.unwrap();
         assert_eq!(stopped["kind"], "completed", "{stopped}");
