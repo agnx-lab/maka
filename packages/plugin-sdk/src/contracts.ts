@@ -7282,6 +7282,214 @@ export const contracts = {
     interface: {
       kind: 'service',
       methods: {
+        attachmentImage: {
+          mode: 'query',
+          input: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentAttachmentImageRead',
+            type: 'object',
+            properties: {
+              sessionId: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 128,
+              },
+              source: {
+                $ref: '#/$defs/AgentAttachmentImageSource',
+              },
+              offset: {
+                type: 'integer',
+                format: 'uint64',
+                minimum: 0,
+                maximum: 9007199254740991,
+              },
+            },
+            additionalProperties: false,
+            required: ['sessionId', 'source', 'offset'],
+            $defs: {
+              AgentAttachmentImageSource: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 256,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'uploaded',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'id'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      through: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                        maximum: 9007199254740991,
+                      },
+                      position: {
+                        $ref: '#/$defs/HistoryRowPosition',
+                      },
+                      attachmentIndex: {
+                        type: 'integer',
+                        format: 'uint32',
+                        minimum: 0,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'history',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'through', 'position', 'attachmentIndex'],
+                  },
+                ],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
+          },
+          output: {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            title: 'AgentAttachmentImagePage',
+            oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  source: {
+                    $ref: '#/$defs/AgentAttachmentImageSource',
+                  },
+                  offset: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                  totalBytes: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  mimeType: {
+                    type: 'string',
+                    pattern: '^image/(png|jpeg|gif|webp|avif)$',
+                  },
+                  digest: {
+                    type: 'string',
+                    pattern: '^sha256:[a-f0-9]{64}$',
+                  },
+                  data: {
+                    description: 'Standard padded Base64 of at most 32KiB of encoded image bytes.',
+                    type: 'string',
+                    maxLength: 43692,
+                    pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
+                  },
+                  kind: {
+                    type: 'string',
+                    const: 'ready',
+                  },
+                },
+                additionalProperties: false,
+                required: ['kind', 'source', 'offset', 'totalBytes', 'mimeType', 'digest', 'data'],
+              },
+            ],
+            $defs: {
+              AgentAttachmentImageSource: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 256,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'uploaded',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'id'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      through: {
+                        type: 'integer',
+                        format: 'uint64',
+                        minimum: 0,
+                        maximum: 9007199254740991,
+                      },
+                      position: {
+                        $ref: '#/$defs/HistoryRowPosition',
+                      },
+                      attachmentIndex: {
+                        type: 'integer',
+                        format: 'uint32',
+                        minimum: 0,
+                      },
+                      kind: {
+                        type: 'string',
+                        const: 'history',
+                      },
+                    },
+                    additionalProperties: false,
+                    required: ['kind', 'through', 'position', 'attachmentIndex'],
+                  },
+                ],
+              },
+              HistoryRowPosition: {
+                description:
+                  'Disposable presentation locator, never authority or a canonical execution fact.\nThe source is the original emitting fact; the index precedes UI filtering.',
+                type: 'object',
+                properties: {
+                  sourceSequence: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 1,
+                    maximum: 9007199254740991,
+                  },
+                  itemIndex: {
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                },
+                additionalProperties: false,
+                required: ['sourceSequence', 'itemIndex'],
+              },
+            },
+          },
+          resources: {},
+        },
         catalog: {
           mode: 'subscription',
           input: {
@@ -41845,7 +42053,7 @@ export const contracts = {
           mode: 'query',
           input: {
             $schema: 'https://json-schema.org/draft/2020-12/schema',
-            title: 'ConnectionVersionBasis',
+            title: 'SettingsConnectionRead',
             type: 'object',
             properties: {
               connectionId: {
@@ -41855,6 +42063,12 @@ export const contracts = {
                 type: 'integer',
                 format: 'uint64',
                 minimum: 0,
+              },
+              includeEditingFacts: {
+                description:
+                  'Opt in to the bounded editing projection; credential reads stay narrow.',
+                type: 'boolean',
+                default: false,
               },
             },
             additionalProperties: false,
@@ -41901,6 +42115,9 @@ export const contracts = {
                     type: 'integer',
                     format: 'uint',
                     minimum: 0,
+                  },
+                  editing: {
+                    $ref: '#/$defs/SettingsConnectionEditingFacts',
                   },
                   kind: {
                     type: 'string',
@@ -41971,6 +42188,172 @@ export const contracts = {
                 },
                 additionalProperties: false,
                 required: ['packageId', 'entryId', 'scope', 'name'],
+              },
+              SettingsConnectionEditingFacts: {
+                type: 'object',
+                properties: {
+                  enabledModelIds: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                    },
+                    maxItems: 512,
+                  },
+                  modelOverrides: {
+                    type: ['object', 'null'],
+                    additionalProperties: {
+                      $ref: '#/$defs/ModelOverride',
+                    },
+                  },
+                  requestBodyOverlay: {
+                    type: ['object', 'null'],
+                    additionalProperties: true,
+                  },
+                },
+                additionalProperties: false,
+                required: ['enabledModelIds', 'modelOverrides', 'requestBodyOverlay'],
+              },
+              ModelOverride: {
+                type: 'object',
+                properties: {
+                  adapter: {
+                    description:
+                      "Public adapter contribution name; omitted selects the wire's default.",
+                    type: 'string',
+                  },
+                  codeMode: {
+                    description:
+                      'Omitted means model-specific defaults; false is an explicit opt-out.',
+                    type: 'boolean',
+                  },
+                  applyPatch: {
+                    description:
+                      'Independent of Code Mode: select patch editing or structured Edit/Write.',
+                    type: 'boolean',
+                  },
+                  thinkingLevels: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/$defs/ThinkingLevel',
+                    },
+                  },
+                  defaultThinkingLevel: {
+                    $ref: '#/$defs/ThinkingLevel',
+                  },
+                  vision: {
+                    type: 'boolean',
+                  },
+                  contextWindow: {
+                    description:
+                      'Override total input-plus-output capacity, without subtracting a reply budget.',
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                  compactionThreshold: {
+                    description:
+                      'Optional override of the automatic compaction threshold, in retained tokens.\nBy default Host uses 85% of the smaller total window/input ceiling.',
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                  inputLimit: {
+                    description:
+                      'Independent input ceiling; also caps the default compaction input budget.',
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                  maxOutputTokens: {
+                    description:
+                      'Requested per-step output budget, subject to provider and remaining-capacity caps.',
+                    type: 'integer',
+                    format: 'uint64',
+                    minimum: 0,
+                  },
+                  displayName: {
+                    type: 'string',
+                  },
+                  description: {
+                    type: 'string',
+                  },
+                  apiProtocol: {
+                    $ref: '#/$defs/ApiProtocol',
+                  },
+                  knowledgeCutoff: {
+                    type: 'string',
+                  },
+                  capabilities: {
+                    $ref: '#/$defs/ModelOverrideCapabilities',
+                  },
+                  modalities: {
+                    $ref: '#/$defs/ModelModalities',
+                  },
+                  serviceTier: {
+                    $ref: '#/$defs/RelayServiceTier',
+                  },
+                },
+                additionalProperties: false,
+              },
+              ThinkingLevel: {
+                type: 'string',
+                enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+              },
+              ApiProtocol: {
+                type: 'string',
+                enum: ['openai-chat', 'openai-responses', 'anthropic-messages'],
+              },
+              ModelOverrideCapabilities: {
+                description: 'Vision has one declaration owner: ModelOverride::vision.',
+                type: 'object',
+                properties: {
+                  chat: {
+                    type: 'boolean',
+                  },
+                  reasoning: {
+                    type: 'boolean',
+                  },
+                  functionCalling: {
+                    type: 'boolean',
+                  },
+                  parallelToolCalls: {
+                    type: 'boolean',
+                  },
+                  imageGeneration: {
+                    type: 'boolean',
+                  },
+                  webSearch: {
+                    type: 'boolean',
+                  },
+                },
+                additionalProperties: false,
+              },
+              ModelModalities: {
+                type: 'object',
+                properties: {
+                  input: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/$defs/ModelModality',
+                    },
+                  },
+                  output: {
+                    type: 'array',
+                    items: {
+                      $ref: '#/$defs/ModelModality',
+                    },
+                  },
+                },
+                additionalProperties: false,
+                required: ['input', 'output'],
+              },
+              ModelModality: {
+                type: 'string',
+                enum: ['text', 'image', 'audio', 'pdf', 'video'],
+              },
+              RelayServiceTier: {
+                type: 'string',
+                enum: ['fast'],
               },
             },
           },

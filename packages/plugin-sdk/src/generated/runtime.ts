@@ -2670,8 +2670,12 @@ export type SettingsConnectionDetail =
       name: string;
       enabled: boolean;
       enabledModelCount: number;
+      editing?: SettingsConnectionEditingFacts;
       kind: 'ready';
     };
+export type ApiProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+export type ModelModality = 'text' | 'image' | 'audio' | 'pdf' | 'video';
+export type RelayServiceTier = 'fast';
 export type SettingsCredentialLoginResult =
   | {
       connection: ConnectionIdentity;
@@ -2708,9 +2712,6 @@ export type SettingsCredentialSaveResult =
       reason: SettingsCredentialRejection;
       kind: 'rejected';
     };
-export type ApiProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
-export type ModelModality = 'text' | 'image' | 'audio' | 'pdf' | 'video';
-export type RelayServiceTier = 'fast';
 export type Nullable_MapOf_ModelOverride = {
   [k: string]: ModelOverride | undefined;
 } | null;
@@ -8455,6 +8456,74 @@ export interface ConnectionCredentialTarget {
     [k: string]: unknown | undefined;
   };
 }
+export interface SettingsConnectionEditingFacts {
+  /**
+   * @maxItems 512
+   */
+  enabledModelIds: string[];
+  modelOverrides: {
+    [k: string]: ModelOverride | undefined;
+  } | null;
+  requestBodyOverlay: {
+    [k: string]: unknown | undefined;
+  } | null;
+}
+export interface ModelOverride {
+  /**
+   * Public adapter contribution name; omitted selects the wire's default.
+   */
+  adapter?: string;
+  /**
+   * Omitted means model-specific defaults; false is an explicit opt-out.
+   */
+  codeMode?: boolean;
+  /**
+   * Independent of Code Mode: select patch editing or structured Edit/Write.
+   */
+  applyPatch?: boolean;
+  thinkingLevels?: ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel;
+  vision?: boolean;
+  /**
+   * Override total input-plus-output capacity, without subtracting a reply budget.
+   */
+  contextWindow?: number;
+  /**
+   * Optional override of the automatic compaction threshold, in retained tokens.
+   * By default Host uses 85% of the smaller total window/input ceiling.
+   */
+  compactionThreshold?: number;
+  /**
+   * Independent input ceiling; also caps the default compaction input budget.
+   */
+  inputLimit?: number;
+  /**
+   * Requested per-step output budget, subject to provider and remaining-capacity caps.
+   */
+  maxOutputTokens?: number;
+  displayName?: string;
+  description?: string;
+  apiProtocol?: ApiProtocol;
+  knowledgeCutoff?: string;
+  capabilities?: ModelOverrideCapabilities;
+  modalities?: ModelModalities;
+  serviceTier?: RelayServiceTier;
+}
+/**
+ * Vision has one declaration owner: ModelOverride::vision.
+ */
+export interface ModelOverrideCapabilities {
+  chat?: boolean;
+  reasoning?: boolean;
+  functionCalling?: boolean;
+  parallelToolCalls?: boolean;
+  imageGeneration?: boolean;
+  webSearch?: boolean;
+}
+export interface ModelModalities {
+  input: ModelModality[];
+  output: ModelModality[];
+}
 export interface SettingsProvidersRead {
   offset: number;
 }
@@ -8539,62 +8608,6 @@ export interface ConnectionCatalogEntryDraft {
   requestBodyOverlay?: {
     [k: string]: unknown | undefined;
   };
-}
-export interface ModelOverride {
-  /**
-   * Public adapter contribution name; omitted selects the wire's default.
-   */
-  adapter?: string;
-  /**
-   * Omitted means model-specific defaults; false is an explicit opt-out.
-   */
-  codeMode?: boolean;
-  /**
-   * Independent of Code Mode: select patch editing or structured Edit/Write.
-   */
-  applyPatch?: boolean;
-  thinkingLevels?: ThinkingLevel[];
-  defaultThinkingLevel?: ThinkingLevel;
-  vision?: boolean;
-  /**
-   * Override total input-plus-output capacity, without subtracting a reply budget.
-   */
-  contextWindow?: number;
-  /**
-   * Optional override of the automatic compaction threshold, in retained tokens.
-   * By default Host uses 85% of the smaller total window/input ceiling.
-   */
-  compactionThreshold?: number;
-  /**
-   * Independent input ceiling; also caps the default compaction input budget.
-   */
-  inputLimit?: number;
-  /**
-   * Requested per-step output budget, subject to provider and remaining-capacity caps.
-   */
-  maxOutputTokens?: number;
-  displayName?: string;
-  description?: string;
-  apiProtocol?: ApiProtocol;
-  knowledgeCutoff?: string;
-  capabilities?: ModelOverrideCapabilities;
-  modalities?: ModelModalities;
-  serviceTier?: RelayServiceTier;
-}
-/**
- * Vision has one declaration owner: ModelOverride::vision.
- */
-export interface ModelOverrideCapabilities {
-  chat?: boolean;
-  reasoning?: boolean;
-  functionCalling?: boolean;
-  parallelToolCalls?: boolean;
-  imageGeneration?: boolean;
-  webSearch?: boolean;
-}
-export interface ModelModalities {
-  input: ModelModality[];
-  output: ModelModality[];
 }
 export interface UpdateCatalogConnectionInput {
   expected: ConnectionVersionBasis;
