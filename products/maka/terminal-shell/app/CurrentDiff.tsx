@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import { cleanup, computed, inputAction, signal, Text, View } from 'nsh';
 import { Button } from 'nsh/base';
 import { List } from 'nsh/list';
 import { host } from './host';
@@ -53,37 +53,17 @@ type DiffRow = {
   text: string;
   old: number | null;
   new: number | null;
-  continuation: boolean;
 };
 
-// Parse the complete original patch; rows split long lines for presentation.
+// One native row per source line; Text wraps at the actual reader width.
 function diffRows(patch: string): DiffRow[] {
-  const rows: DiffRow[] = [];
-  for (const [index, row] of parsePatch(patch).entries()) {
-    let text = '';
-    let length = 0;
-    let segment = 0;
-    const append = () => {
-      rows.push({
-        key: `${index}:${segment}`,
-        kind: row.kind,
-        text,
-        old: segment === 0 && 'old' in row ? (row.old ?? null) : null,
-        new: segment === 0 && 'new' in row ? (row.new ?? null) : null,
-        continuation: segment > 0,
-      });
-      segment += 1;
-      text = '';
-      length = 0;
-    };
-    for (const point of row.text) {
-      if (length === 256) append();
-      text += point;
-      length += 1;
-    }
-    append();
-  }
-  return rows;
+  return parsePatch(patch).map((row, index) => ({
+    key: String(index),
+    kind: row.kind,
+    text: row.text,
+    old: 'old' in row ? row.old : null,
+    new: 'new' in row ? row.new : null,
+  }));
 }
 
 type DiffState =
@@ -224,6 +204,14 @@ function DiffRows(props: { model: CurrentDiffModel }) {
     const state = model.state();
     return state.kind === 'text' ? state.rows : [];
   };
+  const digits = computed(() => {
+    let width = 1;
+    for (const row of rows()) {
+      if (row.old !== null) width = Math.max(width, String(row.old).length);
+      if (row.new !== null) width = Math.max(width, String(row.new).length);
+    }
+    return width;
+  });
   return (
     <List
       accessibilityLabel="Current file diff"
@@ -242,33 +230,74 @@ function DiffRows(props: { model: CurrentDiffModel }) {
       }
     >
       {(row) => (
-        <Text
-          selectable
+        <View
           style={{
-            ...codeTextStyle,
-            color:
-              row().kind === 'added'
-                ? '#9bd5a5'
-                : row().kind === 'removed'
-                  ? C.danger
-                  : row().kind === 'context'
-                    ? C.text
-                    : C.muted,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            minWidth: 0,
             backgroundColor:
               row().kind === 'added' ? '#203527' : row().kind === 'removed' ? '#382528' : undefined,
           }}
         >
-          {row().continuation
-            ? '↳'
-            : row().kind === 'added'
-              ? '+'
-              : row().kind === 'removed'
-                ? '-'
-                : row().kind === 'context'
-                  ? ' '
-                  : ''}
-          {row().text}
-        </Text>
+          <If when={row().kind !== 'hunk' && row().kind !== 'meta'}>
+            <Text
+              selectable={false}
+              style={{
+                ...codeTextStyle,
+                width: (digits() + 1) * 8,
+                flexShrink: 0,
+                paddingRight: 8,
+                textAlign: 'right',
+                color: C.muted,
+              }}
+            >
+              {row().old ?? ''}
+            </Text>
+            <Text
+              selectable={false}
+              style={{
+                ...codeTextStyle,
+                width: (digits() + 1) * 8,
+                flexShrink: 0,
+                paddingRight: 8,
+                textAlign: 'right',
+                color: C.muted,
+              }}
+            >
+              {row().new ?? ''}
+            </Text>
+            <Text
+              selectable={false}
+              style={{
+                ...codeTextStyle,
+                width: 8,
+                flexShrink: 0,
+                color:
+                  row().kind === 'added' ? '#9bd5a5' : row().kind === 'removed' ? C.danger : C.text,
+              }}
+            >
+              {row().kind === 'added' ? '+' : row().kind === 'removed' ? '-' : ' '}
+            </Text>
+          </If>
+          <Text
+            selectable
+            style={{
+              ...codeTextStyle,
+              flex: 1,
+              minWidth: 0,
+              color:
+                row().kind === 'added'
+                  ? '#9bd5a5'
+                  : row().kind === 'removed'
+                    ? C.danger
+                    : row().kind === 'context'
+                      ? C.text
+                      : C.muted,
+            }}
+          >
+            {row().text}
+          </Text>
+        </View>
       )}
     </List>
   );
