@@ -378,7 +378,6 @@ impl Handler for Settings {
                         .collect();
                     let mut choices = Vec::new();
                     let mut next = None;
-                    let mut scanned = 0;
                     'rows: for (index, row) in catalog
                         .connections
                         .iter()
@@ -395,9 +394,7 @@ impl Handler for Settings {
                                 0
                             },
                         ) {
-                            // Bound work as well as returned matches. An empty
-                            // matching page can still continue its exact query.
-                            if scanned == 256 || choices.len() == 16 {
+                            if choices.len() == 16 {
                                 next = Some(ModelCursor {
                                     query: start.query.clone(),
                                     connection: index,
@@ -405,7 +402,6 @@ impl Handler for Settings {
                                 });
                                 break 'rows;
                             }
-                            scanned += 1;
                             let Some(choice) = model_choice(row, model).await else {
                                 continue;
                             };

@@ -472,7 +472,7 @@ async fn ordinary_settings_pages_keep_root_revision_and_exact_default_cas_withou
 }
 
 #[tokio::test]
-async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalog_fences() {
+async fn model_search_reaches_sparse_matches_and_true_eof_with_catalog_fences() {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let long_term = format!("{}終", "界".repeat(257));
     edit(&fixture, |changes| {
@@ -480,24 +480,23 @@ async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalo
         changes.enabled_model_ids = Some((0..300).map(|at| format!("model-{at:03}")).collect());
     })
     .await;
-    let browsing = models(&fixture, json!({"kind":"start"})).await.unwrap();
+    let browsing_query = format!("RESEARCH {long_term}");
+    let browsing = models(&fixture, json!({"kind":"start","query":browsing_query}))
+        .await
+        .unwrap();
     assert_eq!(browsing["choices"].as_array().unwrap().len(), 16);
-    assert_eq!(browsing["next"]["query"], "");
+    assert_eq!(browsing["next"]["query"], browsing_query);
+    let continuation =
+        json!({"kind":"continue","revision":browsing["revision"],"cursor":browsing["next"]});
     assert!(
         models(&fixture, json!({"kind":"start","query":null}))
             .await
             .is_err()
     );
     let query = format!("RESEARCH {long_term} model-299");
-    let first = models(&fixture, json!({"kind":"start","query":query}))
+    let found = models(&fixture, json!({"kind":"start","query":query}))
         .await
         .unwrap();
-    assert!(first["choices"].as_array().unwrap().is_empty());
-    assert_eq!(first["next"]["query"], query);
-    assert_eq!(first["next"]["model"], 256);
-    let continuation =
-        json!({"kind":"continue","revision":first["revision"],"cursor":first["next"]});
-    let found = models(&fixture, continuation.clone()).await.unwrap();
     assert_eq!(found["choices"].as_array().unwrap().len(), 1);
     assert_eq!(found["choices"][0]["selection"]["modelId"], "model-299");
     assert!(found["next"].is_null());
@@ -509,36 +508,17 @@ async fn model_search_continues_its_query_across_bounded_scan_windows_and_catalo
         .await
         .unwrap();
     assert!(missing["choices"].as_array().unwrap().is_empty());
-    assert_eq!(missing["next"]["query"], missing_tail);
-    assert_eq!(missing["next"]["model"], 256);
-    let missing = models(
-        &fixture,
-        json!({"kind":"continue","revision":missing["revision"],"cursor":missing["next"]}),
-    )
-    .await
-    .unwrap();
-    assert!(missing["choices"].as_array().unwrap().is_empty());
     assert!(missing["next"].is_null());
     let matches = models(&fixture, json!({"kind":"start","query":"MoDeL-29"}))
         .await
         .unwrap();
-    assert!(matches["choices"].as_array().unwrap().is_empty());
-    let matches = models(
-        &fixture,
-        json!({"kind":"continue","revision":matches["revision"],"cursor":matches["next"]}),
-    )
-    .await
-    .unwrap();
     assert_eq!(matches["choices"].as_array().unwrap().len(), 10);
+    assert_eq!(matches["choices"][0]["selection"]["modelId"], "model-290");
+    assert_eq!(matches["choices"][9]["selection"]["modelId"], "model-299");
+    assert!(matches["next"].is_null());
     let none = models(
         &fixture,
         json!({"kind":"start","query":"research missing-token"}),
-    )
-    .await
-    .unwrap();
-    let none = models(
-        &fixture,
-        json!({"kind":"continue","revision":none["revision"],"cursor":none["next"]}),
     )
     .await
     .unwrap();
@@ -860,15 +840,7 @@ async fn invalid_thinking_default_remains_unavailable_without_poisoning_other_mo
         .await
         .unwrap();
     assert!(page["choices"].as_array().unwrap().is_empty());
-    assert_eq!(page["next"]["model"], 256);
-    let last = models(
-        &fixture,
-        json!({"kind":"continue","revision":page["revision"],"cursor":page["next"]}),
-    )
-    .await
-    .unwrap();
-    assert!(last["choices"].as_array().unwrap().is_empty());
-    assert!(last["next"].is_null());
+    assert!(page["next"].is_null());
     fixture.app.shutdown().await.unwrap();
     fixture.config.shutdown().await.unwrap();
 }
