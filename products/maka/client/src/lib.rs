@@ -148,6 +148,10 @@ struct State {
     call: LocalCall,
     phase: Phase,
 }
+struct Drained {
+    reply: Option<OperationReply>,
+    cleanup: Result<()>,
+}
 #[derive(PartialEq)]
 enum Phase {
     New,
@@ -231,6 +235,45 @@ impl Client {
         if state.call.cleanup_confirmed() {
             self.0.requests.lock().await.remove(&request.id);
         }
+    }
+    async fn observe_mutation(&self, request: &Request, reply: &OperationReply) -> Result<()> {
+        let id = request
+            .operation
+            .ok_or("Host returned a mutation for a non-mutation request")?;
+        let operation = self.operation(id).await?;
+        if operation.reference.as_ref() != Some(&reply.reference) {
+            return Err("Host completion differs from the original client operation".into());
+        }
+        self.0.journal.observe(&operation, &reply.receipt).await?;
+        if operation.upload.is_some() {
+            self.notify_uploads();
+        }
+        Ok(())
+    }
+    async fn drain_request(&self, request: &Request, state: &mut State) -> Result<Drained> {
+        state.phase = Phase::Interrupted;
+        let drained = match state.call.drain().await? {
+            Some(Reply::Mutation { reply, cleanup }) => {
+                self.observe_mutation(request, &reply).await?;
+                Drained {
+                    reply: Some(*reply),
+                    cleanup,
+                }
+            }
+            Some(reply) => Drained {
+                reply: None,
+                cleanup: reply
+                    .cleanup()
+                    .expect("drain returns a terminal reply")
+                    .clone(),
+            },
+            None => Drained {
+                reply: None,
+                cleanup: Ok(()),
+            },
+        };
+        state.phase = Phase::Complete;
+        Ok(drained)
     }
     pub async fn query(&self, endpoint: &str, method: &str, input: Value) -> Result<Value> {
         let (request, _) = self
@@ -772,7 +815,7 @@ impl Client {
         let (closed, ()) = tokio::join!(host.close(), async {
             for request in requests {
                 let mut state = request.state.lock().await;
-                let _ = state.call.close().await;
+                let _ = self.drain_request(&request, &mut state).await;
                 self.release_if_clean(&request, &state).await;
             }
         });
@@ -788,6 +831,15 @@ pub struct Mutation {
     request: Arc<Request>,
     operation: Operation,
     description: Description,
+}
+/// One observation from the original mutation. Cleanup never replaces its business receipt.
+#[derive(Debug)]
+pub enum MutationEvent {
+    Progress(Value),
+    Finished {
+        reply: OperationReply,
+        cleanup: Result<()>,
+    },
 }
 impl Mutation {
     pub fn id(&self) -> Uuid {
@@ -826,7 +878,7 @@ impl Mutation {
         };
         if result.is_err() {
             state.phase = Phase::Interrupted;
-            let _ = state.call.close().await;
+            let _ = self.client.drain_request(&self.request, &mut state).await;
         }
         self.client.release_if_clean(&self.request, &state).await;
         result
@@ -834,36 +886,95 @@ impl Mutation {
     /// Confirm only after successful durable preparation. Cancellation of this
     /// observer leaves the original Call in the shell scope and fences a second confirm.
     pub async fn confirm(&self) -> Result<OperationReply> {
+        let mut event = self.next_step(true).await?;
+        loop {
+            match event {
+                Some(MutationEvent::Progress(_)) => event = self.next().await?,
+                Some(MutationEvent::Finished { reply, cleanup }) => {
+                    cleanup?;
+                    return Ok(reply);
+                }
+                None => return Err("client mutation ended without a business receipt".into()),
+            }
+        }
+    }
+    /// Read one original progress item or final receipt, confirming once on the first read.
+    /// A dropped observation cannot continue or confirm again; close or recover its receipt.
+    pub async fn next(&self) -> Result<Option<MutationEvent>> {
+        self.next_step(false).await
+    }
+    /// Request cancellation of this exact call. Continue reading its original final receipt.
+    pub fn request_cancel(&self) {
+        self.request.stop.cancel();
+    }
+    async fn next_step(&self, first: bool) -> Result<Option<MutationEvent>> {
         let mut state = self.request.state.lock().await;
-        if state.phase != Phase::Prepared {
+        if first && state.phase != Phase::Prepared {
             return Err("client mutation is not durably prepared".into());
         }
-        state.phase = Phase::Confirming;
-        let result = tokio::select! {
+        let confirm = match &state.phase {
+            Phase::Prepared => true,
+            Phase::Confirming => false,
+            Phase::Complete => return Ok(None),
+            _ => return Err("original mutation lost its observer; close or recover it".into()),
+        };
+        state.phase = Phase::Pulling;
+        // Only the wire observation races cancellation. Once a final business reply
+        // arrives, recording it must finish even if cancellation wins afterwards.
+        let received = tokio::select! {
             biased;
-            () = self.request.stop.cancelled() => Err("client mutation observation cancelled; recover its original receipt".into()),
+            () = self.request.stop.cancelled() => None,
             result = async {
-                let mut reply = state.call.confirm().await?;
-                loop {
-                    match reply {
-                        Reply::Progress { .. } => reply = state.call.receive().await?,
-                        Reply::Mutation { reply, cleanup } => {
-                            let operation = self.client.operation(self.operation.id).await?;
-                            self.client.0.journal.observe(&operation, &reply.receipt).await?;
-                            if operation.upload.is_some() { self.client.notify_uploads(); }
-                            state.phase = Phase::Complete;
-                            cleanup?;
-                            return Ok(*reply);
+                if confirm {
+                    state.call.confirm().await
+                } else {
+                    state.call.receive().await
+                }
+            } => Some(result),
+        };
+        let result = async {
+            match received {
+                Some(Ok(Reply::Progress { value })) => {
+                    state.phase = Phase::Confirming;
+                    Ok(Some(MutationEvent::Progress(value)))
+                }
+                Some(Ok(Reply::Mutation { reply, cleanup })) => {
+                    self.client.observe_mutation(&self.request, &reply).await?;
+                    state.phase = Phase::Complete;
+                    Ok(Some(MutationEvent::Finished {
+                        reply: *reply,
+                        cleanup,
+                    }))
+                }
+                received => {
+                    let failure = match received {
+                        Some(Err(error)) => Some(error),
+                        Some(Ok(Reply::Aborted { reason, cleanup })) => {
+                            Some(cleanup.err().unwrap_or(reason))
                         }
-                        Reply::Aborted { reason, cleanup } => { cleanup?; return Err(reason); }
-                        _ => return Err("Host mutation did not return its original receipt".into()),
+                        Some(Ok(_)) => {
+                            Some("Host mutation did not return its original receipt".into())
+                        }
+                        None => None,
+                    };
+                    match self.client.drain_request(&self.request, &mut state).await {
+                        Ok(Drained {
+                            reply: Some(reply),
+                            cleanup,
+                        }) => Ok(Some(MutationEvent::Finished { reply, cleanup })),
+                        Ok(Drained {
+                            reply: None,
+                            cleanup,
+                        }) => {
+                            cleanup?;
+                            failure.map_or(Ok(None), Err)
+                        }
+                        Err(error) => Err(failure.unwrap_or(error)),
                     }
                 }
-            } => result,
-        };
-        if result.is_err() {
-            let _ = state.call.close().await;
+            }
         }
+        .await;
         self.client.release_if_clean(&self.request, &state).await;
         result
     }
@@ -874,10 +985,13 @@ impl Mutation {
         state.phase = Phase::Interrupted;
     }
     pub async fn close(&self) -> Result<()> {
-        self.request.stop.cancel();
+        self.request_cancel();
         let mut state = self.request.state.lock().await;
-        state.phase = Phase::Interrupted;
-        let result = state.call.close().await;
+        let result = self
+            .client
+            .drain_request(&self.request, &mut state)
+            .await
+            .and_then(|drained| drained.cleanup);
         self.client.release_if_clean(&self.request, &state).await;
         result
     }

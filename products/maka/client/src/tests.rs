@@ -48,6 +48,7 @@ use std::{
 use tokio::sync::Notify;
 
 mod drafts;
+mod progress;
 mod settings;
 
 #[derive(Default)]
@@ -111,11 +112,23 @@ impl Handler for CounterHandler {
                         );
                     }
                     let value = owner.effects.fetch_add(1, Ordering::SeqCst) + 1;
+                    if input["progress"] == true {
+                        context
+                            .emit(json!({"url":"https://auth.openai.com/codex/device","userCode":"ABCD-EFGH"}))
+                            .await?;
+                    }
                     owner.started.notify_one();
                     if owner.blocked.load(Ordering::SeqCst) {
                         owner.release.notified().await;
                     }
-                    if input.get("message").is_some() {
+                    if input["cleanupFailure"] == true {
+                        let mut ticket = context.scope().resources.reserve().map_err(error)?;
+                        ticket.start();
+                        ticket.complete(Err("counter cleanup failure".into()));
+                    }
+                    if input["progress"] == true {
+                        Ok(json!({"kind":"saved"}))
+                    } else if input.get("message").is_some() {
                         Ok(
                             json!({"kind":"started","sessionId":input["sessionId"],"messageId":format!("message-{value}"),"invocationId":format!("invocation-{value}")}),
                         )
@@ -161,7 +174,7 @@ impl Fixture {
         let mut contract: Contract = serde_json::from_value(json!({
             "name":"test.Counter","version":1,"transport":"remote","interface":{"kind":"service","methods":{
                 "read":{"mode":"query","input":{},"output":{},"resources":{}},
-                "send":{"mode":"mutation","input":{},"output":{},"resources":{}},
+                "send":{"mode":"mutation","input":{},"output":{},"progress":{},"resources":{}},
                 "selectBackend":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "stop":{"mode":"mutation","input":{},"output":{},"resources":{}},
                 "respond":{"mode":"mutation","input":{},"output":{},"resources":{}},
@@ -468,6 +481,7 @@ async fn durable_original_receipt_survives_cancelled_observer_disconnect_and_res
             () = fixture.counter.started.notified() => {},
         }
         drop(confirmation);
+        assert_eq!(mutation.next().await.unwrap_err(),"original mutation lost its observer; close or recover it");
         assert!(mutation.confirm().await.is_err(),"the same owner cannot confirm twice");
         mutation.disconnect().await;
         assert!(mutation.close().await.is_err(),"disconnect is not a cleanup acknowledgement");
