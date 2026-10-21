@@ -22,7 +22,7 @@ use super::{
     input::{Input, Pointer},
     output::FrameWriter,
 };
-use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{Event, MouseButton, MouseEventKind};
 use nsh_core::{MountBatch, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
