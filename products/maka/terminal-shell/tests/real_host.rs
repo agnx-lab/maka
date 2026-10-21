@@ -1882,13 +1882,20 @@ fn message_source_available(view: &AppView, selected: bool) -> bool {
     } else {
         "Show message source"
     };
-    view.accessibility_snapshot().iter().any(|node| {
+    let nodes = view.accessibility_snapshot();
+    let Some(composer) = nodes
+        .iter()
+        .find(|node| node.label == "Conversation composer")
+    else {
+        return false;
+    };
+    nodes.iter().any(|node| {
         node.role == nsh_core::AccessibilityRole::Button
             && node.label == label
             && node.state.selected == selected
             && !node.state.disabled
             && node.frame.origin.y.0 >= 0.0
-            && node.frame.origin.y.0 < view.surface().viewport().height.0
+            && node.frame.origin.y.0 + node.frame.size.height.0 <= composer.frame.origin.y.0
     })
 }
 
@@ -2048,7 +2055,27 @@ async fn streamed_markdown_keeps_inline_styles_and_the_original_selectable_sourc
         let suffix = format!("{table}{code}");
         request.delta(code).await;
         // The stream remains physically open: parsing cannot wait for final.
-        wait_view_state(&mut view, |view, screen| screen.contains("RICH_CODE_BLOCK") && message_source_available(view, false) && !screen.contains("```txt")).await;
+        // Copying the long user message can leave its reader anchored above
+        // this new block. Reveal it through the actual native Latest action.
+        let code_readable = |view: &AppView, screen: &str| {
+            if !screen.contains("RICH_CODE_BLOCK") || screen.contains("```txt") || !message_source_available(view, false) {
+                return false;
+            }
+            let nodes = view.accessibility_snapshot();
+            let Some(chat) = nodes.iter().find(|node| node.role == nsh_core::AccessibilityRole::Tab && node.label == "Chat") else { return false; };
+            let Some(composer) = nodes.iter().find(|node| node.label == "Conversation composer") else { return false; };
+            nodes.iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Copy code" && !node.state.disabled
+                && node.frame.origin.y.0 >= chat.frame.origin.y.0 + chat.frame.size.height.0
+                && node.frame.origin.y.0 + node.frame.size.height.0 <= composer.frame.origin.y.0)
+        };
+        wait_view_state(&mut view, |view, screen| {
+            code_readable(view, screen)
+                || view.accessibility_snapshot().iter().any(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Return to latest" && !node.state.disabled)
+        }).await;
+        if !code_readable(&view, &view.snapshot()) {
+            support::click_button(&mut view, "Return to latest").await;
+        }
+        wait_view_state(&mut view, code_readable).await;
         view.drain_service_output().for_each(drop);
         support::click_button(&mut view, "Copy code").await;
         let copied_code = wait_view(&mut view, |screen| screen.contains("Copied") && screen.contains("RICH_CODE_BLOCK")).await;

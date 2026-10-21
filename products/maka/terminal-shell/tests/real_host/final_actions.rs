@@ -111,6 +111,14 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("父会话草稿 stays here"));
         support::wait_draft(&client, &fixture.session, "父会话草稿 stays here").await;
 
+        // This press tests metadata identity, so give both short turns room
+        // before measuring its target. A bottom-following reader in the
+        // original short viewport correctly scrolls when the next turn lands.
+        let viewport = view.surface().viewport();
+        let metrics = view.surface().metrics();
+        let original_size = ((viewport.width.0 / metrics.width().0).round() as u16, (viewport.height.0 / metrics.height().0).round() as u16);
+        view.resize(original_size.0, original_size.1.max(60));
+        wait_mode_layout(&mut view).await;
         // Keep one physical usage press while the next turn advances the
         // history metadata fence. This completed reply still owns that action.
         let usage_button = support::wait_enabled_button(&mut view, "View this turn's model usage").await;
@@ -144,6 +152,8 @@ async fn final_actions_use_original_turn_accounting_and_fork_before_a_later_acti
         wait_view(&mut view, |screen| !screen.contains("Main model usage")).await;
         let after_close = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         assert_eq!(after_close["run"]["invocationId"], second["invocationId"], "Escape in turn usage must close its dialog without stopping the active turn");
+        view.resize(original_size.0, original_size.1);
+        wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Fork from this turn").await;
         let forked = wait_view(&mut view, |screen| screen.contains("Fork of NSH real Agent") && screen.contains("FINAL_A") && !screen.contains("ACTIVE_B")).await;
         let listed = client.query("agent", "list", json!({"filter":"all","scope":{"kind":"all"},"titleQuery":"Fork of NSH real Agent","position":{"kind":"start"}})).await.unwrap();
