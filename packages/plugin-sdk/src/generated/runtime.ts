@@ -7535,9 +7535,6 @@ export interface WorkHubResolve {
 }
 export interface AgentDirectorySelection {
   rootId: string;
-  /**
-   * @maxItems 64
-   */
   segments: string[];
   directoryIdentity: string;
 }

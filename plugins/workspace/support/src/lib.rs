@@ -126,10 +126,9 @@ fn choice(
     segments: Vec<String>,
     name: String,
 ) -> Result<Directory, String> {
-    if segments.len() > 64
-        || segments
-            .iter()
-            .any(|s| s.len() > 255 || s.chars().any(char::is_control))
+    if segments
+        .iter()
+        .any(|s| s.len() > 255 || s.chars().any(char::is_control))
     {
         return Err("agent_directory_invalid".into());
     }
@@ -293,11 +292,10 @@ pub async fn initialize(
     let Ok(root) = root(roots, &selection.root_id) else {
         return Ok(None);
     };
-    if selection.segments.len() > 64
-        || selection
-            .segments
-            .iter()
-            .any(|s| s.len() > 255 || s.chars().any(char::is_control))
+    if selection
+        .segments
+        .iter()
+        .any(|s| s.len() > 255 || s.chars().any(char::is_control))
     {
         return Ok(None);
     }

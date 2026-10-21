@@ -9515,7 +9515,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -10362,7 +10361,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -10450,7 +10448,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -13875,7 +13872,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14112,7 +14108,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14507,7 +14502,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14595,7 +14589,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -14957,7 +14950,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19340,7 +19332,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19493,7 +19484,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19578,7 +19568,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -19726,7 +19715,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -29360,7 +29348,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -30763,7 +30750,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',
@@ -30847,7 +30833,6 @@ export const contracts = {
                     items: {
                       type: 'string',
                     },
-                    maxItems: 64,
                   },
                   directoryIdentity: {
                     type: 'string',

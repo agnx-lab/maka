@@ -25,4 +25,6 @@ Shares directory selection and validation across workspace services. It opens co
 
 Child queries enumerate the selected directory before sorting and returning pages of up to 32 children within 48 KiB. Ordinary files do not prevent browsing child directories. Continue with the returned `after` cursor; each query revalidates the published root and selected directory identity.
 
+Selections have no separate directory-depth limit. Paths must still satisfy the Host's path representation and filesystem checks. ACP follows returned selections toward the requested canonical path, ignoring aliases that do not advance toward it.
+
 [Source](src/lib.rs) · [Cargo manifest](Cargo.toml)

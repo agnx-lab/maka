@@ -31,6 +31,111 @@ use tokio::sync::mpsc;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sdk_published_directory_depth_uses_path_progress() {
+    tokio::time::timeout(Duration::from_secs(40), async {
+        let fixture = support::Fixture::open().await;
+        let root = fixture.workspace.clone();
+        let marker = maka_fs_tools::workspace::MARKER_FILE;
+        let original_root_marker = std::fs::read(root.join(marker)).unwrap();
+        let mut leaf = root.clone();
+        let mut intermediate = Vec::new();
+        for _ in 0..65 {
+            leaf.push("d");
+            std::fs::create_dir(&leaf).unwrap();
+            intermediate.push(leaf.clone());
+        }
+        let (leaf, directory_identity) = maka_fs_tools::directory::capture(&leaf).unwrap();
+        // This contained alias sorts before the real child. Traversal must make
+        // canonical path progress rather than repeatedly selecting the root.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, root.join("a-loop")).unwrap();
+        let mut native = fixture.native;
+        let (sdk, facade) = tokio::io::duplex(1024);
+        let (facade_read, facade_write) = tokio::io::split(facade);
+        let serving = tokio::spawn(maka_acp::serve(
+            fixture.client,
+            facade_read,
+            facade_write,
+            tokio_util::sync::CancellationToken::new(),
+        ));
+        let (sdk_read, sdk_write) = tokio::io::split(sdk);
+        let sdk_result = Client
+            .v2()
+            .connect_with(
+                ByteStreams::new(sdk_write.compat_write(), sdk_read.compat()),
+                async |connection| {
+                    let initialized = connection
+                        .send_request(acp::InitializeRequest::new(
+                            ProtocolVersion::V2,
+                            acp::Implementation::new("maka-sdk-deep-cwd", "1"),
+                        ))
+                        .block_task()
+                        .await?;
+                    // Keep the original failure as data: baseline cannot select the
+                    // physical leaf, but must still close the real ACP/Host owners.
+                    let created = connection
+                        .send_request(acp::NewSessionRequest::new(&leaf))
+                        .block_task()
+                        .await;
+                    if let Ok(created) = &created {
+                        connection
+                            .send_request(acp::CloseSessionRequest::new(created.session_id.clone()))
+                            .block_task()
+                            .await?;
+                    }
+                    Ok((initialized, created))
+                },
+            )
+            .await;
+        let created_id = sdk_result
+            .as_ref()
+            .ok()
+            .and_then(|(_, created)| created.as_ref().ok())
+            .map(|created| created.session_id.to_string());
+        let observed = if let Some(session) = &created_id {
+            Some(support::query(&native, "agent", "observe", json!({"sessionId":session})).await)
+        } else {
+            None
+        };
+        let workspace_identity = maka_fs_tools::workspace::read_identity(&leaf);
+        tokio::time::timeout(Duration::from_secs(10), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        native.close().await.unwrap();
+        fixture.stop.cancel();
+        fixture.server.await.unwrap().unwrap();
+        drop(fixture.provider);
+
+        assert_eq!(leaf.strip_prefix(&root).unwrap().components().count(), 65);
+        assert!(leaf.to_str().unwrap().len() <= 4096);
+        assert_eq!(
+            std::fs::read(root.join(marker)).unwrap(),
+            original_root_marker
+        );
+        for path in intermediate.iter().take(64) {
+            assert!(
+                !path.join(marker).exists(),
+                "ACP initialized an intermediate directory: {path:?}"
+            );
+        }
+        let (initialized, created) = sdk_result.expect("real ACP SDK connection must settle");
+        assert_eq!(initialized.protocol_version, ProtocolVersion::V2);
+        let created = created.expect("NewSession must select the physical depth65 cwd");
+        let observed = observed.unwrap();
+        assert_eq!(observed["session"]["id"], created.session_id.to_string());
+        let workspace: maka_agent_api::contract::Workspace =
+            serde_json::from_value(observed["session"]["workspace"].clone()).unwrap();
+        assert_eq!(workspace.path, leaf.to_str().unwrap());
+        assert_eq!(workspace.directory_identity, directory_identity);
+        assert_eq!(workspace.identity, workspace_identity.unwrap());
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sdk_acceptance_precedes_model_completion_and_resume_replays_canonical_ids() {
     tokio::time::timeout(Duration::from_secs(40), scenario(false))
         .await
