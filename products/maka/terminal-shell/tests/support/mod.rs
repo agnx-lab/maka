@@ -113,6 +113,7 @@ impl Fixture {
             false,
             Some(authentication),
             None,
+            false,
         )
         .await
     }
@@ -154,6 +155,7 @@ impl Fixture {
             true,
             None,
             None,
+            false,
         )
         .await
     }
@@ -169,11 +171,25 @@ impl Fixture {
                 "import":"files", "method":method, "result":"json", "confirmation":"preapproved",
                 "presentation":format!("maka.workspace.Files@1/{method}")
             })),
+            false,
+        )
+        .await
+    }
+    #[cfg(unix)]
+    pub async fn terminals() -> Self {
+        Self::open_with_services(
+            false,
+            false,
+            InitialCatalog::Configured { reasoning: false },
+            false,
+            None,
+            None,
+            true,
         )
         .await
     }
     async fn open_with_options(registered: bool, images: bool, catalog: InitialCatalog) -> Self {
-        Self::open_with_services(registered, images, catalog, false, None, None).await
+        Self::open_with_services(registered, images, catalog, false, None, None, false).await
     }
     async fn open_with_services(
         registered: bool,
@@ -182,6 +198,7 @@ impl Fixture {
         plugins: bool,
         login_handler: Option<Arc<dyn Handler>>,
         file_tool: Option<Value>,
+        terminals: bool,
     ) -> Self {
         let has_files = images || file_tool.is_some();
         let directory = tempfile::tempdir().unwrap();
@@ -230,6 +247,8 @@ impl Fixture {
         let setup_contract = maka_settings_native::contract::setup_contract();
         let receipts_contract = receipt_reader_contract();
         let files_contract = maka_workspace_api::files::contract();
+        let processes_contract = maka_workspace_api::processes::contract();
+        let terminal_contract = maka_workspace_api::terminal::contract();
         let management_contract =
             maka_plugin_core::deployment::management::deployment_manager_contract();
         let empty = json!({"type":"object","additionalProperties":false});
@@ -250,6 +269,16 @@ impl Fixture {
             empty.clone(),
             json!({}),
             json!({"files":{"contract":files_contract,"availability":"required"}}),
+        );
+        let processes = package(
+            "test.nsh.processes",
+            maka_workspace_api::processes::IMPLEMENTATION,
+            maka_workspace_api::processes::configuration_schema(),
+            json!({}),
+            json!({
+                "processes":{"contract":processes_contract,"availability":"required"},
+                "terminal":{"contract":terminal_contract,"availability":"required"}
+            }),
         );
         let settings = package(
             "test.nsh.settings",
@@ -300,6 +329,10 @@ impl Fixture {
         if plugins {
             gateway_imports["management"] =
                 json!({"contract":management_contract,"cardinality":{"kind":"one"}});
+        }
+        if terminals {
+            gateway_imports["terminal"] =
+                json!({"contract":terminal_contract,"cardinality":{"kind":"one"}});
         }
         let gateway = package(
             "test.nsh.gateway",
@@ -359,14 +392,36 @@ impl Fixture {
             plan["instances"]["files"] = node(&files, 5, json!({}), json!({}));
             packages.push(files);
         }
+        if terminals {
+            plan["instances"]["processes"] = node(
+                &processes,
+                12,
+                json!({
+                    "filesystem":{"default":"write","rules":[],"denyGlobs":[]},
+                    "network":"allowed",
+                    "helper":env!("CARGO_BIN_EXE_maka"),
+                    "sessionOwner":[Uuid::from_u128(1)]
+                }),
+                json!({}),
+            );
+            plan["instances"]["gateway"]["bindings"]["terminal"] =
+                json!([{"kind":"instance","path":["processes"],"export":"terminal"}]);
+            packages.push(processes);
+        }
         let input = serde_json::from_value(plan).unwrap();
         store
             .commit_application(deployment, 0, input, vec![], packages)
             .await
             .unwrap();
         let mut native = NativeRegistry::default();
-        maka_agent_native::provide(&mut native).unwrap();
-        maka_settings_native::provide(&mut native).unwrap();
+        if terminals {
+            // Use the product's original factories; composition still admits
+            // only the services explicitly installed in this fixture.
+            maka_product_native::provide(&mut native).unwrap();
+        } else {
+            maka_agent_native::provide(&mut native).unwrap();
+            maka_settings_native::provide(&mut native).unwrap();
+        }
         if let Some(handler) = login_handler.clone() {
             let contract = authentication_contract.clone();
             native
@@ -391,7 +446,7 @@ impl Fixture {
                 )
                 .unwrap();
         }
-        if has_files {
+        if has_files && !terminals {
             maka_files_native::provide(&mut native).unwrap();
         }
         let endpoint = |import: &str, methods: &[&str], recovery| HostEndpoint {
@@ -499,6 +554,19 @@ impl Fixture {
                     endpoint(
                         "management",
                         &["instances", "readSettings", "setEnabled", "configure"],
+                        false,
+                    ),
+                )
+            }))
+            .chain(terminals.then(|| {
+                (
+                    "terminal".into(),
+                    endpoint(
+                        "terminal",
+                        &[
+                            "list", "watchList", "read", "watch", "readDisplay", "readOutput",
+                            "watchOutput", "start", "stop", "acquire", "control", "release",
+                        ],
                         false,
                     ),
                 )

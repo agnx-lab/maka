@@ -36,6 +36,9 @@ mod plugin_settings;
 #[path = "real_host/session_lifecycle.rs"]
 mod session_lifecycle;
 mod support;
+#[cfg(unix)]
+#[path = "real_host/terminal_workbench.rs"]
+mod terminal_workbench;
 #[path = "real_host/tool_cards.rs"]
 mod tool_cards;
 
