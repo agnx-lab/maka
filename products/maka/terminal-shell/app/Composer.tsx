@@ -27,6 +27,7 @@ import { DraftAttachments } from './Attachments';
 import type { AttachmentDraft } from './attachmentDraft';
 import type { ImagePreview } from './ImageThumbnail';
 import { Checklist } from './Checklist';
+import { QueueDock, type QueueSession } from './QueueDock';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { C, bodyTextStyle, compact, controlStyle } from './ui';
 import { Icon } from './Icon';
@@ -43,6 +44,7 @@ export type SendAction = {
 // The resident composer owns no second draft or model selection.
 export type ComposerSession = {
   sessionId: string;
+  queue: QueueSession;
   draft(): string;
   attachments: AttachmentDraft;
   previewImage(image: ImagePreview): void;
@@ -86,12 +88,14 @@ export function Composer(props: {
     props.session() === null ||
     !!blocked() ||
     (!props.session()?.draft().trim() && !props.session()?.attachments.files().length);
+  const sendLabel = () =>
+    props.session()?.invocation() != null ? 'Queue message' : 'Send message';
   let unbind = () => {};
   cleanup(() => unbind());
-  const bodyRoot = signal<YNode | null>(null);
+  const cardRoot = signal<YNode | null>(null);
   effect(() => {
     const stop = props.stopAction();
-    const node = bodyRoot();
+    const node = cardRoot();
     if (node) return keymap.bind('escape', stop, { when: 'always', within: node });
   });
   const workspaceLabel = () => {
@@ -118,7 +122,7 @@ export function Composer(props: {
       }}
     >
       {props.request}
-      <View ref={(node) => bodyRoot.set(node)} style={{ flexShrink: 0 }}>
+      <View style={{ flexShrink: 0 }}>
         <If when={hero()}>
           <View style={{ gap: compact() ? 8 : 16, paddingBottom: 12 }}>
             <View
@@ -212,6 +216,7 @@ export function Composer(props: {
             return (
               <View>
                 <Checklist sessionId={owner.sessionId} />
+                <QueueDock session={owner.queue} />
                 <If when={owner.recoverable()}>
                   <Button
                     disabled={owner.recovering()}
@@ -248,6 +253,7 @@ export function Composer(props: {
         </Each>
         <View
           ref={(node) => {
+            cardRoot.set(node);
             unbind();
             unbind = keymap.bind(
               'mod+u',
@@ -426,8 +432,8 @@ export function Composer(props: {
               </Button>
             </If>
             <Button
-              accessibilityLabel="Send message"
-              tooltip="Send message · Enter"
+              accessibilityLabel={sendLabel()}
+              tooltip={`${sendLabel()} · Enter`}
               disabled={cannotSend()}
               onPress={
                 props.session()

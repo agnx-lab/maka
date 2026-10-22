@@ -158,13 +158,17 @@ async fn queue_management_preserves_the_stream_draft_and_original_message_identi
             _ => None,
         }).collect::<Vec<_>>();
         assert_eq!(copied, [orphan]);
-        support::click_button(&mut view, "Cancel queued message edit").await;
-        tab_to_label(&mut view, "Message composer").await;
-        wait_focused_input(&mut view, "Message composer").await;
-        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(main_draft));
         continuation.delta("QUEUE_FINAL_RESPONSE").await;
         continuation.finish().await;
         fixture.idle(&client, &fixture.session).await;
+        // A new run state rebinds the composer's own Escape command. Its
+        // scope must remain the sibling main card, outside this queue editor.
+        wait_view_state(&mut view, |view, _| !view.accessibility_snapshot().iter().any(|node| node.label == "Stop response")).await;
+        view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        wait_view_state(&mut view, |view, _| !view.accessibility_snapshot().iter().any(|node| node.label == "Queued message editor")).await;
+        tab_to_label(&mut view, "Message composer").await;
+        wait_focused_input(&mut view, "Message composer").await;
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(main_draft));
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), request_count + 2);
         let work = client.query("agent", "work", json!({"sessionId":fixture.session,"target":{"kind":"message","messageId":message_id}})).await.unwrap();
         assert_eq!(work["kind"], "delivered");

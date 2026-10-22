@@ -47,11 +47,12 @@ use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, String>;
 
-const CONTROL_METHODS: [&str; 7] = [
+const CONTROL_METHODS: [&str; 8] = [
     "create",
     "selectBackend",
     "stop",
     "respond",
+    "editQueue",
     "metadata",
     "changeSession",
     "fork",

@@ -43,6 +43,8 @@ const glyphs = {
   more: '⋯',
   latest: '↓',
   paperclip: '📎',
+  queue: '≡',
+  edit: '✎',
   image: '▧',
   expand: '⛶',
   fork: '⑂',
@@ -252,6 +254,25 @@ export function Icon(props: { name: keyof typeof glyphs; color: string }) {
             cx.lineTo(4, 9);
             cx.arc(6, 11, 3, Math.PI * 1.2, 0.2, true);
             cx.lineTo(13, 6);
+            break;
+          case 'queue':
+            for (const y of [4, 8, 12]) {
+              cx.moveTo(2, y);
+              cx.lineTo(11, y);
+            }
+            cx.moveTo(12, 9);
+            cx.lineTo(15, 12);
+            cx.lineTo(12, 15);
+            break;
+          case 'edit':
+            cx.moveTo(3, 10);
+            cx.lineTo(11, 2);
+            cx.lineTo(14, 5);
+            cx.lineTo(6, 13);
+            cx.lineTo(2, 14);
+            cx.closePath();
+            cx.moveTo(9, 4);
+            cx.lineTo(12, 7);
             break;
           case 'image':
             cx.roundRect(1.5, 2, 13, 12, 2);

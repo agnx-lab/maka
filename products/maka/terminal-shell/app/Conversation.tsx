@@ -38,6 +38,7 @@ import { acceptedSend, mergeChunks, replayStartCursor, updateHistoryMetadata } f
 import type { Row, Position, Subscription } from './history';
 import { thinkingSummary } from './thinkingSummary';
 import type { ComposerSession, SendAction } from './Composer';
+import type { QueueSession } from './QueueDock';
 import { sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelDetails } from './modelSelection';
 import { MessageRow, type MessageViewState } from './MessageRow';
@@ -69,6 +70,7 @@ import type {
   AgentHistoryAttachment,
   AgentHistoryLandmark,
   AgentPendingInteractions,
+  AgentQueue,
 } from '../../../../packages/plugin-sdk/src/index.js';
 import {
   createAttachmentDraft,
@@ -150,7 +152,8 @@ export function Conversation(props: ConversationProps) {
   const live = signal<Row[]>([]);
   const toolActivity = signal<ToolActivity[]>([]);
   const parts = signal<LivePart[]>([]);
-  const pendingMessages = signal<(Row & { placement: 'queued' | 'transcript' })[]>([]);
+  const pendingMessages = signal<Row[]>([]);
+  const queued = signal<AgentQueue | null>(null);
   const title = signal(sessionId);
   const archived = signal(false);
   const run = signal<ConversationStatus>('loading');
@@ -273,7 +276,7 @@ export function Conversation(props: ConversationProps) {
       );
     });
     const next = projectProcessGroups({
-      rows: [...ordered, ...pendingMessages().filter((row) => row.placement === 'transcript')],
+      rows: [...ordered, ...pendingMessages()],
       toolActivity: processActivity(),
       activeTurnId: invocation() === null ? null : runTurn(),
       previous: previousGroups,
@@ -328,14 +331,6 @@ export function Conversation(props: ConversationProps) {
           continue;
         result.push({ kind: 'row', key: entry.key, rowId: entry.rowId });
       }
-    }
-    for (const row of pendingMessages()) {
-      if (row.placement === 'queued' && reading() === 'chat')
-        result.push({
-          kind: 'row',
-          key: stableRowId(row),
-          rowId: stableRowId(row),
-        });
     }
     return result;
   });
@@ -674,6 +669,10 @@ export function Conversation(props: ConversationProps) {
     );
   };
   const deliver = (page: any) => {
+    if (page.kind === 'queue') {
+      if (page.queue.revision >= (queued()?.revision ?? -1)) queued.set(page.queue);
+      return;
+    }
     if (page.kind === 'interactions') {
       if (page.pending.revision >= interactions().revision) interactions.set(page.pending);
       return;
@@ -1196,7 +1195,11 @@ export function Conversation(props: ConversationProps) {
       notice.set(receiptMessage(reply));
       return;
     }
-    if (text !== undefined && !canonicalRows().byMessage.has(`${accepted.messageId}/body`)) {
+    if (
+      accepted.kind === 'started' &&
+      text !== undefined &&
+      !canonicalRows().byMessage.has(`${accepted.messageId}/body`)
+    ) {
       pendingMessages.set([
         ...pendingMessages().filter((row) => row.messageId !== accepted.messageId),
         {
@@ -1204,7 +1207,6 @@ export function Conversation(props: ConversationProps) {
           messageId: accepted.messageId,
           field: 'body',
           role: 'user',
-          placement: accepted.kind === 'queued' ? 'queued' : 'transcript',
           text,
           attachments: files.map(
             (file): AgentHistoryAttachment => ({
@@ -1226,6 +1228,7 @@ export function Conversation(props: ConversationProps) {
           ? 'Message accepted.'
           : '',
     );
+    if (accepted.kind === 'queued') return;
     cancelTurnNavigation();
     awayFromLatest.set(false);
     innerReader.set(null);
@@ -1261,7 +1264,6 @@ export function Conversation(props: ConversationProps) {
       );
       return;
     }
-    cancelTurnNavigation();
     if (draft() !== text) changeDraft(text);
     const epoch = editEpoch;
     const files = [...attachments.files()];
@@ -1404,8 +1406,22 @@ export function Conversation(props: ConversationProps) {
       return;
     void send(text, expectedBackend);
   };
+  const queueSession: QueueSession = {
+    sessionId,
+    snapshot: queued,
+    running: () => invocation() !== null && !stopping(),
+    async read(messageId, expectedRevision) {
+      if (!alive) throw new Error('This conversation is closed.');
+      return host.query('agent', 'queueMessage', { sessionId, messageId, expectedRevision });
+    },
+    async change(expectedRevision, edit) {
+      if (!alive) throw new Error('This conversation is closed.');
+      return props.control('editQueue', { sessionId, expectedRevision, edit });
+    },
+  };
   const ownHandle: ConversationHandle = {
     sessionId,
+    queue: queueSession,
     interactions,
     draft,
     attachments,
@@ -1423,6 +1439,7 @@ export function Conversation(props: ConversationProps) {
       rows().length === 0 &&
       live().length === 0 &&
       pendingMessages().length === 0 &&
+      (queued()?.entries.length ?? 0) === 0 &&
       toolActivity().length === 0,
     error,
     notice,
