@@ -52,6 +52,8 @@ pub(super) struct Sample {
 }
 
 pub(super) struct InputSample {
+    /// Most recent writer receipt at dispatch, for diagnostics only.
+    /// Physical input is not bound to this output frame.
     pub frame: Option<u64>,
     pub viewport_generation: Option<u64>,
     pub geometry: u64,

@@ -19,10 +19,7 @@
 
 use super::probe::{Capabilities, SixelGeometry};
 use nsh_gpui_terminal::{FrameToken, SubmittedFrame};
-use std::{
-    collections::{HashSet, VecDeque},
-    time::Instant,
-};
+use std::{collections::VecDeque, time::Instant};
 use termina::{
     Event, WindowSize,
     event::{KeyCode, KeyEventKind, Modifiers, MouseEventKind},
@@ -30,9 +27,7 @@ use termina::{
 
 pub(super) struct Input {
     pub event: Event,
-    pub token: Option<FrameToken>,
     pub geometry: u64,
-    pub startup: bool,
     /// Coalesced motion keeps the oldest arrival in its existing queue slot.
     pub queued_at: Option<Instant>,
 }
@@ -69,14 +64,13 @@ pub(super) struct Encoded {
     pub geometry: u64,
 }
 
-/// Send-only terminal state. GPUI snapshots stay on their native owner thread.
+/// Send-only physical input and output state; native contacts stay on the UI owner.
 pub(crate) struct Inbox {
     pub capabilities: Capabilities,
     events: VecDeque<Input>,
     tracing: bool,
+    /// Last current-viewport writer receipt, used only by output diagnostics.
     pub published: Option<FrameToken>,
-    pub keyboard: Option<FrameToken>,
-    capture: Option<FrameToken>,
     pub(super) pending: Option<Candidate>,
     pub(super) encoded: Option<Result<Encoded, String>>,
     /// Last image whose entire upload-and-retirement transaction was flushed.
@@ -88,9 +82,6 @@ pub(crate) struct Inbox {
     pub geometry: u64,
     pub resize: Option<WindowSize>,
     pub cancel_pointer: bool,
-    /// Earlier offers cannot enter opaque pointer dispatch; native owners
-    /// validate their own target, binding and geometry independently.
-    pub exact_reject_through: u64,
     pub wake: Option<std::thread::Thread>,
     pub effects: Option<Vec<u8>>,
     pub restore_sixel_mode: bool,
@@ -103,8 +94,6 @@ impl Inbox {
             events: VecDeque::new(),
             tracing,
             published: None,
-            keyboard: None,
-            capture: None,
             pending: None,
             encoded: None,
             last_fully_written_image: None,
@@ -114,7 +103,6 @@ impl Inbox {
             geometry: 1,
             resize: None,
             cancel_pointer: false,
-            exact_reject_through: 0,
             wake: None,
             effects: None,
             restore_sixel_mode: false,
@@ -163,40 +151,18 @@ impl Inbox {
                 | MouseEventKind::ScrollLeft
                 | MouseEventKind::ScrollRight => return Ok(false),
                 MouseEventKind::Moved => {
-                    // Leaving the native canvas has the same cleanup authority
-                    // as a physical leave, even without an admissible frame.
+                    // Leaving the native canvas ends the current contact just
+                    // like a physical leave, independently of output progress.
                     self.lose_pointer();
                     return Ok(false);
                 }
                 MouseEventKind::Drag(_) | MouseEventKind::Up(_) => {}
             }
         }
-        let token = match &event {
-            Event::SgrMouse(mouse) => match mouse.kind {
-                MouseEventKind::Down(termina::event::MouseButton::Left) => {
-                    self.capture = self.published.clone();
-                    self.capture.clone()
-                }
-                MouseEventKind::Up(termina::event::MouseButton::Left) => {
-                    self.capture.take().or_else(|| self.published.clone())
-                }
-                MouseEventKind::Drag(termina::event::MouseButton::Left) => self.capture.clone(),
-                _ => self.published.clone(),
-            },
-            Event::Key(_) | Event::Paste(_) => self.keyboard.clone(),
-            _ => self.published.clone(),
-        };
         if matches!(event, Event::MouseLeave) {
             return Ok(false);
         }
-        if pointer(&event) && (token.is_none() || self.resize.is_some()) {
-            if released(&event) {
-                self.lose_pointer();
-            }
-            return Ok(false);
-        }
         if let Some(previous) = self.events.back_mut()
-            && previous.token == token
             && previous.geometry == self.geometry
         {
             match (&mut previous.event, &event) {
@@ -223,9 +189,7 @@ impl Inbox {
         }
         self.events.push_back(Input {
             event,
-            token,
             geometry: self.geometry,
-            startup: self.keyboard.is_none(),
             queued_at: self.tracing.then(Instant::now),
         });
         Ok(false)
@@ -244,7 +208,7 @@ impl Inbox {
     }
 
     /// Records a complete writer receipt, independently of whether resize has
-    /// revoked this frame's input geometry. Only the native worker can publish.
+    /// changed this frame's viewport. Only the native worker can publish.
     pub(super) fn written(&mut self, offer: Offer, image: Option<u32>) {
         self.last_fully_written_geometry = Some(offer.geometry);
         if let Some(image) = image {
@@ -269,15 +233,12 @@ impl Inbox {
     }
 
     fn lose_pointer(&mut self) {
-        self.capture = None;
         self.cancel_pointer = true;
         self.events.retain(|input| !pointer(&input.event));
     }
 
     pub(super) fn has_pending_input(&self) -> bool {
-        self.events
-            .front()
-            .is_some_and(|input| input.token.is_some() || self.published.is_some())
+        !self.events.is_empty() && self.resize.is_none()
     }
 
     pub(super) fn pop(&mut self) -> Option<Input> {
@@ -289,19 +250,6 @@ impl Inbox {
 
     pub(super) fn queue_len(&self) -> usize {
         self.events.len()
-    }
-
-    pub fn retained(&self) -> HashSet<FrameToken> {
-        self.events
-            .iter()
-            .filter_map(|input| input.token.clone())
-            .chain(self.published.iter().cloned())
-            .chain(self.keyboard.iter().cloned())
-            .chain(self.capture.iter().cloned())
-            .chain(self.pending.iter().map(|candidate| candidate.frame.token()))
-            .chain(self.in_flight.iter().cloned())
-            .chain(self.ready.iter().map(|offer| offer.token.clone()))
-            .collect()
     }
 
     pub fn into_startup(self) -> (Vec<Event>, Option<WindowSize>) {
@@ -393,8 +341,6 @@ mod tests {
         assert_eq!(inbox.last_fully_written_geometry, None);
         let token = FrameToken::default();
         inbox.published = Some(token.clone());
-        inbox.keyboard = Some(token.clone());
-        inbox.capture = Some(token.clone());
         let draft = Event::Paste("unfinished 你好 draft".into());
         inbox.push(draft.clone()).unwrap();
         inbox.set_sixel_geometry(maximum(1000, 1000)).unwrap();
@@ -410,13 +356,15 @@ mod tests {
             ))
         );
         assert!(inbox.published.is_none());
-        assert!(inbox.capture.is_none());
         assert!(inbox.cancel_pointer);
-        assert_eq!(inbox.keyboard, Some(token.clone()));
+        // Coordinates wait for the native owner to apply resize, while the
+        // complete draft remains queued independently of output receipts.
+        assert!(inbox.pop().is_none());
+        inbox.resize = None;
         assert_eq!(inbox.pop().unwrap().event, draft);
 
-        // The already-started old viewport transaction must finish physically,
-        // but its receipt alone grants neither new pointer nor keyboard input.
+        // The already-started old viewport transaction must finish physically;
+        // its receipt records the old output geometry only.
         inbox.written(
             Offer {
                 token: token.clone(),
@@ -428,18 +376,14 @@ mod tests {
         assert_eq!(inbox.last_fully_written_geometry, Some(1));
         assert_eq!(inbox.ready.as_ref().unwrap().geometry, 1);
         assert!(inbox.published.is_none());
-        assert!(inbox.capture.is_none());
-        assert_eq!(inbox.keyboard, Some(token.clone()));
 
-        // A new fact that does not change this canvas must not revoke a click.
+        // A new fact that does not change this canvas must not cancel a contact.
         inbox.resize = None;
         inbox.cancel_pointer = false;
         inbox.published = Some(token.clone());
-        inbox.capture = Some(token.clone());
         inbox.set_sixel_geometry(maximum(1000, 1200)).unwrap();
         assert_eq!(inbox.geometry, 2);
         assert_eq!(inbox.published, Some(token.clone()));
-        assert_eq!(inbox.capture, Some(token));
         assert!(!inbox.cancel_pointer);
 
         // Actual terminal resize always revokes old coordinates, even if the
@@ -511,7 +455,6 @@ mod tests {
         let mut caps = capabilities();
         caps.sixel_geometry = maximum(1000, 600);
         let mut inbox = Inbox::new(caps, false);
-        let token = FrameToken::default();
         let pointer = |kind, x, y| {
             Event::SgrMouse(termina::event::SgrMouseEvent {
                 kind,
@@ -523,7 +466,6 @@ mod tests {
         // Real cells remain 10x20 pixels. The right/bottom margins begin at
         // cell 101/31, independently of the smaller native canvas dimensions.
         for (x, y) in [(101, 1), (1, 31), (0, 1)] {
-            inbox.capture = Some(token.clone());
             inbox
                 .push(pointer(
                     MouseEventKind::Down(termina::event::MouseButton::Left),
@@ -534,16 +476,14 @@ mod tests {
             inbox
                 .push(pointer(MouseEventKind::ScrollDown, x, y))
                 .unwrap();
-            assert_eq!(inbox.capture, Some(token.clone()));
+            assert_eq!(inbox.queue_len(), 0);
             assert!(!inbox.cancel_pointer);
             inbox.push(pointer(MouseEventKind::Moved, x, y)).unwrap();
-            assert!(inbox.capture.is_none());
             assert!(inbox.cancel_pointer);
             inbox.cancel_pointer = false;
         }
-        // The adjacent visible cell reaches admission instead of being
-        // confused with the margin. No published frame means no new capture.
-        inbox.capture = Some(token);
+        // The adjacent visible cell reaches the native FIFO even before any
+        // output frame is published.
         inbox
             .push(pointer(
                 MouseEventKind::Down(termina::event::MouseButton::Left),
@@ -551,7 +491,62 @@ mod tests {
                 30,
             ))
             .unwrap();
-        assert!(inbox.capture.is_none());
+        assert_eq!(inbox.queue_len(), 1);
+        assert!(inbox.pop().is_some());
+    }
+
+    #[test]
+    fn pointer_fifo_does_not_wait_for_output_and_resize_keeps_new_coordinates() {
+        let mut inbox = Inbox::new(capabilities(), false);
+        inbox.in_flight = Some(FrameToken::default());
+        let pointer = |kind, x, y| {
+            Event::SgrMouse(termina::event::SgrMouseEvent {
+                kind,
+                x,
+                y,
+                modifiers: Modifiers::NONE,
+            })
+        };
+        let down = pointer(
+            MouseEventKind::Down(termina::event::MouseButton::Left),
+            4,
+            5,
+        );
+        let wheel = pointer(MouseEventKind::ScrollDown, 4, 5);
+        let up = pointer(MouseEventKind::Up(termina::event::MouseButton::Left), 4, 5);
+        for event in [&down, &wheel, &up] {
+            inbox.push(event.clone()).unwrap();
+        }
+        for event in [down, wheel, up] {
+            assert_eq!(inbox.pop().unwrap().event, event);
+        }
+        assert!(inbox.in_flight.is_some());
+        assert!(inbox.published.is_none());
+
+        let old = pointer(
+            MouseEventKind::Down(termina::event::MouseButton::Left),
+            4,
+            5,
+        );
+        inbox.push(old).unwrap();
+        inbox
+            .push(Event::WindowResized(capabilities().size))
+            .unwrap();
+        let current = pointer(
+            MouseEventKind::Down(termina::event::MouseButton::Left),
+            6,
+            7,
+        );
+        inbox.push(current.clone()).unwrap();
+        assert_eq!(inbox.queue_len(), 1, "resize retires only old coordinates");
+        assert!(
+            inbox.pop().is_none(),
+            "apply native resize before mapping the new pointer"
+        );
+        inbox.resize.take();
+        let input = inbox.pop().unwrap();
+        assert_eq!(input.event, current);
+        assert_eq!(input.geometry, 2);
     }
 
     #[test]
@@ -581,8 +576,8 @@ mod tests {
         assert!(!inbox.push(paste.clone()).unwrap());
         expected.push(paste);
         assert!(
-            !inbox.has_pending_input(),
-            "startup input waits for its first presentation"
+            inbox.has_pending_input(),
+            "native input does not wait for pixels"
         );
         let size = WindowSize {
             cols: 80,

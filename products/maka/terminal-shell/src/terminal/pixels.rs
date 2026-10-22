@@ -22,6 +22,8 @@ mod input;
 mod mapping;
 mod probe;
 mod session;
+#[cfg(test)]
+mod tests;
 
 use super::{Presentation, output::Output};
 pub(super) use input::Inbox;
@@ -127,7 +129,7 @@ pub(super) fn run(
         }
         state.trace.is_some()
     };
-    output.submit(setup, None)?;
+    output.submit(setup)?;
     let (startup, handle) = session::spawn(config, presentation.clone())?;
     *worker = Some(handle);
     let mut starting = true;
@@ -212,7 +214,7 @@ pub(super) fn run(
                         // original character modes. Re-enable those after
                         // cleanup without re-entering the alternate screen.
                         restore.extend_from_slice(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
-                        output.submit(restore, None)?;
+                        output.submit(restore)?;
                         while !output.poll()? {
                             if presentation.stop.load(Ordering::Acquire)
                                 || presentation.state.lock().unwrap().quit
@@ -244,8 +246,8 @@ pub(super) fn run(
                         {
                             return Ok(());
                         }
-                        let (commands, frames) = super::ui::spawn(config, presentation.clone())
-                            .map_err(|error| error.to_string())?;
+                        let (commands, frames) =
+                            super::ui::spawn(config).map_err(|error| error.to_string())?;
                         return super::drive(output, presentation, &commands, &frames);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -263,7 +265,7 @@ pub(super) fn run(
             if let Some(generation) = missing
                 && state.pixel_probe.measurement.begin(generation)?
             {
-                output.submit(geometry::QUERY.to_vec(), None)?;
+                output.submit(geometry::QUERY.to_vec())?;
                 phase = Phase::Measure;
             }
             let inbox = state.pixels.as_mut().unwrap();
@@ -271,7 +273,7 @@ pub(super) fn run(
                 continue;
             }
             if let Some(bytes) = inbox.effects.take() {
-                output.submit(bytes, None)?;
+                output.submit(bytes)?;
                 phase = Phase::Effect;
             } else if let Some(encoded) = inbox.encoded.take() {
                 if let Some(wake) = &inbox.wake {
@@ -304,7 +306,7 @@ pub(super) fn run(
                         // Upload and retirement share one indivisible writer
                         // transaction. q=1 preserves errors without a success
                         // reply round trip on the frame publication path.
-                        output.submit(frame.wire().to_vec(), None)?;
+                        output.submit(frame.wire().to_vec())?;
                         phase = Phase::Publish {
                             offer,
                             image: Some(image),
@@ -313,7 +315,7 @@ pub(super) fn run(
                     input::WireFrame::Inline(frame) => {
                         // Sixel and OSC File have no per-image ACK. Only the
                         // original writer's full flush publishes this draw.
-                        output.submit(frame.bytes().to_vec(), None)?;
+                        output.submit(frame.bytes().to_vec())?;
                         phase = Phase::Publish { offer, image: None };
                     }
                 }
