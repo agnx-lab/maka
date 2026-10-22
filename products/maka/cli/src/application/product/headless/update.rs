@@ -60,7 +60,6 @@ pub(in super::super) async fn synchronize(
             } else {
                 changes(previous.as_ref(), &preparation.input)
             },
-            ..Default::default()
         };
         if apply {
             // Recover only this frozen operation, even under a newer executable.
