@@ -705,7 +705,6 @@ maka-process@0.2.0		X
 maka-processes-native@0.2.0		X														
 maka-product-native@0.2.0		X														
 maka-providers@0.2.0		X														
-maka-render-terminal@0.2.0		X														
 maka-responses@0.2.0		X														
 maka-sandbox@0.2.0		X														
 maka-scheduler@0.2.0		X														
@@ -722,7 +721,6 @@ maka-tool-catalog@0.2.0		X
 maka-tools@0.2.0		X														
 maka-transport@0.2.0		X														
 maka-ui-authoring@0.2.0		X														
-maka-ui-js@0.2.0		X														
 maka-ui-runtime@0.2.0		X														
 maka-web-api@0.2.0		X														
 maka-web@0.2.0		X														
@@ -771,16 +769,16 @@ nonmax@0.5.5		X									X
 notify-rust@4.18.1		X									X					
 notify-types@2.1.0		X									X					
 notify@8.2.0							X									
-nsh-base@0.1.1		X														
-nsh-bundler@0.1.1		X														
-nsh-core@0.1.1		X														
-nsh-engine@0.1.1		X														
-nsh-gpui-terminal@0.1.1		X														
-nsh-js@0.1.1		X														
-nsh-macros@0.1.1		X														
-nsh-package@0.1.1		X														
-nsh-platform-gpui@0.1.1		X														
-nsh-platform-tui@0.1.1		X														
+nsh-base@0.2.0		X														
+nsh-bundler@0.2.0		X														
+nsh-core@0.2.0		X														
+nsh-engine@0.2.0		X														
+nsh-gpui-terminal@0.2.0		X														
+nsh-js@0.2.0		X														
+nsh-macros@0.2.0		X														
+nsh-package@0.2.0		X														
+nsh-platform-gpui@0.2.0		X														
+nsh-platform-tui@0.2.0		X														
 ntapi@0.4.3		X									X					
 nu-ansi-term@0.50.3											X					
 num_cpus@1.17.0		X									X					
@@ -947,7 +945,6 @@ profiling-procmacros@1.0.18		X									X
 profiling@1.0.18		X									X					
 prost-derive@0.14.4		X														
 prost@0.14.4		X														
-pulldown-cmark@0.13.4											X					
 pulp-wasm-simd-flag@0.1.1											X					
 pulp@0.22.3											X					
 pxfm@0.1.30		X			X											
@@ -1131,7 +1128,6 @@ signature@3.0.0		X									X
 simd-adler32@0.3.10											X					
 simd-json@0.18.1		X									X					
 simdutf8@0.1.5		X									X					
-similar@3.2.0		X														
 simplecss@0.2.2		X									X					
 siphasher@1.0.3		X									X					
 skrifa@0.40.0		X									X					
