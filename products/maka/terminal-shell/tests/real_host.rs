@@ -608,6 +608,51 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_input(&mut view, "Global instructions", initial_instructions).await;
         let instruction_draft = "  GLOBAL_DRAFT_PRESERVED\n未保存的完整草稿。\n\n";
         fill(&mut view, "Global instructions", instruction_draft).await;
+        // A different shell can leave an original saved action unresolved.
+        // Recover its actual receipt without taking ownership of this draft.
+        let remote_instructions = "REMOTE SAVED GLOBAL INSTRUCTIONS\n另一终端已保存。\n";
+        {
+            let gate = ReplyGate::global_instructions(fixture.directory.path(), fixture.address.clone());
+            let remote = fixture.client_at(&gate.address).await;
+            let remote_id = Uuid::new_v4();
+            let mutation = remote.settings_mutation(remote_id, "agent", "updateGlobalInstructions", json!({
+                "source":initial_global["source"], "revision":initial_global["revision"], "content":remote_instructions
+            }), Default::default()).await.unwrap();
+            let original = mutation.prepare().await.unwrap();
+            gate.arm();
+            let mut confirmation = Box::pin(mutation.confirm());
+            tokio::select! {
+                result = &mut confirmation => panic!("the global save receipt escaped its physical gate: {result:?}"),
+                () = gate.held.notified() => {},
+            }
+            assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), remote_instructions);
+            drop(confirmation);
+            mutation.disconnect().await;
+            gate.release();
+            remote.close().await.unwrap();
+            let pending = client.pending_settings().await.unwrap();
+            assert_eq!(pending.iter().map(|operation| operation.id).collect::<Vec<_>>(), [remote_id]);
+            assert_eq!(pending[0].reference, original.reference);
+            assert!(pending[0].receipt.is_none());
+            // The local owner discovers the shared journal's unresolved action
+            // when its own attempted Save is refused before dispatch.
+            activate(&mut view, "Save global instructions").await;
+            wait_view(&mut view, |screen| screen.contains("Recover original settings actions")).await;
+            activate(&mut view, "Recover settings actions").await;
+            wait_view(&mut view, |screen| screen.contains("Source changed. Your draft is preserved.") && !screen.contains("Recover original settings actions")).await;
+            assert_input(&mut view, "Global instructions", instruction_draft).await;
+            let save = view.accessibility_snapshot().into_iter().find(|node| node.role == nsh_core::AccessibilityRole::Button && node.label == "Save global instructions").expect("receipt recovery removed the independent draft's Save button");
+            assert!(save.state.disabled, "recovered other-shell saves must not make this unrelated draft repeatable");
+            assert_eq!(std::fs::read_to_string(&instruction_path).unwrap(), remote_instructions);
+            let settled = client.operation_for_settings(remote_id).await.unwrap();
+            assert_eq!(settled.reference, original.reference);
+            assert!(matches!(settled.receipt, Some(Receipt::Recorded { outcome: OperationOutcome::Returned { ref value }, .. }) if value == &json!({"kind":"saved"})));
+            assert!(client.pending_settings().await.unwrap().is_empty());
+        }
+        activate(&mut view, "Reload (discard edits)").await;
+        wait_view(&mut view, |screen| screen.contains("REMOTE SAVED GLOBAL INSTRUCTIONS") && !screen.contains("Reading global instructions…")).await;
+        assert_input(&mut view, "Global instructions", remote_instructions).await;
+        fill(&mut view, "Global instructions", instruction_draft).await;
         let external_instructions = "EXTERNAL GLOBAL UPDATE\n外部编辑不能被覆盖。\n";
         std::fs::write(&instruction_path, external_instructions).unwrap();
         activate(&mut view, "Save global instructions").await;
@@ -658,6 +703,7 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert!(system_prompt.contains(final_instructions.trim()), "the provider did not receive the saved full global instructions");
         assert!(!system_prompt.contains("INITIAL GLOBAL UTF-8"));
         assert!(!system_prompt.contains("EXTERNAL GLOBAL UPDATE"));
+        assert!(!system_prompt.contains("REMOTE SAVED GLOBAL INSTRUCTIONS"));
 
         request.thinking("SETTINGS_CONNECTION_REASONING").await;
         request.delta("SETTINGS_CONNECTION_SINGLE_SEND_DONE").await;

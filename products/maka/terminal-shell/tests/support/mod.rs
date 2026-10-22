@@ -1265,6 +1265,15 @@ impl ReplyGate {
     pub fn start(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "send", "mutation", false)
     }
+    pub fn global_instructions(directory: &Path, target: PathBuf) -> Self {
+        Self::for_method(
+            directory,
+            target,
+            "updateGlobalInstructions",
+            "mutation",
+            false,
+        )
+    }
     pub fn directories(directory: &Path, target: PathBuf) -> Self {
         Self::for_method(directory, target, "directories", "finished", false)
     }
