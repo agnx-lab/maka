@@ -35,7 +35,7 @@ pub(crate) struct Restore {
 impl Restore {
     pub(crate) async fn run(self) -> Result<(), HostError> {
         let root = super::root_path(self.root)?;
-        let store = launch::open(root, false, None).await?;
+        let store = launch::open(root, None).await?;
         let result = restore(&store).await;
         store.drain().await;
         println!("{}", serde_json::to_string(&result?)?);
@@ -240,11 +240,9 @@ mod tests {
     #[tokio::test]
     async fn restore_keeps_each_original_source_inventory_without_catalog_leakage() {
         let directory = tempfile::tempdir().unwrap();
-        let store = launch::open(directory.path().join("ui"), true, None)
-            .await
-            .unwrap();
+        let store = launch::create(directory.path().join("ui")).await.unwrap();
         let host_path = directory.path().join("host");
-        let host = Arc::new(launch::open(host_path.clone(), true, None).await.unwrap());
+        let host = Arc::new(launch::create(host_path.clone()).await.unwrap());
         let host_id = Uuid::new_v4();
         let manager = Uuid::new_v4();
         let ui = Uuid::new_v4();
@@ -319,11 +317,9 @@ mod tests {
     #[tokio::test]
     async fn restore_preserves_original_identity_history_and_resumes_without_replay() {
         let directory = tempfile::tempdir().unwrap();
-        let store = launch::open(directory.path().join("ui"), true, None)
-            .await
-            .unwrap();
+        let store = launch::create(directory.path().join("ui")).await.unwrap();
         let host_path = directory.path().join("host");
-        let host = Arc::new(launch::open(host_path.clone(), true, None).await.unwrap());
+        let host = Arc::new(launch::create(host_path.clone()).await.unwrap());
         let ui = Uuid::new_v4();
         let host_id = Uuid::new_v4();
         let manager = Uuid::new_v4();

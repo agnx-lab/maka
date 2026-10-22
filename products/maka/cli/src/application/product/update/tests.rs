@@ -56,8 +56,8 @@ async fn old_installation(
     path: &std::path::Path,
     standard: bool,
 ) -> (EventLog, Uuid, PublishedHost) {
-    let store = launch::open(path.join("ui"), true, None).await.unwrap();
-    let host = Arc::new(launch::open(path.join("host"), true, None).await.unwrap());
+    let store = launch::create(path.join("ui")).await.unwrap();
+    let host = Arc::new(launch::create(path.join("host")).await.unwrap());
     let options = json!({"workspace": path, "hostRoot": path.join("host"), "themeFile": path.join("theme.json"), "helper": std::env::current_exe().unwrap(), "locale":"zh-CN"});
     let mut config = super::super::installation(options.clone()).await.unwrap();
     // Previous ceilings blocked network and external-write approval requests.

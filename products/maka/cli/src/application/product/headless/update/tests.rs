@@ -51,7 +51,7 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(path: &std::path::Path) -> Self {
-        let store = launch::open(path.join("host"), true, None).await.unwrap();
+        let store = launch::create(path.join("host")).await.unwrap();
         let deployment = Uuid::new_v4();
         let key = Uuid::new_v4();
         let previous = leaf("same-ID local fork", "string");

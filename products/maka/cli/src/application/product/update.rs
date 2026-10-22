@@ -73,7 +73,7 @@ impl Update {
     pub(crate) async fn run(self) -> Result<(), HostError> {
         let root = super::root_path(self.root)?;
         let store = if self.apply {
-            launch::open(root, false, None).await?
+            launch::open(root, None).await?
         } else {
             super::super::open_application_inspection(root).await?
         };

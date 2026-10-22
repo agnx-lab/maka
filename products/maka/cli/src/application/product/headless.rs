@@ -394,9 +394,7 @@ mod tests {
     #[tokio::test]
     async fn saved_product_checks_original_source_before_accepting_prepared_input() {
         let directory = tempfile::tempdir().unwrap();
-        let store = launch::open(directory.path().join("host"), true, None)
-            .await
-            .unwrap();
+        let store = launch::create(directory.path().join("host")).await.unwrap();
         let deployment = Uuid::new_v4();
         let source: Input = serde_json::from_value(json!({
             "environment":{"location":"host"},"instances":{}

@@ -75,8 +75,8 @@ async fn partial_initialization_resumes_original_inputs_and_preserves_new_heads(
     let directory = tempfile::tempdir().unwrap();
     let ui_path = directory.path().join("ui");
     let host_path = directory.path().join("host");
-    let store = open(ui_path.clone(), true, None).await.unwrap();
-    let host = Arc::new(open(host_path.clone(), true, None).await.unwrap());
+    let store = create(ui_path.clone()).await.unwrap();
+    let host = Arc::new(create(host_path.clone()).await.unwrap());
     let (ui, host_id, management) = pending(&store, &host).await;
     ensure(&host, host_id, &input(), &[], &[]).await.unwrap();
     let mut edited = input();
@@ -103,7 +103,7 @@ async fn partial_initialization_resumes_original_inputs_and_preserves_new_heads(
     let serving = PublishedHost::start(host.clone(), host_id).await;
     store.drain().await;
     drop(store);
-    let store = open(ui_path.clone(), false, None).await.unwrap();
+    let store = open(ui_path.clone(), None).await.unwrap();
     let (selected, _, clients) = prepare(&store).await.unwrap();
     selected.check_store(&store).unwrap();
     assert_eq!(selected.source().reference.deployment, ui);
@@ -176,12 +176,8 @@ async fn partial_initialization_resumes_original_inputs_and_preserves_new_heads(
 #[tokio::test]
 async fn conflicting_original_commit_keeps_pending_record_and_does_not_create_ui() {
     let directory = tempfile::tempdir().unwrap();
-    let store = open(directory.path().join("ui"), true, None).await.unwrap();
-    let host = Arc::new(
-        open(directory.path().join("host"), true, None)
-            .await
-            .unwrap(),
-    );
+    let store = create(directory.path().join("ui")).await.unwrap();
+    let host = Arc::new(create(directory.path().join("host")).await.unwrap());
     let (ui, host_id, _) = pending(&store, &host).await;
     let mut conflicting = input();
     conflicting.environment = Environment {
@@ -213,8 +209,8 @@ async fn conflicting_original_commit_keeps_pending_record_and_does_not_create_ui
 async fn replacement_host_root_cannot_resume_original_initialization() {
     let directory = tempfile::tempdir().unwrap();
     let host_path = directory.path().join("host");
-    let store = open(directory.path().join("ui"), true, None).await.unwrap();
-    let host = open(host_path.clone(), true, None).await.unwrap();
+    let store = create(directory.path().join("ui")).await.unwrap();
+    let host = create(host_path.clone()).await.unwrap();
     let (ui, _, _) = pending(&store, &host).await;
     host.drain().await;
     drop(host);

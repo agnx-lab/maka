@@ -61,14 +61,10 @@ struct PreparedLaunch {
 
 pub(super) async fn open(
     root: PathBuf,
-    initialize: bool,
     expected_domain: Option<String>,
 ) -> Result<EventLog, HostError> {
     let owner = tokio::task::spawn_blocking(move || {
         let namespaces = RootNamespaces::for_current_account()?;
-        if initialize {
-            maka_event_log::root::initialize(&root, &namespaces)?;
-        }
         let owner = RootOwner::open(&root, &namespaces)?;
         if expected_domain
             .as_deref()
@@ -81,6 +77,17 @@ pub(super) async fn open(
     .await??;
     Ok(maka_transport::open_store(Arc::new(owner)).await?)
 }
+// Test Roots are fresh. Keep the initial owner through SQL startup: dropping and
+// reacquiring it can race a parallel child's inherited OFD lease before exec.
+#[cfg(test)]
+pub(super) async fn create(root: PathBuf) -> Result<EventLog, HostError> {
+    let owner = tokio::task::spawn_blocking(move || {
+        RootOwner::create(&root, &RootNamespaces::for_current_account()?)
+    })
+    .await??;
+    Ok(maka_transport::open_store(Arc::new(owner)).await?)
+}
+
 pub(super) fn targets(
     configuration: &Configuration,
 ) -> Result<(PathBuf, String, Uuid, Uuid), HostError> {
@@ -288,7 +295,7 @@ async fn bootstrap_host(
     connections: &Configuration,
     prepared: PreparedApplication,
 ) -> Result<bool, HostError> {
-    let host_store = match open(root.into(), false, Some(domain.into())).await {
+    let host_store = match open(root.into(), Some(domain.into())).await {
         Ok(store) => store,
         Err(error)
             if error
