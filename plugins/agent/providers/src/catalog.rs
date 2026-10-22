@@ -39,32 +39,32 @@ type RefreshCompletion = oneshot::Sender<Result<(), String>>;
 
 /// The owner holds the write guard across its catalog SQL commit and Arc
 /// publication. Readers retain the read guard while observing the SQL revision.
+/// An unrecoverable commit outcome replaces the same snapshot with an error.
 pub struct Catalog {
-    pub snapshot: RwLock<Arc<Snapshot>>,
+    pub snapshot: RwLock<Result<Arc<Snapshot>, String>>,
     refresh: Mutex<Option<mpsc::UnboundedSender<RefreshCompletion>>>,
 }
 impl Catalog {
     pub fn new(snapshot: Snapshot) -> Self {
         Self {
-            snapshot: RwLock::new(Arc::new(snapshot)),
+            snapshot: RwLock::new(Ok(Arc::new(snapshot))),
             refresh: Mutex::new(None),
         }
     }
 
-    /// Without a runtime owner, this catalogue is a deliberate cached/bundled
-    /// embedding. Otherwise await the owner's current/next refresh receipt.
-    pub async fn refresh(&self) -> Result<(), String> {
+    /// Enqueue synchronously; dropping the receipt does not retract the intent.
+    /// Waiting is optional. A standalone embedding keeps its cached facts.
+    pub fn request_refresh(&self) -> Result<oneshot::Receiver<Result<(), String>>, String> {
         let sender = self.refresh.lock().expect("catalog refresh lock").clone();
-        let Some(sender) = sender else {
-            return Ok(());
-        };
         let (complete, completed) = oneshot::channel();
+        let Some(sender) = sender else {
+            let _ = complete.send(Ok(()));
+            return Ok(completed);
+        };
         sender
             .send(complete)
             .map_err(|_| "public catalog refresh owner is closed".to_owned())?;
-        completed
-            .await
-            .map_err(|_| "public catalog refresh receipt is closed".to_owned())?
+        Ok(completed)
     }
 
     /// Exactly one product driver owns refreshes. Its network work occurs

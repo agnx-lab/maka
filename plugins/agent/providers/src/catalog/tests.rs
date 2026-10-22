@@ -328,24 +328,26 @@ fn captured_public_fact_or_absence_never_uses_todays_fallback() {
 }
 
 #[tokio::test]
-async fn explicit_refresh_awaits_the_owner_receipt_and_reports_owner_closure() {
+async fn explicit_refresh_enqueues_synchronously_and_reports_the_owner_receipt() {
     let catalog = super::Catalog::new(Snapshot::bundled().unwrap());
-    catalog.refresh().await.unwrap(); // A standalone embedding keeps its cached facts.
+    // A standalone embedding returns an already completed cached receipt.
+    catalog.request_refresh().unwrap().await.unwrap().unwrap();
     let mut requests = catalog.attach_refresh();
-    let (result, ()) = tokio::join!(catalog.refresh(), async {
-        requests
-            .recv()
-            .await
-            .unwrap()
-            .send(Err("refresh kept the previous valid source".into()))
-            .unwrap();
-    });
-    assert_eq!(result, Err("refresh kept the previous valid source".into()));
+    let completed = catalog.request_refresh().unwrap();
+    requests
+        .recv()
+        .await
+        .unwrap()
+        .send(Err("refresh kept the previous valid source".into()))
+        .unwrap();
+    assert_eq!(
+        completed.await.unwrap(),
+        Err("refresh kept the previous valid source".into())
+    );
     drop(requests);
-    assert!(catalog.refresh().await.is_err());
+    assert!(catalog.request_refresh().is_err());
     let mut replacement = catalog.attach_refresh();
-    let (result, ()) = tokio::join!(catalog.refresh(), async {
-        replacement.recv().await.unwrap().send(Ok(())).unwrap();
-    });
-    result.unwrap();
+    let completed = catalog.request_refresh().unwrap();
+    replacement.recv().await.unwrap().send(Ok(())).unwrap();
+    completed.await.unwrap().unwrap();
 }
