@@ -23,7 +23,7 @@
 
 Apache Maka (Incubating) is a high-performance agent workspace that keeps a complete record of everything it did.
 
-Maka provides a plugin-composed terminal product and a native desktop shell. A Runtime Host owns execution, permissions and durable state. Model providers, tools and business capabilities use public plugin interfaces.
+Maka provides a terminal workbench and a native desktop shell. A Runtime Host owns execution, permissions and durable state. Model providers, tools and business capabilities use public plugin interfaces.
 
 ## Run from source
 

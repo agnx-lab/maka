@@ -35,7 +35,7 @@ Run `maka` or `maka terminal-shell` for the [NSH terminal workbench](../terminal
 
 Headless commands (`host`, `application serve`, `code` and `acp`) install process logging before runtime initialization. Warnings and errors, including SQLx slow-query warnings, go to stderr without ANSI styling; stdout remains available for command results and protocol frames. Ordinary DEBUG query logs are disabled. Interactive products keep control of their terminal output.
 
-Dedicated Host processes capture stderr in their Root's private control-cache file `host.stderr.log`: on-demand capture starts before spawning, while foreground serving starts after Root selection. Read it with `maka host logs --root-id ID`, or add `--follow` for live NDJSON and `--after CURSOR` to resume. Pages preserve raw bytes as Base64 and report missing capture, replacement or truncation; clearing the control cache removes these logs. This works without an installed service. The default product's Diagnostics → Host logs view supports reading and following without a conversation.
+Dedicated Host processes capture stderr in their Root's private control-cache file `host.stderr.log`: on-demand capture starts before spawning, while foreground serving starts after Root selection. Read it with `maka host logs --root-id ID`, or add `--follow` for live NDJSON and `--after CURSOR` to resume. Pages preserve raw bytes as Base64 and report missing capture, replacement or truncation; clearing the control cache removes these logs. This works without an installed service.
 
 ## Product updates, recovery and URL installation
 

@@ -44,7 +44,7 @@ enum Command {
     Desktop(crate::desktop::Args),
     /// Open the NSH terminal shell (connects to or starts the selected Host).
     TerminalShell(maka_terminal_shell::entry::Args),
-    /// Author, inspect and run plugin applications.
+    /// Author, inspect and serve plugin applications.
     #[command(subcommand)]
     Application(crate::application::Command),
     /// Manage the native runtime host.

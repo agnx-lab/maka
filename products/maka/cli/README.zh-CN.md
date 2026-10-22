@@ -35,7 +35,7 @@
 
 无界面命令（`host`、`application serve`、`code` 和 `acp`）在运行时初始化前安装进程日志订阅器。警告和错误（包括 SQLx 慢查询警告）写入 stderr，不带 ANSI 样式；stdout 保留给命令结果和协议帧。默认不输出普通 DEBUG 查询日志。交互式产品仍自行管理终端输出。
 
-独立 Host 将 stderr 捕获到所属 Root 的私有控制缓存文件 `host.stderr.log`：按需启动在创建进程前接好捕获文件，前台服务在选定 Root 后开始捕获。使用 `maka host logs --root-id ID` 读取，添加 `--follow` 持续接收 NDJSON，添加 `--after CURSOR` 从游标续读。每页以 Base64 保留原始字节，并报告尚无捕获文件、文件替换或截断；清理控制缓存也会删除这些日志。读取不要求安装系统服务。默认产品的“诊断 → Host 日志”无需会话即可读取和跟随日志。
+独立 Host 将 stderr 捕获到所属 Root 的私有控制缓存文件 `host.stderr.log`：按需启动在创建进程前接好捕获文件，前台服务在选定 Root 后开始捕获。使用 `maka host logs --root-id ID` 读取，添加 `--follow` 持续接收 NDJSON，添加 `--after CURSOR` 从游标续读。每页以 Base64 保留原始字节，并报告尚无捕获文件、文件替换或截断；清理控制缓存也会删除这些日志。读取不要求安装系统服务。
 
 ## 产品更新、恢复与 URL 安装
 
