@@ -23,14 +23,9 @@ use std::collections::VecDeque;
 // Yield the input lock between read slices; this is not a queue limit.
 pub(super) const READ_BATCH: usize = 128;
 
-#[derive(Debug)]
-pub(super) struct Input {
-    pub event: Event,
-}
-
 #[derive(Default)]
 pub(super) struct Inbox {
-    events: VecDeque<Input>,
+    events: VecDeque<Event>,
     pub resize: Option<(u16, u16)>,
     pub graphics: super::graphics::Probe,
     pub cancel_pointer: bool,
@@ -61,15 +56,15 @@ impl Inbox {
             // Coordinates read before the resize no longer describe the
             // pending viewport. Keys and paste keep their physical order.
             self.events
-                .retain(|input| !matches!(input.event, Event::Mouse(_)));
+                .retain(|event| !matches!(event, Event::Mouse(_)));
             return;
         }
         if self.error.is_none() {
-            self.events.push_back(Input { event });
+            self.events.push_back(event);
         }
     }
 
-    pub fn pop_batch(&mut self) -> Vec<Input> {
+    pub fn pop_batch(&mut self) -> Vec<Event> {
         self.events.drain(..).collect()
     }
 }
@@ -108,14 +103,7 @@ mod tests {
         assert_eq!(inbox.resize, Some((80, 20)));
         assert!(inbox.cancel_pointer);
         assert!(inbox.quit);
-        assert_eq!(
-            inbox
-                .pop_batch()
-                .into_iter()
-                .map(|input| input.event)
-                .collect::<Vec<_>>(),
-            text.chars().map(key).collect::<Vec<_>>()
-        );
+        assert_eq!(inbox.pop_batch(), text.chars().map(key).collect::<Vec<_>>());
     }
 
     #[test]
@@ -126,14 +114,7 @@ mod tests {
         for event in expected.iter().cloned() {
             inbox.push(event);
         }
-        assert_eq!(
-            inbox
-                .pop_batch()
-                .into_iter()
-                .map(|input| input.event)
-                .collect::<Vec<_>>(),
-            expected
-        );
+        assert_eq!(inbox.pop_batch(), expected);
     }
 
     #[test]
@@ -151,14 +132,7 @@ mod tests {
         for event in expected.iter().cloned() {
             inbox.push(event);
         }
-        assert_eq!(
-            inbox
-                .pop_batch()
-                .into_iter()
-                .map(|input| input.event)
-                .collect::<Vec<_>>(),
-            expected
-        );
+        assert_eq!(inbox.pop_batch(), expected);
     }
 
     #[test]
@@ -172,11 +146,7 @@ mod tests {
         assert_eq!(inbox.resize, Some((80, 20)));
         assert!(inbox.cancel_pointer);
         assert_eq!(
-            inbox
-                .pop_batch()
-                .into_iter()
-                .map(|input| input.event)
-                .collect::<Vec<_>>(),
+            inbox.pop_batch(),
             vec![
                 key('a'),
                 mouse(MouseEventKind::Down(MouseButton::Left)),

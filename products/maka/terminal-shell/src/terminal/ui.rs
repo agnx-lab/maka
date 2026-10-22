@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{input::Input, output::FrameWriter};
+use super::output::FrameWriter;
 use crossterm::event::{Event, MouseEventKind};
 use nsh_core::{MountBatch, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
@@ -66,7 +66,7 @@ pub(super) struct Frame {
 
 pub(super) struct Advance {
     pub image_protocol: Option<ImageProtocol>,
-    pub inputs: Vec<Input>,
+    pub inputs: Vec<Event>,
     pub resize: Option<(u16, u16)>,
     pub cancel_pointer: bool,
     /// Output backpressure delays drawing, never ordinary native input.
@@ -225,8 +225,8 @@ impl Session {
             self.surface.set_image_protocol(Some(protocol));
             changed = true;
         }
-        for input in command.inputs {
-            changed |= match input.event {
+        for event in command.inputs {
+            changed |= match event {
                 Event::Mouse(mouse)
                     if matches!(
                         mouse.kind,
@@ -614,7 +614,7 @@ mod tests {
     fn command(events: impl IntoIterator<Item = Event>) -> Advance {
         Advance {
             image_protocol: None,
-            inputs: events.into_iter().map(|event| Input { event }).collect(),
+            inputs: events.into_iter().collect(),
             resize: None,
             cancel_pointer: false,
             draw: true,
@@ -1372,9 +1372,10 @@ mod tests {
         session.initial_frame().unwrap();
         let command = |key| Advance {
             image_protocol: None,
-            inputs: vec![Input {
-                event: Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
-            }],
+            inputs: vec![Event::Key(KeyEvent::new(
+                KeyCode::Char(key),
+                KeyModifiers::CONTROL,
+            ))],
             resize: None,
             cancel_pointer: false,
             draw: true,
@@ -1414,9 +1415,7 @@ mod tests {
         session.initial_frame().unwrap();
         let command = |key, modifiers| Advance {
             image_protocol: None,
-            inputs: vec![Input {
-                event: Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers)),
-            }],
+            inputs: vec![Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers))],
             resize: None,
             cancel_pointer: false,
             draw: true,
