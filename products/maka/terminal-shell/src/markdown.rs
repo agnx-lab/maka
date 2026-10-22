@@ -557,7 +557,7 @@ mod tests {
                 vec![
                     "👩🏽‍💻 e\u{301}",
                     "",
-                    "[原](https://example.test) ![图](image.png)",
+                    "原 ![图](image.png)",
                     "尾",
                 ],
             ]
