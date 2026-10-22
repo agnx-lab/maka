@@ -660,7 +660,12 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
             let restarted = fixture.client().await;
             assert_eq!(restarted.query("settings", "assistantPreferences", json!({})).await.unwrap(), startup_preferences);
             let persisted_network = restarted.query("settings", "network", json!({})).await.unwrap();
-            assert_eq!(persisted_network, final_network);
+            // Language and network settings share the runtime policy revision.
+            // The final UI language change advances that revision while every
+            // proxy, credential and Root field must remain exactly as saved.
+            let mut expected_network = final_network.clone();
+            expected_network["revision"] = startup_preferences["revision"].clone();
+            assert_eq!(persisted_network, expected_network);
             assert!(!persisted_network.to_string().contains(proxy_secret));
             restarted.close().await.unwrap();
             assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "restoring the configured session must not resend");
