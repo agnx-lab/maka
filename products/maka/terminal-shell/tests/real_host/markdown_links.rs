@@ -133,7 +133,8 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.id == image_link.id && node.role == nsh_core::AccessibilityRole::Link && node.focused)).await;
         wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Show message source").await;
-        wait_view(&mut view, |screen| screen.contains("![Markdown diagram]") && screen.contains("![Reference diagram][image]")).await;
+        // Wrapping changes painted lines, not the original source Text.
+        wait_view_state(&mut view, |view, _| message_source_available(view, true) && view.accessibility_snapshot().iter().any(|node| node.label.contains("![Markdown diagram]") && node.label.contains("![Reference diagram][image]"))).await;
         wait_mode_layout(&mut view).await;
         support::click_button(&mut view, "Show formatted message").await;
         support::wait_enabled_button(&mut view, "View full image: Markdown diagram").await;
