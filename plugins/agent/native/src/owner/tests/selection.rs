@@ -198,6 +198,16 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
 {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let session = fixture.create("Original execution basis").await;
+    edit(&fixture, |changes| {
+        changes.model_overrides = Patch::Set(BTreeMap::from([(
+            "fixture-model".into(),
+            ModelOverride {
+                max_output_tokens: Some(16_384),
+                ..Default::default()
+            },
+        )]));
+    })
+    .await;
     let public = ModelInfo {
         context_window: Some(128_000),
         max_output_tokens: Some(4096),
@@ -322,6 +332,7 @@ async fn captured_execution_ignores_catalog_labels_and_other_models_but_rejects_
                     display_name: Some("Visible name".into()),
                     description: Some("Updated description".into()),
                     knowledge_cutoff: Some("2026".into()),
+                    max_output_tokens: Some(16_384),
                     ..Default::default()
                 },
             ),
