@@ -192,7 +192,7 @@ async fn openrouter_discovery_preserves_reported_efforts_defaults_and_explicit_p
         assert_eq!(metadata.default_thinking_level, default);
         let prepared = binding.prepare(resolve.clone()).await.unwrap();
         assert_eq!(
-            prepared.provider_options["provider"]["reasoningEffort"],
+            prepared.provider_options["openrouter"]["reasoningEffort"],
             match default {
                 Some(Off) => json!("none"),
                 Some(level) => json!(level),
@@ -201,7 +201,7 @@ async fn openrouter_discovery_preserves_reported_efforts_defaults_and_explicit_p
         );
         if default.is_none() {
             assert!(
-                prepared.provider_options["provider"]
+                prepared.provider_options["openrouter"]
                     .get("reasoningEffort")
                     .is_none()
             );
@@ -213,7 +213,7 @@ async fn openrouter_discovery_preserves_reported_efforts_defaults_and_explicit_p
                     .prepare(resolve.clone())
                     .await
                     .unwrap()
-                    .provider_options["provider"]["reasoningEffort"],
+                    .provider_options["openrouter"]["reasoningEffort"],
                 if *level == Off {
                     json!("none")
                 } else {
@@ -243,12 +243,12 @@ async fn openrouter_discovery_preserves_reported_efforts_defaults_and_explicit_p
             .prepare(resolve.clone())
             .await
             .unwrap()
-            .provider_options["provider"]["reasoningEffort"],
+            .provider_options["openrouter"]["reasoningEffort"],
         "high"
     );
     resolve.thinking_level = Some(Low);
     assert_eq!(
-        binding.prepare(resolve).await.unwrap().provider_options["provider"]["reasoningEffort"],
+        binding.prepare(resolve).await.unwrap().provider_options["openrouter"]["reasoningEffort"],
         "low"
     );
 }
@@ -306,7 +306,7 @@ async fn openrouter_controls_distinguish_missing_null_and_mandatory_reasoning() 
     let prepared = binding.prepare(resolve.clone()).await.unwrap();
     assert!(prepared.thinking_levels.is_empty());
     assert!(
-        prepared.provider_options["provider"]
+        prepared.provider_options["openrouter"]
             .get("reasoningEffort")
             .is_none()
     );
