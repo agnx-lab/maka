@@ -435,6 +435,7 @@ fn check_layout(path: &Path) -> io::Result<()> {
                     | "runtime-rust.sqlite-shm"
                     | "runtime-rust.sqlite.writer.lock"
                     | "configuration-rust.sqlite"
+                    | "configuration-rust.sqlite-journal"
                     | "configuration-rust.sqlite-wal"
                     | "configuration-rust.sqlite-shm"
             )
@@ -449,7 +450,9 @@ fn check_layout(path: &Path) -> io::Result<()> {
             kind.is_dir()
         };
         if !supported {
-            return Err(io::Error::other("unsupported files in Rust prototype root"));
+            return Err(io::Error::other(format!(
+                "unsupported files in Rust prototype root: {name:?}"
+            )));
         }
         #[cfg(windows)]
         windows::open_nofollow(&entry.path(), false)?;

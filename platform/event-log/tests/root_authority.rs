@@ -58,6 +58,48 @@ fn identity_and_lease_survive_reopen_and_symlink_alias() {
 }
 
 #[test]
+fn configuration_rollback_journal_preserves_root_resolution_and_lease() {
+    let temp = tempfile::tempdir().unwrap();
+    let ns = namespaces(temp.path());
+    let path = temp.path().join("root");
+    let owner = RootOwner::create(&path, &ns).unwrap();
+    let database = rusqlite::Connection::open(path.join("configuration-rust.sqlite")).unwrap();
+    assert_eq!(
+        database
+            .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+            .unwrap(),
+        "delete"
+    );
+    database
+        .execute_batch(
+            "CREATE TABLE original(value INTEGER);
+             BEGIN IMMEDIATE;
+             INSERT INTO original VALUES(1);",
+        )
+        .unwrap();
+    let journal = path.join("configuration-rust.sqlite-journal");
+    assert!(
+        journal.is_file(),
+        "the actual SQLite writer must own a rollback journal"
+    );
+    assert_eq!(
+        maka_event_log::root::resolve(&path).unwrap().root_id(),
+        owner.root_id()
+    );
+    assert!(RootOwner::open(&path, &ns).is_err());
+    let unknown = path.join("unowned.sqlite");
+    fs::write(&unknown, b"unrecognized root file").unwrap();
+    assert!(maka_event_log::root::resolve(&path).is_err());
+    fs::remove_file(unknown).unwrap();
+    database.execute_batch("ROLLBACK").unwrap();
+    assert!(!journal.exists());
+    drop(database);
+    let id = owner.root_id().to_owned();
+    drop(owner);
+    assert_eq!(RootOwner::open(&path, &ns).unwrap().root_id(), id);
+}
+
+#[test]
 fn copied_marker_and_rebound_path_cannot_reuse_identity() {
     let temp = tempfile::tempdir().unwrap();
     let ns = namespaces(temp.path());
