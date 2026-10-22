@@ -174,7 +174,7 @@ export const host = {
       ? null
       : {
           path: { bytesBase64: link.path },
-          parent: link.parent === null ? null : { bytesBase64: link.parent },
+          parent: link.parent == null ? null : { bytesBase64: link.parent },
         };
   },
   query,
