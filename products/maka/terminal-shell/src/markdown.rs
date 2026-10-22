@@ -554,12 +554,7 @@ mod tests {
             [
                 vec!["左 列", "中", "右", "默认"],
                 vec!["粗 斜", "删", "码🙂", ""],
-                vec![
-                    "👩🏽‍💻 e\u{301}",
-                    "",
-                    "原 ![图](image.png)",
-                    "尾",
-                ],
+                vec!["👩🏽‍💻 e\u{301}", "", "原 ![图](image.png)", "尾",],
             ]
         );
         assert!(table.rows[0].cells[0].runs[1].strong);

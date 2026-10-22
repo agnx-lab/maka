@@ -19,6 +19,19 @@
 
 use super::*;
 
+fn link_node(view: &AppView, label: &str) -> AccessibleNode {
+    // The text carrier may share the label; only the Link is an activation target.
+    let mut links = view.accessibility_snapshot().into_iter().filter(|node| {
+        node.role == nsh_core::AccessibilityRole::Link && node.label == label
+    });
+    let link = links
+        .next()
+        .unwrap_or_else(|| panic!("no native Link has label {label:?}"));
+    assert!(links.next().is_none(), "ambiguous native Link {label:?}");
+    assert!(!link.state.disabled, "native Link {label:?} is disabled");
+    link
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn markdown_links_open_original_workspace_files_without_replacing_the_draft() {
     tokio::time::timeout(Duration::from_secs(90), async {
@@ -48,10 +61,13 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         view.handle_event(Event::Paste("UNSENT_LINK_DRAFT 你好".into()));
         support::wait_draft(&client, &fixture.session, "UNSENT_LINK_DRAFT 你好").await;
 
-        support::click_label(&mut view, "UNSAFE_LINK");
+        let unsafe_link = link_node(&view, "UNSAFE_LINK");
+        support::click_node(&mut view, unsafe_link);
         wait_view(&mut view, |screen| screen.contains("Only HTTP(S) links") && screen.contains("Could not open link")).await;
         assert!(!view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview"));
-        support::click_label(&mut view, "OPEN REPORT");
+        let report = link_node(&view, "OPEN REPORT");
+        let report_id = report.id;
+        support::click_node(&mut view, report);
         wait_view(&mut view, |screen| screen.contains("REAL_LINK_CONTENT") && screen.contains("Original trailing spaces")).await;
         evidence("markdown-link-real-workspace-file", &view.snapshot());
         std::fs::write(&file, "REFRESHED_LINK_CONTENT 中文\n").unwrap();
@@ -59,15 +75,23 @@ async fn markdown_links_open_original_workspace_files_without_replacing_the_draf
         support::click_button(&mut view, "Refresh current file").await;
         wait_view(&mut view, |screen| screen.contains("REFRESHED_LINK_CONTENT") && !screen.contains("REAL_LINK_CONTENT")).await;
         support::click_button(&mut view, "Close workspace preview").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "OPEN REPORT")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.id == report_id && node.role == nsh_core::AccessibilityRole::Link && node.focused && node.label == "OPEN REPORT")).await;
         assert!(view.accessibility_snapshot().iter().any(|node| node.id == composer && node.label == "Message composer"));
 
         // Use the original native Tab/Enter route, not a synthetic handler call.
-        tab_to_label(&mut view, "OPEN_REFERENCE").await;
+        wait_enabled_node(&mut view, "OPEN_REFERENCE").await;
+        let reference = link_node(&view, "OPEN_REFERENCE");
+        for _ in 0..=view.accessibility_snapshot().len() {
+            if view.surface().focused() == Some(reference.id) {
+                break;
+            }
+            view.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        }
+        assert_eq!(view.surface().focused(), Some(reference.id), "native Tab must reach the original Link target");
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
         wait_view(&mut view, |screen| screen.contains("REFRESHED_LINK_CONTENT")).await;
         support::click_button(&mut view, "Close workspace preview").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.focused && node.label == "OPEN_REFERENCE")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("UNSENT_LINK_DRAFT 你好") && !view.accessibility_snapshot().iter().any(|node| node.label == "Close workspace preview") && view.accessibility_snapshot().iter().any(|node| node.id == reference.id && node.role == nsh_core::AccessibilityRole::Link && node.focused && node.label == "OPEN_REFERENCE")).await;
         support::wait_draft(&client, &fixture.session, "UNSENT_LINK_DRAFT 你好").await;
         let observed = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         let history = client.query("agent", "history", json!({"sessionId":fixture.session,"through":observed["through"],"position":{"kind":"tail"},"view":"conversation"})).await.unwrap();
