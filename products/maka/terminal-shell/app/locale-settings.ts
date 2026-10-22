@@ -128,7 +128,7 @@ export const settingsMessages = {
     '從連線設定返回',
   ],
   'Back from general settings': ['Back from general settings', '从常规设置返回', '從一般設定返回'],
-  'Back from plugin settings': ['Back from plugin settings', '从插件设置返回', '從外掛設定返回'],
+  'Back from plugins settings': ['Back from plugins settings', '从插件设置返回', '從外掛設定返回'],
   'Back to model settings': ['Back to model settings', '返回模型设置', '返回模型設定'],
   'Base URL': ['Base URL', '基础 URL', '基底 URL'],
   'Cancel provider sign-in': ['Cancel provider sign-in', '取消提供商登录', '取消供應商登入'],

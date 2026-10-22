@@ -635,6 +635,10 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_view(&mut view, |screen| screen.contains("常规设置") && screen.contains("偏好已保存。")).await;
         support::click_button(&mut view, "关闭设置").await;
         wait_view(&mut view, |screen| screen.contains("消息已复制") && screen.contains("发送消息，或开始一项任务…")).await;
+        // The second Settings dialog was opened from the copy action, so its
+        // native restoration belongs to that action. Explicitly focus the same
+        // resident composer before checking its identity and editing context.
+        tab_to_label(&mut view, "消息输入区").await;
         editable(&mut view, "消息输入区").await;
         assert_eq!(view.surface().focused(), Some(composer), "language changes replaced the resident composer");
         assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some(""));
@@ -1124,6 +1128,13 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         shortcut(&mut view, 'o');
         wait_focused_input(&mut view, "Search session titles").await;
         view.handle_event(Event::Paste("Browser page".into()));
+        assert_eq!(view.surface().input_context().unwrap().text.as_deref(), Some("Browser page"));
+        // The unfiltered catalog can already contain first_title. Settle the
+        // queued change handler before accepting that row for the new query,
+        // using the same native barrier as select_palette above.
+        let (done, committed) = tokio::sync::oneshot::channel();
+        view.control().unwrap().advance_clock(Duration::ZERO, move || { let _ = done.send(()); });
+        tokio::time::timeout(Duration::from_secs(20), committed).await.expect("the browser query did not commit").expect("the browser engine stopped");
         let first_title = first_page["sessions"][0]["title"].as_str().unwrap();
         wait_view(&mut view, |screen| screen.contains(first_title) && !screen.contains("Loading…")).await;
         tokio::time::timeout(Duration::from_secs(20), async {
@@ -1136,7 +1147,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
                 let row = first_page["sessions"].as_array().unwrap().iter()
                     .filter_map(|session| session["title"].as_str())
                     .find(|title| screen.contains(title))
-                    .expect("the browser must show a matching session row before its next page");
+                    .unwrap_or_else(|| panic!("the browser must show a matching session row before its next page; app error: {:?}\n{}", view.last_error(), screen));
                 support::scroll_text(&mut view, row, MouseEventKind::ScrollDown);
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }

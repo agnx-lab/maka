@@ -56,7 +56,10 @@ const watching = original.watchUploads();
     count.set(operations.length);
 }} }})();
 mount(() => <View style={{{{width:"100%",padding:8,gap:8}}}}>
-  <AttachmentPicker client={{selected()}} visible={{visible()}} onStatus={{status => {{
+  <AttachmentPicker client={{selected()}} visible={{visible()}}
+    pathLabel="Attachment path" pathPlaceholder="Absolute file path…"
+    uploadLabel="Upload selected file" uploadingLabel="Uploading…" selectedFileLabel="Selected file"
+    onStatus={{status => {{
     report.set(`${{status.kind}}:${{status.operationId}}:${{status.name}}`);
     if (status.kind === "reading") {{ visible.set(false); selected.set(other); }}
   }}}} />

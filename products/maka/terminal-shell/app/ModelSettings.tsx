@@ -175,7 +175,7 @@ export function ModelSettings(props: { close(): void; changed(): void }) {
                   ? tr('Back from connection settings')
                   : section() === 'general'
                     ? tr('Back from general settings')
-                    : tr('Back from plugin settings')
+                    : tr('Back from plugins settings')
               }
               tooltip={tr('Back')}
               onPress={inputAction(back, backAction())}
