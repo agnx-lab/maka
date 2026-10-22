@@ -21,6 +21,7 @@
 use crate::StoreError;
 use maka_agent_facts::history::RowPosition;
 use maka_agent_ports::session::history::HistoryModel;
+use sqlx::sqlite::SqliteWorkerConnection;
 use sqlx::{Row, SqliteConnection};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,19 @@ pub(super) async fn resolve(
     position: RowPosition,
     through: i64,
 ) -> Result<Metadata, StoreError> {
+    let session = session.to_owned();
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move { resolve_on_worker(worker, &session, position, through).await })
+    })
+    .await
+}
+
+pub(super) async fn resolve_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
+    session: &str,
+    position: RowPosition,
+    through: i64,
+) -> Result<Metadata, StoreError> {
     let producer_sequence = super::read::sql_position(position)?.0;
     let producer = sqlx::query(PRODUCER)
         .bind(session)
@@ -122,7 +136,7 @@ pub(super) async fn resolve(
         }
         // Resolve the unfinished step at the actual sealing fact, never from a
         // later public fence that may contain unrelated model steps.
-        super::evidence::pending_step(tx, &invocation, producer_sequence).await?
+        super::evidence::pending_step_on_worker(tx, &invocation, producer_sequence).await?
     } else if kind == "model_observed" {
         sqlx::query_scalar("SELECT json_extract(event_json, '$.fact.step_id') FROM runtime_events WHERE sequence = ?")
             .bind(producer_sequence).fetch_one(&mut *tx).await?

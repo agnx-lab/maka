@@ -45,6 +45,8 @@ mod preupdate_hook;
 pub(crate) mod deserialize;
 
 mod worker;
+mod worker_connection;
+pub use worker_connection::SqliteWorkerConnection;
 
 /// A connection to an open [Sqlite] database.
 ///
@@ -221,7 +223,21 @@ impl SqliteConnection {
         F: FnOnce(NonNull<sqlite3>) -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.worker.run_on_worker(operation).await
+        self.run_with_connection(move |connection| operation(connection.as_raw_handle())).await
+    }
+
+    /// Run a synchronous operation with this worker's existing query executor.
+    ///
+    /// The callback has the same acceptance, cancellation and panic behavior as
+    /// [`Self::run_on_worker`]. Its queries reuse the original statement cache.
+    /// Query futures/streams are immediately ready; poll them on this worker.
+    /// Do not await outside I/O, control transactions or retain raw handles.
+    pub async fn run_with_connection<F, R>(&mut self, operation: F) -> Result<R, Error>
+    where
+        F: FnOnce(&mut SqliteWorkerConnection<'_>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.worker.run_with_connection(operation).await
     }
 
     /// Lock the SQLite database handle out from the worker thread so direct SQLite API calls can

@@ -22,6 +22,7 @@ use super::read::sql_position;
 use crate::StoreError;
 use maka_agent_facts::history::RowPosition;
 use sha2::{Digest, Sha256};
+use sqlx::sqlite::SqliteWorkerConnection;
 use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
 
 // The ordinary retained database is at most 32 MiB. One active producer may
@@ -128,7 +129,7 @@ async fn trim(db: &mut SqliteConnection) -> Result<(), StoreError> {
 }
 
 async fn retain_source(
-    db: &mut SqliteConnection,
+    db: &mut SqliteWorkerConnection<'_>,
     session: &str,
     source: i64,
 ) -> Result<(), StoreError> {
@@ -140,7 +141,19 @@ async fn retain_source(
 }
 
 pub(super) async fn ensure(
-    db: &mut SqliteConnection,
+    tx: &mut SqliteConnection,
+    session: &str,
+    position: RowPosition,
+) -> Result<(), StoreError> {
+    let session = session.to_owned();
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move { ensure_on_worker(worker, &session, position).await })
+    })
+    .await
+}
+
+pub(super) async fn ensure_on_worker(
+    db: &mut SqliteWorkerConnection<'_>,
     session: &str,
     position: RowPosition,
 ) -> Result<(), StoreError> {
@@ -162,7 +175,7 @@ pub(super) async fn ensure(
     // S is the cache unit: emission already owns every original row from this
     // selected producer. Retain these rows once, never replayed earlier sources.
     // Text remains demand-driven per visited row. A hit needs no sibling fill.
-    let rows = super::emit::source(db, session, position.source_sequence).await?;
+    let rows = super::emit::source_on_worker(db, session, position.source_sequence).await?;
     if !rows.iter().any(|row| row.position == position) {
         return Err(StoreError::TranscriptConflict);
     }

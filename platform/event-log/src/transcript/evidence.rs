@@ -22,6 +22,7 @@ use maka_agent_facts::event::StoredEvent;
 use maka_presentation::ProjectionError;
 use rusqlite::{Connection as RawConnection, OptionalExtension, params};
 use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteWorkerConnection;
 
 const HIGH: &str = r#"SELECT COALESCE(MAX(sequence), 0) FROM event_log"#;
 const EXEC_BOUNDARY: &str = r#"SELECT sequence FROM runtime_events
@@ -113,6 +114,23 @@ pub(super) async fn selected(
     through: i64,
     boundary: bool,
 ) -> Result<Vec<i64>, StoreError> {
+    let invocation = invocation.to_owned();
+    let step = step.map(str::to_owned);
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move {
+            selected_on_worker(worker, &invocation, step.as_deref(), through, boundary).await
+        })
+    })
+    .await
+}
+
+pub(super) async fn selected_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
+    invocation: &str,
+    step: Option<&str>,
+    through: i64,
+    boundary: bool,
+) -> Result<Vec<i64>, StoreError> {
     let metadata = sqlx::query_as::<_, Metadata>(PLAN)
         .bind(invocation)
         .bind(through)
@@ -123,14 +141,11 @@ pub(super) async fn selected(
         if let Some(selection) = plan(metadata, invocation, step, through, boundary)? {
             selection
         } else {
-            let invocation = invocation.to_owned();
-            tx.run_on_worker(move |handle| {
-                // SAFETY: no borrowed handle or statement escapes this callback.
-                let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
-                db.set_prepared_statement_cache_capacity(100);
-                super::tools::selection(&db, &invocation, through)
-            })
-            .await??
+            // SAFETY: the worker exclusively owns this borrowed handle. All
+            // temporary raw statements are dropped before SQLx resumes.
+            let db = unsafe { RawConnection::from_handle(tx.as_raw_handle().as_ptr()) }?;
+            db.set_prepared_statement_cache_capacity(100);
+            super::tools::selection(&db, invocation, through)?
         };
     if let Some(slot) = selection.pending_step_slot() {
         *slot = match sqlx::query_scalar::<_, Option<String>>(PENDING)
@@ -196,6 +211,18 @@ fn decoded_fact(sequence: i64, json: &str) -> Result<StoredEvent, StoreError> {
 
 pub(super) async fn pending_step(
     tx: &mut SqliteConnection,
+    invocation: &str,
+    through: i64,
+) -> Result<Option<String>, StoreError> {
+    let invocation = invocation.to_owned();
+    crate::connection::worker_query(tx, move |worker| {
+        Box::pin(async move { pending_step_on_worker(worker, &invocation, through).await })
+    })
+    .await
+}
+
+pub(super) async fn pending_step_on_worker(
+    tx: &mut SqliteWorkerConnection<'_>,
     invocation: &str,
     through: i64,
 ) -> Result<Option<String>, StoreError> {
@@ -371,7 +398,7 @@ impl Selection {
         }
     }
 
-    async fn read(&self, tx: &mut SqliteConnection) -> Result<Vec<i64>, StoreError> {
+    async fn read(&self, tx: &mut SqliteWorkerConnection<'_>) -> Result<Vec<i64>, StoreError> {
         // UNION removes overlaps; CAST uses the index while original JSON
         // equality preserves malformed non-string step-ID selection semantics.
         let query = sqlx::query_scalar(self.sql());

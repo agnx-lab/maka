@@ -23,7 +23,7 @@ use crate::StoreError;
 use maka_agent_facts::event::{Fact, ToolOutcome};
 use maka_presentation::{InvocationView, Row};
 use rusqlite::{Connection as RawConnection, OptionalExtension, params};
-use sqlx::SqliteConnection;
+use sqlx::sqlite::SqliteWorkerConnection;
 
 pub(super) const ELIGIBLE: &str = r#"(e.kind = 'context_checkpoint_recorded' OR NOT EXISTS (SELECT 1 FROM runtime_events opening
                        WHERE opening.invocation_id = e.invocation_id
@@ -54,15 +54,14 @@ pub(super) const ELIGIBLE: &str = r#"(e.kind = 'context_checkpoint_recorded' OR 
                                  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message','continuation','handoff')))
                        OR (e.kind = 'executor_observed' AND json_extract(e.event_json, '$.fact.output.type') IN ('tool_start','tool_result')))"#;
 
-pub(super) async fn source(
-    connection: &mut SqliteConnection,
+pub(super) async fn source_on_worker(
+    connection: &mut SqliteWorkerConnection<'_>,
     session: &str,
     source: u64,
 ) -> Result<Vec<Row>, StoreError> {
     let sequence = read::sql_number(source)?;
-    // Keep this repeated eligibility statement in the connection's bounded
-    // SQLx cache. Worker-local rusqlite wrappers cannot retain statements
-    // between callbacks; projection still uses the same transaction below.
+    // Reuse the original SQLx statement cache across bounded page callbacks.
+    // Projection still borrows the same connection and transaction below.
     let sql = candidate_sql();
     let candidate: Option<(String, Option<String>, String)> =
         sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -78,18 +77,14 @@ pub(super) async fn source(
         Projection::Compaction
     } else {
         Projection::Evidence(
-            evidence::selected(connection, &invocation, step.as_deref(), sequence, true).await?,
+            evidence::selected_on_worker(connection, &invocation, step.as_deref(), sequence, true)
+                .await?,
         )
     };
-    let session = session.to_owned();
-    connection
-        .run_on_worker(move |handle| {
-            // SAFETY: exclusive worker-local borrow; no handle-backed values escape.
-            let db = unsafe { RawConnection::from_handle(handle.as_ptr()) }?;
-            db.set_prepared_statement_cache_capacity(100);
-            project_source(&db, &session, sequence, projection)
-        })
-        .await?
+    // SAFETY: exclusive worker-local borrow; no handle-backed values escape.
+    let db = unsafe { RawConnection::from_handle(connection.as_raw_handle().as_ptr()) }?;
+    db.set_prepared_statement_cache_capacity(100);
+    project_source(&db, session, sequence, projection)
 }
 
 fn candidate_sql() -> String {

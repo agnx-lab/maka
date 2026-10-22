@@ -28,3 +28,8 @@ The existing `SqliteConnection::establish` is public, and existing PRAGMA/collat
 `run_on_worker` submits one synchronous callback to the existing worker under its exclusive handle guard. The callback borrows the handle and returns owned data; its Rust panic resumes on the awaiting task. SQLx still owns transaction bookkeeping and physical close. Accepted callbacks continue if their observer disappears; abandoning a callback future alone does not guarantee rollback.
 
 中文：`run_on_worker` 将同步回调交给原工作线程，在原独占 guard 内借用句柄并返回自有数据；回调的 Rust panic 在等待方继续展开。事务记账和实际关闭仍由 SQLx 管理。等待方消失不取消已受理回调，单独丢弃回调 future 不保证回滚。
+
+
+`run_with_connection` uses that same callback command and exclusive worker guard to borrow a `SqliteWorkerConnection`. Its `Executor` implementation drives the existing `ExecuteIter`, row decoders and bounded `Statements` cache directly; query futures and streams are immediately ready and stop at the first error. The raw-handle callback delegates to this same entry point. Neither callback may control transactions or retain raw handles. Maka polls a bounded worker query once, failing closed if it unexpectedly yields, and leaves commit/rollback and cache maintenance with the original owner job.
+
+中文：`run_with_connection` 沿用原回调命令和独占 guard，直接借用 SQLx 原有执行器与有界语句缓存；查询 future/stream 立即就绪，首个错误终止执行。原句柄回调委托给同一入口。事务、实际关闭和查询后的维护仍归原 owner；没有新增连接、运行时或持久缓存。

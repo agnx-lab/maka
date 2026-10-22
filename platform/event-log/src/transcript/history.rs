@@ -19,7 +19,7 @@
 
 use super::{
     read::{row_position, sql_number, sql_position},
-    tool_metadata::read as tool_metadata,
+    tool_metadata::read_on_worker as tool_metadata,
 };
 use crate::{EventLog, StoreError, sequence_number};
 use maka_agent_facts::history::RowPosition;
@@ -29,7 +29,7 @@ use maka_agent_ports::session::history::Page;
 use maka_agent_ports::session::history::Position;
 use maka_agent_ports::session::history::Role;
 use maka_agent_ports::session::history::{HistoryField, HistoryView};
-use sqlx::{Row, SqliteConnection};
+use sqlx::{Row, sqlite::SqliteWorkerConnection};
 
 // Text windows and exact source reads retain material labels in their body.
 pub(super) const BODY: &str = "COALESCE(CASE json_extract(payload, '$.type')
@@ -120,233 +120,473 @@ impl EventLog {
         }
         crate::sessions::validate_id(session)?;
         let fence = through;
-        let through_sql = sql_number(fence)?;
+        sql_number(fence)?;
         // A serialized chunk occupies at least one byte. The delivery budget
         // therefore bounds rows even when a caller needs no item-count limit.
         let max_chunks = max_chunks.unwrap_or(max_json_bytes).min(max_json_bytes);
         let session = session.to_owned();
-        self.connection.run(move |connection| super::bodycache::run(connection, move |tx| Box::pin(async move {
-            let mut final_outputs = std::collections::HashMap::new();
-            super::directory::check_read(tx, &session, fence).await?;
-            let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)"
-            ).bind(&session).fetch_one(&mut *tx).await?;
-            if !exists { return Err(invalid("Session no longer exists")); }
-            let target = if let Position::Row { position, field } = position {
-                if position.validate().is_err() || position.source_sequence > fence
-                    || (!include_thinking && field == HistoryField::Thinking) {
-                    return Err(invalid("history row exceeds its fence"));
-                }
-                materialize(tx, &session, position, view, through_sql).await?;
-                // Header lookup requires the actual field; a tool Body cannot
-                // impersonate a Thinking field that was never recorded.
-                header(tx, &session, position, field, view, through_sql).await?;
-                Some((position, field))
-            } else { None };
-            let anchor = match position {
-                Position::Before { cursor } | Position::After { cursor } => {
-                    if cursor.position.source_sequence > fence || (!include_thinking && cursor.field == HistoryField::Thinking) {
-                        return Err(invalid("history cursor exceeds its fence"));
-                    }
-                    sql_number(cursor.offset)?;
-                    materialize(tx, &session, cursor.position, view, through_sql).await?;
-                    let row = header(tx, &session, cursor.position, cursor.field, view, through_sql).await?;
-                    if cursor.offset > row.total {
-                        return Err(invalid("history offset exceeds message"));
-                    }
-                    let byte = if cursor.offset == row.total { Vec::new() } else {
-                        fragment(tx, &session, cursor, 1,
-                            view == HistoryView::Conversation && row.role == "user").await?
-                    };
-                    if byte.first().is_some_and(|byte| byte & 0xc0 == 0x80) {
-                        return Err(invalid("history offset splits UTF-8"));
-                    }
-                    Some((cursor, row))
-                }
-                _ => None,
-            };
-            let (reverse, boundary, inclusive) = match position {
-                Position::Start => (false, None, true),
-                Position::Tail => (true, None, true),
-                Position::Row { position, .. } => (false, Some(position), true),
-                Position::Before { cursor } => (true, Some(cursor.position), cursor.offset > 0 || (include_thinking && cursor.field == HistoryField::Body)),
-                Position::After { cursor } => (false, Some(cursor.position), cursor.offset < anchor.as_ref().unwrap().1.total || cursor.field == HistoryField::Thinking),
-                Position::Event { sequence } => {
-                    if sequence == 0 || sequence > through { return Err(invalid("history event exceeds its fence")); }
-                    (false, Some(RowPosition { source_sequence: sequence, item_index: 0 }), true)
-                }
-            };
-            let query = match (reverse, boundary.is_some(), inclusive) {
-                (true, false, _) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence DESC,item_index DESC LIMIT ?3",
-                (false, false, _) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT ?3",
-                (true, true, true) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
-                (true, true, false) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2",
-                (false, true, true) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
-                (false, true, false) => "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3",
-            };
-            let mut query = sqlx::query_as::<_,(i64,i64)>(sqlx::AssertSqlSafe(query)).bind(&session);
-            // A validated reverse anchor already implies the raw fence. Keep the
-            // cursor pair as the sole upper bound so SQLite seeks directly to it.
-            if !(reverse && boundary.is_some()) { query=query.bind(through_sql); }
-            query=query.bind((max_chunks + 1) as i64);
-            if let Some(boundary)=boundary { let (source,item)=sql_position(boundary)?; query=query.bind(source).bind(item); }
-            let rows = query.fetch_all(&mut *tx).await?;
-            let mut chunks = Vec::new();
-            let mut chunks_json_bytes = 0;
-            let mut bytes = 0;
-            let mut projected = 0;
-            let mut left = None;
-            let mut right = None;
-            'rows: for locator in rows {
-                if chunks.len() == max_chunks || bytes == max_bytes || (projected >= 1024 * 1024 && left.is_some()) {
-                    break;
-                }
-                let locator = row_position(locator.0, locator.1)?;
-                // Materialize only actually visited rows, never a long message's
-                // following rows. One oversized first row still progresses.
-                projected += materialize(tx, &session, locator, view, through_sql).await?;
-                let has_thinking: bool = include_thinking && sqlx::query_scalar(
-                    "SELECT has_thinking FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
-                ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
-                let mut fields = vec![HistoryField::Body];
-                if include_thinking && has_thinking { fields.insert(0, HistoryField::Thinking); }
-                if reverse { fields.reverse(); }
-                for field in fields {
-                    if chunks.len() == max_chunks || bytes == max_bytes { break 'rows; }
-                    if target == Some((locator, HistoryField::Body)) && field == HistoryField::Thinking {
-                        continue;
-                    }
-                    let row = header(tx, &session, locator, field, view, through_sql).await?;
-                    let exact_target = target == Some((locator, field));
-                    if let Some((cursor, _)) = &anchor && cursor.position == locator {
-                        let before = field == HistoryField::Thinking && cursor.field == HistoryField::Body;
-                        let after = field == HistoryField::Body && cursor.field == HistoryField::Thinking;
-                        if (reverse && after) || (!reverse && before) { continue; }
-                        if field == cursor.field && ((reverse && cursor.offset == 0) || (!reverse && cursor.offset == row.total)) { continue; }
-                    }
-                    let cursor_offset = anchor.as_ref().filter(|(cursor, _)| cursor.position == locator && cursor.field == field)
-                        .map(|(cursor, _)| cursor.offset);
-                    let (mut start, end) = if reverse {
-                        let end = cursor_offset.unwrap_or(row.total);
-                        (end.saturating_sub((max_bytes - bytes) as u64), end)
-                    } else {
-                        let start = cursor_offset.unwrap_or(0);
-                        (start, row.total.min(start + (max_bytes - bytes) as u64))
-                    };
-                    let fragment = if row.total == 0 { Vec::new() } else {
-                        fragment(tx, &session, Cursor { field, position: locator, offset: start }, end - start,
-                            view == HistoryView::Conversation && row.role == "user").await?
-                    };
-                    let text = if reverse {
-                        let skip = fragment.iter().take_while(|byte| **byte & 0xc0 == 0x80).count();
-                        start += skip as u64;
-                        std::str::from_utf8(&fragment[skip..]).map_err(|_| invalid("invalid history UTF-8"))?
-                    } else {
-                        match std::str::from_utf8(&fragment) {
-                            Ok(text) => text,
-                            Err(error) if error.error_len().is_none() =>
-                                std::str::from_utf8(&fragment[..error.valid_up_to()]).map_err(|_| invalid("invalid history UTF-8"))?,
-                            Err(_) => return Err(invalid("invalid history UTF-8")),
-                        }
-                    };
-                    if text.is_empty() && row.total > 0 { break 'rows; }
-                    let end = start + text.len() as u64;
-                    let beginning = Cursor { field, position: locator, offset: start };
-                    let ending = (Cursor { field, position: locator, offset: end }, row.total);
-                    let candidate_left = if reverse { Some(beginning) } else { left.or(Some(beginning)) };
-                    let candidate_right = if reverse { right.or(Some(ending)) } else { Some(ending) };
-                    let attachments: Vec<maka_agent_facts::attachment::AttachmentRef> = if start == 0 && row.role == "user" {
-                        let encoded: Option<String> = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.attachments') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
-                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
-                        encoded.map(|value| serde_json::from_str(&value)).transpose()?.unwrap_or_default()
-                    } else { Vec::new() };
-                    let emit = (!row.hidden || exact_target) && (exact_target || row.total != 0
-                        || matches!(row.role.as_str(), "tool_call" | "tool_result")
-                        || (view == HistoryView::Conversation && !attachments.is_empty())
-                        || (view == HistoryView::Conversation && row.role == "context_compacted"));
-                    if emit {
-                    let role = match row.role.as_str() {
-                        "user" => Role::User, "assistant" => Role::Assistant,
-                        "tool_call" => Role::ToolCall, "tool_result" => Role::ToolResult,
-                        "context_compacted" => Role::Compaction,
-                        "turn_state" | "model_interruption" => Role::Failure,
-                        _ => return Err(invalid("invalid history text role")),
-                    };
-                    let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
-                        Some(tool_metadata(tx, &session, locator, through_sql).await?)
-                    } else { None };
-                    let timing = super::timing::read(tx, &session, &row.turn, through_sql).await?;
-                    let compaction = if role == Role::Compaction {
-                        let duration: i64 = sqlx::query_scalar(
-                            "SELECT json_extract(payload, '$.durationMs') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
-                        ).bind(&session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
-                        Some(maka_agent_ports::session::history::Compaction { duration_ms: sequence_number(duration)? })
-                    } else { None };
-                    let (model, final_output) = if role == Role::Assistant {
-                        let output = match final_outputs.entry(row.turn.clone()) {
-                            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
-                                super::final_output::resolve(tx, &session, &row.turn, through_sql).await?),
-                        };
-                        let metadata = super::model::resolve(tx, &session, locator, through_sql).await?;
-                        let final_output = field == HistoryField::Body && row.total > 0 && metadata.producer.as_ref().is_some_and(|producer|
-                            output.as_ref() == Some(producer));
-                        (metadata.model, final_output)
-                    } else { (None, false) };
-                    let chunk = Chunk { field, timing, compaction, origin: row.origin, model, final_output,
-                        message_id: row.message, turn_id: row.turn, timestamp: row.timestamp, role,
-                        position: locator, offset: start, total_bytes: row.total, text: text.to_owned(), attachments, tool,
-                    };
-                    chunks_json_bytes += serde_json::to_vec(&chunk)?.len();
-                    chunks.push(chunk);
-                    }
-                    // Bound the complete canonical delivery, including attachment
-                    // descriptors and JSON escaping. A rejected candidate does not
-                    // advance the source boundary or silently discard any metadata.
-                    let (before, after) = boundaries(tx, &session, through_sql, include_thinking, candidate_left, candidate_right).await?;
-                    // The empty envelope includes []; each chunk adds its exact
-                    // encoded bytes, plus commas between elements. Cursor changes
-                    // still count even when this boundary emits no chunk.
-                    let envelope = Page::Ready { through, chunks: Vec::new(), before, after };
-                    let fits = serde_json::to_vec(&envelope)?.len() + chunks_json_bytes
-                        + chunks.len().saturating_sub(1) <= max_json_bytes;
-                    if !fits && chunks.len() > usize::from(emit) {
-                        if emit { chunks.pop(); }
-                        break 'rows;
-                    }
-                    bytes += text.len();
-                    left = candidate_left;
-                    right = candidate_right;
-                    if (!reverse && end < row.total) || (reverse && start > 0) { break 'rows; }
-                }
-            }
-            if reverse { chunks.reverse(); }
-            if left.is_none() {
-                if let Some((cursor, row)) = anchor {
-                    left = Some(cursor); right = Some((cursor, row.total));
-                } else if matches!(position, Position::Event { .. }) {
-                    let last: Option<(i64,i64)> = sqlx::query_as(
-                        "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id = ?1 AND source_sequence <= ?2 ORDER BY source_sequence DESC,item_index DESC LIMIT 1"
-                    ).bind(&session).bind(through_sql).fetch_optional(&mut *tx).await?;
-                    if let Some(locator) = last {
-                        let locator = row_position(locator.0, locator.1)?;
-                        materialize(tx, &session, locator, view, through_sql).await?;
-                        let row = header(tx, &session, locator, HistoryField::Body, view, through_sql).await?;
-                        let cursor = Cursor { field: HistoryField::Body, position: locator, offset: row.total };
-                        left = Some(cursor); right = Some((cursor, row.total));
-                    }
-                }
-            }
-            let (before, after) = boundaries(tx, &session, through_sql, include_thinking, left, right).await?;
-
-            Ok(Page::Ready { through, chunks, before, after })
-        }))).await
+        self.connection
+            .run(move |connection| {
+                super::bodycache::run(connection, move |tx| {
+                    Box::pin(async move {
+                        super::directory::check_read(tx, &session, fence).await?;
+                        crate::connection::worker_query(tx, move |worker| {
+                            Box::pin(async move {
+                                read_page(
+                                    worker,
+                                    &session,
+                                    through,
+                                    position,
+                                    include_thinking,
+                                    view,
+                                    max_bytes,
+                                    max_chunks,
+                                    max_json_bytes,
+                                )
+                                .await
+                            })
+                        })
+                        .await
+                    })
+                })
+            })
+            .await
     }
 }
 
+// Execute one bounded page with the original SQLx statement cache and row
+// decoders. bodycache::run still owns transaction completion and maintenance.
+#[allow(clippy::too_many_arguments)]
+async fn read_page(
+    tx: &mut SqliteWorkerConnection<'_>,
+    session: &str,
+    through: u64,
+    position: Position,
+    include_thinking: bool,
+    view: HistoryView,
+    max_bytes: usize,
+    max_chunks: usize,
+    max_json_bytes: usize,
+) -> Result<Page, StoreError> {
+    let fence = through;
+    let through_sql = sql_number(through)?;
+    let mut final_outputs = std::collections::HashMap::new();
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_control WHERE id = ?)")
+            .bind(session)
+            .fetch_one(&mut *tx)
+            .await?;
+    if !exists {
+        return Err(invalid("Session no longer exists"));
+    }
+    let target = if let Position::Row { position, field } = position {
+        if position.validate().is_err()
+            || position.source_sequence > fence
+            || (!include_thinking && field == HistoryField::Thinking)
+        {
+            return Err(invalid("history row exceeds its fence"));
+        }
+        materialize(tx, session, position, view, through_sql).await?;
+        // Header lookup requires the actual field; a tool Body cannot
+        // impersonate a Thinking field that was never recorded.
+        header(tx, session, position, field, view, through_sql).await?;
+        Some((position, field))
+    } else {
+        None
+    };
+    let anchor = match position {
+        Position::Before { cursor } | Position::After { cursor } => {
+            if cursor.position.source_sequence > fence
+                || (!include_thinking && cursor.field == HistoryField::Thinking)
+            {
+                return Err(invalid("history cursor exceeds its fence"));
+            }
+            sql_number(cursor.offset)?;
+            materialize(tx, session, cursor.position, view, through_sql).await?;
+            let row = header(
+                tx,
+                session,
+                cursor.position,
+                cursor.field,
+                view,
+                through_sql,
+            )
+            .await?;
+            if cursor.offset > row.total {
+                return Err(invalid("history offset exceeds message"));
+            }
+            let byte = if cursor.offset == row.total {
+                Vec::new()
+            } else {
+                fragment(
+                    tx,
+                    session,
+                    cursor,
+                    1,
+                    view == HistoryView::Conversation && row.role == "user",
+                )
+                .await?
+            };
+            if byte.first().is_some_and(|byte| byte & 0xc0 == 0x80) {
+                return Err(invalid("history offset splits UTF-8"));
+            }
+            Some((cursor, row))
+        }
+        _ => None,
+    };
+    let (reverse, boundary, inclusive) = match position {
+        Position::Start => (false, None, true),
+        Position::Tail => (true, None, true),
+        Position::Row { position, .. } => (false, Some(position), true),
+        Position::Before { cursor } => (
+            true,
+            Some(cursor.position),
+            cursor.offset > 0 || (include_thinking && cursor.field == HistoryField::Body),
+        ),
+        Position::After { cursor } => (
+            false,
+            Some(cursor.position),
+            cursor.offset < anchor.as_ref().unwrap().1.total
+                || cursor.field == HistoryField::Thinking,
+        ),
+        Position::Event { sequence } => {
+            if sequence == 0 || sequence > through {
+                return Err(invalid("history event exceeds its fence"));
+            }
+            (
+                false,
+                Some(RowPosition {
+                    source_sequence: sequence,
+                    item_index: 0,
+                }),
+                true,
+            )
+        }
+    };
+    let query = match (reverse, boundary.is_some(), inclusive) {
+        (true, false, _) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence DESC,item_index DESC LIMIT ?3"
+        }
+        (false, false, _) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 ORDER BY source_sequence,item_index LIMIT ?3"
+        }
+        (true, true, true) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<=(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2"
+        }
+        (true, true, false) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND (source_sequence,item_index)<(?3,?4) ORDER BY source_sequence DESC,item_index DESC LIMIT ?2"
+        }
+        (false, true, true) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>=(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3"
+        }
+        (false, true, false) => {
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id=?1 AND source_sequence<=?2 AND (source_sequence,item_index)>(?4,?5) ORDER BY source_sequence,item_index LIMIT ?3"
+        }
+    };
+    let mut query = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(query)).bind(session);
+    // A validated reverse anchor already implies the raw fence. Keep the
+    // cursor pair as the sole upper bound so SQLite seeks directly to it.
+    if !(reverse && boundary.is_some()) {
+        query = query.bind(through_sql);
+    }
+    query = query.bind((max_chunks + 1) as i64);
+    if let Some(boundary) = boundary {
+        let (source, item) = sql_position(boundary)?;
+        query = query.bind(source).bind(item);
+    }
+    let rows = query.fetch_all(&mut *tx).await?;
+    let mut chunks = Vec::new();
+    let mut chunks_json_bytes = 0;
+    let mut bytes = 0;
+    let mut projected = 0;
+    let mut left = None;
+    let mut right = None;
+    'rows: for locator in rows {
+        if chunks.len() == max_chunks
+            || bytes == max_bytes
+            || (projected >= 1024 * 1024 && left.is_some())
+        {
+            break;
+        }
+        let locator = row_position(locator.0, locator.1)?;
+        // Materialize only actually visited rows, never a long message's
+        // following rows. One oversized first row still progresses.
+        projected += materialize(tx, session, locator, view, through_sql).await?;
+        let has_thinking: bool = include_thinking && sqlx::query_scalar(
+        "SELECT has_thinking FROM transcript_directory WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+    ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
+        let mut fields = vec![HistoryField::Body];
+        if include_thinking && has_thinking {
+            fields.insert(0, HistoryField::Thinking);
+        }
+        if reverse {
+            fields.reverse();
+        }
+        for field in fields {
+            if chunks.len() == max_chunks || bytes == max_bytes {
+                break 'rows;
+            }
+            if target == Some((locator, HistoryField::Body)) && field == HistoryField::Thinking {
+                continue;
+            }
+            let row = header(tx, session, locator, field, view, through_sql).await?;
+            let exact_target = target == Some((locator, field));
+            if let Some((cursor, _)) = &anchor
+                && cursor.position == locator
+            {
+                let before = field == HistoryField::Thinking && cursor.field == HistoryField::Body;
+                let after = field == HistoryField::Body && cursor.field == HistoryField::Thinking;
+                if (reverse && after) || (!reverse && before) {
+                    continue;
+                }
+                if field == cursor.field
+                    && ((reverse && cursor.offset == 0) || (!reverse && cursor.offset == row.total))
+                {
+                    continue;
+                }
+            }
+            let cursor_offset = anchor
+                .as_ref()
+                .filter(|(cursor, _)| cursor.position == locator && cursor.field == field)
+                .map(|(cursor, _)| cursor.offset);
+            let (mut start, end) = if reverse {
+                let end = cursor_offset.unwrap_or(row.total);
+                (end.saturating_sub((max_bytes - bytes) as u64), end)
+            } else {
+                let start = cursor_offset.unwrap_or(0);
+                (start, row.total.min(start + (max_bytes - bytes) as u64))
+            };
+            let fragment = if row.total == 0 {
+                Vec::new()
+            } else {
+                fragment(
+                    tx,
+                    session,
+                    Cursor {
+                        field,
+                        position: locator,
+                        offset: start,
+                    },
+                    end - start,
+                    view == HistoryView::Conversation && row.role == "user",
+                )
+                .await?
+            };
+            let text = if reverse {
+                let skip = fragment
+                    .iter()
+                    .take_while(|byte| **byte & 0xc0 == 0x80)
+                    .count();
+                start += skip as u64;
+                std::str::from_utf8(&fragment[skip..])
+                    .map_err(|_| invalid("invalid history UTF-8"))?
+            } else {
+                match std::str::from_utf8(&fragment) {
+                    Ok(text) => text,
+                    Err(error) if error.error_len().is_none() => {
+                        std::str::from_utf8(&fragment[..error.valid_up_to()])
+                            .map_err(|_| invalid("invalid history UTF-8"))?
+                    }
+                    Err(_) => return Err(invalid("invalid history UTF-8")),
+                }
+            };
+            if text.is_empty() && row.total > 0 {
+                break 'rows;
+            }
+            let end = start + text.len() as u64;
+            let beginning = Cursor {
+                field,
+                position: locator,
+                offset: start,
+            };
+            let ending = (
+                Cursor {
+                    field,
+                    position: locator,
+                    offset: end,
+                },
+                row.total,
+            );
+            let candidate_left = if reverse {
+                Some(beginning)
+            } else {
+                left.or(Some(beginning))
+            };
+            let candidate_right = if reverse {
+                right.or(Some(ending))
+            } else {
+                Some(ending)
+            };
+            let attachments: Vec<maka_agent_facts::attachment::AttachmentRef> = if start == 0
+                && row.role == "user"
+            {
+                let encoded: Option<String> = sqlx::query_scalar(
+                "SELECT json_extract(payload, '$.attachments') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+            ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
+                encoded
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()?
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let emit = (!row.hidden || exact_target)
+                && (exact_target
+                    || row.total != 0
+                    || matches!(row.role.as_str(), "tool_call" | "tool_result")
+                    || (view == HistoryView::Conversation && !attachments.is_empty())
+                    || (view == HistoryView::Conversation && row.role == "context_compacted"));
+            if emit {
+                let role = match row.role.as_str() {
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    "tool_call" => Role::ToolCall,
+                    "tool_result" => Role::ToolResult,
+                    "context_compacted" => Role::Compaction,
+                    "turn_state" | "model_interruption" => Role::Failure,
+                    _ => return Err(invalid("invalid history text role")),
+                };
+                let tool = if matches!(role, Role::ToolCall | Role::ToolResult) {
+                    Some(tool_metadata(tx, session, locator, through_sql).await?)
+                } else {
+                    None
+                };
+                let timing =
+                    super::timing::read_on_worker(tx, session, &row.turn, through_sql).await?;
+                let compaction = if role == Role::Compaction {
+                    let duration: i64 = sqlx::query_scalar(
+                "SELECT json_extract(payload, '$.durationMs') FROM transcript_cache.rows WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
+            ).bind(session).bind(sql_position(locator)?.0).bind(sql_position(locator)?.1).fetch_one(&mut *tx).await?;
+                    Some(maka_agent_ports::session::history::Compaction {
+                        duration_ms: sequence_number(duration)?,
+                    })
+                } else {
+                    None
+                };
+                let (model, final_output) = if role == Role::Assistant {
+                    let output = match final_outputs.entry(row.turn.clone()) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                            super::final_output::resolve_on_worker(
+                                tx,
+                                session,
+                                &row.turn,
+                                through_sql,
+                            )
+                            .await?,
+                        ),
+                    };
+                    let metadata =
+                        super::model::resolve_on_worker(tx, session, locator, through_sql).await?;
+                    let final_output = field == HistoryField::Body
+                        && row.total > 0
+                        && metadata
+                            .producer
+                            .as_ref()
+                            .is_some_and(|producer| output.as_ref() == Some(producer));
+                    (metadata.model, final_output)
+                } else {
+                    (None, false)
+                };
+                let chunk = Chunk {
+                    field,
+                    timing,
+                    compaction,
+                    origin: row.origin,
+                    model,
+                    final_output,
+                    message_id: row.message,
+                    turn_id: row.turn,
+                    timestamp: row.timestamp,
+                    role,
+                    position: locator,
+                    offset: start,
+                    total_bytes: row.total,
+                    text: text.to_owned(),
+                    attachments,
+                    tool,
+                };
+                chunks_json_bytes += serde_json::to_vec(&chunk)?.len();
+                chunks.push(chunk);
+            }
+            // Bound the complete canonical delivery, including attachment
+            // descriptors and JSON escaping. A rejected candidate does not
+            // advance the source boundary or silently discard any metadata.
+            let (before, after) = boundaries(
+                tx,
+                session,
+                through_sql,
+                include_thinking,
+                candidate_left,
+                candidate_right,
+            )
+            .await?;
+            // The empty envelope includes []; each chunk adds its exact
+            // encoded bytes, plus commas between elements. Cursor changes
+            // still count even when this boundary emits no chunk.
+            let envelope = Page::Ready {
+                through,
+                chunks: Vec::new(),
+                before,
+                after,
+            };
+            let fits = serde_json::to_vec(&envelope)?.len()
+                + chunks_json_bytes
+                + chunks.len().saturating_sub(1)
+                <= max_json_bytes;
+            if !fits && chunks.len() > usize::from(emit) {
+                if emit {
+                    chunks.pop();
+                }
+                break 'rows;
+            }
+            bytes += text.len();
+            left = candidate_left;
+            right = candidate_right;
+            if (!reverse && end < row.total) || (reverse && start > 0) {
+                break 'rows;
+            }
+        }
+    }
+    if reverse {
+        chunks.reverse();
+    }
+    if left.is_none() {
+        if let Some((cursor, row)) = anchor {
+            left = Some(cursor);
+            right = Some((cursor, row.total));
+        } else if matches!(position, Position::Event { .. }) {
+            let last: Option<(i64,i64)> = sqlx::query_as(
+            "SELECT source_sequence,item_index FROM transcript_directory WHERE session_id = ?1 AND source_sequence <= ?2 ORDER BY source_sequence DESC,item_index DESC LIMIT 1"
+        ).bind(session).bind(through_sql).fetch_optional(&mut *tx).await?;
+            if let Some(locator) = last {
+                let locator = row_position(locator.0, locator.1)?;
+                materialize(tx, session, locator, view, through_sql).await?;
+                let row =
+                    header(tx, session, locator, HistoryField::Body, view, through_sql).await?;
+                let cursor = Cursor {
+                    field: HistoryField::Body,
+                    position: locator,
+                    offset: row.total,
+                };
+                left = Some(cursor);
+                right = Some((cursor, row.total));
+            }
+        }
+    }
+    let (before, after) =
+        boundaries(tx, session, through_sql, include_thinking, left, right).await?;
+
+    Ok(Page::Ready {
+        through,
+        chunks,
+        before,
+        after,
+    })
+}
+
 async fn boundaries(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     through: i64,
     include_thinking: bool,
@@ -384,7 +624,7 @@ struct Header {
     total: u64,
 }
 async fn header(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     locator: RowPosition,
     field: HistoryField,
@@ -439,7 +679,7 @@ async fn header(
 }
 
 async fn fragment(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     cursor: Cursor,
     bytes: u64,
@@ -468,7 +708,7 @@ async fn fragment(
 }
 
 async fn conversation_tool(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     locator: RowPosition,
     through: i64,
@@ -509,7 +749,7 @@ async fn conversation_tool(
 }
 
 async fn neighbor(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     through: i64,
     cursor: Cursor,
@@ -547,7 +787,7 @@ async fn neighbor(
         .await?)
 }
 async fn materialize(
-    tx: &mut SqliteConnection,
+    tx: &mut SqliteWorkerConnection<'_>,
     session: &str,
     locator: RowPosition,
     view: HistoryView,
@@ -576,7 +816,7 @@ async fn materialize(
     if empty_state {
         return Ok(0);
     }
-    super::bodycache::ensure(tx, session, locator).await?;
+    super::bodycache::ensure_on_worker(tx, session, locator).await?;
     let source: Option<(i64, bool)> = sqlx::query_as(
         "SELECT total_bytes, EXISTS(SELECT 1 FROM transcript_cache.text cached WHERE cached.session_id = source.session_id AND cached.source_sequence = source.source_sequence AND cached.item_index = source.item_index AND cached.field = 'body')
             FROM transcript_cache.rows source WHERE session_id = ?1 AND source_sequence = ?2 AND item_index = ?3"
@@ -622,7 +862,38 @@ fn field_name(field: HistoryField) -> &'static str {
 mod tests {
     use super::*;
     use serde_json::json;
-    use sqlx::Connection;
+    use sqlx::{Connection, SqliteConnection};
+    async fn neighbor(
+        tx: &mut SqliteConnection,
+        session: &str,
+        through: i64,
+        cursor: Cursor,
+        include_thinking: bool,
+        before: bool,
+    ) -> Result<bool, StoreError> {
+        let session = session.to_owned();
+        crate::connection::worker_query(tx, move |worker| {
+            Box::pin(async move {
+                super::neighbor(worker, &session, through, cursor, include_thinking, before).await
+            })
+        })
+        .await
+    }
+
+    async fn conversation_tool(
+        tx: &mut SqliteConnection,
+        session: &str,
+        locator: RowPosition,
+        through: i64,
+    ) -> Result<Option<Header>, StoreError> {
+        let session = session.to_owned();
+        crate::connection::worker_query(tx, move |worker| {
+            Box::pin(
+                async move { super::conversation_tool(worker, &session, locator, through).await },
+            )
+        })
+        .await
+    }
 
     #[tokio::test]
     async fn conversation_retains_trace_parents_and_hides_transport_helpers() {

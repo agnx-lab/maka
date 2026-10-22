@@ -43,6 +43,27 @@ use tokio_util::sync::CancellationToken;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// Execute only immediately-ready SQLx queries and CPU work on the original
+/// SQLite worker. Transaction lifetime stays with the enclosing owner job.
+/// Polling once makes accidental external asynchronous work fail closed rather
+/// than blocking the worker on itself or introducing a second executor runtime.
+pub(crate) async fn worker_query<T: Send + 'static>(
+    connection: &mut SqliteConnection,
+    operation: impl for<'a, 'b> FnOnce(
+        &'a mut sqlx::sqlite::SqliteWorkerConnection<'b>,
+    ) -> BoxFuture<'a, Result<T, StoreError>>
+    + Send
+    + 'static,
+) -> Result<T, StoreError> {
+    connection
+        .run_with_connection(move |worker| {
+            operation(worker)
+                .now_or_never()
+                .expect("SQLite worker query unexpectedly yielded")
+        })
+        .await?
+}
+
 type Job = Box<
     dyn for<'c> FnOnce(&'c mut SqliteConnection, Result<(), StoreError>) -> BoxFuture<'c, ()>
         + Send,
