@@ -950,7 +950,7 @@ async fn invalid_thinking_default_remains_unavailable_without_poisoning_other_mo
 }
 
 #[tokio::test]
-async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain_direct() {
+async fn accepted_tool_policy_survives_settings_changes_and_requires_explicit_fields() {
     let fixture = Fixture::new("http://127.0.0.1:1/v1", None).await;
     let session = fixture.create("Frozen tool policy").await;
     edit(&fixture, |changes| {
@@ -1028,6 +1028,7 @@ async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain
         restored.accepted.editing_tools,
         Some(maka_agent_facts::execution::EditingTools::Structured)
     );
+    assert_eq!(serde_json::to_value(&restored.accepted).unwrap(), stored);
     let (next, prepared) = crate::model::Source::select(
         fixture.config.clone(),
         fixture.owner.catalog.clone(),
@@ -1048,12 +1049,19 @@ async fn accepted_code_mode_survives_settings_changes_and_legacy_messages_remain
         next.accepted.editing_tools,
         Some(maka_agent_facts::execution::EditingTools::ApplyPatch)
     );
-    let mut legacy = stored;
-    legacy.as_object_mut().unwrap().remove("tool_mode");
-    legacy.as_object_mut().unwrap().remove("editing_tools");
-    let accepted: crate::model::AcceptedModel = serde_json::from_value(legacy).unwrap();
-    assert_eq!(accepted.tool_mode, ToolMode::Direct);
+    let mut unfiltered = stored.clone();
+    unfiltered["editing_tools"] = Value::Null;
+    let accepted: crate::model::AcceptedModel = serde_json::from_value(unfiltered.clone()).unwrap();
     assert_eq!(accepted.editing_tools, None);
+    assert_eq!(serde_json::to_value(&accepted).unwrap(), unfiltered);
+    for field in ["tool_mode", "editing_tools"] {
+        let mut missing = stored.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<crate::model::AcceptedModel>(missing).is_err(),
+            "accepted tool policy requires an explicit {field}"
+        );
+    }
     fixture.app.shutdown().await.unwrap();
     fixture.config.shutdown().await.unwrap();
 }

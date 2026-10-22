@@ -75,11 +75,10 @@ pub(crate) struct AcceptedModel {
     pub binding: ModelBinding,
     pub thinking_level: Option<ThinkingLevel>,
     /// Execution policy is captured at message admission. Later model settings
-    /// do not reinterpret queued work. Older accepted messages remain Direct.
-    #[serde(default)]
+    /// do not reinterpret queued work.
     pub tool_mode: ToolMode,
-    /// None preserves the unfiltered tool selection of older accepted messages.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// None captures an unfiltered tool selection.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub editing_tools: Option<EditingTools>,
     context: ModelRequestContext,
     /// Public defaults at admission only; account reports and overrides stay live.
