@@ -1898,9 +1898,11 @@ async fn real_agent_history_and_live_stream_render_and_the_app_sends_once() {
         assert!(!retained.contains("History question 00"), "the cancelled Home snapped to canonical start:\n{retained}");
         let boundary_tail = format!("History {boundary_turn:02} paragraph 29:");
         let formatted = wait_view_state(&mut cancelled, |view, _| view.accessibility_snapshot().iter().any(|node| node.label.starts_with(&boundary_tail) && !node.label.contains("**bold**"))).await;
+        evidence("history-home-wheel-after-formatting", &formatted);
+        evidence("history-home-wheel-after-formatting-ax", &format!("{:#?}", cancelled.accessibility_snapshot()));
+        support::evidence_cells("history-home-wheel-after-formatting", &cancelled);
         assert_eq!(formatted.lines().position(|line| line.contains(&wheel_marker)), Some(wheel_row), "formatting the newly completed prefix moved the same original reading anchor:\n{formatted}");
         assert!(!formatted.contains("History question 00"), "formatting restored an obsolete Home target:\n{formatted}");
-        evidence("history-home-wheel-after-formatting", &formatted);
         support::wait_draft(&cancel_client, &fixture.session, HOME_DRAFT).await;
         assert_eq!(client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap()["through"], observed["through"], "history navigation must not change the Host range");
         evidence("history-home-wheel-cancels-late-reply", &retained);
