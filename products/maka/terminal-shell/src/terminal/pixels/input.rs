@@ -28,7 +28,6 @@ use termina::{
 pub(super) struct Input {
     pub event: Event,
     pub geometry: u64,
-    /// Coalesced motion keeps the oldest arrival in its existing queue slot.
     pub queued_at: Option<Instant>,
 }
 
@@ -161,31 +160,6 @@ impl Inbox {
         }
         if matches!(event, Event::MouseLeave) {
             return Ok(false);
-        }
-        if let Some(previous) = self.events.back_mut()
-            && previous.geometry == self.geometry
-        {
-            match (&mut previous.event, &event) {
-                (Event::SgrMouse(previous), Event::SgrMouse(next))
-                    if previous.kind == MouseEventKind::Moved
-                        && next.kind == MouseEventKind::Moved
-                        && previous.modifiers == next.modifiers =>
-                {
-                    previous.x = next.x;
-                    previous.y = next.y;
-                    return Ok(false);
-                }
-                (Event::Mouse(previous), Event::Mouse(next))
-                    if previous.kind == MouseEventKind::Moved
-                        && next.kind == MouseEventKind::Moved
-                        && previous.modifiers == next.modifiers =>
-                {
-                    previous.column = next.column;
-                    previous.row = next.row;
-                    return Ok(false);
-                }
-                _ => {}
-            }
         }
         self.events.push_back(Input {
             event,
@@ -514,10 +488,17 @@ mod tests {
         );
         let wheel = pointer(MouseEventKind::ScrollDown, 4, 5);
         let up = pointer(MouseEventKind::Up(termina::event::MouseButton::Left), 4, 5);
-        for event in [&down, &wheel, &up] {
+        let events = [
+            pointer(MouseEventKind::Moved, 3, 4),
+            pointer(MouseEventKind::Moved, 4, 5),
+            down,
+            wheel,
+            up,
+        ];
+        for event in &events {
             inbox.push(event.clone()).unwrap();
         }
-        for event in [down, wheel, up] {
+        for event in events {
             assert_eq!(inbox.pop().unwrap().event, event);
         }
         assert!(inbox.in_flight.is_some());
