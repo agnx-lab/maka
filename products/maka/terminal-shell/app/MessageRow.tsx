@@ -124,6 +124,7 @@ export function MessageRow({
                             }
                           >
                             <MarkdownBody
+                              sessionId={sessionId}
                               row={row}
                               sourceId={sourceId()}
                               openLink={openLink}
@@ -273,6 +274,7 @@ export function MessageRow({
                               when={sourceMode()}
                               else={
                                 <MarkdownBody
+                                  sessionId={sessionId}
                                   row={row}
                                   sourceId={sourceId()}
                                   openLink={openLink}

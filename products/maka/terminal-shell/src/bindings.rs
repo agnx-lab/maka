@@ -196,6 +196,12 @@ fn require_contract(endpoint: &str, method: &str, actual: &Contract) -> Result<(
 
 #[class]
 impl ApplicationHost {
+    /// Resolve only an exact workspace-relative image selector. Actual access
+    /// and immutable image bytes remain with the existing Host file service.
+    pub fn workspace_image_path(&self, target: String) -> Result<links::WorkspaceLink, String> {
+        links::workspace_image(&target)
+    }
+
     /// Hand an HTTP(S) link to this client's system browser, or return an exact
     /// workspace-relative path and parent for the original session's reader.
     /// This does not read files or execute anything on the connected Host.

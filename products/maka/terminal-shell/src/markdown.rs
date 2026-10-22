@@ -53,6 +53,7 @@ pub struct MarkdownRun {
     pub strike: bool,
     pub code: bool,
     pub link: Option<MarkdownLink>,
+    pub image: Option<MarkdownImage>,
 }
 
 /// One logical link, including all of its separately styled inline runs.
@@ -60,6 +61,13 @@ pub struct MarkdownRun {
 pub struct MarkdownLink {
     pub key: String,
     pub target: String,
+}
+
+/// An authored image destination; the original scoped file reader resolves it.
+#[derive(Clone, Debug, PartialEq, JsObject)]
+pub struct MarkdownImage {
+    pub target: String,
+    pub alt: String,
 }
 
 /// Rendering supported by the terminal application's rich text primitives.
@@ -328,7 +336,7 @@ impl Presentation<'_> {
             }
             // Link definitions are metadata, not rendered document content.
             Node::Definition(_) => {}
-            // HTML, images and footnotes keep their complete source spelling.
+            // HTML and footnotes keep their complete source spelling.
             _ => {
                 let mut block = self.block(node, MarkdownBlockKind::Literal, context);
                 block.text = raw(self.source, node).into();
@@ -398,6 +406,38 @@ fn inline(
     quote: u32,
     runs: &mut Vec<MarkdownRun>,
 ) -> Result<(), String> {
+    let image = match node {
+        Node::Image(value) => Some((&value.url, &value.alt)),
+        Node::ImageReference(value) => references
+            .get(&value.identifier)
+            .map(|target| (target, &value.alt)),
+        _ => None,
+    };
+    if let Some((target, alt)) = image {
+        // This is the native Text attachment's real object-replacement atom,
+        // not a hidden text/caption substitute for the image's geometry.
+        runs.push(MarkdownRun {
+            key: format!("image:{}", start(node)),
+            source: vec![MarkdownSourceSegment {
+                start: 0,
+                end: 1,
+                source_start: start(node) as u64,
+                source_end: (start(node) + raw(source, node).len()) as u64,
+                kind: MarkdownSourceKind::Replacement,
+            }],
+            text: "\u{fffc}".into(),
+            strong: marks.strong,
+            emphasis: marks.emphasis,
+            strike: marks.strike,
+            code: marks.code,
+            link: link.cloned(),
+            image: Some(MarkdownImage {
+                target: target.clone(),
+                alt: alt.clone(),
+            }),
+        });
+        return Ok(());
+    }
     let linked = match node {
         Node::Link(value) => Some((&value.children, &value.url)),
         Node::LinkReference(value) => references
@@ -467,6 +507,7 @@ fn inline(
         _ => source::literal(start(node), text),
     };
     if let Some(previous) = runs.last_mut()
+        && previous.image.is_none()
         && previous.strong == marks.strong
         && previous.emphasis == marks.emphasis
         && previous.strike == marks.strike
@@ -491,6 +532,7 @@ fn inline(
         strike: marks.strike,
         code: marks.code,
         link: link.cloned(),
+        image: None,
     });
     Ok(())
 }
@@ -702,7 +744,7 @@ mod tests {
             [
                 vec!["左 列", "中", "右", "默认"],
                 vec!["粗 斜", "删", "码🙂", ""],
-                vec!["👩🏽‍💻 e\u{301}", "", "原 ![图](image.png)", "尾",],
+                vec!["👩🏽‍💻 e\u{301}", "", "原 \u{fffc}", "尾",],
             ]
         );
         assert!(table.rows[0].cells[0].runs[1].strong);
@@ -844,11 +886,78 @@ mod tests {
     }
 
     #[test]
+    fn workspace_images_keep_mixed_text_references_and_atomic_source_addresses() {
+        let source = "前🙂 **![图](./图%20原.png)** 中 ![第二][image] 后 [![链接图](preview.png)](report.txt) ![missing][unknown]\n\n[image]: ./second.png\n";
+        let blocks = parse_source(source).unwrap();
+        assert_eq!(blocks.len(), 1);
+        let runs = &blocks[0].runs;
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "前🙂 \u{fffc} 中 \u{fffc} 后 \u{fffc} ![missing][unknown]"
+        );
+        let images = runs
+            .iter()
+            .filter(|run| run.image.is_some())
+            .collect::<Vec<_>>();
+        assert_eq!(images.len(), 3);
+        for (run, syntax, target, alt) in [
+            (images[0], "![图](./图%20原.png)", "./图%20原.png", "图"),
+            (images[1], "![第二][image]", "./second.png", "第二"),
+            (images[2], "![链接图](preview.png)", "preview.png", "链接图"),
+        ] {
+            assert_eq!(run.text, "\u{fffc}");
+            assert_eq!(
+                run.image.as_ref().unwrap(),
+                &MarkdownImage {
+                    target: target.into(),
+                    alt: alt.into()
+                }
+            );
+            let start = source.find(syntax).unwrap() as u64;
+            assert_eq!(
+                run.source,
+                [MarkdownSourceSegment {
+                    start: 0,
+                    end: 1,
+                    source_start: start,
+                    source_end: start + syntax.len() as u64,
+                    kind: MarkdownSourceKind::Replacement,
+                }]
+            );
+        }
+        assert!(images[0].strong);
+        assert!(images[0].link.is_none());
+        assert_eq!(images[2].link.as_ref().unwrap().target, "report.txt");
+        let following = runs.iter().find(|run| run.text == " 中 ").unwrap();
+        let start = source.find(" 中 ").unwrap() as u64;
+        assert_eq!(
+            following.source,
+            [MarkdownSourceSegment {
+                start: 0,
+                end: 3,
+                source_start: start,
+                source_end: start + 5,
+                kind: MarkdownSourceKind::Literal,
+            }]
+        );
+        assert!(following.image.is_none());
+    }
+
+    #[test]
     fn unsupported_constructs_keep_complete_source_without_activation() {
         let source = "[label](https://example.test/target) ![alt](image.png) [^note]\n\n| left | right |\n| --- | --- |\n| 一 | 二 |\n\n<div>HTML</div>\n\n[id]: https://example.test/definition\n\n[^note]: footnote\n\n$E = mc^2$ \\(x\\) \\[y\\]";
         let blocks = parse_source(source).unwrap();
         assert_eq!(blocks[0].runs[0].text, "label");
-        assert_eq!(blocks[0].runs[1].text, " ![alt](image.png) [^note]");
+        assert_eq!(blocks[0].runs[1].text, " ");
+        assert_eq!(blocks[0].runs[2].text, "\u{fffc}");
+        assert_eq!(
+            blocks[0].runs[2].image.as_ref().unwrap(),
+            &MarkdownImage {
+                target: "image.png".into(),
+                alt: "alt".into()
+            }
+        );
+        assert_eq!(blocks[0].runs[3].text, " [^note]");
         assert_eq!(
             blocks[0].runs[0].link.as_ref().unwrap().target,
             "https://example.test/target"

@@ -1,0 +1,188 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { cleanup, inputAction, signal, Text, View } from 'nsh';
+import type { YNode } from 'nsh';
+import { Button } from 'nsh/base';
+import { Image } from 'nsh/image';
+import type { MarkdownImage } from 'maka/markdown';
+import { host, type FileView } from './host';
+import { ImageViewer } from './ImageViewer';
+import { createText, errorText, UiError } from './text';
+import { tr } from './locale';
+import { C, bodyTextStyle, captionTextStyle, controlFocusStyle } from './ui';
+
+type ImageFile = Extract<FileView, { kind: 'image' }>;
+type Reading = { stream: Awaited<ReturnType<typeof openFile>> | null };
+const openFile = (sessionId: string, target: string) =>
+  host.subscribe('agent', 'readFile', { sessionId, path: host.workspaceImagePath(target) });
+const close = async (reading: Reading | null) => {
+  const stream = reading?.stream;
+  if (reading) reading.stream = null;
+  await stream?.close();
+};
+
+// One real native inline attachment remains mounted through loading and failure.
+// Its source atom and paragraph layout are owned by the surrounding Text.
+export function MarkdownImageView(props: {
+  image(): MarkdownImage;
+  sessionId: string;
+  width?(): number;
+  linked: boolean;
+}) {
+  const target = props.image().target;
+  const sessionId = props.sessionId;
+  const file = signal<ImageFile | null>(null);
+  const dimensions = signal<{ width: number; height: number } | null>(null);
+  const error = createText();
+  const viewing = signal(false);
+  let reading: Reading | null = null;
+  let button: YNode | undefined;
+  let alive = true;
+  const owns = () => alive && props.sessionId === sessionId && props.image().target === target;
+  const read = () => {
+    if (!owns()) return;
+    const previous = reading;
+    const request: Reading = { stream: null };
+    reading = request;
+    error.set('');
+    file.set(null);
+    dimensions.set(null);
+    void (async () => {
+      await close(previous);
+      if (!owns() || reading !== request) return;
+      const stream = await openFile(sessionId, target);
+      if (!owns() || reading !== request) {
+        await stream.close();
+        return;
+      }
+      request.stream = stream;
+      try {
+        const captured = await stream.readFile();
+        if (!owns() || reading !== request) return;
+        if (captured.kind === 'absent') throw new UiError('This file no longer exists.');
+        if (captured.kind === 'changed')
+          throw new UiError(
+            'This file changed while it was being read. Refresh to capture it again.',
+          );
+        if (captured.kind !== 'image') throw new UiError('This file is not a supported image.');
+        file.set(captured);
+      } finally {
+        await close(request);
+      }
+    })().catch((reason) => {
+      if (owns() && reading === request) error.set(errorText(reason));
+    });
+  };
+  cleanup(() => {
+    alive = false;
+    void close(reading).catch(() => {});
+  });
+  read();
+  const name = () => props.image().alt || target;
+  const width = () => {
+    const intrinsic = dimensions()?.width;
+    const available = props.width?.();
+    return intrinsic === undefined ? available : Math.min(available ?? intrinsic, intrinsic);
+  };
+  const height = () => {
+    const size = dimensions();
+    return size ? ((width() ?? size.width) * size.height) / size.width : bodyTextStyle.lineHeight;
+  };
+  const activate = (selected: { sessionId: string; target: string }) => {
+    if (!owns() || selected.sessionId !== sessionId || selected.target !== target) return;
+    if (error()) read();
+    else if (file() && dimensions()) viewing.set(true);
+  };
+  const content = () => (
+    <View style={{ gap: 4, width: width() }}>
+      <Each
+        of={file() && !error() && (props.width === undefined || props.width() > 0) ? [file()!] : []}
+        key={(image) => image.uri}
+      >
+        {(image) => {
+          const captured = image();
+          let mounted = true;
+          cleanup(() => {
+            mounted = false;
+          });
+          const current = () => owns() && mounted && file() === captured;
+          return (
+            <Image
+              src={captured.uri}
+              role="image"
+              accessibilityLabel={name()}
+              pointerEvents="none"
+              resizeMode="contain"
+              onLoad={(size) => {
+                if (current()) dimensions.set(size);
+              }}
+              onError={(reason) => {
+                if (current()) {
+                  dimensions.set(null);
+                  error.set(reason.message);
+                }
+              }}
+              style={{ width: width(), height: height(), flexShrink: 0 }}
+            />
+          );
+        }}
+      </Each>
+      <If when={error() || !dimensions()}>
+        <Text style={{ ...captionTextStyle, color: error() ? C.danger : C.muted }}>
+          {name()}
+          {' · '}
+          {error() ? `${tr('Image unavailable')}: ${error()}` : tr('Loading image…')}
+        </Text>
+      </If>
+      <If when={error() && !props.linked}>
+        <Text style={{ ...captionTextStyle, color: C.accent }}>{tr('Retry image')}</Text>
+      </If>
+    </View>
+  );
+  return (
+    <View pointerEvents={props.linked ? 'none' : undefined}>
+      <If when={!props.linked} else={content()}>
+        <Button
+          ref={(node) => {
+            button = node;
+          }}
+          accessibilityLabel={tr(error() ? 'Retry image: {name}' : 'View full image: {name}', {
+            name: name(),
+          })}
+          disabled={!error() && !dimensions()}
+          onPress={inputAction(activate, { sessionId, target })}
+          style={{ padding: 0, alignItems: 'flex-start', backgroundColor: 'transparent' }}
+          focusStyle={controlFocusStyle}
+        >
+          {content()}
+        </Button>
+      </If>
+      <If when={viewing() && file() && dimensions()}>
+        <ImageViewer
+          image={{ uri: file()!.uri, ...dimensions()!, title: name() }}
+          close={() => {
+            viewing.set(false);
+            if (owns()) button?.focus();
+          }}
+        />
+      </If>
+    </View>
+  );
+}

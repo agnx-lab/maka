@@ -88,6 +88,19 @@ fn destination(target: &str) -> Result<Destination, String> {
     }
 }
 
+/// Resolve an image without activating an external URL or reading any file.
+pub(super) fn workspace_image(target: &str) -> Result<WorkspaceLink, String> {
+    match destination(target)? {
+        Destination::Workspace(path, parent) => Ok(WorkspaceLink {
+            path: path.bytes_base64,
+            parent: parent.map(|path| path.bytes_base64),
+        }),
+        Destination::Browser(_) => {
+            Err("Network Markdown images are not supported; use a workspace-relative image.".into())
+        }
+    }
+}
+
 pub(super) async fn open(
     owner: Arc<Owner>,
     target: String,
@@ -155,6 +168,13 @@ mod tests {
             panic!("expected browser URL")
         };
         assert_eq!(url.as_str(), "https://user:password@example.test/");
+        assert!(workspace_image("https://example.test/image.png").is_err());
+        assert_eq!(
+            STANDARD
+                .decode(workspace_image("docs/image%20你好.png").unwrap().path)
+                .unwrap(),
+            "docs/image 你好.png".as_bytes()
+        );
         for target in ["a.txt#L4", "a.txt?download=1#L4"] {
             let Destination::Workspace(path, _) = destination(target).unwrap() else {
                 panic!("expected file component")

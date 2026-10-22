@@ -40,6 +40,7 @@ const sameInput = (left: Input | null, right: Input | null) =>
 export function MarkdownBody(props: {
   row: () => Row;
   sourceId: string;
+  sessionId: string;
   compact?: boolean;
   openLink(target: string, restoreFocus: () => boolean): Promise<void>;
   userScroll(): void;
@@ -137,6 +138,7 @@ export function MarkdownBody(props: {
           {(block) => (
             <MarkdownBlockView
               block={block}
+              sessionId={props.sessionId}
               sourceId={props.sourceId}
               compact={props.compact}
               openLink={props.openLink}
