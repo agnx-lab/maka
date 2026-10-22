@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 75
     env:
       MBX_CACHE_EXPORT_GROUP: ci-${{ github.run_id }}-${{ github.run_attempt }}-test
-      MBX_GC_AUTO: '0'
+      MBX_GC_AUTO: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '0' || '1' }}
       MBX_TARGET_VIEWS: '0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
