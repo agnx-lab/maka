@@ -96,8 +96,31 @@ async fn readable_tool_cards_preserve_paged_originals_across_workspace_changes_a
 
         // Large originals scroll inside the card while its disclosure and
         // original-details action remain visible in the turn's own viewport.
+        let before_wheel = view.accessibility_snapshot();
+        let text_before = before_wheel.iter().find(|node| node.id == text.id && node.label == accessible_original)
+            .expect("the same complete original Text must remain mounted after Copy");
+        let chrome_before = ["Tool details", "Toggle tool WorkspaceDocument", "Toggle original tool details"]
+            .map(|label| before_wheel.iter().find(|node| node.label == label).expect("the open tool reader chrome must be present"));
         support::scroll_snapshot_text(&mut view, &copied_screen, "起点_原始", MouseEventKind::ScrollDown);
-        wait_view_state(&mut view, |view, screen| screen.contains("Read file") && original_visible(view) && !screen.contains("起点_原始")).await;
+        wait_view_state(&mut view, |view, screen| {
+            let nodes = view.accessibility_snapshot();
+            let Some(text_after) = nodes.iter().find(|node| node.id == text_before.id && node.label == accessible_original) else { return false; };
+            if text_after.frame.origin.y.0 >= text_before.frame.origin.y.0 { return false; }
+            assert_eq!(text_after.frame.origin.x, text_before.frame.origin.x, "one vertical wheel must preserve the original Text column");
+            assert_eq!(text_after.frame.size, text_before.frame.size, "scrolling must preserve the complete original Text's layout");
+            let viewport = view.surface().viewport();
+            for before in chrome_before {
+                let after = nodes.iter().find(|node| node.id == before.id && node.label == before.label)
+                    .expect("inner reading must preserve the same tool reader chrome");
+                assert_eq!(after.frame, before.frame, "inner reading must not move outer chrome {:?}", before.label);
+                assert!(after.frame.size.width.0 > 0.0 && after.frame.size.height.0 > 0.0
+                    && after.frame.origin.x.0 >= 0.0 && after.frame.origin.y.0 >= 0.0
+                    && after.frame.origin.x.0 + after.frame.size.width.0 <= viewport.width.0
+                    && after.frame.origin.y.0 + after.frame.size.height.0 <= viewport.height.0,
+                    "tool reader chrome must remain visible: {:?} {:?}", after.label, after.frame);
+            }
+            screen.contains("Read file") && original_visible(view)
+        }).await;
         assert!(support::wait_enabled_button(&mut view, "Toggle tool WorkspaceDocument").await.state.selected);
         tab_to_label(&mut view, "Tool details").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
