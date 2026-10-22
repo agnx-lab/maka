@@ -387,6 +387,7 @@ mod tests {
     fn config(source: &str) -> EngineConfig {
         let mut config = EngineConfig::new(App::Js(Bundle::source(source.to_owned())));
         config.viewport = CellMetrics::default().viewport(40, 8);
+        config.environment.renderer = nsh_core::platform::Renderer::Terminal;
         config.header_heights = nsh_core::NO_NATIVE_HEADER;
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
