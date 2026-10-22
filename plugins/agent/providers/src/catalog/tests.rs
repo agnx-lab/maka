@@ -124,6 +124,11 @@ fn compatible_connections_share_exact_public_ids_without_borrowing_route_control
         "knowledge_cutoff":"2026-01","canonical_slug":"some-other-id",
         "context_length":131072,"supported_parameters":["tools","reasoning"],
         "reasoning":{"mandatory":true,"supported_efforts":["high"],"default_effort":"high"}
+    }, {
+        "id":"openai/gpt-oss-120b","name":"OpenAI: gpt-oss-120b",
+        "knowledge_cutoff":"2024-06-30","context_length":131072,
+        "top_provider":{"max_completion_tokens":65536},
+        "reasoning":{"mandatory":true,"supported_efforts":["high","medium","low"],"default_effort":"medium"}
     }]});
     let snapshot = Snapshot::from_sources(None, Some(&router)).unwrap();
     let public = ModelInfo {
@@ -162,6 +167,41 @@ fn compatible_connections_share_exact_public_ids_without_borrowing_route_control
     let captured =
         Snapshot::for_model("openai-compatible", "vendor/new-model", Some(public)).unwrap();
     assert_eq!(captured.resolve("openai-compatible", reported), expected);
+
+    let models_dev = json!({"openai-compatible":{"id":"openai-compatible","models":{
+        "vendor/new-model":{"id":"vendor/new-model","name":"Route name",
+            "reasoning":false,"tool_call":false,"limit":{"context":8192}}
+    }}});
+    let known = Snapshot::from_sources(Some(&models_dev), Some(&router)).unwrap();
+    assert_eq!(
+        known.get("openai-compatible", "vendor/new-model"),
+        Some(&ModelInfo {
+            id: "vendor/new-model".into(),
+            display_name: Some("Route name".into()),
+            description: Some("Public description".into()),
+            knowledge_cutoff: Some("2026-01".into()),
+            context_window: Some(8192),
+            thinking_levels: Some(vec![]),
+            capabilities: Some(ModelCapabilities {
+                reasoning: Some(false),
+                function_calling: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    );
+    // This exact public ID also occurs in the bundled SiliconFlow inventory.
+    let bundled = known.get("siliconflow", "openai/gpt-oss-120b").unwrap();
+    assert_eq!(bundled.display_name.as_deref(), Some("openai/gpt-oss-120b"));
+    assert_eq!(
+        bundled.description.as_deref(),
+        Some("Open-weight GPT model for self-hosted reasoning and instruction-following workloads")
+    );
+    assert_eq!(bundled.knowledge_cutoff.as_deref(), Some("2024-06-30"));
+    assert_eq!(bundled.context_window, Some(131000));
+    assert_eq!(bundled.max_output_tokens, Some(8000));
+    assert_eq!(bundled.thinking_levels, Some(vec![]));
+    assert_eq!(bundled.default_thinking_level, None);
 }
 
 #[test]
@@ -169,18 +209,22 @@ fn conflicting_gateway_descriptions_never_cross_routes_or_use_slugs_as_ids() {
     let models_dev = json!({
         "private-relay":{"id":"private-relay","models":{
             "exact-local":{"id":"exact-local","canonical_model_id":"vendor/base"},
-            "unrelated":{"id":"unrelated","canonical_model_id":"slug-only"}
+            "unrelated":{"id":"unrelated","canonical_model_id":"slug-only"},
+            "vendor/base":{"id":"vendor/base","canonical_model_id":"vendor/other"},
+            "vendor/base:free":{"id":"vendor/base:free","canonical_model_id":"vendor/base"}
         }},
         "openrouter":{"id":"openrouter","models":{
             "vendor/base":{"id":"vendor/base","canonical_model_id":"vendor/base"},
-            "vendor/base:free":{"id":"vendor/base:free","canonical_model_id":"vendor/base"}
+            "vendor/base:free":{"id":"vendor/base:free","canonical_model_id":"vendor/base"},
+            "vendor/other":{"id":"vendor/other","canonical_model_id":"vendor/other"}
         }}
     });
     let router = json!({"data":[
         {"id":"vendor/base","name":"Paid name","description":"Same description","knowledge_cutoff":"2026-01",
             "canonical_slug":"slug-only","context_length":1000},
         {"id":"vendor/base:free","name":"Free name","description":"Same description","knowledge_cutoff":"2025-01",
-            "context_length":2000}
+            "context_length":2000},
+        {"id":"vendor/other","name":"Other name"}
     ]});
     let snapshot = Snapshot::from_sources(Some(&models_dev), Some(&router)).unwrap();
     let local = snapshot.get("private-relay", "exact-local").unwrap();
@@ -196,6 +240,14 @@ fn conflicting_gateway_descriptions_never_cross_routes_or_use_slugs_as_ids() {
             .description,
         None
     );
+    let conflicting = snapshot.get("private-relay", "vendor/base").unwrap();
+    assert_eq!(conflicting.display_name.as_deref(), Some("Other name"));
+    assert_eq!(conflicting.description, None);
+    assert_eq!(conflicting.knowledge_cutoff, None);
+    let same = snapshot.get("private-relay", "vendor/base:free").unwrap();
+    assert_eq!(same.display_name.as_deref(), Some("Free name"));
+    assert_eq!(same.description.as_deref(), Some("Same description"));
+    assert_eq!(same.knowledge_cutoff.as_deref(), Some("2025-01"));
 }
 
 #[test]
