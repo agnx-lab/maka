@@ -45,6 +45,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             prop(input, 'onChange', text => value.set(text));
             append(root, input);
             const body = element('view');
+            prop(body, 'focusable', true);
             prop(body, 'style', {width: 240, height: 64, backgroundColor: '#406020'});
             append(root, body);
             return root;
