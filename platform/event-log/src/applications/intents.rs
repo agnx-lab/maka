@@ -201,22 +201,21 @@ impl EventLog {
         let domain = self.application_domain()?;
         let owner = self.root_owner.as_ref().expect("owned caller Root").clone();
         let commits = self.commits.clone();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let old = read(&mut tx,&domain,caller.deployment,&consumer,reference.operation).await?;
-            let intent = if let Some(old) = old {
-                if old.reference != reference || old.recovery != recovery { return Err(StoreError::EventConflict); }
-                // Keep the first source and original reference, even after a caller update.
-                old
-            } else {
-                let result = sqlx::query("INSERT INTO application_intents (deployment,consumer,operation,source_revision,reference_json,recovery_json) VALUES (?,?,?,?,?,?)")
-                    .bind(caller.deployment.to_string()).bind(serde_json::to_string(&consumer)?).bind(reference.operation.to_string()).bind(caller.revision as i64).bind(encoded).bind(encoded_recovery).execute(&mut *tx).await?;
-                CallerIntent {cursor:result.last_insert_rowid() as u64,caller,consumer,reference,recovery}
-            };
-            tx.commit().await.map_err(StoreError::CommitUnknown)?;
-            commits.send_modify(|_| {});
-            Ok(RecordedIntent {intent,_owner:owner})
-        })).await
+        self.connection
+            .write(
+                WriteIntent {
+                    domain,
+                    caller,
+                    consumer,
+                    reference,
+                    recovery,
+                    encoded,
+                    encoded_recovery,
+                    owner,
+                },
+                commits,
+            )
+            .await
     }
     /// Read original caller history across source revisions. The count limit is
     /// an upper bound; the complete JSON array also fits 1 MiB. Continue after
@@ -284,3 +283,83 @@ impl EventLog {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) struct WriteIntent {
+    domain: String,
+    caller: DeploymentRef,
+    consumer: InstanceId,
+    reference: RecoveryRef,
+    recovery: serde_json::Value,
+    encoded: String,
+    encoded_recovery: String,
+    owner: Arc<RootOwner>,
+}
+pub(crate) struct IntentValue {
+    intent: CallerIntent,
+    owner: Arc<RootOwner>,
+}
+impl crate::writeback::Statement for WriteIntent {
+    type Value = IntentValue;
+    type Output = RecordedIntent;
+    fn execute(
+        self,
+        connection: &mut SqliteConnection,
+    ) -> crate::connection::BoxFuture<'_, Result<crate::writeback::Prepared<Self::Value>, StoreError>>
+    {
+        Box::pin(async move {
+            let Self {
+                domain,
+                caller,
+                consumer,
+                reference,
+                recovery,
+                encoded,
+                encoded_recovery,
+                owner,
+            } = self;
+            let old = read(
+                connection,
+                &domain,
+                caller.deployment,
+                &consumer,
+                reference.operation,
+            )
+            .await?;
+            let changed = old.is_none();
+            let intent = if let Some(old) = old {
+                if old.reference != reference || old.recovery != recovery {
+                    return Err(StoreError::EventConflict);
+                }
+                // The first source and original reference survive later caller updates.
+                old
+            } else {
+                let result = sqlx::query("INSERT INTO application_intents (deployment,consumer,operation,source_revision,reference_json,recovery_json) VALUES (?,?,?,?,?,?)")
+                    .bind(caller.deployment.to_string()).bind(serde_json::to_string(&consumer)?).bind(reference.operation.to_string()).bind(caller.revision as i64).bind(encoded).bind(encoded_recovery).execute(&mut *connection).await?;
+                CallerIntent {
+                    cursor: result.last_insert_rowid() as u64,
+                    caller,
+                    consumer,
+                    reference,
+                    recovery,
+                }
+            };
+            Ok(crate::writeback::Prepared {
+                value: IntentValue { intent, owner },
+                changed,
+                notification: crate::writeback::Notification::Metadata,
+            })
+        })
+    }
+    fn committed(IntentValue { intent, owner }: Self::Value) -> Self::Output {
+        RecordedIntent {
+            intent,
+            _owner: owner,
+        }
+    }
+    fn isolated_rejection(error: &StoreError) -> bool {
+        matches!(
+            error,
+            StoreError::EventConflict | StoreError::InvalidTransition(_)
+        )
+    }
+}

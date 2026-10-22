@@ -53,7 +53,7 @@ type ReadJob = Box<
 >;
 enum Command {
     Run(Job),
-    Observations(crate::append::observations::Request),
+    Write(crate::writeback::Request),
     Shutdown,
 }
 
@@ -78,27 +78,23 @@ pub(crate) struct WriterIngress {
 }
 
 impl WriterIngress {
-    pub(crate) async fn observations(
+    pub(crate) async fn write<S: crate::writeback::Statement>(
         &self,
-        events: Vec<maka_agent_facts::event::EventWrite>,
+        statement: S,
         commits: watch::Sender<u64>,
-    ) -> Result<Vec<u64>, maka_agent_facts::event::CommitError> {
-        use maka_agent_facts::event::CommitError;
+    ) -> Result<S::Output, StoreError>
+    where
+        crate::writeback::Request: From<crate::writeback::Pending<S>>,
+    {
         let (reply, result) = oneshot::channel();
         self.jobs
-            .send(Command::Observations(
-                crate::append::observations::Request::new(
-                    events,
-                    commits,
-                    reply,
-                    self.failures.clone(),
-                ),
+            .send(Command::Write(
+                crate::writeback::Pending::new(statement, commits, reply, self.failures.clone())
+                    .into(),
             ))
             .await
-            .map_err(|_| CommitError::Rejected(StoreError::ConnectionClosed.to_string()))?;
-        result
-            .await
-            .map_err(|_| CommitError::OutcomeUnknown(StoreError::OperationUnknown.to_string()))?
+            .map_err(|_| StoreError::ConnectionClosed)?;
+        result.await.map_err(|_| StoreError::OperationUnknown)?
     }
 
     pub(crate) fn failures(&self) -> u64 {
@@ -138,6 +134,17 @@ impl OwnedConnection {
             jobs: self.jobs.clone(),
             failures: self.failures.clone(),
         }
+    }
+
+    pub(crate) async fn write<S: crate::writeback::Statement>(
+        &self,
+        statement: S,
+        commits: watch::Sender<u64>,
+    ) -> Result<S::Output, StoreError>
+    where
+        crate::writeback::Request: From<crate::writeback::Pending<S>>,
+    {
+        self.writer().write(statement, commits).await
     }
 
     /// Disposable write hints. Re-read canonical state after each wakeup;
@@ -206,15 +213,13 @@ impl OwnedConnection {
                                         runtime.block_on(job(&mut connection, validate()));
                                         true
                                     }
-                                    Command::Observations(first) => {
+                                    Command::Write(first) => {
                                         // Only the already queued adjacent prefix shares a commit.
                                         // Keep a control boundary locally, ahead of later ingress.
                                         let mut group = vec![first];
                                         while group.len() < 32 {
                                             match receiver.try_recv() {
-                                                Ok(Command::Observations(request)) => {
-                                                    group.push(request)
-                                                }
+                                                Ok(Command::Write(request)) => group.push(request),
                                                 Ok(boundary) => {
                                                     pending = Some(boundary);
                                                     break;
@@ -222,7 +227,7 @@ impl OwnedConnection {
                                                 Err(_) => break,
                                             }
                                         }
-                                        runtime.block_on(crate::append::observations::commit(
+                                        runtime.block_on(crate::writeback::commit(
                                             &mut connection,
                                             group,
                                             &validate,

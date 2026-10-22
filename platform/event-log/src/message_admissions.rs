@@ -142,21 +142,8 @@ impl EventLog {
         admission: PendingMessageAdmission,
     ) -> Result<PendingMessageAdmission, StoreError> {
         self.validate_root()?;
-        let commits = self.commits.clone();
         self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-                    if insert::insert(&mut tx, &admission, insert::Owner::Unsealed)
-                        .await?
-                        .is_some()
-                    {
-                        tx.commit().await.map_err(StoreError::CommitUnknown)?;
-                        commits.send_modify(|_| {});
-                    }
-                    Ok(admission)
-                })
-            })
+            .write(WriteAdmission(admission), self.commits.clone())
             .await
     }
 
@@ -280,4 +267,46 @@ pub(crate) async fn consume(
 }
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidTransition(message.into())
+}
+
+pub(crate) struct WriteAdmission(PendingMessageAdmission);
+impl crate::writeback::Statement for WriteAdmission {
+    type Value = PendingMessageAdmission;
+    type Output = PendingMessageAdmission;
+    fn execute(
+        self,
+        connection: &mut SqliteConnection,
+    ) -> crate::connection::BoxFuture<'_, Result<crate::writeback::Prepared<Self::Value>, StoreError>>
+    {
+        Box::pin(async move {
+            let changed = insert::insert(connection, &self.0, insert::Owner::Unsealed)
+                .await?
+                .is_some();
+            Ok(crate::writeback::Prepared {
+                value: self.0,
+                changed,
+                notification: if changed {
+                    crate::writeback::Notification::Metadata
+                } else {
+                    crate::writeback::Notification::None
+                },
+            })
+        })
+    }
+    fn committed(value: Self::Value) -> Self::Output {
+        value
+    }
+    fn isolated_rejection(error: &StoreError) -> bool {
+        matches!(
+            error,
+            StoreError::InvalidTransition(_)
+                | StoreError::SessionNotFound
+                | StoreError::SessionBusy
+                | StoreError::SessionRetired
+                | StoreError::PermissionRevoked
+                | StoreError::ImportedInvocation
+                | StoreError::MaterialCollected
+                | StoreError::EventConflict
+        )
+    }
 }
