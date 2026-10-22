@@ -19,6 +19,7 @@
 
 use super::super::test_public::PublishedHost;
 use super::*;
+use maka_event_log::applications::launch::Launch as Record;
 use maka_plugin_core::composition::{Environment, ExecutionLocation, PresentationTarget};
 use serde_json::json;
 
@@ -71,36 +72,12 @@ async fn pending(store: &EventLog, host: &EventLog) -> (Uuid, Uuid, Uuid) {
 
 #[tokio::test]
 async fn partial_initialization_resumes_original_inputs_and_preserves_new_heads() {
-    check_partial_initialization(false).await;
-}
-
-#[tokio::test]
-async fn checked_launch_finishes_partial_initialization_and_preserves_new_heads() {
-    check_partial_initialization(true).await;
-}
-
-async fn check_partial_initialization(checked: bool) {
     let directory = tempfile::tempdir().unwrap();
     let ui_path = directory.path().join("ui");
     let host_path = directory.path().join("host");
     let store = open(ui_path.clone(), true, None).await.unwrap();
     let host = Arc::new(open(host_path.clone(), true, None).await.unwrap());
     let (ui, host_id, management) = pending(&store, &host).await;
-    // The small fixture supplies the same checked value that authoring retains
-    // on a first launch; the other case reconstructs it through disk recovery.
-    let prepared = if checked {
-        let record = store.application_launch().await.unwrap().unwrap();
-        let preparation: Preparation =
-            serde_json::from_slice(record.pending.as_ref().unwrap()).unwrap();
-        Some(PreparedLaunch {
-            deployment: record.deployment,
-            configuration: record.configuration,
-            applications: super::super::prepare_sources(&preparation.sources, &[]).unwrap(),
-            preparation,
-        })
-    } else {
-        None
-    };
     ensure(&host, host_id, &input(), &[], &[]).await.unwrap();
     let mut edited = input();
     edited.environment = Environment {
@@ -127,10 +104,7 @@ async fn check_partial_initialization(checked: bool) {
     store.drain().await;
     drop(store);
     let store = open(ui_path.clone(), false, None).await.unwrap();
-    let (selected, _, clients) = match prepared {
-        Some(prepared) => finish(&store, prepared).await.unwrap(),
-        None => prepare(&store, None, Product::Studio).await.unwrap(),
-    };
+    let (selected, _, clients) = prepare(&store).await.unwrap();
     selected.check_store(&store).unwrap();
     assert_eq!(selected.source().reference.deployment, ui);
     assert_eq!(selected.source().reference.revision, 2);
@@ -181,16 +155,7 @@ async fn check_partial_initialization(checked: bool) {
         .commit_application(ui, 2, input(), vec![], vec![])
         .await
         .unwrap();
-    assert!(
-        prepare(
-            &store,
-            Some(Installation::Configured(json!({}))),
-            Product::Agent
-        )
-        .await
-        .is_err()
-    );
-    let (current, _, _) = prepare(&store, None, Product::Agent).await.unwrap();
+    let (current, _, _) = prepare(&store).await.unwrap();
     assert_eq!(current.source().reference.revision, 3);
     assert_eq!(
         store
@@ -227,7 +192,7 @@ async fn conflicting_original_commit_keeps_pending_record_and_does_not_create_ui
         .await
         .unwrap();
     let serving = PublishedHost::start(host.clone(), host_id).await;
-    let error = prepare(&store, None, Product::Agent).await.err().unwrap();
+    let error = prepare(&store).await.err().unwrap();
     assert!(error.to_string().contains("conflicts"), "{error}");
     assert!(
         store
@@ -258,7 +223,7 @@ async fn replacement_host_root_cannot_resume_original_initialization() {
     drop(RootOwner::create(&host_path, &RootNamespaces::for_current_account().unwrap()).unwrap());
     let database = host_path.join(maka_event_log::root::ROOT_DATABASE);
     assert!(!database.exists());
-    let error = prepare(&store, None, Product::Agent).await.err().unwrap();
+    let error = prepare(&store).await.err().unwrap();
     assert!(error.to_string().contains("Root changed"), "{error}");
     assert!(
         !database.exists(),
@@ -274,27 +239,6 @@ async fn replacement_host_root_cannot_resume_original_initialization() {
             .pending
             .is_some()
     );
-    store.drain().await;
-}
-
-#[tokio::test]
-async fn invalid_presentation_is_rejected_before_host_initialization() {
-    let directory = tempfile::tempdir().unwrap();
-    let host = directory.path().join("host");
-    let store = open(directory.path().join("ui"), true, None).await.unwrap();
-    for presentation in [json!("desktop"), json!(7), json!(null)] {
-        let error = begin(
-            &store,
-            Installation::Configured(json!({"presentation":presentation,"hostRoot":host})),
-            Product::Agent,
-        )
-        .await
-        .err()
-        .unwrap();
-        assert!(error.to_string().contains("requires tui"));
-        assert!(!host.exists());
-        assert!(store.application_launch().await.unwrap().is_none());
-    }
     store.drain().await;
 }
 

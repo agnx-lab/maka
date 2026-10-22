@@ -88,7 +88,7 @@ describe('unread paths', () => {
   it('keeps hand-authored sources, including tests and locale copy', () => {
     assert.equal(readable([file('products/maka/cli/src/main.rs', 20, 4)]), 24);
     assert.equal(readable([file('plugins/agent/engine/tests/session.rs', 300)]), 300);
-    assert.equal(readable([file('platform/render-terminal/src/i18n.rs', 80)]), 80);
+    assert.equal(readable([file('products/maka/terminal-shell/app/i18n.ts', 80)]), 80);
     // Named for the notices but hand-written policy prose.
     assert.equal(readable([file('docs/README.md', 40)]), 40);
   });

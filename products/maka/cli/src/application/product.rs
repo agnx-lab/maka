@@ -33,7 +33,6 @@ mod restore;
 mod test_public;
 mod update;
 pub(crate) use headless::{Roots, open_host, select_committed_host};
-pub(crate) use launch::Launch;
 pub(super) use restore::Restore;
 pub(super) use update::Update;
 
@@ -93,6 +92,7 @@ pub(super) struct PackageSets {
     pub(super) management_host: Vec<maka_plugin_core::package::PackageRef>,
     pub(super) ui: Vec<maka_plugin_core::package::PackageRef>,
 }
+#[cfg(test)]
 impl PackageSets {
     pub(super) fn from_applications(applications: &[PreparedApplication; 3]) -> Self {
         Self {

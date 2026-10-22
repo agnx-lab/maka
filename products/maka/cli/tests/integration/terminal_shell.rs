@@ -26,16 +26,45 @@ fn terminal_shell_help_runs_from_the_cli_without_a_sibling_shell() {
         .path()
         .join(if cfg!(windows) { "maka.exe" } else { "maka" });
     std::fs::copy(env!("CARGO_BIN_EXE_maka"), &executable).unwrap();
-    let output = Command::new(&executable)
-        .args(["terminal-shell", "--help"])
-        .current_dir(directory.path())
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    assert!(output.stderr.is_empty(), "{output:?}");
-    let help = String::from_utf8(output.stdout).unwrap();
-    assert!(help.contains("--root"), "{help}");
-    assert!(help.contains("--session"), "{help}");
-    assert!(!help.contains("<ARGS>"), "{help}");
+    for arguments in [vec!["--help"], vec!["terminal-shell", "--help"]] {
+        let output = Command::new(&executable)
+            .args(arguments)
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let help = String::from_utf8(output.stdout).unwrap();
+        assert!(help.contains("--root"), "{help}");
+        assert!(help.contains("--session"), "{help}");
+        assert!(!help.contains("<ARGS>"), "{help}");
+    }
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn default_and_explicit_terminal_entries_reject_redirected_stdio_before_host_startup() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("absent-host");
+    for arguments in [
+        vec![],
+        vec!["--root", root.to_str().unwrap()],
+        vec!["terminal-shell"],
+        vec!["terminal-shell", "--root", root.to_str().unwrap()],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_maka"))
+            .args(&arguments)
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{arguments:?}: {output:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}: {output:?}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            "maka terminal-shell: the terminal shell requires a terminal on stdin and stdout\n",
+            "{arguments:?}"
+        );
+        assert!(!root.exists(), "{arguments:?} must not initialize a Host");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
 }

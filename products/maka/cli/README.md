@@ -27,11 +27,9 @@ From the repository root, run `just run` or `just run --help`. Development build
 
 [Source](src/main.rs) · [Cargo manifest](Cargo.toml)
 
-Run `maka terminal-shell` for the [NSH terminal workbench](../terminal-shell/README.md). It uses `~/.maka/application/host` by default and accepts `--root DIRECTORY` and `--session SESSION_ID`. The terminal interface runs inside the same `maka` executable, including Host discovery, startup and terminal cleanup. `maka terminal-shell --help` shows its options.
+Run `maka` or `maka terminal-shell` for the [NSH terminal workbench](../terminal-shell/README.md). Both use `~/.maka/application/host` by default and accept `--root DIRECTORY` and `--session SESSION_ID`. Host discovery, startup, the interface and terminal cleanup run inside the same `maka` executable. Startup connects to an existing Host or starts one automatically; terminal and desktop clients can share that Host. Select a workspace and model in the interface. Terminals without image support use the Unicode renderer.
 
-The first installation asks for workspace trust inside the TUI, before starting the Host or enabling project skills and tools. Tab or the arrow keys select an action; Enter confirms and Esc exits. The initial selection is Exit. Confirmation keeps the same terminal screen while the product initializes. Reopening uses the saved installation without asking again.
-
-Startup discovers the local Host and connects to it, or starts one automatically. TUI and Desktop can share that Host. By default, quitting a UI also stops the Host when no other client remains. Use Ctrl+Alt+Q in the TUI to close only the UI and keep accepted background tasks running; reconnect to observe their results.
+`maka --help` lists the CLI commands and default terminal options; `maka terminal-shell --help` shows the terminal options alone. The interactive entry requires terminal stdin and stdout. When either is redirected it exits with an error before opening or creating a Host; use explicit Host, application, Code or ACP commands for automation.
 
 `host serve` and `application serve` emit a JSON `ready` line with `rootId`, `hostEpoch` and `socketPath`. Use that epoch when connecting and verify the live Host identity. On Unix, sockets live in a private temporary child directory selected by the system; set `TMPDIR` for a different parent. The canonical socket path must fit the portable 100-byte limit; choose a shorter parent if startup reports that limit.
 

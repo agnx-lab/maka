@@ -55,10 +55,10 @@ with `maka application read`. Updates use the observed revision and preserve ins
 identities. Commit stores desired input and bytes; it is distinct from successful
 activation and cleanup.
 
-Run a committed TUI with `maka application run --root PATH --deployment UUID` in a
-foreground terminal. Cross-process services additionally require launcher connection
-configuration and explicit method/recovery grants. Verify native terminal input
-through the TUI presenter rather than only a pure component reducer test.
+Verify native rendering and input with the intended presenter's existing component
+fixtures. To exercise an installed business Host through Maka's terminal workbench,
+run `maka --root HOST_ROOT`; the Host's selected deployment and explicit grants
+remain authoritative.
 
 In a checkout, run the relevant crate tests and SDK/product type checks. Product
 tests build once before running. To build another product artifact concurrently,

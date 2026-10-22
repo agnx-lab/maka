@@ -18,7 +18,7 @@
  */
 
 //! Restore the installation baseline with the existing durable launcher preparation.
-use super::{HostError, Input, Package, Product, RemoteObservation, Sources, launch};
+use super::{HostError, Input, Package, RemoteObservation, Sources, launch};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use clap::Args;
 use maka_event_log::EventLog;
@@ -51,7 +51,7 @@ async fn restore(store: &EventLog) -> Result<DeploymentRef, HostError> {
     if let Some(pending) = &record.pending {
         let preparation: launch::Preparation = serde_json::from_slice(pending)?;
         let restoring = !preparation.restore.is_empty();
-        launch::prepare(store, None, Product::Agent).await?;
+        launch::prepare(store).await?;
         if restoring {
             return Ok(store
                 .read_application_metadata(record.deployment)
@@ -147,7 +147,7 @@ async fn restore(store: &EventLog) -> Result<DeploymentRef, HostError> {
     }
     .await;
     result?;
-    launch::prepare(store, None, Product::Agent).await?;
+    launch::prepare(store).await?;
     Ok(store
         .read_application_metadata(record.deployment)
         .await?

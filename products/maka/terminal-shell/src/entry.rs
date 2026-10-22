@@ -38,8 +38,8 @@ use std::{
     },
 };
 
-/// Options shared with the `maka terminal-shell` command.
-#[derive(clap::Args)]
+/// Options for the default `maka` entry and the `maka terminal-shell` command.
+#[derive(clap::Args, Default)]
 #[command(version, about = "Maka terminal application using NSH")]
 pub struct Args {
     /// Business Host Root (default: ~/.maka/application/host).

@@ -42,47 +42,7 @@ node scripts/rust/notices.mjs check
 
 检查生成的清单和许可证文本。[notices-sources.json](notices-sources.json)记录已审查的上游例外。发布组装还包含实际 V8 构建与 Rust 标准库的 notices。TSV 清单不能替代完整许可证文本。
 
-在 macOS/Linux 上比较直接启动 TUI 的耗时：先构建并保留前后两个可执行文件，再运行：
-
-```sh
-python3 scripts/rust/benchmark-startup.py --binary target/debug/maka \
-  --baseline /tmp/maka-before --runs 5 --output /tmp/maka-startup
-```
-
-基准使用独立数据目录，首次安装单独计时，重开按前后版本交替执行。它等待首页出现并确认命令面板可用后退出。输出目录保留原始终端输出、失败次数及耗时中位数和范围。两版应使用相同构建配置，测量期间避免同时构建。
-
-在 Linux/WSL 上对照 TUI 行为与响应性，先将前后两个 CLI 可执行文件保留为
-`/tmp/maka-before` 和 `/tmp/maka-after`。两版均使用现有 debug profile 和相同
-feature，不调整优化级别。构建共用夹具，再将 Cargo 输出的测试可执行文件路径
-设为 `$INTEGRATION`。Debug 二进制默认从原构建工作区读取产品资产；从冻结的前版本
-构建一份 bundle，两版共用。`--bundle` 使用正式 `MAKA_PRODUCT_BUNDLE` 覆盖入口，
-保留完整的产品指纹校验：
-
-```sh
-cargo test -p maka-cli --no-default-features --test integration --no-run
-# 在冻结的前版本工作区执行：
-node products/maka/bundle/scripts/build.mjs --output /tmp/maka-product-bundle
-python3 scripts/rust/benchmark-tui-parity.py --fixture "$INTEGRATION" \
-  --baseline /tmp/maka-before --candidate /tmp/maka-after \
-  --bundle /tmp/maka-product-bundle \
-  --runs 5 --output /tmp/maka-tui-parity
-python3 scripts/rust/benchmark-tui-parity.py --fixture "$INTEGRATION" \
-  --baseline /tmp/maka-before --candidate /tmp/maka-after --case concurrent \
-  --bundle /tmp/maka-product-bundle \
-  --runs 5 --output /tmp/maka-tui-concurrent
-```
-
-普通 case 对照输入、滚动、resize 和命令面板操作后的完整 VT 文字帧、可见光标
-与终端模式；concurrent case 验证持续流式期间的输入和滚动，并对照稳定的最终帧。
-两者均核对完整复制内容，保留原始帧、ANSI、明确的动画／计时标签排除记录、失败及
-耗时范围。首帧可见延迟与 `observation_ms` 分开：CPU 和 ANSI 字节数覆盖完整观察
-窗口，包含后续观察与重绘。CPU 仅计 UI 进程及其线程，不含 Host 和夹具；并发总量
-与各输入样本的窗口重叠，不可相加。Linux 内存指标记录 checkpoint 的 `ui_rss_bytes`
-（VmRSS）和进程启动至该 checkpoint 的累计峰值 `ui_peak_rss_bytes`（VmHWM），单位均为
-bytes，不含 Host／夹具，其他系统为 null；这些内存快照与累计峰值不可相加。
-颜色和点击区域由 renderer Buffer／geometry
-测试另行核验。超时按已登记的进程身份与 Host root 清理，证据保存在 `cleanup.json`；
-清理依赖 Linux `/proc`。测量期间避免同时构建。
+终端行为使用当前 [terminal-shell 真实 Host 测试](../../products/maka/terminal-shell/tests/real_host.rs)，包含生产 PTY 生命周期。通过 `cargo test -p maka-cli --no-default-features --test terminal_real_host` 运行。比较保留的 release 产物时，使用相同渲染器、终端协议、视口和负载；分别报告输入延迟、帧编码和输出传输。
 
 长任务对比使用两个版本保留的 release 测试可执行文件，基准夹具必须相同。
 通过 `cargo test --release --no-run` 构建 `maka-event-log --test archive`

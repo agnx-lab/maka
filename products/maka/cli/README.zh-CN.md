@@ -27,11 +27,9 @@
 
 [源码](src/main.rs) · [Cargo 配置](Cargo.toml)
 
-运行 `maka terminal-shell` 打开 [NSH 终端工作台](../terminal-shell/README.zh-CN.md)。默认使用 `~/.maka/application/host`，支持 `--root DIRECTORY` 和 `--session SESSION_ID`。终端界面及其 Host 发现、启动和终端清理都在同一个 `maka` 可执行文件中运行。`maka terminal-shell --help` 可查看参数。
+运行 `maka` 或 `maka terminal-shell` 打开 [NSH 终端工作台](../terminal-shell/README.zh-CN.md)。两者默认使用 `~/.maka/application/host`，支持 `--root DIRECTORY` 和 `--session SESSION_ID`。Host 发现、启动、界面和终端清理均在同一个 `maka` 可执行文件中运行。启动时连接已有 Host，不存在则自动启动；终端与桌面客户端可以共享 Host。在界面中选择工作区和模型。不支持图片的终端使用 Unicode 渲染。
 
-首次安装会在 TUI 内确认工作目录信任，然后才启动 Host、启用项目技能与工具。Tab 或方向键选择，Enter 确认，Esc 退出；默认选中退出。确认后在同一终端画面中初始化并进入产品。再次打开使用已保存的安装，不重复询问。
-
-启动时自动发现并连接本机 Host；不存在则自动启动。TUI 与 Desktop 可以共享同一个 Host。默认退出 UI 时，若没有其他客户端连接，Host 也会退出。TUI 中可用 Ctrl+Alt+Q 仅关闭界面，让已接受的后台任务继续运行，重连后观察结果。
+`maka --help` 列出 CLI 命令和默认终端参数，`maka terminal-shell --help` 单独查看终端参数。交互入口要求 stdin 和 stdout 都连接终端；任一被重定向时，在打开或创建 Host 前报错退出。自动化使用显式 Host、application、Code 或 ACP 命令。
 
 `host serve` 和 `application serve` 输出的 JSON `ready` 行包含 `rootId`、`hostEpoch` 和 `socketPath`。接入时使用该 epoch，并核对实际 Host 身份。Unix socket 位于系统选择的临时目录下的私有子目录中，可通过 `TMPDIR` 指定其他父目录。规范化后的 socket 路径须满足可移植的 100 字节上限；若启动报告路径过长，请选择更短的父目录。
 

@@ -17,14 +17,13 @@
  * under the License.
  */
 
-//! One native launcher record, original source commits, and the existing UI/Host owners.
-use super::{Product, Sources, packages};
-use crate::application::{HostError, read_json, run_tui};
+//! Durable product recovery and shared Host installation operations.
+use super::Sources;
+use crate::application::HostError;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use clap::Args;
 use maka_event_log::{
     EventLog,
-    applications::{LoadedDeployment, PreparedApplication, launch::Launch as Record},
+    applications::{LoadedDeployment, PreparedApplication},
     root::{RootNamespaces, RootOwner},
 };
 use maka_packages::Package;
@@ -35,38 +34,9 @@ use maka_plugin_core::{
 use maka_transport::{Configuration, HostLocation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, io::IsTerminal, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use uuid::Uuid;
 
-pub(super) enum Installation {
-    Standard(Value),
-    Configured(Value),
-}
-
-#[derive(Args, Default)]
-pub(crate) struct Launch {
-    /// UI State Root (default: ~/.maka/application); reopen its saved product.
-    #[arg(long)]
-    root: Option<PathBuf>,
-    /// Advanced first-install configuration; otherwise use the standard product.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["workspace", "locale", "light", "trust_workspace"])]
-    configuration: Option<PathBuf>,
-    /// Product for first initialization. Reopen uses the persisted application.
-    #[arg(long, value_enum)]
-    product: Option<Product>,
-    /// First-install workspace (default: current directory).
-    #[arg(long, value_name = "DIRECTORY")]
-    workspace: Option<PathBuf>,
-    /// Initial language; omitted follows the system, settings can override it.
-    #[arg(long, value_parser = ["auto", "en", "zh-CN", "zh-TW"])]
-    locale: Option<String>,
-    /// Start the first installation with the light theme.
-    #[arg(long)]
-    light: bool,
-    /// Trust the first-install workspace for file changes and sandboxed commands.
-    #[arg(long)]
-    trust_workspace: bool,
-}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Preparation {
@@ -87,94 +57,6 @@ struct PreparedLaunch {
     configuration: Value,
     preparation: Preparation,
     applications: [PreparedApplication; 3],
-}
-
-impl Launch {
-    pub(crate) async fn run(self) -> Result<(), HostError> {
-        if self.configuration.is_none()
-            && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal())
-        {
-            return Err(
-                "Maka needs an interactive terminal. Use --help for automation commands.".into(),
-            );
-        }
-        eprintln!("Opening product…");
-        let root = super::root_path(self.root.clone())?;
-        let store = Arc::new(open(root.clone(), true, None).await?);
-
-        let mut startup = None;
-        let result = async {
-            let existing = store.application_launch().await?.is_some();
-            if existing && (self.workspace.is_some() || self.locale.is_some() || self.light
-                || self.product.is_some() || self.trust_workspace) {
-                return Err("first-install options cannot change a saved product; reopen with --root only and use Settings or Plugins".into());
-            }
-            let configuration = match self.configuration {
-                Some(path) => Some(Installation::Configured(read_json(&path)?)),
-                None if existing => None,
-                None => match standard_configuration(root, self.workspace, self.locale, self.light, self.trust_workspace, &mut startup).await? {
-                    Some(configuration) => Some(configuration),
-                    None => return Ok(None),
-                },
-            };
-            let selected = prepare(&store, configuration, self.product.unwrap_or(Product::Agent)).await?;
-
-            if existing && super::update::begin(&store).await? {
-                prepare(&store, None, Product::Agent).await.map(Some)
-            } else {
-                Ok(Some(selected))
-            }
-        }.await;
-        let (loaded, configuration, anchors) = match result {
-            Ok(Some(value)) => value,
-            Ok(None) => {
-                store.drain().await;
-                return Ok(());
-            }
-            Err(error) => {
-                store.drain().await;
-                return Err(error);
-            }
-        };
-        run_tui(store, loaded, configuration, startup, anchors).await
-    }
-}
-async fn standard_configuration(
-    root: PathBuf,
-    workspace: Option<PathBuf>,
-    locale: Option<String>,
-    light: bool,
-    trusted: bool,
-    startup: &mut Option<maka_render_terminal::startup::Startup>,
-) -> Result<Option<Installation>, HostError> {
-    let workspace = std::fs::canonicalize(workspace.unwrap_or(std::env::current_dir()?))?;
-    if !workspace.is_dir() {
-        return Err("workspace must be a directory".into());
-    }
-    let home = crate::serve::home_directory()?;
-    if !trusted {
-        let shown = workspace.clone();
-        let language = locale
-            .as_deref()
-            .filter(|value| *value != "auto")
-            .map(str::to_owned)
-            .unwrap_or_else(maka_ui_runtime::locale::system);
-        *startup = tokio::task::spawn_blocking(move || {
-            maka_render_terminal::startup::Startup::confirm(&shown, &language, light)
-        })
-        .await??;
-        if startup.is_none() {
-            return Ok(None);
-        }
-    }
-    let options = serde_json::json!({
-        "workspace": workspace, "hostRoot": root.join("host"),
-        "themeFile": root.join("appearance/theme.json"),
-        "helper": std::env::current_exe()?, "home": home,
-        "locale": locale.unwrap_or_else(|| "auto".into()),
-        "scheme": if light { "light" } else { "dark" },
-    });
-    Ok(Some(Installation::Standard(options)))
 }
 
 pub(super) async fn open(
@@ -230,8 +112,6 @@ pub(super) fn targets(
 }
 pub(super) async fn prepare(
     store: &EventLog,
-    configuration: Option<Installation>,
-    product: Product,
 ) -> Result<
     (
         LoadedDeployment,
@@ -240,18 +120,10 @@ pub(super) async fn prepare(
     ),
     HostError,
 > {
-    let record = match store.application_launch().await? {
-        Some(record) => {
-            if configuration.is_some() {
-                return Err("product already selected; reopen with --root only (initialization will resume if needed)".into());
-            }
-            record
-        }
-        None => {
-            let configuration = configuration.ok_or("first launch requires --configuration")?;
-            return finish(store, begin(store, configuration, product).await?).await;
-        }
-    };
+    let record = store
+        .application_launch()
+        .await?
+        .ok_or("product selection missing")?;
     let connections: Configuration = serde_json::from_value(record.configuration.clone())?;
     let (root, domain, host, _) = targets(&connections)?;
     if let Some(bytes) = record.pending {
@@ -446,86 +318,6 @@ async fn bootstrap_host(
     result.map(|()| true)
 }
 
-async fn begin(
-    store: &EventLog,
-    input: Installation,
-    product: Product,
-) -> Result<PreparedLaunch, HostError> {
-    let version = super::bundle_fingerprint()?;
-    let authoring = super::authoring()?;
-    let (mut configuration, mut default_options) = match input {
-        Installation::Standard(options) => (
-            super::installation_with_source(options.clone(), &authoring).await?,
-            Some(options),
-        ),
-        Installation::Configured(configuration) => (configuration, None),
-    };
-    let values = configuration
-        .as_object_mut()
-        .ok_or("installation configuration must be an object")?;
-    match values.get("presentation") {
-        None => {
-            values.insert("presentation".into(), Value::String("tui".into()));
-        }
-        Some(Value::String(value)) if value == "tui" => {}
-        _ => return Err("product launch requires tui presentation".into()),
-    }
-    let root = PathBuf::from(
-        values
-            .get("hostRoot")
-            .and_then(Value::as_str)
-            .ok_or("hostRoot is required")?,
-    );
-    let root = std::path::absolute(root)?;
-    // Acquire the actual independent Host Root before recording its identity.
-    let host_store = open(root, true, None).await?;
-    let result = async {
-        let owner = host_store.owned_root()?;
-        configuration["hostRoot"] = serde_json::to_value(owner.canonical_path())?;
-        if let Some(options) = &mut default_options {
-            options["hostRoot"] = configuration["hostRoot"].clone();
-        }
-        let packages = tokio::task::spawn_blocking(packages).await??;
-        let version = super::verified_fingerprint(&authoring, &packages, &version)?;
-        let (mut sources, installation, applications) = super::author_with_source(product, configuration, &packages, &authoring).await?;
-        for host in sources.connections["hosts"].as_array_mut().ok_or("product connections missing")? {
-            if host["location"]["kind"] == "public" {
-                host["location"]["stateDomain"] = Value::String(owner.root_id().into());
-            }
-        }
-        let connections: Configuration = serde_json::from_value(sources.connections.clone())?;
-        let (_, _, host, management) = targets(&connections)?;
-        // Explicitly supplied identities must also represent a new installation.
-        if host_store.read_application_metadata(host).await?.is_some()
-            || store.read_application_metadata(management).await?.is_some() {
-            return Err("installation deployment already exists; use its original launcher or application run".into());
-        }
-        let selection = sources.connections.clone();
-        let package_sets = super::PackageSets::from_applications(&applications);
-        let inventory: BTreeMap<_, _> = applications.iter().flat_map(|application| application.packages())
-            .map(|package| (package.application_ref(), package)).collect();
-        let mut preparation = Preparation {
-            product: Some(super::update::Baseline { product, installation, default_options, sources: sources.clone(), version: Some(version) }),
-            previous_connections: None,
-            restore: BTreeMap::new(),
-            sources,
-            package_sets,
-            packages: inventory.values().map(|package| package.files().iter().map(|(path, bytes)| (path.clone(), STANDARD.encode(bytes))).collect()).collect(),
-        };
-        let deployment = Uuid::new_v4();
-        store.begin_application_launch(Record {
-            deployment, configuration: selection.clone(),
-            pending: Some(serde_json::to_vec(&preparation)?),
-        }).await?;
-        preparation.packages.clear();
-        Ok::<_, HostError>(PreparedLaunch {
-            deployment, configuration: selection, preparation,
-            applications,
-        })
-    }.await;
-    host_store.drain().await;
-    result
-}
 pub(super) fn decode_packages(
     files: Vec<BTreeMap<String, String>>,
 ) -> Result<Vec<Package>, HostError> {

@@ -210,7 +210,7 @@ describe('ASF header classification', () => {
     for (const path of [
       'plugins/settings/store/src/lib.rs',
       'scripts/asf-source-release.mjs',
-      'platform/render-terminal/locales/zh-CN.ftl',
+      'locales/zh-CN.ftl',
       'products/maka/cli/src/main.rs',
       'Dockerfile',
       'justfile',
@@ -220,7 +220,7 @@ describe('ASF header classification', () => {
     ]) {
       assert.equal(classifyPath(path).status, 'covered', path);
     }
-    assert.equal(commentStyleFor('platform/render-terminal/locales/zh-CN.ftl'), 'hash');
+    assert.equal(commentStyleFor('locales/zh-CN.ftl'), 'hash');
   });
 
   test('excludes the reviewed categories', () => {

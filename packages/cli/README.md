@@ -31,7 +31,7 @@ The launcher selects the matching native executable and forwards arguments, stan
 
 The `latest` tags remain empty placeholders, including the separate `maka-agent` package. They contain no CLI, runtime, dependencies or install scripts. The placeholder source lives in [placeholder](placeholder/README.md); preview artifacts must stay on `rust-preview`.
 
-Run `maka` to start the terminal product. First launch confirms the workspace; later launches reopen the saved installation. See [the product guide](../../products/maka/bundle/README.md) for configuration and explicit composition commands.
+Run `maka` to open the NSH terminal workbench. It discovers or starts the Host at `~/.maka/application/host`; use `--root HOST_ROOT` to select another Host and `--session SESSION_ID` to open an existing conversation. `maka --help` lists automation commands. See [the product guide](../../products/maka/bundle/README.md) for composition and installation commands.
 
 Launch the desktop with `maka desktop --root HOST_ROOT`. This required path selects the business Host: a missing Root gets the standard read-only Host, and an existing Root reopens its saved deployment. The launcher keeps its verified Host client until the shell exits; other connected clients keep the Host alive. The packaged shell reads its adjacent app independently of the working directory. See [desktop-shell](../../products/maka/desktop-shell/README.md) for direct development commands.
 

@@ -28,7 +28,7 @@ use crate::{candidate, code, serve};
 #[command(name = "maka", version, about = "Maka")]
 pub(super) struct Cli {
     #[command(flatten)]
-    launch: Option<crate::application::Launch>,
+    terminal: Option<maka_terminal_shell::entry::Args>,
     /// Total observation budget for a finite Host operation, including cleanup.
     #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=600_000))]
     timeout_ms: Option<u64>,
@@ -139,7 +139,7 @@ struct Log {
 
 impl Cli {
     pub(super) fn is_terminal_shell(&self) -> bool {
-        matches!(self.command, Some(Command::TerminalShell(_)))
+        self.command.is_none() || matches!(self.command, Some(Command::TerminalShell(_)))
     }
 
     pub(super) fn logs_to_stderr(&self) -> bool {
@@ -165,8 +165,8 @@ impl Cli {
     }
 
     pub(super) async fn run(self) -> Result<std::process::ExitCode, HostError> {
-        if self.command.is_some() && self.launch.is_some() {
-            return Err("product startup options cannot be combined with a CLI command".into());
+        if self.command.is_some() && self.terminal.is_some() {
+            return Err("terminal options cannot be combined with a CLI command".into());
         }
         let finite = matches!(&self.command, Some(Command::Host(command)) if !matches!(command,
             HostCommand::Candidate(_) | HostCommand::Serve { .. } | HostCommand::ServiceRun(_)
@@ -205,7 +205,7 @@ impl Cli {
 
     async fn execute(self) -> Result<std::process::ExitCode, HostError> {
         let Some(command) = self.command else {
-            self.launch.unwrap_or_default().run().await?;
+            self.terminal.unwrap_or_default().run().await?;
             return Ok(std::process::ExitCode::SUCCESS);
         };
         let result = match command {
@@ -308,16 +308,7 @@ mod tests {
         for arguments in [
             vec!["maka"],
             vec!["maka", "desktop", "--root", "/tmp/desktop-host"],
-            vec!["maka", "application", "launch"],
-            vec![
-                "maka",
-                "application",
-                "run",
-                "--root",
-                "/tmp/logging-ui",
-                "--deployment",
-                "00000000-0000-0000-0000-000000000001",
-            ],
+            vec!["maka", "terminal-shell"],
         ] {
             assert!(
                 !Cli::try_parse_from(&arguments).unwrap().logs_to_stderr(),
@@ -327,11 +318,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn entry_launches_the_product_and_preserves_operator_parsing() {
+    async fn entry_launches_the_terminal_shell_and_preserves_operator_parsing() {
         Cli::command().debug_assert();
         assert!(Cli::try_parse_from(["maka"]).unwrap().command.is_none());
         assert!(
-            Cli::try_parse_from(["maka", "--root", "/tmp/product", "--locale", "zh-CN"])
+            Cli::try_parse_from(["maka", "--root", "/tmp/host", "--session", "session-id"])
                 .unwrap()
                 .command
                 .is_none()
@@ -362,7 +353,7 @@ mod tests {
             "/tmp/test-root",
         ])
         .unwrap();
-        assert!(worker.launch.is_none());
+        assert!(worker.terminal.is_none());
         assert!(worker.operation_worker);
         assert_eq!(worker.timeout_ms, Some(1000));
         assert!(matches!(
@@ -375,20 +366,20 @@ mod tests {
                 .command,
             Some(Command::Host(HostCommand::Init(_)))
         ));
-        assert!(matches!(
-            Cli::try_parse_from([
-                "maka",
-                "application",
-                "run",
-                "--root",
-                "/tmp/test-root",
-                "--deployment",
-                "00000000-0000-0000-0000-000000000001"
-            ])
-            .unwrap()
-            .command,
-            Some(Command::Application(crate::application::Command::Run(_)))
-        ));
+        for arguments in [
+            vec!["maka"],
+            vec!["maka", "--root", "/tmp/host"],
+            vec!["maka", "terminal-shell", "--session", "session-id"],
+        ] {
+            assert!(Cli::try_parse_from(arguments).unwrap().is_terminal_shell());
+        }
+        for arguments in [
+            vec!["maka", "tui"],
+            vec!["maka", "application", "run"],
+            vec!["maka", "application", "launch"],
+        ] {
+            assert!(Cli::try_parse_from(arguments).is_err());
+        }
         assert!(Cli::try_parse_from(["maka", "unknown-command"]).is_err());
     }
 }

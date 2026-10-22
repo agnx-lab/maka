@@ -86,7 +86,7 @@ impl Pty {
             0
         );
         let mut command = Command::new(env!("CARGO_BIN_EXE_maka"));
-        command.args(["terminal-shell", "--root", root.to_str().unwrap()]);
+        command.args(["--root", root.to_str().unwrap()]);
         if let Some(session) = session {
             command.args(["--session", session]);
         }

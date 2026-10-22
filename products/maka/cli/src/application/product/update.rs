@@ -88,9 +88,9 @@ impl Update {
                 selection.validate()?;
                 super::headless::update::synchronize(&store, self.apply).await?
             } else {
-                let mut outcome = synchronize(&store, true, self.apply).await?;
+                let mut outcome = synchronize(&store, self.apply).await?;
                 if self.apply && outcome.changed && outcome.conflicts.is_empty() {
-                    launch::prepare(&store, None, Product::Agent).await?;
+                    launch::prepare(&store).await?;
                     outcome.applied = true;
                 }
                 outcome
@@ -107,22 +107,8 @@ impl Update {
     }
 }
 
-pub(super) async fn begin(store: &EventLog) -> Result<bool, HostError> {
-    let outcome = synchronize(store, false, true).await?;
-    Ok(outcome.changed && !outcome.customized)
-}
-
-async fn synchronize(store: &EventLog, custom: bool, apply: bool) -> Result<Outcome, HostError> {
+async fn synchronize(store: &EventLog, apply: bool) -> Result<Outcome, HostError> {
     let version = tokio::task::spawn_blocking(super::bundle_fingerprint).await??;
-    synchronize_version(store, custom, apply, version).await
-}
-
-async fn synchronize_version(
-    store: &EventLog,
-    custom: bool,
-    apply: bool,
-    version: String,
-) -> Result<Outcome, HostError> {
     let record = store
         .application_launch()
         .await?
@@ -133,9 +119,6 @@ async fn synchronize_version(
     let original = store.application_product().await?.ok_or(
         "saved UI product has no default-update baseline; update its composition explicitly",
     )?;
-    if !custom && original.get("version").and_then(Value::as_str) == Some(version.as_str()) {
-        return Ok(Outcome::default());
-    }
     let mut baseline: Baseline = serde_json::from_value(original.clone())?;
     let connections = serde_json::from_value(record.configuration.clone())?;
     let (path, domain, host_id, management) = launch::targets(&connections)?;
@@ -167,9 +150,6 @@ async fn synchronize_version(
             customized: local_value != base,
             ..Default::default()
         };
-        if outcome.customized && !custom {
-            return Ok(outcome);
-        }
         if baseline.version.as_ref() == Some(&version) {
             return Ok(outcome);
         }

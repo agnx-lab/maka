@@ -27,7 +27,6 @@ mod initialize;
 #[path = "../../../../../platform/transport/tests/support/mod.rs"]
 mod local_fixture;
 mod sandbox;
-mod terminal;
 mod terminal_shell;
 #[path = "../../src/tests.rs"]
 mod unwind;

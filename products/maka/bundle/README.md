@@ -33,10 +33,10 @@ From the repository root:
 
 ```sh
 just run
-just run --root /tmp/maka-workhub --product workhub
+just run --root /path/to/business-host
 ```
 
-The first launch confirms the workspace and installs the selected terminal product. Standard installations retain the original launcher inputs and regenerate defaults from the current bundled product on upgrade, so new default services and tools are included. Later launches automatically update an unchanged default composition, preserving installation identities, task data and saved settings. A customized composition stays unchanged. Installations created with `--configuration` retain that explicit feature and tool selection when their packages update. The default UI Root is `~/.maka/application`, with its Host Root under `host`; startup options cannot reconfigure an existing installation.
+`just run` opens the [NSH terminal workbench](../terminal-shell/README.md), using `~/.maka/application/host` by default. It connects to an existing Host or starts one automatically. Authoring commands below generate and manage plugin compositions independently of this terminal interface.
 
 For a customized UI product, close Maka and run `maka application update-defaults` to preview a three-way merge of the previous defaults, local composition and new defaults. Use `--apply` to synchronize when the preview has no conflicts; `--root PATH` selects another installation. Independent changes merge by field; conflicting values, deletions and ordered lists report JSON Pointer paths and prevent the entire update. The preview validates the merged composition and actual packages. Updates preserve installed packages that are not selected by the composition, within their original Host or UI. Completed synchronization records the new default baseline, and interrupted writes resume on reopening. UI installations without a saved baseline require explicit composition updates. Standalone Hosts preserve their composition and support [selected package updates](../cli/README.md#product-updates-recovery-and-url-installation) without a UI or default baseline.
 
@@ -45,22 +45,6 @@ For a customized UI product, close Maka and run `maka application update-default
 ```sh
 node products/maka/bundle/scripts/build.mjs --output /tmp/maka-product-bundle
 ```
-
-## Terminal interaction
-
-Tasks can be created and drafted before a model is configured. Sending without a model opens connection setup; completing setup returns to the original draft and model picker. Providers are grouped by service, with variants and advanced configuration disclosed when needed.
-
-The task sidebar stays alongside the workspace. Drag its divider to resize it, or focus the divider with Tab and use Left/Right; Home restores the default width. Details and running terminals open in a side panel. Narrow workspaces show the active panel in place of the conversation; closing it restores the conversation and draft. Esc dismisses the nearest temporary surface first.
-
-Model, connection, project and task lists load or reveal further rows as they scroll. Rendered windows remain bounded, and overlapping rows keep the viewport anchored when the window moves. Scrolling does not take keyboard focus; arrows and Enter provide the corresponding list actions. Approvals and questions appear with the current task, while operation history remains available for recovery.
-
-The task header shows the current recorded state and goal. “Turn ended” describes execution, not verified delivery. F4 opens outputs and verification: expand file changes or command results, or read their original source. This panel follows the loaded history window; its earlier/newer controls expose other records.
-
-The three most recently visited tasks retain their reading owners, search and auxiliary context within a bounded content budget. Drafts use their existing independent storage. Returning to a task preserves the visible content, including a streaming prefix; “Latest” explicitly catches up with newer records. Running submissions are labelled “Queue next turn”; the queue can move a queued message into the current execution where supported.
-
-At narrow widths the task sidebar collapses automatically, retaining its chosen width for later. Model selection opens near the input area. Anonymous providers expose their endpoint without requiring advanced settings or sign-in.
-
-Apps exposes both local-file and URL installation directly. Enter in the URL field reviews the captured link before installation; uncertain results keep the original operation available for checking. The local browser fills the available page height and preserves its selection when resized. After installation, choose an application component to add it to Apps. Closing or removing an app remains available from its context menu.
 
 ## Author an installation
 
@@ -76,9 +60,9 @@ The output directory must be new. The command writes Host, management and UI sou
 
 Preserve the emitted `keys`, `hostDeployment` and `managementDeployment` when reauthoring an installation. They identify existing owners and data. Package revisions identify bytes and can change independently.
 
-For a terminal installation, `maka application launch --root UI_ROOT --configuration installation.json` initializes and starts it. Reopen with only `--root UI_ROOT`; interrupted initialization resumes its original preparation.
+For explicit installation, initialize the target Host Root with `maka host init`, then commit `host.json` using `maka application commit`. Supply the selected deployment ID, expected revision and exported packages. Composition and source commands also support independently managed UI deployments. Each command's `--help` lists its required arguments.
 
-For explicit installation, initialize Host and UI Roots with `maka host init`, then commit `host.json`, `management-host.json` and `ui.json` using `maka application commit`. The management source belongs to the UI Root. Supply the selected deployment IDs, expected revisions, exported packages and, for UI, `remote-exports.json`. Run the UI with `maka application run` or `maka desktop`, passing its Root, deployment and generated `connections.json`. Each command's `--help` lists the required arguments.
+Committing stores desired source and bytes; it does not activate or select that deployment. Use `maka application serve --help` for explicit deployment serving, endpoints and native grants. `maka --root HOST_ROOT` and `maka desktop --root HOST_ROOT` use the Host Root's saved selection.
 
 ## Verify changes
 

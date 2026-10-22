@@ -142,7 +142,7 @@ async fn old_installation(
         .unwrap();
     let serving =
         PublishedHost::start_product(host, host_id, connection.endpoints, connection.native).await;
-    launch::prepare(&store, None, Product::Agent).await.unwrap();
+    launch::prepare(&store).await.unwrap();
     (store, ui, serving)
 }
 
@@ -151,7 +151,7 @@ async fn old_installation(
 async fn explicit_installation_keeps_its_selected_tools_when_packages_upgrade() {
     let directory = tempfile::tempdir().unwrap();
     let (store, _, serving) = old_installation(directory.path(), false).await;
-    assert!(begin(&store).await.unwrap());
+    assert!(synchronize(&store, true).await.unwrap().changed);
     let record = store.application_launch().await.unwrap().unwrap();
     let preparation: launch::Preparation =
         serde_json::from_slice(record.pending.as_ref().unwrap()).unwrap();
@@ -182,8 +182,8 @@ async fn explicit_installation_keeps_its_selected_tools_when_packages_upgrade() 
         .as_array()
         .unwrap();
     assert!(!tools.iter().any(|tool| tool["import"] == "computer"));
-    launch::prepare(&store, None, Product::Agent).await.unwrap();
-    assert!(!begin(&store).await.unwrap());
+    launch::prepare(&store).await.unwrap();
+    assert!(!synchronize(&store, true).await.unwrap().changed);
     serving.stop().await;
     store.drain().await;
 }
@@ -264,7 +264,7 @@ async fn defaults_update_once_and_resume_an_acknowledgement_lost_after_commit() 
     ];
     let original = store.load_application(ui).await.unwrap().unwrap();
     let (original_source, _, _, _) = original.into_parts();
-    let preview = synchronize(&store, true, false).await.unwrap();
+    let preview = synchronize(&store, false).await.unwrap();
     assert!(preview.changed && !preview.customized && preview.conflicts.is_empty());
     assert!(
         preview
@@ -297,7 +297,7 @@ async fn defaults_update_once_and_resume_an_acknowledgement_lost_after_commit() 
             "preview changed a local source inventory"
         );
     }
-    assert!(begin(&store).await.unwrap());
+    assert!(synchronize(&store, true).await.unwrap().changed);
     let pending = store
         .application_launch()
         .await
@@ -363,7 +363,7 @@ async fn defaults_update_once_and_resume_an_acknowledgement_lost_after_commit() 
         )
         .await
         .unwrap();
-    launch::prepare(&store, None, Product::Agent).await.unwrap();
+    launch::prepare(&store).await.unwrap();
     let current = store.load_application(ui).await.unwrap().unwrap();
     let (current_source, _, _, _) = current.into_parts();
     assert_eq!(
@@ -427,7 +427,7 @@ async fn defaults_update_once_and_resume_an_acknowledgement_lost_after_commit() 
         !updated_local[1].packages.contains(old_screen),
         "replaced formerly selected package revisions must not accumulate"
     );
-    assert!(!begin(&store).await.unwrap());
+    assert!(!synchronize(&store, true).await.unwrap().changed);
     assert!(
         store
             .application_launch()
@@ -467,8 +467,7 @@ async fn explicit_sync_keeps_custom_configuration_and_advances_the_default_basel
         )
         .await
         .unwrap();
-    assert!(!begin(&store).await.unwrap()); // Normal reopen cannot change a customized product.
-    let preview = synchronize(&store, true, false).await.unwrap();
+    let preview = synchronize(&store, false).await.unwrap();
     assert!(preview.customized && preview.changed && preview.conflicts.is_empty());
     assert!(
         store
@@ -479,8 +478,8 @@ async fn explicit_sync_keeps_custom_configuration_and_advances_the_default_basel
             .pending
             .is_none()
     );
-    synchronize(&store, true, true).await.unwrap();
-    launch::prepare(&store, None, Product::Agent).await.unwrap();
+    synchronize(&store, true).await.unwrap();
+    launch::prepare(&store).await.unwrap();
     let current = store.load_application(ui).await.unwrap().unwrap();
     let (current_source, _, _, _) = current.into_parts();
     assert_eq!(
@@ -490,9 +489,9 @@ async fn explicit_sync_keeps_custom_configuration_and_advances_the_default_basel
         json!("light")
     );
     assert_eq!(current_source.reference.revision, 3);
-    let preview = synchronize(&store, true, false).await.unwrap();
+    let preview = synchronize(&store, false).await.unwrap();
     assert!(preview.customized && !preview.changed);
-    assert!(!begin(&store).await.unwrap());
+    assert!(!synchronize(&store, true).await.unwrap().changed);
     serving.stop().await;
     store.drain().await;
 }
@@ -530,7 +529,7 @@ async fn conflicting_custom_plugin_does_not_prepare_or_change_any_head() {
         .await
         .unwrap();
     let baseline = store.application_product().await.unwrap();
-    let result = synchronize(&store, true, true).await.unwrap();
+    let result = synchronize(&store, true).await.unwrap();
     assert!(result.changed && result.customized && !result.conflicts.is_empty());
     assert!(
         result
@@ -592,8 +591,8 @@ fn product_version_covers_authoring_and_each_named_package() {
 async fn unchanged_product_records_version_without_rewriting_deployments() {
     let directory = tempfile::tempdir().unwrap();
     let (store, ui, serving) = old_installation(directory.path(), true).await;
-    assert!(begin(&store).await.unwrap());
-    launch::prepare(&store, None, Product::Agent).await.unwrap();
+    assert!(synchronize(&store, true).await.unwrap().changed);
+    launch::prepare(&store).await.unwrap();
     let original = store.application_product().await.unwrap().unwrap();
     let mut uncached = original.clone();
     uncached.as_object_mut().unwrap().remove("version");
@@ -610,14 +609,14 @@ async fn unchanged_product_records_version_without_rewriting_deployments() {
         .unwrap()
         .source
         .reference;
-    assert!(!begin(&store).await.unwrap());
+    assert!(!synchronize(&store, true).await.unwrap().changed);
     let saved: Baseline =
         serde_json::from_value(store.application_product().await.unwrap().unwrap()).unwrap();
     assert_eq!(
         saved.version,
         Some(super::super::bundle_fingerprint().unwrap())
     );
-    assert!(!begin(&store).await.unwrap());
+    assert!(!synchronize(&store, true).await.unwrap().changed);
     assert_eq!(
         store
             .read_application_metadata(ui)
@@ -718,47 +717,4 @@ fn stale_generated_version_cannot_admit_changed_candidates() {
         .extend_from_slice(b"\n// changed");
     changed.insert("notes".into(), Package::new(files).unwrap());
     assert!(super::super::verified_fingerprint("author", &changed, &version).is_err());
-}
-
-#[tokio::test]
-async fn matching_reopen_skips_baseline_sources_and_changed_version_requires_them() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = launch::open(directory.path().join("ui"), true, None)
-        .await
-        .unwrap();
-    let deployment = Uuid::new_v4();
-    store
-        .begin_application_launch(Launch {
-            deployment,
-            configuration: json!({}),
-            pending: Some(vec![1]),
-        })
-        .await
-        .unwrap();
-    let version = super::super::fingerprint("author", []);
-    // A matching reopen needs neither typed baseline sources nor Host/package access.
-    store
-        .complete_application_product(deployment, json!({}), json!({"version": version}))
-        .await
-        .unwrap();
-    let outcome = synchronize_version(&store, false, true, version.clone())
-        .await
-        .unwrap();
-    assert!(!outcome.changed && !outcome.applied);
-    assert!(
-        synchronize_version(
-            &store,
-            false,
-            true,
-            super::super::fingerprint("changed", [])
-        )
-        .await
-        .is_err()
-    );
-    assert!(
-        synchronize_version(&store, true, false, version)
-            .await
-            .is_err()
-    );
-    store.drain().await;
 }

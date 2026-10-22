@@ -21,18 +21,15 @@ mod install;
 mod product;
 mod serve;
 
-pub(crate) use product::{Launch, Roots, open_host, select_committed_host};
+pub(crate) use product::{Roots, open_host, select_committed_host};
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use maka_host_runtime::HostError;
 use maka_packages::Package;
 use maka_plugin_core::{
-    composition::{Input, PresentationTarget},
+    composition::Input,
     deployment::RemoteObservation,
     package::Packages,
     plan::{Plan, RemoteExports},
@@ -49,8 +46,6 @@ pub(super) enum Command {
     UpdateDefaults(product::Update),
     /// Download, validate and install a plugin bundle into an inactive deployment.
     InstallUrl(install::InstallUrl),
-    /// Initialize or reopen an ordinary bundled terminal product.
-    Launch(product::Launch),
     /// Check exact package revisions, template overrides, variants and capability bindings.
     Check(Check),
     /// Emit authoring schemas from the actual runtime wire types.
@@ -59,8 +54,6 @@ pub(super) enum Command {
     InspectPackage(InspectPackage),
     /// Export validated immutable package bytes to a new installable bundle.
     ExportPackage(ExportPackage),
-    /// Run a plugin composition with native terminal presentation.
-    Run(Run),
     /// Atomically commit desired deployment input and exact immutable bytes.
     Commit(Commit),
     /// Read and validate the persisted source and every selected package.
@@ -98,17 +91,6 @@ pub(super) struct Check {
 }
 
 #[derive(Args)]
-pub(super) struct Run {
-    #[arg(long)]
-    root: PathBuf,
-    #[arg(long)]
-    deployment: uuid::Uuid,
-    /// Trusted local Host connections and explicit method/recovery grants.
-    #[arg(long, value_name = "FILE")]
-    connections: Option<PathBuf>,
-}
-
-#[derive(Args)]
 pub(super) struct Commit {
     /// Existing owned State Root.
     #[arg(long)]
@@ -140,9 +122,9 @@ struct Report<'a> {
 
 impl Command {
     pub(super) async fn run(self) -> Result<(), HostError> {
-        self.run_inner().await.map_err(|error| -> HostError {
-            maka_render_terminal::application::sanitize(&error.to_string()).into()
-        })
+        self.run_inner()
+            .await
+            .map_err(|error| -> HostError { sanitize_diagnostic(&error.to_string()).into() })
     }
 
     async fn run_inner(self) -> Result<(), HostError> {
@@ -151,7 +133,6 @@ impl Command {
             Self::RestoreDefaults(args) => args.run().await?,
             Self::UpdateDefaults(args) => args.run().await?,
             Self::InstallUrl(args) => args.run().await?,
-            Self::Launch(args) => args.run().await?,
             Self::Serve(args) => serve::run(args).await?,
             Self::Schema => println!("{}", serde_json::to_string(&maka_schema::catalog())?),
             Self::InspectPackage(args) => {
@@ -199,27 +180,6 @@ impl Command {
                 store.drain().await;
                 let loaded = result?.ok_or("deployment not found")?;
                 println!("{}", serde_json::to_string_pretty(&loaded.source())?);
-            }
-            Self::Run(args) => {
-                let configuration = args
-                    .connections
-                    .as_deref()
-                    .map(maka_transport::Configuration::read)
-                    .transpose()?
-                    .unwrap_or_default();
-                let store = Arc::new(open_store(args.root).await?);
-                let loaded = match store.load_application(args.deployment).await {
-                    Ok(Some(loaded)) => loaded,
-                    Ok(None) => {
-                        store.drain().await;
-                        return Err("UI deployment not found".into());
-                    }
-                    Err(error) => {
-                        store.drain().await;
-                        return Err(error.into());
-                    }
-                };
-                run_tui(store, loaded, configuration, None, Vec::new()).await?;
             }
         }
         Ok(())
@@ -298,113 +258,19 @@ async fn open_application_inspection(root: PathBuf) -> Result<maka_event_log::Ev
     Ok(maka_transport::open_application_inspection(std::sync::Arc::new(owner)).await?)
 }
 
-async fn run_tui(
-    store: Arc<maka_event_log::EventLog>,
-    loaded: maka_event_log::applications::LoadedDeployment,
-    configuration: maka_transport::Configuration,
-    startup: Option<maka_render_terminal::startup::Startup>,
-    anchors: Vec<maka_host_runtime::application::host::Client>,
-) -> Result<(), HostError> {
-    // Keep the foreground VM on one dedicated blocking owner, with
-    // no deeply nested CLI async stack under V8 initialization.
-    let scheduler = tokio::runtime::Handle::current();
-    let setup = (|| -> Result<_, HostError> {
-        let namespaces = maka_event_log::root::RootNamespaces::for_current_account()?;
-        let cohost_native = serve::native()?;
-        let helper = std::env::current_exe()?;
-        Ok((namespaces, helper, cohost_native))
-    })();
-    let (namespaces, helper, cohost_native) = match setup {
-        Ok(value) => value,
-        Err(error) => {
-            store.drain().await;
-            return Err(error);
+// Authored identifiers and source errors can contain terminal control characters.
+// Keep headless CLI diagnostics safe independently of a presentation backend.
+fn sanitize_diagnostic(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\t' => output.push_str("    "),
+            '\n' => output.push(character),
+            character if !character.is_control() => output.push(character),
+            _ => {}
         }
-    };
-    let mut connections = match maka_transport::Connections::prepare_loaded(
-        store.clone(),
-        loaded,
-        PresentationTarget::Tui,
-        configuration,
-        namespaces,
-        helper,
-        cohost_native,
-        Some(maka_host_js::factory(Default::default())),
-    )
-    .await
-    {
-        Ok(connections) => connections,
-        Err(error) => {
-            store.drain().await;
-            return Err(error.into());
-        }
-    };
-    if let Err(error) = connections.start().await {
-        connections.drain().await;
-        store.drain().await;
-        return Err(error.into());
     }
-    // The actual UI peer now keeps the independently started Host resident.
-    drop(anchors);
-    let startup_errors = connections.startup_errors().to_vec();
-    let source = connections.source().clone();
-    let loaded = connections.take_initial().expect("initial UI snapshot");
-    let registrations = connections.registrations();
-    let foreground_store = store.clone();
-    let connections = Arc::new(tokio::sync::Mutex::new(connections));
-    let updates = match maka_transport::Updates::new(
-        store.clone(),
-        source.clone(),
-        connections.clone(),
-        scheduler.clone(),
-    ) {
-        Ok(updates) => updates,
-        Err(error) => {
-            connections.lock().await.drain().await;
-            store.drain().await;
-            return Err(error.into());
-        }
-    };
-    let terminal_errors = startup_errors.clone();
-    let result =
-        tokio::task::spawn_blocking(move || -> Result<maka_transport::ExitMode, HostError> {
-            maka_render_terminal::application::run(
-                foreground_store,
-                loaded,
-                registrations,
-                scheduler,
-                updates,
-                maka_ui_js::execution(Default::default()),
-                startup,
-                terminal_errors,
-            )
-            .map_err(Into::into)
-        })
-        .await;
-    // A panic is not a terminal/module cleanup receipt. Preserve
-    // both actual owners if the foreground execution was lost.
-    if let Err(error) = &result {
-        eprintln!("terminal execution cleanup unconfirmed: {error}");
-        std::future::pending::<()>().await;
-    }
-    let result = result?;
-    match &result {
-        Ok(mode) => connections.lock().await.drain_with(*mode).await,
-        Err(_) => connections.lock().await.drain().await,
-    }
-    store.drain().await;
-    match result {
-        Ok(_) => Ok(()),
-        Err(error)
-            if startup_errors.is_empty()
-                || startup_errors
-                    .iter()
-                    .all(|cause| error.to_string().contains(cause)) =>
-        {
-            Err(error)
-        }
-        Err(error) => Err(format!("{}\nUI activation: {error}", startup_errors.join("\n")).into()),
-    }
+    output
 }
 
 #[cfg(test)]

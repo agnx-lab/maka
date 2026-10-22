@@ -73,7 +73,6 @@ members = [
     "plugins/skills/core",
     "plugins/agent/tool-catalog",
     "plugins/agent/tools",
-    "platform/render-terminal",
     "platform/ui-runtime",
     "platform/ui-js",
     "plugins/workspace/workspace-web/native",
@@ -171,7 +170,6 @@ maka-session-title = { path = "plugins/agent/session-title" }
 maka-skills = { path = "plugins/skills/core" }
 maka-tool-catalog = { path = "plugins/agent/tool-catalog" }
 maka-tools = { path = "plugins/agent/tools" }
-maka-render-terminal = { path = "platform/render-terminal" }
 maka-terminal-shell = { path = "products/maka/terminal-shell" }
 maka-ui-runtime = { path = "platform/ui-runtime" }
 maka-ui-js = { path = "platform/ui-js" }
