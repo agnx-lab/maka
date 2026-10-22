@@ -17,8 +17,6 @@
  * under the License.
  */
 
-use super::Presentation;
-use nsh_platform_tui::InputSnapshot;
 use std::{
     io::{self, Write},
     sync::mpsc,
@@ -27,11 +25,7 @@ use std::{
 };
 
 enum Request {
-    Frame(
-        Vec<u8>,
-        mpsc::SyncSender<io::Result<Instant>>,
-        Option<(Presentation, u64, Box<InputSnapshot>)>,
-    ),
+    Frame(Vec<u8>, mpsc::SyncSender<io::Result<Instant>>),
     Close(Vec<u8>, mpsc::SyncSender<io::Result<()>>),
 }
 
@@ -56,16 +50,10 @@ impl Output {
             .spawn(move || {
                 while let Ok(request) = receive.recv() {
                     match request {
-                        Request::Frame(bytes, receipt, presentation) => {
+                        Request::Frame(bytes, receipt) => {
                             let result = writer.write_all(&bytes).and_then(|_| writer.flush());
                             let failed = result.is_err();
-                            let result = result.map(|()| {
-                                let flushed = Instant::now();
-                                if let Some((presentation, epoch, snapshot)) = presentation {
-                                    presentation.publish(epoch, *snapshot);
-                                }
-                                flushed
-                            });
+                            let result = result.map(|()| Instant::now());
                             let _ = receipt.send(result);
                             driver.unpark();
                             if failed {
@@ -87,19 +75,13 @@ impl Output {
         })
     }
 
-    pub fn submit(
-        &mut self,
-        bytes: Vec<u8>,
-        presentation: Option<(Presentation, u64, InputSnapshot)>,
-    ) -> Result<(), String> {
+    pub fn submit(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         if self.pending.is_some() {
             return Err("terminal frame still in flight".into());
         }
         let (send, receive) = mpsc::sync_channel(1);
-        let presentation =
-            presentation.map(|(owner, epoch, snapshot)| (owner, epoch, Box::new(snapshot)));
         self.send
-            .try_send(Request::Frame(bytes, send, presentation))
+            .try_send(Request::Frame(bytes, send))
             .map_err(|error| error.to_string())?;
         self.pending = Some(receive);
         Ok(())
@@ -163,13 +145,8 @@ impl Write for FrameWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, atomic::Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
-
-    fn snapshot() -> InputSnapshot {
-        nsh_platform_tui::Surface::new(40, 8, nsh_platform_tui::CellMetrics::default())
-            .input_snapshot()
-    }
 
     struct GatedWriter {
         bytes: Arc<Mutex<Vec<u8>>>,
@@ -196,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn query_flush_receipt_uses_the_writer_time_without_publishing_a_frame() {
+    fn query_flush_receipt_uses_the_actual_writer_time() {
         struct FlushGate {
             entered: mpsc::SyncSender<()>,
             release: Option<mpsc::Receiver<()>>,
@@ -221,7 +198,7 @@ mod tests {
         })
         .unwrap();
         output
-            .submit(super::super::graphics::QUERY.to_vec(), None)
+            .submit(super::super::graphics::QUERY.to_vec())
             .unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
         let before_flush = Instant::now();
@@ -308,13 +285,10 @@ mod tests {
             flushes: flushes.clone(),
         })
         .unwrap();
-        let presentation = Presentation::default();
-        output
-            .submit(frame.0, Some((presentation.clone(), 7, snapshot())))
-            .unwrap();
+        output.submit(frame.0).unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
         assert!(!output.poll().unwrap());
-        assert!(output.submit(b"replacement".to_vec(), None).is_err());
+        assert!(output.submit(b"replacement".to_vec()).is_err());
         let closed = output.close(b"RESTORE".to_vec()).unwrap();
         assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
         release.send(()).unwrap();
@@ -329,7 +303,6 @@ mod tests {
         );
         assert_eq!(&written[expected.len()..], b"RESTORE");
         assert_eq!(flushes.load(Ordering::SeqCst), 2);
-        assert_eq!(presentation.presented.load(Ordering::Acquire), 7);
     }
 
     #[test]
@@ -346,29 +319,16 @@ mod tests {
             entered,
         })
         .unwrap();
-        let presentation = Presentation::default();
-        output
-            .submit(
-                transaction.to_vec(),
-                Some((presentation.clone(), 7, snapshot())),
-            )
-            .unwrap();
+        output.submit(transaction.to_vec()).unwrap();
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!(
-            presentation
-                .presented
-                .load(std::sync::atomic::Ordering::Acquire),
-            0
-        );
         let partial = transaction.len() / 2;
         for _ in 0..partial {
             gate.send(()).unwrap();
             observing.recv_timeout(Duration::from_secs(1)).unwrap();
         }
         assert_eq!(*bytes.lock().unwrap(), transaction[..partial]);
-        assert_eq!(presentation.presented.load(Ordering::Acquire), 0);
         assert!(!output.poll().unwrap());
-        assert!(output.submit(b"replacement".to_vec(), None).is_err());
+        assert!(output.submit(b"replacement".to_vec()).is_err());
         let closed = output.close(b"!".to_vec()).unwrap();
         assert!(matches!(closed.try_recv(), Err(mpsc::TryRecvError::Empty)));
         for _ in 0..transaction.len() - partial + 1 {
@@ -381,14 +341,6 @@ mod tests {
         assert_eq!(
             *bytes.lock().unwrap(),
             [transaction.as_slice(), b"!"].concat()
-        );
-        // No driver poll observes either completion: the actual flush
-        // publishes the frame before the final cleanup receipt arrives.
-        assert_eq!(
-            presentation
-                .presented
-                .load(std::sync::atomic::Ordering::Acquire),
-            7
         );
     }
 
@@ -404,24 +356,12 @@ mod tests {
             }
         }
         let mut output = Output::new(Failed).unwrap();
-        let presentation = Presentation::default();
-        output
-            .submit(
-                b"frame".to_vec(),
-                Some((presentation.clone(), 7, snapshot())),
-            )
-            .unwrap();
+        output.submit(b"frame".to_vec()).unwrap();
         loop {
             match output.poll() {
                 Ok(false) => thread::yield_now(),
                 Err(error) => {
                     assert_eq!(error, "flush failed");
-                    assert_eq!(
-                        presentation
-                            .presented
-                            .load(std::sync::atomic::Ordering::Acquire),
-                        0
-                    );
                     break;
                 }
                 Ok(true) => panic!("failed frame admitted"),

@@ -17,9 +17,9 @@
  * under the License.
  */
 
-//! One NSH UI turn per completed terminal presentation. Host ownership and
-//! recovery stay outside this shell; neither blocked stdout nor JS prevents
-//! the input owner from cancelling and returning to that Host scope.
+//! Native UI input and terminal output have independent owners. Host ownership
+//! and recovery stay outside this shell; blocked stdout never stalls native
+//! event dispatch or the input owner’s independent cancellation path.
 
 mod adapter;
 #[cfg(target_os = "linux")]
@@ -31,16 +31,15 @@ mod output;
 mod pixels;
 mod ui;
 
-use crossterm::event;
 use input::Inbox;
 use nsh_engine::EngineConfig;
-use nsh_platform_tui::{CellMetrics, InputSnapshot};
+use nsh_platform_tui::CellMetrics;
 use output::Output;
 use std::{
     io::{self, IsTerminal},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc,
     },
     thread,
@@ -58,7 +57,6 @@ pub(crate) type GpuWorker = thread::JoinHandle<Result<(), String>>;
 #[derive(Clone, Default)]
 struct Presentation {
     state: Arc<Mutex<Inbox>>,
-    presented: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
     driver: Option<thread::Thread>,
 }
@@ -70,22 +68,8 @@ impl Presentation {
         }
     }
 
-    fn publish(&self, epoch: u64, snapshot: InputSnapshot) {
-        let mut inbox = self.state.lock().unwrap();
-        if !self.stop.load(Ordering::Acquire)
-            && !inbox.quit
-            && inbox.error.is_none()
-            && inbox.resize.is_none()
-        {
-            inbox.last_frame = Some((epoch, snapshot));
-            self.presented.store(epoch, Ordering::Release);
-        }
-    }
-
     fn shutdown(&self) {
         self.stop.store(true, Ordering::Release);
-        let _inbox = self.state.lock().unwrap();
-        self.presented.store(0, Ordering::Release);
     }
 }
 
@@ -142,7 +126,7 @@ pub(crate) fn run(
         setup.extend(state.pixel_probe.query()?);
         setup
     };
-    output.submit(setup, None)?;
+    output.submit(setup)?;
     let mut input = None;
     let result = (|| {
         input = Some(start_reader(presentation.clone(), reader)?);
@@ -163,8 +147,7 @@ pub(crate) fn run(
                 );
             }
         }
-        let (commands, frames) =
-            ui::spawn(config, presentation.clone()).map_err(|error| error.to_string())?;
+        let (commands, frames) = ui::spawn(config).map_err(|error| error.to_string())?;
         // Returning drops both channel endpoints without joining either
         // blocked owner, including startup errors after terminal mutation.
         drive(&mut output, &presentation, &commands, &frames)
@@ -215,16 +198,12 @@ fn drive(
     commands: &mpsc::SyncSender<ui::Advance>,
     frames: &mpsc::Receiver<Result<ui::Frame, String>>,
 ) -> Result<(), String> {
-    let Presentation {
-        state,
-        presented,
-        stop,
-        ..
-    } = presentation;
+    let Presentation { state, stop, .. } = presentation;
     let mut setup = true;
     let mut busy = true;
-    let mut pending = None;
-    let mut epoch = 0;
+    // An encoded delta remains immutable until the sole writer accepts it.
+    // Later native input can advance without producing another delta.
+    let mut ready = None;
     let mut next_tick = Instant::now();
     loop {
         if stop.load(Ordering::Acquire) {
@@ -239,16 +218,12 @@ fn drive(
                 return Err(error.clone());
             }
         }
-        if output.poll()? {
-            if setup && output.take_flushed().is_some() {
-                state.lock().unwrap().graphics.flushed();
-            }
+        let mut writable = output.poll()?;
+        if writable && output.take_flushed().is_some() && setup {
+            state.lock().unwrap().graphics.flushed();
             setup = false;
-            if let Some(completed) = pending.take() {
-                epoch = completed;
-            }
         }
-        if !setup && pending.is_none() && busy {
+        if busy {
             match frames.try_recv() {
                 Ok(frame) => {
                     let frame = frame?;
@@ -257,45 +232,34 @@ fn drive(
                     }
                     busy = false;
                     if let Some(bytes) = frame.bytes {
-                        output.submit(
-                            bytes,
-                            Some((
-                                presentation.clone(),
-                                frame.epoch,
-                                frame.input.expect("completed frame input"),
-                            )),
-                        )?;
-                        pending = Some(frame.epoch);
-                    } else {
-                        epoch = frame.epoch;
+                        debug_assert!(ready.is_none());
+                        ready = Some(bytes);
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => return Err("NSH UI worker stopped".into()),
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        if !setup && !busy && pending.is_none() {
-            let mut inbox = state.lock().unwrap();
-            let image_protocol = inbox.graphics.take_ready();
-            let resize = inbox.resize.take();
-            let inputs = inbox.pop_batch(if resize.is_some() { 0 } else { epoch });
-            let cancel_pointer = std::mem::take(&mut inbox.cancel_pointer);
-            if let Some(query) = inbox.graphics.query() {
-                output.submit(query.to_vec(), None)?;
+        if writable {
+            if let Some(bytes) = ready.take() {
+                output.submit(bytes)?;
+                writable = false;
+            } else if let Some(query) = state.lock().unwrap().graphics.query() {
+                output.submit(query.to_vec())?;
                 setup = true;
+                writable = false;
             }
+        }
+        if !busy {
+            let mut inbox = state.lock().unwrap();
             let command = ui::Advance {
-                image_protocol,
-                inputs,
-                resize,
-                cancel_pointer,
+                image_protocol: inbox.graphics.take_ready(),
+                inputs: inbox.pop_batch(),
+                resize: inbox.resize.take(),
+                cancel_pointer: std::mem::take(&mut inbox.cancel_pointer),
+                draw: writable && !setup && ready.is_none(),
             };
             if !command.is_probe() || Instant::now() >= next_tick {
-                if !command.is_probe() {
-                    // Explicit input revokes before the UI worker can run.
-                    // Idle probes first check whether any work is due.
-                    presented.store(0, Ordering::Release);
-                }
                 commands
                     .try_send(command)
                     .map_err(|error| error.to_string())?;
@@ -303,7 +267,7 @@ fn drive(
                 next_tick = Instant::now() + TICK;
             }
         }
-        thread::sleep(Duration::from_millis(2));
+        thread::park_timeout(Duration::from_millis(2));
     }
 }
 
@@ -313,18 +277,12 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
     let handle = thread::Builder::new()
         .name("maka-nsh-input".into())
         .spawn(move || {
-            let Presentation {
-                state,
-                presented,
-                stop,
-                ..
-            } = &presentation;
+            let Presentation { state, stop, .. } = &presentation;
             while !stop.load(Ordering::Acquire) {
                 {
                     let mut inbox = state.lock().unwrap();
-                    // poll itself can consume and cache terminal bytes. Keep
-                    // polling, decoding and stamping under the presentation
-                    // fence, without waiting for stdin while holding it.
+                    // Keep polling and decoding in FIFO order, without
+                    // waiting for stdin while holding the input lock.
                     for _ in 0..input::READ_BATCH {
                         let event = reader
                             .poll(Some(Duration::ZERO), |_| true)
@@ -373,10 +331,7 @@ fn start_reader(presentation: Presentation, reader: EventReader) -> Result<Reade
                         let Some(event) = adapter::event(event) else {
                             continue;
                         };
-                        if matches!(event, event::Event::Resize(..)) {
-                            presented.store(0, Ordering::Release);
-                        }
-                        inbox.push(event, presented.load(Ordering::Acquire));
+                        inbox.push(event);
                         if inbox.quit || inbox.error.is_some() || stop.load(Ordering::Acquire) {
                             break;
                         }
@@ -426,7 +381,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn blocked_stdout_does_not_publish_the_frame_or_prevent_independent_cancel() {
+    fn blocked_stdout_does_not_prevent_independent_cancel() {
         for external in [false, true] {
             blocked_cancel(external);
         }
@@ -452,7 +407,6 @@ mod tests {
             }
         }
         let state = Arc::new(Mutex::new(Inbox::default()));
-        let presented = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let (entered, observing) = mpsc::sync_channel(1);
         let (resume, gate) = mpsc::channel();
@@ -461,23 +415,18 @@ mod tests {
             resume: gate,
         })
         .unwrap();
-        output.submit(b"SETUP".to_vec(), None).unwrap();
+        output.submit(b"SETUP".to_vec()).unwrap();
         let (commands, _worker) = mpsc::sync_channel(1);
         let (frames, receive) = mpsc::sync_channel(1);
         frames
             .send(Ok(ui::Frame {
-                epoch: 7,
                 bytes: Some(b"FRAME".to_vec()),
-                input: Some(
-                    nsh_platform_tui::Surface::new(40, 8, CellMetrics::default()).input_snapshot(),
-                ),
                 quit: false,
             }))
             .unwrap();
         let (finished, result) = mpsc::sync_channel(1);
         let presentation = Presentation {
             state: state.clone(),
-            presented: presented.clone(),
             stop: stop.clone(),
             ..Default::default()
         };
@@ -486,7 +435,6 @@ mod tests {
             let _ = finished.send(result);
         });
         observing.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!(presented.load(Ordering::Acquire), 0);
         if external {
             stop.store(true, Ordering::Release);
         } else {

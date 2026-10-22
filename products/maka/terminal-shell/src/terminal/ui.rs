@@ -17,17 +17,13 @@
  * under the License.
  */
 
-use super::{
-    Presentation,
-    input::{Input, Pointer},
-    output::FrameWriter,
-};
-use crossterm::event::{Event, MouseButton, MouseEventKind};
+use super::{input::Input, output::FrameWriter};
+use crossterm::event::{Event, MouseEventKind};
 use nsh_core::{MountBatch, platform::Environment};
 use nsh_engine::{EngineConfig, LocalEngine, MountSink};
 use nsh_platform_tui::{
-    CellMetrics, ImageProtocol, InputSnapshot, PressLease, ProtocolType, ServiceOutput,
-    ServiceRequest, Surface, SurfaceEvent, TerminalTextEngine,
+    CellMetrics, ImageProtocol, ProtocolType, ServiceOutput, ServiceRequest, Surface, SurfaceEvent,
+    TerminalTextEngine,
 };
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
@@ -53,15 +49,7 @@ struct Sink(Arc<Mutex<Commits>>);
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
-        let mut commits = self.0.lock().unwrap();
-        // LocalEngine has at most four turns and one idle-GC commit in
-        // pump(). This is an explicit fail-closed guard, never replacement
-        // of a delta by a later delta.
-        if commits.batches.len() >= 8 {
-            commits.error = Some("NSH exceeded the per-turn mount batch limit".into());
-        } else {
-            commits.batches.push(batch);
-        }
+        self.0.lock().unwrap().batches.push(batch);
     }
     fn report_error(&self, message: &str) {
         self.0.lock().unwrap().error = Some(message.into());
@@ -72,10 +60,7 @@ impl MountSink for Sink {
 }
 
 pub(super) struct Frame {
-    pub epoch: u64,
     pub bytes: Option<Vec<u8>>,
-    /// None only when an idle probe kept the existing presentation.
-    pub input: Option<InputSnapshot>,
     pub quit: bool,
 }
 
@@ -84,6 +69,8 @@ pub(super) struct Advance {
     pub inputs: Vec<Input>,
     pub resize: Option<(u16, u16)>,
     pub cancel_pointer: bool,
+    /// Output backpressure delays drawing, never ordinary native input.
+    pub draw: bool,
 }
 
 impl Advance {
@@ -97,10 +84,7 @@ impl Advance {
 
 type Frames = mpsc::Receiver<Result<Frame, String>>;
 
-pub(super) fn spawn(
-    config: EngineConfig,
-    presentation: Presentation,
-) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
+pub(super) fn spawn(config: EngineConfig) -> io::Result<(mpsc::SyncSender<Advance>, Frames)> {
     let (send, commands) = mpsc::sync_channel::<Advance>(1);
     let (frames, receive) = mpsc::sync_channel(1);
     thread::Builder::new()
@@ -113,7 +97,6 @@ pub(super) fn spawn(
                     return;
                 }
             };
-            session.presentation = presentation;
             if frames.send(session.initial_frame()).is_err() {
                 return;
             }
@@ -135,10 +118,9 @@ struct Session {
     sink: Sink,
     terminal: Terminal<CrosstermBackend<FrameWriter>>,
     area: Rect,
-    epoch: u64,
+    dirty: bool,
     started: Instant,
     effects: Vec<u8>,
-    presentation: Presentation,
 }
 
 impl Session {
@@ -176,10 +158,9 @@ impl Session {
             sink,
             terminal,
             area,
-            epoch: 0,
+            dirty: false,
             started: Instant::now(),
             effects: Vec::new(),
-            presentation: Presentation::default(),
         })
     }
 
@@ -189,31 +170,17 @@ impl Session {
     }
 
     fn advance_if_needed(&mut self, command: Advance) -> Result<Frame, String> {
-        if command.is_probe() {
-            let presentation = &self.presentation;
-            let inbox = presentation.state.lock().unwrap();
-            if presentation.stop.load(std::sync::atomic::Ordering::Acquire)
-                || inbox.has_pending()
-                || (!self.engine.needs_pump() && !self.surface.animating())
-            {
-                return Ok(Frame {
-                    epoch: self.epoch,
-                    bytes: None,
-                    input: None,
-                    quit: self.surface.should_quit(),
-                });
-            }
-            presentation
-                .presented
-                .store(0, std::sync::atomic::Ordering::Release);
-        }
-        let frame = self.advance(command)?;
-        if frame.bytes.is_none()
-            && let Some(snapshot) = &frame.input
+        if command.is_probe()
+            && !self.engine.needs_pump()
+            && !self.surface.animating()
+            && (!command.draw || (!self.dirty && self.effects.is_empty()))
         {
-            self.presentation.publish(frame.epoch, snapshot.clone());
+            return Ok(Frame {
+                bytes: None,
+                quit: self.surface.should_quit(),
+            });
         }
-        Ok(frame)
+        self.advance(command)
     }
 
     fn advance(&mut self, command: Advance) -> Result<Frame, String> {
@@ -226,7 +193,9 @@ impl Session {
             self.surface.set_image_protocol(None);
             self.area = viewport(columns, rows)?;
             self.surface.resize(self.area.width, self.area.height);
-            self.engine.set_focus_path_now(&self.surface.focus_path());
+            self.engine
+                .control()
+                .set_focus_path(self.surface.focus_path());
             self.environment.window = self.surface.viewport();
             let control = self.engine.control();
             control.resize(self.environment.window);
@@ -256,147 +225,58 @@ impl Session {
             self.surface.set_image_protocol(Some(protocol));
             changed = true;
         }
-        for input in &command.inputs {
-            if matches!(input.pointer, Some(Pointer::Exact(epoch)) if epoch != self.epoch) {
-                return Err("pointer input belongs to an obsolete presentation".into());
-            }
-        }
-        let mut inputs = command.inputs.into_iter().peekable();
-        while let Some(input) = inputs.next() {
-            if matches!(
-                &input.pointer,
-                Some(Pointer::Press { epoch, .. } | Pointer::Wheel { epoch, .. })
-                    if *epoch <= self.presentation.state.lock().unwrap().resized_through
-            ) {
-                self.cancel_pointer()?;
-                changed = true;
-                continue;
-            }
-            let lease = match &input.pointer {
-                Some(Pointer::Press { lease, .. }) => Some(lease.as_ref()),
-                _ => None,
-            };
-            if let Event::Mouse(mouse) = &input.event
-                && matches!(
-                    mouse.kind,
-                    MouseEventKind::ScrollUp
-                        | MouseEventKind::ScrollDown
-                        | MouseEventKind::ScrollLeft
-                        | MouseEventKind::ScrollRight
-                )
-            {
-                // Inbox supplies one bounded group of identical wheels.
-                // The Surface resolves its original target once. A custom
-                // component may consume only one; its old-frame remainder
-                // is revoked, never replayed against another target.
-                let steps = (1 + inputs.count()) as u16;
-                let consumed = match &input.pointer {
-                    Some(Pointer::Wheel { lease, .. }) => self
-                        .surface
-                        .handle_presented_wheel(*mouse, steps, lease)
-                        .unwrap_or(0),
-                    _ => self.surface.handle_wheel(*mouse, steps),
-                };
-                changed |= consumed != 0;
-                self.forward_events(true)?;
-                break;
-            }
-            if let (Event::Mouse(mouse), Some(lease)) = (&input.event, lease) {
-                if !matches!(
-                    mouse.kind,
-                    MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
-                ) && !(matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
-                    && lease.allows_drag())
+        for input in command.inputs {
+            changed |= match input.event {
+                Event::Mouse(mouse)
+                    if matches!(
+                        mouse.kind,
+                        MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown
+                            | MouseEventKind::ScrollLeft
+                            | MouseEventKind::ScrollRight
+                    ) =>
                 {
-                    self.cancel_pointer()?;
-                    changed = true;
-                    continue;
+                    self.surface.handle_wheel(mouse, 1) != 0
                 }
-                match self.surface.handle_presented_mouse(*mouse, lease) {
-                    Some(handled) => changed |= handled,
-                    None => {
-                        self.cancel_pointer()?;
-                        changed = true;
-                        continue;
-                    }
-                }
-            } else {
-                changed |= self.surface.handle_event(input.event);
-            }
-            let events: Vec<_> = self.surface.drain_events().collect();
-            // Finish one captured gesture before applying its JS changes.
-            // A later independent gesture validates its original native owner
-            // and binding against that updated state.
-            let invokes_application = self.dispatch_events(events, true, lease)?;
-            if invokes_application {
-                if inputs.peek().is_some() {
-                    self.cancel_pointer()?;
-                    changed = true;
-                }
-                break;
-            }
+                event => self.surface.handle_event(event),
+            };
+            self.forward_events()?;
+            // The next physical event sees the ordinary native tree after
+            // every callback from this event has reached the application.
+            self.engine.pump();
+            changed |= self.apply_commits()?;
         }
         self.engine.pump();
         changed |= self.apply_commits()?;
         changed |= self.surface.tick(self.started.elapsed().as_secs_f64());
-        self.forward_events(false)?;
-        self.encode(changed)
+        self.forward_events()?;
+        self.dirty |= changed;
+        if command.draw {
+            let dirty = std::mem::take(&mut self.dirty);
+            self.encode(dirty)
+        } else {
+            Ok(Frame {
+                bytes: None,
+                quit: self.surface.should_quit(),
+            })
+        }
     }
 
     fn cancel_pointer(&mut self) -> Result<(), String> {
-        // NSH's focus-loss path cancels captures. Reconcile immediately to
-        // restore the mounted input's focus.
-        self.surface.handle_event(Event::FocusLost);
-        self.surface.handle_event(Event::FocusGained);
-        // Cancellation restores native capture and focus without admitting
-        // callbacks from the revoked gesture against a later presentation.
-        let events = self
-            .surface
-            .drain_events()
-            .filter(|event| !matches!(event, SurfaceEvent::Event(..)))
-            .collect();
-        self.dispatch_events(events, false, None).map(|_| ())
+        self.surface.cancel_pointer();
+        self.forward_events()
     }
 
-    fn forward_events(&mut self, presented_input: bool) -> Result<(), String> {
+    fn forward_events(&mut self) -> Result<(), String> {
         let events: Vec<_> = self.surface.drain_events().collect();
-        self.dispatch_events(events, presented_input, None)
-            .map(|_| ())
+        self.dispatch_events(events)
     }
 
-    fn dispatch_events(
-        &mut self,
-        events: Vec<SurfaceEvent>,
-        presented_input: bool,
-        lease: Option<&PressLease>,
-    ) -> Result<bool, String> {
-        self.engine.set_focus_path_now(&self.surface.focus_path());
-        let mut invokes_application = false;
+    fn dispatch_events(&mut self, events: Vec<SurfaceEvent>) -> Result<(), String> {
         let control = self.engine.control();
+        control.set_focus_path(self.surface.focus_path());
         for event in events {
             match event {
-                SurfaceEvent::Event(id, event, payload) if presented_input => {
-                    if !invokes_application {
-                        invokes_application = if let Some(lease) = lease {
-                            let Some(binding) = lease.binding() else {
-                                self.cancel_pointer()?;
-                                break;
-                            };
-                            match self
-                                .engine
-                                .dispatch_bound_event_now(id, event, payload, binding)
-                            {
-                                Some(entered) => entered,
-                                None => {
-                                    self.cancel_pointer()?;
-                                    break;
-                                }
-                            }
-                        } else {
-                            self.engine.dispatch_event_now(id, event, payload)
-                        };
-                    }
-                }
                 SurfaceEvent::Event(id, event, payload) => {
                     control.dispatch_event(id, event, payload)
                 }
@@ -430,7 +310,7 @@ impl Session {
                 }
             }
         }
-        Ok(invokes_application)
+        Ok(())
     }
 
     fn apply_commits(&mut self) -> Result<bool, String> {
@@ -444,7 +324,7 @@ impl Session {
         for batch in commits.batches.drain(..) {
             self.surface.apply(batch);
         }
-        self.forward_events(false)?;
+        self.forward_events()?;
         if commits.frame {
             self.engine.control().frame();
         }
@@ -452,15 +332,9 @@ impl Session {
     }
 
     fn encode(&mut self, changed: bool) -> Result<Frame, String> {
-        self.epoch = self
-            .epoch
-            .checked_add(1)
-            .ok_or("terminal presentation epoch exhausted")?;
         if !changed && self.effects.is_empty() {
             return Ok(Frame {
-                epoch: self.epoch,
                 bytes: None,
-                input: Some(self.surface.input_snapshot()),
                 quit: self.surface.should_quit(),
             });
         }
@@ -486,9 +360,7 @@ impl Session {
         // and its original flush receipt.
         bytes.append(&mut self.effects);
         Ok(Frame {
-            epoch: self.epoch,
             bytes: Some(bytes),
-            input: Some(self.surface.input_snapshot()),
             quit: self.surface.should_quit(),
         })
     }
@@ -508,7 +380,7 @@ mod tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
-    use nsh_core::{EventKind, EventPayload, MountItem, ROOT_ID, ViewKind};
+    use nsh_core::{MountItem, ROOT_ID, ViewKind};
     use nsh_engine::{App, Bundle, Limits};
     use std::io::Write;
 
@@ -519,28 +391,6 @@ mod tests {
         config.limits = Limits::default();
         config.ui_sets = vec![nsh_base::registry()];
         config
-    }
-
-    fn publish(
-        output: &mut super::super::output::Output,
-        presentation: &Presentation,
-        frame: Frame,
-    ) {
-        output
-            .submit(
-                frame.bytes.unwrap_or_default(),
-                Some((
-                    presentation.clone(),
-                    frame.epoch,
-                    frame.input.expect("completed frame input"),
-                )),
-            )
-            .unwrap();
-        let deadline = Instant::now() + std::time::Duration::from_secs(2);
-        while !output.poll().unwrap() {
-            assert!(Instant::now() < deadline, "output did not flush");
-            thread::yield_now();
-        }
     }
 
     #[test]
@@ -571,6 +421,7 @@ mod tests {
                     inputs: Vec::new(),
                     resize: Some((columns, rows)),
                     cancel_pointer: false,
+                    draw: true,
                 })
                 .unwrap();
             let screen = session.surface.snapshot();
@@ -617,6 +468,7 @@ mod tests {
                     inputs: Vec::new(),
                     resize: None,
                     cancel_pointer: false,
+                    draw: true,
                 })
                 .unwrap();
             bytes.extend(frame.bytes.unwrap_or_default());
@@ -665,6 +517,7 @@ mod tests {
                 inputs: Vec::new(),
                 resize: None,
                 cancel_pointer: false,
+                draw: true,
             })
             .unwrap()
             .bytes
@@ -681,6 +534,7 @@ mod tests {
                     inputs: Vec::new(),
                     resize: None,
                     cancel_pointer: false,
+                    draw: true,
                 })
                 .unwrap()
                 .bytes
@@ -693,6 +547,7 @@ mod tests {
                 inputs: Vec::new(),
                 resize: Some((40, 8)),
                 cancel_pointer: false,
+                draw: true,
             })
             .unwrap()
             .bytes
@@ -709,6 +564,7 @@ mod tests {
                 inputs: Vec::new(),
                 resize: Some((40, 8)),
                 cancel_pointer: false,
+                draw: true,
             })
             .unwrap()
             .bytes
@@ -725,6 +581,7 @@ mod tests {
                     inputs: Vec::new(),
                     resize: None,
                     cancel_pointer: false,
+                    draw: true,
                 })
                 .unwrap()
                 .bytes
@@ -754,10 +611,45 @@ mod tests {
         assert!(session.encode(false).unwrap().bytes.is_none());
     }
 
+    fn command(events: impl IntoIterator<Item = Event>) -> Advance {
+        Advance {
+            image_protocol: None,
+            inputs: events.into_iter().map(|event| Input { event }).collect(),
+            resize: None,
+            cancel_pointer: false,
+            draw: true,
+        }
+    }
+
+    fn mouse(surface: &Surface, label: &str, kind: MouseEventKind, column: u16) -> Event {
+        let node = surface
+            .accessibility_snapshot()
+            .into_iter()
+            .find(|node| node.label == label)
+            .unwrap_or_else(|| panic!("missing accessibility node: {label}"));
+        Event::Mouse(MouseEvent {
+            kind,
+            column: (node.frame.origin.x.0 / 8.0) as u16 + column,
+            row: (node.frame.origin.y.0 / 16.0) as u16,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    fn click(surface: &Surface, label: &str) -> Vec<Event> {
+        [
+            MouseEventKind::Moved,
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ]
+        .into_iter()
+        .map(|kind| mouse(surface, label, kind, 0))
+        .collect()
+    }
+
     const APP: &str = r#"
         import { mount, signal } from "nsh";
         import { Button } from "nsh/base";
-        import { element, prop, bindProp, insert, append, list } from "nsh:rt";
+        import { element, prop, insert, append, list } from "nsh:rt";
         const rows = signal([{ id: "A" }]);
         const selected = signal("none");
         mount(() => {
@@ -787,13 +679,10 @@ mod tests {
     "#;
 
     #[test]
-    fn presented_input_precedes_a_queued_rebind_of_the_same_list_node() {
+    fn a_retained_row_uses_the_current_binding_after_background_rebind() {
         let mut session = Session::new(config(APP)).unwrap();
         session.initial_frame().unwrap();
-        let epoch = session.epoch;
-        let presentation = Presentation::default();
-        presentation.publish(epoch, session.surface.input_snapshot());
-        session.presentation = presentation.clone();
+        let events = click(&session.surface, "row:A");
         let row = session
             .surface
             .accessibility_snapshot()
@@ -801,39 +690,9 @@ mod tests {
             .find(|node| node.label == "row:A")
             .unwrap()
             .id;
-        for event in click(&session.surface, "row:A") {
-            presentation.state.lock().unwrap().push(event, epoch);
-        }
-        // The driver has already posted an idle probe when the physical
-        // click arrives. Its queued frame callback must not rebind A to B
-        // before the original input owner can admit that click.
-        let probe = session
-            .advance_if_needed(Advance {
-                image_protocol: None,
-                inputs: Vec::new(),
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert_eq!(probe.epoch, epoch);
-        assert!(probe.bytes.is_none());
-        assert!(
-            session
-                .surface
-                .accessibility_snapshot()
-                .iter()
-                .any(|node| node.label == "row:A")
-        );
-        let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("selected:A"));
+        let mut background = command([]);
+        background.draw = false;
+        assert!(session.advance(background).unwrap().bytes.is_none());
         let rebound = session
             .surface
             .accessibility_snapshot()
@@ -841,22 +700,81 @@ mod tests {
             .find(|node| node.label == "row:B")
             .unwrap()
             .id;
-        assert_eq!(row, rebound, "the actual virtual-list cell was retained");
+        assert_eq!(
+            row, rebound,
+            "the virtual list retained its actual native cell"
+        );
+        session.advance(command(events)).unwrap();
+        assert!(session.surface.snapshot().contains("selected:B"));
     }
 
     #[test]
-    fn driver_accepts_a_click_queued_in_one_presented_frame() {
+    fn a_pointer_burst_reaches_the_button_without_an_intermediate_frame() {
         let source = APP.replace(
             "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
             "",
         );
         let mut session = Session::new(config(&source)).unwrap();
-        drive_burst(&mut session, |surface| click(surface, "row:A"));
+        session.initial_frame().unwrap();
+        let events = click(&session.surface, "row:A");
+        session.advance(command(events)).unwrap();
         assert!(session.surface.snapshot().contains("selected:A"));
     }
 
     #[test]
-    fn a_flushed_close_survives_background_work_and_an_earlier_action() {
+    fn independent_clicks_resolve_against_the_current_retained_row() {
+        let source = APP
+            .replace(
+                "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
+                "",
+            )
+            .replace(
+                "onPress: () => selected.set(row().id),",
+                "onPress: () => { selected.set(row().id); rows.set([{ id: \"B\" }]); },",
+            );
+        let mut session = Session::new(config(&source)).unwrap();
+        session.initial_frame().unwrap();
+        let mut events = click(&session.surface, "row:A");
+        events.extend(events.clone());
+        session.advance(command(events)).unwrap();
+        assert!(session.surface.snapshot().contains("selected:B"));
+    }
+
+    #[test]
+    fn press_up_and_press_callbacks_from_one_release_both_reach_the_application() {
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { Button } from "nsh/base";
+            import { element, prop, insert, append } from "nsh:rt";
+            const history = signal("");
+            const record = phase => history.set(history() + phase + ";");
+            mount(() => {
+                const root = element("view");
+                const status = element("text");
+                prop(status, "style", { height: 16 });
+                insert(status, () => "events:" + history());
+                append(root, status);
+                append(root, Button({
+                    accessibilityLabel: "Run",
+                    style: { height: 16 },
+                    onPressDown: () => record("down"),
+                    onPressUp: () => record("up"),
+                    onPress: () => record("press"),
+                }));
+                return root;
+            });
+            "#,
+        ))
+        .unwrap();
+        session.initial_frame().unwrap();
+        let events = click(&session.surface, "Run");
+        session.advance(command(events)).unwrap();
+        assert!(session.surface.snapshot().contains("events:down;up;press;"));
+    }
+
+    #[test]
+    fn ordinary_actions_continue_while_drawing_is_deferred() {
         let mut session = Session::new(config(
             r#"
             import { inputAction, mount, signal } from "nsh";
@@ -864,7 +782,6 @@ mod tests {
             import { element, prop, insert, append } from "nsh:rt";
             const status = signal("before");
             const closed = signal(0);
-            const close = () => closed.set(closed() + 1);
             mount(() => {
                 const root = element("view");
                 const result = element("text");
@@ -874,174 +791,198 @@ mod tests {
                 append(root, Button({
                     accessibilityLabel: "Close",
                     style: { height: 16 },
-                    onPress: inputAction(close, null),
+                    onPress: inputAction(() => closed.update(n => n + 1), null),
                 }));
                 return root;
             });
             requestAnimationFrame(() => status.set("after"));
-        "#,
+            "#,
         ))
         .unwrap();
-        let mut output = super::super::output::Output::new(io::sink()).unwrap();
-        let presentation = session.presentation.clone();
-        // The next UI revision is ready before stdout has displayed it. The
-        // ordinary Close action still belongs to the previously flushed UI.
-        let initial = session.initial_frame().unwrap();
-        let initial_epoch = initial.epoch;
-        publish(&mut output, &presentation, initial);
-        let events = click(&session.surface, "Close");
-        let background = session
-            .advance_if_needed(Advance {
-                image_protocol: None,
-                inputs: Vec::new(),
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(background.epoch > initial_epoch);
-        assert!(session.surface.snapshot().contains("after closed:0"));
-        assert_eq!(
-            session
-                .presentation
-                .presented
-                .load(std::sync::atomic::Ordering::Acquire),
-            0
-        );
-        {
-            let mut inbox = session.presentation.state.lock().unwrap();
-            for event in events.iter().chain(events.iter()) {
-                inbox.push(event.clone(), 0);
-            }
-        }
-        let inputs = session
-            .presentation
-            .state
-            .lock()
-            .unwrap()
-            .pop_batch(session.epoch);
-        assert_eq!(inputs.len(), 2);
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("after closed:1"));
-        let inputs = {
-            let mut inbox = session.presentation.state.lock().unwrap();
-            let inputs = inbox.pop_batch(session.epoch);
-            assert_eq!(
-                inputs.len(),
-                2,
-                "the same displayed owner and binding retain the second independent click"
-            );
-            assert!(!inbox.cancel_pointer);
-            inputs
-        };
-        let acted = session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
+        session.initial_frame().unwrap();
+        let mut background = command([]);
+        background.draw = false;
+        assert!(session.advance(background).unwrap().bytes.is_none());
+        let mut events = click(&session.surface, "Close");
+        events.extend(events.clone());
+        let mut input = command(events);
+        input.draw = false;
+        assert!(session.advance(input).unwrap().bytes.is_none());
         assert!(session.surface.snapshot().contains("after closed:2"));
-        publish(&mut output, &presentation, acted);
-        {
-            let mut inbox = session.presentation.state.lock().unwrap();
-            for event in events {
-                inbox.push(event, session.epoch);
-            }
-        }
-        let inputs = session
-            .presentation
-            .state
-            .lock()
-            .unwrap()
-            .pop_batch(session.epoch);
-        let fresh = session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(
-            session.surface.snapshot().contains("after closed:3"),
-            "a freshly displayed Close remains usable"
-        );
-        publish(&mut output, &presentation, fresh);
-        let events = click(&session.surface, "Close");
-        {
-            let mut inbox = session.presentation.state.lock().unwrap();
-            inbox.push(events[0].clone(), session.epoch);
-            let Event::Mouse(mut drag) = events[0].clone() else {
-                unreachable!()
-            };
-            drag.kind = MouseEventKind::Drag(MouseButton::Left);
-            inbox.push(Event::Mouse(drag), session.epoch);
-            inbox.push(events[1].clone(), session.epoch);
-        }
-        let (inputs, cancel_pointer) = {
-            let mut inbox = session.presentation.state.lock().unwrap();
-            (
-                inbox.pop_batch(session.epoch),
-                std::mem::take(&mut inbox.cancel_pointer),
-            )
-        };
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer,
-            })
-            .unwrap();
-        assert!(
-            session.surface.snapshot().contains("after closed:3"),
-            "a cancelled sealed gesture cannot release through the opaque path"
-        );
-        // A later opaque release must not complete a capture recreated by the
-        // cancelled group's Down. This also checks that its pressed state ended.
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs: vec![Input {
-                    event: events[1].clone(),
-                    pointer: Some(Pointer::Exact(session.epoch)),
-                }],
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("after closed:3"));
-        let inputs = click(&session.surface, "Close")
-            .into_iter()
-            .map(|event| Input {
-                event,
-                pointer: Some(Pointer::Exact(session.epoch)),
-            })
-            .collect();
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(
-            session.surface.snapshot().contains("after closed:4"),
-            "the next native click remains usable after cancellation"
-        );
+        assert!(session.advance(command([])).unwrap().bytes.is_some());
     }
 
     #[test]
-    fn a_presented_reading_click_keeps_its_scope_before_escape_while_output_is_pending() {
+    fn real_click_and_paste_reach_the_application_before_blocked_stdout_completes() {
+        struct FrameGate {
+            bytes: Arc<Mutex<Vec<u8>>>,
+            entered: mpsc::SyncSender<()>,
+            release: Option<mpsc::Receiver<()>>,
+            flushes: Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl Write for FrameGate {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if bytes != b"SETUP"
+                    && let Some(release) = self.release.take()
+                {
+                    let prefix = bytes.len().min(7);
+                    self.bytes
+                        .lock()
+                        .unwrap()
+                        .extend_from_slice(&bytes[..prefix]);
+                    self.entered.send(()).unwrap();
+                    release
+                        .recv()
+                        .map_err(|_| io::Error::other("test gate closed"))?;
+                    return Ok(prefix);
+                }
+                self.bytes.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { Button } from "nsh/base";
+            import { element, prop, bindProp, insert, append } from "nsh:rt";
+            const clicked = signal(0);
+            const draft = signal("draft");
+            mount(() => {
+                const root = element("view");
+                const status = element("text");
+                prop(status, "style", { height: 16 });
+                insert(status, () => "clicked:" + clicked() + " draft:" + draft());
+                append(root, status);
+                append(root, Button({
+                    accessibilityLabel: "Run",
+                    style: { height: 16 },
+                    onPress: () => clicked.update(n => n + 1),
+                }));
+                const input = element("input");
+                prop(input, "style", { height: 16 });
+                prop(input, "accessibilityLabel", "Composer");
+                prop(input, "autoFocus", true);
+                bindProp(input, "value", draft);
+                prop(input, "onChange", text => draft.set(text));
+                append(root, input);
+                return root;
+            });
+            "#,
+        ))
+        .unwrap();
+        let initial = session.initial_frame().unwrap();
+        let initial_bytes = initial.bytes.clone().unwrap();
+        assert!(initial_bytes.len() > 7);
+        let mut events = click(&session.surface, "Run");
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            events.push(mouse(&session.surface, "Composer", kind, 5));
+        }
+        events.push(Event::Paste("你好😀".into()));
+        let presentation = super::super::Presentation::default();
+        let state = presentation.state.clone();
+        let stop = presentation.stop.clone();
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let flushes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (entered, observing) = mpsc::sync_channel(1);
+        let (release, gate) = mpsc::channel();
+        let (commands, receive) = mpsc::sync_channel(1);
+        let (frames, ready) = mpsc::sync_channel(1);
+        frames.send(Ok(initial)).unwrap();
+        let driver = {
+            let bytes = bytes.clone();
+            let flushes = flushes.clone();
+            thread::spawn(move || {
+                let mut output = super::super::output::Output::new(FrameGate {
+                    bytes,
+                    entered,
+                    release: Some(gate),
+                    flushes,
+                })
+                .unwrap();
+                output.submit(b"SETUP".to_vec()).unwrap();
+                let result = super::super::drive(&mut output, &presentation, &commands, &ready);
+                let restored = output.close(b"CLEANUP".to_vec()).unwrap();
+                (result, restored)
+            })
+        };
+        observing
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(flushes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        {
+            let mut inbox = state.lock().unwrap();
+            for event in events {
+                inbox.push(event);
+            }
+        }
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let command = receive
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            assert!(
+                !command.draw,
+                "blocked output must defer drawing, not native input"
+            );
+            frames.send(session.advance_if_needed(command)).unwrap();
+            let editor = session.surface.input_context().unwrap();
+            if editor.text.as_deref() == Some("draft你好😀") {
+                assert_eq!(editor.selection, 9..9);
+                assert!(
+                    session
+                        .surface
+                        .snapshot()
+                        .contains("clicked:1 draft:draft你好😀")
+                );
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "physical input did not reach the application"
+            );
+        }
+        assert_eq!(
+            *bytes.lock().unwrap(),
+            [b"SETUP".as_slice(), &initial_bytes[..7]].concat(),
+            "the application has changed while the first physical UI frame is still partial",
+        );
+        assert_eq!(flushes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        let (result, restored) = driver.join().unwrap();
+        result.unwrap();
+        assert!(matches!(
+            restored.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release.send(()).unwrap();
+        restored
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            *bytes.lock().unwrap(),
+            [
+                b"SETUP".as_slice(),
+                initial_bytes.as_slice(),
+                b"CLEANUP".as_slice()
+            ]
+            .concat(),
+            "the sole writer must finish the original frame before cleanup",
+        );
+        assert_eq!(flushes.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn a_reading_click_owns_escape_before_another_frame_is_drawn() {
         const APP: &str = r#"
             import { mount, signal } from "nsh";
             import { keymap } from "nsh/keymap";
@@ -1092,92 +1033,30 @@ mod tests {
         for text in [true, false] {
             let source = APP.replace("USE_TEXT", if text { "true" } else { "false" });
             let mut session = Session::new(config(&source)).unwrap();
-            let mut output = super::super::output::Output::new(io::sink()).unwrap();
-            let presentation = session.presentation.clone();
-            let initial = session.initial_frame().unwrap();
-            let visible_epoch = initial.epoch;
-            publish(&mut output, &presentation, initial);
+            session.initial_frame().unwrap();
             assert_eq!(
                 session.surface.input_context().unwrap().text.as_deref(),
                 Some("Unsent composer draft"),
             );
-            let detail = session
-                .surface
-                .accessibility_snapshot()
-                .into_iter()
-                .find(|node| node.label == "Request detail")
-                .unwrap();
-            let mouse = |kind| {
-                Event::Mouse(MouseEvent {
-                    kind,
-                    column: (detail.frame.origin.x.0 / 8.0) as u16 + 1,
-                    row: (detail.frame.origin.y.0 / 16.0) as u16,
-                    modifiers: KeyModifiers::NONE,
-                })
-            };
-            let background = session
-                .advance_if_needed(Advance {
-                    image_protocol: None,
-                    inputs: Vec::new(),
-                    resize: None,
-                    cancel_pointer: false,
-                })
-                .unwrap();
-            assert_ne!(background.epoch, visible_epoch);
+            let mut background = command([]);
+            background.draw = false;
+            session.advance(background).unwrap();
+            let mut events = click(&session.surface, "Request detail");
+            events.push(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            let mut input = command(events);
+            input.draw = false;
+            assert!(session.advance(input).unwrap().bytes.is_none());
+            let screen = session.surface.snapshot();
             assert!(
-                session
-                    .surface
-                    .snapshot()
-                    .contains("after returned:0 stopped:0")
+                screen.contains("after returned:1 stopped:0"),
+                "text={text}:\n{screen}"
             );
-            assert_eq!(
-                presentation
-                    .presented
-                    .load(std::sync::atomic::Ordering::Acquire),
-                0
-            );
-            {
-                let mut inbox = presentation.state.lock().unwrap();
-                assert_eq!(inbox.last_frame.as_ref().unwrap().0, visible_epoch);
-                // One physical burst: no flush, focus wait or JS turn between
-                // reading the original detail and pressing Escape.
-                inbox.push(mouse(MouseEventKind::Down(MouseButton::Left)), 0);
-                inbox.push(mouse(MouseEventKind::Up(MouseButton::Left)), 0);
-                inbox.push(
-                    Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-                    0,
-                );
-            }
-            publish(&mut output, &presentation, background);
-            loop {
-                let command = {
-                    let mut inbox = presentation.state.lock().unwrap();
-                    if !inbox.has_pending() {
-                        break;
-                    }
-                    Advance {
-                        image_protocol: None,
-                        inputs: inbox.pop_batch(session.epoch),
-                        resize: None,
-                        cancel_pointer: std::mem::take(&mut inbox.cancel_pointer),
-                    }
-                };
-                let frame = session.advance(command).unwrap();
-                publish(&mut output, &presentation, frame);
-            }
-            assert!(
-                session
-                    .surface
-                    .snapshot()
-                    .contains("after returned:1 stopped:0"),
-                "{text}: the presented native reading click must own Escape:\n{}",
-                session.surface.snapshot(),
-            );
+            assert!(screen.contains("Unsent composer draft"), "{screen}");
         }
     }
 
     #[test]
-    fn a_flushed_editor_keeps_click_and_drag_selection_while_background_output_is_pending() {
+    fn editor_click_and_drag_preserve_selection_and_paste_while_drawing_is_deferred() {
         const APP: &str = r#"
             import { mount, signal } from "nsh";
             import { element, prop, bindProp, insert, append } from "nsh:rt";
@@ -1209,102 +1088,43 @@ mod tests {
             [(false, 2..2, "heXllo", 3..3), (true, 1..4, "hXo", 2..2)]
         {
             let mut session = Session::new(config(APP)).unwrap();
-            // Reproduce the completed/pending frame pair from the physical
-            // workspace-picker failure without advancing through idle turns.
-            session.epoch = 64;
-            let mut output = super::super::output::Output::new(io::sink()).unwrap();
-            let presentation = session.presentation.clone();
-            let initial = session.initial_frame().unwrap();
-            assert_eq!(initial.epoch, 65);
-            publish(&mut output, &presentation, initial);
+            session.initial_frame().unwrap();
             assert_eq!(
                 session.surface.input_context().unwrap().text.as_deref(),
                 Some("previous")
             );
-            let composer = session
-                .surface
-                .accessibility_snapshot()
-                .into_iter()
-                .find(|node| node.label == "Composer")
-                .unwrap();
-            let pointer = |kind, offset| {
-                Event::Mouse(MouseEvent {
-                    kind,
-                    column: (composer.frame.origin.x.0 / 8.0) as u16 + offset,
-                    row: (composer.frame.origin.y.0 / 16.0) as u16,
-                    modifiers: KeyModifiers::NONE,
-                })
-            };
-            let background = session
-                .advance_if_needed(Advance {
-                    image_protocol: None,
-                    inputs: Vec::new(),
-                    resize: None,
-                    cancel_pointer: false,
-                })
-                .unwrap();
-            assert_eq!(background.epoch, 66);
-            assert!(session.surface.snapshot().contains("after draft:hello"));
-            assert_eq!(
-                presentation
-                    .presented
-                    .load(std::sync::atomic::Ordering::Acquire),
-                0
-            );
-            {
-                let mut inbox = presentation.state.lock().unwrap();
-                assert_eq!(inbox.last_frame.as_ref().unwrap().0, 65);
-                inbox.resized_through = 56;
-                inbox.push(
-                    pointer(
-                        MouseEventKind::Down(MouseButton::Left),
-                        if drag { 1 } else { 2 },
-                    ),
-                    0,
-                );
-                if drag {
-                    inbox.push(pointer(MouseEventKind::Drag(MouseButton::Left), 4), 0);
-                }
-                inbox.push(
-                    pointer(
-                        MouseEventKind::Up(MouseButton::Left),
-                        if drag { 4 } else { 2 },
-                    ),
-                    0,
-                );
-                inbox.push(Event::Paste("X".into()), 0);
+            let mut background = command([]);
+            background.draw = false;
+            session.advance(background).unwrap();
+            let mut events = vec![mouse(
+                &session.surface,
+                "Composer",
+                MouseEventKind::Down(MouseButton::Left),
+                if drag { 1 } else { 2 },
+            )];
+            if drag {
+                events.push(mouse(
+                    &session.surface,
+                    "Composer",
+                    MouseEventKind::Drag(MouseButton::Left),
+                    4,
+                ));
             }
-            publish(&mut output, &presentation, background);
-            let (inputs, cancel_pointer) = {
-                let mut inbox = presentation.state.lock().unwrap();
-                (
-                    inbox.pop_batch(session.epoch),
-                    std::mem::take(&mut inbox.cancel_pointer),
-                )
-            };
-            assert_eq!(inputs.len(), if drag { 3 } else { 2 });
-            let acted = session
-                .advance(Advance {
-                    image_protocol: None,
-                    inputs,
-                    resize: None,
-                    cancel_pointer,
-                })
-                .unwrap();
+            events.push(mouse(
+                &session.surface,
+                "Composer",
+                MouseEventKind::Up(MouseButton::Left),
+                if drag { 4 } else { 2 },
+            ));
+            let mut input = command(events);
+            input.draw = false;
+            assert!(session.advance(input).unwrap().bytes.is_none());
             let editor = session.surface.input_context().unwrap();
-            assert_eq!(editor.node, composer.id);
             assert_eq!(editor.text.as_deref(), Some("hello"));
             assert_eq!(editor.selection, selected);
-            publish(&mut output, &presentation, acted);
-            let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
-            session
-                .advance(Advance {
-                    image_protocol: None,
-                    inputs,
-                    resize: None,
-                    cancel_pointer: false,
-                })
-                .unwrap();
+            let mut paste = command([Event::Paste("X".into())]);
+            paste.draw = false;
+            assert!(session.advance(paste).unwrap().bytes.is_none());
             let editor = session.surface.input_context().unwrap();
             assert_eq!(editor.text.as_deref(), Some(expected));
             assert_eq!(editor.selection, caret);
@@ -1314,155 +1134,41 @@ mod tests {
                 "{screen}"
             );
             assert!(screen.contains("previous"), "{screen}");
+            assert!(session.advance(command([])).unwrap().bytes.is_some());
         }
-    }
-
-    fn click(surface: &Surface, label: &str) -> Vec<Event> {
-        let row = surface
-            .accessibility_snapshot()
-            .into_iter()
-            .find(|node| node.label == label)
-            .unwrap();
-        [
-            MouseEventKind::Down(MouseButton::Left),
-            MouseEventKind::Up(MouseButton::Left),
-        ]
-        .into_iter()
-        .map(|kind| {
-            Event::Mouse(MouseEvent {
-                kind,
-                column: (row.frame.origin.x.0 / 8.0) as u16,
-                row: (row.frame.origin.y.0 / 16.0) as u16,
-                modifiers: KeyModifiers::NONE,
-            })
-        })
-        .collect()
-    }
-
-    fn drive_burst(session: &mut Session, events: impl FnOnce(&Surface) -> Vec<Event>) {
-        let initial = session.initial_frame().unwrap();
-        let events = events(&session.surface);
-        let state = Arc::new(Mutex::new(super::super::input::Inbox::default()));
-        let presented = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let presentation = Presentation {
-            state: state.clone(),
-            presented: presented.clone(),
-            stop: stop.clone(),
-            ..Default::default()
-        };
-        session.presentation = presentation.clone();
-        let (commands, receive) = mpsc::sync_channel(1);
-        let (frames, ready) = mpsc::sync_channel(1);
-        frames.send(Ok(initial)).unwrap();
-        let driver = {
-            let presentation = presentation.clone();
-            thread::spawn(move || {
-                let mut output = super::super::output::Output::new(io::sink()).unwrap();
-                output.submit(b"SETUP".to_vec(), None).unwrap();
-                super::super::drive(&mut output, &presentation, &commands, &ready)
-            })
-        };
-        let deadline = Instant::now() + std::time::Duration::from_secs(1);
-        loop {
-            let command = receive
-                .recv_timeout(std::time::Duration::from_secs(1))
-                .unwrap();
-            if command.is_probe() && !session.engine.needs_pump() && !session.surface.animating() {
-                // The real driver has sent an idle probe, but its UI owner
-                // has not replied. Input still belongs to the visible frame.
-                let mut inbox = state.lock().unwrap();
-                let epoch = presented.load(std::sync::atomic::Ordering::Acquire);
-                assert_eq!(epoch, session.epoch);
-                for event in events {
-                    inbox.push(event, epoch);
-                }
-                drop(inbox);
-                let frame = session.advance_if_needed(command).unwrap();
-                assert_eq!(frame.epoch, epoch);
-                assert!(frame.bytes.is_none());
-                frames.send(Ok(frame)).unwrap();
-                break;
-            }
-            frames.send(session.advance_if_needed(command)).unwrap();
-            assert!(Instant::now() < deadline, "the UI did not reach idle");
-        }
-        for _ in 0..4 {
-            let command = receive
-                .recv_timeout(std::time::Duration::from_secs(1))
-                .unwrap();
-            frames.send(session.advance_if_needed(command)).unwrap();
-        }
-        stop.store(true, std::sync::atomic::Ordering::Release);
-        driver.join().unwrap().unwrap();
     }
 
     #[test]
-    fn driver_revokes_a_second_old_click_after_the_first_callback_rebinds_its_row() {
-        let source = APP
-            .replace(
-                "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
-                "",
-            )
-            .replace(
-                "onPress: () => selected.set(row().id),",
-                "onPress: () => { selected.set(row().id); rows.set([{ id: \"B\" }]); },",
-            );
-        let mut session = Session::new(config(&source)).unwrap();
-        drive_burst(&mut session, |surface| {
-            let mut events = click(surface, "row:A");
-            events.extend(click(surface, "row:A"));
-            events
-        });
-        assert!(session.surface.snapshot().contains("selected:A"));
-        assert!(
-            session
-                .surface
-                .accessibility_snapshot()
-                .iter()
-                .any(|node| node.label == "row:B")
-        );
-        drive_burst(&mut session, |surface| click(surface, "row:B"));
-        assert!(session.surface.snapshot().contains("selected:B"));
-    }
-
-    #[test]
-    fn mouse_down_callback_revokes_the_queued_release_before_it_reads_a_new_row() {
-        let source = APP
-            .replace("requestAnimationFrame(() => rows.set([{ id: \"B\" }]));", "")
-            .replace(
-                "onPress: () => selected.set(row().id),",
-                "onPress: () => selected.set(row().id), onPressDown: () => { selected.set('pressed:' + row().id); rows.set([{ id: \"B\" }]); },",
-            );
-        let mut session = Session::new(config(&source)).unwrap();
+    fn bracketed_cjk_paste_preserves_the_literal_text_and_utf16_caret() {
+        let mut session = Session::new(config(
+            r#"
+            import { mount, signal } from "nsh";
+            import { element, prop, bindProp } from "nsh:rt";
+            const draft = signal("a😀中z");
+            mount(() => {
+                const input = element("input");
+                prop(input, "autoFocus", true);
+                bindProp(input, "value", draft);
+                prop(input, "onChange", text => draft.set(text));
+                return input;
+            });
+            "#,
+        ))
+        .unwrap();
         session.initial_frame().unwrap();
-        let inputs = click(&session.surface, "row:A")
-            .into_iter()
-            .map(|event| Input {
-                event,
-                pointer: Some(Pointer::Exact(session.epoch)),
-            })
-            .collect();
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs,
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("selected:pressed:A"));
-        assert!(
-            session
-                .surface
-                .accessibility_snapshot()
-                .iter()
-                .any(|node| node.label == "row:B")
-        );
+        let mut input = command([
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+            Event::Paste("你好😀".into()),
+        ]);
+        input.draw = false;
+        session.advance(input).unwrap();
+        let editor = session.surface.input_context().unwrap();
+        assert_eq!(editor.text.as_deref(), Some("你好😀"));
+        assert_eq!(editor.selection, 4..4);
     }
 
     #[test]
-    fn driver_accumulates_wheels_without_clicking_new_content_at_old_coordinates() {
+    fn wheels_then_a_click_use_the_current_viewport_in_fifo_order() {
         let mut session = Session::new(config(
             r#"
             import { mount, signal } from "nsh";
@@ -1477,7 +1183,7 @@ mod tests {
                 append(root, result);
                 const scroll = element("scroll");
                 prop(scroll, "style", { flex: 1 });
-                prop(scroll, "onScroll", (event) => offset.set(event.offset.y));
+                prop(scroll, "onScroll", event => offset.set(event.offset.y));
                 for (let row = 0; row < 30; row++) {
                     const node = element("view");
                     prop(node, "style", { height: 16 });
@@ -1491,31 +1197,18 @@ mod tests {
                 append(root, scroll);
                 return root;
             });
-        "#,
+            "#,
         ))
         .unwrap();
-        drive_burst(&mut session, |surface| {
-            let click = click(surface, "row:0");
-            let Event::Mouse(mut mouse) = click[0] else {
-                unreachable!()
-            };
-            mouse.kind = MouseEventKind::ScrollDown;
-            let mut events = vec![Event::Mouse(mouse); 3];
-            events.extend(click);
-            events
-        });
-        assert!(
-            session
-                .surface
-                .snapshot()
-                .contains("offset:144 selected:none")
-        );
-        drive_burst(&mut session, |surface| click(surface, "row:9"));
+        session.initial_frame().unwrap();
+        let mut events = vec![mouse(&session.surface, "row:0", MouseEventKind::ScrollDown, 0); 3];
+        events.extend(click(&session.surface, "row:0"));
+        session.advance(command(events)).unwrap();
         assert!(session.surface.snapshot().contains("offset:144 selected:9"));
     }
 
     #[test]
-    fn a_flushed_wheel_survives_background_work_but_not_a_keyed_reader_replacement() {
+    fn a_wheel_reaches_the_current_reader_and_preserves_the_composer_draft() {
         const APP: &str = r#"
             import { mount, signal } from "nsh";
             import { element, prop, bindProp, insert, append } from "nsh:rt";
@@ -1566,149 +1259,58 @@ mod tests {
             });
         "#;
         for replace_owner in [false, true] {
-            let mut session = Session::new(config(
-                &APP.replace("REPLACE_OWNER", &replace_owner.to_string()),
-            ))
-            .unwrap();
-            let mut output = super::super::output::Output::new(io::sink()).unwrap();
-            let presentation = session.presentation.clone();
-            let initial = session.initial_frame().unwrap();
-            let initial_epoch = initial.epoch;
-            publish(&mut output, &presentation, initial);
+            let source = APP.replace("REPLACE_OWNER", &replace_owner.to_string());
+            let mut session = Session::new(config(&source)).unwrap();
+            session.initial_frame().unwrap();
             assert!(session.surface.snapshot().contains("Row A:9"));
             let editor = session.surface.input_context().unwrap();
-            assert_eq!(editor.text.as_deref(), Some("wheel draft"));
-            let owner_id = |surface: &Surface, owner: &str| {
-                surface
-                    .accessibility_snapshot()
-                    .into_iter()
-                    .find(|node| node.label == format!("owner:{owner}"))
-                    .unwrap()
-                    .id
-            };
-            let original_owner = owner_id(&session.surface, "A");
-            let Event::Mouse(mut wheel) = click(&session.surface, "row:A:9")[0] else {
-                unreachable!()
-            };
-            wheel.kind = MouseEventKind::ScrollUp;
-            let background = session
-                .advance_if_needed(Advance {
-                    image_protocol: None,
-                    inputs: Vec::new(),
-                    resize: None,
-                    cancel_pointer: false,
-                })
-                .unwrap();
-            assert!(background.epoch > initial_epoch);
-            assert!(session.surface.snapshot().contains("after "));
-            assert_eq!(
-                presentation
-                    .presented
-                    .load(std::sync::atomic::Ordering::Acquire),
-                0
-            );
+            let wheel = mouse(&session.surface, "row:A:9", MouseEventKind::ScrollUp, 0);
+            let mut background = command([]);
+            background.draw = false;
+            session.advance(background).unwrap();
+            let mut input = command([wheel]);
+            input.draw = false;
+            session.advance(input).unwrap();
             let owner = if replace_owner { "B" } else { "A" };
-            let current_owner = owner_id(&session.surface, owner);
-            if replace_owner {
-                assert_ne!(current_owner, original_owner);
-            } else {
-                assert_eq!(current_owner, original_owner);
-            }
-            {
-                let mut inbox = presentation.state.lock().unwrap();
-                assert_eq!(inbox.last_frame.as_ref().unwrap().0, initial_epoch);
-                inbox.push(Event::Mouse(wheel), 0);
-            }
-            // The queued wheel still names the flushed reader when newer
-            // background output completes before the driver can deliver it.
-            publish(&mut output, &presentation, background);
-            let inputs = presentation.state.lock().unwrap().pop_batch(session.epoch);
-            assert_eq!(inputs.len(), 1);
-            let acted = session
-                .advance(Advance {
-                    image_protocol: None,
-                    inputs,
-                    resize: None,
-                    cancel_pointer: false,
-                })
-                .unwrap();
             let screen = session.surface.snapshot();
-            if replace_owner {
-                assert!(screen.contains("after B:144"), "{screen}");
-                assert!(screen.contains("Row B:9"), "{screen}");
-                assert!(!screen.contains("Row B:6"), "{screen}");
-            } else {
-                assert!(screen.contains("after A:96"), "{screen}");
-                assert!(screen.contains("Row A:6"), "{screen}");
-            }
-            let current_editor = session.surface.input_context().unwrap();
-            assert_eq!(current_editor.node, editor.node);
-            assert_eq!(current_editor.text, editor.text);
-            assert_eq!(current_editor.selection, editor.selection);
-            if replace_owner {
-                // Rejection is specific to the old owner: a newly flushed
-                // wheel reaches B and produces its real onScroll payload.
-                publish(&mut output, &presentation, acted);
-                let Event::Mouse(mut fresh) = click(&session.surface, "row:B:9")[0] else {
-                    unreachable!()
-                };
-                fresh.kind = MouseEventKind::ScrollUp;
-                let inputs = {
-                    let mut inbox = presentation.state.lock().unwrap();
-                    inbox.push(Event::Mouse(fresh), session.epoch);
-                    inbox.pop_batch(session.epoch)
-                };
-                assert_eq!(inputs.len(), 1);
-                session
-                    .advance(Advance {
-                        image_protocol: None,
-                        inputs,
-                        resize: None,
-                        cancel_pointer: false,
-                    })
-                    .unwrap();
-                let screen = session.surface.snapshot();
-                assert!(screen.contains("after B:96"), "{screen}");
-                assert!(screen.contains("Row B:6"), "{screen}");
-            }
+            assert!(screen.contains(&format!("after {owner}:96")), "{screen}");
+            assert!(screen.contains(&format!("Row {owner}:6")), "{screen}");
+            let current = session.surface.input_context().unwrap();
+            assert_eq!(current.node, editor.node);
+            assert_eq!(current.text.as_deref(), Some("wheel draft"));
+            assert_eq!(current.selection, editor.selection);
         }
     }
 
     #[test]
-    fn a_callback_revokes_later_callbacks_from_the_same_physical_input() {
+    fn cancelled_capture_cannot_complete_on_a_later_release() {
         let source = APP.replace(
-            "onPress: () => selected.set(row().id),",
-            "onPress: () => selected.set(selected() === 'none' ? 'once' : 'twice'),",
+            "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
+            "",
         );
         let mut session = Session::new(config(&source)).unwrap();
         session.initial_frame().unwrap();
-        let row = session
-            .surface
-            .accessibility_snapshot()
-            .into_iter()
-            .find(|node| node.label == "row:A")
-            .unwrap()
-            .id;
-        let invoked = session
-            .dispatch_events(
-                vec![
-                    SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
-                    SurfaceEvent::Event(row, EventKind::Press, EventPayload::None),
-                ],
-                true,
-                None,
-            )
-            .unwrap();
-        assert!(invoked);
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs: Vec::new(),
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("selected:once"));
+        let down = mouse(
+            &session.surface,
+            "row:A",
+            MouseEventKind::Down(MouseButton::Left),
+            0,
+        );
+        let up = mouse(
+            &session.surface,
+            "row:A",
+            MouseEventKind::Up(MouseButton::Left),
+            0,
+        );
+        session.advance(command([down])).unwrap();
+        let mut cancel = command([]);
+        cancel.cancel_pointer = true;
+        session.advance(cancel).unwrap();
+        session.advance(command([up])).unwrap();
+        assert!(session.surface.snapshot().contains("selected:none"));
+        let events = click(&session.surface, "row:A");
+        session.advance(command(events)).unwrap();
+        assert!(session.surface.snapshot().contains("selected:A"));
     }
 
     #[test]
@@ -1753,54 +1355,6 @@ mod tests {
     }
 
     #[test]
-    fn rejected_mouse_up_cancels_the_old_gesture_before_native_ticks_resume() {
-        let source = APP.replace(
-            "requestAnimationFrame(() => rows.set([{ id: \"B\" }]));",
-            "",
-        );
-        let mut session = Session::new(config(&source)).unwrap();
-        session.initial_frame().unwrap();
-        let row = session
-            .surface
-            .accessibility_snapshot()
-            .into_iter()
-            .find(|node| node.label == "row:A")
-            .unwrap();
-        let mouse = |kind| {
-            Event::Mouse(MouseEvent {
-                kind,
-                column: (row.frame.origin.x.0 / 8.0) as u16,
-                row: (row.frame.origin.y.0 / 16.0) as u16,
-                modifiers: KeyModifiers::NONE,
-            })
-        };
-        session
-            .surface
-            .handle_event(mouse(MouseEventKind::Down(MouseButton::Left)));
-        session.forward_events(true).unwrap();
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs: Vec::new(),
-                resize: None,
-                cancel_pointer: true,
-            })
-            .unwrap();
-        session
-            .advance(Advance {
-                image_protocol: None,
-                inputs: vec![Input {
-                    event: mouse(MouseEventKind::Up(MouseButton::Left)),
-                    pointer: Some(Pointer::Exact(session.epoch)),
-                }],
-                resize: None,
-                cancel_pointer: false,
-            })
-            .unwrap();
-        assert!(session.surface.snapshot().contains("selected:none"));
-    }
-
-    #[test]
     fn ctrl_c_copies_selected_unicode_through_the_same_output_frame() {
         let mut session = Session::new(config(
             r#"
@@ -1820,10 +1374,10 @@ mod tests {
             image_protocol: None,
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
-                pointer: None,
             }],
             resize: None,
             cancel_pointer: false,
+            draw: true,
         };
         session.advance(command('a')).unwrap();
         let copied = session.advance(command('c')).unwrap();
@@ -1862,10 +1416,10 @@ mod tests {
             image_protocol: None,
             inputs: vec![Input {
                 event: Event::Key(KeyEvent::new(KeyCode::Char(key), modifiers)),
-                pointer: None,
             }],
             resize: None,
             cancel_pointer: false,
+            draw: true,
         };
         session
             .advance(command('a', KeyModifiers::CONTROL))
