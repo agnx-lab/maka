@@ -85,7 +85,7 @@
     "plugins/shared/agent-imports.ts": "12d95ddee8f7de84637ea96a5171243a1bcb8b68a43a8479c7e632192e9a25a7",
     "plugins/shared/locale-messages.ts": "69c6d4126bad017553b8c3a8e0a3390b0a20774c7c063ba87a4369ecfe4c0b8b",
     "plugins/shared/locale.ts": "d3d772870643169345756a37af4718e52cdbeb59f5a2bbb9418023607b7ead1f",
-    "plugins/shared/package.ts": "e3bbe7bbc65f130ef1f33ee73737808e446e5b4be0710b74dd11d05b0f8dc01b",
+    "plugins/shared/package.ts": "664ef0d7f9d5f433c5ba4b99eb429254cdc7901ee8b41c47b2ced45ae958cb39",
     "plugins/shared/tool-presentation.ts": "4536c58e5c05edfe95428ab3f07ead40ef7dd1f55c18ae0968e7fb5e06896bb3",
     "plugins/shared/tui-messages.ts": "957caf07fe327fc1aa26ea33d376309b4493fbb9afbacdae2c8022e056af39dd",
     "plugins/shared/value.ts": "9b1b52b05ca45a4e37fbab6454810fca2a474c8532941e25c15ab897aaa2d607",
