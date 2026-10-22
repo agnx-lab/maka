@@ -124,6 +124,7 @@ fn tool_text(sent: &Value) -> String {
 async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
     let scenario = std::cell::Cell::new("initial");
     let step = std::cell::Cell::new("initial");
+    let revocation_trace = std::cell::RefCell::new(Value::Null);
     tokio::time::timeout(Duration::from_secs(90), async {
         scenario.set("listener.bind");
         step.set("direct.await");
@@ -238,7 +239,47 @@ async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
             let events = service_tools::facts(&f, &session).await;
             scenario.set("revocation.dispatch_facts.returned");
             step.set("returned_or_assertions");
+            *revocation_trace.borrow_mut() = json!({
+                "factCount": events.len(),
+                "lastFacts": events.iter().rev().take(32).rev().map(|event| {
+                    match event {
+                        Fact::ToolDispatched { operation_id, call, name, input, .. } => json!({
+                            "kind":event.kind(), "operationId":operation_id, "call":call,
+                            "name":name, "method":input.get("method"),
+                            "revocationCell":name == "cua_repl" && input["code"] == "await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});"
+                        }),
+                        Fact::ToolSettled { operation_id, outcome } => json!({
+                            "kind":event.kind(), "operationId":operation_id,
+                            "outcome":match outcome {
+                                ToolOutcome::Succeeded { .. } => json!({"kind":"succeeded"}),
+                                ToolOutcome::Failed { message } => json!({"kind":"failed", "message":message.chars().take(1024).collect::<String>()}),
+                                ToolOutcome::Unknown { message, .. } => json!({"kind":"unknown", "message":message.chars().take(1024).collect::<String>()}),
+                            }
+                        }),
+                        Fact::ToolRejected { operation_id, name, reason, .. } => json!({
+                            "kind":event.kind(), "operationId":operation_id, "name":name,
+                            "reason":reason.to_string().chars().take(1024).collect::<String>(),
+                        }),
+                        Fact::InvocationEnded { outcome } => json!({
+                            "kind":event.kind(), "status":outcome.status(),
+                        }),
+                        Fact::ModelInterrupted { step_id, status, diagnostic, .. } => json!({
+                            "kind":event.kind(), "stepId":step_id, "status":status,
+                            "diagnostic":diagnostic.as_ref().map(|text| text.chars().take(1024).collect::<String>()),
+                        }),
+                        _ => json!({"kind":event.kind(), "operationId":event.operation_id()}),
+                    }
+                }).collect::<Vec<_>>()
+            });
             if events.iter().filter(|event| matches!(event, Fact::ToolDispatched { input, name, .. } if name == "cua_operation" && input["method"] == "listBrowsers")).count() >= 2 { break; }
+            if let Some(operation) = events.iter().find_map(|event| match event {
+                Fact::ToolDispatched { operation_id, name, input, .. }
+                    if name == "cua_repl" && input["code"] == "await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});" => Some(operation_id),
+                _ => None,
+            }) {
+                assert!(!events.iter().any(|event| matches!(event, Fact::ToolSettled { operation_id, .. } if operation_id == operation)),
+                    "revocation cell settled before its expected child dispatch: {}", revocation_trace.borrow());
+            }
             scenario.set("revocation.commit_wait");
             step.set("direct.await");
             commits.changed().await.unwrap();
@@ -285,5 +326,5 @@ async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
         f.config.shutdown().await.unwrap();
         scenario.set("config.shutdown.returned");
         step.set("returned_or_assertions");
-    }).await.inspect_err(|_| eprintln!("Computer test timed out: scenario={} helper={}", scenario.get(), step.get())).unwrap();
+    }).await.inspect_err(|_| eprintln!("Computer test timed out: scenario={} helper={} revocation={}", scenario.get(), step.get(), revocation_trace.borrow())).unwrap();
 }
