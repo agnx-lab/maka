@@ -45,7 +45,7 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
             prop(input, 'onChange', text => value.set(text));
             append(root, input);
             const body = element('view');
-            prop(body, 'focusable', true);
+            prop(body, 'onPress', () => {});
             prop(body, 'style', {width: 240, height: 64, backgroundColor: '#406020'});
             append(root, body);
             return root;
@@ -184,8 +184,8 @@ fn native_editor_focus_and_text_do_not_wait_for_another_pixel_frame() {
     platform.paste("你好😀").unwrap();
     assert_eq!(copied(), "a你好😀");
 
-    // The same registered handler must consult live focus: an ordinary body
-    // click must stop paste immediately, without a paint to unregister it.
+    // The same registered handler must consult live focus: clicking another
+    // native press target stops paste without a paint to unregister it.
     click(96.0);
     platform.paste("must not enter the old editor").unwrap();
     click(32.0);
