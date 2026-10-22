@@ -169,7 +169,7 @@ async fn provider_prompt_copy_and_cancel_settle_the_original_without_replacing_t
         view.set_host_services(Some(clipboard.clone())).unwrap();
         activate(&mut view, "Choose model and effort").await;
         activate(&mut view, "Use fixture-model · NSH fixture").await;
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model") && model_menu_closed(view)).await;
         tab_to_label(&mut view, "Message composer").await;
         editable(&mut view, "Message composer").await;
         let draft = "OAuth keeps this exact composer draft 你好";

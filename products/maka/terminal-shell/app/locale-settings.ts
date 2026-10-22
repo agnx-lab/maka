@@ -200,6 +200,11 @@ export const settingsMessages = {
     '連線已儲存；正在儲存 API 金鑰…',
   ],
   'Connection settings': ['Connection settings', '连接设置', '連線設定'],
+  'Current saved reasoning efforts: {levels}. Default: {level}.': [
+    'Current saved reasoning efforts: {levels}. Default: {level}.',
+    '当前已保存的推理强度：{levels}。默认：{level}。',
+    '目前已儲存的推理強度：{levels}。預設：{level}。',
+  ],
   'Copy URL': ['Copy URL', '复制 URL', '複製 URL'],
   'Copy code': msg_copyLoginCode,
   'Copy sign-in URL': ['Copy sign-in URL', '复制登录 URL', '複製登入 URL'],
@@ -218,12 +223,6 @@ export const settingsMessages = {
   ],
   'Default model cleared.': msg_defaultCleared,
   'Default model saved.': msg_defaultSaved,
-  'Default · Use connection default': [
-    'Default · Use connection default',
-    '默认 · 使用连接默认值',
-    '預設 · 使用連線預設值',
-  ],
-  'Default · {level}': ['Default · {level}', '默认 · {level}', '預設 · {level}'],
   'Delete connection': ['Delete connection', '删除连接', '刪除連線'],
   'Delete this connection, its stored provider credential and model settings? Existing conversations keep their saved selection.':
     [
@@ -521,6 +520,8 @@ export const settingsMessages = {
   ],
   'Preferences saved.': tui_assistant_saved,
   'Provider default': ['Provider default', '提供商默认设置', '供應商預設設定'],
+  'Provider controlled': ['Provider controlled', '由提供商控制', '由供應商控制'],
+  None: ['None', '无', '無'],
   'Provider sign-in': ['Provider sign-in', '提供商登录', '供應商登入'],
   Proxy: ['Proxy', '代理', '代理'],
   'Proxy authentication': tui_network_auth,
@@ -806,7 +807,6 @@ export const settingsMessages = {
     '此提供商未提供此處支援的 API 金鑰或互動式登入方式。',
   ],
   'Use Host default': ['Use Host default', '使用 Host 默认值', '使用 Host 預設值'],
-  'Use connection default': ['Use connection default', '使用连接默认值', '使用連線預設值'],
   'Use default prompt': ['Use default prompt', '使用默认提示词', '使用預設提示詞'],
   'Use effort {level}': ['Use effort {level}', '使用推理强度 {level}', '使用推理強度 {level}'],
   'Use lowercase letters, numbers, dashes or underscores for the connection ID.': [
@@ -815,6 +815,7 @@ export const settingsMessages = {
     '連線識別碼請使用小寫字母、數字、連字號或底線。',
   ],
   'Use provider defaults': ['Use provider defaults', '使用提供商默认设置', '使用供應商預設設定'],
+  'Use provider settings': ['Use provider settings', '使用提供商设置', '使用供應商設定'],
   'Use the API endpoint supplied by your provider.': [
     'Use the API endpoint supplied by your provider.',
     '使用提供商提供的 API 端点。',

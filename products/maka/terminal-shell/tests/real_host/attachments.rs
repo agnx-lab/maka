@@ -51,7 +51,7 @@ async fn attachments_survive_restart_and_send_original_images_without_message_te
         support::click_button(&mut view, "Choose model and effort").await;
         wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
         support::click_button(&mut view, "Use fixture-model · NSH fixture").await;
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model") && model_menu_closed(view)).await;
         let chosen = client.query("agent", "observe", json!({"sessionId":fixture.session})).await.unwrap();
         assert_eq!(chosen["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model","thinkingLevel":null}));
         super::wait_enabled_node(&mut view, "Attach files").await;
@@ -101,7 +101,7 @@ async fn attachments_survive_restart_and_send_original_images_without_message_te
         let restarted = fixture.client().await;
         let (mut view, bindings) = fixture.view(restarted.clone(), Some(fixture.session.clone()));
         super::wait_enabled_node(&mut view, "Open attachment original.png").await;
-        wait_view(&mut view, |screen| screen.contains("fixture-model · Default")).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model") && model_menu_closed(view)).await;
         let restored = restarted.load_draft("agent", &fixture.session, EDITOR).await.unwrap().unwrap();
         assert_eq!(restored.revision, selected.revision);
         assert_eq!(restored.attachments, selected.attachments);

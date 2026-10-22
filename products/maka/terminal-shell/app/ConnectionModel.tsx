@@ -36,7 +36,9 @@ import {
 export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
   const owner = props.settings;
   const model = () => owner.model()!;
-  const disabled = () => owner.busy() || !owner.pendingKnown() || owner.pending().length > 0;
+  const disabled = () =>
+    owner.busy() || owner.loading() || !owner.pendingKnown() || owner.pending().length > 0;
+  const supported = () => model().thinkingLevels ?? model().effective?.thinkingLevels ?? [];
   return (
     <Scroll style={{ flex: 1 }}>
       <View style={{ padding: 8, gap: 16 }}>
@@ -58,6 +60,14 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
         <Text style={{ ...bodyTextStyle, color: C.text, fontWeight: '500' }}>
           {tr('Supported reasoning efforts')}
         </Text>
+        <If when={model().effective}>
+          <Text style={{ ...captionTextStyle, color: C.muted }}>
+            {tr('Current saved reasoning efforts: {levels}. Default: {level}.', {
+              levels: model().effective!.thinkingLevels.join(', ') || tr('None'),
+              level: model().effective!.defaultThinkingLevel ?? tr('Provider controlled'),
+            })}
+          </Text>
+        </If>
         <Button
           disabled={disabled()}
           selected={model().thinkingLevels === null}
@@ -79,7 +89,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
             {(level) => (
               <Button
                 disabled={disabled()}
-                selected={model().thinkingLevels?.includes(level()) ?? false}
+                selected={supported().includes(level())}
                 accessibilityLabel={tr('Support effort {level}', { level: level() })}
                 onPress={inputAction(owner.toggleThinking, {
                   ...owner.modelAction(),
@@ -92,7 +102,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
               >
                 <ChoiceIndicator
                   kind="checkbox"
-                  checked={model().thinkingLevels?.includes(level()) ?? false}
+                  checked={supported().includes(level())}
                   disabled={disabled()}
                 />
                 <Text style={{ ...captionTextStyle, color: C.text }}>{level()}</Text>
@@ -125,7 +135,7 @@ export function ConnectionModel(props: { settings: ModelSettingsOwner }) {
           <Text style={{ ...captionTextStyle, color: C.text }}>{tr('Provider default')}</Text>
         </Button>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-          <Each of={model().thinkingLevels ?? []} key={(level) => level}>
+          <Each of={supported()} key={(level) => level}>
             {(level) => (
               <Button
                 disabled={disabled()}

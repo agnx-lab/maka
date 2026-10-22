@@ -31,8 +31,8 @@ async fn escape_stops_each_current_execution_after_its_scoped_binding_is_refresh
         })
         .await;
         support::click_button(&mut view, "Use fixture-model · NSH fixture").await;
-        wait_view(&mut view, |screen| {
-            screen.contains("fixture-model · Default")
+        wait_view_state(&mut view, |view, screen| {
+            screen.contains("fixture-model") && model_menu_closed(view)
         })
         .await;
         let mut previous = None;

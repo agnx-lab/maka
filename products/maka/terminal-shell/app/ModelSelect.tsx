@@ -17,8 +17,9 @@
  * under the License.
  */
 
-import { batch, cleanup, computed, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
+import { batch, cleanup, computed, effect, Input, inputAction, Scroll, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
+import type { ThinkingLevel } from '../../../../packages/plugin-sdk/src/generated/runtime';
 import { Button, Popover } from 'nsh/base';
 import { keymap } from 'nsh/keymap';
 import { List } from 'nsh/list';
@@ -27,7 +28,7 @@ import { host } from './host';
 import { tr } from './locale';
 import { createText, errorText, UiError } from './text';
 import type { ConversationHandle } from './Conversation';
-import { effortCaption, modelCaption, sameRoute } from './modelSelection';
+import { effectiveThinkingLevel, effortCaption, modelCaption, sameRoute } from './modelSelection';
 import type { BackendIdentity, ModelBackend, ModelChoice } from './modelSelection';
 import { ChoiceIndicator } from './ChoiceIndicator';
 import { Icon } from './Icon';
@@ -49,6 +50,7 @@ type SelectionAction = {
   expected: BackendIdentity;
   backend: ModelBackend;
 };
+type EffortAction = SelectionAction & { level: ThinkingLevel };
 type ModelsPage = {
   revision: number;
   next: { query: string; connection: number; model: number } | null;
@@ -84,9 +86,10 @@ export function ModelSelect(props: {
   });
   const label = () => {
     const backend = owner.backend();
-    return backend
-      ? `${modelCaption(backend, owner.modelDetails())} · ${effortCaption(backend, owner.modelDetails())}`
-      : tr('Choose a model');
+    if (!backend) return tr('Choose a model');
+    const model = modelCaption(backend, owner.modelDetails());
+    const effort = effortCaption(backend, owner.modelDetails());
+    return effort ? `${model} · ${effort}` : model;
   };
   return (
     <Popover
@@ -211,6 +214,13 @@ function ModelMenu(props: {
       ? details.choice
       : null;
   };
+  const hasEffortControls = () => {
+    const choice = readyChoice();
+    return (
+      choice !== null &&
+      (choice.thinkingLevels.length > 0 || owner.backend()?.thinkingLevel != null)
+    );
+  };
   const sameBackend = (left: BackendIdentity, right: BackendIdentity) =>
     sameRoute(left, right) && left?.thinkingLevel === right?.thinkingLevel;
   const action = (backend: ModelBackend): SelectionAction => ({
@@ -243,13 +253,24 @@ function ModelMenu(props: {
       if (alive) pending.set(false);
     }
   };
-  const selectEffort = (request: SelectionAction) => {
+  const selectEffort = (request: EffortAction) => {
     const choice = readyChoice();
     if (
       !choice ||
       !sameRoute(request.backend, choice.selection) ||
-      (request.backend.thinkingLevel !== null &&
-        !choice.thinkingLevels.includes(request.backend.thinkingLevel))
+      !choice.thinkingLevels.includes(request.level) ||
+      effectiveThinkingLevel(request.backend, choice) !== request.level
+    )
+      return;
+    void submit(request);
+  };
+  const resetEffort = (request: SelectionAction) => {
+    const choice = readyChoice();
+    if (
+      !choice ||
+      !sameRoute(request.backend, choice.selection) ||
+      choice.defaultThinkingLevel !== null ||
+      request.backend.thinkingLevel !== null
     )
       return;
     void submit(request);
@@ -268,7 +289,7 @@ function ModelMenu(props: {
   };
   const changePane = ({ instance, to, from }: { instance: number; to: Pane; from: Pane }) => {
     if (!active() || pending() || instance !== props.instance || pane() !== from) return;
-    if (to === 'effort' && !readyChoice()) return;
+    if (to === 'effort' && !hasEffortControls()) return;
     if (to === 'root') focusIntent = from === 'models' ? 'model' : 'effort';
     error.set('');
     pane.set(to);
@@ -357,6 +378,12 @@ function ModelMenu(props: {
     back,
     dismiss: () => close({ instance: props.instance, from: pane() }),
   };
+  effect(() => {
+    if (pane() === 'effort' && owner.modelDetails().kind === 'ready' && !hasEffortControls()) {
+      focusIntent = 'model';
+      pane.set('root');
+    }
+  });
   props.attach(handle);
   cleanup(() => props.detach(handle));
   void owner.refreshModel();
@@ -436,40 +463,42 @@ function ModelMenu(props: {
           </Text>
           <Icon name="right" color={C.muted} />
         </Button>
-        <Button
-          ref={(node) => focusRoot('effort', node)}
-          disabled={pending() || !readyChoice()}
-          accessibilityLabel={tr('Choose reasoning effort')}
-          onPress={inputAction(changePane, {
-            instance: props.instance,
-            from: 'root',
-            to: 'effort',
-          })}
-          style={{
-            ...controlStyle,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-          hoverStyle={{ backgroundColor: C.raised }}
-          focusStyle={{ backgroundColor: C.raised }}
-          disabledStyle={controlDisabledStyle}
-        >
-          <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Reasoning effort')}</Text>
-          <Text
-            numberOfLines={1}
+        <If when={hasEffortControls()}>
+          <Button
+            ref={(node) => focusRoot('effort', node)}
+            disabled={pending() || !readyChoice()}
+            accessibilityLabel={tr('Choose reasoning effort')}
+            onPress={inputAction(changePane, {
+              instance: props.instance,
+              from: 'root',
+              to: 'effort',
+            })}
             style={{
-              ...captionTextStyle,
-              color: C.muted,
-              flex: 1,
-              minWidth: 0,
-              textAlign: 'right',
+              ...controlStyle,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
             }}
+            hoverStyle={{ backgroundColor: C.raised }}
+            focusStyle={{ backgroundColor: C.raised }}
+            disabledStyle={controlDisabledStyle}
           >
-            {effortCaption(owner.backend(), owner.modelDetails())}
-          </Text>
-          <Icon name="right" color={C.muted} />
-        </Button>
+            <Text style={{ ...captionTextStyle, color: C.secondary }}>{tr('Reasoning effort')}</Text>
+            <Text
+              numberOfLines={1}
+              style={{
+                ...captionTextStyle,
+                color: C.muted,
+                flex: 1,
+                minWidth: 0,
+                textAlign: 'right',
+              }}
+            >
+              {effortCaption(owner.backend(), owner.modelDetails())}
+            </Text>
+            <Icon name="right" color={C.muted} />
+          </Button>
+        </If>
       </If>
       <If when={pane() === 'models'}>
         <Input
@@ -590,27 +619,20 @@ function ModelMenu(props: {
           >
             {(item) => (
               <View style={{ gap: 8 }}>
-                <Each<string | null>
-                  of={[null, ...item().thinkingLevels]}
-                  key={(level: string | null) => level ?? 'default'}
-                >
+                <Each<ThinkingLevel> of={item().thinkingLevels} key={(level: ThinkingLevel) => level}>
                   {(level) => (
                     <Button
                       disabled={pending()}
-                      accessibilityLabel={
-                        level() === null
-                          ? tr('Use connection default')
-                          : tr('Use effort {level}', { level: level()! })
-                      }
-                      selected={owner.backend()?.thinkingLevel === level()}
-                      onPress={inputAction(
-                        selectEffort,
-                        action({
+                      accessibilityLabel={tr('Use effort {level}', { level: level() })}
+                      selected={effectiveThinkingLevel(owner.backend(), item()) === level()}
+                      onPress={inputAction(selectEffort, {
+                        ...action({
                           connectionId: item().selection.connectionId,
                           modelId: item().selection.modelId,
-                          thinkingLevel: level(),
+                          thinkingLevel: item().defaultThinkingLevel === level() ? null : level(),
                         }),
-                      )}
+                        level: level(),
+                      })}
                       style={{
                         ...controlStyle,
                         backgroundColor: C.background,
@@ -624,15 +646,39 @@ function ModelMenu(props: {
                     >
                       <ChoiceIndicator
                         kind="radio"
-                        checked={owner.backend()?.thinkingLevel === level()}
+                        checked={effectiveThinkingLevel(owner.backend(), item()) === level()}
                         disabled={pending()}
                       />
                       <Text style={{ ...captionTextStyle, color: C.text }}>
-                        {level() === null ? tr('Default · Use connection default') : level()}
+                        {level()}
                       </Text>
                     </Button>
                   )}
                 </Each>
+                <If
+                  when={item().defaultThinkingLevel === null && owner.backend()?.thinkingLevel != null}
+                >
+                  <Button
+                    disabled={pending()}
+                    accessibilityLabel={tr('Use provider settings')}
+                    onPress={inputAction(
+                      resetEffort,
+                      action({
+                        connectionId: item().selection.connectionId,
+                        modelId: item().selection.modelId,
+                        thinkingLevel: null,
+                      }),
+                    )}
+                    style={controlStyle}
+                    hoverStyle={controlHoverStyle}
+                    focusStyle={controlFocusStyle}
+                    disabledStyle={controlDisabledStyle}
+                  >
+                    <Text style={{ ...captionTextStyle, color: C.secondary }}>
+                      {tr('Use provider settings')}
+                    </Text>
+                  </Button>
+                </If>
               </View>
             )}
           </Each>

@@ -19,19 +19,20 @@
 
 import { tr } from './locale';
 import type { UiText } from './text';
+import type { ThinkingLevel } from '../../../../packages/plugin-sdk/src/generated/runtime';
 
 export type ModelBackend = {
   connectionId: string;
   modelId: string;
-  thinkingLevel: string | null;
+  thinkingLevel: ThinkingLevel | null;
 };
 export type BackendIdentity = ModelBackend | null;
 export type ModelChoice = {
   selection: { connectionId: string; modelId: string; revision: number };
   connectionName: string;
   label: string;
-  thinkingLevels: string[];
-  defaultThinkingLevel: string | null;
+  thinkingLevels: ThinkingLevel[];
+  defaultThinkingLevel: ThinkingLevel | null;
 };
 export type ModelDetails =
   | { kind: 'loading' }
@@ -59,10 +60,16 @@ export function effortCaption(backend: BackendIdentity, details: ModelDetails): 
       ? details.choice
       : null;
   if (backend?.thinkingLevel == null)
-    return choice?.defaultThinkingLevel != null
-      ? tr('Default · {level}', { level: choice.defaultThinkingLevel })
-      : tr('Default');
+    return (
+      choice?.defaultThinkingLevel ??
+      (choice && choice.thinkingLevels.length > 0 ? tr('Provider controlled') : '')
+    );
   return choice && !choice.thinkingLevels.includes(backend.thinkingLevel)
     ? tr('{level} · Unavailable', { level: backend.thinkingLevel })
     : backend.thinkingLevel;
 }
+
+export const effectiveThinkingLevel = (
+  backend: BackendIdentity,
+  choice: ModelChoice,
+): ThinkingLevel | null => backend?.thinkingLevel ?? choice.defaultThinkingLevel;

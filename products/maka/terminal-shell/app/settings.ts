@@ -64,6 +64,10 @@ export type ModelEditor = {
   label: string;
   thinkingLevels: ThinkingLevel[] | null;
   defaultThinkingLevel: ThinkingLevel | null;
+  effective: {
+    thinkingLevels: ThinkingLevel[];
+    defaultThinkingLevel: ThinkingLevel | null;
+  } | null;
 };
 export type SettingsPage = 'connections' | 'providers' | 'connection' | 'models' | 'model';
 export const thinkingLevels: ThinkingLevel[] = [
@@ -567,11 +571,43 @@ export function createModelSettings(
       label: raw?.displayName ?? '',
       thinkingLevels: raw?.thinkingLevels ? [...raw.thinkingLevels] : null,
       defaultThinkingLevel: raw?.defaultThinkingLevel ?? null,
+      effective: null,
     });
     confirmation.set(null);
     page.set('model');
     error.set('');
     notice.set('');
+    if (id !== null) void loadModelMetadata({ ...modelAction() });
+  };
+  const loadModelMetadata = async (request: ModelAction) => {
+    const connectionId = editor()!.baseline!.target.connectionId;
+    const generation = ++read;
+    loading.set(true);
+    try {
+      const result = await host.query('settings', 'resolveModel', {
+        connectionId,
+        modelId: request.modelId,
+      });
+      if (generation !== read || !currentModel(request)) return;
+      if (
+        result.kind !== 'ready' ||
+        result.choice.selection.connectionId !== connectionId ||
+        result.choice.selection.modelId !== request.modelId ||
+        result.choice.selection.revision !== request.revision
+      )
+        return;
+      model.set({
+        ...model()!,
+        effective: {
+          thinkingLevels: [...result.choice.thinkingLevels],
+          defaultThinkingLevel: result.choice.defaultThinkingLevel,
+        },
+      });
+    } catch (reason) {
+      if (generation === read && currentModel(request)) report(reason);
+    } finally {
+      if (alive && generation === read) loading.set(false);
+    }
   };
   const changeModel = (change: Partial<ModelEditor>) => {
     const current = model();
@@ -582,9 +618,10 @@ export function createModelSettings(
     const level = request.level;
     const current = model();
     if (!current || busy()) return;
-    const levels = (current.thinkingLevels ?? []).includes(level)
-      ? current.thinkingLevels!.filter((value) => value !== level)
-      : [...(current.thinkingLevels ?? []), level];
+    const effective = current.thinkingLevels ?? current.effective?.thinkingLevels ?? [];
+    const levels = effective.includes(level)
+      ? effective.filter((value) => value !== level)
+      : [...effective, level];
     changeModel({
       thinkingLevels: levels,
       defaultThinkingLevel:
@@ -599,7 +636,8 @@ export function createModelSettings(
   const defaultThinking = (request: ModelAction & { level: ThinkingLevel | null }) => {
     if (
       currentModel(request) &&
-      (request.level === null || model()?.thinkingLevels?.includes(request.level))
+      (request.level === null ||
+        (model()?.thinkingLevels ?? model()?.effective?.thinkingLevels)?.includes(request.level))
     )
       changeModel({ defaultThinkingLevel: request.level });
   };

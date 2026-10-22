@@ -796,9 +796,15 @@ async fn configure(owner: Arc<RootOwner>, base: &str, vision: bool, reasoning: b
         overrides["fixture-model"]["defaultThinkingLevel"] = json!("low");
         overrides["fixture-model-alt"]["thinkingLevels"] = json!(["off", "high"]);
         overrides["fixture-model-alt"]["defaultThinkingLevel"] = json!("high");
+        overrides["fixture-model-unknown"] = json!({"contextWindow":200000,"vision":vision,"thinkingLevels":["off","high"]});
     }
+    let enabled_models = if reasoning {
+        json!(["fixture-model","fixture-model-alt","fixture-model-unknown"])
+    } else {
+        json!(["fixture-model","fixture-model-alt"])
+    };
     let CatalogMutationResult::Committed {connection:Some(connection),..} = config.create_connection(serde_json::from_value(json!({
-        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":["fixture-model","fixture-model-alt"],"modelOverrides":overrides}
+        "expectedCatalogRevision":0,"connection":{"slug":"nsh-fixture","name":"NSH fixture","provider":provider,"configuration":{"baseUrl":base},"enabled":true,"enabledModelIds":enabled_models,"modelOverrides":overrides}
     })).unwrap()).await.unwrap() else { panic!("create fixture connection") };
     let maka_config::oauth::enrollment::LoginPreparation::Ready(login) = config.prepare_oauth_login(serde_json::from_value(json!({
         "expectedCredential":null,"attemptId":Uuid::new_v4(),"target":{"kind":"existing","expected":{"connectionId":connection.connection_id,"revision":connection.revision,"provider":provider,"slug":"nsh-fixture","configuration":{"baseUrl":base}},"configuration":{"baseUrl":base}},
@@ -873,7 +879,7 @@ impl ModelRequest {
                 .contains(&format!("authorization: bearer {PROVIDER_KEY}"))
         );
         if headers.starts_with("GET /v1/models ") {
-            let body = br#"{"data":[{"id":"fixture-discovered-model"}]}"#;
+            let body = br#"{"data":[{"id":"fixture-discovered-model","reasoning":{"mandatory":false,"default_enabled":true,"supported_efforts":["max","high","low","none"],"default_effort":"high"}}]}"#;
             socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
             socket.write_all(body).await.unwrap();
             socket.flush().await.unwrap();

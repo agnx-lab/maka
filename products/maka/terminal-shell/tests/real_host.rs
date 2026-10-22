@@ -161,15 +161,11 @@ fn assert_effort_choices(view: &AppView, choice: &Value, selected: Option<&str>)
         rendered, advertised,
         "efforts must come from this model's metadata"
     );
-    assert_eq!(
-        nodes
-            .iter()
-            .find(|node| node.label == "Use connection default")
-            .unwrap()
-            .state
-            .selected,
-        selected.is_none(),
+    assert!(
+        !nodes.iter().any(|node| node.label == "Use connection default"),
+        "connection inheritance must not appear as another reasoning effort",
     );
+    let effective = selected.or_else(|| choice["defaultThinkingLevel"].as_str());
     for level in advertised {
         assert_eq!(
             nodes
@@ -178,8 +174,8 @@ fn assert_effort_choices(view: &AppView, choice: &Value, selected: Option<&str>)
                 .unwrap()
                 .state
                 .selected,
-            selected == Some(level),
-            "the saved policy, rather than its effective default, selects {level}",
+            effective == Some(level),
+            "the effective reasoning effort must select {level}",
         );
     }
 }
@@ -437,12 +433,12 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         activate(&mut view, "Add connection").await;
         wait_view(&mut view, |screen| screen.contains("Choose the API provider for this connection.") && !screen.contains("Loading settings…")).await;
         // Provider inventory uses the production virtual List. Wheel its real
-        // painted rows until the compatible provider is physically available.
+        // painted rows until the OpenRouter provider is physically available.
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 support::tick(&mut view);
                 let screen = view.snapshot();
-                if screen.contains("Chat Completions") {
+                if screen.contains("OpenRouter") {
                     break;
                 }
                 let anchor = view.accessibility_snapshot().into_iter().find_map(|node| {
@@ -454,8 +450,8 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-        }).await.expect("the real provider inventory did not reveal Chat Completions");
-        support::click_button(&mut view, "Connect Chat Completions").await;
+        }).await.expect("the real provider inventory did not reveal OpenRouter");
+        support::click_button(&mut view, "Connect OpenRouter").await;
         wait_view(&mut view, |screen| screen.contains("Connection settings") && screen.contains("Connection name")).await;
         fill(&mut view, "Connection name", "UI 连接").await;
         fill(&mut view, "Connection ID", "ui-connection").await;
@@ -478,6 +474,16 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         activate(&mut view, "Manage models").await;
         wait_view(&mut view, |screen| screen.contains("Connection models") && screen.contains("fixture-discovered-model")).await;
+        let discovered = client.query("settings", "models", json!({"kind":"start","query":"fixture-discovered-model"})).await.unwrap();
+        let discovered_choice = &discovered["choices"][0];
+        assert_eq!(discovered_choice["thinkingLevels"], json!(["max","high","low","off"]));
+        assert_eq!(discovered_choice["defaultThinkingLevel"], "high");
+        activate(&mut view, "Edit model fixture-discovered-model").await;
+        wait_view(&mut view, |screen| screen.contains("Current saved reasoning efforts: max, high, low, off. Default: high.") && !screen.contains("Loading settings…")).await;
+        let node = support::wait_enabled_button(&mut view, "Support effort high").await;
+        assert!(node.state.selected, "provider-discovered efforts must be visible without an override");
+        activate(&mut view, "Back from connection settings").await;
+        wait_view(&mut view, |screen| screen.contains("Connection models")).await;
         activate(&mut view, "Add model manually").await;
         wait_view(&mut view, |screen| screen.contains("Model settings") && screen.contains("Model ID")).await;
         fill(&mut view, "Model ID", "manual-ui-agent").await;
@@ -516,8 +522,17 @@ async fn empty_settings_configure_a_real_connection_and_manual_reasoning_model_b
         wait_enabled_node(&mut view, "Use this workspace folder").await;
         support::click_button(&mut view, "Use this workspace folder").await;
         wait_view(&mut view, |screen| screen.contains("Search models…") && !screen.contains("Loading…")).await;
+        select_palette(&mut view, "Search models…", "fixture-discovered-model", "fixture-discovered-model").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-discovered-model · high") && model_menu_closed(view)).await;
+        activate(&mut view, "Choose model and effort").await;
+        activate(&mut view, "Choose reasoning effort").await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Use effort high") && model_menu_ready(view, "Back to model settings")).await;
+        assert_effort_choices(&view, discovered_choice, None);
+        activate(&mut view, "Back to model settings").await;
+        activate(&mut view, "Choose model").await;
+        wait_focused_input(&mut view, "Search models").await;
         select_palette(&mut view, "Search models…", "manual-ui-agent", "Manual UI Agent").await;
-        wait_view_state(&mut view, |view, screen| screen.contains("Manual UI Agent · Default · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("Manual UI Agent · high") && model_menu_closed(view)).await;
         let sessions = client.query("agent", "list", json!({"filter":"all","position":{"kind":"start"}})).await.unwrap();
         assert_eq!(sessions["sessions"].as_array().unwrap().len(), 1);
         let session = sessions["sessions"][0]["id"].as_str().unwrap().to_owned();
@@ -798,6 +813,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         let choices = models["choices"].as_array().unwrap();
         let primary = choices.iter().find(|choice| choice["selection"]["modelId"] == "fixture-model").unwrap();
         let alternative = choices.iter().find(|choice| choice["selection"]["modelId"] == "fixture-model-alt").unwrap();
+        let unknown_default = choices.iter().find(|choice| choice["selection"]["modelId"] == "fixture-model-unknown").unwrap();
+        assert_eq!(unknown_default["thinkingLevels"], json!(["off", "high"]));
+        assert!(unknown_default["defaultThinkingLevel"].is_null());
         assert_eq!(primary["thinkingLevels"], json!(["off", "low", "high"]));
         assert_eq!(primary["defaultThinkingLevel"], "low");
         assert_eq!(alternative["thinkingLevels"], json!(["off", "high"]));
@@ -940,7 +958,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         view.handle_event(Event::Paste(model_query));
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && screen.contains("1 model") && !screen.contains("Loading…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view_state(&mut view, |view, screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · Default · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("New conversation") && screen.contains("fixture-model-alt · high") && model_menu_closed(view)).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}));
         wait_editable_composer(&mut view).await;
@@ -954,16 +972,16 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view_state(&mut view, |view, screen| screen.contains("Models") && model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         tab_to_label(&mut view, "Choose reasoning effort").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
         assert_effort_choices(&view, alternative, None);
-        tab_to_label(&mut view, "Use effort high").await;
+        tab_to_label(&mut view, "Use effort off").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · off") && model_menu_closed(view)).await;
         wait_focused_input(&mut view, "Message composer").await;
         assert_eq!(view.surface().focused(), Some(created_editor));
         assert_eq!(view.surface().input_context().unwrap().selection, caret);
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
-        assert_eq!(observed["session"]["backend"]["thinkingLevel"], "high");
+        assert_eq!(observed["session"]["backend"]["thinkingLevel"], "off");
 
         // Re-selecting the same route preserves an explicit policy. A mouse
         // Menu returns focus to its actual model trigger, not the editor.
@@ -974,19 +992,19 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · off") && model_menu_closed(view)).await;
         assert_eq!(view.surface().focused(), Some(model_trigger));
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
-        assert_eq!(observed["session"]["backend"]["thinkingLevel"], "high");
+        assert_eq!(observed["session"]["backend"]["thinkingLevel"], "off");
 
         support::click_label(&mut view, "Choose model and effort");
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
-        assert_effort_choices(&view, alternative, Some("high"));
-        support::evidence_cells("workbench-model-effort-explicit-high", &view);
-        // Hold an Off press across a keyboard selection of Default.
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
+        assert_effort_choices(&view, alternative, Some("off"));
+        support::evidence_cells("workbench-model-effort-explicit-off", &view);
+        // Hold an Off press across a keyboard selection of the actual default high.
         // Its later release must not replace the newer policy.
         let off = view.accessibility_snapshot().into_iter().find(|node| node.label == "Use effort off").unwrap().frame;
         let column = (off.origin.x.0 / 8.0 - 0.5).ceil().max(0.0) as u16;
@@ -997,9 +1015,9 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
             row,
             modifiers: KeyModifiers::NONE,
         }));
-        tab_to_label(&mut view, "Use connection default").await;
+        tab_to_label(&mut view, "Use effort high").await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · Default · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · high") && model_menu_closed(view)).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
         view.handle_event(Event::Mouse(MouseEvent {
@@ -1016,13 +1034,13 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
             .expect("the old chooser release did not commit")
             .expect("the chooser engine stopped");
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
-        assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}), "the old Off release changed the newer Default policy");
+        assert_eq!(observed["session"]["backend"], json!({"kind":"model","connectionId":fixture.selection["connectionId"],"modelId":"fixture-model-alt","thinkingLevel":null}), "the old Off release changed the newer inherited high policy");
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
         support::click_label(&mut view, "Choose model and effort");
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
         wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · off") && model_menu_closed(view)).await;
@@ -1035,7 +1053,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
         assert_effort_choices(&view, alternative, Some("off"));
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection") && model_menu_button(view, "Back to model settings").is_none()).await;
@@ -1043,7 +1061,7 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model · NSH fixture");
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model · Default · low") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model · low") && model_menu_closed(view)).await;
         let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
         assert_eq!(observed["session"]["backend"]["modelId"], "fixture-model");
         assert!(observed["session"]["backend"]["thinkingLevel"].is_null());
@@ -1051,20 +1069,44 @@ async fn the_home_palette_creates_switches_models_and_stops_a_real_session_witho
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
         assert_effort_choices(&view, primary, None);
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection") && model_menu_button(view, "Back to model settings").is_none()).await;
         support::click_label(&mut view, "Choose model");
         wait_focused_input(&mut view, "Search models").await;
+        wait_view(&mut view, |screen| screen.contains("fixture-model-unknown") && !screen.contains("Loading…")).await;
+        support::click_label(&mut view, "Use fixture-model-unknown · NSH fixture");
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-unknown · Provider controlled") && model_menu_closed(view)).await;
+        support::click_button(&mut view, "Choose model and effort").await;
+        support::click_button(&mut view, "Choose reasoning effort").await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Use effort high") && model_menu_ready(view, "Back to model settings")).await;
+        assert_effort_choices(&view, unknown_default, None);
+        assert!(model_menu_button(&view, "Use provider settings").is_none());
+        support::click_button(&mut view, "Use effort high").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-unknown · high") && model_menu_closed(view)).await;
+        let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
+        assert_eq!(observed["session"]["backend"]["thinkingLevel"], "high");
+        support::click_button(&mut view, "Choose model and effort").await;
+        support::click_button(&mut view, "Choose reasoning effort").await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Use provider settings") && model_menu_ready(view, "Back to model settings")).await;
+        assert_effort_choices(&view, unknown_default, Some("high"));
+        support::click_button(&mut view, "Use provider settings").await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-unknown · Provider controlled") && model_menu_closed(view)).await;
+        let observed = client.query("agent", "observe", json!({"sessionId":created_id})).await.unwrap();
+        assert!(observed["session"]["backend"]["thinkingLevel"].is_null(), "resetting provider control must clear the saved override");
+        assert_eq!(fixture.request_count.load(Ordering::SeqCst), 0);
+        support::click_button(&mut view, "Choose model and effort").await;
+        support::click_button(&mut view, "Choose model").await;
+        wait_focused_input(&mut view, "Search models").await;
         wait_view(&mut view, |screen| screen.contains("fixture-model-alt") && !screen.contains("Loading…")).await;
         support::click_label(&mut view, "Use fixture-model-alt · NSH fixture");
-        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · Default · high") && model_menu_closed(view)).await;
+        wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · high") && model_menu_closed(view)).await;
         support::click_label(&mut view, "Choose model and effort");
         wait_view_state(&mut view, |view, _| model_menu_ready(view, "Choose reasoning effort") && model_menu_ready(view, "Close model selection")).await;
         wait_enabled_node(&mut view, "Choose reasoning effort").await;
         support::click_label(&mut view, "Choose reasoning effort");
-        wait_view_state(&mut view, |view, screen| screen.contains("Default · Use connection default") && model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use connection default")).await;
+        wait_view_state(&mut view, |view, _| model_menu_ready(view, "Back to model settings") && model_menu_ready(view, "Use effort high")).await;
         assert_effort_choices(&view, alternative, None);
         support::click_label(&mut view, "Use effort off");
         wait_view_state(&mut view, |view, screen| screen.contains("fixture-model-alt · off") && model_menu_closed(view)).await;
@@ -1533,7 +1575,7 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         )
         .await;
         wait_view_state(&mut view, |view, screen| {
-            screen.contains("fixture-model-alt · Default") && model_menu_closed(view)
+            screen.contains("fixture-model-alt") && model_menu_closed(view)
         })
         .await;
         wait_editable_composer(&mut view).await;
@@ -1571,7 +1613,8 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         // discard its draft, or move a native caret that is inside the text.
         shortcut(&mut view, 'g');
         wait_view_state(&mut view, |view, _| {
-            model_menu_ready(view, "Choose reasoning effort")
+            model_menu_ready(view, "Choose model")
+                && model_menu_button(view, "Choose reasoning effort").is_none()
                 && model_menu_ready(view, "Close model selection")
         })
         .await;
@@ -1579,7 +1622,8 @@ async fn the_resident_composer_keeps_its_session_editor_and_isolates_native_undo
         wait_view(&mut view, |screen| screen.contains("Search models…")).await;
         view.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         wait_view_state(&mut view, |view, _| {
-            model_menu_ready(view, "Choose reasoning effort")
+            model_menu_ready(view, "Choose model")
+                && model_menu_button(view, "Choose reasoning effort").is_none()
                 && model_menu_ready(view, "Close model selection")
                 && model_menu_button(view, "Back to model settings").is_none()
         })
@@ -2780,7 +2824,7 @@ async fn immutable_tool_images_render_and_preview_without_stopping_the_running_t
         bindings.close().await.unwrap();
 
         let mut terminal = support::pty::Pty::spawn(&fixture.directory.path().join("host"), Some(&fixture.session));
-        terminal.wait_for("fixture-model · Default").await;
+        terminal.wait_for("fixture-model").await;
         terminal.wait_for_absent("Loading session history").await;
         terminal.wait_for("Working…").await;
         terminal.send(b"\x1b[1;3B");
@@ -3265,7 +3309,7 @@ async fn production_binary_sends_renders_provider_text_and_restores_its_actual_t
         gate.release();
         terminal.wait_for_absent("Loading session history").await;
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "history recovery must not replay the early Enter");
-        terminal.click_send("fixture-model · Default").await;
+        terminal.click_send("fixture-model").await;
         // A real terminal keeps reading stdout while waiting for the provider.
         // This also exercises the production LocalEngine presentation acknowledgements.
         let awaiting = Instant::now();
@@ -3364,7 +3408,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         assert_eq!(fixture.request_count.load(Ordering::SeqCst), 1, "retry must not send the retained draft");
 
         send.arm();
-        terminal.click_send("fixture-model · Default").await;
+        terminal.click_send("fixture-model").await;
         let started = Instant::now();
         let mut request = loop {
             terminal.read();
@@ -3444,7 +3488,7 @@ async fn production_history_retry_and_live_reconnect_preserve_the_draft_receipt_
         terminal.wait_for("RECOVERY_ORIGINAL_A + LATER_UNSENT_B").await;
         // A new deliberate send proves the new live subscription receives
         // subsequent facts, rather than merely displaying its recovery snapshot.
-        terminal.click_send("fixture-model · Default").await;
+        terminal.click_send("fixture-model").await;
         let started = Instant::now();
         let mut next = loop {
             terminal.read();
