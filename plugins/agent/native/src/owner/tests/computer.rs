@@ -69,9 +69,10 @@ async fn start(
     input: Value,
     expected_state: &str,
     step: &std::cell::Cell<&'static str>,
-) {
+) -> String {
     step.set("start.send");
-    f.send(session).await.unwrap();
+    let receipt = f.send(session).await.unwrap();
+    let invocation = receipt["invocationId"].as_str().unwrap().to_owned();
     step.set("provider.accept");
     let (mut socket, _) = listener.accept().await.unwrap();
     step.set("provider.request");
@@ -92,6 +93,7 @@ async fn start(
     step.set("start.tool_response");
     service_tools::named_tool_response(&mut socket, method, input).await;
     step.set("start.returned");
+    invocation
 }
 async fn finish(
     listener: &TcpListener,
@@ -228,21 +230,28 @@ async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
         // Revocation stops the cell; reset joins the VM before replacing it.
         scenario.set("revocation.start");
         step.set("direct.await");
-        start(&listener, &f, &session, "cua_repl", json!({"code":"await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});","timeout_ms":120000}), "ready", &step).await;
+        let revocation_invocation = start(&listener, &f, &session, "cua_repl", json!({"code":"await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});","timeout_ms":120000}), "ready", &step).await;
         scenario.set("revocation.start.returned");
         step.set("returned_or_assertions");
         let mut commits = f.store.subscribe_commits();
         loop {
-            commits.borrow_and_update();
+            let observed_commit = *commits.borrow_and_update();
             scenario.set("revocation.dispatch_facts");
             step.set("direct.await");
-            let events = service_tools::facts(&f, &session).await;
+            let stored = service_tools::stored_facts(&f, &session).await;
+            let events: Vec<_> = stored.iter()
+                .filter(|event| event.event.invocation.invocation_id == revocation_invocation)
+                .collect();
             scenario.set("revocation.dispatch_facts.returned");
             step.set("returned_or_assertions");
             *revocation_trace.borrow_mut() = json!({
                 "factCount": events.len(),
-                "lastFacts": events.iter().rev().take(32).rev().map(|event| {
-                    match event {
+                "invocationId": revocation_invocation,
+                "observedCommit": observed_commit,
+                "lastSequence": stored.last().map(|event| event.sequence),
+                "lastFacts": events.iter().rev().take(32).rev().map(|stored| {
+                    let event = &stored.event.fact;
+                    let mut row = match event {
                         Fact::ToolDispatched { operation_id, call, name, input, .. } => json!({
                             "kind":event.kind(), "operationId":operation_id, "call":call,
                             "name":name, "method":input.get("method"),
@@ -268,18 +277,29 @@ async fn computer_product_tools_preserve_approval_repl_media_and_revocation() {
                             "diagnostic":diagnostic.as_ref().map(|text| text.chars().take(1024).collect::<String>()),
                         }),
                         _ => json!({"kind":event.kind(), "operationId":event.operation_id()}),
-                    }
+                    };
+                    row["sequence"] = json!(stored.sequence);
+                    row
                 }).collect::<Vec<_>>()
             });
-            if events.iter().filter(|event| matches!(event, Fact::ToolDispatched { input, name, .. } if name == "cua_operation" && input["method"] == "listBrowsers")).count() >= 2 { break; }
-            if let Some(operation) = events.iter().find_map(|event| match event {
+            if let Some(operation) = events.iter().find_map(|event| match &event.event.fact {
                 Fact::ToolDispatched { operation_id, name, input, .. }
                     if name == "cua_repl" && input["code"] == "await cua.listBrowsers(); nodeRepl.write('waiting'); await new Promise(() => {});" => Some(operation_id),
                 _ => None,
             }) {
-                assert!(!events.iter().any(|event| matches!(event, Fact::ToolSettled { operation_id, .. } if operation_id == operation)),
+                if events.iter().any(|event| matches!(&event.event.fact,
+                    Fact::ToolDispatched { input, name, call, .. }
+                        if name == "cua_operation" && input["method"] == "listBrowsers"
+                            && matches!(&call.origin, maka_agent_facts::tool_call::ToolOrigin::HostSdk {
+                                parent_operation_id: Some(parent), ..
+                            } if parent == operation))) { break; }
+                assert!(!events.iter().any(|event| matches!(&event.event.fact, Fact::ToolSettled { operation_id, .. } if operation_id == operation)),
                     "revocation cell settled before its expected child dispatch: {}", revocation_trace.borrow());
             }
+            assert!(!events.iter().any(|event| matches!(&event.event.fact,
+                Fact::ToolRejected { name, .. } if name == "cua_repl")
+                || matches!(&event.event.fact, Fact::ModelInterrupted { .. } | Fact::InvocationEnded { .. })),
+                "current invocation ended before its expected child dispatch: {}", revocation_trace.borrow());
             scenario.set("revocation.commit_wait");
             step.set("direct.await");
             commits.changed().await.unwrap();

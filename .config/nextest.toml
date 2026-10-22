@@ -15,6 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+# 0.9.145 fixes captured output pipes leaking into concurrently spawned tests.
+# https://github.com/nextest-rs/nextest/pull/3553
+nextest-version = "0.9.145"
+
 # These fixtures own multi-threaded Hosts, databases and child processes.
 # Account for that work instead of oversubscribing them as single-thread tests.
 [[profile.default.overrides]]
