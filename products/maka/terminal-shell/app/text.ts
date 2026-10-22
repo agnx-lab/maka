@@ -19,15 +19,9 @@
 
 import { signal } from 'nsh';
 import { tr, type MessageKey } from './locale';
+import { message, type UiText, type UiTextValues } from './text-value';
 
-type Values = Readonly<Record<string, UiText | number>>;
-export type UiText = string | { readonly key: MessageKey; readonly values?: Values };
-
-/** Authored interface text keeps its identity; external text remains opaque. */
-export const message = (key: MessageKey, values?: Values): Exclude<UiText, string> => ({
-  key,
-  values,
-});
+export { message, type UiText } from './text-value';
 
 export function renderText(value: UiText): string {
   if (typeof value === 'string') return value;
@@ -53,7 +47,7 @@ export function createText() {
 
 export class UiError extends Error {
   readonly text: UiText;
-  constructor(key: MessageKey, values?: Values) {
+  constructor(key: MessageKey, values?: UiTextValues) {
     const text = message(key, values);
     super(renderText(text));
     this.text = text;

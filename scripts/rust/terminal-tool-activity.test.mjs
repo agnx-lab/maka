@@ -22,6 +22,7 @@ import test from 'node:test';
 import {
   updateToolActivity,
   latestToolActivity,
+  toolActivitySummary,
 } from '../../products/maka/terminal-shell/app/toolActivity.ts';
 
 import {
@@ -30,6 +31,23 @@ import {
   updateHistoryMetadata,
 } from '../../products/maka/terminal-shell/app/history.ts';
 import { thinkingSummary } from '../../products/maka/terminal-shell/app/thinkingSummary.ts';
+
+test('tool summaries use UI-rendered labels while retaining the tool source details', () => {
+  const tool = {
+    phase: 'preparing',
+    name: '搜索源代码',
+    title: { fallback: 'Opaque fallback' },
+    detail: ' 搜索\n  原文😀 ',
+  };
+  assert.equal(
+    toolActivitySummary(tool, '正在准备工具', '查找定义'),
+    '正在准备工具 · 搜索源代码 · 查找定义 · 搜索 原文😀',
+  );
+  assert.equal(
+    toolActivitySummary({ ...tool, phase: 'running' }, 'Running tool'),
+    'Running tool · 搜索源代码 · 搜索 原文😀',
+  );
+});
 
 test('thinking summary retains the last nonempty paragraph and its Unicode text', () => {
   for (const [source, expected] of [

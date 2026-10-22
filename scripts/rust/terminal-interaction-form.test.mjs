@@ -33,8 +33,8 @@ const string = (name, extra = {}) => ({
   ...extra,
 });
 
-// Exercise the same pure validator imported by the actual terminal InteractionPanel.
-// Node 24 strips its type-only imports; no copied schema or component stub is used.
+// Exercise the same pure validator and message carriers imported by the actual
+// terminal InteractionPanel. Node strips types; no native module or UI is emulated.
 test('terminal forms preserve complete multibyte defaults and aggregate answers', () => {
   const original = `原文😀${'甲😀'.repeat(1500)}完整结尾`;
   assert.ok([...original].length > 2048);
@@ -85,17 +85,24 @@ test('terminal forms preserve authored limits, omission, and malformed-value rej
   const bounded = string('value', { minLength: 2, maxLength: 3, default: '甲😀' });
   const valid = formSubmission([bounded], initialForm([bounded]));
   assert.equal(valid.answer.values.value, '甲😀', 'authored character limits count Unicode points');
-  for (const value of ['a', '甲😀ab']) {
+  for (const [value, key, count] of [
+    ['a', 'Use at least {count} characters.', 2],
+    ['甲😀ab', 'Use at most {count} characters.', 3],
+  ]) {
     const result = formSubmission([bounded], [{ included: true, value, hidden: false }]);
     assert.equal(result.answer, null);
     assert.ok(
       result.problems[0],
       'an explicit authored minimum or maximum must remain authoritative',
     );
+    assert.deepEqual(result.problems[0], { key, values: { count } });
   }
   const missing = formSubmission([bounded], [{ included: false, value: '甲😀', hidden: false }]);
   assert.equal(missing.answer, null);
-  assert.equal(missing.problems[0], 'This field is required.');
+  assert.deepEqual(missing.problems[0], {
+    key: 'This field is required.',
+    values: undefined,
+  });
 
   for (const [field, value] of [
     [string('value', { format: 'date' }), '2025-02-29'],

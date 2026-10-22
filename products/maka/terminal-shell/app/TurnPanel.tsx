@@ -18,7 +18,7 @@
  */
 
 import { createText, errorText } from './text';
-import { tr } from './locale';
+import { displayText, tr } from './locale';
 import { cleanup, computed, effect, inputAction, signal, Text, View } from 'nsh';
 import type { YNode } from 'nsh';
 import { Button } from 'nsh/base';
@@ -425,7 +425,12 @@ export function TurnPanel(props: {
     const activity = props.activity();
     if (activity.kind === 'waiting') return tr('Waiting for your response');
     const tool = props.toolActivity();
-    if (tool) return toolActivitySummary(tool);
+    if (tool)
+      return toolActivitySummary(
+        tool,
+        tool.phase === 'preparing' ? tr('Preparing tool') : tr('Running tool'),
+        tool.title ? displayText(tool.title) : undefined,
+      );
     if (
       activity.kind === 'thinking' &&
       activity.rowId &&

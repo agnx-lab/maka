@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { displayText, tr } from './locale';
 import type { DisplayText } from '../../../../packages/plugin-sdk/src/index.js';
 
 // Display-only source observations. No preview is parsed or used to authorize a tool.
@@ -143,14 +142,9 @@ export function latestToolActivity(
   return latest;
 }
 
-export function toolActivitySummary(tool: ToolActivity): string {
+export function toolActivitySummary(tool: ToolActivity, phaseLabel: string, title?: string): string {
   const detail = tool.detail.replace(/\s+/g, ' ').trim();
-  return [
-    tool.phase === 'preparing' ? tr('Preparing tool') : tr('Running tool'),
-    tool.name,
-    tool.title ? snippet(displayText(tool.title)) : undefined,
-    detail,
-  ]
+  return [phaseLabel, tool.name, title ? snippet(title) : undefined, detail]
     .filter(Boolean)
     .join(' · ');
 }

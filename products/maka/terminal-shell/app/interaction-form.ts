@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { message as uiMessage, type UiText } from './text';
+import { message as uiMessage, type UiText } from './text-value.ts';
 import type {
   FormField,
   FormValue,
