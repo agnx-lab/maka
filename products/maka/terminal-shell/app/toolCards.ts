@@ -18,10 +18,7 @@
  */
 
 import { tr } from './locale';
-import {
-  toolPresentation,
-  webPresentation,
-} from '../../../../plugins/agent/tool-details/presentation';
+import { toolPresentation, webPresentation } from '../../../../plugins/shared/tool-presentation';
 export const cardFamily = (key: string | null | undefined) =>
   toolPresentation(key) ?? webPresentation(key);
 export type ToolFamily = ReturnType<typeof cardFamily>;

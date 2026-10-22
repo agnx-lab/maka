@@ -44,7 +44,6 @@ path = "../terminal-shell/tests/real_host.rs"
 
 [dependencies]
 hex.workspace = true
-maka-capabilities.workspace = true
 maka-agent-facts.workspace = true
 maka-packages.workspace = true
 maka-product-native.workspace = true
@@ -87,6 +86,7 @@ nsh-core.workspace = true
 nsh-base.workspace = true
 
 [dev-dependencies]
+maka-capabilities.workspace = true
 maka-ui-runtime.workspace = true
 crossterm.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

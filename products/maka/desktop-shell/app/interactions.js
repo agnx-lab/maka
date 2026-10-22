@@ -20,9 +20,7 @@
 // What the agent is waiting on in one session: service approvals, permission
 // requests, client capabilities and questions, and the card that answers
 // them. The watch delivers the pending list, `agent.interaction` reads each
-// request once and `agent.respond` answers it, with the answer shapes the TUI
-// sends (plugins/agent/agent-screen/component-events.ts, actions.ts
-// respondInteraction and submitQuestion, and plugins/agent/form-editor).
+// request once and `agent.respond` answers it using the formal Agent wire shapes.
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, InputState } from 'gpui-base';

@@ -52,13 +52,10 @@ Review the exact package revisions in the preview. Apply replaces explicitly sel
 
 `update-defaults` requires stored package records that the current executable can decode. A Root containing a removed internal format, such as the old `desktop` surface, fails before preview; preserve that Root and initialize a new one.
 
-Close the product UI before recovery; restoration updates the independent Host through its management service. Direct package installation requires the selected Root to be inactive. Both commands default to `~/.maka/application`; select another installation with `--root DIRECTORY`.
+Direct package installation requires the selected Host Root to be inactive. `update-defaults` and `install-url` default to `~/.maka/application/host`; select another Host with `--root DIRECTORY`.
 
 ```sh
-maka application restore-defaults
 maka application install-url --url https://example.com/plugin.maka-plugin
 ```
 
-`restore-defaults` restores the Host, management and UI compositions from the original installation, with their exact packages and instance IDs. It keeps conversations, credentials, plugin data, connection authority and source history. It restores the installation baseline, not a newer executable's defaults. An interrupted restore resumes the same prepared revisions when reopened; later conflicting edits are rejected.
-
-`install-url` accepts a direct HTTP(S) `.maka-plugin` bundle URL. It validates the package digest and bounded downloads, stores an immutable revision, and leaves activation to the Plugins composition editor. Add `--sha256 HEX` to verify a publisher-provided bundle digest, `--expected-revision N` for an explicit source comparison, or `--deployment UUID` for an independently committed deployment. Downloads use the process proxy environment. The live Plugins install page and Agent `UIRequest` also expose URL installation through the bound deployment manager.
+`install-url` accepts a direct HTTP(S) `.maka-plugin` bundle URL. It validates the package digest and bounded downloads, stores an immutable revision, and leaves activation to the Plugins composition editor. Add `--sha256 HEX` to verify a publisher-provided bundle digest, `--expected-revision N` for an explicit source comparison, or `--deployment UUID` for an independently committed deployment. Downloads use the process proxy environment. The live Plugins install page also exposes URL installation through the bound Host deployment manager.

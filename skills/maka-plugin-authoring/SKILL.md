@@ -33,13 +33,13 @@ For a new package, follow [Quickstart](references/quickstart.md). It covers a si
 Read the guide relevant to the change:
 
 - [Host services and Agent tools](references/tools-and-input.md): handlers, scoped calls and tool selection.
-- [Runtime UI authoring](references/runtime-ui.md): read, install and update the connected UI; customize the composer footer.
+- [Runtime UI authoring](references/runtime-ui.md): Host plugin management and independently authored UI request consumers.
 - [UI components](references/terminal-apps.md): callbacks, native scenes, editors and input.
 - [State and authority](references/state-and-authority.md): data ownership, mutation receipts and cancellation.
 - [Native Rust](references/native-rust.md): definitions, registration and resource lifetime.
 - [Models and execution](references/models-and-execution.md): Agent/provider integration.
 - [Testing and shipping](references/testing-and-shipping.md): package checks, installation and actual runtime tests.
-- [Product source examples](references/product-sources.md): current contracts, complete UI examples and product wiring, with a generated resource index.
+- [Product source examples](references/product-sources.md): current Host contracts, business package examples and product wiring, with a generated resource index.
 - [API sources](references/api-map.md): exact types and schemas for this build.
 
 Use the SDK root exports and the runtime's `maka application schema` output. Rust declarations generate SDK contracts; hand-editing generated files creates drift. JavaScript entries have no ambient Node APIs. Effects use declared service imports and request-local resources.

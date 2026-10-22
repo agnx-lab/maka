@@ -31,13 +31,12 @@ A plugin is declared by a leaf `package.ts`. It lists executable entries, config
 | [skills](skills/native/README.md) | Skill discovery, reads and publication |
 | [interactions](interactions/native/README.md) | Questions and forms |
 | [workhub](workhub/core/README.md) | Task coordination and worker results |
-| `ui/` | Declarations for native UI capabilities |
 | `application/` | Deployment management, plugin installation and UI authoring |
 | `shared/` | Shared TypeScript contracts and authoring helpers |
 
-For an existing plugin, start with its declaration and follow its selected implementation. JavaScript entries name a local module such as `tui.js`, built from `tui.ts`. Native entries select an implementation supplied by the executable. Neither a family directory nor a linked crate activates a plugin. The [desktop shell](../products/maka/desktop-shell/README.md) authors its app separately and connects to the same public Host services.
+For an existing plugin, start with its declaration and follow its selected implementation. Native entries select an implementation supplied by the executable; JavaScript entries name their bundled local module. Neither a family directory nor a linked crate activates a plugin.
 
-A family describes business ownership, not a mutually exclusive UI/service category. `package.ts` is authoritative: `host` and `tui` entries say where each implementation runs, and their exports distinguish components from services and values. For example, `application/authoring` has a Host service and a foreground UI worker. `ui/` contains reusable presentation capabilities; it is not a collection of every plugin with a UI. Large components can split plain modules by responsibility; [AgentScreen](agent/agent-screen/README.md) keeps one component state and lifecycle while separating commands, replies, events and view regions.
+The product selects business Host services. The [terminal shell](../products/maka/terminal-shell/README.md) and [desktop shell](../products/maka/desktop-shell/README.md) author their interfaces separately and connect to those same public Host capabilities. General SDK scene contracts remain available for independently authored runtimes; the default bundle has no scene presenter packages.
 
 Build a single package from the repository root:
 
@@ -50,8 +49,6 @@ The builder replaces its output directory. It emits immutable-package inputs und
 To include a plugin in Maka, add its path to [the product selection](../products/maka/bundle/package-inputs.json), then add instances and bindings in [the composition](../products/maka/bundle/src/composition.ts). A new native implementation also needs a factory in [the product registry](../products/maka/native/README.md). An import identifies a dependency; Host grants determine which calls are allowed.
 
 The [plugin-authoring skill](../skills/maka-plugin-authoring/SKILL.md) includes a runnable standalone starter and guides for services, UI, state and native extensions. The [SDK](../packages/plugin-sdk/README.md) supplies the exact contracts.
-
-Large UI components (`application/apps`, `application/deployment`, `agent/scheduler`, `agent/conversation-import`, `settings/insights`, `settings/connection-form`) use `state.ts` for shared state and local value types, `operations.ts` for service intents and settlement, `view.ts` for scenes, and `events.ts` for inputs. `index.ts` constructs the component and wires its lifecycle. These are plain modules of one component, with one state and one publication boundary; they do not introduce another event bus or store. Small components can stay in one file.
 
 Plugin lists use the package author's `displayName` and `description`. Describe what the user can do in one sentence; internal package IDs remain stable technical identities. Optional `localizations` maps language tags to translated names and descriptions:
 
@@ -67,4 +64,4 @@ Plugin lists use the package author's `displayName` and `description`. Describe 
 }
 ```
 
-The plugin manager displays and searches this copy; the app chooser uses it too. Missing translations fall back to the default copy, then the instance name or package ID. Labels should predict the action or destination, following [Apple's guidance on clear names](https://developer.apple.com/videos/play/wwdc2026/290/). Use familiar icons with accessible labels and tooltips for common actions; keep explicit text for consequential or unfamiliar actions. Large collections use reading-area scroll observations to load adjacent data and preserve the visible row; data cursors remain an implementation detail.
+The plugin manager displays and searches this copy. Missing translations fall back to the default copy, then the instance name or package ID. Labels should predict the action or destination, following [Apple's guidance on clear names](https://developer.apple.com/videos/play/wwdc2026/290/). Use familiar icons with accessible labels and tooltips for common actions; keep explicit text for consequential or unfamiliar actions. Shell lists use their native virtualized controls and preserve the visible row; data cursors remain an implementation detail.

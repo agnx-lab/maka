@@ -232,8 +232,8 @@ mod tests {
             "references/source-index.md",
             "references/sdk/contracts/agent.ts",
             "references/sdk/contracts/deploymentManager.ts",
-            "references/source/plugins/shared/contracts.ts",
-            "references/source/plugins/agent/agent-screen/index.ts",
+            "references/source/plugins/shared/package.ts",
+            "references/source/plugins/application/gateway/package.ts",
         ] {
             assert!(
                 source.files.iter().any(|(path, _)| *path == required),

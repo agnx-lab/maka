@@ -234,7 +234,6 @@ async fn selected_and_override_pins_upgrade_without_reauthoring_custom_compositi
     let record = f.store.application_launch().await.unwrap().unwrap();
     assert_eq!(record.configuration, f.selection);
     assert!(record.pending.is_none());
-    assert!(f.store.application_product().await.unwrap().is_none());
     let again = synchronize_packages(&f.store, record, true, f.bundled())
         .await
         .unwrap();
@@ -294,7 +293,7 @@ async fn pending_preview_and_apply_recover_only_frozen_target_including_lost_ack
         let f = Fixture::new(directory.path()).await;
         let pending = f.stage().await;
         if committed {
-            super::super::super::restore::ensure(
+            launch::ensure_replacement(
                 &f.store,
                 f.deployment,
                 1,

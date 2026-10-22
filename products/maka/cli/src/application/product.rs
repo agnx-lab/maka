@@ -18,7 +18,7 @@
  */
 //! Product authoring loads checked packages from development output or release assets.
 use super::{HostError, Input, Package, RemoteObservation, read_json};
-use clap::{Args, ValueEnum};
+use clap::Args;
 use maka_event_log::applications::PreparedApplication;
 use maka_js_runtime::plugin::Vm;
 use serde::{Deserialize, Serialize};
@@ -27,13 +27,8 @@ use std::{collections::BTreeMap, io::Write, path::PathBuf};
 
 mod headless;
 mod launch;
-mod public;
-mod restore;
-#[cfg(test)]
-mod test_public;
 mod update;
 pub(crate) use headless::{Roots, open_host, select_committed_host};
-pub(super) use restore::Restore;
 pub(super) use update::Update;
 
 pub(super) fn root_path(root: Option<PathBuf>) -> Result<PathBuf, HostError> {
@@ -41,7 +36,7 @@ pub(super) fn root_path(root: Option<PathBuf>) -> Result<PathBuf, HostError> {
         Some(root) => Ok(std::path::absolute(root)?),
         None => Ok(crate::serve::home_directory()?
             .ok_or("home directory unavailable; select --root")?
-            .join(".maka/application")),
+            .join(".maka/application/host")),
     }
 }
 
@@ -55,14 +50,6 @@ include!(concat!(env!("OUT_DIR"), "/product-assets.rs"));
 #[cfg(not(maka_embedded_product))]
 const DEVELOPMENT_BUNDLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../bundle/dist");
 
-#[derive(Clone, Copy, ValueEnum, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum Product {
-    Agent,
-    Studio,
-    Workhub,
-}
-
 #[derive(Args)]
 pub(crate) struct Compose {
     /// Installation configuration and explicit grants; omitted identities are generated once.
@@ -71,48 +58,15 @@ pub(crate) struct Compose {
     /// New output directory for checked sources, connection input and exact packages.
     #[arg(long, value_name = "DIRECTORY")]
     output: PathBuf,
-    #[arg(long, value_enum, default_value = "agent")]
-    product: Product,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Sources {
     host: Input,
-    management_host: Input,
-    ui: Input,
-    remote_exports: Vec<RemoteObservation>,
-    connections: Value,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PackageSets {
-    pub(super) host: Vec<maka_plugin_core::package::PackageRef>,
-    pub(super) management_host: Vec<maka_plugin_core::package::PackageRef>,
-    pub(super) ui: Vec<maka_plugin_core::package::PackageRef>,
-}
-#[cfg(test)]
-impl PackageSets {
-    pub(super) fn from_applications(applications: &[PreparedApplication; 3]) -> Self {
-        Self {
-            host: applications[0]
-                .packages()
-                .iter()
-                .map(Package::application_ref)
-                .collect(),
-            management_host: applications[1]
-                .packages()
-                .iter()
-                .map(Package::application_ref)
-                .collect(),
-            ui: applications[2]
-                .packages()
-                .iter()
-                .map(Package::application_ref)
-                .collect(),
-        }
-    }
+    deployment: uuid::Uuid,
+    endpoints: BTreeMap<String, maka_host_runtime::application::transport::HostEndpoint>,
+    native: Vec<maka_host_runtime::application::transport::NativeGrant>,
 }
 
 impl Compose {
@@ -123,7 +77,7 @@ impl Compose {
         let authoring = authoring()?;
         verified_fingerprint(&authoring, &packages, &version)?;
         let (sources, installation, _) =
-            author_with_source(self.product, configuration, &packages, &authoring).await?;
+            author_with_source(configuration, &packages, &authoring).await?;
         tokio::task::spawn_blocking(move || export(self.output, sources, installation, packages))
             .await??;
         println!("Checked product sources and immutable packages written");
@@ -158,10 +112,7 @@ fn package_paths() -> Result<BTreeMap<String, PathBuf>, HostError> {
     let names: Vec<String> = serde_json::from_value(read_json(&directory.join("packages.json"))?)?;
     let mut paths = BTreeMap::new();
     for name in names {
-        if name.is_empty()
-            || name.len() > 128
-            || !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
-        {
+        if name.is_empty() || !name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
             return Err("invalid development package name".into());
         }
         let path = directory.join("packages").join(&name);
@@ -262,20 +213,18 @@ fn authoring() -> Result<String, HostError> {
 }
 
 async fn author(
-    product: Product,
     configuration: Value,
     packages: &BTreeMap<String, Package>,
-) -> Result<(Sources, Value, [PreparedApplication; 3]), HostError> {
+) -> Result<(Sources, Value, PreparedApplication), HostError> {
     let source = authoring()?;
     verified_fingerprint(&source, packages, &bundle_fingerprint()?)?;
-    author_with_source(product, configuration, packages, &source).await
+    author_with_source(configuration, packages, &source).await
 }
 async fn author_with_source(
-    product: Product,
     mut configuration: Value,
     packages: &BTreeMap<String, Package>,
     source: &str,
-) -> Result<(Sources, Value, [PreparedApplication; 3]), HostError> {
+) -> Result<(Sources, Value, PreparedApplication), HostError> {
     let values = configuration
         .as_object_mut()
         .ok_or("installation configuration must be an object")?;
@@ -285,11 +234,9 @@ async fn author_with_source(
         .collect();
     // Caller-supplied package locators cannot substitute for actual build bytes.
     values.insert("packages".into(), serde_json::to_value(references)?);
-    for key in ["hostDeployment", "managementDeployment"] {
-        values
-            .entry(key)
-            .or_insert_with(|| Value::String(uuid::Uuid::new_v4().to_string()));
-    }
+    values
+        .entry("hostDeployment")
+        .or_insert_with(|| Value::String(uuid::Uuid::new_v4().to_string()));
     let vm = Vm::pure(Default::default())?;
     let result: Result<Value, HostError> =
         match vm.load("maka-product-authoring".into(), source.to_owned()) {
@@ -316,13 +263,11 @@ async fn author_with_source(
                                 .or_insert_with(|| Value::String(uuid::Uuid::new_v4().to_string()));
                         }
                     }
-                    let method = match product {
-                        Product::Agent => "composition",
-                        Product::Studio => "studioComposition",
-                        Product::Workhub => "workhubComposition",
-                    };
                     Ok(module
-                        .call(vec![method.into()], vec![Value::Object(values.clone())])
+                        .call(
+                            vec!["composition".into()],
+                            vec![Value::Object(values.clone())],
+                        )
                         .await?)
                 }
                 .await;
@@ -334,10 +279,17 @@ async fn author_with_source(
     vm.shutdown().await;
     let sources: Sources = serde_json::from_value(result?)?;
     let checked: Vec<_> = packages.values().cloned().collect();
-    let prepared = prepare_sources(&sources, &checked)?;
-    let connections: maka_transport::Configuration =
-        serde_json::from_value(sources.connections.clone())?;
-    connections.validate().map_err(HostError::from)?;
+    let mut applications =
+        maka_event_log::applications::prepare_applications(&[(&sources.host, &[])], &checked)?;
+    let prepared = applications.pop().expect("one authored Host");
+    if sources.deployment.is_nil() {
+        return Err("Host deployment must not be nil".into());
+    }
+    maka_host_runtime::application::host::Configuration::PublicHost {
+        endpoints: sources.endpoints.clone(),
+        native: sources.native.clone(),
+    }
+    .validate()?;
     values.remove("packages");
     Ok((sources, configuration, prepared))
 }
@@ -362,16 +314,8 @@ fn export(
     }
     for (name, value) in [
         ("host", serde_json::to_value(sources.host)?),
-        (
-            "management-host",
-            serde_json::to_value(sources.management_host)?,
-        ),
-        ("ui", serde_json::to_value(sources.ui)?),
-        (
-            "remote-exports",
-            serde_json::to_value(sources.remote_exports)?,
-        ),
-        ("connections", sources.connections),
+        ("endpoints", serde_json::to_value(sources.endpoints)?),
+        ("native-grants", serde_json::to_value(sources.native)?),
         ("packages", serde_json::to_value(references)?),
         ("installation", installation),
     ] {
@@ -443,63 +387,5 @@ fn selected(
         .collect())
 }
 
-fn prepare_sources(
-    sources: &Sources,
-    packages: &[Package],
-) -> Result<[PreparedApplication; 3], HostError> {
-    let prepared = maka_event_log::applications::prepare_applications(
-        &[
-            (&sources.host, &[][..]),
-            (&sources.management_host, &[][..]),
-            (&sources.ui, sources.remote_exports.as_slice()),
-        ],
-        packages,
-    )?;
-    let prepared: [PreparedApplication; 3] = prepared
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("three prepared product sources"));
-    Ok(prepared)
-}
-
-/// Explicit inventories survive replacement and recovery without being selected again.
-fn prepare_package_sets(
-    sources: &Sources,
-    sets: &PackageSets,
-    packages: &[Package],
-) -> Result<[PreparedApplication; 3], HostError> {
-    let mut available = BTreeMap::new();
-    for package in packages {
-        if available
-            .insert(package.application_ref(), package)
-            .is_some()
-        {
-            return Err("duplicate prepared package bytes".into());
-        }
-    }
-    let [host, management_host, ui] = [
-        (&sources.host, &[][..], &sets.host),
-        (&sources.management_host, &[][..], &sets.management_host),
-        (&sources.ui, sources.remote_exports.as_slice(), &sets.ui),
-    ]
-    .map(|(input, observations, references)| {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut inventory = Vec::new();
-        for reference in references {
-            if !seen.insert(reference) {
-                return Err::<_, HostError>("duplicate prepared package reference".into());
-            }
-            inventory.push(
-                (*available
-                    .get(reference)
-                    .ok_or("prepared package set refers to missing bytes")?)
-                .clone(),
-            );
-        }
-        Ok(PreparedApplication::new(
-            input.clone(),
-            observations.to_vec(),
-            inventory,
-        )?)
-    });
-    Ok([host?, management_host?, ui?])
-}
+#[cfg(test)]
+mod tests;

@@ -292,8 +292,7 @@ export const MESSAGES = {
   attachmentClosed: ['the Host is closing', 'Host 正在关闭', 'Host 正在關閉'],
   attachmentArchived: ['the task is archived', '任务已归档', '任務已封存'],
 
-  // Context use and Compact, in the composer (context.js). The confirmation
-  // copies the TUI's (plugins/agent/agent-screen/compact.ts).
+  // Context use and Compact, in the composer (context.js).
   contextUseTip: ['Context use', '上下文用量', '上下文用量'],
   contextUseShare: ['Context use: {value}', '上下文用量：{value}', '上下文用量：{value}'],
   contextTokens: ['{count} tokens', '{count} tokens', '{count} tokens'],

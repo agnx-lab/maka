@@ -18,7 +18,7 @@
  */
 //! A public Host opens the same persisted product source across process restarts.
 pub(super) mod update;
-use super::{HostError, Input, Product, author, installation, launch, packages};
+use super::{HostError, Input, author, installation, launch, packages};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use maka_event_log::{
     EventLog,
@@ -27,10 +27,7 @@ use maka_event_log::{
 };
 use maka_host_runtime::{
     DirectoryRootSpec,
-    application::{
-        host::{Host, Options},
-        transport::{HostEndpoint, NativeGrant},
-    },
+    application::host::{Host, Options},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -60,59 +57,6 @@ struct Preparation {
     expected_revision: u64,
     input: Input,
     packages: Vec<BTreeMap<String, String>>,
-}
-
-/// Persist the exact UI-authored business Host selection before any public
-/// process starts. Resumption checks the original selection and revision one.
-pub(super) async fn save_product(
-    store: &EventLog,
-    deployment: Uuid,
-    prepared: PreparedApplication,
-    endpoints: BTreeMap<String, HostEndpoint>,
-    native: Vec<NativeGrant>,
-) -> Result<(), HostError> {
-    if !prepared.remote_exports().is_empty() {
-        return Err("public Host cannot use remote observations".into());
-    }
-    let selection = serde_json::to_value(Selection::PublicHost { endpoints, native })?;
-    match store.application_launch().await? {
-        Some(record) => {
-            if record.deployment != deployment || record.configuration != selection {
-                return Err("original public Host selection changed".into());
-            }
-            // Existing pending bytes remain authoritative and must recover first.
-            prepare(store, Roots::Saved).await?;
-            launch::ensure_prepared(store, deployment, prepared).await?;
-        }
-        None => {
-            let preparation = Preparation {
-                expected_revision: 0,
-                input: prepared.input().clone(),
-                packages: prepared
-                    .packages()
-                    .iter()
-                    .map(|package| {
-                        package
-                            .files()
-                            .iter()
-                            .map(|(path, bytes)| (path.clone(), STANDARD.encode(bytes)))
-                            .collect()
-                    })
-                    .collect(),
-            };
-            store
-                .begin_application_launch(Launch {
-                    deployment,
-                    configuration: selection,
-                    pending: Some(serde_json::to_vec(&preparation)?),
-                })
-                .await?;
-            // The pending record is durable; keep the exact already checked bytes.
-            launch::ensure_prepared(store, deployment, prepared).await?;
-            store.complete_application_launch(deployment).await?;
-        }
-    }
-    Ok(())
 }
 
 /// Bind an explicitly committed generic Host without reauthoring its source.
@@ -205,7 +149,7 @@ async fn prepare(
         if preparation.expected_revision == 0 {
             launch::ensure(store, record.deployment, &preparation.input, &[], &packages).await?;
         } else {
-            super::restore::ensure(
+            launch::ensure_replacement(
                 store,
                 record.deployment,
                 preparation.expected_revision,
@@ -234,10 +178,11 @@ async fn begin(
     let roots = directories(roots)?;
     let root = store.owned_root()?;
     let mut configuration = installation(json!({
-        "workspace": roots.first().map(|root| root.path.as_path()).unwrap_or(root.canonical_path()), "hostRoot": root.canonical_path(),
-        "helper": std::env::current_exe()?, "themeFile": root.canonical_path().join("appearance/theme.json"),
+        "workspace": roots.first().map(|root| root.path.as_path()).unwrap_or(root.canonical_path()),
+        "helper": std::env::current_exe()?,
         "home": home,
-    })).await?;
+    }))
+    .await?;
     configuration["agent"]["workspaceRoots"] = serde_json::to_value(&roots)?;
     configuration["agent"]["permissions"]["access"] = json!("read_only");
     configuration["skills"]["projectRoots"] = serde_json::to_value(&roots)?;
@@ -248,16 +193,11 @@ async fn begin(
             .collect(),
     );
     let packages = tokio::task::spawn_blocking(packages).await??;
-    let (sources, _, [prepared, _, _]) = author(Product::Agent, configuration, &packages).await?;
-    let connections: maka_transport::Configuration = serde_json::from_value(sources.connections)?;
-    let connection = connections
-        .hosts
-        .into_iter()
-        .find(|host| host.name == "local")
-        .ok_or("product public Host missing")?;
+    let (sources, _, prepared) = author(configuration, &packages).await?;
+    let deployment = sources.deployment;
     let selection = Selection::PublicHost {
-        endpoints: connection.endpoints,
-        native: connection.native,
+        endpoints: sources.endpoints,
+        native: sources.native,
     };
     let preparation = Preparation {
         expected_revision: 0,
@@ -276,12 +216,12 @@ async fn begin(
     };
     store
         .begin_application_launch(Launch {
-            deployment: connection.deployment,
+            deployment,
             configuration: serde_json::to_value(&selection)?,
             pending: Some(serde_json::to_vec(&preparation)?),
         })
         .await?;
-    Ok((connection.deployment, selection, prepared))
+    Ok((deployment, selection, prepared))
 }
 
 async fn apply_directories(
@@ -391,86 +331,6 @@ fn configuration_values<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test]
-    async fn saved_product_checks_original_source_before_accepting_prepared_input() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = launch::create(directory.path().join("host")).await.unwrap();
-        let deployment = Uuid::new_v4();
-        let source: Input = serde_json::from_value(json!({
-            "environment":{"location":"host"},"instances":{}
-        }))
-        .unwrap();
-        let pending = Preparation {
-            expected_revision: 0,
-            input: source.clone(),
-            packages: vec![],
-        };
-        let configuration = serde_json::to_value(Selection::PublicHost {
-            endpoints: BTreeMap::new(),
-            native: vec![],
-        })
-        .unwrap();
-        store
-            .begin_application_launch(Launch {
-                deployment,
-                configuration: configuration.clone(),
-                pending: Some(serde_json::to_vec(&pending).unwrap()),
-            })
-            .await
-            .unwrap();
-        let mut changed = source.clone();
-        changed.environment.location = maka_plugin_core::composition::ExecutionLocation::Ui;
-        changed.environment.presentation =
-            Some(maka_plugin_core::composition::PresentationTarget::Tui);
-        let error = save_product(
-            &store,
-            deployment,
-            PreparedApplication::new(changed, vec![], vec![]).unwrap(),
-            BTreeMap::new(),
-            vec![],
-        )
-        .await
-        .err()
-        .unwrap();
-        assert!(error.to_string().contains("conflicts"), "{error}");
-        let stored = store.load_application(deployment).await.unwrap().unwrap();
-        assert_eq!(stored.source().reference.revision, 1);
-        assert_eq!(
-            serde_json::to_value(&stored.source().input).unwrap(),
-            serde_json::to_value(&source).unwrap()
-        );
-        assert_eq!(
-            store
-                .application_launch()
-                .await
-                .unwrap()
-                .unwrap()
-                .configuration,
-            configuration
-        );
-        save_product(
-            &store,
-            deployment,
-            PreparedApplication::new(source, vec![], vec![]).unwrap(),
-            BTreeMap::new(),
-            vec![],
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            store
-                .read_application_metadata(deployment)
-                .await
-                .unwrap()
-                .unwrap()
-                .source
-                .reference
-                .revision,
-            1
-        );
-        store.drain().await;
-    }
-
     #[tokio::test]
     async fn public_host_resumes_original_source_and_starts_with_read_only_permissions() {
         let directory = tempfile::tempdir().unwrap();

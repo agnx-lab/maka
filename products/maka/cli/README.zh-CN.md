@@ -52,13 +52,10 @@ maka application update-defaults --root /path/to/host --apply
 
 `update-defaults` 要求当前可执行文件能够解码已有的包记录。包含已移除内部格式（例如旧 `desktop` surface）的 Root 会在预览前失败；保留原 Root，另行初始化新的 Root。
 
-恢复前先关闭产品 UI；恢复通过管理服务更新独立 Host。直接安装插件包时，所选 Root 必须处于未运行状态。两个命令默认使用 `~/.maka/application`；可用 `--root DIRECTORY` 选择其他安装。
+直接安装插件包前需要停止所选 Host。`update-defaults` 和 `install-url` 默认使用 `~/.maka/application/host`；可用 `--root DIRECTORY` 选择其他 Host。
 
 ```sh
-maka application restore-defaults
 maka application install-url --url https://example.com/plugin.maka-plugin
 ```
 
-`restore-defaults` 从首次安装的原始版本恢复 Host、管理端和 UI 组合，使用当时的完整包和实例 ID。会话、凭据、插件数据、连接授权及源码历史仍保留。恢复的是该安装的初始组合，不是新版本可执行文件的默认值。中断后再次打开会继续同一组已准备的版本；若发现后续冲突修改则拒绝覆盖。
-
-`install-url` 接受 HTTP(S) `.maka-plugin` 包的直接下载链接，限制下载大小和时长、校验整包摘要，并保存不可变版本。之后在插件组合编辑器中启用。可用 `--sha256 HEX` 验证发布者提供的包摘要、`--expected-revision N` 指定预期源码版本，或用 `--deployment UUID` 选择独立提交的部署。下载遵循进程的代理环境。运行中的插件安装页面和 Agent `UIRequest` 也通过绑定的部署管理器支持 URL 安装。
+`install-url` 接受 HTTP(S) `.maka-plugin` 包的直接下载链接，限制下载大小和时长、校验整包摘要，并保存不可变版本。之后在插件组合编辑器中启用。可用 `--sha256 HEX` 验证发布者提供的包摘要、`--expected-revision N` 指定预期源码版本，或用 `--deployment UUID` 选择独立提交的部署。下载遵循进程的代理环境。运行中的插件安装页面也通过绑定的 Host 部署管理器支持 URL 安装。

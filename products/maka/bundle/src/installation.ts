@@ -22,17 +22,14 @@ import type { CompositionConfiguration } from './composition.js';
 /** Trusted launcher inputs. Product defaults live with the ordinary composition. */
 export interface InstallationOptions {
   workspace: string;
-  hostRoot: string;
   helper: string;
-  themeFile: string;
   home?: string;
   locale?: string;
-  scheme?: 'light' | 'dark';
 }
 
 export function installation(
   options: InstallationOptions,
-): Omit<CompositionConfiguration, 'packages' | 'keys' | 'hostDeployment' | 'managementDeployment'> {
+): Omit<CompositionConfiguration, 'packages' | 'keys' | 'hostDeployment'> {
   const workspaceRoots: CompositionConfiguration['agent']['workspaceRoots'] = [
     { label: 'Workspace', path: options.workspace },
   ];
@@ -131,11 +128,7 @@ export function installation(
     helper: options.helper,
   };
   return {
-    presentation: 'tui',
     locale: options.locale ?? 'auto',
-    scheme: options.scheme ?? 'dark',
-    hostRoot: options.hostRoot,
-    themeFile: options.themeFile,
     agent,
     processes,
     computer: { desktop: 'auto', browsers: [] },

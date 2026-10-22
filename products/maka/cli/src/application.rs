@@ -38,11 +38,9 @@ use serde::Serialize;
 
 #[derive(Subcommand)]
 pub(super) enum Command {
-    /// Author an ordinary bundled product without Node or a source checkout.
+    /// Author a checked business Host without Node or a source checkout.
     Compose(product::Compose),
-    /// Restore the originally installed product composition, preserving identities and stored data.
-    RestoreDefaults(product::Restore),
-    /// Preview new defaults merged with local customizations; use --apply to synchronize.
+    /// Preview selected bundled Host package updates; use --apply to synchronize.
     UpdateDefaults(product::Update),
     /// Download, validate and install a plugin bundle into an inactive deployment.
     InstallUrl(install::InstallUrl),
@@ -130,7 +128,6 @@ impl Command {
     async fn run_inner(self) -> Result<(), HostError> {
         match self {
             Self::Compose(args) => args.run().await?,
-            Self::RestoreDefaults(args) => args.run().await?,
             Self::UpdateDefaults(args) => args.run().await?,
             Self::InstallUrl(args) => args.run().await?,
             Self::Serve(args) => serve::run(args).await?,

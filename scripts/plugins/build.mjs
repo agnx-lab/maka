@@ -37,8 +37,9 @@ const exists = (path) =>
     () => true,
     () => false,
   );
-const sharedContracts = resolve(repo, 'plugins/shared/contracts.ts');
-const header = (await readFile(sharedContracts, 'utf8')).split('\n\n', 1)[0].trim();
+const header = (await readFile(resolve(repo, 'packages/plugin-sdk/src/index.ts'), 'utf8'))
+  .split('\n\n', 1)[0]
+  .trim();
 
 // Product selections are paths to authored packages, not a second declaration catalog.
 export async function bundle({ packages, output, composition }) {
@@ -51,7 +52,6 @@ export async function bundle({ packages, output, composition }) {
       resolve(repo, path, 'package.ts'),
     ]),
   );
-  entries.contracts = sharedContracts;
   entries.sdk = resolve(repo, 'packages/plugin-sdk/src/index.ts');
   if (composition) entries.composition = resolve(repo, composition);
   const authoring = await build({
@@ -67,11 +67,6 @@ export async function bundle({ packages, output, composition }) {
     metafile: true,
   });
   const inputs = new Set(Object.keys(authoring.metafile.inputs).map((path) => resolve(repo, path)));
-  const own = await import(pathToFileURL(resolve(destination, 'authoring/contracts.mjs')));
-  const literals = Object.entries(own)
-    .filter(([, value]) => typeof value !== 'function')
-    .map(([name, value]) => `export const ${name} = ${JSON.stringify(value)};`)
-    .join('\n');
   const names = [];
   for (const [name, path] of Object.entries(packages)) {
     const source = resolve(repo, path);
@@ -115,9 +110,6 @@ export async function bundle({ packages, output, composition }) {
                 loader: 'js',
                 resolveDir: source,
               }));
-              builder.onLoad({ filter: /\/contracts\.ts$/ }, ({ path }) =>
-                path === sharedContracts ? { contents: literals, loader: 'js' } : undefined,
-              );
             },
           },
         ],

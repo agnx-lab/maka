@@ -57,66 +57,6 @@ impl EventLog {
         })).await
     }
 
-    /// Native product authoring inputs and the last installed default sources.
-    pub async fn application_product(&self) -> Result<Option<Value>, StoreError> {
-        self.application_domain()?;
-        self.connection
-            .run(|connection| {
-                Box::pin(async move {
-                    let row =
-                        sqlx::query("SELECT product FROM application_launch WHERE singleton=1")
-                            .fetch_optional(connection)
-                            .await?;
-                    let Some(row) = row else {
-                        return Ok(None);
-                    };
-                    let value = row.try_get::<Option<String>, _>("product")?;
-                    value
-                        .map(|value| serde_json::from_str(&value).map_err(StoreError::from))
-                        .transpose()
-                })
-            })
-            .await
-    }
-
-    /// Refresh derived product metadata only while the observed baseline is still current.
-    pub async fn compare_and_set_application_product(
-        &self,
-        expected: Value,
-        product: Value,
-    ) -> Result<bool, StoreError> {
-        self.application_domain()?;
-        let expected = serde_json::to_string(&expected)?;
-        let product = serde_json::to_string(&product)?;
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let changed = sqlx::query("UPDATE application_launch SET product=? WHERE singleton=1 AND product=? AND pending IS NULL")
-                .bind(product).bind(expected).execute(&mut *tx).await?.rows_affected() == 1;
-            tx.commit().await.map_err(StoreError::CommitUnknown)?;
-            Ok(changed)
-        })).await
-    }
-
-    /// Publish an already prepared default upgrade only after every source commit.
-    /// Selection, baseline and preparation completion change atomically.
-    pub async fn complete_application_product(
-        &self,
-        deployment: Uuid,
-        configuration: Value,
-        product: Value,
-    ) -> Result<(), StoreError> {
-        self.application_domain()?;
-        let configuration = serde_json::to_string(&configuration)?;
-        let product = serde_json::to_string(&product)?;
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let changed = sqlx::query("UPDATE application_launch SET configuration=?, product=?, pending=NULL WHERE singleton=1 AND deployment=? AND pending IS NOT NULL")
-                .bind(configuration).bind(product).bind(deployment.to_string()).execute(&mut *tx).await?.rows_affected();
-            if changed != 1 { return Err(invalid("launcher selection or preparation changed")); }
-            tx.commit().await.map_err(StoreError::CommitUnknown)
-        })).await
-    }
-
     pub async fn application_launch(&self) -> Result<Option<Launch>, StoreError> {
         self.application_domain()?;
         self.connection.run(|connection| Box::pin(async move {

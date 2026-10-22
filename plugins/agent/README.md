@@ -21,7 +21,7 @@
 
 [简体中文](README.zh-CN.md)
 
-This family owns Agent behavior and its user interface. Leaf `package.ts` files declare independently composable features. The Rust crates below support those declarations; their names describe code ownership, not implicit activation.
+This family owns Agent business behavior. Leaf `package.ts` files declare independently composable features. The Rust crates below support those declarations; their names describe code ownership, not implicit activation.
 
 - [facts](facts/README.md), [api](api/README.md) and [ports](ports/README.md) separate persisted data, wire contracts and business interfaces.
 - [authority](authority/README.md) checks the original invocation; [native](native/README.md) exposes Host services; [engine](engine/README.md) runs Agent work.
@@ -30,6 +30,4 @@ This family owns Agent behavior and its user interface. Leaf `package.ts` files 
 - [assistant](assistant/README.md), [goal](goal/README.md), [graph](graph/README.md), [scheduler](scheduler/engine/README.md), [insights](insights/README.md), [session-import](session-import/README.md), [session-recap](session-recap/README.md) and [session-title](session-title/README.md) own their respective features.
 - [acp-executor](acp-executor/native/README.md) connects external ACP agents through explicit process and callback services.
 
-UI packages such as `agent-screen`, `composer` and `timeline` consume these contracts. Product assembly belongs to [products/maka](../../products/maka/README.md).
-
-[Composer](composer/component.ts) owns native draft capture, submission, receipt recovery and draft checkpoints. It fixes the destination at submission and reports admitted sends to the conversation. Each draft saves its own caller cursor only after its native clear applies or restoration checks the complete remaining prefix.
+The [terminal shell](../../products/maka/terminal-shell/README.md) and [desktop shell](../../products/maka/desktop-shell/README.md) consume these public Host contracts. Product assembly belongs to [products/maka](../../products/maka/README.md); each shell owns its native draft editor and interaction lifecycle.

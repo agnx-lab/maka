@@ -17,7 +17,9 @@
   under the License.
 -->
 
-# TUI components
+# Standalone SDK scene components
+
+These components target the SDK scene runtime. Maka's terminal and desktop shells author their own interfaces and do not mount these scenes.
 
 An entry exports `activate(configuration)` with a Component descriptor:
 `{ Counter: { contract, kind: "component", component: ["counter"] } }`.

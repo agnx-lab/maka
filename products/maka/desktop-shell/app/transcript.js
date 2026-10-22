@@ -29,7 +29,7 @@
 // replaces `rows`, `live` or `pending` with a new array, so a render can hand
 // the list one consistent snapshot without copying anything.
 //
-// The flow mirrors the TUI (plugins/agent/agent-screen):
+// The conversation follows the public Host session lifecycle:
 // - observe, then watch from the observed fence, or from just before the
 //   first open part so its earlier deltas replay (results.ts:547-564);
 // - the tail page at that fence, going back while a page is empty
@@ -1645,7 +1645,7 @@ function thinkingRow(item, cx) {
 
 /**
  * Tools whose display contract the Host names in `call.presentation` (the
- * keys the TUI reads, plugins/agent/tool-details/index.ts:48-78): the
+ * keys shared with the terminal shell): the
  * message for the label in the name lane, the icon, and the argument the
  * header shows.
  */

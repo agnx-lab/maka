@@ -205,11 +205,8 @@ fn main() {
             split_contracts(&mut files);
             for relative in [
                 "plugins/shared",
-                "plugins/agent/composer-footer",
-                "plugins/agent/composer",
-                "plugins/agent/agent-screen",
                 "plugins/application/authoring",
-                "plugins/application/deployment",
+                "plugins/application/gateway",
                 "products/maka/bundle/src",
             ] {
                 collect_sources(repo, &repo.join(relative), &mut files);

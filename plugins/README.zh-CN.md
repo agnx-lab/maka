@@ -31,13 +31,12 @@
 | [skills](skills/native/README.zh-CN.md) | 技能发现、读取和发布 |
 | [interactions](interactions/native/README.zh-CN.md) | 问题和表单 |
 | [workhub](workhub/core/README.zh-CN.md) | 任务协调和 worker 结果 |
-| `ui/` | 原生 UI 能力声明 |
 | `application/` | 部署管理、插件安装与 UI 编写 |
 | `shared/` | 共用 TypeScript 契约与开发辅助函数 |
 
-修改已有插件时，从声明入手，沿所选实现查找代码。JavaScript 入口指定本地模块，例如由 `tui.ts` 构建的 `tui.js`。原生入口选择可执行文件提供的实现。插件族目录和已链接 crate 都不会自动激活插件。[桌面 shell](../products/maka/desktop-shell/README.zh-CN.md) 单独编写 app，并连接相同的公共 Host 服务。
+修改已有插件时，从声明入手，沿所选实现查找代码。原生入口选择可执行文件提供的实现；JavaScript 入口指定打包后的本地模块。插件族目录和已链接 crate 都不会自动激活插件。
 
-插件族表示业务归属，不是互斥的 UI/服务分类。以 `package.ts` 为准：`host`、`tui` 入口说明实现运行位置，导出契约区分组件、服务和值。例如 `application/authoring` 同时包含 Host 服务与前台 UI worker。`ui/` 存放通用展示能力，并不收纳所有带 UI 的插件。大型组件可以按职责拆成普通模块；[AgentScreen](agent/agent-screen/README.zh-CN.md) 保留一个组件状态和生命周期，将命令、结果、事件及视图区域分开组织。
+默认产品选择业务 Host 服务。[终端 shell](../products/maka/terminal-shell/README.zh-CN.md) 和[桌面 shell](../products/maka/desktop-shell/README.zh-CN.md) 各自编写界面，连接相同的公共 Host 能力。通用 SDK scene 契约仍可用于独立编写的运行环境；默认 bundle 不再含 scene 展示包。
 
 在仓库根目录构建单个包：
 
@@ -50,8 +49,6 @@ node scripts/plugins/build.mjs   --plugin plugins/workspace/workspace-web --outp
 将插件加入 Maka 时，在[产品选择](../products/maka/bundle/package-inputs.json)中添加路径，再在[组合](../products/maka/bundle/src/composition.ts)中添加实例和绑定。新增原生实现还需在[产品注册表](../products/maka/native/README.zh-CN.md)中加入工厂。导入声明依赖，Host 授权决定可以执行哪些调用。
 
 [插件开发 skill](../skills/maka-plugin-authoring/SKILL.md)提供可运行的独立示例，以及服务、UI、状态和原生扩展指南。[SDK](../packages/plugin-sdk/README.zh-CN.md)提供精确契约。
-
-较大的 UI 组件（`application/apps`、`application/deployment`、`agent/scheduler`、`agent/conversation-import`、`settings/insights`、`settings/connection-form`）用 `state.ts` 定义共享状态和局部值类型，`operations.ts` 处理服务意图与结果结算，`view.ts` 构造场景，`events.ts` 处理输入，`index.ts` 负责组件创建和生命周期连接。这些仍是同一组件的普通模块，共用一个状态和发布边界，不增加事件总线或独立 store。小组件可以保留单文件。
 
 插件列表使用作者在 `package.ts` 中提供的 `displayName` 和 `description`；用一句话说明用户能做什么。包 ID 继续作为稳定技术标识。可选的 `localizations` 按语言标签提供翻译，例如：
 
@@ -67,4 +64,4 @@ node scripts/plugins/build.mjs   --plugin plugins/workspace/workspace-web --outp
 }
 ```
 
-插件管理会展示并搜索这些说明，添加应用时也会展示。缺少翻译时使用默认文案，最后回退到实例名或包 ID。名称应让人预知操作结果或目的地，参照 [Apple 的清晰命名指南](https://developer.apple.com/videos/play/wwdc2026/290/)。常见操作使用带无障碍名称和提示的图标；重要或不熟悉的操作保留明确文字。长列表通过阅读区域的滚动观察加载相邻数据并保留可见行，数据游标不暴露为手动翻页。
+插件管理会展示并搜索这些说明，添加应用时也会展示。缺少翻译时使用默认文案，最后回退到实例名或包 ID。名称应让人预知操作结果或目的地，参照 [Apple 的清晰命名指南](https://developer.apple.com/videos/play/wwdc2026/290/)。常见操作使用带无障碍名称和提示的图标；重要或不熟悉的操作保留明确文字。shell 列表使用原生虚拟列表并保留可见行，数据游标不暴露为手动翻页。

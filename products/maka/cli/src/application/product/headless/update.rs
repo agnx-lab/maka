@@ -53,7 +53,6 @@ pub(in super::super) async fn synchronize(
             } else {
                 Scope::SelectedPackages
             },
-            customized: true,
             changed: true,
             applied: false,
             changes: if initializing {
@@ -115,7 +114,6 @@ async fn synchronize_packages(
     let changes = changes(Some(&loaded.source().input), &next);
     let mut outcome = Outcome {
         scope: Scope::SelectedPackages,
-        customized: true,
         changed: !changes.is_empty(),
         changes,
         ..Default::default()

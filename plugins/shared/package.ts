@@ -17,12 +17,7 @@
  * under the License.
  */
 
-import type {
-  Contract,
-  EntryDeclaration,
-  Export,
-  Import,
-} from '../../packages/plugin-sdk/src/index.js';
+import type { Contract, EntryDeclaration, Export, Import } from '../../packages/plugin-sdk/src/index.js';
 export const required = (contract: Contract): Export => ({ contract, availability: 'required' });
 export const one = (contract: Contract): Import => ({ contract, cardinality: { kind: 'one' } });
 export const empty = { type: 'object', properties: {}, required: [], additionalProperties: false };
@@ -38,22 +33,5 @@ export function native(definition: {
     exports: Object.fromEntries(
       Object.entries(definition.exports).map(([name, contract]) => [name, required(contract)]),
     ),
-  };
-}
-export function uiEntries(spec: {
-  contract: Contract;
-  export: string;
-  imports: Record<string, Import>;
-  configuration?: unknown;
-  scene?: boolean;
-}): Record<'tui', EntryDeclaration & { imports: Record<string, Import> }> {
-  return {
-    tui: {
-      implementation: { kind: 'javascript', module: 'tui.js', realm: 'dedicated' },
-      configuration: spec.configuration ?? empty,
-      imports: { ...spec.imports },
-      exports: { [spec.export]: required(spec.contract) },
-      ...(spec.scene === false ? {} : { scene: { name: 'maka.tui.scene', version: 1 } }),
-    },
   };
 }

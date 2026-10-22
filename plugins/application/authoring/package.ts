@@ -18,8 +18,7 @@
  */
 
 import * as sdk from '../../../packages/plugin-sdk/src/index.js';
-import { native, one, uiEntries } from '../../shared/package.js';
-import { uiAuthoringContract } from '../../shared/contracts.js';
+import { native } from '../../shared/package.js';
 export default {
   schemaVersion: 1,
   id: 'maka.application.authoring',
@@ -31,17 +30,6 @@ export default {
   application: {
     entries: {
       host: native(sdk.nativeImplementations.uiAuthoring),
-      ...uiEntries({
-        contract: uiAuthoringContract,
-        export: 'Worker',
-        imports: {
-          requests: one(sdk.contracts.uiAuthoring),
-          management: one(sdk.contracts.deploymentManager),
-          receipts: one(sdk.contracts.receiptReader),
-          managerReceipts: one(sdk.contracts.receiptReader),
-          history: one(sdk.contracts.callerHistory),
-        },
-      }),
     },
   },
 };

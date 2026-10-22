@@ -359,10 +359,6 @@ fn standalone_host_package_update_preserves_saved_configuration_and_data() {
             .select_committed_application_launch(source, selection.clone())
             .await
             .unwrap();
-        assert!(
-            store.application_product().await.unwrap().is_none(),
-            "existing standalone Roots have no UI defaults baseline"
-        );
         store
             .create_session(
                 "retained-session",
@@ -418,7 +414,6 @@ fn standalone_host_package_update_preserves_saved_configuration_and_data() {
             "packages":loaded.packages().iter().map(Package::application_ref).collect::<Vec<_>>(),
             "selection":{"deployment":launch.deployment,"configuration":launch.configuration,
                 "pending":launch.pending},
-            "baseline":store.application_product().await.unwrap(),
             "session":store.get_session::<Value>("retained-session").await.unwrap().unwrap(),
             "history":store.prefix(100, 128 * 1024).await.unwrap(),
         });
@@ -458,7 +453,6 @@ fn standalone_host_package_update_preserves_saved_configuration_and_data() {
     );
     let preview: Value = serde_json::from_slice(&preview.stdout).unwrap();
     assert_eq!(preview["scope"], "selected_packages");
-    assert_eq!(preview["customized"], true);
     assert_eq!(preview["changed"], true);
     assert_eq!(preview["applied"], false);
     let old_ref = previous.application_ref();
@@ -470,7 +464,6 @@ fn standalone_host_package_update_preserves_saved_configuration_and_data() {
             old_ref.id, old_ref.revision, new_ref.id, new_ref.revision
         )])
     );
-    assert_eq!(preview["conflicts"], json!([]));
     assert_eq!(
         snapshot(),
         initial,
@@ -505,7 +498,7 @@ fn standalone_host_package_update_preserves_saved_configuration_and_data() {
         after["source"]["reference"]["stateDomain"],
         initial["source"]["reference"]["stateDomain"]
     );
-    for field in ["rootId", "selection", "baseline", "session", "history"] {
+    for field in ["rootId", "selection", "session", "history"] {
         assert_eq!(
             after[field], initial[field],
             "package update changed {field}"

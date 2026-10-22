@@ -26,10 +26,10 @@ use uuid::Uuid;
 
 #[derive(Args)]
 pub(crate) struct InstallUrl {
-    /// UI State Root (default: ~/.maka/application). Close its running UI first.
+    /// Business Host Root (default: ~/.maka/application/host). Stop its Host first.
     #[arg(long)]
     root: Option<PathBuf>,
-    /// Omit to install into this Root's saved UI product.
+    /// Omit to install into this Root's selected Host deployment.
     #[arg(long)]
     deployment: Option<Uuid>,
     #[arg(long)]
