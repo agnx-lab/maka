@@ -203,7 +203,7 @@ impl ApplicationHost {
         this: Instance<Self>,
         target: String,
     ) -> Result<Option<links::WorkspaceLink>, String> {
-        let owner = this.owner.clone();
+        let owner = this.with(|host| host.owner.clone());
         drop(this);
         links::open(owner, target).await
     }
