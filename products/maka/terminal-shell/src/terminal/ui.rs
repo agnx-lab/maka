@@ -306,7 +306,7 @@ impl Session {
                     mouse.kind,
                     MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
                 ) && !(matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
-                    && (lease.is_native_pan() || lease.is_native_input()))
+                    && lease.allows_drag())
                 {
                     self.cancel_pointer()?;
                     changed = true;

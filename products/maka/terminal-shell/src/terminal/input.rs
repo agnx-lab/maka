@@ -141,7 +141,7 @@ impl Inbox {
                     if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
                         && let Some(Capture::Active(pointer @ Pointer::Press { lease, .. })) =
                             &self.capture
-                        && (lease.is_native_pan() || lease.is_native_input())
+                        && lease.allows_drag()
                     {
                         Some(pointer.clone())
                     } else {
@@ -629,7 +629,7 @@ mod tests {
             let Some(Pointer::Press { epoch: 7, lease }) = input.pointer else {
                 panic!("every phase must keep the original native capture")
             };
-            assert!(lease.is_native_pan());
+            assert!(lease.allows_drag());
             assert_eq!(lease.binding(), None);
             if let Some(original) = &capture {
                 assert!(Arc::ptr_eq(original, &lease));
