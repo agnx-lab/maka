@@ -22,7 +22,7 @@ import type { YNode } from 'nsh';
 import { Button, Dialog } from 'nsh/base';
 import { host } from './host';
 import { keymap } from 'nsh/keymap';
-import { C, Header, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
+import { bodyTextStyle, C, Header, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import type { Control, ConversationHandle } from './Conversation';
@@ -662,21 +662,26 @@ function App() {
                 }
               >
                 <Scroll
-                  style={{ minHeight: 0, flexShrink: 1, backgroundColor: C.surface }}
+                  accessibilityLabel="Action feedback"
+                  style={{
+                    minHeight: bodyTextStyle.lineHeight + 16,
+                    flexShrink: 1,
+                    backgroundColor: C.surface,
+                  }}
                   contentStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
                 >
                   <If when={error()}>
-                    <Text selectable style={{ color: C.danger }}>
+                    <Text selectable style={{ ...bodyTextStyle, color: C.danger }}>
                       {error()}
                     </Text>
                   </If>
                   <If when={switching() || busy()}>
-                    <Text style={{ color: C.muted }}>
+                    <Text style={{ ...bodyTextStyle, color: C.muted }}>
                       {switching() ? 'Saving draft before switching…' : 'Confirming action…'}
                     </Text>
                   </If>
                   <If when={status()}>
-                    <Text selectable style={{ color: C.muted }}>
+                    <Text selectable style={{ ...bodyTextStyle, color: C.muted }}>
                       {status()}
                     </Text>
                   </If>
@@ -688,7 +693,7 @@ function App() {
                       hoverStyle={controlHoverStyle}
                       focusStyle={controlFocusStyle}
                     >
-                      <Text style={{ color: C.warning }}>
+                      <Text style={{ ...bodyTextStyle, color: C.warning }}>
                         {recovering()
                           ? 'Reading original action receipts…'
                           : controlsKnown()
@@ -707,7 +712,7 @@ function App() {
                           hoverStyle={controlHoverStyle}
                           focusStyle={controlFocusStyle}
                         >
-                          <Text style={{ color: C.warning }}>
+                          <Text style={{ ...bodyTextStyle, color: C.warning }}>
                             Abandon unconfirmed {original().method} · {original().id.slice(0, 8)}
                           </Text>
                         </Button>
