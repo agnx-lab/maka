@@ -1041,6 +1041,142 @@ mod tests {
     }
 
     #[test]
+    fn a_presented_reading_click_keeps_its_scope_before_escape_while_output_is_pending() {
+        const APP: &str = r#"
+            import { mount, signal } from "nsh";
+            import { keymap } from "nsh/keymap";
+            import { element, prop, insert, append } from "nsh:rt";
+            const phase = signal("before"), returned = signal(0), stopped = signal(0);
+            const useText = USE_TEXT;
+            mount(() => {
+                const root = element("view");
+                prop(root, "style", { flex: 1 });
+                const status = element("text");
+                prop(status, "style", { height: 16 });
+                insert(status, () => phase() + " returned:" + returned() + " stopped:" + stopped());
+                append(root, status);
+                const request = element("view");
+                prop(request, "style", { height: 64 });
+                const detail = element(useText ? "text" : "scroll");
+                prop(detail, "accessibilityLabel", "Request detail");
+                prop(detail, "style", { height: 32 });
+                if (useText) {
+                    prop(detail, "selectable", true);
+                    insert(detail, "Physical form decision");
+                } else {
+                    const content = element("text");
+                    prop(content, "style", { height: 160 });
+                    insert(content, "Request scroll content");
+                    append(detail, content);
+                }
+                append(request, detail);
+                append(root, request);
+                const composer = element("view");
+                prop(composer, "style", { height: 32 });
+                const input = element("input");
+                prop(input, "style", { height: 32 });
+                prop(input, "value", "Unsent composer draft");
+                prop(input, "autoFocus", true);
+                append(composer, input);
+                append(root, composer);
+                keymap.bind("escape", () => returned.update(n => n + 1), {
+                    when: "always", within: request,
+                });
+                keymap.bind("escape", () => stopped.update(n => n + 1), {
+                    when: "always", within: composer,
+                });
+                return root;
+            });
+            requestAnimationFrame(() => phase.set("after"));
+        "#;
+        for text in [true, false] {
+            let source = APP.replace("USE_TEXT", if text { "true" } else { "false" });
+            let mut session = Session::new(config(&source)).unwrap();
+            let mut output = super::super::output::Output::new(io::sink()).unwrap();
+            let presentation = session.presentation.clone();
+            let initial = session.initial_frame().unwrap();
+            let visible_epoch = initial.epoch;
+            publish(&mut output, &presentation, initial);
+            assert_eq!(
+                session.surface.input_context().unwrap().text.as_deref(),
+                Some("Unsent composer draft"),
+            );
+            let detail = session
+                .surface
+                .accessibility_snapshot()
+                .into_iter()
+                .find(|node| node.label == "Request detail")
+                .unwrap();
+            let mouse = |kind| {
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column: (detail.frame.origin.x.0 / 8.0) as u16 + 1,
+                    row: (detail.frame.origin.y.0 / 16.0) as u16,
+                    modifiers: KeyModifiers::NONE,
+                })
+            };
+            let background = session
+                .advance_if_needed(Advance {
+                    image_protocol: None,
+                    inputs: Vec::new(),
+                    resize: None,
+                    cancel_pointer: false,
+                })
+                .unwrap();
+            assert_ne!(background.epoch, visible_epoch);
+            assert!(
+                session
+                    .surface
+                    .snapshot()
+                    .contains("after returned:0 stopped:0")
+            );
+            assert_eq!(
+                presentation
+                    .presented
+                    .load(std::sync::atomic::Ordering::Acquire),
+                0
+            );
+            {
+                let mut inbox = presentation.state.lock().unwrap();
+                assert_eq!(inbox.last_frame.as_ref().unwrap().0, visible_epoch);
+                // One physical burst: no flush, focus wait or JS turn between
+                // reading the original detail and pressing Escape.
+                inbox.push(mouse(MouseEventKind::Down(MouseButton::Left)), 0);
+                inbox.push(mouse(MouseEventKind::Up(MouseButton::Left)), 0);
+                inbox.push(
+                    Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                    0,
+                );
+            }
+            publish(&mut output, &presentation, background);
+            loop {
+                let command = {
+                    let mut inbox = presentation.state.lock().unwrap();
+                    if !inbox.has_pending() {
+                        break;
+                    }
+                    Advance {
+                        image_protocol: None,
+                        inputs: inbox.pop_batch(session.epoch),
+                        resize: None,
+                        cancel_pointer: std::mem::take(&mut inbox.cancel_pointer),
+                    }
+                };
+                let frame = session.advance(command).unwrap();
+                publish(&mut output, &presentation, frame);
+            }
+            assert!(
+                session
+                    .surface
+                    .snapshot()
+                    .contains("after returned:1 stopped:0"),
+                "{text}: the presented native reading click must own Escape:\n{}",
+                session.surface.snapshot(),
+            );
+        }
+    }
+
+    #[test]
     fn a_flushed_editor_keeps_click_and_drag_selection_while_background_output_is_pending() {
         const APP: &str = r#"
             import { mount, signal } from "nsh";
